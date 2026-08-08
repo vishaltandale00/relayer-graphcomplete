@@ -1,0 +1,48 @@
+# Relayer GraphComplete
+
+Relayer GraphComplete is an open-source recursive graph-construction system built on [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent).
+
+The canonical boundary is:
+
+```ts
+const result = await complete(inputGraph, options);
+```
+
+The input is an existing graph. The output is a graph that was accepted or stopped with an explicit reason. A root model ending its turn does not mean the graph is complete.
+
+## Status
+
+Pre-alpha architecture skeleton. The public contracts exist; the Prime Agent runtime and graph algorithm are intentionally not implemented yet.
+
+## Core design
+
+- Prime Agent owns model execution, nested agent sessions, parent-child messaging, persistence, and continuation.
+- GraphComplete owns recursive content construction, scope ownership, self-assessment, adaptive depth, graph mutations, acceptance, and budget-aware stopping.
+- Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
+- Generic runtime improvements should be contributed to Prime Agent. Graph-specific behavior stays here.
+
+The intended recursive loop is:
+
+1. A content owner inspects its assigned scope and the workspace.
+2. A separate reviewer checks child structure and coverage before judging the node itself.
+3. The reviewer accepts the scope or requests evidence, revision, decomposition, or stopping.
+4. Decomposition creates three to eight child content owners unless the correct child count is zero.
+5. Every child repeats the same ownership and self-assessment process.
+6. Parent acceptance depends on sufficient child coverage, not direct control over every deeper decision.
+
+See [Architecture](docs/architecture.md) and [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
+
+## Development
+
+Requires Node.js 22.8 or newer.
+
+```sh
+npm install
+npm run check
+npm run build
+```
+
+## License
+
+Apache-2.0
+
