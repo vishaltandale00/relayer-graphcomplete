@@ -36,7 +36,7 @@ export function desktopReleaseArtifactNames(contract) {
   });
 }
 
-function validateManifest(manifest, contract, zip) {
+function validateManifest(manifest, contract, artifacts) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
     throw new Error(`${contract.manifestName} must contain a YAML object.`);
   }
@@ -44,10 +44,16 @@ function validateManifest(manifest, contract, zip) {
     throw new Error(`${contract.manifestName} version does not match ${contract.version}.`);
   }
   const files = Array.isArray(manifest.files) ? manifest.files : [];
-  const zipEntry = files.find((entry) => entry?.url === zip.name);
-  if (!zipEntry || zipEntry.sha512 !== zip.sha512 || Number(zipEntry.size) !== zip.size) {
-    throw new Error(`${contract.manifestName} does not seal the exact update ZIP.`);
+  if (files.length !== artifacts.length) {
+    throw new Error(`${contract.manifestName} must contain exactly the update ZIP and DMG.`);
   }
+  for (const artifact of artifacts) {
+    const entry = files.find((candidate) => candidate?.url === artifact.name);
+    if (!entry || entry.sha512 !== artifact.sha512 || Number(entry.size) !== artifact.size) {
+      throw new Error(`${contract.manifestName} does not seal the exact ${artifact.name} bytes.`);
+    }
+  }
+  const zip = artifacts.find((artifact) => artifact.name.endsWith(".zip"));
   if (manifest.path && manifest.path !== zip.name) {
     throw new Error(`${contract.manifestName} legacy path does not name the update ZIP.`);
   }
@@ -65,7 +71,7 @@ export async function collectDesktopReleaseEvidence({ distRoot, contract } = {})
     readFile(join(distRoot, names.manifest), "utf8"),
   ]);
   const manifest = parseYaml(manifestText);
-  validateManifest(manifest, contract, zip);
+  validateManifest(manifest, contract, [zip, dmg]);
   return { names, dmg, zip, manifest };
 }
 

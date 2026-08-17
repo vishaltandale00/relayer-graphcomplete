@@ -253,6 +253,7 @@ describe("desktop skeleton", () => {
       const originalZip = Buffer.from("electron-builder-zip-fixture");
       const finalZip = Buffer.from("one-app-final-update-zip-fixture");
       const originalZipSha512 = createHash("sha512").update(originalZip).digest("base64");
+      const dmgSha512 = createHash("sha512").update(dmg).digest("base64");
       await Promise.all([
         writeFile(join(directory, names.dmg), dmg),
         writeFile(join(directory, names.zip), originalZip),
@@ -262,6 +263,9 @@ describe("desktop skeleton", () => {
           `  - url: ${names.zip}`,
           `    sha512: ${originalZipSha512}`,
           `    size: ${originalZip.length}`,
+          `  - url: ${names.dmg}`,
+          `    sha512: ${dmgSha512}`,
+          `    size: ${dmg.length}`,
           `path: ${names.zip}`,
           `sha512: ${originalZipSha512}`,
           "",
