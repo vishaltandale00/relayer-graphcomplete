@@ -8,20 +8,20 @@
   "channel": "preview",
   "manifest": "beta-mac.yml",
   "updateBaseUrl": "https://updates.relayerlabs.ai/desktop/macos/arm64",
-  "sourceCommit": "7c58dd0c828402b1bebb30a6d24dcb45508ff979",
+  "sourceCommit": "4e5b9c3d21d2c7bbf902313d655f8e70aac30e75",
   "appleTeamId": "NZ253AL7U6",
   "artifacts": [
     {
       "name": "Relayer-0.2.0-mac-arm64.dmg",
-      "size": 227583348,
-      "sha256": "f7086b7320b0ad3d6ebe33ad3767de2d76c24765ef4f1d6b14dc7ee80fa0cd16",
-      "sha512": "lnoHi/0y4kCJHip1+/4cXpB4yrBap9xWuZpwEUyBfe1G6xGJ8tUQGI1PHoZXz9t1e/AboDZ/SFpuvtnY5drKNg=="
+      "size": 227574008,
+      "sha256": "3eedf1e462e9af3f797b4bcbd57ca43c5bca341b995a8d02075df167f38dbdb3",
+      "sha512": "vsGmutJYKiTi6tj6VpwFmX9ADKecTDrUBqUBUZuSczMf9jisboZMWCxNAafXLo1K1HGkSvNsNQxCHYYzewt3ig=="
     },
     {
       "name": "Relayer-0.2.0-mac-arm64.zip",
-      "size": 226188721,
-      "sha256": "0ac69819a85af1d7542d972d2d53f124679e3f7fbafd62577d769dedcd110a6d",
-      "sha512": "AV1i9/iVFyTvzjfoAKdS2LsQtgU0jmRTaU4GlJ+klgewmTTLerBzEw2zzVeaDFIyOnDV31FTu6kqvlsh2MAcOw=="
+      "size": 226188213,
+      "sha256": "8a25c3a07686692ce18767a40557b918f51f54c4cbd61d4440e472f75baf5ccc",
+      "sha512": "nd78b3ww/RJxivEpfYjBpIlk6vZuC79pmFdvMs+bh322BYo7yuzGw1mK3Gh/8Zrw5QMNy+7AaDTKXpHel8e1/Q=="
     }
   ]
 }

@@ -791,7 +791,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </tr>
 </tbody></table>
 <h4><code>UPD-002-E1</code> — signed Preview <code>0.2.0</code> launch</h4>
-<p>This is the actual Developer-ID-signed and Apple-notarized arm64 application built from commit <code>7c58dd0c828402b1bebb30a6d24dcb45508ff979</code>, launched with an empty isolated profile. Gatekeeper accepted the app, stapler validated both the application and DMG, and the generated release receipt seals the DMG and final updater ZIP hashes.</p>
+<p>This is the actual Developer-ID-signed and Apple-notarized arm64 application built from commit <code>4e5b9c3d21d2c7bbf902313d655f8e70aac30e75</code>, launched with an empty isolated profile. Gatekeeper accepted the app, stapler validated both the application and DMG, and the generated release receipt seals the post-stapling DMG and final updater ZIP hashes and regenerated blockmaps.</p>
 <figure class="evidence-figure">
   <div class="evidence-image">
     <img src="assets/evidence/desktop/signed-preview-0.2.0.png" alt="UPD-002-E1: Signed and notarized Relayer 0.2.0 Preview launch">
