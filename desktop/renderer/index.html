@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' http://127.0.0.1:*; img-src 'self' data:;" />
+  <title>Relayer</title>
+  <link rel="icon" href="./assets/relayer-logo.svg" />
+  <script src="./theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <section class="auth-screen hidden" id="authScreen" aria-labelledby="authTitle">
+    <div class="auth-card">
+      <div class="logo large" role="img" aria-label="Relayer"></div>
+      <h1 id="authTitle">Connect a provider</h1>
+      <div class="provider-option">
+        <div class="provider-icon">›_</div>
+        <div class="provider-copy"><strong>Codex</strong><small>OpenAI</small></div>
+        <button class="primary" id="connectCodex">Connect</button>
+      </div>
+      <div class="auth-status" id="authStatus">Checking Codex…</div>
+    </div>
+  </section>
+
+  <div class="app-shell hidden" id="appShell">
+    <aside class="sidebar">
+      <button class="titlebar-toggle" id="collapseSidebar" title="Collapse sidebar" aria-label="Collapse sidebar">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3" width="15" height="14" rx="3"></rect><path d="M7.5 3v14"></path></svg>
+      </button>
+      <div class="sidebar-title"><div class="logo" role="img" aria-label="Relayer"></div><strong>Relayer</strong></div>
+      <button class="new-thread-button" id="newThread"><span>＋</span> New thread <kbd>⌘N</kbd></button>
+      <div class="side-section"><div class="section-label">Chats</div><div id="chatList" class="entry-list"></div></div>
+      <div class="side-section"><div class="section-label">Projects</div><div id="projectList" class="project-list"></div></div>
+      <div class="sidebar-footer">
+        <button class="footer-button" id="settingsButton" title="Settings">⚙<span>Settings</span></button>
+        <button class="update-button hidden" id="updateButton" title="Application update available">↓</button>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <section class="new-thread-view" id="newThreadView">
+        <div class="new-thread-center">
+          <div class="logo hero-logo" role="img" aria-label="Relayer"></div>
+          <h1>What are we working on?</h1>
+          <p>Start without a folder or connect a local project.</p>
+          <div class="new-composer">
+            <textarea id="newThreadPrompt" rows="4" placeholder="Ask Relayer to investigate, design, or build something…"></textarea>
+            <div class="composer-row">
+              <div class="scope-control">
+                <button class="scope-button" id="scopeButton"><span>⌁</span><span id="scopeLabel">No folder</span><span>⌄</span></button>
+                <div class="scope-menu hidden" id="scopeMenu"></div>
+              </div>
+              <button class="send-button" id="createThread" title="Create thread and send">↑</button>
+            </div>
+            <div class="folder-summary hidden" id="folderSummary"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="thread-view hidden" id="threadView">
+        <header class="thread-header">
+          <div class="turn-navigation"><button disabled title="Previous turn">←</button><button disabled title="Next turn">→</button></div>
+          <div><h2 id="threadTitle">New thread</h2><p id="threadScope">No folder</p></div>
+          <div class="run-state" id="runState"><i></i><span>Ready</span></div><button class="stop-run hidden" id="stopRun" title="Stop interaction">■</button>
+        </header>
+        <div class="thread-workspace">
+          <div class="graph-column">
+            <div class="interaction-banner" id="interactionBanner"><span class="interaction-icon">›_</span><div><small>Your interaction</small><p id="interactionText"></p></div></div>
+            <div class="graph-empty" id="graphEmpty"><div class="thinking-dot"></div><p>Agent execution is not connected in this desktop slice.</p><button class="secondary hidden" id="retryRun">Retry interaction</button></div>
+            <div class="graph-stage hidden" id="graphStage">
+              <svg id="edgeCanvas" aria-hidden="true"></svg>
+              <div id="nodeLayer"></div>
+              <div class="graph-hint">Drag nodes to explore the response</div>
+            </div>
+            <div class="thread-composer disabled-composer"><span>Agent execution and graph output are intentionally deferred.</span></div>
+          </div>
+          <aside class="inspector hidden" id="inspector">
+            <div class="inspector-header"><span>Node details</span><button class="icon-button" id="closeInspector">×</button></div>
+            <div class="node-heading"><div class="node-icon" id="detailIcon">N</div><div><small id="detailKind">CONCEPT</small><h2 id="detailTitle"></h2></div></div>
+            <div class="node-content" id="detailContent"></div>
+            <div class="inline-actions hidden" id="detailActions"></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="settings-view hidden" id="settingsView" aria-labelledby="settingsTitle">
+        <header class="settings-header">
+          <div><small>Relayer</small><h1 id="settingsTitle">Settings</h1></div>
+        </header>
+        <div class="settings-content">
+          <section class="settings-section">
+            <h2>Appearance</h2>
+            <label class="setting-row"><div><b>Theme</b><small>Choose how Relayer looks on this Mac.</small></div><select id="appearanceSelect"><option value="dark">Dark</option><option value="light">Light</option></select></label>
+          </section>
+          <section class="settings-section">
+            <h2>Codex</h2>
+            <div class="setting-row"><div><b id="settingsAccount">Connected</b><small>Managed by Codex</small></div><button type="button" class="secondary" id="disconnectCodex">Disconnect</button></div>
+          </section>
+          <section class="settings-section">
+            <h2>Application updates</h2>
+            <label class="setting-row"><div><b>Update channel</b><small>Preview receives beta builds before Stable.</small></div><select id="updateChannel"><option value="stable">Stable</option><option value="preview">Preview</option></select></label>
+            <div class="setting-row"><div><b id="updateStatus">Up to date</b><small id="currentVersion"></small></div><button type="button" class="secondary" id="checkUpdates">Check for updates</button></div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="update-popover hidden" id="updatePopover"><button class="icon-button close-popover" id="closeUpdate">×</button><small>Relayer update</small><h3 id="updateTitle">Update available</h3><p id="updateDetail"></p><button class="primary wide" id="updateAction">Download update</button></div>
+  <div class="toast hidden" id="toast"></div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

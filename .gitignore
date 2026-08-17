@@ -3,4 +3,5 @@ dist/
 coverage/
 *.log
 .DS_Store
-
+desktop/dist/
+docs/prd/comments.json

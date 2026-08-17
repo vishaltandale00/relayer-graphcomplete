@@ -1,0 +1,2118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relayer Desktop and Relayer Harness — Product Requirements</title>
+  <style>
+    :root { --toc-width: 292px; color-scheme: light dark; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; }
+    body { margin: 0; overflow: hidden; background: light-dark(#eef0f4, #0d1016); color: light-dark(#172033, #edf1fb); line-height: 1.58; }
+    .document-bar { position: relative; z-index: 30; height: 62px; display: grid; grid-template-columns: auto minmax(180px, 260px) minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid light-dark(#d7dce5, #303746); background: light-dark(rgba(255,255,255,.96), rgba(18,22,30,.97)); }
+    .toc-toggle { width: 31px; height: 31px; display: grid; place-items: center; border: 1px solid light-dark(#ccd3df, #3a4354); border-radius: 6px; background: light-dark(#fff, #202631); color: inherit; font: inherit; cursor: pointer; }
+    .document-brand { min-width: 0; }
+    .document-brand strong { display: block; overflow: hidden; color: light-dark(#1f2937, #f3f5fa); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .document-brand span { display: block; color: light-dark(#7b8495, #8f99ac); font-size: 10px; }
+    .document-current { min-width: 0; overflow: hidden; color: light-dark(#667185, #a5afc0); font-size: 11px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+    .toc-sidebar { position: fixed; z-index: 20; top: 62px; bottom: 0; left: 0; width: var(--toc-width); display: grid; grid-template-rows: minmax(0, 1fr) minmax(180px, 38%); transform: translateX(-100%); border-right: 1px solid light-dark(#d7dce5, #303746); background: light-dark(#f8f9fb, #121720); transition: transform 180ms ease; }
+    body.toc-open .toc-sidebar { transform: translateX(0); }
+    .toc-panel { min-height: 0; display: flex; flex-direction: column; padding: 14px 12px; }
+    .toc-panel + .toc-panel { border-top: 1px solid light-dark(#d7dce5, #303746); }
+    .toc-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; padding: 0 6px; color: light-dark(#667185, #a5afc0); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+    .annotation-save-state { overflow: hidden; font-size: 9px; font-weight: 500; letter-spacing: 0; text-align: right; text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
+    .document-nav, .annotation-list { min-height: 0; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; }
+    .document-nav button { width: 100%; flex: 0 0 auto; padding: 7px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: light-dark(#667185, #a5afc0); font: inherit; font-size: 10px; text-align: left; cursor: pointer; }
+    .document-nav button[aria-current="page"] { border-color: light-dark(#cbd3df, #424b5e); background: light-dark(#fff, #252b37); color: light-dark(#202a3d, #fff); }
+    .document-controls { display: flex; align-items: center; gap: 6px; }
+    .document-controls button { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid light-dark(#ccd3df, #3a4354); border-radius: 6px; background: light-dark(#fff, #202631); color: inherit; font: inherit; cursor: pointer; }
+    .document-controls button:disabled { opacity: .35; cursor: default; }
+    .document-position { min-width: 48px; color: light-dark(#778194, #929caf); font-size: 10px; text-align: center; }
+    main.prd-rail { width: 100%; height: calc(100vh - 62px); display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; transition: width 180ms ease, margin-left 180ms ease; }
+    body.toc-open main.prd-rail { width: calc(100% - var(--toc-width)); margin-left: var(--toc-width); }
+    .prd-page { flex: 0 0 100%; width: 100%; height: 100%; padding: 22px; overflow: hidden; scroll-snap-align: start; }
+    .prd-page-inner { width: min(1180px, 100%); height: 100%; margin: 0 auto; padding: clamp(24px, 4vw, 56px); overflow-y: auto; overscroll-behavior: contain; background: light-dark(#fff, #171b24); border: 1px solid light-dark(#d9dee8, #333a4b); border-radius: 14px; box-shadow: 0 16px 44px rgba(10, 16, 28, .11); }
+    .prd-page-inner > :first-child { margin-top: 0; }
+    h1 { margin-top: 0; font-size: clamp(34px, 5vw, 62px); line-height: 1; letter-spacing: -.045em; }
+    h2 { margin: 0 0 30px; font-size: clamp(25px, 3vw, 38px); letter-spacing: -.025em; }
+    h3 { margin-top: 40px; font-size: 22px; }
+    h4 { margin-top: 30px; font-size: 17px; }
+    p, li { max-width: 920px; }
+    a { color: light-dark(#5c45c8, #b9abff); }
+    img { display: block; width: 100%; max-width: 1180px; height: auto; margin: 28px auto 38px; border: 1px solid light-dark(#cdd3df, #3a4254); border-radius: 12px; box-shadow: 0 14px 40px rgba(10, 16, 28, .15); }
+    .evidence-figure { width: 100%; max-width: 1180px; margin: 28px auto 38px; }
+    .evidence-image { position: relative; overflow: hidden; border: 1px solid light-dark(#cdd3df, #3a4254); border-radius: 12px; box-shadow: 0 14px 40px rgba(10, 16, 28, .15); }
+    .evidence-image img { width: 100%; max-width: none; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+    .evidence-callout { position: absolute; left: var(--x); top: var(--y); width: 28px; height: 28px; display: grid; place-items: center; transform: translate(-50%, -50%); border: 2px solid #fff; border-radius: 999px; background: #d8512f; box-shadow: 0 2px 9px rgba(0,0,0,.55); color: #fff; font-size: 12px; font-weight: 850; line-height: 1; }
+    .evidence-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px 18px; margin: 12px 0 0; padding: 14px 16px; border: 1px solid light-dark(#dce1e9, #343c4d); border-radius: 10px; background: light-dark(#f8f9fb, #121720); list-style: none; }
+    .evidence-legend li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; align-items: start; margin: 0; font-size: 12px; }
+    .evidence-legend b { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 999px; background: #d8512f; color: #fff; font-size: 10px; }
+    .evidence-note { margin: 8px 2px 0; color: light-dark(#687387, #9ca6b8); font-size: 11px; }
+    .delivery-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 20px; }
+    .delivery-status { display: inline-flex; align-items: center; gap: 6px; width: fit-content; padding: 3px 8px; border: 1px solid transparent; border-radius: 999px; font-size: 10px; font-weight: 800; line-height: 1.3; white-space: nowrap; }
+    .delivery-status::before { width: 7px; height: 7px; border-radius: 999px; background: currentColor; content: ""; }
+    .delivery-status.verified { border-color: light-dark(#a8d9b7, #315f3e); background: light-dark(#eaf7ee, #173120); color: light-dark(#216638, #8dd7a1); }
+    .delivery-status.partial { border-color: light-dark(#e8ca7a, #695727); background: light-dark(#fff7df, #352b13); color: light-dark(#825e00, #e9c65d); }
+    .delivery-status.open { border-color: light-dark(#e6aaa5, #703b37); background: light-dark(#fff0ef, #391d1b); color: light-dark(#9b3029, #ef9b94); }
+    .delivery-status.deferred { border-color: light-dark(#cbd1dc, #485163); background: light-dark(#f1f3f6, #242a35); color: light-dark(#606b7e, #abb4c5); }
+    .delivery-status.next { border-color: light-dark(#a9c7ee, #365f91); background: light-dark(#edf5ff, #172c46); color: light-dark(#285f9f, #91bff3); }
+    .slice-summary { margin: 18px 0 26px; padding: 16px 18px; border-left: 4px solid light-dark(#d2961d, #e4b84c); border-radius: 8px; background: light-dark(#fff9e9, #2c2515); }
+    .slice-summary > :first-child { margin-top: 0; }
+    .slice-summary > :last-child { margin-bottom: 0; }
+    .product-walkthrough { display: block; width: 100%; height: 760px; margin: 24px auto 28px; border: 1px solid light-dark(#cdd3df, #3a4254); border-radius: 12px; background: light-dark(#fff, #181818); box-shadow: 0 14px 40px rgba(10, 16, 28, .15); }
+    .scenario-reading { margin: 28px 0 34px; padding-top: 24px; border-top: 1px solid light-dark(#dce1e9, #323949); }
+    .scenario-reading-header { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+    .scenario-reading-eyebrow { display: block; margin-bottom: 3px; color: light-dark(#7a8497, #929caf); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .scenario-reading-title { margin: 0; font-size: 24px; }
+    .scenario-open-section { flex: 0 0 auto; border: 0; background: transparent; color: light-dark(#5c45c8, #b9abff); font: inherit; font-size: 11px; cursor: pointer; }
+    .scenario-reading-content { padding: 22px; border: 1px solid light-dark(#dce1e9, #343c4d); border-radius: 10px; background: light-dark(#f8f9fb, #121720); }
+    .scenario-reading-content > :first-child { margin-top: 0; }
+    .scenario-reading-content > :last-child { margin-bottom: 0; }
+    .scenario-reading-content h2, .scenario-reading-content h3, .scenario-reading-content h4 { font-size: 20px; }
+    table { width: 100%; border-collapse: collapse; display: block; overflow-x: auto; margin: 18px 0 30px; }
+    th, td { min-width: 130px; padding: 10px 12px; border: 1px solid light-dark(#dce1e9, #343c4d); vertical-align: top; text-align: left; font-size: 13px; }
+    th { background: light-dark(#f0f2f6, #202631); }
+    code { background: light-dark(#f0eef8, #28233a); border-radius: 4px; padding: 2px 5px; }
+    pre { overflow-x: auto; padding: 16px; border-radius: 9px; background: light-dark(#f4f5f8, #0e1118); border: 1px solid light-dark(#dfe3ea, #303746); }
+    pre code { padding: 0; background: transparent; }
+    .mermaid { display: flex; min-height: 260px; align-items: center; justify-content: center; overflow-x: auto; margin: 22px 0 34px; padding: 24px; border: 1px solid light-dark(#dfe3ea, #303746); border-radius: 10px; background: light-dark(#fbfbfd, #11151d); }
+    .mermaid svg { display: block; max-width: 100%; height: auto; }
+    .annotation-trigger { position: fixed; z-index: 60; display: none; padding: 7px 10px; border: 1px solid light-dark(#b9c1cf, #4c566b); border-radius: 7px; background: light-dark(#fff, #252c39); box-shadow: 0 8px 24px rgba(10, 16, 28, .18); color: inherit; font: inherit; font-size: 11px; cursor: pointer; }
+    .annotation-trigger.visible { display: block; }
+    .media-annotation-button { display: block; margin: -24px auto 30px; padding: 6px 10px; border: 1px solid light-dark(#cdd3df, #3a4254); border-radius: 6px; background: light-dark(#fff, #202631); color: light-dark(#667185, #a5afc0); font: inherit; font-size: 10px; cursor: pointer; }
+    ::highlight(prd-annotations) { background: rgba(250, 202, 75, .45); text-decoration: underline 1px rgba(163, 112, 0, .72); }
+    img[data-annotated="true"], iframe[data-annotated="true"] { outline: 3px solid rgba(250, 202, 75, .72); outline-offset: 3px; }
+    .annotation-list-empty { margin: 8px 6px; color: light-dark(#7b8495, #8f99ac); font-size: 10px; }
+    .annotation-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 6px; padding: 8px; border: 1px solid light-dark(#d9dee8, #333a4b); border-radius: 7px; background: light-dark(#fff, #171b24); }
+    .annotation-item.addressed { border-color: light-dark(#cbd9cf, #34483b); background: light-dark(#f6faf7, #151d18); }
+    .annotation-item.superseded { border-color: light-dark(#d9d7cf, #454238); background: light-dark(#faf9f5, #1d1b16); }
+    .annotation-item-open { min-width: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+    .annotation-item-target { display: block; overflow: hidden; color: light-dark(#7b8495, #8f99ac); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .annotation-item-comment { display: -webkit-box; overflow: hidden; margin-top: 3px; font-size: 10px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .annotation-item-resolution { display: -webkit-box; overflow: hidden; margin-top: 5px; color: light-dark(#4f6c58, #9bc5a7); font-size: 9px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+    .annotation-status { display: inline-flex; width: fit-content; margin-top: 6px; padding: 2px 5px; border-radius: 999px; background: light-dark(#e5f2e8, #22372a); color: light-dark(#3f6d4d, #9dd0aa); font-size: 7px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+    .annotation-status.superseded { background: light-dark(#eeece4, #343126); color: light-dark(#736b52, #c9bd91); }
+    .annotation-item-delete { align-self: start; border: 0; background: transparent; color: light-dark(#8a6370, #c893a4); cursor: pointer; }
+    .annotation-dialog { width: min(520px, calc(100vw - 32px)); padding: 0; border: 1px solid light-dark(#cdd3df, #3a4254); border-radius: 12px; background: light-dark(#fff, #181d26); color: inherit; box-shadow: 0 24px 80px rgba(0,0,0,.3); }
+    .annotation-dialog::backdrop { background: rgba(7, 10, 16, .48); }
+    .annotation-form { padding: 20px; }
+    .annotation-form h3 { margin: 0 0 6px; font-size: 18px; }
+    .annotation-preview { max-height: 92px; overflow: auto; margin: 0 0 14px; padding: 10px; border-radius: 7px; background: light-dark(#f3f4f7, #10141b); color: light-dark(#5f687a, #aeb7c9); font-size: 11px; }
+    .annotation-form textarea { width: 100%; min-height: 110px; resize: vertical; padding: 10px; border: 1px solid light-dark(#cdd3df, #3a4254); border-radius: 7px; background: light-dark(#fff, #11151d); color: inherit; font: inherit; }
+    .annotation-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+    .annotation-actions button { padding: 7px 12px; border: 1px solid light-dark(#cdd3df, #3a4254); border-radius: 7px; background: light-dark(#fff, #202631); color: inherit; font: inherit; cursor: pointer; }
+    .annotation-actions button[type="submit"] { border-color: #6d55dc; background: #6d55dc; color: #fff; }
+    blockquote { margin-left: 0; padding-left: 18px; border-left: 3px solid #7557e8; color: light-dark(#5f687a, #aeb7c9); }
+    @media (max-width: 820px) {
+      .document-bar { grid-template-columns: auto minmax(0, 1fr) auto; }
+      .document-brand { display: none; }
+      .toc-sidebar { width: min(var(--toc-width), calc(100vw - 42px)); box-shadow: 16px 0 40px rgba(0,0,0,.24); }
+      body.toc-open main.prd-rail { width: 100%; margin-left: 0; }
+      .prd-page { padding: 0; }
+      .prd-page-inner { border: 0; border-radius: 0; padding: 22px 16px 48px; }
+      .product-walkthrough { height: 720px; }
+      .scenario-reading-header { align-items: start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <main><h1>Relayer Desktop and Relayer Harness: Product Requirements</h1>
+<p><strong>Status:</strong> draft for product review
+<strong>Last updated:</strong> 2026-08-17</p>
+<p>This document specifies two concrete product packages that live in this <code>relayer-graphcomplete</code> repository and ship together as one Relayer product:</p>
+<ol>
+<li><strong>Relayer Desktop</strong>: the local-first desktop application that provides projects, threads, providers, persistence, Git/worktrees, the graph interface, updates, evaluation execution, and saved-result replay; and</li>
+<li><strong>Relayer Harness</strong>: the graph engine, <code>complete(inputGraph)</code> implementation, Prime Agent integration, graph tools, and Relayer evaluation suites.</li>
+</ol>
+<p>The repository is a monorepo: Relayer Desktop and Relayer Harness have explicit package and runtime boundaries, but V1 does not split them into separate repositories. V1 does not define a general-purpose harness desktop, arbitrary harness plug-ins, or a custom conversation-view framework. Those abstractions are deferred until the concrete Relayer product proves which seams are actually stable. Part I defines the desktop screens and ordinary user flows. Part II defines the Relayer graph engine and Complete boundary. Part III defines the Relayer eval runner, cases, and product replay. Part IV defines desktop packaging, distribution, verification, and V1 acceptance.</p>
+<h2>1. Product definition and whole-product view</h2>
+<p>The delivered product is Relayer Desktop running the pinned Relayer Harness bundled with that application release. A user connects an agent credential, creates a no-folder or project-backed chat, optionally selects a Git checkout or new worktree, sends interactions, stops or retries work, navigates accepted history, reopens persisted chats, and installs desktop updates. Each accepted Complete call persists a graph response. Relayer Desktop renders the returned layer as movable icon-title nodes, shows selected-node detail and actions in the right inspector, and lets prior nodes be navigated or attached to later messages.</p>
+<p>A harness configuration can ship only when the same immutable configuration has passed its required deterministic tests, live evaluations, saved-result replay, and human visual review defined in Part II.</p>
+<h3>1.1 One end-to-end flow</h3>
+<pre><code class="language-mermaid">flowchart LR
+    A[&quot;Connect agent login&quot;] --&gt; B[&quot;Open New thread&quot;]
+    B --&gt; C{&quot;Choose scope&quot;}
+    C --&gt;|No folder| D[&quot;App-owned local workspace&quot;]
+    C --&gt;|Project| E[&quot;Folder plus optional Git worktree&quot;]
+    D --&gt; F[&quot;Create one user-interaction node&quot;]
+    E --&gt; F
+    F --&gt; G[&quot;Call complete(inputGraph)&quot;]
+    G --&gt; H[&quot;Harness constructs response through graph tools&quot;]
+    H --&gt; I[&quot;Graph engine validates and commits accepted run output&quot;]
+    I --&gt; J[&quot;Resolve interaction plus run and render exact layer&quot;]
+    J --&gt; K{&quot;Next user move&quot;}
+    K --&gt;|Message| F
+    K --&gt;|Authored node action| F
+    K --&gt;|Add nodes as context| F
+    K --&gt;|Navigate history or graph| J
+</code></pre>
+<h3>1.2 Concrete monorepo package boundary</h3>
+<pre><code class="language-mermaid">flowchart LR
+    subgraph REPO[&quot;relayer-graphcomplete repository&quot;]
+      subgraph RD[&quot;Relayer Desktop package&quot;]
+        UI[&quot;Desktop shell and graph interface&quot;]
+        AS[&quot;Local app server&quot;]
+        ER[&quot;Relayer eval runner, report, and See in App&quot;]
+        DS[&quot;Projects, threads, credentials, Git, persistence, updates&quot;]
+      end
+      subgraph RH[&quot;Relayer Harness package&quot;]
+        GE[&quot;Stable graph engine package&quot;]
+        GC[&quot;Complete plus Prime Agent implementation&quot;]
+        ES[&quot;Relayer cases, operator, checks, and judge rubric&quot;]
+      end
+    end
+    UI --&gt; AS
+    AS --&gt; GE
+    AS --&gt; GC
+    ER --&gt; ES
+    ER --&gt; GC
+    GC --&gt; GE
+</code></pre>
+<p>Relayer Desktop owns the user-facing product:</p>
+<ul>
+<li>local profile and secure credential storage;</li>
+<li>projects, no-folder chats, threads, folder permissions, checkouts, and worktrees;</li>
+<li>app-server lifecycle, composer shell, history navigation, stop/retry, settings, local persistence, recovery, packaging, updates, and release channels;</li>
+<li>the Relayer graph canvas, force layout, parent banner, node inspector, actions, turn navigation, and accessibility behavior;</li>
+<li>the local Relayer evaluation runner, immutable result catalog, report UI, and <strong>See in App</strong> handoff;</li>
+<li>product capabilities for filesystem, Git, secret references, app data, deep links, and cancellation.</li>
+</ul>
+<p>It does <strong>not</strong> implement agent recursion, decide graph semantics, or own Complete prompts and evaluation rubrics. It renders and interacts with graph state only through the graph engine&#39;s stable product APIs.</p>
+<p>Relayer Harness owns the graph product:</p>
+<ul>
+<li>the graph engine&#39;s schemas, versions, layers, actions, accepted snapshots, persistence, migrations, compatibility, and read/write authority;</li>
+<li>Complete, Prime Agent, IPython state, graph tools/skills, topology policy, search/reuse policy, and repair behavior;</li>
+<li>Relayer-specific cases, deterministic checks, operator tasks, judge rubric, and promotion manifest.</li>
+</ul>
+<p>The graph engine remains a stable package boundary inside Relayer Harness. Complete uses its public tool API; Relayer Desktop uses its product read/write APIs through the local app server. Neither reads the journal directly. Package imports and contract tests enforce this boundary even though both packages live in one repository.</p>
+<h3>1.3 Stable Desktop-to-Harness contract</h3>
+<p>Relayer Desktop and Relayer Harness integrate through one versioned product boundary:</p>
+<pre><code class="language-ts">interface RelayerHarnessClient {
+  complete(inputGraph: InputGraph, options: CompleteOptions): Promise&lt;CompleteResult&gt;;
+  stop(runId: string): Promise&lt;void&gt;;
+}
+
+type CompleteResult = {
+  runId: string;
+  inputNodeId: string;
+  status: &quot;accepted&quot; | &quot;stopped&quot; | &quot;failed&quot;;
+  retryable: boolean;
+  acceptedLayerId?: string;
+  graphVersion: number;
+  diagnosticRef?: string;
+};
+</code></pre>
+<p>Desktop creates the user interaction and context/action relationships through the graph engine, then passes the resulting input graph to <code>complete(inputGraph, options)</code>. Complete constructs and submits the response through graph tools. Desktop resolves <code>acceptedLayerId</code> through the graph read API and displays that exact layer. A model turn ending does not produce an accepted result.</p>
+<p>The bundled desktop release pins one compatible Relayer Harness package version and refuses incompatible graph schema, graph tool, renderer contract, or harness configuration versions before starting a run.</p>
+<h3>1.4 Deferred abstraction</h3>
+<p>V1 does not include arbitrary harness adapters, third-party conversation views, a generic agent protocol, or a public multi-harness conformance kit. The eval system may compare Relayer Harness configurations, Prime Agent versions, and model/provider choices, but every run still exercises the Relayer product contract. A general platform should be reconsidered only after the Relayer Desktop/Harness boundary has shipped and repeated implementations reveal a concrete reusable seam.</p>
+<h2>2. Canonical visual product reference</h2>
+<p>The walkthrough is the current product mock. Each scenario must correspond to a requirements subsection directly beneath it in the rendered review site. The optional annotation overlay is review tooling, not product chrome.</p>
+<iframe class="product-walkthrough" src="assets/product-walkthrough.html" title="Interactive Relayer desktop product walkthrough"></iframe>
+
+<h3>2.1 Mock inventory</h3>
+<table>
+<thead>
+<tr>
+<th>Mock</th>
+<th>Product decision shown</th>
+<th>Contract or implementation it proves</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Agent setup: Codex</td>
+<td>Agent login is the primary setup; harness choice is collapsed under Advanced</td>
+<td>Provider-independent configuration plus Codex managed login</td>
+</tr>
+<tr>
+<td>Agent setup: API key</td>
+<td>API key reveals provider, secure key entry, and optional provider API URL</td>
+<td>Extensible provider credentials without creating a Relayer account</td>
+</tr>
+<tr>
+<td>New no-folder chat</td>
+<td>A chat can start without a project or user folder</td>
+<td>User-facing “No folder” choice backed by <code>scope.kind = standalone</code> and an isolated app-owned workspace</td>
+</tr>
+<tr>
+<td>New project thread</td>
+<td>Folder choice lives in New thread, not onboarding</td>
+<td>Project creation is inline with the first task</td>
+</tr>
+<tr>
+<td>Git execution options</td>
+<td>Git-only checkout and worktree choices are advanced, contextual options</td>
+<td>Non-Git folders remain simple; Git state is not mandatory</td>
+</tr>
+<tr>
+<td>Graph thread</td>
+<td>The accepted opened layer is a force graph with node details on the right</td>
+<td>Exact display contract and local graph navigation</td>
+</tr>
+<tr>
+<td>Add graph context</td>
+<td>A selected node can be attached with an optional annotation</td>
+<td>Context attachment schema and next Complete request</td>
+</tr>
+<tr>
+<td>Node action and child thread</td>
+<td>Authored actions can navigate or create recursively enterable subthreads</td>
+<td>Action invocation contract and recursive graph/thread model</td>
+</tr>
+<tr>
+<td>Settings</td>
+<td>Normal settings are simple; advanced diagnostics remain collapsed</td>
+<td>Provider, storage, Git, update, and developer-diagnostic boundaries</td>
+</tr>
+<tr>
+<td>Desktop update</td>
+<td>Signed update is visible, deferrable, and restartable</td>
+<td>Required V1 distribution and rollback behavior</td>
+</tr>
+<tr>
+<td>Eval runner</td>
+<td>A developer chooses a case, exact harness/model/judge manifests, runs it, and sees progress plus result actions</td>
+<td>Relayer eval runner and Relayer Harness evaluation contract</td>
+</tr>
+<tr>
+<td>Eval report</td>
+<td>A passing run exposes one See in App handoff</td>
+<td>Immutable run bundle and local deep-link contract</td>
+</tr>
+<tr>
+<td>Evaluation thread</td>
+<td>The exact graph result opens in the normal renderer under Evaluations</td>
+<td>Product-real replay plus continuation pinned to the tested harness configuration</td>
+</tr>
+</tbody></table>
+<h3>2.2 Visual acceptance rule</h3>
+<p>Every user-visible requirement needs structural UI assertions plus a rendered screenshot or saved-result replay in this UX. Schema validation alone does not satisfy visual acceptance.</p>
+<h3>2.3 Slice 1 delivery checkpoint — desktop front door</h3>
+<p>Slice 1 is the desktop front door: provider setup through Codex, entry into the desktop shell, full-page Settings, appearance/sidebar behavior, and the New Thread scope surface. It does <strong>not</strong> claim that project creation, durable thread creation, persistence, agent execution, or graph interaction works in the product.</p>
+<div class="delivery-legend"><span class="delivery-status verified">Verified</span><span class="delivery-status partial">Partial</span><span class="delivery-status open">Open</span><span class="delivery-status next">Next slice</span><span class="delivery-status deferred">Deferred</span></div>
+
+<p>Status is based on product proof, not code presence. <strong>Verified</strong> requires automated coverage plus a screenshot for visible behavior. <strong>Partial</strong> means a visible surface or underlying component exists but the end-to-end behavior is not proven. <strong>Open</strong> is unfinished work within the stated Slice 1 boundary. <strong>Deferred</strong> remains a future PRD requirement outside this slice.</p>
+<div class="slice-summary"><b>Slice 1 result:</b> the app can be visually exercised from fresh provider setup through the connected New Thread shell. The largest remaining gap inside this slice is that selecting a folder/project and creating, persisting, and reopening a first thread have not been product-verified.</div>
+
+<table>
+<thead>
+<tr>
+<th>Product requirement</th>
+<th>Status</th>
+<th>What is proven now</th>
+<th>What remains</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Codex provider setup: normal and abandoned-auth flows</td>
+<td><span class="delivery-status verified">Verified</span></td>
+<td>Disconnected, authorization-pending with <strong>Open again</strong>, successful connection, and connected restart are covered by one compact lifecycle scenario and four Electron screenshots in Section 3.6.</td>
+<td>Explicit rejection, expiration, and later credential revocation are tracked separately below; real authentication needs a signed-release smoke.</td>
+</tr>
+<tr>
+<td>Desktop shell and appearance</td>
+<td><span class="delivery-status verified">Verified</span></td>
+<td>Light and dark provider setup, Relayer branding, expanded shell, and the collapsed-sidebar layout are structurally tested and visually captured.</td>
+<td>Keyboard navigation, accessibility, small-window layout, and restart persistence remain broader desktop requirements.</td>
+</tr>
+<tr>
+<td>Full-page Settings surface</td>
+<td><span class="delivery-status partial">Partial</span></td>
+<td>Full-page layout, theme selector, connected Codex row, Disconnect control, channel selector, and update control are structurally tested and captured in <code>SET-001-E1</code>.</td>
+<td>Disconnect/reconnect behavior and retention of local data are not verified. Advanced project, storage, Git, and provider settings are not built.</td>
+</tr>
+<tr>
+<td>New Thread entry and scope menu</td>
+<td><span class="delivery-status partial">Partial</span></td>
+<td>The connected landing page, composer, explicit <strong>No folder</strong> state, and <strong>Open another folder</strong> choice are structurally tested and captured in <code>SCP-001-E1</code> and <code>SCP-001-E2</code>.</td>
+<td>Folder picker completion, project creation/selection, Git detection, and local-checkout/new-worktree choice need choice-driven product tests and screenshots.</td>
+</tr>
+<tr>
+<td>Create and persist the first thread</td>
+<td><span class="delivery-status open">Open</span></td>
+<td>A static/experimental thread surface has been viewed, but it is not proof of a desktop-owned thread lifecycle.</td>
+<td>Create a no-folder or project thread without relying on agent execution; show it in the sidebar; quit; reopen; prove the same thread, scope, and draft/interaction state survive.</td>
+</tr>
+<tr>
+<td>Provider failure edges</td>
+<td><span class="delivery-status open">Open</span></td>
+<td>Abandoned authorization and rapid replacement are covered.</td>
+<td>Add compact coverage for explicit authorization rejection, credential expiration/revocation on a later launch, and recovery without freezing the setup page.</td>
+</tr>
+<tr>
+<td>Desktop updater and distributable packaging</td>
+<td><span class="delivery-status next">Next slice</span></td>
+<td>An unsigned Apple Silicon development package builds, and an isolated updater state-service scenario covers check, available, download, ready, and install events.</td>
+<td>No signed/notarized release, hosted Stable/Preview feed, previous-version upgrade, signature-failure behavior, or rollback has been product-proven. Section 5.7 defines the proposed next slice.</td>
+</tr>
+<tr>
+<td>Relayer login and additional providers</td>
+<td><span class="delivery-status deferred">Deferred</span></td>
+<td>Future product requirements remain documented.</td>
+<td>Relayer account login, API-key login, additional providers, custom URLs, secure key storage, connection tests, and model listing are outside Slice 1.</td>
+</tr>
+<tr>
+<td>Harness execution, graph output, and graph interactions</td>
+<td><span class="delivery-status deferred">Deferred</span></td>
+<td>Experimental harness, graph, and eval work is separate engineering evidence and is not counted as desktop proof.</td>
+<td>Invocation, stop/retry, accepted graph rendering, node details, context attachment, actions, subthreads, turns, and graph persistence belong to later slices.</td>
+</tr>
+</tbody></table>
+<h1>Part I — Desktop chat application</h1>
+<h2>3. Agent setup and credentials</h2>
+<h3>3.1 First launch</h3>
+<p>Relayer has no product account in V1. It uses one implicit local profile. First launch opens Agent setup and, after a valid configuration is saved, opens the normal New thread window. Folder and project choice are not onboarding steps.</p>
+<p>The setup surface is one focused <strong>Agent login</strong> card. Codex and API key are presented as horizontal login-method choices, followed by the credential and model controls for the selected method. The form should not split setup into equal Harness and Agent login columns or stack alternative methods into a long vertical option list.</p>
+<p>An <strong>Advanced</strong> disclosure below the ordinary login controls contains the harness selector and its short explanation. Prime Agent is the only enabled V1 harness, and it is preselected. Harness selection is a new-thread default: changing it never changes an existing thread. The persisted value is a stable harness identifier rather than a hard-coded UI assumption, but a first-time user does not need to understand harness architecture to connect an agent.</p>
+<h3>3.2 Login methods</h3>
+<h4>Codex</h4>
+<ul>
+<li><code>Connect Codex</code> starts the managed ChatGPT/Codex browser authentication flow.</li>
+<li>The credential is an agent credential, not a Relayer identity.</li>
+<li>Successful authentication populates compatible model choices.</li>
+<li>Expired or revoked authentication returns the user to Agent setup without losing projects, threads, or graphs.</li>
+</ul>
+<h4>API key</h4>
+<ul>
+<li>Choosing API key reveals a provider selector.</li>
+<li>Known providers can prefill their default API URL.</li>
+<li><code>Other</code> reveals a required provider name and API base URL.</li>
+<li>The API key field is masked, supports paste, and is never written to logs, graph data, chat history, annotations, exports, or diagnostics.</li>
+<li>The key is stored in the operating-system credential store. Product settings persist only a credential reference.</li>
+<li>A <code>Test connection</code> action verifies authentication and model listing without invoking Complete.</li>
+<li>The model selector is enabled only after the credential test succeeds.</li>
+</ul>
+<h3>3.3 Configuration schema</h3>
+<pre><code class="language-ts">type AgentConfiguration = {
+  harnessId: string;
+  harnessVersion: string;
+  loginMethod: &quot;codex&quot; | &quot;api-key&quot;;
+  providerId: string;
+  providerApiUrl?: string;
+  credentialRef: string;
+  modelId: string;
+};
+
+type ThreadAgentBinding = {
+  threadRootInteractionId: string;
+  harnessId: string;
+  harnessVersion: string;
+};
+
+type InteractionModelBinding = {
+  interactionNodeId: string;
+  providerId: string;
+  credentialRef: string;
+  modelId: string;
+};
+</code></pre>
+<p>The harness binding is written when the thread&#39;s root interaction is created and is inherited by every interaction in that thread. The model picker remains available in the composer and may change before any interaction. Every submitted interaction records the exact provider, credential reference, and model used for that call.</p>
+<h3>3.4 Product requirements</h3>
+<ul>
+<li><strong>AGT-001:</strong> No Relayer sign-up, sign-in, avatar, cloud-sync promise, or Sign out action appears in V1.</li>
+<li><strong>AGT-002:</strong> Agent login is the primary setup task; harness selection is available only inside a collapsed Advanced disclosure.</li>
+<li><strong>AGT-003:</strong> Prime Agent is the preselected and only enabled V1 harness; its advanced selector remains present so the persisted product contract is not designed around a permanent singleton. A harness change applies only to newly created threads.</li>
+<li><strong>AGT-004:</strong> Codex and API key are the enabled V1 login methods.</li>
+<li><strong>AGT-005:</strong> Provider-specific controls appear only after API key is chosen.</li>
+<li><strong>AGT-006:</strong> <code>Other</code> requires provider name and a valid HTTPS API URL, except explicitly permitted local development URLs in developer mode.</li>
+<li><strong>AGT-007:</strong> Secrets are stored through the OS credential store and are redacted from every persistence and diagnostic path.</li>
+<li><strong>AGT-008:</strong> Continue is disabled until the preselected or advanced-selected harness, credential, provider, and initial model form a valid configuration.</li>
+<li><strong>AGT-009:</strong> The composer exposes the model for the next interaction. Changing it affects that interaction and later defaults, never prior interaction records.</li>
+<li><strong>AGT-010:</strong> An existing thread cannot switch harnesses in place. To use a different harness, the user starts or forks into a new thread.</li>
+</ul>
+<h3>3.5 Verification</h3>
+<p>Deterministic choice-driven UI tests cover every selector transition, conditional field, validation error, disabled state, secure-storage adapter call, and secret-redaction path. Credential-adapter integration tests use fake Codex and provider servers. One opt-in real authentication smoke is run before a signed release; it does not enter the default suite and does not execute a paid Complete call.</p>
+<h3>3.6 Current delivery evidence — <code>PROV-001 Provider setup</code></h3>
+<p><code>PROV-001</code> is one product requirement with several observable subrequirements, not a collection of independent setup features:</p>
+<ul>
+<li>when no agent provider is connected, Relayer displays the full-page provider setup;</li>
+<li>Codex is the first enabled provider while the product contract retains future Relayer login and additional providers;</li>
+<li>Connect opens the hosted Codex authorization flow;</li>
+<li>abandoning that flow leaves an <strong>Open again</strong> action that replaces the old authorization attempt rather than freezing the page;</li>
+<li>successful authorization enters the normal New Thread application; and</li>
+<li>a later desktop process recognizes the existing Relayer-scoped Codex connection.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Sprint 1 status</th>
+<th>Automated proof</th>
+<th>Visual proof</th>
+<th>Remaining work</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>PROV-001 Provider setup</code> and its Codex subrequirements</td>
+<td><span class="delivery-status verified">Verified</span></td>
+<td><code>test/desktop-shell.test.mjs</code> has one structural desktop scenario and one provider-lifecycle scenario. The lifecycle scenario covers disconnected account read, two rapid Connect calls, cancellation-before-replacement, completion notification, connected account read, request timeout, and app-server interruption.</td>
+<td><code>PROV-001-E1</code> through <code>PROV-001-E4</code> below</td>
+<td>Explicit rejected/expired/revoked-credential copy and behavior; signed-release real-auth smoke. Relayer login, API keys, additional providers, provider URLs, secure secret storage, model listing, and harness selection remain planned after Sprint 1.</td>
+</tr>
+</tbody></table>
+<p>The default validation command remains fast: on 2026-08-17, <code>npm run check</code> completed with <strong>2 test files and 5 tests passing</strong>, and <code>npm run build</code> passed. Only the desktop structure and provider-lifecycle scenarios are provider-setup evidence; GraphComplete contract tests must not be counted as proof of this desktop flow.</p>
+<h4><code>PROV-001-E1</code> — disconnected provider setup, dark appearance</h4>
+<p>Captured from the Electron development application with an isolated empty Relayer profile. This proves the full-page setup, Relayer branding, Codex as the first provider, and the initial Connect action.</p>
+<figure class="evidence-figure">
+  <div class="evidence-image">
+    <img src="assets/evidence/provider/setup-dark.png" alt="PROV-001-E1: Relayer provider setup in dark appearance">
+    <span class="evidence-callout" style="--x:42%;--y:47%">1</span>
+    <span class="evidence-callout" style="--x:42%;--y:55%">2</span>
+    <span class="evidence-callout" style="--x:64%;--y:55%">3</span>
+  </div>
+  <ol class="evidence-legend"><li><b>1</b><span>One full-page provider task, without project or harness setup.</span></li><li><b>2</b><span>Codex is the first enabled provider; OpenAI is named as its source.</span></li><li><b>3</b><span>Connect is the only initial action.</span></li></ol>
+</figure>
+
+<h4><code>PROV-001-E2</code> — disconnected provider setup, light appearance</h4>
+<p>Captured from the same Electron application and isolated profile after persisting the light appearance. This proves that provider setup participates in the desktop appearance setting.</p>
+<figure class="evidence-figure">
+  <div class="evidence-image">
+    <img src="assets/evidence/provider/setup-light.png" alt="PROV-001-E2: Relayer provider setup in light appearance">
+    <span class="evidence-callout" style="--x:42%;--y:48%">1</span>
+    <span class="evidence-callout" style="--x:42%;--y:55%">2</span>
+    <span class="evidence-callout" style="--x:64%;--y:55%">3</span>
+  </div>
+  <ol class="evidence-legend"><li><b>1</b><span>The same provider hierarchy is preserved in light appearance.</span></li><li><b>2</b><span>The card, logo, and text use the light Relayer palette.</span></li><li><b>3</b><span>The primary action retains clear contrast.</span></li></ol>
+</figure>
+
+<h4><code>PROV-001-E3</code> — authorization pending and recoverable</h4>
+<p>Captured after starting the real hosted Codex authorization flow. The desktop remains actionable and exposes <strong>Open again</strong>; the compact lifecycle test proves that selecting it cancels the previous login ID before starting its replacement.</p>
+<figure class="evidence-figure">
+  <div class="evidence-image">
+    <img src="assets/evidence/provider/authorization-pending.png" alt="PROV-001-E3: Relayer provider authorization pending with Open again">
+    <span class="evidence-callout" style="--x:63%;--y:55%">1</span>
+    <span class="evidence-callout" style="--x:43%;--y:58%">2</span>
+  </div>
+  <ol class="evidence-legend"><li><b>1</b><span>Open again remains enabled after the browser flow is abandoned.</span></li><li><b>2</b><span>The status says where completion happens without adding agent-runtime language.</span></li></ol>
+</figure>
+
+<h4><code>PROV-001-E4</code> — connected account recognized by a new desktop process</h4>
+<p>Captured from a newly launched Electron development process using the existing Relayer-scoped Codex profile. It bypasses provider setup and opens the normal New Thread surface. The image proves startup presentation, not agent invocation or graph behavior.</p>
+<figure class="evidence-figure">
+  <div class="evidence-image">
+    <img src="assets/evidence/provider/connected-after-restart.png" alt="PROV-001-E4: Relayer opens New Thread after recognizing the connected Codex profile">
+    <span class="evidence-callout" style="--x:9%;--y:6%">1</span>
+    <span class="evidence-callout" style="--x:10%;--y:14%">2</span>
+    <span class="evidence-callout" style="--x:59%;--y:54%">3</span>
+  </div>
+  <ol class="evidence-legend"><li><b>1</b><span>Connected restart enters the desktop shell rather than provider setup.</span></li><li><b>2</b><span>New Thread is immediately available from the sidebar.</span></li><li><b>3</b><span>The ordinary task composer is the post-login destination.</span></li></ol>
+</figure>
+
+<p>The numbered callouts above are the evidence metadata and requirement associations. Screenshots are implementation evidence, not design mocks and not proof of unrelated features visible in the frame.</p>
+<h2>4. Projects, no-folder chats, and Git execution</h2>
+<h3>4.1 New thread is the project entry point</h3>
+<p>After Agent setup, Relayer opens the ordinary New thread composer. The user writes a task and chooses one of these scopes before sending:</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Stored ontology</th>
+<th>Filesystem behavior</th>
+<th>Sidebar placement</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>No folder</td>
+<td><code>scope.kind = &quot;standalone&quot;</code>, no <code>projectId</code></td>
+<td>Isolated app-owned working directory; no user-folder access</td>
+<td>Chats group</td>
+</tr>
+<tr>
+<td>Existing project</td>
+<td><code>scope.kind = &quot;project&quot;</code>, stable <code>projectId</code></td>
+<td>Uses the project&#39;s authorized folder or chosen worktree</td>
+<td>Under the project</td>
+</tr>
+<tr>
+<td>Open another folder</td>
+<td>Creates a project, then selects it</td>
+<td>Requests folder access and records canonical path metadata</td>
+<td>New project group</td>
+</tr>
+</tbody></table>
+<p>The folder control initially reads <strong>Open folder</strong>. Opening it shows existing projects, <strong>Choose another folder…</strong>, and <strong>No folder</strong>. “Standalone” remains an internal scope name only; it is not user-facing terminology.</p>
+<p>The first send creates one top-level <strong>user-interaction node</strong>. The thread&#39;s identity points to that root interaction node; the product does not create a separate semantic thread node for the same event.</p>
+<h3>4.2 Folder and project behavior</h3>
+<ul>
+<li>Any local folder can be a project. Git is detected capability, not a requirement.</li>
+<li>Reopening an existing canonical folder reuses the project after confirmation instead of silently duplicating it.</li>
+<li>Missing or revoked folder access keeps the project and history visible while prompting the user to relocate or reauthorize the folder.</li>
+<li>Removing a project from Relayer never deletes the user folder or worktree.</li>
+<li>A no-folder chat can be moved into an existing or newly created project when the work grows. This changes the thread&#39;s scope and sidebar placement in place; it does not create a second thread, change its root interaction ID, or discard its graph history.</li>
+<li>Moving into a project affects subsequent interactions. Previously accepted turns retain the standalone scope and filesystem binding recorded when they ran.</li>
+</ul>
+<h3>4.3 Git-aware execution options</h3>
+<p>When the selected project is a Git repository, an execution control appears beside the folder control:</p>
+<ul>
+<li><strong>Local checkout:</strong> use the opened folder and its current branch.</li>
+<li><strong>New worktree:</strong> choose a base branch, create an isolated worktree, and start the thread there.
+V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong>, matching the compact Codex-style decision. Base-branch, custom-location, and existing-worktree controls are deferred until a demonstrated product need. Non-Git folders do not show Git controls or empty Git status.</li>
+</ul>
+<p>Forking a thread can keep its current execution location or create a new worktree. The new interaction inherits the conversation graph and project ontology while retaining its own thread-specific history.</p>
+<h3>4.4 Requirements</h3>
+<ul>
+<li><strong>SCP-001:</strong> Send is disabled until the composer has text and a valid No folder or project scope.</li>
+<li><strong>SCP-002:</strong> No folder never receives a user folder path by implication; the stored internal scope remains <code>standalone</code>.</li>
+<li><strong>SCP-003:</strong> Project scope always resolves through a stable <code>projectId</code>; display names and paths are metadata, not identity.</li>
+<li><strong>SCP-004:</strong> Git controls appear only when Git detection succeeds.</li>
+<li><strong>SCP-005:</strong> Worktree creation errors leave the draft intact and offer retry or Local checkout.</li>
+<li><strong>SCP-006:</strong> The Complete request records the exact project, checkout/worktree, and repository state selected at send time.</li>
+<li><strong>SCP-007:</strong> New thread, fork, rename, archive, pin, delete-entry, and reopen actions are available from expected sidebar or thread menus.</li>
+<li><strong>SCP-008:</strong> Deleting a thread entry never deletes graph nodes referenced by another thread or turn.</li>
+<li><strong>SCP-009:</strong> Moving a no-folder chat into a project preserves thread and graph identity, records the scope transition, and uses the selected project only for later interactions.</li>
+</ul>
+<h3>4.5 Verification</h3>
+<p>Choice-driven tests cover No folder, existing folder, new folder, non-Git folder, Git local checkout, new worktree, creation failure, revoked folder permission, duplicate project, move-to-project, fork-in-place, and fork-to-worktree. Filesystem and Git tests use temporary repositories and never modify a user&#39;s real checkout.</p>
+<h3>4.6 Current delivery evidence — New Thread and scope selection</h3>
+<table>
+<thead>
+<tr>
+<th>Requirement group</th>
+<th>Current state</th>
+<th>Automated proof</th>
+<th>Visual proof</th>
+<th>Remaining work</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>New Thread shell and initial No folder/folder choice</td>
+<td><span class="delivery-status partial">Partial</span></td>
+<td>The existing structural desktop scenario asserts New Thread, <code>scopeButton</code>, and <code>scopeMenu</code> in the shipped renderer.</td>
+<td><code>SCP-001-E1</code> and <code>SCP-001-E2</code> below</td>
+<td>The send path currently reaches experimental agent integration and is not desktop-product proof. Existing-project population, folder dialog completion, Git detection, local/new-worktree choice, and persistence remain unverified.</td>
+</tr>
+</tbody></table>
+<h4><code>SCP-001-E1</code> — connected New Thread</h4>
+<figure class="evidence-figure">
+  <div class="evidence-image">
+    <img src="assets/evidence/desktop/new-thread.png" alt="SCP-001-E1: Connected Relayer New Thread page">
+    <span class="evidence-callout" style="--x:10%;--y:15%">1</span>
+    <span class="evidence-callout" style="--x:59%;--y:51%">2</span>
+    <span class="evidence-callout" style="--x:39%;--y:61%">3</span>
+    <span class="evidence-callout" style="--x:82%;--y:61%">4</span>
+  </div>
+  <ol class="evidence-legend"><li><b>1</b><span>New Thread remains available beside Chats and Projects.</span></li><li><b>2</b><span>One task composer is the primary page action.</span></li><li><b>3</b><span>No folder is the explicit initial scope.</span></li><li><b>4</b><span>The send control is inline with the composer.</span></li></ol>
+</figure>
+
+<h4><code>SCP-001-E2</code> — inline scope choice</h4>
+<figure class="evidence-figure">
+  <div class="evidence-image">
+    <img src="assets/evidence/desktop/new-thread-scope-menu.png" alt="SCP-001-E2: New Thread scope menu">
+    <span class="evidence-callout" style="--x:39%;--y:46%">1</span>
+    <span class="evidence-callout" style="--x:40%;--y:52%">2</span>
+    <span class="evidence-callout" style="--x:39%;--y:61%">3</span>
+  </div>
+  <ol class="evidence-legend"><li><b>1</b><span>No folder keeps work in an app-owned local directory.</span></li><li><b>2</b><span>Open another folder begins local project creation.</span></li><li><b>3</b><span>Scope choice stays inside New Thread rather than onboarding.</span></li></ol>
+</figure>
+
+<h2>5. Desktop shell, persistence, settings, and updates</h2>
+<h3>5.1 Persistent shell and thread management</h3>
+<p>The left sidebar contains New thread, no-folder chats under the user-facing <strong>Chats</strong> label, projects with durable thread entries, and two compact footer icons: Settings on the left and Download update on the right when an update is available. It is a compact entry list, not a recursive graph tree. A child or subchild conversation can become a resumable sidebar entry without reproducing its full ancestry there; ancestry remains visible through graph breadcrumbs.</p>
+<p>The header shows the current thread title, scope, and backward/forward turn controls. The composer remains the place to send, stop, and attach context. There is no separate <code>active run</code> dashboard.</p>
+<h3>5.2 Local persistence and recovery</h3>
+<p>Product data is local and disk-persisted:</p>
+<ul>
+<li>profile and non-secret settings;</li>
+<li>provider configuration references;</li>
+<li>projects and authorized-folder metadata;</li>
+<li>thread/sidebar projection;</li>
+<li>user-interaction nodes, graph data, accepted snapshots, and execution status;</li>
+<li>update state and schema version;</li>
+<li>optional developer traces when explicitly enabled.</li>
+</ul>
+<p>Persistence uses atomic writes or transactions. A crash may interrupt an in-progress Complete call, but it must not corrupt the last accepted graph. On reopen, accepted turns render immediately; an interrupted interaction is marked stopped or failed and retryable. Recovery is a reliability requirement, not a primary product concept or prominent settings category.</p>
+<h3>5.3 Settings information architecture</h3>
+<p>Normal settings contain:</p>
+<ul>
+<li><strong>Agent:</strong> harness, login method, provider, model, reconnect, replace API key.</li>
+<li><strong>Projects and storage:</strong> local data location, export, and remove-local-data actions.</li>
+<li><strong>Git:</strong> default execution choice, worktree location, and the maximum number of worktrees Relayer may create; visible only when meaningful.</li>
+<li><strong>Updates:</strong> current version, channel, automatic download preference, and Check for updates.</li>
+<li><strong>Appearance and behavior:</strong> theme and ordinary desktop preferences.</li>
+</ul>
+<p>An <strong>Advanced</strong> disclosure contains:</p>
+<ul>
+<li>provider API URL overrides;</li>
+<li>graph/store diagnostics;</li>
+<li>agent traces, disabled by default and labeled for Relayer developers;</li>
+<li>local development update channel and other developer-only switches.</li>
+</ul>
+<p>There is no <code>workspace graph build</code> setting in V1. Graph memory is built through Complete interactions, not through a required up-front workspace indexing operation.</p>
+<p>The worktree limit applies only to worktrees created and managed by Relayer. User-created worktrees do not count toward it and are never deleted by Relayer. The exact default, whether the limit is global or per project, and the user flow when the limit is reached remain open in Section 14.3.</p>
+<h3>5.4 Desktop application updates</h3>
+<p>Signed desktop updates are essential V1 distribution infrastructure.</p>
+<ol>
+<li>The app checks a configured HTTPS release channel for a signed manifest.</li>
+<li>It compares version and schema compatibility without blocking the user.</li>
+<li>It downloads in the background and verifies hash and publisher signature.</li>
+<li>When an update is available, a small highlighted circular download icon appears at the bottom-right of the sidebar. No version number or update label is permanently shown.</li>
+<li>Clicking the icon opens one compact prompt describing the update with a single <code>Download update</code> action and a dismiss control.</li>
+<li>Download and verification occur without blocking chat. Installation is deferred while Complete is committing graph work.</li>
+<li>Before installation, product state is flushed and the target migration is prepared. Activation is atomic; failed startup health or migration restores the prior binary and preserves local data.</li>
+</ol>
+<h3>5.5 Verification</h3>
+<p>Event-driven tests cover every persistence and UI state transition: app launch, thread reopen, interrupted write, stopped run, retry, settings disclosure, trace enablement, update unavailable/downloading/verified/restart-deferred/activated/rolled-back, corrupt manifest, signature failure, offline check, and migration failure. Every release also performs a signed previous-version-to-current desktop smoke on the supported macOS versions.</p>
+<h3>5.6 Current delivery evidence — Settings and shell</h3>
+<table>
+<thead>
+<tr>
+<th>Requirement group</th>
+<th>Current state</th>
+<th>Automated proof</th>
+<th>Visual proof</th>
+<th>Remaining work</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Full-page Settings</td>
+<td><span class="delivery-status partial">Partial</span></td>
+<td>The structural desktop scenario asserts the Settings page, appearance selector, disconnect action, update channel, and absence of a nested dialog.</td>
+<td><code>SET-001-E1</code> below</td>
+<td>Disconnect/reconnect behavior and retained product data are not yet covered. Advanced settings, project/storage controls, Git/worktree limits, and provider replacement remain unbuilt.</td>
+</tr>
+<tr>
+<td>Collapsible persistent shell</td>
+<td><span class="delivery-status verified">Verified</span></td>
+<td>The same structural scenario asserts <code>collapseSidebar</code>; current visual evidence proves both expanded and collapsed states.</td>
+<td><code>SHL-001-E1</code> below</td>
+<td>Keyboard, accessibility, restart persistence, small-window layout, and populated project/thread lists remain broader desktop requirements.</td>
+</tr>
+<tr>
+<td>Application updater</td>
+<td><span class="delivery-status next">Next slice</span></td>
+<td>One updater scenario covers check, available, download, ready, and install without network access.</td>
+<td>Settings callouts 5 and 6 show the current development controls.</td>
+<td>Signed manifest/feed, real download, signature verification, restart installation, Stable/Preview publication, and rollback remain undone.</td>
+</tr>
+</tbody></table>
+<h4><code>SET-001-E1</code> — full-page Settings</h4>
+<p>The capture uses a generic connected-account label so personal account identity is not stored in the repository. All other visible state comes from the Electron renderer.</p>
+<figure class="evidence-figure">
+  <div class="evidence-image">
+    <img src="assets/evidence/desktop/settings-full-page.png" alt="SET-001-E1: Full-page Relayer Settings">
+    <span class="evidence-callout" style="--x:29%;--y:12%">1</span>
+    <span class="evidence-callout" style="--x:83%;--y:25%">2</span>
+    <span class="evidence-callout" style="--x:37%;--y:38%">3</span>
+    <span class="evidence-callout" style="--x:82%;--y:38%">4</span>
+    <span class="evidence-callout" style="--x:82%;--y:51%">5</span>
+    <span class="evidence-callout" style="--x:81%;--y:58%">6</span>
+  </div>
+  <ol class="evidence-legend"><li><b>1</b><span>Settings occupies the main view; it is not a window inside the app.</span></li><li><b>2</b><span>Appearance is an ordinary top-level setting.</span></li><li><b>3</b><span>The connected Codex state is visible without making it a Relayer identity.</span></li><li><b>4</b><span>Disconnect is an account-connection action; its data-retention behavior remains to be verified.</span></li><li><b>5</b><span>Stable and Preview are explicit update channels.</span></li><li><b>6</b><span>Development builds state that updates are disabled while retaining the check control.</span></li></ol>
+</figure>
+
+<h4><code>SHL-001-E1</code> — collapsed sidebar</h4>
+<figure class="evidence-figure">
+  <div class="evidence-image">
+    <img src="assets/evidence/desktop/sidebar-collapsed.png" alt="SHL-001-E1: Relayer sidebar collapsed beside New Thread">
+    <span class="evidence-callout" style="--x:9%;--y:6%">1</span>
+    <span class="evidence-callout" style="--x:6%;--y:15%">2</span>
+    <span class="evidence-callout" style="--x:54%;--y:53%">3</span>
+  </div>
+  <ol class="evidence-legend"><li><b>1</b><span>The collapse control stays beside the macOS window controls.</span></li><li><b>2</b><span>Relayer, New Thread, and Settings remain reachable as compact icons.</span></li><li><b>3</b><span>The main task surface expands into the released sidebar space.</span></li></ol>
+</figure>
+
+<h3>5.7 Proposed Slice 2 — packaged desktop and updates</h3>
+<p><span class="delivery-status next">Next slice</span></p>
+<p>The next slice turns the existing development shell into a safely installable and updateable macOS arm64 product. It does not add project/thread persistence, invoke a harness, or render graph output.</p>
+<h4>Slice boundary</h4>
+<table>
+<thead>
+<tr>
+<th>In scope</th>
+<th>Explicitly out of scope</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Fast unsigned local package for developer visual testing</td>
+<td>Harness selection or agent execution</td>
+</tr>
+<tr>
+<td>Signed, notarized Preview artifact for external beta testing</td>
+<td>Complete, graph output, or graph interaction</td>
+</tr>
+<tr>
+<td>Stable and Preview release identities/channels</td>
+<td>Project/worktree completion and thread persistence</td>
+</tr>
+<tr>
+<td>Hosted update artifact and channel manifest</td>
+<td>Universal/Intel macOS support</td>
+</tr>
+<tr>
+<td>In-app check, available, download progress, ready, restart, success, and retryable failure states</td>
+<td>Full data-schema migration and failed-migration rollback, which require the persistence slice</td>
+</tr>
+<tr>
+<td>Previous-Preview-version to current-Preview-version update smoke</td>
+<td>Stable public promotion before Preview is proven</td>
+</tr>
+</tbody></table>
+<h4>Decisions to settle before implementation</h4>
+<ol>
+<li><strong>Preview isolation:</strong> decide whether Preview is a separately installable <code>Relayer Preview</code> application with its own bundle ID/data directory, or the same <code>Relayer</code> application switching feeds. A separate Preview app is recommended because it can coexist with Stable and cannot strand a user on a prerelease version when downgrades are disabled.</li>
+<li><strong>Artifact host:</strong> choose the HTTPS host and immutable directory convention for DMG, ZIP, checksums, and <code>latest</code>/<code>beta</code> channel metadata.</li>
+<li><strong>Signing automation:</strong> confirm the Apple Developer ID identity and notarization credentials already used by Relayer, then define how local release builds and CI receive them without storing secrets in the repository.</li>
+<li><strong>Update prompt timing:</strong> use the existing compact sidebar indicator; downloading is user-triggered, and restart remains explicitly deferrable.</li>
+<li><strong>Minimum supported macOS:</strong> record and test one floor version plus the current macOS version before calling Preview distributable.</li>
+</ol>
+<h4>Minimal validation plan</h4>
+<table>
+<thead>
+<tr>
+<th>Validation</th>
+<th>Fast path</th>
+<th>Product/release proof</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Updater state machine</td>
+<td>Keep one scenario-driven fake-updater test covering no update, available, progress, ready, install request, failure, and retry. No network and no additional test per event.</td>
+<td>Screenshots of the actual packaged app in available, downloading, ready-to-restart, and failure states.</td>
+</tr>
+<tr>
+<td>Unsigned developer package</td>
+<td>Build once and inspect the packaged file inventory, bundle identity, icon, and version.</td>
+<td>Launch with an isolated profile and capture Settings/About evidence; never present it as a distributable build.</td>
+</tr>
+<tr>
+<td>Signed Preview package</td>
+<td>Verify signing, hardened runtime, notarization, stapling, Gatekeeper acceptance, update ZIP, and checksums with release scripts.</td>
+<td>Install the DMG on a clean macOS user, launch it, connect Codex or use a prepared non-secret test profile, and capture the installed app.</td>
+</tr>
+<tr>
+<td>Real update</td>
+<td>Generate two small Preview versions and publish only to the Preview feed.</td>
+<td>Install N-1, change a harmless local preference, update through the UI to N, relaunch, and prove the new version plus preserved preference. No harness call is required.</td>
+</tr>
+<tr>
+<td>Failure safety</td>
+<td>Serve an offline feed, missing manifest, and invalid/tampered artifact through one fixture-driven integration scenario.</td>
+<td>The packaged app remains launchable on the old version, presents a retryable error, and does not lose the test preference.</td>
+</tr>
+</tbody></table>
+<p>Slice 2 is complete only when the real packaged Preview app—not Electron development mode—installs through macOS, shows the expected Relayer branding, updates from N-1 to N through the visible product flow, preserves its local preference, and leaves the old version usable after a rejected update. Every manually inspected state receives an annotated screenshot in this PRD.</p>
+<h1>Part II — Relayer graph engine and Complete harness</h1>
+<h2>6. Graph engine: stable product contract</h2>
+<p>The graph engine is a stable deterministic package inside Relayer Harness and is the only API that reads or changes persisted Relayer graph state. Complete and Relayer Desktop are separate clients of this engine. Neither reads the JSONL journal directly or invents compatibility behavior. Relayer Desktop sees the graph only through the engine&#39;s product read/write contracts.</p>
+<h3>6.1 Engine ownership</h3>
+<p>The engine owns:</p>
+<ul>
+<li>node, undirected edge, layer, action, scope, graph-version, and accepted-snapshot schemas;</li>
+<li>append-only persistence, replay, optimistic version checks, atomic commit, and migration;</li>
+<li>deterministic integrity and authority validation;</li>
+<li>typed traversal, lookup, and search primitives;</li>
+<li>draft versus submitted state and accepted versus stopped outcomes;</li>
+<li>the mapping from an interaction plus Complete run to its accepted output layer;</li>
+<li>compatibility checks across graph schema, graph-tool, renderer, and harness versions.</li>
+</ul>
+<p>The engine does not decide what an answer should say, which concepts deserve nodes, whether an old concept is relevant, or when recursive agents are useful. Those are harness decisions.</p>
+<h3>6.2 Stable graph schema required by the product</h3>
+<pre><code class="language-ts">type GraphNode = {
+  id: string;
+  revision: number;
+  kind: string;
+  semanticKey?: string;
+  icon: string;
+  title: string;
+  detail: string;
+  status: &quot;draft&quot; | &quot;accepted&quot; | &quot;stopped&quot;;
+  metadata?: Record&lt;string, JsonValue&gt;;
+};
+
+type GraphEdge = {
+  id: string;
+  revision: number;
+  kind: string;
+  endpoints: readonly [string, string];
+  metadata?: Record&lt;string, JsonValue&gt;;
+};
+
+type GraphLayer = {
+  id: string;
+  ownerNodeId: string;
+  nodeIds: string[];
+  graphVersion: number;
+};
+</code></pre>
+<p><code>semanticKey</code> is optional for ordinary product display but required when a harness wants stable reuse and when an evaluation must select a generated node without depending on its title or random ID. Edges are stored and displayed without arrow direction. Directional behavior belongs in explicit fields such as an action target or layer owner rather than visual edge direction.</p>
+<h3>6.3 UX read contract</h3>
+<pre><code class="language-ts">interface ProductGraphReadApi {
+  getNode(nodeId: string, snapshotVersion?: number): Promise&lt;GraphNode&gt;;
+  getLayer(layerId: string, snapshotVersion?: number): Promise&lt;GraphLayerView&gt;;
+  getNodeActions(nodeId: string, snapshotVersion?: number): Promise&lt;NodeAction[]&gt;;
+  getCompletionOutput(inputNodeId: string, runId: string): Promise&lt;{
+    actionId: string;
+    layerId: string;
+    graphVersion: number;
+  }&gt;;
+  listAcceptedTurns(threadRootId: string): Promise&lt;AcceptedTurn[]&gt;;
+}
+</code></pre>
+<p>The renderer receives a resolved layer view containing its exact nodes, induced edges, breadcrumb owner, and accepted snapshot version. It does not traverse the graph to guess what belongs on screen. If one interaction has multiple attempts or accepted children, <code>runId</code> selects the exact completion output.</p>
+<h3>6.4 Product write contract</h3>
+<pre><code class="language-ts">interface ProductGraphWriteApi {
+  createInteraction(input: CreateInteractionInput): Promise&lt;UserInteractionNode&gt;;
+  attachContext(inputNodeId: string, attachment: ContextAttachment): Promise&lt;void&gt;;
+  invokeAction(sourceNodeId: string, actionId: string, text?: string): Promise&lt;UserInteractionNode&gt;;
+}
+</code></pre>
+<p>The product may create user-interaction nodes and their user-selected attachment or action-reference relationships. It cannot create agent answer nodes, modify accepted answer content, submit scopes, or bypass engine validation.</p>
+<h3>6.5 Harness graph-tool contract</h3>
+<pre><code class="language-ts">interface HarnessGraphTools {
+  readNode(id: string): Promise&lt;GraphNode&gt;;
+  traverse(input: TraverseInput): Promise&lt;GraphSubgraph&gt;;
+  search(input: SearchInput): Promise&lt;GraphNode[]&gt;;
+  createNode(input: CreateNodeInput): Promise&lt;GraphNode&gt;;
+  updateNode(input: UpdateNodeInput): Promise&lt;GraphNode&gt;;
+  createEdge(input: CreateEdgeInput): Promise&lt;GraphEdge&gt;;
+  authorAction(input: CreateActionInput): Promise&lt;NodeAction&gt;;
+  createLayer(input: CreateLayerInput): Promise&lt;GraphLayer&gt;;
+  submit(input: SubmitRunInput): Promise&lt;SubmittedGraphVersion&gt;;
+  stop(input: StopRunInput): Promise&lt;StoppedRun&gt;;
+}
+</code></pre>
+<p>Every mutation is attributed to a run, turn, agent, and writable scope. Child scopes can change only their owned content; the root can integrate submitted child work. Validation errors return structured repair guidance to the harness. Only <code>submit</code> makes a response available to ordinary UX reads.</p>
+<h3>6.6 Compatibility contract</h3>
+<p>Every persisted graph and evaluation bundle records <code>graphSchemaVersion</code>, <code>graphToolVersion</code>, <code>rendererContractVersion</code>, and <code>harnessConfigurationId</code>. On open:</p>
+<ol>
+<li>the engine validates the stored schema;</li>
+<li>a supported migration produces a new journal version without rewriting prior records;</li>
+<li>unsupported newer schemas fail read-only with an actionable update requirement;</li>
+<li>the renderer refuses a layer contract it cannot display;</li>
+<li>a harness configuration runs only against declared compatible engine and graph-tool ranges.</li>
+</ol>
+<h3>6.7 Current repository versus required V1 engine</h3>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Present executable slice</th>
+<th>Required V1 addition</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Persistence</td>
+<td>Append-only JSONL journal and replay</td>
+<td>Snapshot index, migration registry, recovery verification</td>
+</tr>
+<tr>
+<td>Authority</td>
+<td>Root/child scope ownership and attributed mutations</td>
+<td>Product-versus-harness write capabilities</td>
+</tr>
+<tr>
+<td>Versions</td>
+<td>Draft/submitted records and optimistic base version</td>
+<td>Accepted turn snapshots and run-to-output lookup</td>
+</tr>
+<tr>
+<td>Entities</td>
+<td>Generic nodes and edges</td>
+<td>First-class layers, actions, interaction relationships, semantic keys</td>
+</tr>
+<tr>
+<td>Reads</td>
+<td>Latest/submitted replay plus basic node/search routes</td>
+<td>Stable product layer/action/turn APIs and typed traversal</td>
+</tr>
+<tr>
+<td>Validation</td>
+<td>JSON shape, referential integrity, scope authority</td>
+<td>Display-layer, action-target, compatibility, and topology validation</td>
+</tr>
+</tbody></table>
+<h2>7. Complete harness boundary</h2>
+<h3>7.1 Input contract</h3>
+<p><code>complete(inputGraph, options)</code> remains the only agent entry point. <code>inputGraph</code> is an immutable submitted snapshot whose root is the user-interaction node being answered. The root may be unconnected for a first interaction or connected to any amount of prior conversation and context.</p>
+<pre><code class="language-ts">type CompleteInputGraph = GraphSnapshot &amp; {
+  rootNodeId: string; // the UserInteractionNode being completed
+};
+
+type CompleteOptions = {
+  runId: string;
+  harnessConfigurationRef: string;
+  workspaceBindingRef?: string;
+  signal?: AbortSignal;
+};
+</code></pre>
+<p>A project-backed interaction connects to a <code>WorkspaceBinding</code> recorded by the product. That binding identifies the project, checkout, worktree, Git snapshot, and authorized filesystem capability. The Complete host resolves it into filesystem and Git tools; raw desktop permission objects and secrets are never embedded in graph content. A no-folder interaction may omit the binding.</p>
+<h3>7.2 Required Complete outcome</h3>
+<p>Complete has one required job: <strong>build and submit one response graph layer under the input interaction node, or stop/fail explicitly without exposing draft work.</strong></p>
+<p>On acceptance, the engine must contain exactly one <code>completion-output</code> navigate action for the pair <code>(inputNodeId, runId)</code>. That action targets the accepted response layer. This engine record—not extra layer IDs in the function return—is the source of truth used by the UX.</p>
+<h3>7.3 Result contract</h3>
+<pre><code class="language-ts">type CompleteResult = {
+  contractVersion: string;
+  runId: string;
+  interactionNodeId: string; // echoed for logging and integration simplicity
+  status: &quot;accepted&quot; | &quot;stopped&quot; | &quot;failed&quot;;
+  accepted: boolean;         // must equal status === &quot;accepted&quot;
+  graphVersion: number;
+  changes: {
+    nodesCreated: number;
+    nodesUpdated: number;
+    nodesReused: number;
+    edgesCreated: number;
+    actionsAuthored: number;
+  };
+  retryable: boolean;
+  failure?: { code: string; userMessage: string };
+  diagnosticRef?: string;
+  metrics: { durationMs: number; modelUsage?: ModelUsage };
+};
+</code></pre>
+<p>The desktop already knows the interaction it submitted. After an accepted result it calls <code>getCompletionOutput(interactionNodeId, runId)</code> and opens that layer. <code>runId</code> disambiguates multiple retries or accepted children on one interaction. The result reports outcome and change counts; it does not duplicate graph content or transmit graph deltas.</p>
+<h3>7.4 Harness implementation responsibilities</h3>
+<p>The stable Complete outcome does not prescribe how the harness reaches it. The selected harness owns:</p>
+<ul>
+<li>prompt construction and model/provider calls;</li>
+<li>deciding which connected input state and workspace ground truth to inspect;</li>
+<li>graph traversal, lexical or embedding search, and cache/reuse strategy;</li>
+<li>node grouping, detail, authored actions, and when to revise an existing node;</li>
+<li>Prime Agent recursion, IPython kernel state, tool sequencing, and repair loops;</li>
+<li>responding to structured engine validation errors until it submits, stops, or fails.</li>
+</ul>
+<p>The harness does not own graph persistence, write authority, schema compatibility, accepted-layer resolution, rendering, projects/worktrees, credentials, app updates, or release grading.</p>
+<h3>7.5 Versioned harness configuration</h3>
+<pre><code class="language-ts">type HarnessConfigurationManifest = {
+  schemaVersion: string;
+  configurationId: string;
+  contentDigest: string;
+  completeImplementation: string;
+  harnessId: string;
+  harnessVersion: string;
+  promptBundleVersion: string;
+  graphSkillVersion: string;
+  graphPolicyVersion: string;
+  compatibleGraphSchemaRange: string;
+  compatibleGraphToolRange: string;
+  modelProvider: string;
+  modelId: string;
+  modelParameters: Record&lt;string, unknown&gt;;
+  toolPolicyVersion: string;
+  allowedTools: string[];
+};
+</code></pre>
+<p>Prime Agent is the only enabled V1 implementation. Candidate Relayer Harness configurations and test doubles implement the same Complete interface:</p>
+<pre><code class="language-ts">interface CompleteImplementation {
+  complete(inputGraph: CompleteInputGraph, options: CompleteOptions): Promise&lt;CompleteResult&gt;;
+}
+</code></pre>
+<p>The same immutable manifest digest is used by local evaluation, an evaluation replay thread, an interactive candidate thread, and production promotion. Credentials remain local secret references outside the manifest.</p>
+<h3>7.6 Runtime architecture</h3>
+<pre><code class="language-mermaid">flowchart LR
+    UI[&quot;Relayer Desktop shell and graph interface&quot;] --&gt; AS[&quot;Relayer Desktop app server&quot;]
+    AS --&gt; P[&quot;Projects, threads, secrets, Git, updates&quot;]
+    AS --&gt;|&quot;create interaction, attach context, invoke action&quot;| GE[&quot;Relayer graph engine package&quot;]
+    UI --&gt;|&quot;read layers, nodes, actions&quot;| GE
+    AS --&gt; C[&quot;complete(inputGraph, options)&quot;]
+    C --&gt; H[&quot;Prime Agent implementation&quot;]
+    H --&gt; K[&quot;IPython kernel and recursive agents&quot;]
+    H --&gt;|&quot;read, traverse, mutate, submit&quot;| GE
+    H --&gt; F[&quot;Desktop-authorized filesystem and Git tools&quot;]
+    GE --&gt;|&quot;accepted layer ID and snapshot&quot;| AS
+    AS --&gt; UI
+</code></pre>
+<p><code>complete(inputGraph, options)</code> is the canonical agent entry point. The local app server may handle process startup and transport details, but it cannot replace the graph semantics or completion acceptance rule.</p>
+<h2>8. Interaction, response, and graph-memory contract</h2>
+<h3>8.1 Messages and multiple turns</h3>
+<p>A message creates one interaction node, connects any selected prior state to it, and makes one Complete call. On acceptance, the engine records the run&#39;s output navigate action and response layer under that interaction. Later interaction nodes connect into the existing conversation graph and may refer to any prior node. The thread graph is the V1 conversation memory; V1 does not maintain a separate continuously updated summary.</p>
+<p>If a later turn needs a stale node, the harness reassesses and updates that node through the staged graph tools before referring to it. Otherwise stale nodes remain unchanged. Broader recursive freshness propagation is deferred.</p>
+<h3>8.2 Add as context</h3>
+<p>The permanent inline <code>+</code> action exists on every selectable node. It opens an optional annotation field in the inspector. After attachment:</p>
+<ul>
+<li>the composer shows one compact graph annotation with a count;</li>
+<li>a compact attachment strip appears directly above the chat box, following the familiar Codex attachment placement;</li>
+<li>hover or click on that strip reveals the attached node icons;</li>
+<li>selecting an icon shows the user&#39;s annotation for that node;</li>
+<li>attachments persist with the draft, survive navigation, and clear only after durable send or explicit removal;</li>
+<li>the next interaction node receives typed attachment edges carrying the selected node IDs and annotations.</li>
+</ul>
+<p>Adding context alone does not invoke Complete.</p>
+<p>V1 has no separate feedback interaction. When a user wants to correct, question, or expand a node, they press <code>+</code>, attach that node with an optional note such as “this claim is wrong,” and send an ordinary message. The note is stored on the attachment edge; the interaction remains <code>kind = &quot;message&quot;</code>.</p>
+<h3>8.3 Authored node actions</h3>
+<p>Every node action except <code>+</code> is authored by the harness on that node. Authored actions appear inline first; the universal attach-context <code>+</code> is the final control in the row. An action declares:</p>
+<pre><code class="language-ts">type NodeAction = {
+  id: string;
+  actionKey: string;
+  sourceNodeId: string;
+  label: string;
+  mode: &quot;navigate&quot; | &quot;invoke&quot;;
+  targetNodeId?: string;
+  interactionTemplate?: {
+    kind: &quot;message&quot; | &quot;node-action&quot;;
+    text?: string;
+  };
+};
+</code></pre>
+<ul>
+<li><code>navigate</code> opens an existing node, layer, thread entry, or subthread without Complete.</li>
+<li><code>invoke</code> creates one user-interaction node referring to the selected node and action, then calls Complete once.</li>
+<li>The accepted response becomes a child subgraph/subthread and is enterable from the parent through a navigate action and from its durable sidebar entry.</li>
+<li>Subthreads are recursive without a fixed depth.</li>
+</ul>
+<p>There is no universal <code>Go deeper</code> button. Deeper work exists only when the harness authors an appropriate invoking action.</p>
+<h4>Authored-action lifecycle</h4>
+<ol>
+<li>During a Complete run, the harness authors an action in draft state on a draft or reused node.</li>
+<li>The engine validates that the source exists, <code>actionKey</code> is unique on that node revision, the mode is supported, and any navigate target exists in the submitted graph version.</li>
+<li>The action becomes visible only when its graph version is submitted and accepted.</li>
+<li>A <code>navigate</code> selection reads its target locally and does not change graph state.</li>
+<li>An <code>invoke</code> selection creates a new <code>node-action</code> interaction containing the source node ID, action ID/key, optional user text, and inherited workspace binding. That new interaction is the root of the next Complete input graph.</li>
+<li>The original action remains part of its accepted snapshot. It is not consumed or converted into the new turn.</li>
+<li>Stop or failure leaves the invoked interaction retryable and does not create an accepted child layer.</li>
+<li>Retry creates a new <code>runId</code> for the same interaction. The accepted run-to-output mapping identifies which child layer the UX opens.</li>
+<li>If a later graph revision removes or replaces an action, old accepted snapshots retain the old action; the current snapshot may mark it unavailable rather than silently redirecting it.</li>
+</ol>
+<p>The output navigate action created for a successful Complete run follows the same persisted action schema. It is automatically followed once by the desktop after acceptance; later selections are ordinary local navigation.</p>
+<h3>8.4 Display and navigation</h3>
+<ul>
+<li>The response view contains the first layer of the accepted subgraph, including edges among those response nodes.</li>
+<li>Edges are visually undirected.</li>
+<li>The interaction/parent node is not repeated inside its child layer. It appears in a centered breadcrumb above the canvas with icon and title.</li>
+<li>Clicking a breadcrumb segment navigates to that node&#39;s layer locally.</li>
+<li>Nodes are movable icon-title objects with force/gravity behavior.</li>
+<li>Clicking a node opens its authored details and actions in the right inspector.</li>
+<li>Previous and next arrows move across accepted turn snapshots without Complete.</li>
+<li>The renderer shows the immutable accepted snapshot for that turn even if later turns update shared nodes.</li>
+</ul>
+<h1>Part III — Evaluation and product replay</h1>
+<h2>9. Exact basic Complete evaluation</h2>
+<p>The first paid evaluation is one fixed case named <code>basic-graph-conversation-v1</code>. It tests the smallest end-to-end conversation that exercises graph construction and product interactions without requiring a prebuilt workspace graph.</p>
+<h3>9.1 Public sample repository</h3>
+<p>The basic case clones the small MIT-licensed public repository <a href="https://github.com/sindresorhus/p-limit"><code>sindresorhus/p-limit</code></a> at commit <code>df476048d023ff868cd45b35ee47f5fb0ca2b25a</code> with Git tree <code>21d1b1115ab955f499ca0de32b8819b936775dd9</code>. The case primarily grounds against <code>index.js</code>, <code>readme.md</code>, and <code>test.js</code>: together they expose a compact but real concurrency scheduler, documented behavior, and executable examples. The runner verifies both hashes before starting. A changed upstream default branch cannot change an existing case.</p>
+<p>The repository is cached once in the local eval catalog and materialized into a temporary checkout per run. It is not copied into this repository, checked into every worktree, or described as a synthetic fixture workspace.</p>
+<p>The conversation graph starts empty. The runner creates the first user-interaction node exactly as Relayer Desktop would. The source URL, commit, tree digest, graph schema version, case definition, harness manifest, candidate model, operator manifest, and quality-judge manifest are pinned in the run record.</p>
+<h3>9.2 Exact interaction sequence</h3>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Product interaction created by runner</th>
+<th>Real graph target selection</th>
+<th>Required observable result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>initial-message</code></td>
+<td>Message: “Explain how p-limit schedules work. Show how queued work becomes active and distinguish activeCount, pendingCount, and clearQueue.”</td>
+<td>New unconnected interaction root</td>
+<td>Accepted layer with 3–7 coherent nodes, grounded lifecycle detail, undirected connections, and an authored action for tracing a concurrency change</td>
+</tr>
+<tr>
+<td><code>attached-follow-up</code></td>
+<td>Attach the clear-queue node with annotation “Use this exact behavior as the reference point,” then ask “Why does clearQueue not cancel work that is already running?”</td>
+<td>Node from step 1 selected by <code>semanticKey = p-limit.clear-queue</code></td>
+<td>Response uses the attachment and source evidence without duplicating the clear-queue concept</td>
+</tr>
+<tr>
+<td><code>operator-navigation</code></td>
+<td>Give the operator the goal: “Find how changing concurrency wakes pending work, inspect the relevant node, and use the graph&#39;s authored action to trace it.”</td>
+<td>Operator sees only the same layer, node-detail, navigate, and action surfaces available to a product user</td>
+<td>Operator opens the relevant node, invokes its authored action, and produces an accepted child layer grounded in the setter and <code>queueMicrotask</code> path</td>
+</tr>
+<tr>
+<td><code>context-summary</code></td>
+<td>Attach the operator-created result with annotation “Focus on what a caller can observe,” then ask “Summarize the behavior in two practical rules.”</td>
+<td>Node selected from the accepted operator step</td>
+<td>Ordinary message uses the selected result and prior graph memory; no separate feedback interaction or duplicated scheduling concepts</td>
+</tr>
+</tbody></table>
+<p>The scripted steps intentionally require stable <code>semanticKey</code> values so deterministic checks can target nodes actually generated by the harness. The operator step does not receive semantic keys or hidden graph JSON; it must discover and use the visible graph as a person would.</p>
+<h3>9.3 Case schema for messages and real-node interactions</h3>
+<pre><code class="language-ts">type EvalNodeSelector =
+  | { by: &quot;nodeId&quot;; value: string }
+  | { by: &quot;semanticKey&quot;; value: string; fromStep?: string };
+
+type EvalActionSelector = {
+  source: EvalNodeSelector;
+  actionKey: string;
+};
+
+type EvalInteraction =
+  | { stepId: string; type: &quot;message&quot;; text: string }
+  | { stepId: string; type: &quot;message&quot;; text: string; attachments: Array&lt;{
+      node: EvalNodeSelector; annotation?: string;
+    }&gt; }
+  | { stepId: string; type: &quot;invoke-action&quot;; action: EvalActionSelector; text?: string }
+  | { stepId: string; type: &quot;operator-task&quot;; goal: string; maxOperations: number };
+</code></pre>
+<p>At runtime every scripted selector resolves against the accepted graph snapshot from the named prior step. Resolution must return exactly one node/action or the step fails before Complete is called. Resolved IDs and every operator observation/action are saved so the run can be replayed exactly.</p>
+<h3>9.4 Operator agent contract</h3>
+<p>The evaluation judge system has two separate roles. The <strong>operator agent</strong> uses the product; the <strong>quality judge</strong> grades the resulting graph and operator trajectory. The operator is not allowed to read the graph journal, semantic keys, expected node IDs, candidate harness name, or answer key.</p>
+<pre><code class="language-ts">interface EvalProductDriver {
+  readCurrentLayer(): Promise&lt;VisibleLayerSummary&gt;;
+  openNode(visibleNodeId: string): Promise&lt;VisibleNodeDetail&gt;;
+  navigate(actionId: string): Promise&lt;VisibleLayerSummary&gt;;
+  invoke(actionId: string, text?: string): Promise&lt;AcceptedViewResult&gt;;
+  attachContext(visibleNodeId: string, annotation?: string): Promise&lt;void&gt;;
+  sendMessage(text: string): Promise&lt;AcceptedViewResult&gt;;
+}
+
+type OperatorTrajectory = {
+  operatorManifestDigest: string;
+  goal: string;
+  operations: Array&lt;{
+    sequence: number;
+    observationDigest: string;
+    operation: &quot;open-node&quot; | &quot;navigate&quot; | &quot;invoke&quot; | &quot;attach-context&quot; | &quot;send-message&quot;;
+    visibleTarget?: string;
+    resultingInteractionNodeId?: string;
+  }&gt;;
+  completed: boolean;
+  finalEvidenceNodeIds: string[];
+};
+</code></pre>
+<p>The driver is the same interaction state machine used by Relayer Desktop, exposed through an accessibility-oriented test adapter rather than screen coordinates. The operator has a fixed operation budget, cannot mutate an immutable saved run, and acts only while the case is still executing. Its success assertion is task-level: it found the correct concept through visible information, invoked a valid authored action, and reached an accepted child layer. This tests whether the graph is usable, not only whether its JSON looks plausible.</p>
+<h3>9.5 Deterministic and judged assertions</h3>
+<p>Every step first checks:</p>
+<ul>
+<li>valid Complete result and accepted boolean/status invariant;</li>
+<li>one submitted run output for <code>(interactionNodeId, runId)</code>;</li>
+<li>output layer, node, edge, action, authority, and snapshot integrity;</li>
+<li>node-count bounds and unique semantic/action keys required by the case;</li>
+<li>file-grounding references resolve inside the pinned repository commit;</li>
+<li>the next interaction targets the exact persisted node/action selected by the case;</li>
+<li>the operator used only allowed product operations, stayed within budget, and its recorded observations match the displayed snapshots;</li>
+<li>stopped/failed draft work is absent from product reads.</li>
+</ul>
+<p>The pinned quality judge then scores instruction fulfillment, factual grounding, attachment use, continuity, reuse versus duplication, topology, node detail, action usefulness, operator task completion, and final practical summary. Each score includes evidence node IDs. Unsupported claims, broken target selection, invalid action output, operator use of hidden state, or loss of conversation memory are critical failures regardless of average score.</p>
+<p>The configuration passes the basic unit only when every deterministic assertion passes, no critical judge failure occurs, every scored dimension meets its threshold, and the saved result successfully opens in the desktop replay view.</p>
+<h2>10. Evaluation catalog, runner, results, and promotion</h2>
+<h3>10.1 Evaluation boundary and data model</h3>
+<p>The Relayer evaluation target is <code>complete(inputGraph, options)</code> under a pinned <code>HarnessConfigurationManifest</code>. Relayer Desktop owns local run orchestration, storage, report UI, and replay. Relayer Harness supplies cases, Complete, deterministic checks, operator goals, and judge rubrics. Product and evaluation execution use the same graph engine, Complete implementation, and configuration digest:</p>
+<pre><code class="language-mermaid">flowchart LR
+    PF[&quot;Relayer Desktop persists interaction&quot;] --&gt; C[&quot;complete(inputGraph, options)&quot;]
+    EF[&quot;Relayer eval runner loads case&quot;] --&gt; C
+    C --&gt; GE[&quot;Graph engine commits run output&quot;]
+    GE --&gt; PV[&quot;Product resolves and renders layer&quot;]
+    GE --&gt; EV[&quot;Eval validates, judges, and saves run&quot;]
+    EV --&gt; UX[&quot;See in App&quot;]
+</code></pre>
+<p>Established evaluation products store cases as versioned datasets and runs as immutable experiments rather than copying source repositories into every algorithm branch. For example, <a href="https://www.braintrust.dev/docs/guides/datasets">Braintrust datasets</a> are versioned and experiments are immutable run snapshots. This product follows that pattern locally: lightweight Relayer case definitions are versioned in the Relayer Harness package; cloned source and result artifacts live once in Relayer Desktop&#39;s content-addressed catalog. <a href="https://git-scm.com/docs/git-worktree.html">Git linked worktrees</a> share repository state but still have distinct materialized working trees, so source repositories are not checked into every worktree.</p>
+<h3>10.2 Shared source and result catalog without worktree duplication</h3>
+<pre><code class="language-text">relayer-harness/evals/
+  cases/&lt;case-id&gt;.json                  # small versioned interaction definition
+  suites/&lt;suite-id&gt;.json                # ordered case IDs and gates
+  configurations/&lt;configuration-id&gt;.json
+  operators/&lt;operator-id&gt;.json
+  judges/&lt;judge-id&gt;.json
+
+~/.relayer/evals/
+  repositories/&lt;source-id&gt;.git          # one cached public Git repository
+  objects/sha256/&lt;digest&gt;               # immutable non-Git artifacts
+  runs/&lt;run-id&gt;/bundle.json             # immutable experiment record
+  runs/&lt;run-id&gt;/graph.jsonl             # accepted graph journal
+  runs/&lt;run-id&gt;/screenshots/             # optional rendered evidence
+  materialized/&lt;run-id&gt;/                 # temporary copy-on-write checkout
+</code></pre>
+<p>Case definitions reference a public repository URL, pinned commit, and expected tree digest; they do not contain a source directory. All local Relayer worktrees share the same user-level repository and object catalog. The runner creates a detached temporary checkout from the cached commit, then removes it after the run. A mutating case always gets a private checkout. Result bundles live outside both the source checkout and either code repository.</p>
+<p>The catalog verifies every object digest before use and garbage-collects only unreferenced materializations and runs according to an explicit retention policy. Checked-in case/config/judge JSON stays small enough to review normally in pull requests.</p>
+<h3>10.3 Runner execution</h3>
+<p>Local commands are standardized target interfaces:</p>
+<pre><code class="language-sh">npm run eval -- --suite basic --configuration prime-agent-v1
+npm run eval -- --suite capability:memory --configuration prime-agent-v1
+npm run eval:compare -- --baseline prime-agent-v1 --candidate prime-agent-v2
+npm run eval:web
+</code></pre>
+<p><code>eval:web</code> opens the Relayer evaluation runner shown in Mock 10. The left column lists versioned cases, capability suites, and recent runs. The selected case shows the source repository/commit and three explicit inputs: candidate harness configuration, candidate model, and judge system. <code>Run evaluation</code> starts one local run. The execution panel reports clone/verification, each scripted interaction, operator activity, deterministic checks, quality judging, timing, cost, and failures. A completed run offers <strong>Open report</strong> and <strong>See in App</strong>. The web UI and CLI call the same runner service and produce the same bundle; the UI is not a separate eval implementation.</p>
+<p>For each case the runner:</p>
+<ol>
+<li>resolves and verifies the source repository commit/tree, case, operator, judge, graph schema, and harness configuration digests;</li>
+<li>creates an isolated materialization and empty graph store;</li>
+<li>resolves scripted node/action selectors against the preceding accepted snapshot and gives operator steps only the product driver;</li>
+<li>creates the exact product interaction node and relationships;</li>
+<li>invokes the same Complete adapter used by the desktop;</li>
+<li>runs deterministic checks, the bounded operator task, and then the pinned quality judge in the order declared by the case;</li>
+<li>saves graph journal, per-step selections, operator trajectory, results, scores, traces, cost, and screenshots into one immutable run directory;</li>
+<li>prints the run ID, summary, local report URL, and <code>See in App</code> deep link;</li>
+<li>removes the temporary workspace unless retention was explicitly requested.</li>
+</ol>
+<p>Live commands require an explicit confirmation in the web runner or command flag plus an available credential reference and declared cost cap. They never run inside <code>npm run check</code> or the default test suite. CI may run them only in a separately authorized, budget-limited job. Closing the web page does not orphan a run: the local runner service retains status, cancellation, and the immutable partial failure record.</p>
+<h3>10.4 Judge design</h3>
+<p>Deterministic checks run first and fail the case before model-based evaluation if the contract, graph integrity, run-output mapping, grounding references, or display layer is invalid. Operator steps then execute through <code>EvalProductDriver</code>; the operator receives the task goal and visible product observations but not hidden graph fields or the expected answer. The quality judge receives the case goal, per-step interaction, pinned source ground truth, attachments, returned result, accepted graph snapshot, and operator trajectory. Neither model role receives the candidate harness name.</p>
+<p>The pinned quality-judge rubric emits structured scores for instruction fulfillment, factual grounding, use of conversation memory, node reuse versus duplication, semantic grouping and connections, detail/action usefulness, operator task success, and overall response usefulness. Each dimension includes evidence node IDs and a short rationale. Critical failures—unsupported claims, missing requested output, invalid action target, hidden-state use by the operator, or broken turn continuity—are separate booleans rather than averages that can be hidden by other scores.</p>
+<p>For configuration comparison, the judge also performs a blind pairwise preference on the two replay bundles. Promotion thresholds, judge model/version, prompt version, rubric version, repeat count, and tie policy are stored in the judge manifest. A sample of passing, failing, and close-call bundles is rendered in the desktop UX for human review; human ratings calibrate the judge but do not silently rewrite recorded model scores.</p>
+<h3>10.5 Evaluation ladder</h3>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Purpose</th>
+<th>Execution</th>
+<th>Gate</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Deterministic product tests</td>
+<td>Prove non-LLM choices, events, persistence, and contract validation</td>
+<td>Fake Complete implementation; no paid inference</td>
+<td>Required for every change</td>
+</tr>
+<tr>
+<td>Basic Complete unit</td>
+<td>Run the exact four-step case in Section 9</td>
+<td><code>basic-graph-conversation-v1</code> against one pinned configuration</td>
+<td>Required before larger evals</td>
+</tr>
+<tr>
+<td>Capability evaluations</td>
+<td>Test each required harness behavior independently</td>
+<td>Small suites for interactions, reuse, actions, memory, grounding, topology, stop/retry</td>
+<td>Required for affected capability</td>
+</tr>
+<tr>
+<td>Hard-task benchmark</td>
+<td>Compare output quality on longer, more complex work</td>
+<td>Multi-case runs across pinned configurations</td>
+<td>Required for promoted candidates</td>
+</tr>
+<tr>
+<td>UX replay and human grading</td>
+<td>Determine whether outputs are understandable and useful in the real graph interface</td>
+<td>Load saved bundles into the desktop app</td>
+<td>Required before production promotion</td>
+</tr>
+</tbody></table>
+<h3>10.6 Capability coverage matrix</h3>
+<p>Every harness-facing product requirement must have an evaluation case:</p>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Minimal evaluation assertion</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Message response</td>
+<td>Accepted result answers the interaction and opens a coherent first layer</td>
+</tr>
+<tr>
+<td>Existing-node reuse</td>
+<td>Relevant prior concept is referenced or updated instead of duplicated</td>
+</tr>
+<tr>
+<td>Attached context</td>
+<td>Attached node and user annotation materially affect the answer</td>
+</tr>
+<tr>
+<td>Node action</td>
+<td>Invoking action yields the promised child response and preserves target linkage</td>
+</tr>
+<tr>
+<td>Correction through context</td>
+<td>A node attached with a corrective annotation materially affects an ordinary message without unrelated graph churn</td>
+</tr>
+<tr>
+<td>Multiple-turn memory</td>
+<td>Later response correctly uses prior graph memory and turn lineage</td>
+</tr>
+<tr>
+<td>Grounding</td>
+<td>Claims that depend on files are traceable to the pinned source commit</td>
+</tr>
+<tr>
+<td>Transitive grounding</td>
+<td>Semantic node can inherit support through explicit grounded relationships</td>
+</tr>
+<tr>
+<td>Topology</td>
+<td>Node count, semantic grouping, and connections are understandable in the renderer</td>
+</tr>
+<tr>
+<td>Authored details/actions</td>
+<td>Visible nodes contain useful detail; actions are valid and specific</td>
+</tr>
+<tr>
+<td>Stop and retry</td>
+<td>Stop preserves accepted memory; retry reuses the same interaction identity</td>
+</tr>
+<tr>
+<td>Recursive work</td>
+<td>Internal subagent work contributes to one accepted Complete result</td>
+</tr>
+<tr>
+<td>Failure recovery</td>
+<td>Tool/validation feedback leads to repair or an explicit retryable failure</td>
+</tr>
+</tbody></table>
+<h3>10.7 Result bundle</h3>
+<p>Every evaluation run saves:</p>
+<pre><code class="language-ts">type CompleteEvaluationBundle = {
+  bundleSchemaVersion: string;
+  runId: string;
+  caseId: string;
+  caseDigest: string;
+  sourceDigest: string;
+  source: { repositoryUrl: string; commit: string; treeDigest: string };
+  graphSchemaVersion: string;
+  stepResults: Array&lt;{
+    stepId: string;
+    interactionNodeId: string;
+    resolvedSelections: Array&lt;{ selector: unknown; nodeId: string; actionId?: string }&gt;;
+    result: CompleteResult;
+    acceptedGraphSnapshot?: GraphSnapshot;
+    deterministicChecks: CheckResult[];
+    judgeResults: JudgeResult[];
+  }&gt;;
+  inputGraph: CompleteInputGraph;
+  configuration: HarnessConfigurationManifest;
+  configurationDigest: string;
+  judgeConfigurationId: string;
+  operatorTrajectory?: OperatorTrajectory;
+  diagnosticTraceRef?: string;
+  timing: { startedAt: string; completedAt: string; durationMs: number };
+  cost?: { currency: &quot;USD&quot;; amount: number };
+};
+</code></pre>
+<p>The bundle is immutable evidence. Continuing to chat must never modify it; interactive use clones its accepted graph and pinned configuration into a new product thread.</p>
+<h3>10.8 Promotion to production</h3>
+<p>A candidate is promoted by publishing the exact immutable configuration manifest exercised by the passing eval bundle. Its content digest becomes the production reference resolved by <code>harnessConfigurationRef</code>; promotion does not copy prompts by hand, rebuild an approximate product configuration, or introduce product-only defaults.</p>
+<p>Release checks verify:</p>
+<ul>
+<li>the production app resolves the same configuration values recorded in the passing eval bundle;</li>
+<li>the Complete request and result contract versions are supported;</li>
+<li>affected capability evals pass relative to the current production baseline;</li>
+<li>no deterministic regression or critical judge regression is introduced;</li>
+<li>at least one saved result is reviewed in the real product UX;</li>
+<li>rollback can restore the previous configuration without migrating graph data backward.</li>
+</ul>
+<h2>11. Relayer evaluation replay: See in App</h2>
+<h3>11.1 Eval report action</h3>
+<p>Every completed local eval report shows <strong>See in App</strong> when its bundle passes Relayer result-bundle and graph-integrity validation. Relayer Desktop owns this behavior for Relayer evaluation runs. The deep-link shape is:</p>
+<pre><code class="language-text">relayer://eval-runs/&lt;runId&gt;
+</code></pre>
+<p>The CLI prints the same deep link. Relayer Desktop also exposes a developer-only <strong>Open evaluation run…</strong> action for selecting a local bundle when custom-protocol activation is unavailable.</p>
+<h3>11.2 Special evaluation thread</h3>
+<p>Opening the link asks Relayer Desktop to open a read-only entry under an <strong>Evaluations</strong> sidebar group using the bundled graph renderer. It is not inserted into ordinary Chats or Projects and does not alter the immutable run bundle. A missing or incompatible Relayer Harness, graph schema, or renderer contract produces an exact install/update requirement instead of a misleading partial rendering.</p>
+<p>The evaluation thread uses the normal product UI:</p>
+<ul>
+<li>the graph canvas renders the exact accepted layer through <code>ProductGraphReadApi</code>;</li>
+<li>the breadcrumb, node inspector, details, authored actions, attached context, and turn arrows behave exactly as they do in a product thread;</li>
+<li>an evaluation banner shows case ID, pass/fail, configuration digest, model, judge version, run time, and cost;</li>
+<li>previous/next moves across the case&#39;s interaction steps;</li>
+<li>failed deterministic or judge checks can be opened alongside the node IDs used as evidence;</li>
+<li>diagnostic traces remain behind the developer setting.</li>
+</ul>
+<p>Replay mode does not invoke Complete. Invoke actions are visible as evidence but disabled with an explanation that the run is immutable.</p>
+<h3>11.3 Continue with the tested harness</h3>
+<p>The evaluation thread has one <strong>Continue with this configuration</strong> action. It:</p>
+<ol>
+<li>clones the selected accepted graph snapshot into a new ordinary thread;</li>
+<li>creates a writable checkout from the bundle&#39;s pinned source repository commit;</li>
+<li>pins the exact <code>HarnessConfigurationManifest.contentDigest</code> used by the eval;</li>
+<li>records the source evaluation <code>runId</code> on the new thread;</li>
+<li>enables the normal composer and authored invoke actions;</li>
+<li>sends all new interactions through the production Complete adapter.</li>
+</ol>
+<p>The cloned thread can diverge without changing the evaluation evidence. If the manifest is unavailable, incompatible, or lacks a current credential, Continue is disabled and states the exact missing requirement.</p>
+<h3>11.4 Deep-link security and tests</h3>
+<p>The desktop accepts only a run ID, never an arbitrary command or filesystem path. The local app server resolves the ID inside the eval catalog, validates bundle and object digests, and rejects path traversal, unsupported schema, missing objects, or mutated artifacts.</p>
+<p>Product tests cover deep-link activation with the app closed or running, duplicate activation, missing run, corrupt bundle, incompatible graph schema, read-only replay, step navigation, evidence display, configuration pinning, copy-on-write continuation, and proof that continuation cannot mutate the source bundle.</p>
+<h1>Part IV — Desktop delivery and acceptance</h1>
+<h2>12. Desktop build, local packaging, signing, and distribution</h2>
+<h3>12.1 V1 desktop shell decision and current gap</h3>
+<p>V1 uses an Electron shell in the Relayer Desktop package of this repository and direct macOS distribution outside the Mac App Store. Relayer Desktop packages the shell, graph renderer, local app server, eval runner, result catalog, and updater. Each desktop release locks and bundles the compatible Relayer Harness package from the same verified source revision, containing the graph engine, Complete implementation, Prime Agent runtime dependencies, Python/IPython capability, graph tools, and graph skill.</p>
+<p>Electron&#39;s macOS distribution guidance requires code signing and Apple notarization for normal distribution, and its automatic updater requires a signed macOS app. V1 treats those as release gates, not optional polish.</p>
+<p>The current repository has an Electron shell, an unsigned Apple Silicon development package, release-mode builder configuration, and an updater state service. Those are implementation starting points, not distribution proof. Developer-ID signing, notarization, stapling, hosted Stable/Preview feeds, a real previous-version update, clean-user installation, failure safety, and release automation remain unverified. Existing graph-engine, Complete, Prime Agent runtime, graph-tool, and eval code remain behind the Relayer Harness package boundary; Slice 2 packages the desktop without claiming those experimental paths work in the product.</p>
+<h3>12.2 Required developer and release modes</h3>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Command contract</th>
+<th>Artifact and use</th>
+<th>Required checks</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Renderer/server development</td>
+<td><code>npm run desktop:dev</code></td>
+<td>Electron loads the local development renderer and starts the app server from source</td>
+<td>Fast unit/integration checks and isolated data directory</td>
+</tr>
+<tr>
+<td>Local packaged test</td>
+<td><code>npm run desktop:pack</code></td>
+<td>Unsigned arm64 <code>Relayer Dev.app</code> for the building Mac only</td>
+<td>Packaged startup, file inventory, bundle metadata, icon, and isolated-profile screenshot</td>
+</tr>
+<tr>
+<td>Signed Preview</td>
+<td><code>npm run desktop:dist:preview</code></td>
+<td>Developer-ID-signed, notarized and stapled arm64 DMG/ZIP on the Preview feed</td>
+<td>Clean-user install, Gatekeeper, visible updater states, and Preview N-1 to N smoke</td>
+</tr>
+<tr>
+<td>Signed Stable</td>
+<td><code>npm run desktop:dist</code></td>
+<td>Signed/notarized arm64 DMG/ZIP promoted only after Preview evidence</td>
+<td>Checksums, provenance, clean-user install, and previous-Stable-version update smoke</td>
+</tr>
+</tbody></table>
+<p>Unsigned artifacts are never uploaded or presented as distributable builds. Release mode fails closed when signing identity, notarization credentials, update signing, or required bundled-runtime inputs are missing.</p>
+<h3>12.3 Packaged application contents</h3>
+<p>The build produces an inventory manifest and verifies that the <code>.app</code> contains:</p>
+<ul>
+<li>Electron main/preload code and the built renderer;</li>
+<li>compiled local app server, graph renderer, and Relayer eval runner;</li>
+<li>a lockfile and inventory for the exact bundled Relayer Harness release;</li>
+<li>the Relayer graph engine, Prime Agent package, harness configuration resolver, Python/IPython environment, and <code>relayer_graph</code> skill required by that distribution;</li>
+<li>migration files, default configuration manifests, licenses, and icons;</li>
+<li>no development credentials, cached eval source repositories, user graphs, source maps with secrets, or absolute developer paths.</li>
+</ul>
+<p>Startup uses an app-owned data directory and a per-launch loopback port/token. The Electron main process owns app-server startup, health, cancellation, shutdown, deep-link routing, and update installation barriers.</p>
+<h3>12.4 macOS release pipeline</h3>
+<pre><code class="language-mermaid">flowchart LR
+    S[&quot;Clean tagged source&quot;] --&gt; T[&quot;Install locked dependencies&quot;]
+    T --&gt; B[&quot;Build renderer, server, engine, runtime bundle&quot;]
+    B --&gt; U[&quot;Unit, integration, and packaged E2E&quot;]
+    U --&gt; P[&quot;Package arm64 app, DMG, and update ZIP&quot;]
+    P --&gt; C[&quot;Sign nested code and app with Developer ID&quot;]
+    C --&gt; N[&quot;Apple notarization and stapling&quot;]
+    N --&gt; V[&quot;Verify signatures, Gatekeeper, contents, hashes&quot;]
+    V --&gt; Q[&quot;Candidate clean-machine smoke&quot;]
+    Q --&gt; R[&quot;Publish immutable artifacts and checksums&quot;]
+    R --&gt; M[&quot;Publish stable update manifest last&quot;]
+</code></pre>
+<p>The initial V1 architecture is macOS arm64. Universal/x64 support is a separate release requirement and cannot be implied by a successful arm64 build. The exact supported macOS floor is recorded in the release manifest and tested on that floor plus the current macOS version.</p>
+<h3>12.5 Distribution and update acceptance</h3>
+<p>The distributable outputs are a notarized DMG for first install and a signed ZIP plus channel metadata for Electron updates. Artifacts are content-addressed and immutable. The mutable channel manifest is published only after the referenced artifact, signature, checksum, notarization ticket, and smoke evidence are available.</p>
+<p>Before promotion, a clean machine must be able to install, launch, connect an agent, run or load the basic eval, use See in App, create a normal thread pinned to the passing configuration, quit/reopen with persistence, and update from the previous production version without losing graphs or settings.</p>
+<h2>13. Verification ownership</h2>
+<table>
+<thead>
+<tr>
+<th>Verification surface</th>
+<th>Owning package</th>
+<th>Required proof</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Projects, threads, providers, worktrees, persistence, updater, and graph renderer</td>
+<td>Relayer Desktop</td>
+<td>Deterministic unit/integration tests plus packaged desktop smoke</td>
+</tr>
+<tr>
+<td>Relayer eval runner, report, immutable catalog, deep links, See in App</td>
+<td>Relayer Desktop</td>
+<td>Fake/replay Complete suite plus browser/desktop E2E</td>
+</tr>
+<tr>
+<td>Graph schemas, tools, snapshots, migrations, view projection</td>
+<td>Relayer Harness</td>
+<td>Deterministic graph-engine and view-contract tests</td>
+</tr>
+<tr>
+<td><code>complete(inputGraph)</code>, Prime Agent, graph search/reuse/topology</td>
+<td>Relayer Harness</td>
+<td>Relayer basic/capability/hard-task live evals</td>
+</tr>
+<tr>
+<td>Bundled Relayer Desktop distribution</td>
+<td>Desktop release manifest plus Harness package manifest</td>
+<td>Cross-package compatibility test, signed package smoke, and exact version inventory</td>
+</tr>
+</tbody></table>
+<h3>13.1 Product tests without paid inference</h3>
+<p>The default suite uses a fake or replay Complete implementation. It covers:</p>
+<ul>
+<li>every visible choice and event in Agent setup, New thread, projects, Git/worktrees, thread management, settings, updates, graph navigation, context attachment, stop, retry, and recovery;</li>
+<li>desktop interaction/session assembly plus Relayer input-graph and workspace-binding assembly for messages, attached context, and node actions;</li>
+<li>graph-engine read/write authorization, schema/version compatibility, run-output lookup, and migration rules;</li>
+<li>staged graph-tool integrity, atomic acceptance, <code>(interactionNodeId, runId)</code> output resolution, snapshot immutability, and exact target-layer rendering;</li>
+<li>secret redaction and local persistence boundaries;</li>
+<li>accessibility and visual-structure assertions for all canonical mocks.</li>
+</ul>
+<h3>13.2 Live evaluations</h3>
+<p>Live Prime Agent/model runs are opt-in, metered, and never part of the default <code>npm run check</code>. They run through the evaluation runner, produce bundles, and use pinned configurations. LLM judges are versioned and calibrated against human decisions; their scores are not treated as ground truth.</p>
+<h3>13.3 Human product evaluation</h3>
+<p>Human graders load saved results into the actual desktop graph UX and judge whether they can understand the response, find important detail, follow connections, use actions, and continue the task. This is separate from judging raw JSON or traces. The primary comparison is Complete configuration A versus B on the same pinned source repository and interaction case.</p>
+<h2>14. V1 boundary and open decisions</h2>
+<h3>14.1 Included in V1</h3>
+<ul>
+<li>local profile with Codex or API-key agent login;</li>
+<li>one OSS monorepo containing concrete Relayer Desktop and Relayer Harness packages;</li>
+<li>Prime Agent behind the Relayer Complete interface;</li>
+<li>no-folder and project-backed threads;</li>
+<li>non-Git folders, local Git checkout, new worktree, and fork-to-worktree;</li>
+<li>graph messages, corrective or explanatory annotations through attached context, authored node actions, recursive subthreads, turn navigation, stop, retry, and local persistence;</li>
+<li>graph-engine product and harness APIs with explicit compatibility versions;</li>
+<li>exact basic Complete evaluation against a pinned public sample repository, shared source/result catalog, operator navigation, capability evals, replay bundles, quality judging, and human UX review;</li>
+<li>Relayer eval runner/report plus See in App evaluation threads and interactive continuation pinned to the tested harness configuration;</li>
+<li>Electron local packages, Developer-ID-signed/notarized macOS distribution, and signed desktop updates.</li>
+</ul>
+<h3>14.2 Excluded or deferred</h3>
+<ul>
+<li>Relayer accounts, cloud sync, remote hosting, teams, and enterprise workspace administration;</li>
+<li>mandatory up-front workspace graph construction;</li>
+<li>continuous background stale-node propagation;</li>
+<li>self-assessment as a separate product algorithm before Complete is stable;</li>
+<li>user-selectable non-Prime production harnesses and a general-purpose pluggable harness desktop;</li>
+<li>third-party conversation views, generic harness protocols, and public multi-harness conformance suites;</li>
+<li>a formal side-by-side evaluation application;</li>
+<li>Mac App Store distribution and non-macOS desktop builds;</li>
+<li>canonical user-facing agent-activity or diagnostic-trace views.</li>
+</ul>
+<h3>14.3 Decisions still open</h3>
+<ul>
+<li>final field-level GraphNode, GraphEdge, GraphLayer, NodeAction, and migration schemas consistent with Section 6;</li>
+<li>engine indexing and compaction implementation behind the stable read/write contract;</li>
+<li>graph search/retrieval policy and when embeddings are worth adding;</li>
+<li>graph topology limits and semantic-grouping rules used by GraphComplete;</li>
+<li>thresholds and calibration examples for the first LLM-judge rubric;</li>
+<li>production configuration-manifest signing and hosting;</li>
+<li>exact supported macOS floor and release artifact hosting;</li>
+<li>default maximum number of Relayer-managed worktrees, whether the limit is global or per project, and the limit-reached cleanup flow;</li>
+<li>exact thread archive, delete-entry, graph-retention, and remove-local-data behavior;</li>
+<li>exact product persistence database, export bundle, restore, and migration format.</li>
+</ul>
+<h2>15. Product acceptance statement</h2>
+<p>V1 is acceptable when the Relayer Desktop and Relayer Harness packages pass their independent and cross-package contracts; a new local user can install a signed/notarized Relayer Desktop build, configure Prime Agent with Codex or a securely stored provider API key, start a no-folder or project-backed thread, receive an accepted response through the stable graph-engine contract, inspect and navigate the exact movable output layer, use attachments and their annotations, authored actions, recursive subthreads, history, stop, retry, persistence, and updates; and a developer can run <code>basic-graph-conversation-v1</code> from the web runner or CLI, watch an operator use the same graph interaction surfaces, inspect the immutable result through See in App, continue in a normal thread with the exact passing harness configuration, and promote that same configuration and verified desktop artifact without hidden behavioral drift.</p>
+</main>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.16.1/dist/mermaid.min.js"></script>
+  <script>
+    (async () => {
+      const main = document.querySelector('main');
+      if (!main) return;
+
+      const slugify = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const headings = Array.from(main.querySelectorAll('h1, h2, h3, h4'));
+      const usedIds = new Set();
+      headings.forEach((heading) => {
+        const base = slugify(heading.textContent || 'section') || 'section';
+        let id = base;
+        let suffix = 2;
+        while (usedIds.has(id)) {
+          id = base + '-' + suffix;
+          suffix += 1;
+        }
+        usedIds.add(id);
+        heading.id = id;
+      });
+
+      const originalChildren = Array.from(main.children);
+      main.textContent = '';
+      main.className = 'prd-rail';
+      main.setAttribute('aria-label', 'Product requirements sections');
+
+      const pages = [];
+      const createPage = (label) => {
+        const page = document.createElement('section');
+        page.className = 'prd-page';
+        page.dataset.label = label;
+        const inner = document.createElement('div');
+        inner.className = 'prd-page-inner';
+        page.append(inner);
+        main.append(page);
+        pages.push(page);
+        return inner;
+      };
+
+      let currentPage = createPage('Overview');
+      originalChildren.forEach((element) => {
+        if (element.tagName === 'H2') currentPage = createPage(element.textContent || 'Section');
+        currentPage.append(element);
+      });
+
+      const mermaidBlocks = Array.from(main.querySelectorAll('pre > code.language-mermaid'));
+      if (window.mermaid && mermaidBlocks.length) {
+        const diagrams = mermaidBlocks.map((code) => {
+          const container = document.createElement('div');
+          container.className = 'mermaid';
+          container.textContent = code.textContent;
+          code.parentElement.replaceWith(container);
+          return container;
+        });
+        window.mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: 'strict',
+          theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default',
+          flowchart: { useMaxWidth: true, htmlLabels: true },
+        });
+        try {
+          await window.mermaid.run({ nodes: diagrams });
+        } catch (error) {
+          console.error('Unable to render Mermaid diagrams', error);
+        }
+      }
+
+      const bar = document.createElement('header');
+      bar.className = 'document-bar';
+      bar.innerHTML = '<button type="button" class="toc-toggle" data-toc-toggle aria-label="Toggle table of contents" aria-expanded="false">☰</button><div class="document-brand"><strong>Relayer Desktop + Harness PRD</strong><span>Horizontal product review</span></div><span class="document-current"></span><div class="document-controls"><button type="button" data-annotate-slide aria-label="Comment on this section">＋</button><button type="button" data-page-previous aria-label="Previous section">←</button><span class="document-position"></span><button type="button" data-page-next aria-label="Next section">→</button></div>';
+      document.body.insertBefore(bar, main);
+
+      const sidebar = document.createElement('aside');
+      sidebar.className = 'toc-sidebar';
+      sidebar.setAttribute('aria-label', 'Document navigation and annotations');
+      sidebar.innerHTML = '<section class="toc-panel"><div class="toc-panel-header"><span>Contents</span></div><nav class="document-nav" aria-label="PRD sections"></nav></section><section class="toc-panel"><div class="toc-panel-header"><span>Annotations</span><span class="annotation-save-state">Loading…</span></div><div class="annotation-list"></div></section>';
+      document.body.insertBefore(sidebar, main);
+
+      const annotationTrigger = document.createElement('button');
+      annotationTrigger.type = 'button';
+      annotationTrigger.className = 'annotation-trigger';
+      annotationTrigger.textContent = '＋ Comment';
+      document.body.append(annotationTrigger);
+
+      const annotationDialog = document.createElement('dialog');
+      annotationDialog.className = 'annotation-dialog';
+      annotationDialog.innerHTML = '<form class="annotation-form"><h3>Add annotation</h3><p class="annotation-preview"></p><textarea name="comment" aria-label="Annotation comment" placeholder="What should change or be clarified?" required></textarea><div class="annotation-actions"><button type="button" data-annotation-cancel>Cancel</button><button type="submit">Save comment</button></div></form>';
+      document.body.append(annotationDialog);
+
+      const nav = sidebar.querySelector('.document-nav');
+      const currentLabel = bar.querySelector('.document-current');
+      const position = bar.querySelector('.document-position');
+      const previous = bar.querySelector('[data-page-previous]');
+      const next = bar.querySelector('[data-page-next]');
+      const tocToggle = bar.querySelector('[data-toc-toggle]');
+      const annotateSlide = bar.querySelector('[data-annotate-slide]');
+      const annotationList = sidebar.querySelector('.annotation-list');
+      const annotationSaveState = sidebar.querySelector('.annotation-save-state');
+      const annotationForm = annotationDialog.querySelector('.annotation-form');
+      const annotationPreview = annotationDialog.querySelector('.annotation-preview');
+      const annotationComment = annotationDialog.querySelector('textarea[name="comment"]');
+      const navButtons = pages.map((page, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = page.dataset.label;
+        button.addEventListener('click', () => goToPage(index));
+        nav.append(button);
+        return button;
+      });
+      let activePage = 0;
+
+      const keepNavButtonVisible = (button) => {
+        if (!button) return;
+        const top = button.offsetTop;
+        const bottom = top + button.offsetHeight;
+        if (top < nav.scrollTop) nav.scrollTo({ top: Math.max(0, top - 6), behavior: 'auto' });
+        else if (bottom > nav.scrollTop + nav.clientHeight) nav.scrollTo({ top: bottom - nav.clientHeight + 6, behavior: 'auto' });
+      };
+
+      const scrollWithinPage = (target, behavior = 'smooth') => {
+        const inner = target?.closest('.prd-page-inner');
+        if (!inner) return;
+        const innerRect = inner.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        inner.scrollTo({
+          top: Math.max(0, inner.scrollTop + targetRect.top - innerRect.top - 12),
+          behavior,
+        });
+      };
+
+      const updatePageChrome = (index) => {
+        activePage = Math.max(0, Math.min(pages.length - 1, index));
+        navButtons.forEach((button, buttonIndex) => {
+          if (buttonIndex === activePage) button.setAttribute('aria-current', 'page');
+          else button.removeAttribute('aria-current');
+        });
+        position.textContent = String(activePage + 1) + ' / ' + String(pages.length);
+        currentLabel.textContent = pages[activePage]?.dataset.label || '';
+        previous.disabled = activePage === 0;
+        next.disabled = activePage === pages.length - 1;
+        keepNavButtonVisible(navButtons[activePage]);
+      };
+
+      function goToPage(index, behavior = 'auto') {
+        const target = Math.max(0, Math.min(pages.length - 1, index));
+        main.scrollTo({ left: target * main.clientWidth, behavior });
+        updatePageChrome(target);
+      }
+
+      previous.addEventListener('click', () => goToPage(activePage - 1, 'smooth'));
+      next.addEventListener('click', () => goToPage(activePage + 1, 'smooth'));
+      const setTocOpen = (open) => {
+        document.body.classList.toggle('toc-open', open);
+        tocToggle.setAttribute('aria-expanded', String(open));
+        setTimeout(() => goToPage(activePage, 'auto'), 190);
+      };
+      tocToggle.addEventListener('click', () => setTocOpen(!document.body.classList.contains('toc-open')));
+      if (window.innerWidth >= 1100) setTocOpen(true);
+      let scrollFrame = 0;
+      main.addEventListener('scroll', () => {
+        if (scrollFrame) return;
+        scrollFrame = requestAnimationFrame(() => {
+          scrollFrame = 0;
+          updatePageChrome(Math.round(main.scrollLeft / Math.max(1, main.clientWidth)));
+        });
+      });
+      window.addEventListener('resize', () => goToPage(activePage, 'auto'));
+
+      const annotationStorageKey = 'relayer-graphcomplete:prd-comments:v1';
+      let annotationDocument = { schemaVersion: 1, document: 'docs/prd/index.html', updatedAt: null, annotations: [] };
+      let annotationBackend = 'file';
+      let pendingAnnotation = null;
+
+      const pathFromRoot = (node, root) => {
+        const path = [];
+        let cursor = node;
+        while (cursor && cursor !== root) {
+          const parent = cursor.parentNode;
+          if (!parent) return null;
+          path.unshift(Array.prototype.indexOf.call(parent.childNodes, cursor));
+          cursor = parent;
+        }
+        return cursor === root ? path : null;
+      };
+
+      const nodeFromPath = (root, path) => {
+        let cursor = root;
+        for (const index of path || []) {
+          cursor = cursor?.childNodes?.[index];
+          if (!cursor) return null;
+        }
+        return cursor;
+      };
+
+      const rangeFromQuote = (root, quote) => {
+        if (!quote) return null;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        const textNodes = [];
+        let combined = '';
+        let node;
+        while ((node = walker.nextNode())) {
+          textNodes.push({ node, start: combined.length, end: combined.length + node.data.length });
+          combined += node.data;
+        }
+        const start = combined.indexOf(quote);
+        if (start < 0) return null;
+        const end = start + quote.length;
+        const startNode = textNodes.find((entry) => start >= entry.start && start <= entry.end);
+        const endNode = textNodes.find((entry) => end >= entry.start && end <= entry.end);
+        if (!startNode || !endNode) return null;
+        const range = document.createRange();
+        range.setStart(startNode.node, start - startNode.start);
+        range.setEnd(endNode.node, end - endNode.start);
+        return range;
+      };
+
+      const rangeForAnnotation = (annotation) => {
+        if (annotation.target?.kind !== 'text') return null;
+        const page = pages[annotation.section?.index];
+        const root = page?.querySelector('.prd-page-inner');
+        if (!root) return null;
+        const startNode = nodeFromPath(root, annotation.target.startPath);
+        const endNode = nodeFromPath(root, annotation.target.endPath);
+        if (startNode && endNode) {
+          try {
+            const range = document.createRange();
+            range.setStart(startNode, annotation.target.startOffset);
+            range.setEnd(endNode, annotation.target.endOffset);
+            if (range.toString() === annotation.target.quote) return range;
+          } catch {}
+        }
+        return rangeFromQuote(root, annotation.target.quote);
+      };
+
+      const elementForAnnotation = (annotation) => {
+        const page = pages[annotation.section?.index];
+        if (!page || !['image', 'embed'].includes(annotation.target?.kind)) return null;
+        const selector = annotation.target.kind === 'image' ? 'img' : 'iframe';
+        return Array.from(page.querySelectorAll(selector)).find((element) => element.getAttribute('src') === annotation.target.src) || null;
+      };
+
+      const annotationLabel = (annotation) => {
+        if (annotation.target?.kind === 'text') return '“' + annotation.target.quote.trim().replace(/\s+/g, ' ').slice(0, 76) + '”';
+        if (annotation.target?.kind === 'image') return annotation.target.alt || 'Image';
+        if (annotation.target?.kind === 'embed') return annotation.target.title || 'Interactive mock';
+        return annotation.section?.label || 'Section';
+      };
+
+      const renderAnnotations = () => {
+        main.querySelectorAll('[data-annotated="true"]').forEach((element) => element.removeAttribute('data-annotated'));
+        const ranges = [];
+        annotationDocument.annotations.forEach((annotation) => {
+          const range = rangeForAnnotation(annotation);
+          if (range) ranges.push(range);
+          const element = elementForAnnotation(annotation);
+          if (element) element.dataset.annotated = 'true';
+        });
+        if (globalThis.CSS?.highlights && globalThis.Highlight) {
+          CSS.highlights.delete('prd-annotations');
+          if (ranges.length) CSS.highlights.set('prd-annotations', new Highlight(...ranges));
+        }
+
+        annotationList.textContent = '';
+        if (!annotationDocument.annotations.length) {
+          const empty = document.createElement('p');
+          empty.className = 'annotation-list-empty';
+          empty.textContent = 'Select text or an image, then add a comment.';
+          annotationList.append(empty);
+          return;
+        }
+        const isClosedAnnotation = (annotation) => ['addressed', 'superseded'].includes(annotation.status);
+        const sortedAnnotations = [...annotationDocument.annotations].sort((left, right) => Number(isClosedAnnotation(left)) - Number(isClosedAnnotation(right)));
+        sortedAnnotations.forEach((annotation) => {
+          const item = document.createElement('article');
+          item.className = 'annotation-item';
+          if (annotation.status === 'addressed') item.classList.add('addressed');
+          if (annotation.status === 'superseded') item.classList.add('superseded');
+          const open = document.createElement('button');
+          open.type = 'button';
+          open.className = 'annotation-item-open';
+          const target = document.createElement('span');
+          target.className = 'annotation-item-target';
+          target.textContent = (annotation.section?.label || 'Section') + ' · ' + annotationLabel(annotation);
+          const comment = document.createElement('span');
+          comment.className = 'annotation-item-comment';
+          comment.textContent = annotation.comment;
+          open.append(target, comment);
+          if (annotation.resolution) {
+            const resolution = document.createElement('span');
+            resolution.className = 'annotation-item-resolution';
+            resolution.textContent = annotation.resolution;
+            open.append(resolution);
+          }
+          if (isClosedAnnotation(annotation)) {
+            const status = document.createElement('span');
+            status.className = 'annotation-status';
+            if (annotation.status === 'superseded') status.classList.add('superseded');
+            status.textContent = annotation.status === 'superseded' ? 'Superseded' : 'Addressed';
+            open.append(status);
+          }
+          open.addEventListener('click', () => {
+            const index = annotation.section?.index ?? 0;
+            goToPage(index);
+            setTocOpen(true);
+            setTimeout(() => {
+              const range = rangeForAnnotation(annotation);
+              const element = elementForAnnotation(annotation) || (range?.commonAncestorContainer?.nodeType === Node.TEXT_NODE ? range.commonAncestorContainer.parentElement : range?.commonAncestorContainer);
+              if (element) scrollWithinPage(element);
+              else pages[index]?.querySelector('.prd-page-inner')?.scrollTo({ top: 0, behavior: 'smooth' });
+            }, 350);
+          });
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'annotation-item-delete';
+          remove.setAttribute('aria-label', 'Delete annotation');
+          remove.textContent = '×';
+          remove.addEventListener('click', async () => {
+            if (!window.confirm('Delete this annotation?')) return;
+            annotationDocument.annotations = annotationDocument.annotations.filter((candidate) => candidate.id !== annotation.id);
+            renderAnnotations();
+            await persistAnnotations();
+          });
+          item.append(open, remove);
+          annotationList.append(item);
+        });
+      };
+
+      const persistAnnotations = async () => {
+        annotationDocument.updatedAt = new Date().toISOString();
+        try {
+          const response = await fetch('./api/prd-annotations', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(annotationDocument, null, 2),
+          });
+          if (!response.ok) throw new Error('Annotation endpoint unavailable');
+          annotationBackend = 'file';
+          annotationSaveState.textContent = 'Saved to JSON';
+        } catch {
+          annotationBackend = 'browser';
+          localStorage.setItem(annotationStorageKey, JSON.stringify(annotationDocument));
+          annotationSaveState.textContent = 'Saved in browser';
+        }
+      };
+
+      const loadAnnotations = async () => {
+        try {
+          const response = await fetch('./api/prd-annotations', { cache: 'no-store' });
+          if (!response.ok) throw new Error('Annotation endpoint unavailable');
+          annotationDocument = await response.json();
+          annotationBackend = 'file';
+          annotationSaveState.textContent = 'JSON file';
+        } catch {
+          annotationBackend = 'browser';
+          const stored = localStorage.getItem(annotationStorageKey);
+          if (stored) annotationDocument = JSON.parse(stored);
+          annotationSaveState.textContent = 'Browser storage';
+        }
+        if (!Array.isArray(annotationDocument.annotations)) annotationDocument.annotations = [];
+        renderAnnotations();
+      };
+
+      const showAnnotationTrigger = (rect, target) => {
+        pendingAnnotation = target;
+        annotationTrigger.style.left = Math.max(12, Math.min(window.innerWidth - 112, rect.right - 104)) + 'px';
+        annotationTrigger.style.top = Math.max(68, Math.min(window.innerHeight - 48, rect.bottom + 8)) + 'px';
+        annotationTrigger.classList.add('visible');
+      };
+
+      const openAnnotationDialog = (target) => {
+        pendingAnnotation = target;
+        annotationPreview.textContent = target.preview;
+        annotationComment.value = '';
+        annotationDialog.showModal();
+        annotationComment.focus();
+      };
+
+      main.querySelectorAll('img, iframe').forEach((media) => {
+        const page = media.closest('.prd-page');
+        const pageIndex = pages.indexOf(page);
+        if (pageIndex < 0) return;
+        const kind = media.tagName === 'IMG' ? 'image' : 'embed';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'media-annotation-button';
+        button.textContent = kind === 'image' ? '＋ Comment on image' : '＋ Comment on interactive mock';
+        button.addEventListener('click', () => openAnnotationDialog({
+          preview: kind === 'image' ? (media.alt || 'Image') : (media.title || 'Interactive mock'),
+          section: { index: pageIndex, label: page.dataset.label },
+          target: { kind, src: media.getAttribute('src'), alt: media.alt || '', title: media.title || '' },
+        }));
+        const annotationAnchor = media.closest('.evidence-figure') || media;
+        annotationAnchor.insertAdjacentElement('afterend', button);
+      });
+
+      main.addEventListener('mouseup', () => {
+        setTimeout(() => {
+          const selection = window.getSelection();
+          if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
+          const range = selection.getRangeAt(0);
+          const commonElement = range.commonAncestorContainer.nodeType === Node.TEXT_NODE ? range.commonAncestorContainer.parentElement : range.commonAncestorContainer;
+          const inner = commonElement?.closest?.('.prd-page-inner');
+          const page = inner?.closest('.prd-page');
+          const pageIndex = pages.indexOf(page);
+          if (!inner || pageIndex < 0) return;
+          const startPath = pathFromRoot(range.startContainer, inner);
+          const endPath = pathFromRoot(range.endContainer, inner);
+          if (!startPath || !endPath) return;
+          const quote = range.toString();
+          const target = {
+            preview: quote.trim().replace(/\s+/g, ' ').slice(0, 240),
+            section: { index: pageIndex, label: page.dataset.label },
+            target: { kind: 'text', quote, startPath, endPath, startOffset: range.startOffset, endOffset: range.endOffset },
+          };
+          showAnnotationTrigger(range.getBoundingClientRect(), target);
+        }, 0);
+      });
+
+      main.addEventListener('click', (event) => {
+        const media = event.target.closest('img, iframe');
+        if (!media || media.tagName === 'IFRAME') return;
+        const page = media.closest('.prd-page');
+        const pageIndex = pages.indexOf(page);
+        if (pageIndex < 0) return;
+        const kind = media.tagName === 'IMG' ? 'image' : 'embed';
+        showAnnotationTrigger(media.getBoundingClientRect(), {
+          preview: kind === 'image' ? (media.alt || 'Image') : (media.title || 'Interactive mock'),
+          section: { index: pageIndex, label: page.dataset.label },
+          target: { kind, src: media.getAttribute('src'), alt: media.alt || '', title: media.title || '' },
+        });
+      });
+
+      annotationTrigger.addEventListener('click', () => {
+        annotationTrigger.classList.remove('visible');
+        if (pendingAnnotation) openAnnotationDialog(pendingAnnotation);
+      });
+      annotateSlide.addEventListener('click', () => openAnnotationDialog({
+        preview: 'Entire section: ' + (pages[activePage]?.dataset.label || 'Section'),
+        section: { index: activePage, label: pages[activePage]?.dataset.label || 'Section' },
+        target: { kind: 'section' },
+      }));
+      annotationDialog.querySelector('[data-annotation-cancel]').addEventListener('click', () => annotationDialog.close());
+      annotationForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const comment = annotationComment.value.trim();
+        if (!comment || !pendingAnnotation) return;
+        annotationDocument.annotations.push({
+          id: crypto.randomUUID(),
+          createdAt: new Date().toISOString(),
+          section: pendingAnnotation.section,
+          target: pendingAnnotation.target,
+          comment,
+        });
+        annotationDialog.close();
+        pendingAnnotation = null;
+        window.getSelection()?.removeAllRanges();
+        renderAnnotations();
+        setTocOpen(true);
+        await persistAnnotations();
+      });
+      main.addEventListener('scroll', () => annotationTrigger.classList.remove('visible'), true);
+      await loadAnnotations();
+
+      const findHeading = (prefix, tagName) => Array.from(main.querySelectorAll(tagName)).find((heading) => (heading.textContent || '').startsWith(prefix));
+      const scenarioSpecs = {
+        'agent-setup': { label: 'Agent setup: Codex', heading: () => findHeading('3.', 'h2') },
+        'agent-api': { label: 'Agent setup: API key', heading: () => findHeading('3.2', 'h3') },
+        standalone: { label: 'New no-folder chat', heading: () => findHeading('4.1', 'h3') },
+        'thread-setup': { label: 'Project and Git execution', heading: () => findHeading('4.3', 'h3') },
+        thread: { label: 'Graph thread', heading: () => findHeading('8.5', 'h3') },
+        context: { label: 'Add graph context', heading: () => findHeading('8.2', 'h3') },
+        actions: { label: 'Authored node actions', heading: () => findHeading('8.3', 'h3') },
+        settings: { label: 'Settings and advanced controls', heading: () => findHeading('5.3', 'h3') },
+        update: { label: 'Desktop update', heading: () => findHeading('5.4', 'h3') },
+        'eval-report': { label: 'Evaluation report and See in App', heading: () => findHeading('11.1', 'h3') },
+        'eval-thread': { label: 'Evaluation thread replay', heading: () => findHeading('11.2', 'h3') },
+      };
+      const walkthrough = main.querySelector('.product-walkthrough');
+      const reading = document.createElement('section');
+      reading.className = 'scenario-reading';
+      reading.setAttribute('aria-live', 'polite');
+      reading.innerHTML = '<div class="scenario-reading-header"><div><span class="scenario-reading-eyebrow">Requirements for selected mock</span><h3 class="scenario-reading-title"></h3></div><button type="button" class="scenario-open-section">Open full section →</button></div><div class="scenario-reading-content"></div>';
+      walkthrough?.insertAdjacentElement('afterend', reading);
+      const readingTitle = reading.querySelector('.scenario-reading-title');
+      const readingContent = reading.querySelector('.scenario-reading-content');
+      const openSection = reading.querySelector('.scenario-open-section');
+      let currentSourceHeading = null;
+
+      const renderScenario = (scenario) => {
+        const spec = scenarioSpecs[scenario];
+        const source = spec?.heading();
+        if (!spec || !source || !readingTitle || !readingContent) return;
+        currentSourceHeading = source;
+        readingTitle.textContent = spec.label;
+        readingContent.textContent = '';
+        const level = Number(source.tagName.slice(1));
+        let cursor = source;
+        while (cursor) {
+          if (cursor !== source && /^H[1-6]$/.test(cursor.tagName) && Number(cursor.tagName.slice(1)) <= level) break;
+          const clone = cursor.cloneNode(true);
+          if (clone.removeAttribute) clone.removeAttribute('id');
+          clone.querySelectorAll?.('[id]').forEach((element) => element.removeAttribute('id'));
+          readingContent.append(clone);
+          cursor = cursor.nextElementSibling;
+        }
+      };
+
+      openSection?.addEventListener('click', () => {
+        const page = currentSourceHeading?.closest('.prd-page');
+        const index = pages.indexOf(page);
+        if (index < 0) return;
+        goToPage(index);
+        setTimeout(() => scrollWithinPage(currentSourceHeading), 350);
+      });
+      window.addEventListener('message', (event) => {
+        if (event.data?.type !== 'relayer:walkthrough-scenario') return;
+        if (!Object.hasOwn(scenarioSpecs, event.data.scenario)) return;
+        renderScenario(event.data.scenario);
+      });
+
+      main.addEventListener('click', (event) => {
+        const link = event.target.closest('a[href^="#"]');
+        if (!link) return;
+        const target = document.getElementById(link.getAttribute('href').slice(1));
+        const page = target?.closest('.prd-page');
+        const index = pages.indexOf(page);
+        if (!target || index < 0) return;
+        event.preventDefault();
+        goToPage(index);
+        setTimeout(() => scrollWithinPage(target), 350);
+      });
+
+      renderScenario('agent-setup');
+      updatePageChrome(0);
+      if (location.hash) {
+        const target = document.getElementById(location.hash.slice(1));
+        const page = target?.closest('.prd-page');
+        const index = pages.indexOf(page);
+        if (target && index >= 0) {
+          goToPage(index, 'auto');
+          scrollWithinPage(target, 'auto');
+        }
+      }
+    })().catch((error) => console.error('Unable to initialize the PRD page', error));
+  </script>
+</body>
+</html>

@@ -5,6 +5,9 @@
   "license": "Apache-2.0",
   "type": "module",
   "private": false,
+  "workspaces": [
+    "desktop"
+  ],
   "engines": {
     "node": ">=22.8.0"
   },
@@ -22,12 +25,20 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc --noEmit && vitest run",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prd": "node docs/prd/server.mjs",
+    "desktop:dev": "electron desktop/main/index.mjs",
+    "desktop:pack": "electron-builder --config desktop/packaging/electron-builder.mjs --dir --arm64",
+    "desktop:dist": "RELAYER_DESKTOP_RELEASE=1 electron-builder --config desktop/packaging/electron-builder.mjs --mac dmg zip --arm64 --publish never",
+    "desktop:dist:preview": "RELAYER_DESKTOP_RELEASE=1 RELAYER_DESKTOP_CHANNEL=preview electron-builder --config desktop/packaging/electron-builder.mjs --mac dmg zip --arm64 --publish never"
   },
   "dependencies": {
     "prime-agent": "https://github.com/PrimeIntellect-ai/prime-agent/releases/download/v0.7.0/prime-agent-0.7.0.tgz"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
+    "electron": "43.0.0",
+    "electron-builder": "26.15.3",
     "typescript": "^5.9.2",
     "vitest": "^4.1.9"
   }
