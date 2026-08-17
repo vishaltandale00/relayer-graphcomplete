@@ -128,7 +128,7 @@ describe("desktop skeleton", () => {
     expect(desktopManifest).not.toContain("prime-agent");
     expect(desktopManifest).not.toContain("@openai/codex-sdk");
     expect(desktopManifest).toContain('"main": "main/index.mjs"');
-    expect(JSON.parse(packageManifest).workspaces).toEqual(["desktop"]);
+    expect(JSON.parse(packageManifest).workspaces).toEqual(["desktop", "packages/*"]);
     expect(JSON.parse(packageManifest).devDependencies).not.toHaveProperty("@openai/codex");
     expect(JSON.parse(packageManifest).devDependencies).not.toHaveProperty("electron-updater");
     expect(packageManifest).toContain("desktop/packaging/electron-builder.mjs");

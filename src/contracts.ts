@@ -76,4 +76,3 @@ export interface CompleteOptions {
   readonly policy: CompletionPolicy;
   readonly signal?: AbortSignal;
 }
-

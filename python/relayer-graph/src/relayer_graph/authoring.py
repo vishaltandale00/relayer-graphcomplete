@@ -1,0 +1,237 @@
+"""Object-based client for the GraphComplete Rust graph engine."""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import socket
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Mapping, Sequence
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+from .exceptions import APIError, AuthenticationError, ConfigurationError, NotFound, TransportError, ValidationError
+
+
+@dataclass(frozen=True, slots=True)
+class GraphNode:
+    id: int
+    kind: str
+    icon: str
+    title: str
+    detail: str
+    state: str
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "GraphNode":
+        return cls(int(value["id"]), str(value["kind"]), str(value["icon"]),
+                   str(value["title"]), str(value["detail"]), str(value["state"]))
+
+
+@dataclass(frozen=True, slots=True)
+class GraphEdge:
+    id: int
+    endpoints: tuple[int, int]
+    state: str
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "GraphEdge":
+        endpoints = value["endpoints"]
+        return cls(int(value["id"]), (int(endpoints[0]), int(endpoints[1])), str(value["state"]))
+
+
+@dataclass(frozen=True, slots=True)
+class GraphLayer:
+    id: int
+    nodes: tuple[int, ...]
+    edges: tuple[int, ...]
+    state: str
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "GraphLayer":
+        return cls(int(value["id"]), tuple(map(int, value["nodes"])),
+                   tuple(map(int, value["edges"])), str(value["state"]))
+
+
+@dataclass(slots=True)
+class NodeObject:
+    icon: str
+    title: str
+    detail: str
+    kind: str = "concept"
+    client_key: str = field(default_factory=lambda: str(uuid.uuid4()))
+    ref: GraphNode | None = field(default=None, init=False)
+
+
+@dataclass(slots=True)
+class EdgeObject:
+    endpoints: tuple["NodeReference", "NodeReference"]
+    client_key: str = field(default_factory=lambda: str(uuid.uuid4()))
+    ref: GraphEdge | None = field(default=None, init=False)
+
+
+@dataclass(slots=True)
+class LayerObject:
+    nodes: Sequence["NodeReference"]
+    edges: Sequence["EdgeReference"]
+    client_key: str = field(default_factory=lambda: str(uuid.uuid4()))
+    ref: GraphLayer | None = field(default=None, init=False)
+
+
+NodeReference = int | GraphNode | NodeObject
+EdgeReference = int | GraphEdge | EdgeObject
+LayerReference = int | GraphLayer | LayerObject
+
+
+class RelayerGraphClient:
+    def __init__(self, url: str, token: str, node_id: int, *, timeout: float = 30.0) -> None:
+        if not url or not token or node_id < 1:
+            raise ConfigurationError("url, token, and a positive node_id are required")
+        self.url = url.rstrip("/")
+        self.token = token
+        self.node_id = node_id
+        self.timeout = timeout
+
+    async def __aenter__(self) -> "RelayerGraphClient":
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
+
+    @classmethod
+    def from_env(cls, *, timeout: float = 30.0) -> "RelayerGraphClient":
+        try:
+            return cls(os.environ["RELAYER_GRAPH_URL"], os.environ["RELAYER_GRAPH_TOKEN"],
+                       int(os.environ["RELAYER_NODE_ID"]), timeout=timeout)
+        except (KeyError, ValueError) as error:
+            raise ConfigurationError("RELAYER_GRAPH_URL, RELAYER_GRAPH_TOKEN, and RELAYER_NODE_ID are required") from error
+
+    async def get_node(self, node: NodeReference) -> GraphNode:
+        value = await self._request("GET", f"/api/graph/nodes/{_node_id(node)}")
+        return GraphNode.from_dict(value["node"])
+
+    async def get_neighbors(self, node: NodeReference) -> tuple[GraphNode, ...]:
+        value = await self._request("GET", f"/api/graph/nodes/{_node_id(node)}/neighbors")
+        return tuple(GraphNode.from_dict(item) for item in value["nodes"])
+
+    async def submit_node(self, node: NodeObject) -> GraphNode:
+        value = await self._request("POST", "/api/graph/nodes", {
+            "clientKey": node.client_key, "kind": node.kind, "icon": node.icon,
+            "title": node.title, "detail": node.detail,
+        })
+        node.ref = GraphNode.from_dict(value["node"])
+        return node.ref
+
+    async def create_edge(self, left: NodeReference | EdgeObject, right: NodeReference | None = None,
+                          *, client_key: str | None = None) -> GraphEdge:
+        edge = left if isinstance(left, EdgeObject) else EdgeObject((left, _required(right)), client_key or str(uuid.uuid4()))
+        value = await self._request("POST", "/api/graph/edges", {
+            "clientKey": edge.client_key, "endpoints": [_node_id(item) for item in edge.endpoints],
+        })
+        edge.ref = GraphEdge.from_dict(value["edge"])
+        return edge.ref
+
+    async def submit_layer(self, layer: LayerObject) -> GraphLayer:
+        value = await self._request("POST", "/api/graph/layers", {
+            "clientKey": layer.client_key,
+            "nodes": [_node_id(item) for item in layer.nodes],
+            "edges": [_edge_id(item) for item in layer.edges],
+        })
+        layer.ref = GraphLayer.from_dict(value["layer"])
+        return layer.ref
+
+    async def add_navigate_action(self, source: NodeReference, label: str, target: LayerReference,
+                                  *, response: bool = False, client_key: str) -> Mapping[str, Any]:
+        return await self._request("POST", "/api/graph/actions", {
+            "clientKey": client_key, "sourceNodeId": _node_id(source),
+            "kind": "navigate", "label": label, "targetLayerId": _layer_id(target), "response": response,
+        })
+
+    async def add_invoke_action(self, source: NodeReference, label: str, interaction_text: str,
+                                *, client_key: str) -> Mapping[str, Any]:
+        return await self._request("POST", "/api/graph/actions", {
+            "clientKey": client_key, "sourceNodeId": _node_id(source),
+            "kind": "invoke", "label": label, "interactionText": interaction_text,
+        })
+
+    async def get_layer(self, layer: LayerReference) -> Mapping[str, Any]:
+        return await self._request("GET", f"/api/graph/layers/{_layer_id(layer)}")
+
+    async def submit(self, interaction_node: NodeReference | None = None) -> Mapping[str, Any]:
+        interaction_id = self.node_id if interaction_node is None else _node_id(interaction_node)
+        return await self._request("POST", "/api/graph/submit", {"nodeId": interaction_id})
+
+    async def get_completion_output(self, interaction_node: NodeReference | None = None) -> Mapping[str, Any]:
+        interaction_id = self.node_id if interaction_node is None else _node_id(interaction_node)
+        return await self._request("GET", f"/api/graph/nodes/{interaction_id}/output")
+
+    async def _request(self, method: str, path: str, body: Any = None) -> Any:
+        encoded = None if body is None else json.dumps(body, separators=(",", ":")).encode()
+        headers = {"accept": "application/json", "authorization": f"Bearer {self.token}"}
+        if encoded is not None:
+            headers["content-type"] = "application/json"
+
+        def send() -> Any:
+            try:
+                with urlopen(Request(self.url + path, data=encoded, method=method, headers=headers), timeout=self.timeout) as response:
+                    return json.loads(response.read() or b"{}")
+            except HTTPError as error:
+                try:
+                    raw = error.read()
+                finally:
+                    error.close()
+                details = json.loads(raw or b"{}")
+                item = details.get("error", {}) if isinstance(details, Mapping) else {}
+                message = item.get("message", f"Graph request failed with HTTP {error.code}")
+                error_type = (
+                    AuthenticationError if error.code in (401, 403)
+                    else NotFound if error.code == 404
+                    else ValidationError if error.code in (400, 409, 422)
+                    else APIError
+                )
+                raise error_type(str(message), status=error.code, details=details) from error
+            except (URLError, socket.timeout, TimeoutError, OSError) as error:
+                raise TransportError(f"could not reach Relayer Graph at {self.url}: {error}") from error
+
+        return await asyncio.to_thread(send)
+
+
+def _node_id(value: NodeReference) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, NodeObject):
+        if value.ref is None:
+            raise ValueError(f"NodeObject {value.client_key} must be submitted first")
+        return value.ref.id
+    return value.id
+
+
+def _edge_id(value: EdgeReference) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, EdgeObject):
+        if value.ref is None:
+            raise ValueError(f"EdgeObject {value.client_key} must be created first")
+        return value.ref.id
+    return value.id
+
+
+def _layer_id(value: LayerReference) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, LayerObject):
+        if value.ref is None:
+            raise ValueError(f"LayerObject {value.client_key} must be submitted first")
+        return value.ref.id
+    return value.id
+
+
+def _required(value: NodeReference | None) -> NodeReference:
+    if value is None:
+        raise ValueError("create_edge requires two node references")
+    return value
+
+
+# Backwards-compatible name used by the first authoring-client prototype.
+GraphAuthoringClient = RelayerGraphClient
