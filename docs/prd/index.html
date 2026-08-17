@@ -732,18 +732,19 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <section class="release-status-card" aria-label="Desktop update slice status">
   <div class="release-status-header">
     <div class="release-status-title">
-      <span class="delivery-status partial">Partial — infrastructure ready, product update unverified</span>
+      <span class="delivery-status partial">Partial — signed check verified, product update unverified</span>
       <strong>Desktop update delivery status</strong>
       <small>Status reflects saved proof, not the presence of implementation code.</small>
     </div>
-    <span class="release-status-count">2 verified · 1 ready · 2 open · 1 deferred</span>
+    <span class="release-status-count">3 verified · 1 ready · 2 open · 1 deferred</span>
   </div>
   <div class="release-checkpoints">
     <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Release contract</strong><small>Identity, version, provenance, signing requirements, manifests, hashes, retry, downgrade, and mutation rules pass deterministic tests.</small></article>
     <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Local signed 0.2.0</strong><small>Developer ID signing, notarization, stapling, Gatekeeper acceptance, launch screenshot, and artifact receipt are saved below.</small></article>
+    <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Signed updater check</strong><small>A Developer-ID-signed 0.2.0 build reaches the sealed Preview feed and presents its currently empty feed as a concise, retryable product state.</small></article>
     <article class="release-checkpoint"><span class="delivery-status next">Ready to verify</span><strong>CI signed candidate</strong><small>Protected credentials and workflow are configured. The workflow has not run from <code>main</code> yet.</small></article>
     <article class="release-checkpoint"><span class="delivery-status open">Open</span><strong>Hosted Preview 0.2.0</strong><small>The publication role is configured, but the update bucket is intentionally empty and no publication receipt exists.</small></article>
-    <article class="release-checkpoint"><span class="delivery-status open">Open</span><strong>0.2.0 → 0.2.1 update</strong><small>No packaged in-app check, download, restart, preference-preservation, or failure-state sequence has been captured.</small></article>
+    <article class="release-checkpoint"><span class="delivery-status open">Open</span><strong>0.2.0 → 0.2.1 update</strong><small>The signed empty-feed check is captured; available, download, restart, and preference-preservation still require a hosted 0.2.1.</small></article>
     <article class="release-checkpoint"><span class="delivery-status deferred">Deferred</span><strong>Stable promotion and rollback</strong><small>Implemented only after the Preview update path has passed its product smoke.</small></article>
   </div>
 </section>
@@ -751,11 +752,12 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <div class="release-proof-grid">
   <figure class="release-proof-card">
     <div class="evidence-image">
-      <img src="assets/evidence/desktop/settings-full-page.png" alt="Relayer Settings showing Stable and Preview update channels and the update check control">
-      <span class="evidence-callout" style="--x:82%;--y:51%">1</span>
-      <span class="evidence-callout" style="--x:81%;--y:58%">2</span>
+      <img src="assets/evidence/desktop/signed-preview-0.2.0-updater-empty-feed.png" alt="Developer-ID-signed Relayer 0.2.0 showing the Preview channel and a retryable empty-feed update result">
+      <span class="evidence-callout" style="--x:81%;--y:35%">1</span>
+      <span class="evidence-callout" style="--x:25%;--y:62%">2</span>
+      <span class="evidence-callout" style="--x:80%;--y:67%">3</span>
     </div>
-    <figcaption><span class="delivery-status verified">Visible UI verified</span><strong>Update controls exist in the full-page Settings view.</strong><span><b>1</b> marks the Stable/Preview channel choice. <b>2</b> marks the update check control and its explicit development-build state.</span></figcaption>
+    <figcaption><span class="delivery-status verified">Signed update check verified</span><strong>The signed app reaches the sealed Preview feed and fails safely while it is empty.</strong><span><b>1</b> is the packaged Preview channel. <b>2</b> is the concise failure state after the real feed returned <code>403</code>. <b>3</b> is the retry control. This does not prove download or restart.</span></figcaption>
   </figure>
   <figure class="release-proof-card" id="upd-002-e1-proof">
     <div class="evidence-image">
@@ -847,6 +849,9 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <p>This is the actual Developer-ID-signed and Apple-notarized arm64 application built from commit <code>4e5b9c3d21d2c7bbf902313d655f8e70aac30e75</code>, launched with an empty isolated profile. Gatekeeper accepted the app, stapler validated both the application and DMG, and the generated release receipt seals the post-stapling DMG and final updater ZIP hashes and regenerated blockmaps.</p>
 <p>See the annotated packaged-launch screenshot in <a href="#upd-002-e1-proof">Current visual proof</a> above.</p>
 <p>Machine-readable evidence: <code>assets/evidence/desktop/signed-preview-0.2.0-release.json</code>.</p>
+<h4><code>UPD-002-E2</code> — signed Preview feed check</h4>
+<p>A fresh Developer-ID-signed arm64 build from commit <code>3fb0e658706fd0fd3cc5993b3f353c6f4e1b6a84</code> was launched with an isolated profile. Its packaged updater selected Preview, requested the sealed <code>beta-mac.yml</code> URL, received the expected <code>403 AccessDenied</code> while no Preview release is published, and left the application usable with a concise retry state. The screenshot above is from that signed application, not Electron development mode. This local evidence does not claim a fresh notarization or a successful N-1 to N update.</p>
+<p>Machine-readable evidence: <code>assets/evidence/desktop/signed-preview-0.2.0-updater-empty-feed.json</code>.</p>
 <p>Slice 2 is complete only when the real packaged Preview app—not Electron development mode—installs through macOS, shows the expected Relayer branding, updates from N-1 to N through the visible product flow, preserves its local preference, and leaves the old version usable after a rejected update. Every manually inspected state receives an annotated screenshot in this PRD.</p>
 <h1>Part II — Relayer graph engine and Complete harness</h1>
 <h2>6. Graph engine: stable product contract</h2>

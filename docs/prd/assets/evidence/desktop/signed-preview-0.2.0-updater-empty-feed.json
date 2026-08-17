@@ -1,0 +1,34 @@
+{
+  "evidenceId": "UPD-002-E2",
+  "sourceCommit": "3fb0e658706fd0fd3cc5993b3f353c6f4e1b6a84",
+  "version": "0.2.0",
+  "architecture": "arm64",
+  "artifactMode": "release",
+  "channel": "preview",
+  "providerChannel": "beta",
+  "updateUrl": "https://updates.relayerlabs.ai/desktop/macos/arm64/beta-mac.yml",
+  "signature": {
+    "type": "Developer ID Application",
+    "teamId": "NZ253AL7U6",
+    "codesignVerification": "valid on disk; satisfies its Designated Requirement",
+    "notarizedForThisEvidence": false
+  },
+  "observedResult": {
+    "httpStatus": 403,
+    "productState": "Couldn’t check for updates",
+    "retryAvailable": true,
+    "applicationRemainedUsable": true
+  },
+  "proves": [
+    "packaged release metadata enables the updater",
+    "the signed app selects the Preview channel",
+    "the signed app reaches the sealed update feed",
+    "an unavailable feed produces a concise retryable state"
+  ],
+  "doesNotProve": [
+    "notarization of this local evidence build",
+    "an available update",
+    "download or signature verification of an update",
+    "restart into a newer version"
+  ]
+}
