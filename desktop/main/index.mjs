@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { CodexCredentialAdapter } from "./credentials/codex-credential-adapter.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
-import { createDesktopUpdater } from "./services/updater.mjs";
+import { createDesktopUpdater, packagedUpdateChannel } from "./services/updater.mjs";
 import { createWindowFactory } from "./window.mjs";
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -19,8 +19,8 @@ if (process.env.RELAYER_DESKTOP_USER_DATA_DIR) {
 
 const metadataPath = app.isPackaged ? join(app.getAppPath(), "package.json") : join(repositoryRoot, "package.json");
 const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
-const releaseArtifact = metadata.relayerUpdateChannel === "latest" || metadata.relayerUpdateChannel === "beta";
-const packagedUpdateChannel = metadata.relayerUpdateChannel === "beta" ? "preview" : "stable";
+const releaseChannel = packagedUpdateChannel(metadata);
+const releaseArtifact = releaseChannel !== null;
 app.setName(metadata.relayerProductName || "Relayer Dev");
 
 const userDataPath = app.getPath("userData");
@@ -70,7 +70,7 @@ app.whenReady().then(async () => {
   nativeTheme.themeSource = appearance;
   const channel = saved.updateChannel === "preview" || saved.updateChannel === "stable"
     ? saved.updateChannel
-    : packagedUpdateChannel;
+    : releaseChannel || "stable";
   if (channel === "preview") updater.setChannel("preview");
 
   registerDesktopIpc({

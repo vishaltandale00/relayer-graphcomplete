@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-credential-adapter.mjs";
 import { CredentialAdapter } from "../desktop/main/credentials/credential-adapter.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
-import { createDesktopUpdater } from "../desktop/main/services/updater.mjs";
+import { createDesktopUpdater, packagedUpdateChannel } from "../desktop/main/services/updater.mjs";
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
 import {
   DESKTOP_RELEASE,
@@ -159,6 +159,11 @@ describe("desktop skeleton", () => {
   });
 
   it("drives the packaged update lifecycle through one state service", async () => {
+    expect(packagedUpdateChannel({ relayerArtifactMode: "release", relayerUpdateChannel: "preview" })).toBe("preview");
+    expect(packagedUpdateChannel({ relayerArtifactMode: "release", relayerUpdateChannel: "stable" })).toBe("stable");
+    expect(packagedUpdateChannel({ relayerArtifactMode: "development", relayerUpdateChannel: "preview" })).toBeNull();
+    expect(packagedUpdateChannel({ relayerArtifactMode: "release", relayerUpdateChannel: "beta" })).toBeNull();
+
     const autoUpdater = Object.assign(new EventEmitter(), {
       checkForUpdates: vi.fn(async () => undefined),
       downloadUpdate: vi.fn(async () => undefined),
