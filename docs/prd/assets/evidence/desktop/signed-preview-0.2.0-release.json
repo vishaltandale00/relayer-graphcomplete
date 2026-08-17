@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "product": "Relayer",
+  "appId": "ai.relayer.desktop",
+  "version": "0.2.0",
+  "architecture": "arm64",
+  "minimumMacOSVersion": "13.0.0",
+  "channel": "preview",
+  "manifest": "beta-mac.yml",
+  "updateBaseUrl": "https://updates.relayerlabs.ai/desktop/macos/arm64",
+  "sourceCommit": "7c58dd0c828402b1bebb30a6d24dcb45508ff979",
+  "appleTeamId": "NZ253AL7U6",
+  "artifacts": [
+    {
+      "name": "Relayer-0.2.0-mac-arm64.dmg",
+      "size": 227583348,
+      "sha256": "f7086b7320b0ad3d6ebe33ad3767de2d76c24765ef4f1d6b14dc7ee80fa0cd16",
+      "sha512": "lnoHi/0y4kCJHip1+/4cXpB4yrBap9xWuZpwEUyBfe1G6xGJ8tUQGI1PHoZXz9t1e/AboDZ/SFpuvtnY5drKNg=="
+    },
+    {
+      "name": "Relayer-0.2.0-mac-arm64.zip",
+      "size": 226188721,
+      "sha256": "0ac69819a85af1d7542d972d2d53f124679e3f7fbafd62577d769dedcd110a6d",
+      "sha512": "AV1i9/iVFyTvzjfoAKdS2LsQtgU0jmRTaU4GlJ+klgewmTTLerBzEw2zzVeaDFIyOnDV31FTu6kqvlsh2MAcOw=="
+    }
+  ]
+}
