@@ -343,7 +343,7 @@ type CompleteResult = {
 <td>Desktop updater and distributable packaging</td>
 <td><span class="delivery-status partial">Partial</span></td>
 <td>An unsigned development package builds; a real <code>0.2.0</code> Apple Silicon candidate is signed, notarized, stapled, Gatekeeper-accepted, and captured; the Preview publisher and protected tag/OIDC infrastructure are implemented and deterministically tested.</td>
-<td>The CI signing certificate is not configured, the bucket remains empty, and no hosted update, previous-version upgrade, visible packaged updater flow, Stable promotion, or rollback has been product-proven. Section 5.7 defines the remaining slice.</td>
+<td>The protected CI signing and notarization credentials are configured, but the workflow has not run and the bucket remains empty. No hosted update, previous-version upgrade, visible packaged updater flow, Stable promotion, or rollback has been product-proven. Section 5.7 defines the remaining slice.</td>
 </tr>
 <tr>
 <td>Relayer login and additional providers</td>
@@ -682,7 +682,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <td><span class="delivery-status partial">Partial</span></td>
 <td>One updater scenario covers check, available, download, ready, and install without network access. The release scenarios cover identity, version, channel, credentials, manifest sealing, final ZIP reconstruction, checksums, receipts, tamper rejection, tag provenance, immutable publication keys, conditional writes, retry recovery, downgrade rejection, and same-version byte-replacement rejection.</td>
 <td><code>UPD-002-E1</code> proves the real signed and notarized <code>0.2.0</code> packaged app launches with an isolated profile.</td>
-<td>The Preview AWS role and protected GitHub environment are configured, but the feed is intentionally still empty. CI signing, hosted Preview publication, real download/restart installation, Stable promotion, and rollback remain undone.</td>
+<td>The Preview AWS role, protected GitHub environments, and CI signing/notarization credentials are configured, but the feed is intentionally still empty. A CI-signed candidate run, hosted Preview publication, real download/restart installation, Stable promotion, and rollback remain undone.</td>
 </tr>
 </tbody></table>
 <h4><code>SET-001-E1</code> — full-page Settings</h4>
@@ -714,7 +714,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <h3>5.7 Proposed Slice 2 — packaged desktop and updates</h3>
 <p><span class="delivery-status partial">In progress</span></p>
 <p>The next slice turns the existing development shell into a safely installable and updateable macOS arm64 product. It does not add project/thread persistence, invoke a harness, or render graph output.</p>
-<p><strong>Current checkpoint:</strong> the release identity and artifact contract, local signed/notarized <code>0.2.0</code> proof, immutable Preview publisher, protected tag environment, and narrow AWS OIDC role are complete. No release objects have been uploaded. CI still needs an exportable Developer ID certificate; then the first controlled tag can prove hosted <code>0.2.0</code>, followed by <code>0.2.1</code> as the real in-app update.</p>
+<p><strong>Current checkpoint:</strong> the release identity and artifact contract, local signed/notarized <code>0.2.0</code> proof, immutable Preview publisher, protected GitHub environments, CI signing/notarization credentials, and narrow AWS OIDC role are complete. The PKCS#12 was verified through an isolated Keychain import before its encrypted GitHub secrets were stored, and the temporary export was deleted. No release objects have been uploaded. After review and merge, the first controlled tag can prove hosted <code>0.2.0</code>, followed by <code>0.2.1</code> as the real in-app update.</p>
 <h4>Slice boundary</h4>
 <table>
 <thead>
@@ -1426,7 +1426,7 @@ npm run eval:web
 <h3>12.1 V1 desktop shell decision and current gap</h3>
 <p>V1 uses an Electron shell in the Relayer Desktop package of this repository and direct macOS distribution outside the Mac App Store. Relayer Desktop packages the shell, graph renderer, local app server, eval runner, result catalog, and updater. Each desktop release locks and bundles the compatible Relayer Harness package from the same verified source revision, containing the graph engine, Complete implementation, Prime Agent runtime dependencies, Python/IPython capability, graph tools, and graph skill.</p>
 <p>Electron&#39;s macOS distribution guidance requires code signing and Apple notarization for normal distribution, and its automatic updater requires a signed macOS app. V1 treats those as release gates, not optional polish.</p>
-<p>The repository now has an Electron shell, an unsigned Apple Silicon development package, a fail-closed release contract, and a locally verified <code>0.2.0</code> Developer-ID-signed/notarized Preview DMG and updater ZIP. The package, exact ZIP contents, sealed feed metadata, checksums, provenance receipt, Gatekeeper acceptance, and stapled notarization tickets are verified. The tag-gated Preview publisher, protected GitHub environment, and narrow AWS OIDC role are configured; publication deterministically rejects stale, mutable, or unsealed inputs. The update bucket remains empty. CI signing, hosted Preview publication, a real previous-version update, Stable promotion, rollback, and clean-user DMG installation remain unverified. Existing graph-engine, Complete, Prime Agent runtime, graph-tool, and eval code remain behind the Relayer Harness package boundary; Slice 2 packages the desktop without claiming those experimental paths work in the product.</p>
+<p>The repository now has an Electron shell, an unsigned Apple Silicon development package, a fail-closed release contract, and a locally verified <code>0.2.0</code> Developer-ID-signed/notarized Preview DMG and updater ZIP. The package, exact ZIP contents, sealed feed metadata, checksums, provenance receipt, Gatekeeper acceptance, and stapled notarization tickets are verified. The tag-gated Preview publisher, protected GitHub environments, CI signing/notarization credentials, and narrow AWS OIDC role are configured; publication deterministically rejects stale, mutable, or unsealed inputs. The update bucket remains empty. A CI-signed candidate run, hosted Preview publication, a real previous-version update, Stable promotion, rollback, and clean-user DMG installation remain unverified. Existing graph-engine, Complete, Prime Agent runtime, graph-tool, and eval code remain behind the Relayer Harness package boundary; Slice 2 packages the desktop without claiming those experimental paths work in the product.</p>
 <h3>12.2 Required developer and release modes</h3>
 <table>
 <thead>
