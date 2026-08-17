@@ -1,0 +1,60 @@
+import { spawn } from "node:child_process";
+import { rm } from "node:fs/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { writeDesktopReleaseEvidence, verifyDesktopReleaseEvidence } from "./artifacts.mjs";
+import { loadDesktopReleaseContract } from "./contract.mjs";
+import { finalizeDesktopUpdateArtifact } from "./finalize-update-artifact.mjs";
+import { notarizeAndStapleDesktopDMGs } from "./notarize-and-staple.mjs";
+import { verifyMacOSApplication } from "./verify-macos-app.mjs";
+import { verifyPackagedDesktopContract } from "./verify-packaged-contract.mjs";
+import { verifyDesktopUpdateZip } from "./verify-update-zip.mjs";
+
+function run(command, args, options) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, { ...options, stdio: "inherit" });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (code === 0) resolvePromise();
+      else reject(new Error(`${command} failed with ${signal ? `signal ${signal}` : `exit code ${code}`}.`));
+    });
+  });
+}
+
+export async function buildDesktopRelease({ channelName = process.argv[2], environment = process.env } = {}) {
+  if (channelName !== "stable" && channelName !== "preview") {
+    throw new Error("Usage: node desktop/release/build-release.mjs <stable|preview>");
+  }
+  const repositoryRoot = resolve(import.meta.dirname, "../..");
+  const desktopRoot = resolve(repositoryRoot, "desktop");
+  const distRoot = resolve(desktopRoot, "dist");
+  const releaseEnvironment = {
+    ...environment,
+    RELAYER_DESKTOP_RELEASE: "1",
+    RELAYER_DESKTOP_CHANNEL: channelName,
+  };
+  const contract = await loadDesktopReleaseContract({ environment: releaseEnvironment, desktopRoot });
+
+  await rm(distRoot, { recursive: true, force: true });
+  await run(
+    resolve(repositoryRoot, "node_modules", ".bin", "electron-builder"),
+    ["--config", "desktop/packaging/electron-builder.mjs", "--mac", "dmg", "zip", "--arm64", "--publish", "never"],
+    { cwd: repositoryRoot, env: releaseEnvironment },
+  );
+  await notarizeAndStapleDesktopDMGs({ distRoot, environment: releaseEnvironment });
+  const appPath = resolve(distRoot, "mac-arm64", "Relayer.app");
+  await finalizeDesktopUpdateArtifact({ appPath, contract, distRoot });
+  await verifyMacOSApplication(appPath, {
+    assessNotarization: true,
+  });
+  await verifyPackagedDesktopContract({ appPath, contract });
+  await verifyDesktopUpdateZip({ contract, distRoot });
+  await writeDesktopReleaseEvidence({ distRoot, contract });
+  return verifyDesktopReleaseEvidence({ distRoot, contract });
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const result = await buildDesktopRelease();
+  console.log(JSON.stringify({ ok: true, receipt: result.names.receipt }, null, 2));
+}

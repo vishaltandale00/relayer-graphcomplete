@@ -42,3 +42,8 @@ Model and thinking level are separate choices. The runtime must fail clearly whe
 
 Implement one root content owner that can create one child owner, invoke one separate reviewer, and return an explicitly accepted or stopped graph. Use Prime Agent's native child sessions and messaging. Do not build a second agent scheduler.
 
+## Desktop release boundary
+
+Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of Prime Agent and GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates are Apple Silicon builds for macOS 13 or newer and begin at version `0.2.0`.
+
+Release configuration resolves through one fail-closed contract. The contract seals the numeric version, source commit, product identity, Apple team, architecture, minimum macOS version, channel manifest, and exact HTTPS update base into both the application package and its release receipt. The updater and publisher consume this contract rather than maintaining parallel identity or channel rules. See [ADR 0002](decisions/0002-desktop-release-contract.md).

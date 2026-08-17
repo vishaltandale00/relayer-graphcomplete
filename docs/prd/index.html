@@ -747,13 +747,13 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <td>Stable public promotion before Preview is proven</td>
 </tr>
 </tbody></table>
-<h4>Decisions to settle before implementation</h4>
+<h4>Release decisions</h4>
 <ol>
-<li><strong>Preview isolation:</strong> decide whether Preview is a separately installable <code>Relayer Preview</code> application with its own bundle ID/data directory, or the same <code>Relayer</code> application switching feeds. A separate Preview app is recommended because it can coexist with Stable and cannot strand a user on a prerelease version when downgrades are disabled.</li>
-<li><strong>Artifact host:</strong> choose the HTTPS host and immutable directory convention for DMG, ZIP, checksums, and <code>latest</code>/<code>beta</code> channel metadata.</li>
-<li><strong>Signing automation:</strong> confirm the Apple Developer ID identity and notarization credentials already used by Relayer, then define how local release builds and CI receive them without storing secrets in the repository.</li>
+<li><strong>Product continuity:</strong> Preview and Stable are channels for the same <code>ai.relayer.desktop</code> application. Unsigned local packages use <code>ai.relayer.desktop.development</code> and can coexist with the signed app. The first signed seed is <code>0.2.0</code>; <code>0.2.1</code> is the first real update proof.</li>
+<li><strong>Artifact host:</strong> DMG, ZIP, checksums, receipts, and <code>latest</code>/<code>beta</code> metadata use <code>https://updates.relayerlabs.ai/desktop/macos/arm64</code>. Versioned artifacts are immutable; channel metadata is written last.</li>
+<li><strong>Signing automation:</strong> release builds use the existing Developer ID Application identity for Apple team <code>NZ253AL7U6</code> and App Store Connect notarization credentials supplied locally or through a protected GitHub environment. Secrets are never stored in the repository.</li>
 <li><strong>Update prompt timing:</strong> use the existing compact sidebar indicator; downloading is user-triggered, and restart remains explicitly deferrable.</li>
-<li><strong>Minimum supported macOS:</strong> record and test one floor version plus the current macOS version before calling Preview distributable.</li>
+<li><strong>Minimum supported macOS:</strong> V1 supports Apple Silicon on macOS 13 or newer. Release evidence records the floor and validates both identity and architecture.</li>
 </ol>
 <h4>Minimal validation plan</h4>
 <table>
@@ -1474,7 +1474,7 @@ npm run eval:web
     Q --&gt; R[&quot;Publish immutable artifacts and checksums&quot;]
     R --&gt; M[&quot;Publish stable update manifest last&quot;]
 </code></pre>
-<p>The initial V1 architecture is macOS arm64. Universal/x64 support is a separate release requirement and cannot be implied by a successful arm64 build. The exact supported macOS floor is recorded in the release manifest and tested on that floor plus the current macOS version.</p>
+<p>The initial V1 architecture is macOS arm64 on macOS 13 or newer. Universal/x64 support is a separate release requirement and cannot be implied by a successful arm64 build. The supported macOS floor is recorded in the release receipt and tested on that floor plus the current macOS version.</p>
 <h3>12.5 Distribution and update acceptance</h3>
 <p>The distributable outputs are a notarized DMG for first install and a signed ZIP plus channel metadata for Electron updates. Artifacts are content-addressed and immutable. The mutable channel manifest is published only after the referenced artifact, signature, checksum, notarization ticket, and smoke evidence are available.</p>
 <p>Before promotion, a clean machine must be able to install, launch, connect an agent, run or load the basic eval, use See in App, create a normal thread pinned to the passing configuration, quit/reopen with persistence, and update from the previous production version without losing graphs or settings.</p>

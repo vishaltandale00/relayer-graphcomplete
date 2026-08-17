@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
@@ -8,6 +9,17 @@ import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-creden
 import { CredentialAdapter } from "../desktop/main/credentials/credential-adapter.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
 import { createDesktopUpdater } from "../desktop/main/services/updater.mjs";
+import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
+import {
+  DESKTOP_RELEASE,
+  resolveDesktopReleaseContract,
+} from "../desktop/release/contract.mjs";
+import {
+  desktopReleaseArtifactNames,
+  verifyDesktopReleaseEvidence,
+  writeDesktopReleaseEvidence,
+} from "../desktop/release/artifacts.mjs";
+import { finalizeDesktopUpdateArtifact } from "../desktop/release/finalize-update-artifact.mjs";
 import { addLocalThread, interactionForThread, responseNodesForThread } from "../desktop/renderer/src/thread-model.js";
 
 describe("desktop skeleton", () => {
@@ -167,6 +179,120 @@ describe("desktop skeleton", () => {
     expect(autoUpdater.setFeedURL).toHaveBeenCalledWith(expect.objectContaining({ channel: "beta" }));
     expect(autoUpdater.downloadUpdate).toHaveBeenCalledOnce();
     expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
+  });
+
+  it("enforces one signed desktop release contract and seals its candidate artifacts", async () => {
+    const releaseEnvironment = {
+      RELAYER_DESKTOP_RELEASE: "1",
+      RELAYER_DESKTOP_CHANNEL: "preview",
+      RELAYER_DESKTOP_UPDATE_BASE_URL: DESKTOP_RELEASE.updateBaseUrl,
+      RELAYER_DESKTOP_SIGN_IDENTITY: "Developer ID Application: VISHAL TANDALE (NZ253AL7U6)",
+      APPLE_API_KEY: "/tmp/AuthKey_TEST.p8",
+      APPLE_API_KEY_ID: "TESTKEY",
+      APPLE_API_ISSUER: "00000000-0000-0000-0000-000000000000",
+    };
+    const sourceCommit = "a".repeat(40);
+    const contract = resolveDesktopReleaseContract({
+      environment: releaseEnvironment,
+      version: "0.2.0",
+      sourceCommit,
+    });
+    expect(contract).toMatchObject({
+      release: true,
+      appId: "ai.relayer.desktop",
+      version: "0.2.0",
+      architecture: "arm64",
+      minimumMacOSVersion: "13.0.0",
+      channelName: "preview",
+      providerChannel: "beta",
+      manifestName: "beta-mac.yml",
+      sourceCommit,
+      appleTeamId: "NZ253AL7U6",
+    });
+    const builder = createDesktopBuilderConfig(contract);
+    expect(builder).toMatchObject({
+      appId: "ai.relayer.desktop",
+      productName: "Relayer",
+      forceCodeSigning: true,
+      afterSign: "desktop/release/verify-macos-app.mjs",
+      mac: {
+        identity: "VISHAL TANDALE (NZ253AL7U6)",
+        minimumSystemVersion: "13.0.0",
+        hardenedRuntime: true,
+        notarize: true,
+      },
+      publish: [{ provider: "generic", url: DESKTOP_RELEASE.updateBaseUrl, channel: "beta" }],
+    });
+
+    const development = resolveDesktopReleaseContract({ environment: {}, version: "0.2.0" });
+    expect(development).toMatchObject({
+      release: false,
+      appId: "ai.relayer.desktop.development",
+      productName: "Relayer Dev",
+      channelName: "development",
+      signingMode: "unsigned",
+    });
+
+    const invalidCases = [
+      [{ ...releaseEnvironment, RELAYER_DESKTOP_CHANNEL: "nightly" }, "0.2.0", sourceCommit, "stable or preview"],
+      [releaseEnvironment, "0.1.0", sourceCommit, "0.2.0 or newer"],
+      [{ ...releaseEnvironment, RELAYER_DESKTOP_UPDATE_BASE_URL: "https://example.test" }, "0.2.0", sourceCommit, "must be exactly"],
+      [{ ...releaseEnvironment, RELAYER_DESKTOP_SIGN_IDENTITY: "Apple Development: Example" }, "0.2.0", sourceCommit, "Developer ID Application"],
+      [{ ...releaseEnvironment, APPLE_API_KEY: "" }, "0.2.0", sourceCommit, "notarytool"],
+      [{ ...releaseEnvironment, CSC_LINK: "/tmp/certificate.p12" }, "0.2.0", sourceCommit, "provided together"],
+      [releaseEnvironment, "0.2.0", "short", "40-character"],
+    ];
+    for (const [environment, version, commit, message] of invalidCases) {
+      expect(() => resolveDesktopReleaseContract({ environment, version, sourceCommit: commit })).toThrow(message);
+    }
+
+    const directory = await mkdtemp(join(tmpdir(), "relayer-release-contract-"));
+    try {
+      const names = desktopReleaseArtifactNames(contract);
+      const dmg = Buffer.from("signed-notarized-dmg-fixture");
+      const originalZip = Buffer.from("electron-builder-zip-fixture");
+      const finalZip = Buffer.from("one-app-final-update-zip-fixture");
+      const originalZipSha512 = createHash("sha512").update(originalZip).digest("base64");
+      await Promise.all([
+        writeFile(join(directory, names.dmg), dmg),
+        writeFile(join(directory, names.zip), originalZip),
+        writeFile(join(directory, names.manifest), [
+          `version: ${contract.version}`,
+          "files:",
+          `  - url: ${names.zip}`,
+          `    sha512: ${originalZipSha512}`,
+          `    size: ${originalZip.length}`,
+          `path: ${names.zip}`,
+          `sha512: ${originalZipSha512}`,
+          "",
+        ].join("\n")),
+      ]);
+      await finalizeDesktopUpdateArtifact({
+        appPath: join(directory, "Relayer.app"),
+        contract,
+        distRoot: directory,
+        execute: async (_command, args) => {
+          await writeFile(args.at(-1), finalZip);
+          return { stdout: "", stderr: "" };
+        },
+        createBlockMap: async ({ outputPath }) => writeFile(outputPath, "blockmap-fixture"),
+      });
+      const written = await writeDesktopReleaseEvidence({ distRoot: directory, contract });
+      expect(written.receipt).toMatchObject({
+        version: "0.2.0",
+        channel: "preview",
+        sourceCommit,
+        appleTeamId: "NZ253AL7U6",
+      });
+      expect(written.zip.sha512).toBe(createHash("sha512").update(finalZip).digest("base64"));
+      await expect(verifyDesktopReleaseEvidence({ distRoot: directory, contract })).resolves.toMatchObject({
+        names: { receipt: names.receipt, checksums: names.checksums },
+      });
+      await writeFile(join(directory, names.checksums), "tampered\n");
+      await expect(verifyDesktopReleaseEvidence({ distRoot: directory, contract })).rejects.toThrow("checksum manifest");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("keeps settings writes atomic and local thread graph state scoped to its owning thread", async () => {
