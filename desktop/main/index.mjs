@@ -36,9 +36,9 @@ const updateBaseUrl = packagedRelease?.updateBaseUrl || (
 const bundledCodexBinary = app.isPackaged
   ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex")
   : join(repositoryRoot, "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex");
-const relayerAppServerBinary = process.env.RELAYER_APP_SERVER_BINARY || (app.isPackaged
+const relayerAppServerBinary = app.isPackaged
   ? join(process.resourcesPath, "bin", "relayer-app-server")
-  : join(repositoryRoot, "target", "debug", "relayer-app-server"));
+  : resolve(process.env.RELAYER_APP_SERVER_BINARY || join(repositoryRoot, "target", "debug", "relayer-app-server"));
 const rendererDirectory = app.isPackaged
   ? join(process.resourcesPath, "renderer")
   : join(desktopDirectory, "renderer");
@@ -84,7 +84,7 @@ let shutdownPromise;
 let shutdownComplete = false;
 
 async function shutdownServices() {
-  shutdownPromise ??= Promise.allSettled([credentials.close(), productServer.close()]);
+  shutdownPromise ??= Promise.all([credentials.close(), productServer.close()]);
   await shutdownPromise;
 }
 
@@ -113,6 +113,10 @@ app.whenReady().then(async () => {
     beforeUpdateInstall: async () => {
       await shutdownServices();
       shutdownComplete = true;
+    },
+    onUpdateInstallFailure: () => {
+      app.relaunch();
+      app.exit(1);
     },
   });
   mainWindow = await createWindow(productSession);

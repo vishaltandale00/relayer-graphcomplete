@@ -16,6 +16,9 @@ function bindEvents() {
   };
   $("#scopeButton").onclick = () => $("#scopeMenu").classList.toggle("hidden");
   $("#createThread").onclick = createFirstThread;
+  $("#newThreadPrompt").oninput = () => {
+    $("#createThread").disabled = !$("#newThreadPrompt").value.trim();
+  };
   $("#newThreadPrompt").onkeydown = (event) => {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();

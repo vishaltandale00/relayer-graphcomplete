@@ -36,6 +36,8 @@ pub struct Interaction {
 pub struct CreateProject {
     pub path: String,
     pub name: Option<String>,
+    #[serde(default)]
+    pub reuse_existing: bool,
 }
 
 #[derive(Debug, Deserialize)]

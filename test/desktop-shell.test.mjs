@@ -43,6 +43,8 @@ describe("desktop skeleton", () => {
     const packageManifest = await readFile(new URL("../package.json", import.meta.url), "utf8");
     const desktopManifest = await readFile(new URL("../desktop/package.json", import.meta.url), "utf8");
     const packaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
+    const desktopWindow = await readFile(new URL("../desktop/main/window.mjs", import.meta.url), "utf8");
+    const desktopIpc = await readFile(new URL("../desktop/main/ipc/register-ipc.mjs", import.meta.url), "utf8");
     const threads = await readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8");
     const prd = await readFile(new URL("../docs/prd/index.html", import.meta.url), "utf8");
     const prdServer = await readFile(new URL("../docs/prd/server.mjs", import.meta.url), "utf8");
@@ -54,6 +56,7 @@ describe("desktop skeleton", () => {
     expect(html).toContain('id="collapseSidebar"');
     expect(html).toContain('id="scopeButton"');
     expect(html).toContain('id="scopeMenu"');
+    expect(html).toContain('id="createThread" title="Create thread and send" disabled');
     expect(html).toContain('id="disconnectCodex"');
     expect(html).toContain('id="updateChannel"');
     expect(html).toContain("relayer-logo");
@@ -65,6 +68,11 @@ describe("desktop skeleton", () => {
     expect(desktopMain).toContain("RelayerAppServerService");
     expect(desktopMain).toContain("productServer.start()");
     expect(desktopMain).toContain("productServer.close()");
+    expect(desktopMain).toContain("app.isPackaged");
+    expect(desktopWindow).toContain('window.webContents.on("will-navigate"');
+    expect(desktopWindow).toContain('window.webContents.on("will-redirect"');
+    expect(desktopWindow).toContain('setWindowOpenHandler(() => ({ action: "deny" }))');
+    expect(desktopIpc).toContain("onUpdateInstallFailure");
     expect(packageManifest).not.toContain("@openai/codex-sdk");
     expect(desktopManifest).not.toContain("prime-agent");
     expect(desktopManifest).not.toContain("@openai/codex-sdk");
@@ -80,6 +88,15 @@ describe("desktop skeleton", () => {
     expect(threads).not.toContain("/messages");
     expect(threads).not.toContain("EventSource");
     expect(prd).toContain('src="assets/product-walkthrough.html"');
+    expect(prd).toContain("App-server and persistence delivery checkpoint");
+    expect(prd).toContain('class="requirement-row status-verified"');
+    expect(prd).toContain('class="requirement-row status-open"');
+    expect(prd).toContain("APP-001-E1");
+    expect(prd).toContain("APP-001-E2");
+    expect(prd).toContain("APP-001-E3");
+    expect(prd).toContain('assets/evidence/app-server/thread-created.png');
+    expect(prd).toContain('assets/evidence/app-server/thread-reopened.png');
+    expect(prd).toContain('assets/evidence/app-server/packaged-startup.png');
     expect(prd).toContain('document: \'docs/prd/index.html\'');
     expect(prdServer).toContain('join(prdDirectory, "comments.json")');
     expect(packageManifest).not.toContain('"marked"');
@@ -154,6 +171,30 @@ describe("desktop skeleton", () => {
       });
       await expect(unavailable.start()).rejects.toThrow("could not start: spawn ENOENT");
       expect(failedChild.kill).toHaveBeenCalledWith("SIGTERM");
+
+      const remoteChild = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null,
+        signalCode: null,
+        killed: false,
+        kill: vi.fn(function kill() { this.killed = true; }),
+      });
+      const untrusted = new RelayerAppServerService({
+        userDataDirectory: directory,
+        binaryPath: "/test/bin/untrusted-server",
+        webDirectory: "/test/renderer",
+        spawnProcess: () => {
+          queueMicrotask(() => remoteChild.stdout.write(`${JSON.stringify({
+            ready: true,
+            origin: "https://example.test",
+            cookieName: "relayer_control",
+          })}\n`));
+          return remoteChild;
+        },
+      });
+      await expect(untrusted.start()).rejects.toThrow("must use an authenticated 127.0.0.1 origin");
+      expect(remoteChild.kill).toHaveBeenCalledWith("SIGTERM");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

@@ -13,14 +13,21 @@ pub enum StoreError {
     NotFound(String),
     #[error("invalid input: {0}")]
     Invalid(String),
+    #[error("project already exists: {0}")]
+    ProjectExists(String),
+    #[error("folder unavailable at {path}: {reason}")]
+    FolderUnavailable { path: String, reason: String },
     #[error("storage failed: {0}")]
     Storage(#[from] rusqlite::Error),
-    #[error("filesystem failed: {0}")]
-    Filesystem(#[from] std::io::Error),
 }
 
 pub struct ProductStore {
     connection: Connection,
+}
+
+pub struct ProjectWriteOutcome {
+    pub project: Project,
+    pub created: bool,
 }
 
 impl ProductStore {
@@ -84,11 +91,21 @@ impl ProductStore {
             .map_err(StoreError::from)
     }
 
-    pub fn create_project(&mut self, input: CreateProject) -> Result<Project, StoreError> {
+    pub fn create_project(
+        &mut self,
+        input: CreateProject,
+    ) -> Result<ProjectWriteOutcome, StoreError> {
         let path = canonical_directory(&input.path)?;
         let path_text = path.to_string_lossy().into_owned();
         if let Some(project) = self.project_by_path(&path_text)? {
-            return Ok(project);
+            return if input.reuse_existing {
+                Ok(ProjectWriteOutcome {
+                    project,
+                    created: false,
+                })
+            } else {
+                Err(StoreError::ProjectExists(project.id))
+            };
         }
         let name = input
             .name
@@ -107,7 +124,10 @@ impl ProductStore {
             "INSERT INTO projects(id,name,path,created_at,updated_at) VALUES (?1,?2,?3,?4,?4)",
             params![id, name, path_text, timestamp],
         )?;
-        self.get_project(&id)
+        Ok(ProjectWriteOutcome {
+            project: self.get_project(&id)?,
+            created: true,
+        })
     }
 
     pub fn get_project(&self, id: &str) -> Result<Project, StoreError> {
@@ -238,7 +258,11 @@ fn required<'a>(value: &'a str, name: &str) -> Result<&'a str, StoreError> {
 }
 
 fn canonical_directory(value: &str) -> Result<PathBuf, StoreError> {
-    let path = std::fs::canonicalize(required(value, "path")?)?;
+    let value = required(value, "path")?;
+    let path = std::fs::canonicalize(value).map_err(|error| StoreError::FolderUnavailable {
+        path: value.to_owned(),
+        reason: error.to_string(),
+    })?;
     if !path.is_dir() {
         return Err(StoreError::Invalid(format!(
             "project path is not a directory: {}",

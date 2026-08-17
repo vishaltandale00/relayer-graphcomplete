@@ -33,6 +33,25 @@ export async function loadThread(threadId) {
   await refreshState(threadId);
 }
 
+async function createOrReuseProject(selectedScope) {
+  const input = { path: selectedScope.path, name: selectedScope.label };
+  try {
+    return await request("/api/projects", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  } catch (error) {
+    if (error.code !== "project_exists" || !error.details?.existingProject) throw error;
+    const existing = error.details.existingProject;
+    const confirmed = window.confirm(`“${existing.name}” already uses this folder. Use the existing project?`);
+    if (!confirmed) throw new Error("Project selection was cancelled. Your draft is unchanged.");
+    return request("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ ...input, reuseExisting: true }),
+    });
+  }
+}
+
 export async function createFirstThread() {
   const input = $("#newThreadPrompt");
   const promptText = input.value.trim();
@@ -55,10 +74,7 @@ export async function createFirstThread() {
     }
     let projectId = selectedScope.projectId;
     if (selectedScope.kind === "folder") {
-      const project = await request("/api/projects", {
-        method: "POST",
-        body: JSON.stringify({ path: selectedScope.path, name: selectedScope.label }),
-      });
+      const project = await createOrReuseProject(selectedScope);
       projectId = project.id;
     }
     const thread = await request("/api/threads", {
@@ -75,7 +91,7 @@ export async function createFirstThread() {
   } catch (error) {
     toast(error.message);
   } finally {
-    $("#createThread").disabled = false;
+    $("#createThread").disabled = !input.value.trim();
   }
 }
 

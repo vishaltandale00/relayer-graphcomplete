@@ -139,8 +139,28 @@ async fn create_project(
     Json(input): Json<CreateProject>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     authorize(&state, &headers)?;
-    let project = lock(&state)?.create_project(input)?;
-    Ok((StatusCode::CREATED, Json(json!(project))))
+    let mut store = lock(&state)?;
+    let outcome = match store.create_project(input) {
+        Ok(outcome) => outcome,
+        Err(StoreError::ProjectExists(id)) => {
+            let project = store.get_project(&id)?;
+            return Err(ApiError(
+                StatusCode::CONFLICT,
+                json!({
+                    "code": "project_exists",
+                    "error": "This folder is already a Relayer project. Confirm before reusing it.",
+                    "existingProject": project,
+                }),
+            ));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let status = if outcome.created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((status, Json(json!(outcome.project))))
 }
 
 async fn list_threads(
@@ -255,7 +275,24 @@ impl From<StoreError> for ApiError {
             ),
             StoreError::Invalid(message) => Self(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                json!({ "error": message }),
+                json!({ "code": "invalid_input", "error": message }),
+            ),
+            StoreError::ProjectExists(project_id) => Self(
+                StatusCode::CONFLICT,
+                json!({
+                    "code": "project_exists",
+                    "error": "This folder is already a Relayer project.",
+                    "projectId": project_id,
+                }),
+            ),
+            StoreError::FolderUnavailable { path, reason } => Self(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({
+                    "code": "folder_unavailable",
+                    "error": "Relayer cannot access that folder. Choose it again or restore permission.",
+                    "path": path,
+                    "reason": reason,
+                }),
             ),
             other => Self::internal(&other.to_string()),
         }
@@ -313,6 +350,52 @@ mod tests {
                 serde_json::from_slice(&to_bytes(project.into_body(), usize::MAX).await.unwrap())
                     .unwrap();
 
+            let duplicate = app
+                .clone()
+                .oneshot(api_request(
+                    "POST",
+                    "/api/projects",
+                    Some(json!({ "path": project_folder })),
+                    true,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+            let duplicate: Value =
+                serde_json::from_slice(&to_bytes(duplicate.into_body(), usize::MAX).await.unwrap())
+                    .unwrap();
+            assert_eq!(duplicate["code"], "project_exists");
+            assert_eq!(duplicate["existingProject"]["id"], project["id"]);
+
+            let reused = app
+                .clone()
+                .oneshot(api_request(
+                    "POST",
+                    "/api/projects",
+                    Some(json!({ "path": project_folder, "reuseExisting": true })),
+                    true,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(reused.status(), StatusCode::OK);
+
+            let unavailable = app
+                .clone()
+                .oneshot(api_request(
+                    "POST",
+                    "/api/projects",
+                    Some(json!({ "path": root.join("missing") })),
+                    true,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(unavailable.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            let unavailable: Value = serde_json::from_slice(
+                &to_bytes(unavailable.into_body(), usize::MAX).await.unwrap(),
+            )
+            .unwrap();
+            assert_eq!(unavailable["code"], "folder_unavailable");
+
             let thread = app
                 .clone()
                 .oneshot(api_request(
@@ -328,6 +411,21 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(thread.status(), StatusCode::CREATED);
+
+            let standalone = app
+                .clone()
+                .oneshot(api_request(
+                    "POST",
+                    "/api/threads",
+                    Some(json!({
+                        "title": "Standalone thread",
+                        "initialMessage": "Keep this local"
+                    })),
+                    true,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(standalone.status(), StatusCode::CREATED);
         }
 
         let app = router(
@@ -335,6 +433,7 @@ mod tests {
             root.clone(),
         );
         let state = app
+            .clone()
             .oneshot(api_request("GET", "/api/state", None, true))
             .await
             .unwrap();
@@ -342,8 +441,40 @@ mod tests {
             serde_json::from_slice(&to_bytes(state.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert_eq!(state["projects"].as_array().unwrap().len(), 1);
-        assert_eq!(state["threads"].as_array().unwrap().len(), 1);
-        assert_eq!(state["nodes"][0]["summary"], "Map the project");
+        assert_eq!(state["threads"].as_array().unwrap().len(), 2);
+        assert!(state["threads"].as_array().unwrap().iter().any(|thread| {
+            thread["title"] == "Standalone thread" && thread["projectId"].is_null()
+        }));
+        for (title, expected_message) in [
+            ("Persist me", "Map the project"),
+            ("Standalone thread", "Keep this local"),
+        ] {
+            let thread_id = state["threads"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|thread| thread["title"] == title)
+                .unwrap()["id"]
+                .as_str()
+                .unwrap();
+            let interactions = app
+                .clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/threads/{thread_id}/interactions"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap();
+            let interactions: Value = serde_json::from_slice(
+                &to_bytes(interactions.into_body(), usize::MAX)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(interactions["interactions"][0]["text"], expected_message);
+        }
         assert_eq!(state["capabilities"]["graph"], false);
         assert_eq!(state["capabilities"]["harness"], false);
 

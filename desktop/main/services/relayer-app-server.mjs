@@ -4,6 +4,34 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
+export const RELAYER_CONTROL_COOKIE = "relayer_control";
+
+function validateReadyMessage(message) {
+  if (message?.ready !== true) return null;
+  if (message.cookieName !== RELAYER_CONTROL_COOKIE) {
+    throw new Error("Relayer app server returned an unexpected control cookie.");
+  }
+  let origin;
+  try {
+    origin = new URL(message.origin);
+  } catch {
+    throw new Error("Relayer app server returned an invalid origin.");
+  }
+  if (
+    origin.protocol !== "http:"
+    || origin.hostname !== "127.0.0.1"
+    || !origin.port
+    || origin.username
+    || origin.password
+    || origin.pathname !== "/"
+    || origin.search
+    || origin.hash
+  ) {
+    throw new Error("Relayer app server must use an authenticated 127.0.0.1 origin.");
+  }
+  return { origin: origin.origin, cookieName: message.cookieName };
+}
+
 export class RelayerAppServerService {
   constructor({
     userDataDirectory,
@@ -112,14 +140,21 @@ export class RelayerAppServerService {
         reject(new Error(`Relayer app server could not start: ${error.message}`));
       };
       const onLine = (line) => {
+        let message;
         try {
-          const message = JSON.parse(line);
-          if (message.ready === true && typeof message.origin === "string" && typeof message.cookieName === "string") {
-            cleanup();
-            resolve(message);
-          }
+          message = JSON.parse(line);
         } catch {
           // Non-protocol output is ignored until the readiness timeout.
+          return;
+        }
+        try {
+          const ready = validateReadyMessage(message);
+          if (!ready) return;
+          cleanup();
+          resolve(ready);
+        } catch (error) {
+          cleanup();
+          reject(error);
         }
       };
       const cleanup = () => {
