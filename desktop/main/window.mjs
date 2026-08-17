@@ -1,13 +1,7 @@
 import { join } from "node:path";
 
-export function createWindowFactory({ BrowserWindow, app, desktopDirectory, getAppearance, updater }) {
-  const rendererPath = (relativePath) => join(
-    app.isPackaged ? app.getAppPath() : desktopDirectory,
-    "renderer",
-    relativePath,
-  );
-
-  return async function createWindow() {
+export function createWindowFactory({ BrowserWindow, desktopDirectory, getAppearance, updater }) {
+  return async function createWindow(productSession) {
     const window = new BrowserWindow({
       width: 1420,
       height: 900,
@@ -22,12 +16,18 @@ export function createWindowFactory({ BrowserWindow, app, desktopDirectory, getA
         sandbox: true,
       },
     });
-    if (!app.isPackaged) {
-      window.webContents.on("did-fail-load", (_event, code, description) => {
-        console.error(`Renderer load failed (${code}): ${description}`);
-      });
-    }
-    await window.loadFile(rendererPath("index.html"));
+    window.webContents.on("did-fail-load", (_event, code, description) => {
+      console.error(`Renderer load failed (${code}): ${description}`);
+    });
+    await window.webContents.session.cookies.set({
+      url: productSession.origin,
+      name: productSession.cookie.name,
+      value: productSession.cookie.value,
+      httpOnly: true,
+      sameSite: "strict",
+      secure: false,
+    });
+    await window.loadURL(productSession.origin);
     if (updater.status().phase !== "development") {
       setTimeout(() => { void updater.check().catch(() => undefined); }, 5_000);
     }

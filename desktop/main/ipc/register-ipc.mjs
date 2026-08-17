@@ -11,6 +11,7 @@ export function registerDesktopIpc({
   getWindow,
   getAppearance,
   setAppearance,
+  beforeUpdateInstall = async () => {},
 }) {
   const normalizeAppearance = (value) => value === "light" ? "light" : "dark";
 
@@ -42,6 +43,7 @@ export function registerDesktopIpc({
   ipcMain.handle("relayer:update-download", () => updater.download());
   ipcMain.handle("relayer:update-install", async () => {
     if (updater.status().phase !== "ready") throw new Error("No verified update is ready to install.");
+    await beforeUpdateInstall();
     updater.install();
     return { installing: true };
   });

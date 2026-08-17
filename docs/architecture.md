@@ -15,6 +15,19 @@ Product host
     -> product persistence and activation
 ```
 
+## Working desktop product path
+
+```text
+Electron desktop
+    -> Rust Relayer app server
+        -> product SQLite
+        -> desktop renderer
+```
+
+Electron owns native windows, provider setup, updates, and the Rust child-process lifecycle. The Rust app server owns durable project, thread, and interaction records and serves the renderer over a random loopback port. The renderer uses the app server as its product API.
+
+This path deliberately ends before graph or harness execution. Those capabilities are reported as unavailable until their product contracts are integrated.
+
 ## Required invariants
 
 1. Every scope has one content owner.

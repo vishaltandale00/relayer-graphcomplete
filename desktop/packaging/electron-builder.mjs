@@ -6,6 +6,7 @@ import {
 } from "../release/contract.mjs";
 
 const desktopRoot = resolve(import.meta.dirname, "..");
+const repositoryRoot = resolve(desktopRoot, "..");
 
 export function createDesktopBuilderConfig(contract) {
   const release = contract.release;
@@ -31,7 +32,11 @@ export function createDesktopBuilderConfig(contract) {
       relayerAppleTeamId: contract.appleTeamId,
       relayerMinimumMacOSVersion: contract.minimumMacOSVersion,
     },
-    files: ["**/*", "!dist/**/*", "!packaging/**/*", "!release/**/*"],
+    files: ["**/*", "!dist/**/*", "!packaging/**/*", "!release/**/*", "!renderer/**/*"],
+    extraResources: [
+      { from: resolve(repositoryRoot, "target/release/relayer-app-server"), to: "bin/relayer-app-server" },
+      { from: resolve(desktopRoot, "renderer"), to: "renderer" },
+    ],
     artifactName: `${release ? "Relayer" : "Relayer-DEV"}-\${version}-mac-\${arch}.\${ext}`,
     afterSign: release ? "desktop/release/verify-macos-app.mjs" : undefined,
     mac: {

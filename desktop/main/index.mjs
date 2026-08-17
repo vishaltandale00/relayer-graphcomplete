@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { CodexCredentialAdapter } from "./credentials/codex-credential-adapter.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
+import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
 import { createDesktopUpdater } from "./services/updater.mjs";
 import { createWindowFactory } from "./window.mjs";
@@ -35,10 +36,21 @@ const updateBaseUrl = packagedRelease?.updateBaseUrl || (
 const bundledCodexBinary = app.isPackaged
   ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex")
   : join(repositoryRoot, "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex");
+const relayerAppServerBinary = process.env.RELAYER_APP_SERVER_BINARY || (app.isPackaged
+  ? join(process.resourcesPath, "bin", "relayer-app-server")
+  : join(repositoryRoot, "target", "debug", "relayer-app-server"));
+const rendererDirectory = app.isPackaged
+  ? join(process.resourcesPath, "renderer")
+  : join(desktopDirectory, "renderer");
 
 let mainWindow;
 let appearance = "dark";
 const settings = createSettingsStore(userDataPath);
+const productServer = new RelayerAppServerService({
+  userDataDirectory: userDataPath,
+  binaryPath: relayerAppServerBinary,
+  webDirectory: rendererDirectory,
+});
 
 const credentials = new CodexCredentialAdapter({
   environment: { ...process.env, CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: bundledCodexBinary },
@@ -63,11 +75,18 @@ const updater = createDesktopUpdater({
 
 const createWindow = createWindowFactory({
   BrowserWindow,
-  app,
   desktopDirectory,
   getAppearance: () => appearance,
   updater,
 });
+
+let shutdownPromise;
+let shutdownComplete = false;
+
+async function shutdownServices() {
+  shutdownPromise ??= Promise.allSettled([credentials.close(), productServer.close()]);
+  await shutdownPromise;
+}
 
 app.whenReady().then(async () => {
   await mkdir(codexHome, { recursive: true });
@@ -78,6 +97,7 @@ app.whenReady().then(async () => {
     ? saved.updateChannel
     : packagedRelease?.channel || "stable";
   if (channel === "preview") updater.setChannel("preview");
+  const productSession = await productServer.start();
 
   registerDesktopIpc({
     ipcMain,
@@ -90,16 +110,31 @@ app.whenReady().then(async () => {
     getWindow: () => mainWindow,
     getAppearance: () => appearance,
     setAppearance: (value) => { appearance = value; },
+    beforeUpdateInstall: async () => {
+      await shutdownServices();
+      shutdownComplete = true;
+    },
   });
-  mainWindow = await createWindow();
+  mainWindow = await createWindow(productSession);
   mainWindow.on("closed", () => { mainWindow = undefined; });
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = await createWindow();
+      mainWindow = await createWindow(await productServer.start());
       mainWindow.on("closed", () => { mainWindow = undefined; });
     }
   });
+}).catch((error) => {
+  console.error("Relayer startup failed:", error);
+  dialog.showErrorBox("Relayer could not start", error.message);
+  app.quit();
 });
 
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("before-quit", () => { void credentials.close(); });
+app.on("before-quit", (event) => {
+  if (shutdownComplete) return;
+  event.preventDefault();
+  void shutdownServices().finally(() => {
+    shutdownComplete = true;
+    app.quit();
+  });
+});

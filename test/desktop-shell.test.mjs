@@ -7,6 +7,7 @@ import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-credential-adapter.mjs";
 import { CredentialAdapter } from "../desktop/main/credentials/credential-adapter.mjs";
+import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
 import { createDesktopUpdater } from "../desktop/main/services/updater.mjs";
 import {
@@ -42,6 +43,7 @@ describe("desktop skeleton", () => {
     const packageManifest = await readFile(new URL("../package.json", import.meta.url), "utf8");
     const desktopManifest = await readFile(new URL("../desktop/package.json", import.meta.url), "utf8");
     const packaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
+    const threads = await readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8");
     const prd = await readFile(new URL("../docs/prd/index.html", import.meta.url), "utf8");
     const prdServer = await readFile(new URL("../docs/prd/server.mjs", import.meta.url), "utf8");
     expect(html).toContain("Connect a provider");
@@ -60,7 +62,9 @@ describe("desktop skeleton", () => {
     expect(html).not.toContain("<dialog");
     expect(html.toLowerCase()).not.toContain("harness selector");
     expect(desktopMain).not.toContain("PrimeAgentThreadRunner");
-    expect(desktopMain).not.toContain("RelayerAppServer");
+    expect(desktopMain).toContain("RelayerAppServerService");
+    expect(desktopMain).toContain("productServer.start()");
+    expect(desktopMain).toContain("productServer.close()");
     expect(packageManifest).not.toContain("@openai/codex-sdk");
     expect(desktopManifest).not.toContain("prime-agent");
     expect(desktopManifest).not.toContain("@openai/codex-sdk");
@@ -71,10 +75,88 @@ describe("desktop skeleton", () => {
     expect(packageManifest).toContain("desktop/packaging/electron-builder.mjs");
     expect(packaging).toContain('"macos/entitlements.mac.plist"');
     expect(packaging).toContain('"!packaging/**/*"');
+    expect(packaging).toContain('"target/release/relayer-app-server"');
+    expect(packaging).toContain('to: "renderer"');
+    expect(threads).not.toContain("/messages");
+    expect(threads).not.toContain("EventSource");
     expect(prd).toContain('src="assets/product-walkthrough.html"');
     expect(prd).toContain('document: \'docs/prd/index.html\'');
     expect(prdServer).toContain('join(prdDirectory, "comments.json")');
     expect(packageManifest).not.toContain('"marked"');
+  });
+
+  it("starts and stops the Rust product server with an isolated profile and private session", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-app-server-service-"));
+    const invocations = [];
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+      killed: false,
+    });
+    child.kill = vi.fn((signal) => {
+      child.killed = true;
+      child.signalCode = signal;
+      queueMicrotask(() => child.emit("exit", null, signal));
+      return true;
+    });
+    const service = new RelayerAppServerService({
+      userDataDirectory: directory,
+      binaryPath: "/test/bin/relayer-app-server",
+      webDirectory: "/test/renderer",
+      spawnProcess: (binary, args, options) => {
+        invocations.push({ binary, args, options });
+        queueMicrotask(() => child.stdout.write(`${JSON.stringify({
+          ready: true,
+          origin: "http://127.0.0.1:43123",
+          cookieName: "relayer_control",
+        })}\n`));
+        return child;
+      },
+    });
+
+    try {
+      const session = await service.start();
+      expect(session).toMatchObject({
+        origin: "http://127.0.0.1:43123",
+        cookie: { name: "relayer_control" },
+      });
+      expect(session.cookie.value).toMatch(/^[a-f0-9]{64}$/);
+      expect(invocations).toHaveLength(1);
+      expect(invocations[0].binary).toBe("/test/bin/relayer-app-server");
+      expect(invocations[0].args).toEqual([
+        "--data-dir", join(directory, "product-data"),
+        "--web-dir", "/test/renderer",
+        "--control-token", session.cookie.value,
+        "--port", "0",
+      ]);
+      expect(await service.start()).toBe(session);
+      await service.close();
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+
+      const failedChild = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null,
+        signalCode: null,
+        killed: false,
+        kill: vi.fn(function kill() { this.killed = true; }),
+      });
+      const unavailable = new RelayerAppServerService({
+        userDataDirectory: directory,
+        binaryPath: "/missing/relayer-app-server",
+        webDirectory: "/test/renderer",
+        spawnProcess: () => {
+          queueMicrotask(() => failedChild.emit("error", new Error("spawn ENOENT")));
+          return failedChild;
+        },
+      });
+      await expect(unavailable.start()).rejects.toThrow("could not start: spawn ENOENT");
+      expect(failedChild.kill).toHaveBeenCalledWith("SIGTERM");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("covers the provider authorization lifecycle and its retryable edge cases in one scenario", async () => {

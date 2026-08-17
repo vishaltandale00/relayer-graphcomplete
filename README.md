@@ -32,16 +32,16 @@ The intended recursive loop is:
 
 See [Architecture](docs/architecture.md) and [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
 
-## Desktop Slice 1
+## Relayer Desktop
 
-The first Relayer Desktop slice is an Electron shell for Codex provider setup, the New Thread entry surface, full-page Settings, appearance, folder selection, and the initial local interaction view. Agent execution and graph output are intentionally not connected in this slice.
+Relayer Desktop is an Electron application backed by a local Rust app server and SQLite product database. The current product path persists projects, threads, and their user interactions. Codex provider setup remains an Electron-owned service. Agent execution and graph output are intentionally not connected.
 
 ```sh
 npm install
 npm run desktop:dev
 ```
 
-Build an unsigned Apple Silicon development application with:
+Build an unsigned Apple Silicon development application, including the Rust server, with:
 
 ```sh
 npm run desktop:pack

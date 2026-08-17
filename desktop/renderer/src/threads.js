@@ -1,11 +1,9 @@
-import { apiUrl, request } from "./api.js";
+import { request } from "./api.js";
 import { renderThread } from "./graph.js";
 import { renderScopeMenu, renderSidebar, setMainView } from "./navigation.js";
 import { appState, productApiAvailable, viewState } from "./state.js";
 import { $, threadTitle, toast } from "./ui.js";
 import { addLocalThread } from "./thread-model.js";
-
-let eventSource;
 
 export async function refreshState(threadId = viewState.currentThreadId) {
   if (!productApiAvailable) {
@@ -72,10 +70,6 @@ export async function createFirstThread() {
       }),
     });
     viewState.currentThreadId = thread.id;
-    await request(`/api/threads/${encodeURIComponent(thread.id)}/messages`, {
-      method: "POST",
-      body: JSON.stringify({ content: promptText, selectedNodeIds: [] }),
-    });
     input.value = "";
     await loadThread(thread.id);
   } catch (error) {
@@ -86,24 +80,5 @@ export async function createFirstThread() {
 }
 
 export function connectEvents() {
-  if (!productApiAvailable) return;
-  eventSource?.close();
-  eventSource = new EventSource(apiUrl("/api/events"));
-  const productEvents = new Set([
-    "project.created",
-    "thread.created",
-    "turn.started",
-    "turn.submitted",
-    "turn.accepted",
-    "turn.stopped",
-    "turn.failed",
-    "turn.cancelled",
-  ]);
-  eventSource.onmessage = (event) => {
-    try {
-      const message = JSON.parse(event.data);
-      if (message.threadId && message.threadId !== viewState.currentThreadId) return;
-      if (productEvents.has(message.type)) void refreshState(viewState.currentThreadId);
-    } catch {}
-  };
+  // Live harness events are intentionally outside this product-persistence slice.
 }
