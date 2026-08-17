@@ -20,6 +20,14 @@ import {
   writeDesktopReleaseEvidence,
 } from "../desktop/release/artifacts.mjs";
 import { finalizeDesktopUpdateArtifact } from "../desktop/release/finalize-update-artifact.mjs";
+import {
+  buildPutObjectArgs,
+  classifyPreviewPointer,
+  createPreviewPublicationPlan,
+  preparePreviewManifest,
+  validatePreviewCandidate,
+  validatePreviewPublicationProvenance,
+} from "../desktop/release/publish-preview.mjs";
 import { addLocalThread, interactionForThread, responseNodesForThread } from "../desktop/renderer/src/thread-model.js";
 
 describe("desktop skeleton", () => {
@@ -182,6 +190,10 @@ describe("desktop skeleton", () => {
   });
 
   it("enforces one signed desktop release contract and seals its candidate artifacts", async () => {
+    const releaseWorkflow = await readFile(new URL("../.github/workflows/desktop-signed-preview.yml", import.meta.url), "utf8");
+    expect(releaseWorkflow).toContain('if: startsWith(github.ref, \'refs/tags/desktop-v\')');
+    expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main');
+    expect(releaseWorkflow).toContain("environment:\n      name: desktop-update-preview");
     const releaseEnvironment = {
       RELAYER_DESKTOP_RELEASE: "1",
       RELAYER_DESKTOP_CHANNEL: "preview",
@@ -297,6 +309,125 @@ describe("desktop skeleton", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("gates Preview publication on one immutable candidate and one monotonic pointer", () => {
+    const version = "0.2.0";
+    const sourceCommit = "b".repeat(40);
+    const evidenceFor = (name, content) => ({
+      name,
+      size: Buffer.byteLength(content),
+      sha256: createHash("sha256").update(content).digest("hex"),
+      sha512: createHash("sha512").update(content).digest("base64"),
+    });
+    const prefix = `Relayer-${version}-mac-arm64`;
+    const dmg = evidenceFor(`${prefix}.dmg`, "notarized-dmg");
+    const zip = evidenceFor(`${prefix}.zip`, "notarized-update-zip");
+    const dmgBlockmap = evidenceFor(`${dmg.name}.blockmap`, "dmg-blockmap");
+    const zipBlockmap = evidenceFor(`${zip.name}.blockmap`, "zip-blockmap");
+    const releaseReceipt = {
+      schemaVersion: 1,
+      product: "Relayer",
+      appId: DESKTOP_RELEASE.productionAppId,
+      version,
+      architecture: DESKTOP_RELEASE.architecture,
+      minimumMacOSVersion: DESKTOP_RELEASE.minimumMacOSVersion,
+      channel: "preview",
+      manifest: "beta-mac.yml",
+      updateBaseUrl: DESKTOP_RELEASE.updateBaseUrl,
+      sourceCommit,
+      appleTeamId: DESKTOP_RELEASE.appleTeamId,
+      artifacts: [dmg, zip],
+    };
+    const checksumText = `${dmg.sha256}  ${dmg.name}\n${zip.sha256}  ${zip.name}\n`;
+    const evidence = [
+      dmg,
+      dmgBlockmap,
+      zip,
+      zipBlockmap,
+      evidenceFor(`${prefix}-SHA256SUMS.txt`, checksumText),
+      evidenceFor(`${prefix}-RELEASE.json`, JSON.stringify(releaseReceipt)),
+    ];
+
+    expect(validatePreviewPublicationProvenance({
+      GITHUB_SHA: sourceCommit,
+      GITHUB_REF_NAME: `desktop-v${version}`,
+      GITHUB_RUN_ID: "123",
+      GITHUB_RUN_ATTEMPT: "2",
+    }, version)).toEqual({ sourceCommit, workflowRunId: "123", workflowRunAttempt: "2" });
+    expect(() => validatePreviewPublicationProvenance({
+      GITHUB_SHA: sourceCommit,
+      GITHUB_REF_NAME: "desktop-v0.2.1",
+      GITHUB_RUN_ID: "123",
+      GITHUB_RUN_ATTEMPT: "2",
+    }, version)).toThrow(`desktop-v${version}`);
+
+    expect(() => validatePreviewCandidate({
+      releaseReceipt,
+      checksumText,
+      version,
+      sourceCommit,
+      artifactEvidence: evidence,
+    })).not.toThrow();
+    expect(() => validatePreviewCandidate({
+      releaseReceipt,
+      checksumText: checksumText.replace(dmg.sha256, "0".repeat(64)),
+      version,
+      sourceCommit,
+      artifactEvidence: evidence,
+    })).toThrow("checksum manifest");
+
+    const manifestText = [
+      `version: ${version}`,
+      "files:",
+      `  - url: ${zip.name}`,
+      `    sha512: ${zip.sha512}`,
+      `    size: ${zip.size}`,
+      `    blockMapSize: ${zipBlockmap.size}`,
+      `  - url: ${dmg.name}`,
+      `    sha512: ${dmg.sha512}`,
+      `    size: ${dmg.size}`,
+      `    blockMapSize: ${dmgBlockmap.size}`,
+      `path: ${zip.name}`,
+      `sha512: ${zip.sha512}`,
+      "",
+    ].join("\n");
+    const preparedManifest = preparePreviewManifest({ manifestText, version, artifactEvidence: evidence });
+    expect(preparedManifest).toContain(`releases/${version}/${zip.name}`);
+    expect(preparedManifest).toContain(`releases/${version}/${dmg.name}`);
+    expect(createPreviewPublicationPlan({ version, evidence })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: zip.name, key: `desktop/macos/arm64/releases/${version}/${zip.name}` }),
+      expect.objectContaining({ name: dmg.name, key: `desktop/macos/arm64/releases/${version}/${dmg.name}` }),
+    ]));
+    expect(buildPutObjectArgs({
+      bucket: "updates",
+      key: `desktop/macos/arm64/releases/${version}/${zip.name}`,
+      filePath: `/tmp/${zip.name}`,
+      evidence: zip,
+      ifNoneMatch: true,
+      cacheControl: "immutable",
+      sourceCommit,
+    })).toEqual(expect.arrayContaining(["--if-none-match", "*", "--checksum-sha256"]));
+
+    expect(classifyPreviewPointer({ version, manifestText: preparedManifest })).toEqual({ recovery: false });
+    expect(classifyPreviewPointer({
+      currentVersion: version,
+      currentContent: preparedManifest,
+      version,
+      manifestText: preparedManifest,
+    })).toEqual({ recovery: true });
+    expect(() => classifyPreviewPointer({
+      currentVersion: version,
+      currentContent: "different bytes",
+      version,
+      manifestText: preparedManifest,
+    })).toThrow("cannot be replaced");
+    expect(() => classifyPreviewPointer({
+      currentVersion: "0.2.1",
+      currentContent: "newer",
+      version,
+      manifestText: preparedManifest,
+    })).toThrow("must be newer");
   });
 
   it("keeps settings writes atomic and local thread graph state scoped to its owning thread", async () => {

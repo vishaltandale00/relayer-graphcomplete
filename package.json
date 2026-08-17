@@ -31,7 +31,8 @@
     "desktop:pack": "electron-builder --config desktop/packaging/electron-builder.mjs --dir --arm64",
     "desktop:dist": "RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs stable",
     "desktop:dist:preview": "RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs preview",
-    "desktop:release:verify": "node desktop/release/verify-artifacts.mjs"
+    "desktop:release:verify": "node desktop/release/verify-artifacts.mjs",
+    "desktop:release:publish-preview": "node desktop/release/publish-preview.mjs"
   },
   "dependencies": {
     "prime-agent": "https://github.com/PrimeIntellect-ai/prime-agent/releases/download/v0.7.0/prime-agent-0.7.0.tgz"

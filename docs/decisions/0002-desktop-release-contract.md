@@ -12,6 +12,8 @@ Every signed candidate is built from a clean Git commit and includes its source 
 
 Unsigned artifacts are never published. Preview publication writes immutable versioned artifacts before `beta-mac.yml`. Stable promotion reuses the exact verified Preview artifact and changes only `latest-mac.yml`; it never rebuilds or re-signs the candidate.
 
+The signed-candidate workflow may be run manually from `main` without changing the feed. Preview publication requires a matching `desktop-vX.Y.Z` tag on a commit contained by `origin/main`, the protected `desktop-update-preview` GitHub environment, and short-lived AWS credentials obtained through GitHub OIDC. The publisher accepts exactly one sealed artifact set, rejects a downgrade or same-version byte replacement, verifies immutable public bytes before moving the pointer, and uses conditional S3 writes so concurrent publishers cannot silently win. A retry may reuse only byte-identical objects and the original immutable publication receipt.
+
 ## Consequences
 
 - The original `0.1.0` Relayer build and the new desktop share product continuity; `0.2.0` is the first new signed seed and `0.2.1` is the first update proof.
@@ -19,3 +21,4 @@ Unsigned artifacts are never published. Preview publication writes immutable ver
 - A Preview user cannot downgrade to an older Stable version. Stable promotion therefore follows a successful Preview canary and uses monotonically increasing numeric versions.
 - Intel and macOS 12-or-older support require separate release decisions and validation.
 - The updater UI, publication pipeline, and rollback tooling consume this contract; they do not redefine release identity or channel semantics.
+- A tag is publication authority, not merely a version label. Deleting or recreating a tag cannot overwrite immutable artifacts for that version.
