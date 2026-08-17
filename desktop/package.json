@@ -1,0 +1,14 @@
+{
+  "name": "relayer-desktop",
+  "version": "0.0.0",
+  "description": "Local-first Relayer desktop application.",
+  "author": "Relayer",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "main": "main/index.mjs",
+  "dependencies": {
+    "@openai/codex": "0.147.0",
+    "electron-updater": "6.8.9"
+  }
+}

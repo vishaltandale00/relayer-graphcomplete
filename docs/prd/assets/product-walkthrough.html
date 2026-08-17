@@ -1,0 +1,2052 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Relayer Product Walkthrough</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Relayer Product Walkthrough" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;Relayer Product Walkthrough&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(
+    --background,
+    var(--color-background-primary, light-dark(rgb(255 255 255), rgb(24 24 24)))
+  ) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --color-background-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --card: color-mix(in oklab, var(--foreground) 5%, var(--background));
+  --card-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --popover: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255), rgb(45 45 45))
+  );
+  --popover-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --primary: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --primary-foreground: var(
+    --color-text-inverse,
+    light-dark(rgb(255 255 255), rgb(13 13 13))
+  );
+  --secondary: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%))
+  );
+  --secondary-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: var(
+    --color-text-secondary,
+    light-dark(rgb(26 28 31 / 49.4%), rgb(255 255 255 / 49.8%))
+  );
+  --accent: var(
+    --color-background-info,
+    light-dark(rgb(229 242 255), rgb(13 39 63))
+  );
+  --accent-foreground: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --destructive: var(
+    --color-text-warning,
+    light-dark(rgb(226 85 7), rgb(255 133 73))
+  );
+  --border: var(
+    --color-border-secondary,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+  --input: var(
+    --color-border-primary,
+    light-dark(
+      rgb(26 28 31 / 11.8%),
+      color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+    )
+  );
+  --ring: var(
+    --color-ring-primary,
+    light-dark(rgb(51 156 255), rgb(131 195 255 / 76%))
+  );
+  --font-size-base: var(--font-text-md-size, 14px);
+  --blue: light-dark(rgb(51 156 255), rgb(51 156 255));
+  --orange: light-dark(rgb(226 85 7), rgb(251 106 34));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+  --red: light-dark(rgb(224 46 42), rgb(255 103 100));
+  --purple: light-dark(rgb(146 79 247), rgb(173 123 249));
+  --yellow: light-dark(rgb(255 195 0), rgb(255 210 64));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: var(--border-radius-lg, 12.5px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
+  --color-background-primary: var(
+    --background,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --color-text-primary: var(
+    --foreground,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --color-border-secondary: var(
+    --border,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive &gt; .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align=&quot;right&quot;]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align=&quot;center&quot;]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card, .progress) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress {
+  display: flex;
+  height: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+}
+
+.progress-bar {
+  height: 100%;
+  flex-shrink: 0;
+  border: 0;
+  background: var(--viz-series-1);
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+  [aria-pressed=&quot;true&quot;],
+  [aria-selected=&quot;true&quot;],
+  .is-selected
+) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+/* Model-authored chart rules can otherwise stretch icons after these styles load. */
+svg.lucide {
+  display: block;
+  width: 16px !important;
+  height: 16px !important;
+  flex: none;
+  margin: 0 !important;
+  stroke-width: 1.6;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id=&quot;relayer-product-walkthrough&quot;&gt;
+  &lt;style&gt;
+    #relayer-product-walkthrough {
+      color-scheme: light;
+      width: 100%;
+      color: light-dark(#172033, #eef2ff);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;
+    }
+    #relayer-product-walkthrough * { box-sizing: border-box; }
+    #relayer-product-walkthrough .walkthrough-nav {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 0 0 12px;
+    }
+    #relayer-product-walkthrough .walkthrough-nav button {
+      flex: 0 0 auto;
+      border: 1px solid light-dark(#d9deea, #343b50);
+      border-radius: 7px;
+      background: light-dark(#ffffff, #171b26);
+      color: light-dark(#525d73, #aeb7ca);
+      font: inherit;
+      font-size: 12px;
+      font-weight: 650;
+      padding: 7px 10px;
+      cursor: pointer;
+    }
+    #relayer-product-walkthrough .walkthrough-nav button[aria-pressed=&quot;true&quot;] {
+      background: light-dark(#172033, #f0f3ff);
+      border-color: light-dark(#172033, #f0f3ff);
+      color: light-dark(#ffffff, #161923);
+    }
+    #relayer-product-walkthrough .walkthrough-nav .annotation-toggle { margin-left: auto; }
+    #relayer-product-walkthrough .product-window {
+      width: 100%;
+      min-width: 0;
+      height: 650px;
+      overflow: hidden;
+      position: relative;
+      border: 1px solid light-dark(#cfd5e2, #363d50);
+      border-radius: 12px;
+      background: light-dark(#f5f6f8, #0f1219);
+      box-shadow: 0 16px 45px rgba(12, 18, 31, 0.16);
+    }
+    #relayer-product-walkthrough .screen { display: none; width: 100%; height: 100%; }
+    #relayer-product-walkthrough .screen.active { display: block; }
+    #relayer-product-walkthrough .titlebar {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      background: light-dark(#eceef2, #181c25);
+      border-bottom: 1px solid light-dark(#d8dce5, #2a3040);
+      font-size: 11px;
+      font-weight: 650;
+      color: light-dark(#697287, #9da6ba);
+    }
+    #relayer-product-walkthrough .traffic { position: absolute; left: 13px; display: flex; gap: 6px; }
+    #relayer-product-walkthrough .traffic i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+    #relayer-product-walkthrough .traffic i:nth-child(1) { background: #ff5f57; }
+    #relayer-product-walkthrough .traffic i:nth-child(2) { background: #febc2e; }
+    #relayer-product-walkthrough .traffic i:nth-child(3) { background: #28c840; }
+    #relayer-product-walkthrough .app-body { height: calc(100% - 34px); display: flex; }
+    #relayer-product-walkthrough .sidebar {
+      width: 220px;
+      flex: 0 0 220px;
+      background: #ffffff;
+      border-right: 1px solid light-dark(#d9dde6, #2b3040);
+      padding: 12px 10px 58px;
+      position: relative;
+    }
+    #relayer-product-walkthrough .brand { display: flex; align-items: center; gap: 8px; padding: 4px 5px 13px; font-weight: 760; font-size: 13px; }
+    #relayer-product-walkthrough .brand-mark { width: 19px; height: 19px; border-radius: 5px; background: #3182ce; color: #fff; display: grid; place-items: center; font-size: 10px; }
+    #relayer-product-walkthrough .new-thread { width: 100%; border: 1px solid light-dark(#cfd5e0, #373e50); background: light-dark(#fff, #202633); color: inherit; border-radius: 7px; padding: 8px 10px; font: inherit; font-size: 12px; text-align: left; }
+    #relayer-product-walkthrough .section-label { margin: 16px 7px 7px; font-size: 9px; font-weight: 800; color: light-dark(#8790a1, #737d92); letter-spacing: .09em; text-transform: uppercase; }
+    #relayer-product-walkthrough .project-row, #relayer-product-walkthrough .thread-row { display: flex; align-items: center; gap: 7px; min-height: 28px; border-radius: 6px; padding: 5px 7px; font-size: 11px; color: light-dark(#455066, #abb4c7); }
+    #relayer-product-walkthrough .project-row { font-weight: 720; color: light-dark(#283349, #dbe2f1); }
+    #relayer-product-walkthrough .thread-row.active { background: light-dark(#dfe3eb, #292f3e); color: light-dark(#172033, #fff); }
+    #relayer-product-walkthrough .thread-row.child { margin-left: 13px; border-left: 1px solid light-dark(#c8ceda, #3c4457); border-radius: 0 6px 6px 0; }
+    #relayer-product-walkthrough .thread-row.deep { margin-left: 27px; }
+    #relayer-product-walkthrough .dot { width: 6px; height: 6px; border-radius: 50%; background: #3182ce; flex: 0 0 auto; }
+    #relayer-product-walkthrough .app-footer { position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; align-items: center; justify-content: space-between; padding: 8px 2px 0; border-top: 1px solid #e1e4ea; }
+    #relayer-product-walkthrough .footer-icon { width: 27px; height: 27px; padding: 0; display: grid; place-items: center; border: 1px solid #d4dae4; border-radius: 6px; background: #ffffff; color: #667185; font: inherit; font-size: 12px; }
+    #relayer-product-walkthrough .footer-icon.update-ready { border-radius: 50%; border-color: #60a5fa; background: #dbeafe; color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+    #relayer-product-walkthrough .update-popover { position: absolute; left: 12px; bottom: 53px; z-index: 14; width: 196px; padding: 11px; border: 1px solid #cfd6e0; border-radius: 8px; background: #ffffff; box-shadow: 0 12px 30px rgba(15,23,42,.18); }
+    #relayer-product-walkthrough .update-popover strong { display: block; color: #263147; font-size: 10px; }
+    #relayer-product-walkthrough .update-popover p { margin: 5px 0 8px; color: #6b7587; font-size: 8px; line-height: 1.4; }
+    #relayer-product-walkthrough .update-actions { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+    #relayer-product-walkthrough .update-actions button { border: 0; background: transparent; color: #667185; font: inherit; font-size: 8px; }
+    #relayer-product-walkthrough .update-actions .download-update { padding: 6px 8px; border-radius: 5px; background: #111827; color: #ffffff; font-weight: 720; }
+    #relayer-product-walkthrough .main { flex: 1; min-width: 0; background: #ffffff; position: relative; }
+    #relayer-product-walkthrough .main-header { height: 48px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid light-dark(#e1e4ea, #292f3d); padding: 0 16px; }
+    #relayer-product-walkthrough .thread-title { font-size: 12px; font-weight: 760; }
+    #relayer-product-walkthrough .crumb { color: light-dark(#7b8495, #8e98ac); font-size: 10px; margin-top: 2px; }
+    #relayer-product-walkthrough .graph-area { position: absolute; inset: 48px 0 82px; overflow: hidden; background: #ffffff; }
+    #relayer-product-walkthrough .has-inspector .graph-area { right: 250px; }
+    #relayer-product-walkthrough .graph-card { position: absolute; width: 128px; height: 58px; padding: 2px 4px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 5px; border: 0; background: transparent; color: inherit; font: inherit; z-index: 3; transform: translate(-50%, -50%); cursor: grab; touch-action: none; user-select: none; }
+    #relayer-product-walkthrough .graph-card.dragging { cursor: grabbing; z-index: 6; }
+    #relayer-product-walkthrough .graph-card.interaction { width: 190px; }
+    #relayer-product-walkthrough .graph-card.selected { border: 0; box-shadow: none; }
+    #relayer-product-walkthrough .graph-card h4 { margin: 0; max-width: 124px; font-size: 10px; line-height: 1.22; text-align: center; color: #2d3748; text-shadow: 0 1px 2px #ffffff; }
+    #relayer-product-walkthrough .node-icon { width: 27px; height: 27px; flex: 0 0 27px; border-radius: 50%; display: grid; place-items: center; border: 1px solid #718096; background: #ffffff; color: #718096; font-size: 11px; font-weight: 800; box-shadow: 0 2px 6px rgba(13,20,35,.08); }
+    #relayer-product-walkthrough .graph-card.node-slate .node-icon { color: #718096; border-color: #718096; }
+    #relayer-product-walkthrough .graph-card.node-blue .node-icon { color: #3182ce; border-color: #3182ce; }
+    #relayer-product-walkthrough .graph-card.node-green .node-icon { color: #38a169; border-color: #38a169; }
+    #relayer-product-walkthrough .graph-card.node-gold .node-icon { color: #d69e2e; border-color: #d69e2e; }
+    #relayer-product-walkthrough .graph-card.node-red .node-icon { color: #e53e3e; border-color: #e53e3e; }
+    #relayer-product-walkthrough .graph-card.node-orange .node-icon { color: #dd6b20; border-color: #dd6b20; }
+    #relayer-product-walkthrough .graph-card.interaction .node-icon { background: #ffffff; color: #f59e0b; border-color: #f59e0b; }
+    #relayer-product-walkthrough .layer-breadcrumb { position: absolute; left: 50%; top: 12px; z-index: 5; width: calc(100% - 32px); max-width: 590px; min-height: 44px; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; gap: 7px; padding: 6px 10px; border: 1px solid #e2e8f0; background: rgba(255,255,255,.96); }
+    #relayer-product-walkthrough .layer-segment { min-width: 0; display: flex; align-items: center; gap: 7px; padding: 3px 5px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; }
+    #relayer-product-walkthrough button.layer-segment { cursor: pointer; }
+    #relayer-product-walkthrough button.layer-segment:hover { background: #f5f7fa; }
+    #relayer-product-walkthrough .layer-segment .node-icon { width: 23px; height: 23px; flex: 0 0 23px; color: #64748b; border-color: #64748b; box-shadow: none; }
+    #relayer-product-walkthrough .layer-segment.current .node-icon { color: #f59e0b; border-color: #f59e0b; }
+    #relayer-product-walkthrough .layer-segment span { min-width: 0; }
+    #relayer-product-walkthrough .layer-segment small { display: block; margin-bottom: 1px; color: #94a3b8; font-size: 7px; font-weight: 760; letter-spacing: .07em; text-transform: uppercase; }
+    #relayer-product-walkthrough .layer-segment strong { display: block; overflow: hidden; max-width: 218px; color: #1f2937; font-size: 9px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    #relayer-product-walkthrough .layer-separator { flex: 0 0 auto; color: #a0a8b6; font-size: 15px; }
+    #relayer-product-walkthrough .graph-card.selected .node-icon { border-width: 2px; box-shadow: 0 0 0 4px rgba(49,130,206,.13); }
+    #relayer-product-walkthrough svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+    #relayer-product-walkthrough svg.edges path, #relayer-product-walkthrough svg.edges line { fill: none; stroke: rgba(148,163,184,.58); stroke-width: 1.55; vector-effect: non-scaling-stroke; }
+    #relayer-product-walkthrough svg.edges .relation { stroke: rgba(148,163,184,.42); stroke-width: 1.2; }
+    #relayer-product-walkthrough .composer { position: absolute; left: 18px; right: 18px; bottom: 13px; min-height: 57px; border: 1px solid light-dark(#ccd2dd, #3a4253); border-radius: 10px; background: light-dark(#fff, #1b202a); box-shadow: 0 7px 22px rgba(12,18,30,.10); padding: 9px 11px; }
+    #relayer-product-walkthrough .has-inspector .composer { right: 268px; }
+    #relayer-product-walkthrough .node-inspector { position: absolute; top: 48px; right: 0; bottom: 0; width: 250px; z-index: 7; display: flex; flex-direction: column; background: light-dark(#fff, #181d27); border-left: 1px solid light-dark(#d8dde6, #303747); }
+    #relayer-product-walkthrough .inspector-heading { height: 37px; display: flex; align-items: center; padding: 0 14px; border-bottom: 1px solid #e2e5eb; color: #273248; font-size: 9px; font-weight: 760; text-transform: uppercase; letter-spacing: .06em; }
+    #relayer-product-walkthrough .inspector-body { min-height: 0; flex: 1; overflow: hidden; padding: 15px; }
+    #relayer-product-walkthrough .inspector-head { display: flex; gap: 9px; align-items: center; margin-bottom: 13px; }
+    #relayer-product-walkthrough .inspector-head .node-icon { width: 31px; height: 31px; flex-basis: 31px; }
+    #relayer-product-walkthrough .inspector-head h3 { margin: 0; font-size: 12px; line-height: 1.25; }
+    #relayer-product-walkthrough .inspector-kind { margin-top: 2px; font-size: 8px; font-weight: 760; text-transform: uppercase; letter-spacing: .07em; color: #64748b; }
+    #relayer-product-walkthrough .inspector-copy { font-size: 9.5px; line-height: 1.48; color: light-dark(#616c80, #aab4c7); }
+    #relayer-product-walkthrough .inspector-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 14px 0; }
+    #relayer-product-walkthrough .inspector-meta div { padding: 7px; border: 1px solid light-dark(#e0e4eb, #323a4a); border-radius: 6px; }
+    #relayer-product-walkthrough .inspector-meta small { display: block; font-size: 7.5px; color: light-dark(#8992a3, #818b9f); text-transform: uppercase; letter-spacing: .06em; }
+    #relayer-product-walkthrough .inspector-meta b { display: block; margin-top: 3px; font-size: 8.5px; }
+    #relayer-product-walkthrough .inline-node-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 14px; }
+    #relayer-product-walkthrough .node-action { min-height: 27px; padding: 5px 8px; border: 1px solid light-dark(#d3d8e2, #3b4455); border-radius: 6px; background: light-dark(#fff, #202631); color: inherit; font: inherit; font-size: 9px; text-align: left; }
+    #relayer-product-walkthrough .node-action.add-context { width: 27px; padding: 0; display: grid; place-items: center; color: #1f2937; background: #ffffff; font-size: 15px; line-height: 1; }
+    #relayer-product-walkthrough .node-action.add-context[aria-pressed=&quot;true&quot;] { border-color: #93c5fd; background: #eff6ff; color: #2563eb; }
+    #relayer-product-walkthrough .context-attach-editor { margin-top: 10px; padding: 9px; border: 1px solid #d9dee7; border-radius: 7px; background: #f8fafc; }
+    #relayer-product-walkthrough .context-attach-editor label { display: block; margin-bottom: 5px; color: #566174; font-size: 8px; font-weight: 700; }
+    #relayer-product-walkthrough .context-attach-editor textarea { width: 100%; min-height: 48px; resize: none; padding: 7px; border: 1px solid #cfd5df; border-radius: 6px; background: #fff; color: #263147; font: inherit; font-size: 8.5px; line-height: 1.35; }
+    #relayer-product-walkthrough .context-attach-editor footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; color: #8992a3; font-size: 7.5px; }
+    #relayer-product-walkthrough .context-attach-confirm { min-height: 24px; padding: 4px 8px; border: 0; border-radius: 5px; background: #111827; color: #fff; font: inherit; font-size: 8px; font-weight: 700; }
+    #relayer-product-walkthrough .composer-placeholder { font-size: 11px; color: light-dark(#8a93a4, #7e899e); }
+    #relayer-product-walkthrough .composer-draft { min-height: 24px; color: #273248; font-size: 11px; line-height: 1.4; }
+    #relayer-product-walkthrough .composer-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; font-size: 9px; color: light-dark(#7b8598, #8791a5); }
+    #relayer-product-walkthrough .composer-footer.actions-only { justify-content: flex-end; }
+    #relayer-product-walkthrough .send { width: 23px; height: 23px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 6px; background: #111827; color: #fff; font: inherit; font-weight: 800; }
+    #relayer-product-walkthrough .stop-square { font-size: 8px; }
+    #relayer-product-walkthrough .context-composer { min-height: 79px; z-index: 9; }
+    #relayer-product-walkthrough .context-summary { position: absolute; left: 18px; right: 268px; bottom: 99px; z-index: 10; display: flex; align-items: center; gap: 6px; width: fit-content; min-height: 25px; padding: 4px 7px; border: 1px solid #d8dee8; border-radius: 7px; background: #ffffff; color: #5d687c; font-size: 8.5px; box-shadow: 0 5px 14px rgba(15,23,42,.08); }
+    #relayer-product-walkthrough .context-annotation { position: relative; display: inline-flex; margin-left: 3px; vertical-align: middle; }
+    #relayer-product-walkthrough .context-annotation-trigger { position: relative; width: 24px; height: 20px; padding: 0; display: inline-grid; place-items: center; border: 0; background: transparent; color: #2563eb; font: inherit; cursor: pointer; }
+    #relayer-product-walkthrough .context-marker-icon { width: 15px; height: 15px; display: grid; place-items: center; border: 1px solid #60a5fa; border-radius: 50%; background: #eff6ff; font-size: 8px; }
+    #relayer-product-walkthrough .context-marker-count { position: absolute; right: 0; top: -3px; min-width: 11px; height: 11px; display: grid; place-items: center; border-radius: 6px; background: #2563eb; color: #ffffff; font-size: 7px; font-weight: 760; }
+    #relayer-product-walkthrough .context-annotation-popover { display: none; position: absolute; left: -18px; bottom: calc(100% + 7px); z-index: 20; width: 270px; padding: 10px; border: 1px solid #d7dce5; border-radius: 8px; background: #ffffff; box-shadow: 0 14px 34px rgba(15,23,42,.18); }
+    #relayer-product-walkthrough .context-annotation:hover .context-annotation-popover,
+    #relayer-product-walkthrough .context-annotation:focus-within .context-annotation-popover,
+    #relayer-product-walkthrough .context-annotation.open .context-annotation-popover { display: block; }
+    #relayer-product-walkthrough .context-annotation-title { margin-bottom: 7px; color: #7b8597; font-size: 8px; font-weight: 760; letter-spacing: .06em; text-transform: uppercase; }
+    #relayer-product-walkthrough .context-node-icons { display: flex; gap: 8px; margin-bottom: 9px; }
+    #relayer-product-walkthrough .context-node { width: 34px; height: 34px; padding: 2px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; }
+    #relayer-product-walkthrough .context-node[aria-pressed=&quot;true&quot;] { box-shadow: 0 0 0 3px rgba(49,130,206,.14); }
+    #relayer-product-walkthrough .context-note { padding-top: 8px; border-top: 1px solid #e3e6eb; color: #667185; font-size: 9px; line-height: 1.4; }
+    #relayer-product-walkthrough .context-note strong { display: block; margin-bottom: 3px; color: #263147; font-size: 9px; }
+    #relayer-product-walkthrough .context-note small { display: block; margin-bottom: 2px; color: #8b94a4; font-size: 7.5px; text-transform: uppercase; letter-spacing: .06em; }
+    #relayer-product-walkthrough .callout { display: none; position: absolute; z-index: 12; width: 21px; height: 21px; border-radius: 50%; place-items: center; background: #ff7a45; color: #fff; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(64,31,18,.3); font-size: 10px; font-weight: 850; }
+    #relayer-product-walkthrough .legend { display: none; position: absolute; z-index: 10; left: 12px; right: 12px; bottom: 10px; min-height: 53px; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 8px; border: 1px solid light-dark(#d6dbe5, #353d4f); border-radius: 8px; background: light-dark(rgba(255,255,255,.96), rgba(22,27,37,.97)); box-shadow: 0 8px 22px rgba(12,18,30,.12); }
+    #relayer-product-walkthrough.show-annotations .callout { display: grid; }
+    #relayer-product-walkthrough.show-annotations .legend { display: grid; }
+    #relayer-product-walkthrough.show-annotations .main .graph-area { bottom: 180px; }
+    #relayer-product-walkthrough.show-annotations .main .composer { bottom: 76px; }
+    #relayer-product-walkthrough .legend-item { display: flex; gap: 6px; font-size: 9px; line-height: 1.3; color: light-dark(#5d687c, #aeb7ca); }
+    #relayer-product-walkthrough .legend-item b { flex: 0 0 auto; width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; background: #ff7a45; color: #fff; font-size: 9px; }
+    #relayer-product-walkthrough .legend-item strong { display: block; color: light-dark(#273248, #edf1fb); font-size: 9px; margin-bottom: 1px; }
+    #relayer-product-walkthrough .agent-setup-bg { height: calc(100% - 34px); background: light-dark(#f7f7f9, #10131a); display: grid; place-items: center; padding-bottom: 55px; position: relative; }
+    #relayer-product-walkthrough .agent-setup-panel { width: min(860px, calc(100% - 70px)); }
+    #relayer-product-walkthrough .setup-pane { padding: 18px 20px 26px; min-height: 430px; text-align: center; }
+    #relayer-product-walkthrough .eyebrow { color: #3182ce; font-size: 9px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+    #relayer-product-walkthrough .setup-pane h2 { font-size: 22px; margin: 7px 0 8px; }
+    #relayer-product-walkthrough .setup-pane &gt; p { font-size: 11px; line-height: 1.5; color: light-dark(#677185, #a5aec0); margin: 0 auto 20px; max-width: 340px; }
+    #relayer-product-walkthrough .setup-grid { width: min(500px, 100%); margin: 16px auto 0; text-align: left; }
+    #relayer-product-walkthrough .setup-column { min-height: 278px; padding: 16px; border: 1px solid #d9dee7; border-radius: 9px; background: #ffffff; }
+    #relayer-product-walkthrough .setup-column h3 { margin: 0 0 4px; color: #263147; font-size: 12px; }
+    #relayer-product-walkthrough .setup-column &gt; p { margin: 0 0 13px; color: #7b8597; font-size: 8.5px; line-height: 1.45; }
+    #relayer-product-walkthrough .agent-form { width: 100%; margin: 0; text-align: left; }
+    #relayer-product-walkthrough .setup-field { margin-top: 10px; }
+    #relayer-product-walkthrough .setup-field label { display: block; margin-bottom: 5px; color: #4d596c; font-size: 9px; font-weight: 700; }
+    #relayer-product-walkthrough .setup-field select, #relayer-product-walkthrough .setup-field input { width: 100%; height: 34px; padding: 0 9px; border: 1px solid #cfd5df; border-radius: 7px; background: #fff; color: #263147; font: inherit; font-size: 9px; }
+    #relayer-product-walkthrough .login-methods { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    #relayer-product-walkthrough .login-method { min-height: 34px; border: 1px solid #d4dae4; border-radius: 7px; background: #fff; color: #536074; font: inherit; font-size: 9px; }
+    #relayer-product-walkthrough .login-method.selected { border-color: #8bb8e8; background: #eef6ff; color: #245f99; font-weight: 720; }
+    #relayer-product-walkthrough .harness-choice { padding: 11px; border: 1px solid #93c5fd; border-radius: 8px; background: #eff6ff; }
+    #relayer-product-walkthrough .harness-choice strong { display: block; color: #234b70; font-size: 11px; }
+    #relayer-product-walkthrough .harness-choice span { display: block; margin-top: 4px; color: #5f7690; font-size: 8.5px; line-height: 1.4; }
+    #relayer-product-walkthrough .secure-hint { display: flex; align-items: center; gap: 5px; margin-top: 6px; color: #748095; font-size: 7.5px; }
+    #relayer-product-walkthrough .codex-connect { width: 100%; height: 36px; margin-top: 9px; border: 0; border-radius: 7px; background: #111827; color: #fff; font: inherit; font-size: 10px; font-weight: 760; }
+    #relayer-product-walkthrough .agent-caption { margin-top: 7px; color: #7b8597; font-size: 8px; text-align: center; }
+    #relayer-product-walkthrough .setup-advanced { margin-top: 12px; border-top: 1px solid #e3e7ed; padding-top: 10px; }
+    #relayer-product-walkthrough .setup-advanced summary { color: #596579; font-size: 9px; font-weight: 720; cursor: pointer; }
+    #relayer-product-walkthrough .setup-advanced .setup-field { margin-top: 9px; }
+    #relayer-product-walkthrough .setup-advanced p { margin: 6px 0 0; color: #7b8597; font-size: 8px; line-height: 1.4; }
+    #relayer-product-walkthrough .agent-continue { width: 100%; height: 34px; margin-top: 13px; border: 1px solid #d5dae3; border-radius: 7px; background: #edf0f4; color: #98a0ae; font: inherit; font-size: 9px; font-weight: 720; }
+    #relayer-product-walkthrough .permission { display: flex; gap: 10px; padding: 12px; border: 1px solid light-dark(#dde1e8, #343c4c); border-radius: 8px; margin: 10px 0; background: light-dark(#fafbfc, #1e2430); }
+    #relayer-product-walkthrough .permission .icon { width: 28px; height: 28px; border-radius: 7px; background: #f3f4f6; display: grid; place-items: center; }
+    #relayer-product-walkthrough .permission strong { font-size: 10px; display: block; }
+    #relayer-product-walkthrough .permission span { font-size: 9px; color: light-dark(#737d90, #929db1); }
+    #relayer-product-walkthrough .permission-button { width: 100%; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+    #relayer-product-walkthrough .permission-button.preferred { border-color: #93c5fd; background: #eff6ff; }
+    #relayer-product-walkthrough .permission-button strong { color: #263147; }
+    #relayer-product-walkthrough .primary { border: 0; border-radius: 7px; padding: 9px 13px; background: #111827; color: white; font: inherit; font-size: 10px; font-weight: 760; }
+    #relayer-product-walkthrough .secondary { border: 1px solid light-dark(#d2d7e1, #3b4354); border-radius: 7px; padding: 8px 12px; background: transparent; color: inherit; font: inherit; font-size: 10px; }
+    #relayer-product-walkthrough .setup-actions { margin-top: 20px; display: flex; justify-content: space-between; align-items: center; }
+    #relayer-product-walkthrough .folder-modal { position: absolute; width: 475px; top: 78px; left: calc(50% - 237px); z-index: 8; border: 1px solid light-dark(#ccd2dd, #3a4254); border-radius: 10px; background: light-dark(#fff, #1a1f29); box-shadow: 0 24px 70px rgba(8,14,26,.27); overflow: hidden; }
+    #relayer-product-walkthrough .folder-modal header { display: flex; justify-content: space-between; align-items: center; padding: 13px 15px; border-bottom: 1px solid light-dark(#e3e6eb, #2d3341); font-size: 12px; font-weight: 760; }
+    #relayer-product-walkthrough .folder-body { padding: 17px; }
+    #relayer-product-walkthrough .pathbox { padding: 10px; border: 1px solid #93c5fd; border-radius: 7px; background: #eff6ff; font-size: 10px; }
+    #relayer-product-walkthrough .project-setup-title { margin: 1px 0 14px; color: #1f2937; font-size: 20px; font-weight: 760; }
+    #relayer-product-walkthrough .folder-choice { width: 100%; display: grid; grid-template-columns: 32px minmax(0,1fr) 18px; gap: 10px; align-items: center; padding: 11px; border: 1px solid #d9dee7; border-radius: 8px; background: #ffffff; color: inherit; font: inherit; text-align: left; }
+    #relayer-product-walkthrough .folder-choice .folder-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 7px; background: #f2f4f7; color: #596579; font-size: 14px; }
+    #relayer-product-walkthrough .folder-choice strong { display: block; color: #263147; font-size: 11px; }
+    #relayer-product-walkthrough .folder-choice small { display: block; margin-top: 2px; color: #7b8597; font-size: 9px; }
+    #relayer-product-walkthrough .folder-choice .chevron { color: #7b8597; font-size: 17px; text-align: right; }
+    #relayer-product-walkthrough .new-thread-stage { position: absolute; inset: 48px 0 70px; display: flex; justify-content: center; padding-top: 82px; background: #ffffff; }
+    #relayer-product-walkthrough .new-thread-content { width: 560px; position: relative; }
+    #relayer-product-walkthrough .new-thread-content h2 { margin: 0 0 16px; color: #222b3b; font-size: 18px; font-weight: 720; text-align: center; }
+    #relayer-product-walkthrough .new-thread-composer { min-height: 118px; padding: 14px; border: 1px solid #d7dce5; border-radius: 12px; background: #ffffff; box-shadow: 0 10px 28px rgba(15,23,42,.09); }
+    #relayer-product-walkthrough .new-thread-prompt { min-height: 62px; color: #7a8496; font-size: 12px; }
+    #relayer-product-walkthrough .new-thread-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    #relayer-product-walkthrough .new-thread-tools { display: flex; align-items: center; gap: 6px; }
+    #relayer-product-walkthrough .composer-tool { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 5px 8px; border: 1px solid #d9dee7; border-radius: 7px; background: #ffffff; color: #4d596d; font: inherit; font-size: 9px; }
+    #relayer-product-walkthrough .composer-tool.icon-only { width: 28px; justify-content: center; padding: 0; font-size: 13px; }
+    #relayer-product-walkthrough .composer-tool.static { border-color: transparent; padding-left: 2px; color: #7b8597; }
+    #relayer-product-walkthrough .new-thread-send { width: 29px; height: 29px; display: grid; place-items: center; border: 0; border-radius: 7px; background: #111827; color: #ffffff; font: inherit; font-size: 13px; font-weight: 800; }
+    #relayer-product-walkthrough .execution-popover { display: none; position: absolute; top: 174px; z-index: 8; width: 282px; padding: 7px; border: 1px solid #d7dce5; border-radius: 9px; background: #ffffff; box-shadow: 0 16px 38px rgba(15,23,42,.15); }
+    #relayer-product-walkthrough .execution-popover.active { display: block; }
+    #relayer-product-walkthrough .folder-picker-popover { left: 40px; }
+    #relayer-product-walkthrough .worktree-picker-popover { left: 176px; }
+    #relayer-product-walkthrough .execution-popover-title { padding: 5px 7px 7px; color: #7b8597; font-size: 8px; font-weight: 760; letter-spacing: .07em; text-transform: uppercase; }
+    #relayer-product-walkthrough .execution-option { width: 100%; display: grid; grid-template-columns: 24px minmax(0,1fr) 18px; gap: 7px; align-items: center; padding: 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; }
+    #relayer-product-walkthrough .execution-option.selected { background: #f1f4f8; }
+    #relayer-product-walkthrough .execution-option .execution-icon { width: 22px; height: 22px; display: grid; place-items: center; color: #5f6b7e; font-size: 11px; }
+    #relayer-product-walkthrough .execution-option strong { display: block; color: #283348; font-size: 10px; }
+    #relayer-product-walkthrough .execution-option small { display: block; margin-top: 1px; color: #7e889a; font-size: 8px; }
+    #relayer-product-walkthrough .execution-check { color: #3182ce; font-size: 11px; text-align: center; }
+    #relayer-product-walkthrough .detect-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 13px; }
+    #relayer-product-walkthrough .detect { border: 1px solid light-dark(#dde1e8, #343b4b); border-radius: 7px; padding: 10px; font-size: 9px; color: light-dark(#667185, #a2adbf); }
+    #relayer-product-walkthrough .detect strong { display: block; color: light-dark(#263147, #eef2fb); font-size: 10px; margin-bottom: 3px; }
+    #relayer-product-walkthrough .modal-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 17px; }
+    #relayer-product-walkthrough .turn-strip { display: flex; gap: 5px; align-items: center; }
+    #relayer-product-walkthrough .turn-arrow { width: 25px; height: 25px; padding: 0; display: grid; place-items: center; border: 1px solid #d8dde6; border-radius: 5px; background: #ffffff; color: #39465c; font: inherit; font-size: 13px; line-height: 1; }
+    #relayer-product-walkthrough .turn-arrow.disabled { color: #c2c8d2; background: #f8fafc; }
+    #relayer-product-walkthrough .turn-position { min-width: 57px; text-align: center; font-size: 9px; font-weight: 680; color: #687286; }
+    #relayer-product-walkthrough .composer-chips { display: flex; gap: 5px; margin-bottom: 6px; }
+    #relayer-product-walkthrough .composer-chips span { border: 1px solid #93c5fd; background: #eff6ff; color: #1d4ed8; border-radius: 5px; padding: 3px 6px; font-size: 8px; }
+    #relayer-product-walkthrough .breadcrumb { display: flex; gap: 5px; align-items: center; font-size: 9px; color: light-dark(#7a8497, #8f99ad); }
+    #relayer-product-walkthrough .breadcrumb b { color: light-dark(#2b354a, #e9edf7); }
+    #relayer-product-walkthrough .run-controls { display: flex; align-items: center; gap: 7px; }
+    #relayer-product-walkthrough .mode { border: 1px solid light-dark(#d2d7e1, #3b4354); border-radius: 6px; padding: 5px 7px; font-size: 9px; }
+    #relayer-product-walkthrough .stop { border: 1px solid light-dark(#f0b7b7, #713d43); background: light-dark(#fff5f5, #321f24); color: light-dark(#b23b3b, #ff9c9c); border-radius: 6px; padding: 5px 8px; font-size: 9px; font-weight: 760; }
+    #relayer-product-walkthrough .dimmed { opacity: .48; }
+    #relayer-product-walkthrough .action-popover { position: absolute; z-index: 8; width: 165px; border: 1px solid light-dark(#d4d9e2, #3a4254); border-radius: 8px; background: light-dark(#fff, #1c222d); box-shadow: 0 12px 28px rgba(10,16,28,.18); padding: 6px; }
+    #relayer-product-walkthrough .action-popover div { padding: 7px 8px; border-radius: 5px; font-size: 9px; }
+    #relayer-product-walkthrough .action-popover div:first-child { background: #eff6ff; color: #1d4ed8; font-weight: 760; }
+    #relayer-product-walkthrough .action-popover small { display: block; color: light-dark(#858ea0, #8c96aa); margin-top: 2px; }
+    #relayer-product-walkthrough .settings-layout { position: absolute; inset: 48px 0 0; display: grid; grid-template-columns: 180px minmax(0,1fr); background: #fff; }
+    #relayer-product-walkthrough .settings-nav { padding: 18px 12px; border-right: 1px solid #e1e5eb; }
+    #relayer-product-walkthrough .settings-nav button { width: 100%; margin-bottom: 3px; padding: 8px 9px; border: 0; border-radius: 6px; background: transparent; color: #627086; font: inherit; font-size: 9px; text-align: left; }
+    #relayer-product-walkthrough .settings-nav button.active { background: #edf1f6; color: #263147; font-weight: 720; }
+    #relayer-product-walkthrough .settings-content { padding: 24px 30px; overflow: hidden; }
+    #relayer-product-walkthrough .settings-content h2 { margin: 0 0 5px; color: #263147; font-size: 18px; }
+    #relayer-product-walkthrough .settings-content &gt; p { margin: 0 0 18px; color: #7b8597; font-size: 9px; }
+    #relayer-product-walkthrough .settings-row { display: grid; grid-template-columns: 170px minmax(0,1fr) auto; gap: 14px; align-items: center; min-height: 52px; border-top: 1px solid #e7e9ee; }
+    #relayer-product-walkthrough .settings-row strong { color: #344055; font-size: 9px; }
+    #relayer-product-walkthrough .settings-row span { color: #7b8597; font-size: 8.5px; }
+    #relayer-product-walkthrough .settings-row button { border: 1px solid #d4dae4; border-radius: 6px; background: #fff; color: #4f5c71; font: inherit; font-size: 8px; padding: 6px 8px; }
+    #relayer-product-walkthrough .advanced-disclosure { margin-top: 17px; padding: 10px 0; border-top: 1px solid #e7e9ee; color: #546176; font-size: 9px; font-weight: 720; }
+    #relayer-product-walkthrough .eval-runner { height: calc(100% - 34px); display: grid; grid-template-columns: 178px minmax(0,1fr); background: #f5f6f8; color: #273248; }
+    #relayer-product-walkthrough .runner-sidebar { padding: 15px 12px; border-right: 1px solid #d9dee7; background: #ffffff; }
+    #relayer-product-walkthrough .runner-brand { margin-bottom: 15px; font-size: 12px; font-weight: 760; }
+    #relayer-product-walkthrough .runner-label { margin: 14px 6px 5px; color: #8a94a6; font-size: 7px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    #relayer-product-walkthrough .runner-case { width: 100%; min-height: 35px; margin-bottom: 3px; padding: 7px 8px; border: 0; border-radius: 6px; background: transparent; color: #536074; font: inherit; font-size: 8px; text-align: left; }
+    #relayer-product-walkthrough .runner-case.active { background: #edf1f6; color: #263147; font-weight: 720; }
+    #relayer-product-walkthrough .runner-main { min-width: 0; padding: 18px 24px; }
+    #relayer-product-walkthrough .runner-header { display: flex; align-items: start; justify-content: space-between; gap: 18px; padding-bottom: 14px; border-bottom: 1px solid #d9dee7; }
+    #relayer-product-walkthrough .runner-header h2 { margin: 1px 0 4px; font-size: 18px; }
+    #relayer-product-walkthrough .runner-header p { margin: 0; color: #748095; font-size: 8px; }
+    #relayer-product-walkthrough .run-eval { min-height: 32px; padding: 6px 11px; border: 0; border-radius: 7px; background: #111827; color: #ffffff; font: inherit; font-size: 8px; font-weight: 760; }
+    #relayer-product-walkthrough .runner-config { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 10px; padding: 14px 0; }
+    #relayer-product-walkthrough .runner-field label { display: block; margin-bottom: 4px; color: #748095; font-size: 7px; font-weight: 720; }
+    #relayer-product-walkthrough .runner-field select { width: 100%; height: 31px; padding: 0 8px; border: 1px solid #cfd6e1; border-radius: 6px; background: #ffffff; color: #344055; font: inherit; font-size: 8px; }
+    #relayer-product-walkthrough .runner-body { display: grid; grid-template-columns: minmax(0,1fr) 215px; gap: 14px; }
+    #relayer-product-walkthrough .runner-panel { min-height: 280px; padding: 12px; border: 1px solid #d9dee7; background: #ffffff; }
+    #relayer-product-walkthrough .runner-panel h3 { margin: 0 0 10px; font-size: 10px; }
+    #relayer-product-walkthrough .runner-step { display: grid; grid-template-columns: 18px minmax(0,1fr) auto; gap: 8px; align-items: center; min-height: 42px; border-top: 1px solid #e5e8ee; font-size: 8px; }
+    #relayer-product-walkthrough .runner-step:first-of-type { border-top: 0; }
+    #relayer-product-walkthrough .runner-step b { width: 16px; height: 16px; display: grid; place-items: center; border-radius: 50%; background: #e8f5ec; color: #2f7d4d; }
+    #relayer-product-walkthrough .runner-step span { color: #7a8497; }
+    #relayer-product-walkthrough .runner-summary { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #e5e8ee; }
+    #relayer-product-walkthrough .runner-summary strong { display: block; color: #2f7d4d; font-size: 11px; }
+    #relayer-product-walkthrough .runner-summary span { color: #7a8497; font-size: 8px; }
+    #relayer-product-walkthrough .runner-metric { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; color: #687489; font-size: 8px; }
+    #relayer-product-walkthrough .runner-metric b { color: #344055; }
+    #relayer-product-walkthrough .runner-open { width: 100%; min-height: 30px; margin-top: 13px; border: 1px solid #cfd6e1; border-radius: 6px; background: #ffffff; color: #344055; font: inherit; font-size: 8px; font-weight: 720; }
+    #relayer-product-walkthrough .eval-report-bg { height: calc(100% - 34px); padding: 34px 52px; background: #f5f6f8; }
+    #relayer-product-walkthrough .eval-report-shell { width: min(760px, 100%); margin: 0 auto; color: #273248; }
+    #relayer-product-walkthrough .eval-report-header { display: flex; align-items: start; justify-content: space-between; gap: 18px; padding-bottom: 18px; border-bottom: 1px solid #d9dee7; }
+    #relayer-product-walkthrough .eval-report-header h2 { margin: 3px 0 5px; font-size: 20px; }
+    #relayer-product-walkthrough .eval-report-header p { margin: 0; color: #748095; font-size: 9px; }
+    #relayer-product-walkthrough .eval-pass { color: #2f7d4d; font-size: 9px; font-weight: 760; letter-spacing: .06em; text-transform: uppercase; }
+    #relayer-product-walkthrough .see-in-app { min-height: 34px; padding: 7px 12px; border: 0; border-radius: 7px; background: #111827; color: #fff; font: inherit; font-size: 9px; font-weight: 760; }
+    #relayer-product-walkthrough .eval-meta { display: grid; grid-template-columns: repeat(4,1fr); gap: 1px; margin-top: 18px; border: 1px solid #d9dee7; background: #d9dee7; }
+    #relayer-product-walkthrough .eval-meta div { padding: 10px; background: #fff; }
+    #relayer-product-walkthrough .eval-meta small { display: block; color: #8a94a6; font-size: 7px; text-transform: uppercase; }
+    #relayer-product-walkthrough .eval-meta strong { display: block; margin-top: 3px; font-size: 9px; }
+    #relayer-product-walkthrough .eval-steps { margin-top: 18px; border-top: 1px solid #d9dee7; }
+    #relayer-product-walkthrough .eval-step { display: grid; grid-template-columns: 26px minmax(0,1fr) 100px 55px; gap: 10px; align-items: center; min-height: 48px; border-bottom: 1px solid #e1e5eb; font-size: 9px; }
+    #relayer-product-walkthrough .eval-step b { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: #e8f5ec; color: #2f7d4d; }
+    #relayer-product-walkthrough .eval-step span { color: #6d788c; }
+    #relayer-product-walkthrough .eval-thread .evaluation-banner { position: absolute; z-index: 8; top: 48px; left: 0; right: 250px; height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-bottom: 1px solid #dce1e9; background: #f8fafc; }
+    #relayer-product-walkthrough .evaluation-banner strong { display: block; color: #2e394d; font-size: 9px; }
+    #relayer-product-walkthrough .evaluation-banner span { color: #748095; font-size: 8px; }
+    #relayer-product-walkthrough .evaluation-banner button { min-height: 28px; padding: 5px 8px; border: 1px solid #cfd6e1; border-radius: 6px; background: #fff; color: #3e4b60; font: inherit; font-size: 8px; font-weight: 700; }
+    #relayer-product-walkthrough .eval-thread .graph-area { top: 102px; bottom: 0; right: 250px; }
+    #relayer-product-walkthrough .eval-thread .node-inspector { top: 48px; }
+    @media (max-width: 860px) {
+      #relayer-product-walkthrough { overflow-x: hidden; }
+      #relayer-product-walkthrough .sidebar { width: 170px; flex-basis: 170px; }
+      #relayer-product-walkthrough .node-inspector { width: 220px; }
+      #relayer-product-walkthrough .has-inspector .graph-area { right: 220px; }
+      #relayer-product-walkthrough .has-inspector .composer { right: 238px; }
+      #relayer-product-walkthrough .legend { grid-template-columns: repeat(2, 1fr); }
+      #relayer-product-walkthrough .setup-grid { grid-template-columns: 1fr; }
+    }
+  &lt;/style&gt;
+
+  &lt;div class=&quot;walkthrough-nav&quot; role=&quot;tablist&quot; aria-label=&quot;Product scenarios&quot;&gt;
+    &lt;button type=&quot;button&quot; data-target=&quot;agent-setup&quot; aria-pressed=&quot;true&quot;&gt;1. Codex setup&lt;/button&gt;
+    &lt;button type=&quot;button&quot; data-target=&quot;agent-api&quot; aria-pressed=&quot;false&quot;&gt;2. API key setup&lt;/button&gt;
+    &lt;button type=&quot;button&quot; data-target=&quot;standalone&quot; aria-pressed=&quot;false&quot;&gt;3. No folder chat&lt;/button&gt;
+    &lt;button type=&quot;button&quot; data-target=&quot;thread-setup&quot; aria-pressed=&quot;false&quot;&gt;4. Project + Git&lt;/button&gt;
+    &lt;button type=&quot;button&quot; data-target=&quot;thread&quot; aria-pressed=&quot;false&quot;&gt;5. Graph thread&lt;/button&gt;
+    &lt;button type=&quot;button&quot; data-target=&quot;context&quot; aria-pressed=&quot;false&quot;&gt;6. Add context&lt;/button&gt;
+    &lt;button type=&quot;button&quot; data-target=&quot;actions&quot; aria-pressed=&quot;false&quot;&gt;7. Node actions&lt;/button&gt;
+    &lt;button type=&quot;button&quot; data-target=&quot;settings&quot; aria-pressed=&quot;false&quot;&gt;8. Settings&lt;/button&gt;
+    &lt;button type=&quot;button&quot; data-target=&quot;update&quot; aria-pressed=&quot;false&quot;&gt;9. App update&lt;/button&gt;
+    &lt;button type=&quot;button&quot; data-target=&quot;eval-runner&quot; aria-pressed=&quot;false&quot;&gt;10. Eval runner&lt;/button&gt;
+    &lt;button type=&quot;button&quot; data-target=&quot;eval-report&quot; aria-pressed=&quot;false&quot;&gt;11. Eval report&lt;/button&gt;
+    &lt;button type=&quot;button&quot; data-target=&quot;eval-thread&quot; aria-pressed=&quot;false&quot;&gt;12. Eval thread&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;annotation-toggle&quot; data-annotations-toggle aria-pressed=&quot;false&quot;&gt;Show annotations&lt;/button&gt;
+  &lt;/div&gt;
+
+  &lt;div class=&quot;product-window&quot;&gt;
+    &lt;section class=&quot;screen active&quot; data-screen=&quot;agent-setup&quot;&gt;
+      &lt;div class=&quot;titlebar&quot;&gt;&lt;span class=&quot;traffic&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;Relayer — Agent setup&lt;/div&gt;
+      &lt;div class=&quot;agent-setup-bg&quot;&gt;
+        &lt;div class=&quot;agent-setup-panel&quot;&gt;
+          &lt;main class=&quot;setup-pane&quot;&gt;
+            &lt;div class=&quot;eyebrow&quot;&gt;Local setup&lt;/div&gt;
+            &lt;h2&gt;Set up your agent&lt;/h2&gt;
+            &lt;p&gt;Connect the agent Relayer will use. Relayer does not create a product account.&lt;/p&gt;
+            &lt;div class=&quot;setup-grid&quot;&gt;
+              &lt;section class=&quot;setup-column&quot;&gt;&lt;h3&gt;Agent login&lt;/h3&gt;&lt;p&gt;Credentials are local and belong to the model provider, not to Relayer.&lt;/p&gt;&lt;div class=&quot;login-methods&quot;&gt;&lt;button class=&quot;login-method selected&quot; type=&quot;button&quot;&gt;Codex&lt;/button&gt;&lt;button class=&quot;login-method&quot; type=&quot;button&quot;&gt;API key&lt;/button&gt;&lt;/div&gt;&lt;button class=&quot;codex-connect&quot; type=&quot;button&quot;&gt;Connect Codex&lt;/button&gt;&lt;div class=&quot;setup-field&quot;&gt;&lt;label for=&quot;agent-model&quot;&gt;Model&lt;/label&gt;&lt;select id=&quot;agent-model&quot; disabled&gt;&lt;option&gt;Connect Codex to choose&lt;/option&gt;&lt;/select&gt;&lt;/div&gt;&lt;details class=&quot;setup-advanced&quot;&gt;&lt;summary&gt;Advanced&lt;/summary&gt;&lt;div class=&quot;setup-field&quot;&gt;&lt;label for=&quot;agent-harness&quot;&gt;Harness&lt;/label&gt;&lt;select id=&quot;agent-harness&quot;&gt;&lt;option&gt;Prime Agent&lt;/option&gt;&lt;/select&gt;&lt;/div&gt;&lt;p&gt;Prime Agent is the V1 implementation behind the Complete contract.&lt;/p&gt;&lt;/details&gt;&lt;button class=&quot;agent-continue&quot; type=&quot;button&quot; disabled&gt;Continue to New thread&lt;/button&gt;&lt;/section&gt;
+            &lt;/div&gt;
+          &lt;/main&gt;
+        &lt;/div&gt;
+        &lt;span class=&quot;callout&quot; style=&quot;left:calc(50% - 215px);top:220px&quot;&gt;1&lt;/span&gt;
+        &lt;span class=&quot;callout&quot; style=&quot;left:calc(50% + 215px);top:220px&quot;&gt;2&lt;/span&gt;
+        &lt;span class=&quot;callout&quot; style=&quot;left:calc(50% + 215px);top:300px&quot;&gt;3&lt;/span&gt;
+        &lt;span class=&quot;callout&quot; style=&quot;left:calc(50% + 215px);top:395px&quot;&gt;4&lt;/span&gt;
+        &lt;div class=&quot;legend&quot;&gt;
+          &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;1&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Agent login is primary&lt;/strong&gt;The first-launch job is connecting a usable agent credential.&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;2&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Horizontal methods&lt;/strong&gt;Codex and API key are peer choices, not a vertical setup sequence.&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;3&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Managed Codex login&lt;/strong&gt;Connect Codex uses the subscription flow and then lists compatible models.&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;4&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Harness is advanced&lt;/strong&gt;Prime Agent is preselected; swapping the implementation stays collapsed by default.&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;section class=&quot;screen&quot; data-screen=&quot;agent-api&quot;&gt;
+      &lt;div class=&quot;titlebar&quot;&gt;&lt;span class=&quot;traffic&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;Relayer — Agent setup · API key&lt;/div&gt;
+      &lt;div class=&quot;agent-setup-bg&quot;&gt;
+        &lt;div class=&quot;agent-setup-panel&quot;&gt;
+          &lt;main class=&quot;setup-pane&quot;&gt;
+            &lt;div class=&quot;eyebrow&quot;&gt;Local setup&lt;/div&gt;&lt;h2&gt;Set up your agent&lt;/h2&gt;&lt;p&gt;Use a provider API key when Codex login is not the right credential path.&lt;/p&gt;
+            &lt;div class=&quot;setup-grid&quot;&gt;
+              &lt;section class=&quot;setup-column&quot;&gt;&lt;h3&gt;Agent login&lt;/h3&gt;&lt;p&gt;The key is stored in the macOS Keychain; only an opaque reference enters Relayer settings.&lt;/p&gt;&lt;div class=&quot;login-methods&quot;&gt;&lt;button class=&quot;login-method&quot; type=&quot;button&quot;&gt;Codex&lt;/button&gt;&lt;button class=&quot;login-method selected&quot; type=&quot;button&quot;&gt;API key&lt;/button&gt;&lt;/div&gt;&lt;div class=&quot;setup-field&quot;&gt;&lt;label for=&quot;api-provider&quot;&gt;Provider&lt;/label&gt;&lt;select id=&quot;api-provider&quot;&gt;&lt;option&gt;OpenAI&lt;/option&gt;&lt;option&gt;Anthropic&lt;/option&gt;&lt;option&gt;OpenRouter&lt;/option&gt;&lt;option&gt;Other…&lt;/option&gt;&lt;/select&gt;&lt;/div&gt;&lt;div class=&quot;setup-field&quot;&gt;&lt;label for=&quot;api-key&quot;&gt;API key&lt;/label&gt;&lt;input id=&quot;api-key&quot; type=&quot;password&quot; value=&quot;sk-••••••••••••&quot; aria-label=&quot;API key&quot;&gt;&lt;/div&gt;&lt;div class=&quot;setup-field&quot;&gt;&lt;label for=&quot;provider-url&quot;&gt;Provider API URL&lt;/label&gt;&lt;input id=&quot;provider-url&quot; value=&quot;https://api.openai.com/v1&quot;&gt;&lt;/div&gt;&lt;div class=&quot;secure-hint&quot;&gt;⌾ Stored securely · never included in traces or graph data&lt;/div&gt;&lt;details class=&quot;setup-advanced&quot;&gt;&lt;summary&gt;Advanced&lt;/summary&gt;&lt;div class=&quot;setup-field&quot;&gt;&lt;label&gt;Harness&lt;/label&gt;&lt;select&gt;&lt;option&gt;Prime Agent&lt;/option&gt;&lt;/select&gt;&lt;/div&gt;&lt;p&gt;Harness configuration is pinned separately from provider credentials.&lt;/p&gt;&lt;/details&gt;&lt;button class=&quot;codex-connect&quot; type=&quot;button&quot;&gt;Test connection&lt;/button&gt;&lt;/section&gt;
+            &lt;/div&gt;
+          &lt;/main&gt;
+        &lt;/div&gt;
+        &lt;span class=&quot;callout&quot; style=&quot;left:calc(50% + 300px);top:210px&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:calc(50% + 300px);top:268px&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:calc(50% + 300px);top:343px&quot;&gt;3&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:calc(50% + 300px);top:425px&quot;&gt;4&lt;/span&gt;
+        &lt;div class=&quot;legend&quot;&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;1&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Provider choice&lt;/strong&gt;Known providers supply defaults; Other asks for a name and URL.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;2&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Secure key entry&lt;/strong&gt;The masked secret goes directly to the OS credential store.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;3&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Advanced endpoint&lt;/strong&gt;The provider URL is editable for compatible or self-hosted APIs.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;4&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Connection test&lt;/strong&gt;Authentication and model listing are verified without calling Complete.&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;section class=&quot;screen&quot; data-screen=&quot;standalone&quot;&gt;
+      &lt;div class=&quot;titlebar&quot;&gt;&lt;span class=&quot;traffic&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;Relayer — New chat&lt;/div&gt;
+      &lt;div class=&quot;app-body&quot;&gt;
+        &lt;aside class=&quot;sidebar&quot;&gt;&lt;div class=&quot;brand&quot;&gt;&lt;span class=&quot;brand-mark&quot;&gt;R&lt;/span&gt;Relayer&lt;/div&gt;&lt;button class=&quot;new-thread&quot;&gt;＋ New thread&lt;/button&gt;&lt;div class=&quot;section-label&quot;&gt;Chats&lt;/div&gt;&lt;div class=&quot;thread-row active&quot;&gt;&lt;span class=&quot;dot&quot;&gt;&lt;/span&gt;New chat&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Product idea&lt;/div&gt;&lt;div class=&quot;section-label&quot;&gt;Projects&lt;/div&gt;&lt;div class=&quot;project-row&quot;&gt;⌄ graphcomplete&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Send-to-display flow&lt;/div&gt;&lt;div class=&quot;app-footer&quot;&gt;&lt;button class=&quot;footer-icon&quot; type=&quot;button&quot; aria-label=&quot;Settings&quot;&gt;⚙&lt;/button&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;&lt;/aside&gt;
+        &lt;main class=&quot;main&quot;&gt;&lt;div class=&quot;main-header&quot;&gt;&lt;div&gt;&lt;div class=&quot;thread-title&quot;&gt;New thread&lt;/div&gt;&lt;div class=&quot;crumb&quot;&gt;No folder&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;new-thread-stage&quot;&gt;&lt;div class=&quot;new-thread-content&quot;&gt;&lt;h2&gt;What do you want to work on?&lt;/h2&gt;&lt;div class=&quot;new-thread-composer&quot;&gt;&lt;div class=&quot;new-thread-prompt&quot;&gt;Plan a product launch checklist…&lt;/div&gt;&lt;div class=&quot;new-thread-footer&quot;&gt;&lt;div class=&quot;new-thread-tools&quot;&gt;&lt;button class=&quot;composer-tool icon-only&quot; type=&quot;button&quot; aria-label=&quot;Attach context&quot;&gt;＋&lt;/button&gt;&lt;button class=&quot;composer-tool&quot; type=&quot;button&quot; data-picker=&quot;standalone-scope&quot; aria-expanded=&quot;true&quot;&gt;⌂ Open folder⌄&lt;/button&gt;&lt;span class=&quot;composer-tool static&quot;&gt;Prime Agent&lt;/span&gt;&lt;/div&gt;&lt;button class=&quot;new-thread-send&quot; type=&quot;button&quot; aria-label=&quot;Send first message&quot;&gt;↑&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;execution-popover folder-picker-popover active&quot; data-picker-panel=&quot;standalone-scope&quot;&gt;&lt;div class=&quot;execution-popover-title&quot;&gt;Open folder&lt;/div&gt;&lt;button class=&quot;execution-option selected&quot; type=&quot;button&quot;&gt;&lt;span class=&quot;execution-icon&quot;&gt;○&lt;/span&gt;&lt;span&gt;&lt;strong&gt;No folder&lt;/strong&gt;&lt;small&gt;Start a chat without access to a project folder&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;execution-check&quot;&gt;✓&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;execution-option&quot; type=&quot;button&quot;&gt;&lt;span class=&quot;execution-icon&quot;&gt;⌂&lt;/span&gt;&lt;span&gt;&lt;strong&gt;graphcomplete&lt;/strong&gt;&lt;small&gt;Use an existing project&lt;/small&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;execution-option&quot; type=&quot;button&quot;&gt;&lt;span class=&quot;execution-icon&quot;&gt;▱&lt;/span&gt;&lt;span&gt;&lt;strong&gt;Choose another folder…&lt;/strong&gt;&lt;small&gt;Create a project from a local folder&lt;/small&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;span class=&quot;callout&quot; style=&quot;left:82px;top:132px&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:calc(50% - 220px);top:296px&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:calc(50% + 250px);top:252px&quot;&gt;3&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:calc(50% + 260px);top:356px&quot;&gt;4&lt;/span&gt;&lt;div class=&quot;legend&quot;&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;1&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Chats&lt;/strong&gt;No-folder chats remain first-class sidebar entries without internal terminology.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;2&lt;/b&gt;&lt;span&gt;&lt;strong&gt;One folder menu&lt;/strong&gt;Open folder includes No folder, existing projects, and Choose another folder.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;3&lt;/b&gt;&lt;span&gt;&lt;strong&gt;No Git clutter&lt;/strong&gt;Checkout and worktree controls are absent without a project.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;4&lt;/b&gt;&lt;span&gt;&lt;strong&gt;One first interaction&lt;/strong&gt;Send creates the root user-interaction node and calls Complete once.&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;&lt;/main&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;section class=&quot;screen&quot; data-screen=&quot;thread-setup&quot;&gt;
+      &lt;div class=&quot;titlebar&quot;&gt;&lt;span class=&quot;traffic&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;Relayer — New thread&lt;/div&gt;
+      &lt;div class=&quot;app-body&quot;&gt;
+        &lt;aside class=&quot;sidebar&quot;&gt;&lt;div class=&quot;brand&quot;&gt;&lt;span class=&quot;brand-mark&quot;&gt;R&lt;/span&gt;Relayer&lt;/div&gt;&lt;button class=&quot;new-thread&quot;&gt;＋ New thread&lt;/button&gt;&lt;div class=&quot;section-label&quot;&gt;Chats&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Product idea&lt;/div&gt;&lt;div class=&quot;section-label&quot;&gt;Projects&lt;/div&gt;&lt;div class=&quot;project-row&quot;&gt;⌄ graphcomplete&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Send-to-display flow&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Graph search design&lt;/div&gt;&lt;div class=&quot;app-footer&quot;&gt;&lt;button class=&quot;footer-icon&quot; type=&quot;button&quot; aria-label=&quot;Settings&quot;&gt;⚙&lt;/button&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;&lt;/aside&gt;
+        &lt;main class=&quot;main&quot;&gt;
+          &lt;div class=&quot;main-header&quot;&gt;&lt;div&gt;&lt;div class=&quot;thread-title&quot;&gt;New thread&lt;/div&gt;&lt;div class=&quot;crumb&quot;&gt;graphcomplete&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;new-thread-stage&quot;&gt;
+            &lt;div class=&quot;new-thread-content&quot;&gt;
+              &lt;h2&gt;What do you want to work on?&lt;/h2&gt;
+              &lt;div class=&quot;new-thread-composer&quot;&gt;
+                &lt;div class=&quot;new-thread-prompt&quot;&gt;Describe a task…&lt;/div&gt;
+                &lt;div class=&quot;new-thread-footer&quot;&gt;
+                  &lt;div class=&quot;new-thread-tools&quot;&gt;&lt;button class=&quot;composer-tool icon-only&quot; type=&quot;button&quot; aria-label=&quot;Attach context&quot;&gt;＋&lt;/button&gt;&lt;button class=&quot;composer-tool&quot; type=&quot;button&quot; data-picker=&quot;folder&quot; aria-expanded=&quot;false&quot; aria-controls=&quot;new-thread-folder-picker&quot;&gt;⌂ graphcomplete⌄&lt;/button&gt;&lt;button class=&quot;composer-tool&quot; type=&quot;button&quot; data-picker=&quot;worktree&quot; aria-expanded=&quot;true&quot; aria-controls=&quot;new-thread-worktree-picker&quot;&gt;⑂ Local⌄&lt;/button&gt;&lt;span class=&quot;composer-tool static&quot;&gt;Prime Agent&lt;/span&gt;&lt;/div&gt;
+                  &lt;button class=&quot;new-thread-send&quot; type=&quot;button&quot; aria-label=&quot;Send first message&quot;&gt;↑&lt;/button&gt;
+                &lt;/div&gt;
+              &lt;/div&gt;
+              &lt;div class=&quot;execution-popover folder-picker-popover&quot; id=&quot;new-thread-folder-picker&quot; data-picker-panel=&quot;folder&quot;&gt;
+                &lt;div class=&quot;execution-popover-title&quot;&gt;Open folder&lt;/div&gt;
+                &lt;button class=&quot;execution-option&quot; type=&quot;button&quot;&gt;&lt;span class=&quot;execution-icon&quot;&gt;○&lt;/span&gt;&lt;span&gt;&lt;strong&gt;No folder&lt;/strong&gt;&lt;small&gt;Start without access to a project folder&lt;/small&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/button&gt;
+                &lt;button class=&quot;execution-option selected&quot; type=&quot;button&quot;&gt;&lt;span class=&quot;execution-icon&quot;&gt;⌂&lt;/span&gt;&lt;span&gt;&lt;strong&gt;graphcomplete&lt;/strong&gt;&lt;small&gt;~/ProjectsDev/relayer-graphcomplete&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;execution-check&quot;&gt;✓&lt;/span&gt;&lt;/button&gt;
+                &lt;button class=&quot;execution-option&quot; type=&quot;button&quot;&gt;&lt;span class=&quot;execution-icon&quot;&gt;▱&lt;/span&gt;&lt;span&gt;&lt;strong&gt;Choose another folder…&lt;/strong&gt;&lt;small&gt;Add the selected folder as a project&lt;/small&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;/div&gt;
+              &lt;div class=&quot;execution-popover worktree-picker-popover active&quot; id=&quot;new-thread-worktree-picker&quot; data-picker-panel=&quot;worktree&quot;&gt;
+                &lt;div class=&quot;execution-popover-title&quot;&gt;Execution location&lt;/div&gt;
+                &lt;button class=&quot;execution-option selected&quot; type=&quot;button&quot;&gt;&lt;span class=&quot;execution-icon&quot;&gt;⌂&lt;/span&gt;&lt;span&gt;&lt;strong&gt;Local checkout&lt;/strong&gt;&lt;small&gt;Use the selected folder and current branch&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;execution-check&quot;&gt;✓&lt;/span&gt;&lt;/button&gt;
+                &lt;button class=&quot;execution-option&quot; type=&quot;button&quot;&gt;&lt;span class=&quot;execution-icon&quot;&gt;⑂&lt;/span&gt;&lt;span&gt;&lt;strong&gt;New worktree&lt;/strong&gt;&lt;small&gt;Create an isolated worktree from main&lt;/small&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;/div&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;span class=&quot;callout&quot; style=&quot;left:8px;top:17px&quot;&gt;1&lt;/span&gt;
+          &lt;span class=&quot;callout&quot; style=&quot;left:calc(50% + 270px);top:186px&quot;&gt;2&lt;/span&gt;
+          &lt;span class=&quot;callout&quot; style=&quot;left:calc(50% - 250px);top:300px&quot;&gt;3&lt;/span&gt;
+          &lt;span class=&quot;callout&quot; style=&quot;left:calc(50% + 268px);top:277px&quot;&gt;4&lt;/span&gt;
+          &lt;div class=&quot;legend&quot;&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;1&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Chats or projects&lt;/strong&gt;No-folder chats remain separate from project folders.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;2&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Composer first&lt;/strong&gt;The user starts by describing the task, without a setup modal.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;3&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Two Git choices&lt;/strong&gt;A Git project reveals only Local checkout and New worktree in V1.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;4&lt;/b&gt;&lt;span&gt;&lt;strong&gt;First send creates&lt;/strong&gt;Sending creates the thread and invokes Complete.&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/main&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;section class=&quot;screen&quot; data-screen=&quot;thread&quot;&gt;
+      &lt;div class=&quot;titlebar&quot;&gt;&lt;span class=&quot;traffic&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;Relayer — Send-to-display flow&lt;/div&gt;
+      &lt;div class=&quot;app-body&quot;&gt;
+        &lt;aside class=&quot;sidebar&quot;&gt;
+          &lt;div class=&quot;brand&quot;&gt;&lt;span class=&quot;brand-mark&quot;&gt;R&lt;/span&gt;Relayer&lt;/div&gt;&lt;button class=&quot;new-thread&quot;&gt;＋ New thread&lt;/button&gt;&lt;div class=&quot;section-label&quot;&gt;Chats&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Product idea&lt;/div&gt;&lt;div class=&quot;section-label&quot;&gt;Projects&lt;/div&gt;&lt;div class=&quot;project-row&quot;&gt;⌄ graphcomplete&lt;/div&gt;&lt;div class=&quot;thread-row active&quot;&gt;&lt;span class=&quot;dot&quot;&gt;&lt;/span&gt;Send-to-display flow&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Graph search design&lt;/div&gt;
+          &lt;div class=&quot;app-footer&quot;&gt;&lt;button class=&quot;footer-icon&quot; type=&quot;button&quot; aria-label=&quot;Settings&quot;&gt;⚙&lt;/button&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/aside&gt;
+        &lt;main class=&quot;main has-inspector&quot;&gt;
+          &lt;div class=&quot;main-header&quot;&gt;&lt;div&gt;&lt;div class=&quot;thread-title&quot;&gt;Send-to-display flow&lt;/div&gt;&lt;div class=&quot;crumb&quot;&gt;graphcomplete&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;turn-strip&quot; aria-label=&quot;Turn history&quot;&gt;&lt;button class=&quot;turn-arrow&quot; aria-label=&quot;Previous turn&quot;&gt;←&lt;/button&gt;&lt;span class=&quot;turn-position&quot;&gt;Turn 2 of 2&lt;/span&gt;&lt;button class=&quot;turn-arrow disabled&quot; aria-label=&quot;Next turn&quot; disabled&gt;→&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;graph-area&quot;&gt;
+            &lt;svg class=&quot;edges&quot; data-force-edges preserveAspectRatio=&quot;none&quot;&gt;&lt;line class=&quot;relation&quot; data-source=&quot;agent&quot; data-target=&quot;completion&quot;/&gt;&lt;line class=&quot;relation&quot; data-source=&quot;completion&quot; data-target=&quot;persistence&quot;/&gt;&lt;line class=&quot;relation&quot; data-source=&quot;completion&quot; data-target=&quot;display&quot;/&gt;&lt;line class=&quot;relation&quot; data-source=&quot;persistence&quot; data-target=&quot;display&quot;/&gt;&lt;/svg&gt;
+            &lt;nav class=&quot;layer-breadcrumb&quot; aria-label=&quot;Graph layer path&quot;&gt;&lt;button class=&quot;layer-segment&quot; type=&quot;button&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;◫&lt;/span&gt;&lt;span&gt;&lt;small&gt;Direct parent&lt;/small&gt;&lt;strong&gt;Send-to-display flow&lt;/strong&gt;&lt;/span&gt;&lt;/button&gt;&lt;span class=&quot;layer-separator&quot;&gt;›&lt;/span&gt;&lt;div class=&quot;layer-segment current&quot; aria-current=&quot;page&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;V&lt;/span&gt;&lt;span&gt;&lt;small&gt;Current layer · Turn 2&lt;/small&gt;&lt;strong&gt;What makes a GraphComplete turn complete and visible?&lt;/strong&gt;&lt;/span&gt;&lt;/div&gt;&lt;/nav&gt;
+            &lt;button class=&quot;graph-card node-blue&quot; type=&quot;button&quot; data-force-node=&quot;agent&quot; data-x=&quot;0.30&quot; data-y=&quot;0.43&quot; aria-label=&quot;Prime Agent execution node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;⌘&lt;/span&gt;&lt;h4&gt;Prime Agent execution&lt;/h4&gt;&lt;/button&gt;
+            &lt;button class=&quot;graph-card node-green selected&quot; type=&quot;button&quot; data-force-node=&quot;completion&quot; data-x=&quot;0.68&quot; data-y=&quot;0.38&quot; aria-label=&quot;Accepted turn contract node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;✓&lt;/span&gt;&lt;h4&gt;Accepted turn contract&lt;/h4&gt;&lt;/button&gt;
+            &lt;button class=&quot;graph-card node-orange&quot; type=&quot;button&quot; data-force-node=&quot;persistence&quot; data-x=&quot;0.31&quot; data-y=&quot;0.72&quot; aria-label=&quot;Durable turn persistence node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;▣&lt;/span&gt;&lt;h4&gt;Durable turn persistence&lt;/h4&gt;&lt;/button&gt;
+            &lt;button class=&quot;graph-card node-slate&quot; type=&quot;button&quot; data-force-node=&quot;display&quot; data-x=&quot;0.69&quot; data-y=&quot;0.67&quot; aria-label=&quot;Opened-layer display node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;◫&lt;/span&gt;&lt;h4&gt;Opened-layer display&lt;/h4&gt;&lt;/button&gt;
+          &lt;/div&gt;
+          &lt;aside class=&quot;node-inspector&quot;&gt;&lt;div class=&quot;inspector-heading&quot;&gt;Node details&lt;/div&gt;&lt;div class=&quot;inspector-body&quot;&gt;&lt;div class=&quot;inspector-head&quot;&gt;&lt;span class=&quot;node-icon&quot; style=&quot;color:#38a169;border-color:#38a169&quot;&gt;✓&lt;/span&gt;&lt;div&gt;&lt;h3&gt;Accepted turn contract&lt;/h3&gt;&lt;div class=&quot;inspector-kind&quot;&gt;Completion boundary&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;p class=&quot;inspector-copy&quot;&gt;GraphComplete validates the submitted graph and records an explicit accepted, stopped, or failed result. A model turn ending by itself is not completion.&lt;/p&gt;&lt;div class=&quot;inline-node-actions&quot;&gt;&lt;button class=&quot;node-action add-context&quot; type=&quot;button&quot; aria-label=&quot;Add node as context&quot;&gt;＋&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;&lt;/aside&gt;
+          &lt;div class=&quot;composer&quot;&gt;&lt;div class=&quot;composer-placeholder&quot;&gt;Complete is responding…&lt;/div&gt;&lt;div class=&quot;composer-footer&quot;&gt;&lt;span&gt;You can continue typing&lt;/span&gt;&lt;button class=&quot;send stop-square&quot; type=&quot;button&quot; aria-label=&quot;Stop response&quot;&gt;■&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;span class=&quot;callout&quot; style=&quot;left:340px;top:66px&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:430px;top:205px&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:340px;top:288px&quot;&gt;3&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;right:25px;top:190px&quot;&gt;4&lt;/span&gt;
+          &lt;div class=&quot;legend&quot;&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;1&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Layer breadcrumb&lt;/strong&gt;The direct parent&#x27;s icon and title navigate back without entering the graph layout.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;2&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Opened graph layer&lt;/strong&gt;The graph interface contains only the nodes of the current layer.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;3&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Child-only edges&lt;/strong&gt;Undirected lines show relationships among visible children.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;4&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Details inspector&lt;/strong&gt;Clicking a node reveals content and actions on the right.&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/main&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;section class=&quot;screen&quot; data-screen=&quot;context&quot;&gt;
+      &lt;div class=&quot;titlebar&quot;&gt;&lt;span class=&quot;traffic&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;Relayer — Attach graph context&lt;/div&gt;
+      &lt;div class=&quot;app-body&quot;&gt;
+        &lt;aside class=&quot;sidebar&quot;&gt;&lt;div class=&quot;brand&quot;&gt;&lt;span class=&quot;brand-mark&quot;&gt;R&lt;/span&gt;Relayer&lt;/div&gt;&lt;button class=&quot;new-thread&quot;&gt;＋ New thread&lt;/button&gt;&lt;div class=&quot;section-label&quot;&gt;Chats&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Product idea&lt;/div&gt;&lt;div class=&quot;section-label&quot;&gt;Projects&lt;/div&gt;&lt;div class=&quot;project-row&quot;&gt;⌄ graphcomplete&lt;/div&gt;&lt;div class=&quot;thread-row active&quot;&gt;&lt;span class=&quot;dot&quot;&gt;&lt;/span&gt;Send-to-display flow&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Graph search design&lt;/div&gt;&lt;div class=&quot;app-footer&quot;&gt;&lt;button class=&quot;footer-icon&quot; type=&quot;button&quot; aria-label=&quot;Settings&quot;&gt;⚙&lt;/button&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;&lt;/aside&gt;
+        &lt;main class=&quot;main has-inspector&quot;&gt;
+          &lt;div class=&quot;main-header&quot;&gt;&lt;div&gt;&lt;div class=&quot;thread-title&quot;&gt;Send-to-display flow&lt;/div&gt;&lt;div class=&quot;crumb&quot;&gt;graphcomplete&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;turn-strip&quot; aria-label=&quot;Turn history&quot;&gt;&lt;button class=&quot;turn-arrow&quot; aria-label=&quot;Previous turn&quot;&gt;←&lt;/button&gt;&lt;span class=&quot;turn-position&quot;&gt;Turn 2 of 2&lt;/span&gt;&lt;button class=&quot;turn-arrow disabled&quot; aria-label=&quot;Next turn&quot; disabled&gt;→&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;graph-area&quot;&gt;
+            &lt;svg class=&quot;edges&quot; data-force-edges preserveAspectRatio=&quot;none&quot;&gt;&lt;line class=&quot;relation&quot; data-source=&quot;agent&quot; data-target=&quot;completion&quot;/&gt;&lt;line class=&quot;relation&quot; data-source=&quot;completion&quot; data-target=&quot;persistence&quot;/&gt;&lt;line class=&quot;relation&quot; data-source=&quot;completion&quot; data-target=&quot;display&quot;/&gt;&lt;line class=&quot;relation&quot; data-source=&quot;persistence&quot; data-target=&quot;display&quot;/&gt;&lt;/svg&gt;
+            &lt;nav class=&quot;layer-breadcrumb&quot; aria-label=&quot;Graph layer path&quot;&gt;&lt;button class=&quot;layer-segment&quot; type=&quot;button&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;◫&lt;/span&gt;&lt;span&gt;&lt;small&gt;Direct parent&lt;/small&gt;&lt;strong&gt;Send-to-display flow&lt;/strong&gt;&lt;/span&gt;&lt;/button&gt;&lt;span class=&quot;layer-separator&quot;&gt;›&lt;/span&gt;&lt;div class=&quot;layer-segment current&quot; aria-current=&quot;page&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;V&lt;/span&gt;&lt;span&gt;&lt;small&gt;Current layer · Turn 2&lt;/small&gt;&lt;strong&gt;What makes a GraphComplete turn complete and visible?&lt;/strong&gt;&lt;/span&gt;&lt;/div&gt;&lt;/nav&gt;
+            &lt;button class=&quot;graph-card node-blue&quot; type=&quot;button&quot; data-force-node=&quot;agent&quot; data-x=&quot;0.30&quot; data-y=&quot;0.43&quot; aria-label=&quot;Prime Agent execution node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;⌘&lt;/span&gt;&lt;h4&gt;Prime Agent execution&lt;/h4&gt;&lt;/button&gt;
+            &lt;button class=&quot;graph-card node-green&quot; type=&quot;button&quot; data-force-node=&quot;completion&quot; data-x=&quot;0.68&quot; data-y=&quot;0.38&quot; aria-label=&quot;Accepted turn contract node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;✓&lt;/span&gt;&lt;h4&gt;Accepted turn contract&lt;/h4&gt;&lt;/button&gt;
+            &lt;button class=&quot;graph-card node-orange&quot; type=&quot;button&quot; data-force-node=&quot;persistence&quot; data-x=&quot;0.31&quot; data-y=&quot;0.72&quot; aria-label=&quot;Durable turn persistence node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;▣&lt;/span&gt;&lt;h4&gt;Durable turn persistence&lt;/h4&gt;&lt;/button&gt;
+            &lt;button class=&quot;graph-card node-slate selected&quot; type=&quot;button&quot; data-force-node=&quot;display&quot; data-x=&quot;0.69&quot; data-y=&quot;0.67&quot; aria-label=&quot;Opened-layer display node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;◫&lt;/span&gt;&lt;h4&gt;Opened-layer display&lt;/h4&gt;&lt;/button&gt;
+          &lt;/div&gt;
+          &lt;aside class=&quot;node-inspector&quot;&gt;&lt;div class=&quot;inspector-heading&quot;&gt;Node details&lt;/div&gt;&lt;div class=&quot;inspector-body&quot;&gt;&lt;div class=&quot;inspector-head&quot;&gt;&lt;span class=&quot;node-icon&quot; style=&quot;color:#718096;border-color:#718096&quot;&gt;◫&lt;/span&gt;&lt;div&gt;&lt;h3&gt;Opened-layer display&lt;/h3&gt;&lt;div class=&quot;inspector-kind&quot;&gt;Display contract&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;p class=&quot;inspector-copy&quot;&gt;The desktop displays the exact accepted opened layer, represents its interaction and direct parent in the breadcrumb, and opens this node&#x27;s authored detail here.&lt;/p&gt;&lt;div class=&quot;inline-node-actions&quot;&gt;&lt;button class=&quot;node-action add-context&quot; type=&quot;button&quot; aria-label=&quot;Add node as context&quot; aria-expanded=&quot;true&quot;&gt;＋&lt;/button&gt;&lt;/div&gt;&lt;div class=&quot;context-attach-editor&quot;&gt;&lt;label for=&quot;context-note-draft&quot;&gt;Why should Complete use this node?&lt;/label&gt;&lt;textarea id=&quot;context-note-draft&quot;&gt;Keep the opened-layer display tied to the exact accepted snapshot.&lt;/textarea&gt;&lt;footer&gt;&lt;span&gt;Optional note&lt;/span&gt;&lt;button class=&quot;context-attach-confirm&quot; type=&quot;button&quot;&gt;Attach&lt;/button&gt;&lt;/footer&gt;&lt;/div&gt;&lt;/div&gt;&lt;/aside&gt;
+          &lt;div class=&quot;context-summary&quot;&gt;&lt;span&gt;Attached context&lt;/span&gt;&lt;span class=&quot;context-annotation&quot; data-context-annotation&gt;&lt;button class=&quot;context-annotation-trigger&quot; type=&quot;button&quot; aria-expanded=&quot;false&quot; aria-label=&quot;Show 2 attached context nodes&quot;&gt;&lt;span class=&quot;context-marker-icon&quot; aria-hidden=&quot;true&quot;&gt;●&lt;/span&gt;&lt;span class=&quot;context-marker-count&quot; aria-hidden=&quot;true&quot;&gt;2&lt;/span&gt;&lt;/button&gt;&lt;span class=&quot;context-annotation-popover&quot;&gt;&lt;span class=&quot;context-annotation-title&quot;&gt;Attached nodes&lt;/span&gt;&lt;span class=&quot;context-node-icons&quot;&gt;&lt;button class=&quot;context-node&quot; type=&quot;button&quot; data-context-node data-context-title=&quot;Accepted turn contract&quot; data-context-note=&quot;Treat explicit graph acceptance, not the model turn ending, as completion.&quot; aria-label=&quot;Accepted turn contract&quot; aria-pressed=&quot;true&quot;&gt;&lt;span class=&quot;node-icon&quot; style=&quot;color:#38a169;border-color:#38a169&quot;&gt;✓&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;context-node&quot; type=&quot;button&quot; data-context-node data-context-title=&quot;Opened-layer display&quot; data-context-note=&quot;Keep the direct parent in the breadcrumb and show only the accepted opened layer.&quot; aria-label=&quot;Opened-layer display&quot; aria-pressed=&quot;false&quot;&gt;&lt;span class=&quot;node-icon&quot; style=&quot;color:#718096;border-color:#718096&quot;&gt;◫&lt;/span&gt;&lt;/button&gt;&lt;/span&gt;&lt;span class=&quot;context-note&quot;&gt;&lt;small&gt;Your annotation&lt;/small&gt;&lt;strong data-context-title-display&gt;Accepted turn contract&lt;/strong&gt;&lt;span data-context-note-display&gt;Treat explicit graph acceptance, not the model turn ending, as completion.&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;composer context-composer&quot;&gt;&lt;div class=&quot;composer-draft&quot;&gt;How should these two contracts work across multiple turns?&lt;/div&gt;&lt;div class=&quot;composer-footer&quot;&gt;&lt;span&gt;Context clears after durable send&lt;/span&gt;&lt;button class=&quot;send&quot; type=&quot;button&quot; aria-label=&quot;Send follow-up&quot;&gt;↑&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;span class=&quot;callout&quot; style=&quot;left:70px;top:125px&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;right:25px;top:350px&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:260px;bottom:151px&quot;&gt;3&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;right:22px;top:20px&quot;&gt;4&lt;/span&gt;
+          &lt;div class=&quot;legend&quot;&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;1&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Select a node&lt;/strong&gt;The graph remains a compact icon-and-title surface.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;2&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Inline node action&lt;/strong&gt;The + opens an optional annotation field in place, scoped to the selected node.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;3&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Context above chat&lt;/strong&gt;The attachment strip sits directly above the chat box; hover or click reveals nodes and notes.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;4&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Historical context&lt;/strong&gt;The user can first navigate to another turn.&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/main&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;section class=&quot;screen&quot; data-screen=&quot;actions&quot;&gt;
+      &lt;div class=&quot;titlebar&quot;&gt;&lt;span class=&quot;traffic&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;Relayer — Stop and retry&lt;/div&gt;
+      &lt;div class=&quot;app-body&quot;&gt;
+        &lt;aside class=&quot;sidebar&quot;&gt;
+          &lt;div class=&quot;brand&quot;&gt;&lt;span class=&quot;brand-mark&quot;&gt;R&lt;/span&gt;Relayer&lt;/div&gt;&lt;button class=&quot;new-thread&quot;&gt;＋ New thread&lt;/button&gt;&lt;div class=&quot;section-label&quot;&gt;Chats&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Product idea&lt;/div&gt;&lt;div class=&quot;section-label&quot;&gt;Projects&lt;/div&gt;&lt;div class=&quot;project-row&quot;&gt;⌄ graphcomplete&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Send-to-display flow&lt;/div&gt;&lt;div class=&quot;thread-row active&quot;&gt;&lt;span class=&quot;dot&quot;&gt;&lt;/span&gt;Stop and retry&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Graph search design&lt;/div&gt;
+          &lt;div class=&quot;app-footer&quot;&gt;&lt;button class=&quot;footer-icon&quot; type=&quot;button&quot; aria-label=&quot;Settings&quot;&gt;⚙&lt;/button&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/aside&gt;
+        &lt;main class=&quot;main has-inspector&quot;&gt;
+          &lt;div class=&quot;main-header&quot;&gt;&lt;div&gt;&lt;div class=&quot;thread-title&quot;&gt;Stop and retry&lt;/div&gt;&lt;div class=&quot;crumb&quot;&gt;graphcomplete&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;graph-area&quot;&gt;
+            &lt;svg class=&quot;edges&quot; data-force-edges preserveAspectRatio=&quot;none&quot;&gt;&lt;line class=&quot;relation&quot; data-source=&quot;visible&quot; data-target=&quot;stopped&quot;/&gt;&lt;line class=&quot;relation&quot; data-source=&quot;stopped&quot; data-target=&quot;retryable&quot;/&gt;&lt;line class=&quot;relation&quot; data-source=&quot;retryable&quot; data-target=&quot;attempt&quot;/&gt;&lt;/svg&gt;
+            &lt;nav class=&quot;layer-breadcrumb&quot; aria-label=&quot;Graph layer path&quot;&gt;&lt;button class=&quot;layer-segment&quot; type=&quot;button&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;◫&lt;/span&gt;&lt;span&gt;&lt;small&gt;Thread&lt;/small&gt;&lt;strong&gt;Send-to-display flow&lt;/strong&gt;&lt;/span&gt;&lt;/button&gt;&lt;span class=&quot;layer-separator&quot;&gt;›&lt;/span&gt;&lt;button class=&quot;layer-segment&quot; type=&quot;button&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;■&lt;/span&gt;&lt;span&gt;&lt;small&gt;Direct parent&lt;/small&gt;&lt;strong&gt;Explore stop behavior&lt;/strong&gt;&lt;/span&gt;&lt;/button&gt;&lt;span class=&quot;layer-separator&quot;&gt;›&lt;/span&gt;&lt;div class=&quot;layer-segment current&quot; aria-current=&quot;page&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;V&lt;/span&gt;&lt;span&gt;&lt;small&gt;Current layer&lt;/small&gt;&lt;strong&gt;Explain what happens when I stop an active run&lt;/strong&gt;&lt;/span&gt;&lt;/div&gt;&lt;/nav&gt;
+            &lt;button class=&quot;graph-card node-slate&quot; type=&quot;button&quot; data-force-node=&quot;visible&quot; data-x=&quot;0.29&quot; data-y=&quot;0.42&quot; aria-label=&quot;Accepted graph stays visible node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;◫&lt;/span&gt;&lt;h4&gt;Accepted graph stays visible&lt;/h4&gt;&lt;/button&gt;
+            &lt;button class=&quot;graph-card node-red&quot; type=&quot;button&quot; data-force-node=&quot;stopped&quot; data-x=&quot;0.68&quot; data-y=&quot;0.38&quot; aria-label=&quot;Stopped interaction node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;■&lt;/span&gt;&lt;h4&gt;Stopped interaction&lt;/h4&gt;&lt;/button&gt;
+            &lt;button class=&quot;graph-card node-orange&quot; type=&quot;button&quot; data-force-node=&quot;retryable&quot; data-x=&quot;0.32&quot; data-y=&quot;0.71&quot; aria-label=&quot;Retryable state node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;↻&lt;/span&gt;&lt;h4&gt;Retryable state&lt;/h4&gt;&lt;/button&gt;
+            &lt;button class=&quot;graph-card node-green selected&quot; type=&quot;button&quot; data-force-node=&quot;attempt&quot; data-x=&quot;0.69&quot; data-y=&quot;0.67&quot; aria-label=&quot;New execution attempt node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;＋&lt;/span&gt;&lt;h4&gt;New execution attempt&lt;/h4&gt;&lt;/button&gt;
+          &lt;/div&gt;
+          &lt;aside class=&quot;node-inspector&quot;&gt;&lt;div class=&quot;inspector-heading&quot;&gt;Node details&lt;/div&gt;&lt;div class=&quot;inspector-body&quot;&gt;&lt;div class=&quot;inspector-head&quot;&gt;&lt;span class=&quot;node-icon&quot; style=&quot;color:#38a169;border-color:#38a169&quot;&gt;＋&lt;/span&gt;&lt;div&gt;&lt;h3&gt;New execution attempt&lt;/h3&gt;&lt;div class=&quot;inspector-kind&quot;&gt;Retry action&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;p class=&quot;inspector-copy&quot;&gt;Retry invokes Complete again against the same user-interaction node. The stopped attempt remains in history; the message and graph identity are not duplicated.&lt;/p&gt;&lt;div class=&quot;inline-node-actions&quot;&gt;&lt;button class=&quot;node-action&quot; type=&quot;button&quot;&gt;View attempts →&lt;/button&gt;&lt;button class=&quot;node-action&quot; type=&quot;button&quot;&gt;Explore another stop case →&lt;/button&gt;&lt;button class=&quot;node-action add-context&quot; type=&quot;button&quot; aria-label=&quot;Add node as context&quot;&gt;＋&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;&lt;/aside&gt;
+          &lt;div class=&quot;composer&quot;&gt;&lt;div class=&quot;composer-placeholder&quot;&gt;Continue this thread…&lt;/div&gt;&lt;div class=&quot;composer-footer actions-only&quot;&gt;&lt;button class=&quot;send&quot; type=&quot;button&quot; aria-label=&quot;Send follow-up&quot;&gt;↑&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;span class=&quot;callout&quot; style=&quot;left:92px;top:136px&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:337px;top:48px&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;right:25px;top:350px&quot;&gt;3&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:430px;top:80px&quot;&gt;4&lt;/span&gt;
+          &lt;div class=&quot;legend&quot;&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;1&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Compact thread list&lt;/strong&gt;New, forked, and resumed interaction threads remain findable without mirroring the graph tree.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;2&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Layer breadcrumb&lt;/strong&gt;Icon-title ancestors stay visible and navigate to their graph layers.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;3&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Inspector actions&lt;/strong&gt;Selected-node actions can navigate or start new work.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;4&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Action result&lt;/strong&gt;The invoking interaction owns this layer but is not a graph node in it.&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/main&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;section class=&quot;screen&quot; data-screen=&quot;settings&quot;&gt;
+      &lt;div class=&quot;titlebar&quot;&gt;&lt;span class=&quot;traffic&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;Relayer — Settings&lt;/div&gt;
+      &lt;div class=&quot;app-body&quot;&gt;
+        &lt;aside class=&quot;sidebar&quot;&gt;&lt;div class=&quot;brand&quot;&gt;&lt;span class=&quot;brand-mark&quot;&gt;R&lt;/span&gt;Relayer&lt;/div&gt;&lt;button class=&quot;new-thread&quot;&gt;＋ New thread&lt;/button&gt;&lt;div class=&quot;section-label&quot;&gt;Chats&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Product idea&lt;/div&gt;&lt;div class=&quot;section-label&quot;&gt;Projects&lt;/div&gt;&lt;div class=&quot;project-row&quot;&gt;⌄ graphcomplete&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Send-to-display flow&lt;/div&gt;&lt;div class=&quot;app-footer&quot;&gt;&lt;button class=&quot;footer-icon&quot; type=&quot;button&quot; aria-label=&quot;Settings&quot;&gt;⚙&lt;/button&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;&lt;/aside&gt;
+        &lt;main class=&quot;main&quot;&gt;&lt;div class=&quot;main-header&quot;&gt;&lt;div&gt;&lt;div class=&quot;thread-title&quot;&gt;Settings&lt;/div&gt;&lt;div class=&quot;crumb&quot;&gt;Local profile&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;settings-layout&quot;&gt;&lt;nav class=&quot;settings-nav&quot; aria-label=&quot;Settings sections&quot;&gt;&lt;button class=&quot;active&quot; type=&quot;button&quot;&gt;Agent&lt;/button&gt;&lt;button type=&quot;button&quot;&gt;Projects &amp;amp; storage&lt;/button&gt;&lt;button type=&quot;button&quot;&gt;Git&lt;/button&gt;&lt;button type=&quot;button&quot;&gt;Updates&lt;/button&gt;&lt;button type=&quot;button&quot;&gt;Appearance&lt;/button&gt;&lt;/nav&gt;&lt;section class=&quot;settings-content&quot;&gt;&lt;h2&gt;Agent&lt;/h2&gt;&lt;p&gt;Configure how Complete runs and which model credential it uses.&lt;/p&gt;&lt;div class=&quot;settings-row&quot;&gt;&lt;strong&gt;Harness&lt;/strong&gt;&lt;span&gt;Prime Agent · pinned production configuration&lt;/span&gt;&lt;button type=&quot;button&quot;&gt;Change&lt;/button&gt;&lt;/div&gt;&lt;div class=&quot;settings-row&quot;&gt;&lt;strong&gt;Agent login&lt;/strong&gt;&lt;span&gt;Codex · connected&lt;/span&gt;&lt;button type=&quot;button&quot;&gt;Reconnect&lt;/button&gt;&lt;/div&gt;&lt;div class=&quot;settings-row&quot;&gt;&lt;strong&gt;Model&lt;/strong&gt;&lt;span&gt;Configured model&lt;/span&gt;&lt;button type=&quot;button&quot;&gt;Choose&lt;/button&gt;&lt;/div&gt;&lt;div class=&quot;advanced-disclosure&quot;&gt;› Advanced&lt;/div&gt;&lt;div class=&quot;settings-row&quot;&gt;&lt;strong&gt;Agent traces&lt;/strong&gt;&lt;span&gt;Off · diagnostic data for Relayer developers&lt;/span&gt;&lt;button type=&quot;button&quot;&gt;Configure&lt;/button&gt;&lt;/div&gt;&lt;/section&gt;&lt;/div&gt;&lt;span class=&quot;callout&quot; style=&quot;left:210px;top:88px&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:510px;top:185px&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:510px;top:350px&quot;&gt;3&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:510px;top:430px&quot;&gt;4&lt;/span&gt;&lt;div class=&quot;legend&quot;&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;1&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Ordinary categories&lt;/strong&gt;Agent, storage, Git, updates, and appearance are discoverable without a diagnostic dashboard.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;2&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Configuration summary&lt;/strong&gt;Harness, login, and model remain separate and replaceable.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;3&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Advanced disclosure&lt;/strong&gt;Endpoint overrides and developer controls stay collapsed by default.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;4&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Traces are diagnostic&lt;/strong&gt;Agent traces are off by default and never the canonical graph view.&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;&lt;/main&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;section class=&quot;screen&quot; data-screen=&quot;update&quot;&gt;
+      &lt;div class=&quot;titlebar&quot;&gt;&lt;span class=&quot;traffic&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;Relayer — Update ready&lt;/div&gt;
+      &lt;div class=&quot;app-body&quot;&gt;
+        &lt;aside class=&quot;sidebar&quot;&gt;
+          &lt;div class=&quot;brand&quot;&gt;&lt;span class=&quot;brand-mark&quot;&gt;R&lt;/span&gt;Relayer&lt;/div&gt;&lt;button class=&quot;new-thread&quot;&gt;＋ New thread&lt;/button&gt;&lt;div class=&quot;section-label&quot;&gt;Chats&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Product idea&lt;/div&gt;&lt;div class=&quot;section-label&quot;&gt;Projects&lt;/div&gt;&lt;div class=&quot;project-row&quot;&gt;⌄ graphcomplete&lt;/div&gt;&lt;div class=&quot;thread-row active&quot;&gt;&lt;span class=&quot;dot&quot;&gt;&lt;/span&gt;Send-to-display flow&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Graph search design&lt;/div&gt;
+          &lt;div class=&quot;update-popover&quot;&gt;&lt;strong&gt;Update available&lt;/strong&gt;&lt;p&gt;Download the signed Relayer update in the background.&lt;/p&gt;&lt;div class=&quot;update-actions&quot;&gt;&lt;button type=&quot;button&quot;&gt;Not now&lt;/button&gt;&lt;button class=&quot;download-update&quot; type=&quot;button&quot;&gt;Download update&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;app-footer&quot;&gt;&lt;button class=&quot;footer-icon&quot; type=&quot;button&quot; aria-label=&quot;Settings&quot;&gt;⚙&lt;/button&gt;&lt;button class=&quot;footer-icon update-ready&quot; type=&quot;button&quot; aria-label=&quot;Download update&quot;&gt;↓&lt;/button&gt;&lt;/div&gt;
+        &lt;/aside&gt;
+        &lt;main class=&quot;main&quot;&gt;
+          &lt;div class=&quot;main-header&quot;&gt;&lt;div&gt;&lt;div class=&quot;thread-title&quot;&gt;New thread&lt;/div&gt;&lt;div class=&quot;crumb&quot;&gt;Open a folder or continue without one&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;new-thread-stage&quot;&gt;&lt;div class=&quot;new-thread-content&quot;&gt;&lt;h2&gt;What do you want to work on?&lt;/h2&gt;&lt;div class=&quot;new-thread-composer&quot;&gt;&lt;div class=&quot;new-thread-prompt&quot;&gt;Describe a task…&lt;/div&gt;&lt;div class=&quot;new-thread-footer&quot;&gt;&lt;div class=&quot;new-thread-tools&quot;&gt;&lt;button class=&quot;composer-tool icon-only&quot; type=&quot;button&quot; aria-label=&quot;Attach context&quot;&gt;＋&lt;/button&gt;&lt;button class=&quot;composer-tool&quot; type=&quot;button&quot;&gt;Choose scope⌄&lt;/button&gt;&lt;span class=&quot;composer-tool static&quot;&gt;Prime Agent&lt;/span&gt;&lt;/div&gt;&lt;button class=&quot;new-thread-send&quot; type=&quot;button&quot; aria-label=&quot;Send first message&quot; disabled&gt;↑&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;span class=&quot;callout&quot; style=&quot;left:166px;bottom:61px&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:191px;bottom:215px&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:390px;top:330px&quot;&gt;3&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:82px;bottom:133px&quot;&gt;4&lt;/span&gt;
+          &lt;div class=&quot;legend&quot;&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;1&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Small update signal&lt;/strong&gt;A highlighted circular icon appears only when an update is available.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;2&lt;/b&gt;&lt;span&gt;&lt;strong&gt;One compact prompt&lt;/strong&gt;Clicking the icon offers Download update or Not now.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;3&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Work stays usable&lt;/strong&gt;Download and verification remain in the background.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;4&lt;/b&gt;&lt;span&gt;&lt;strong&gt;No update chrome&lt;/strong&gt;No version number, banner, or wide sidebar button is permanently displayed.&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/main&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;section class=&quot;screen&quot; data-screen=&quot;eval-runner&quot;&gt;
+      &lt;div class=&quot;titlebar&quot;&gt;&lt;span class=&quot;traffic&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;Relayer Eval — local evaluation runner&lt;/div&gt;
+      &lt;div class=&quot;eval-runner&quot;&gt;
+        &lt;aside class=&quot;runner-sidebar&quot;&gt;&lt;div class=&quot;runner-brand&quot;&gt;Relayer Eval&lt;/div&gt;&lt;button class=&quot;runner-case active&quot; type=&quot;button&quot;&gt;Basic graph conversation&lt;/button&gt;&lt;div class=&quot;runner-label&quot;&gt;Capability suites&lt;/div&gt;&lt;button class=&quot;runner-case&quot; type=&quot;button&quot;&gt;Context and memory&lt;/button&gt;&lt;button class=&quot;runner-case&quot; type=&quot;button&quot;&gt;Node actions&lt;/button&gt;&lt;button class=&quot;runner-case&quot; type=&quot;button&quot;&gt;Stop and retry&lt;/button&gt;&lt;div class=&quot;runner-label&quot;&gt;Recent runs&lt;/div&gt;&lt;button class=&quot;runner-case&quot; type=&quot;button&quot;&gt;eval_01J · Passed&lt;/button&gt;&lt;/aside&gt;
+        &lt;main class=&quot;runner-main&quot;&gt;
+          &lt;header class=&quot;runner-header&quot;&gt;&lt;div&gt;&lt;h2&gt;Basic graph conversation&lt;/h2&gt;&lt;p&gt;Clone the pinned sample repository, replay real product interactions, then grade the saved graph.&lt;/p&gt;&lt;/div&gt;&lt;button class=&quot;run-eval&quot; type=&quot;button&quot;&gt;Run evaluation&lt;/button&gt;&lt;/header&gt;
+          &lt;div class=&quot;runner-config&quot;&gt;&lt;div class=&quot;runner-field&quot;&gt;&lt;label for=&quot;runner-harness&quot;&gt;Harness configuration&lt;/label&gt;&lt;select id=&quot;runner-harness&quot;&gt;&lt;option&gt;Relayer Prime Agent · v1&lt;/option&gt;&lt;/select&gt;&lt;/div&gt;&lt;div class=&quot;runner-field&quot;&gt;&lt;label for=&quot;runner-model&quot;&gt;Candidate model&lt;/label&gt;&lt;select id=&quot;runner-model&quot;&gt;&lt;option&gt;Codex · pinned&lt;/option&gt;&lt;/select&gt;&lt;/div&gt;&lt;div class=&quot;runner-field&quot;&gt;&lt;label for=&quot;runner-judge&quot;&gt;Judge&lt;/label&gt;&lt;select id=&quot;runner-judge&quot;&gt;&lt;option&gt;Operator + quality judge · v1&lt;/option&gt;&lt;/select&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;runner-body&quot;&gt;
+            &lt;section class=&quot;runner-panel&quot;&gt;&lt;h3&gt;Case execution&lt;/h3&gt;&lt;div class=&quot;runner-step&quot;&gt;&lt;b&gt;✓&lt;/b&gt;&lt;div&gt;&lt;strong&gt;Clone sample repository&lt;/strong&gt;&lt;span&gt; Pinned commit verified&lt;/span&gt;&lt;/div&gt;&lt;span&gt;0:03&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;runner-step&quot;&gt;&lt;b&gt;✓&lt;/b&gt;&lt;div&gt;&lt;strong&gt;Initial message&lt;/strong&gt;&lt;span&gt; Accepted graph · 5 nodes&lt;/span&gt;&lt;/div&gt;&lt;span&gt;0:41&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;runner-step&quot;&gt;&lt;b&gt;✓&lt;/b&gt;&lt;div&gt;&lt;strong&gt;Attached-context message&lt;/strong&gt;&lt;span&gt; Prior node reused&lt;/span&gt;&lt;/div&gt;&lt;span&gt;0:36&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;runner-step&quot;&gt;&lt;b&gt;✓&lt;/b&gt;&lt;div&gt;&lt;strong&gt;Operator navigation&lt;/strong&gt;&lt;span&gt; Inspect node · invoke action&lt;/span&gt;&lt;/div&gt;&lt;span&gt;0:28&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;runner-step&quot;&gt;&lt;b&gt;✓&lt;/b&gt;&lt;div&gt;&lt;strong&gt;Judge and product replay&lt;/strong&gt;&lt;span&gt; Contract and UX thresholds met&lt;/span&gt;&lt;/div&gt;&lt;span&gt;0:30&lt;/span&gt;&lt;/div&gt;&lt;/section&gt;
+            &lt;aside class=&quot;runner-panel&quot;&gt;&lt;h3&gt;Run result&lt;/h3&gt;&lt;div class=&quot;runner-summary&quot;&gt;&lt;strong&gt;Passed&lt;/strong&gt;&lt;span&gt;eval_01J · immutable bundle&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;runner-metric&quot;&gt;&lt;span&gt;Deterministic&lt;/span&gt;&lt;b&gt;38 / 38&lt;/b&gt;&lt;/div&gt;&lt;div class=&quot;runner-metric&quot;&gt;&lt;span&gt;Operator task&lt;/span&gt;&lt;b&gt;Completed&lt;/b&gt;&lt;/div&gt;&lt;div class=&quot;runner-metric&quot;&gt;&lt;span&gt;Quality judge&lt;/span&gt;&lt;b&gt;All thresholds&lt;/b&gt;&lt;/div&gt;&lt;div class=&quot;runner-metric&quot;&gt;&lt;span&gt;Cost&lt;/span&gt;&lt;b&gt;$0.42&lt;/b&gt;&lt;/div&gt;&lt;button class=&quot;runner-open&quot; type=&quot;button&quot; data-open-report&gt;Open report&lt;/button&gt;&lt;button class=&quot;see-in-app&quot; style=&quot;width:100%;margin-top:7px&quot; type=&quot;button&quot; data-open-eval&gt;See in App&lt;/button&gt;&lt;/aside&gt;
+          &lt;/div&gt;
+        &lt;/main&gt;
+        &lt;span class=&quot;callout&quot; style=&quot;left:207px;top:83px&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:390px;top:154px&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:450px;top:340px&quot;&gt;3&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;right:70px;top:450px&quot;&gt;4&lt;/span&gt;
+        &lt;div class=&quot;legend&quot;&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;1&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Versioned case&lt;/strong&gt;The UI chooses a checked-in case, suite, and pinned repository revision.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;2&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Exact configuration&lt;/strong&gt;Harness, candidate model, and judge manifests are explicit inputs.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;3&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Visible execution&lt;/strong&gt;Product interactions, operator actions, checks, cost, and failures stream into one run.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;4&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Two review paths&lt;/strong&gt;Open the detailed report or hand the immutable bundle to the desktop.&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;section class=&quot;screen&quot; data-screen=&quot;eval-report&quot;&gt;
+      &lt;div class=&quot;titlebar&quot;&gt;&lt;span class=&quot;traffic&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;Relayer Eval — local run report&lt;/div&gt;
+      &lt;div class=&quot;eval-report-bg&quot;&gt;
+        &lt;main class=&quot;eval-report-shell&quot;&gt;
+          &lt;header class=&quot;eval-report-header&quot;&gt;&lt;div&gt;&lt;div class=&quot;eval-pass&quot;&gt;Passed · basic gate&lt;/div&gt;&lt;h2&gt;basic-graph-conversation-v1&lt;/h2&gt;&lt;p&gt;Prime Agent · configuration 91d4c8a · run eval_01J&lt;/p&gt;&lt;/div&gt;&lt;button class=&quot;see-in-app&quot; type=&quot;button&quot; data-open-eval&gt;See in App&lt;/button&gt;&lt;/header&gt;
+          &lt;div class=&quot;eval-meta&quot;&gt;&lt;div&gt;&lt;small&gt;Deterministic&lt;/small&gt;&lt;strong&gt;38 / 38&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;Judge&lt;/small&gt;&lt;strong&gt;All thresholds&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;Duration&lt;/small&gt;&lt;strong&gt;2m 18s&lt;/strong&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;Cost&lt;/small&gt;&lt;strong&gt;$0.42&lt;/strong&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;section class=&quot;eval-steps&quot; aria-label=&quot;Evaluation steps&quot;&gt;
+            &lt;div class=&quot;eval-step&quot;&gt;&lt;b&gt;✓&lt;/b&gt;&lt;strong&gt;Initial message&lt;/strong&gt;&lt;span&gt;Accepted layer · 5 nodes&lt;/span&gt;&lt;strong&gt;Passed&lt;/strong&gt;&lt;/div&gt;
+            &lt;div class=&quot;eval-step&quot;&gt;&lt;b&gt;✓&lt;/b&gt;&lt;strong&gt;Attached follow-up&lt;/strong&gt;&lt;span&gt;Reused acceptance node&lt;/span&gt;&lt;strong&gt;Passed&lt;/strong&gt;&lt;/div&gt;
+            &lt;div class=&quot;eval-step&quot;&gt;&lt;b&gt;✓&lt;/b&gt;&lt;strong&gt;Node action&lt;/strong&gt;&lt;span&gt;Retry child layer&lt;/span&gt;&lt;strong&gt;Passed&lt;/strong&gt;&lt;/div&gt;
+            &lt;div class=&quot;eval-step&quot;&gt;&lt;b&gt;✓&lt;/b&gt;&lt;strong&gt;Operator action&lt;/strong&gt;&lt;span&gt;Inspected and invoked retry path&lt;/span&gt;&lt;strong&gt;Passed&lt;/strong&gt;&lt;/div&gt;
+          &lt;/section&gt;
+        &lt;/main&gt;
+        &lt;span class=&quot;callout&quot; style=&quot;right:150px;top:70px&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:150px;top:202px&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:150px;top:310px&quot;&gt;3&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;right:150px;top:445px&quot;&gt;4&lt;/span&gt;
+        &lt;div class=&quot;legend&quot;&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;1&lt;/b&gt;&lt;span&gt;&lt;strong&gt;One product handoff&lt;/strong&gt;See in App opens this immutable run in Relayer.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;2&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Pinned evidence&lt;/strong&gt;Case, workspace, harness, graph schema, and judge digests are recorded.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;3&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Real interactions&lt;/strong&gt;Each step resolves persisted nodes and actions from the prior result.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;4&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Immutable run&lt;/strong&gt;The report and graph journal remain unchanged after review.&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;section class=&quot;screen&quot; data-screen=&quot;eval-thread&quot;&gt;
+      &lt;div class=&quot;titlebar&quot;&gt;&lt;span class=&quot;traffic&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;Relayer — Evaluation replay&lt;/div&gt;
+      &lt;div class=&quot;app-body&quot;&gt;
+        &lt;aside class=&quot;sidebar&quot;&gt;&lt;div class=&quot;brand&quot;&gt;&lt;span class=&quot;brand-mark&quot;&gt;R&lt;/span&gt;Relayer&lt;/div&gt;&lt;button class=&quot;new-thread&quot;&gt;＋ New thread&lt;/button&gt;&lt;div class=&quot;section-label&quot;&gt;Chats&lt;/div&gt;&lt;div class=&quot;thread-row&quot;&gt;Product idea&lt;/div&gt;&lt;div class=&quot;section-label&quot;&gt;Projects&lt;/div&gt;&lt;div class=&quot;project-row&quot;&gt;⌄ graphcomplete&lt;/div&gt;&lt;div class=&quot;section-label&quot;&gt;Evaluations&lt;/div&gt;&lt;div class=&quot;thread-row active&quot;&gt;&lt;span class=&quot;dot&quot;&gt;&lt;/span&gt;basic-graph-conversation-v1&lt;/div&gt;&lt;div class=&quot;app-footer&quot;&gt;&lt;button class=&quot;footer-icon&quot; type=&quot;button&quot; aria-label=&quot;Settings&quot;&gt;⚙&lt;/button&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;&lt;/aside&gt;
+        &lt;main class=&quot;main has-inspector eval-thread&quot;&gt;
+          &lt;div class=&quot;main-header&quot;&gt;&lt;div&gt;&lt;div class=&quot;thread-title&quot;&gt;basic-graph-conversation-v1&lt;/div&gt;&lt;div class=&quot;crumb&quot;&gt;Evaluation run eval_01J · read-only replay&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;turn-strip&quot;&gt;&lt;button class=&quot;turn-arrow&quot; type=&quot;button&quot; aria-label=&quot;Previous evaluation step&quot;&gt;←&lt;/button&gt;&lt;span class=&quot;turn-position&quot;&gt;Step 1 of 4&lt;/span&gt;&lt;button class=&quot;turn-arrow&quot; type=&quot;button&quot; aria-label=&quot;Next evaluation step&quot;&gt;→&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;evaluation-banner&quot;&gt;&lt;div&gt;&lt;strong&gt;Passed · Prime Agent · 91d4c8a&lt;/strong&gt;&lt;span&gt;38 deterministic checks · judge thresholds met · immutable evidence&lt;/span&gt;&lt;/div&gt;&lt;button type=&quot;button&quot;&gt;Continue with this configuration&lt;/button&gt;&lt;/div&gt;
+          &lt;div class=&quot;graph-area&quot;&gt;
+            &lt;svg class=&quot;edges&quot; data-force-edges preserveAspectRatio=&quot;none&quot;&gt;&lt;line class=&quot;relation&quot; data-source=&quot;accepted&quot; data-target=&quot;stopped&quot;/&gt;&lt;line class=&quot;relation&quot; data-source=&quot;accepted&quot; data-target=&quot;visible&quot;/&gt;&lt;line class=&quot;relation&quot; data-source=&quot;stopped&quot; data-target=&quot;failed&quot;/&gt;&lt;line class=&quot;relation&quot; data-source=&quot;visible&quot; data-target=&quot;failed&quot;/&gt;&lt;/svg&gt;
+            &lt;div class=&quot;layer-breadcrumb&quot;&gt;&lt;span class=&quot;layer-segment current&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;V&lt;/span&gt;&lt;span&gt;&lt;small&gt;Evaluation interaction · step 1&lt;/small&gt;&lt;strong&gt;Explain how a run becomes visible&lt;/strong&gt;&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+            &lt;button class=&quot;graph-card node-green selected&quot; type=&quot;button&quot; data-force-node=&quot;accepted&quot; data-x=&quot;0.33&quot; data-y=&quot;0.42&quot; aria-label=&quot;Accepted graph commit node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;✓&lt;/span&gt;&lt;h4&gt;Accepted graph commit&lt;/h4&gt;&lt;/button&gt;
+            &lt;button class=&quot;graph-card node-orange&quot; type=&quot;button&quot; data-force-node=&quot;stopped&quot; data-x=&quot;0.68&quot; data-y=&quot;0.38&quot; aria-label=&quot;Stopped is retryable node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;↻&lt;/span&gt;&lt;h4&gt;Stopped is retryable&lt;/h4&gt;&lt;/button&gt;
+            &lt;button class=&quot;graph-card node-blue&quot; type=&quot;button&quot; data-force-node=&quot;visible&quot; data-x=&quot;0.31&quot; data-y=&quot;0.72&quot; aria-label=&quot;Visible after submit node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;◫&lt;/span&gt;&lt;h4&gt;Visible after submit&lt;/h4&gt;&lt;/button&gt;
+            &lt;button class=&quot;graph-card node-red&quot; type=&quot;button&quot; data-force-node=&quot;failed&quot; data-x=&quot;0.70&quot; data-y=&quot;0.69&quot; aria-label=&quot;Failed after exhausted repair node&quot;&gt;&lt;span class=&quot;node-icon&quot;&gt;!&lt;/span&gt;&lt;h4&gt;Failed after exhausted repair&lt;/h4&gt;&lt;/button&gt;
+          &lt;/div&gt;
+          &lt;aside class=&quot;node-inspector&quot;&gt;&lt;div class=&quot;inspector-heading&quot;&gt;NODE DETAILS&lt;/div&gt;&lt;div class=&quot;inspector-body&quot;&gt;&lt;div class=&quot;inspector-head&quot;&gt;&lt;span class=&quot;node-icon&quot; style=&quot;color:#38a169;border-color:#38a169&quot;&gt;✓&lt;/span&gt;&lt;div&gt;&lt;h3&gt;Accepted graph commit&lt;/h3&gt;&lt;div class=&quot;inspector-kind&quot;&gt;completion.acceptance&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;p class=&quot;inspector-copy&quot;&gt;The response becomes product-visible only after the graph engine validates and submits the run output. A model turn ending does not satisfy this requirement.&lt;/p&gt;&lt;div class=&quot;inspector-meta&quot;&gt;&lt;div&gt;&lt;small&gt;Grounding&lt;/small&gt;&lt;b&gt;docs/completion.md&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;small&gt;Judge evidence&lt;/small&gt;&lt;b&gt;2 dimensions&lt;/b&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;inline-node-actions&quot;&gt;&lt;button class=&quot;node-action&quot; type=&quot;button&quot; disabled&gt;Explain retry →&lt;/button&gt;&lt;button class=&quot;node-action add-context&quot; type=&quot;button&quot; disabled aria-label=&quot;Attach context&quot;&gt;＋&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;&lt;/aside&gt;
+          &lt;span class=&quot;callout&quot; style=&quot;left:82px;top:280px&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:490px;top:75px&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;left:500px;top:345px&quot;&gt;3&lt;/span&gt;&lt;span class=&quot;callout&quot; style=&quot;right:120px;top:420px&quot;&gt;4&lt;/span&gt;
+          &lt;div class=&quot;legend&quot;&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;1&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Separate evaluation group&lt;/strong&gt;Replay entries do not mix with ordinary chats or projects.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;2&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Same renderer&lt;/strong&gt;The app resolves the run output through the normal graph-engine read contract.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;3&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Normal graph inspection&lt;/strong&gt;Nodes, connections, breadcrumb, details, and step history remain realistic.&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;legend-item&quot;&gt;&lt;b&gt;4&lt;/b&gt;&lt;span&gt;&lt;strong&gt;Explicit continuation&lt;/strong&gt;Continuing clones the graph and pins the exact passing harness configuration.&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;/main&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+  &lt;/div&gt;
+
+  &lt;script&gt;
+    (() =&gt; {
+      const root = document.getElementById(&#x27;relayer-product-walkthrough&#x27;);
+      if (!root) return;
+
+      const buttons = Array.from(root.querySelectorAll(&#x27;[data-target]&#x27;));
+      const screens = Array.from(root.querySelectorAll(&#x27;[data-screen]&#x27;));
+      const forceScenes = new WeakMap();
+
+      const initializeForceScene = (screen) =&gt; {
+        const area = screen.querySelector(&#x27;.graph-area&#x27;);
+        const svg = area?.querySelector(&#x27;[data-force-edges]&#x27;);
+        const nodeElements = Array.from(area?.querySelectorAll(&#x27;[data-force-node]&#x27;) || []);
+        if (!area || !svg || nodeElements.length === 0) return null;
+
+        const existing = forceScenes.get(screen);
+        if (existing) {
+          existing.reheat(0.5);
+          return existing;
+        }
+
+        const nodes = nodeElements.map((element, index) =&gt; ({
+          id: element.dataset.forceNode,
+          element,
+          xRatio: Number(element.dataset.x || 0.5),
+          yRatio: Number(element.dataset.y || 0.5),
+          x: 0,
+          y: 0,
+          vx: index % 2 === 0 ? -0.18 : 0.18,
+          vy: index &lt; 2 ? -0.12 : 0.12,
+          fixed: false,
+        }));
+        const nodesById = new Map(nodes.map((node) =&gt; [node.id, node]));
+        const links = Array.from(svg.querySelectorAll(&#x27;[data-source][data-target]&#x27;))
+          .map((line) =&gt; ({ line, source: nodesById.get(line.dataset.source), target: nodesById.get(line.dataset.target) }))
+          .filter((link) =&gt; link.source &amp;&amp; link.target);
+
+        let width = 0;
+        let height = 0;
+        let alpha = 0.9;
+        let frame = 0;
+        let dragging = null;
+
+        const measure = () =&gt; {
+          const nextWidth = area.clientWidth;
+          const nextHeight = area.clientHeight;
+          if (!nextWidth || !nextHeight) return false;
+          const firstMeasure = width === 0 || height === 0;
+          const scaleX = firstMeasure ? 1 : nextWidth / width;
+          const scaleY = firstMeasure ? 1 : nextHeight / height;
+          width = nextWidth;
+          height = nextHeight;
+          svg.setAttribute(&#x27;viewBox&#x27;, `0 0 ${width} ${height}`);
+          nodes.forEach((node) =&gt; {
+            if (firstMeasure) {
+              node.x = width * node.xRatio;
+              node.y = height * node.yRatio;
+            } else {
+              node.x *= scaleX;
+              node.y *= scaleY;
+            }
+          });
+          return true;
+        };
+
+        const paint = () =&gt; {
+          nodes.forEach((node) =&gt; {
+            node.element.style.left = `${node.x}px`;
+            node.element.style.top = `${node.y}px`;
+          });
+          links.forEach(({ line, source, target }) =&gt; {
+            const sourceY = source.y - 11;
+            const targetY = target.y - 11;
+            const dx = target.x - source.x;
+            const dy = targetY - sourceY;
+            const distance = Math.max(1, Math.hypot(dx, dy));
+            const inset = 15;
+            line.setAttribute(&#x27;x1&#x27;, String(source.x + (dx / distance) * inset));
+            line.setAttribute(&#x27;y1&#x27;, String(sourceY + (dy / distance) * inset));
+            line.setAttribute(&#x27;x2&#x27;, String(target.x - (dx / distance) * inset));
+            line.setAttribute(&#x27;y2&#x27;, String(targetY - (dy / distance) * inset));
+          });
+        };
+
+        const tick = () =&gt; {
+          frame = 0;
+          if (!screen.classList.contains(&#x27;active&#x27;) || !width || !height) return;
+
+          const centerX = width * 0.5;
+          const centerY = height * 0.57;
+          nodes.forEach((node) =&gt; {
+            if (node.fixed) return;
+            node.vx += (centerX - node.x) * 0.0015 * alpha;
+            node.vy += (centerY - node.y) * 0.0012 * alpha;
+          });
+
+          for (let i = 0; i &lt; nodes.length; i += 1) {
+            for (let j = i + 1; j &lt; nodes.length; j += 1) {
+              const a = nodes[i];
+              const b = nodes[j];
+              let dx = b.x - a.x;
+              let dy = b.y - a.y;
+              let distance = Math.max(1, Math.hypot(dx, dy));
+              const repulsion = Math.min(1.8, 4200 / (distance * distance)) * alpha;
+              const nx = dx / distance;
+              const ny = dy / distance;
+              if (!a.fixed) {
+                a.vx -= nx * repulsion;
+                a.vy -= ny * repulsion;
+              }
+              if (!b.fixed) {
+                b.vx += nx * repulsion;
+                b.vy += ny * repulsion;
+              }
+              const minimum = 126;
+              if (distance &lt; minimum) {
+                const push = (minimum - distance) * 0.025 * alpha;
+                if (!a.fixed) {
+                  a.vx -= nx * push;
+                  a.vy -= ny * push;
+                }
+                if (!b.fixed) {
+                  b.vx += nx * push;
+                  b.vy += ny * push;
+                }
+              }
+            }
+          }
+
+          links.forEach(({ source, target }) =&gt; {
+            const dx = target.x - source.x;
+            const dy = target.y - source.y;
+            const distance = Math.max(1, Math.hypot(dx, dy));
+            const spring = (distance - 168) * 0.012 * alpha;
+            const nx = dx / distance;
+            const ny = dy / distance;
+            if (!source.fixed) {
+              source.vx += nx * spring;
+              source.vy += ny * spring;
+            }
+            if (!target.fixed) {
+              target.vx -= nx * spring;
+              target.vy -= ny * spring;
+            }
+          });
+
+          nodes.forEach((node) =&gt; {
+            if (node.fixed) return;
+            node.vx *= 0.82;
+            node.vy *= 0.82;
+            node.x += node.vx;
+            node.y += node.vy;
+            node.x = Math.max(72, Math.min(width - 72, node.x));
+            node.y = Math.max(104, Math.min(height - 40, node.y));
+          });
+          paint();
+          alpha *= 0.982;
+          if (alpha &gt; 0.008 || dragging) frame = requestAnimationFrame(tick);
+        };
+
+        const reheat = (nextAlpha = 0.65) =&gt; {
+          if (!measure()) return;
+          alpha = Math.max(alpha, nextAlpha);
+          if (!frame) frame = requestAnimationFrame(tick);
+        };
+
+        nodes.forEach((node) =&gt; {
+          let moved = false;
+          node.element.addEventListener(&#x27;pointerdown&#x27;, (event) =&gt; {
+            dragging = node;
+            moved = false;
+            node.fixed = true;
+            node.element.classList.add(&#x27;dragging&#x27;);
+            node.element.setPointerCapture(event.pointerId);
+            reheat(0.9);
+          });
+          node.element.addEventListener(&#x27;pointermove&#x27;, (event) =&gt; {
+            if (dragging !== node) return;
+            const bounds = area.getBoundingClientRect();
+            node.x = Math.max(72, Math.min(width - 72, event.clientX - bounds.left));
+            node.y = Math.max(104, Math.min(height - 40, event.clientY - bounds.top));
+            node.vx = 0;
+            node.vy = 0;
+            moved = true;
+            alpha = Math.max(alpha, 0.75);
+            paint();
+          });
+          const endDrag = (event) =&gt; {
+            if (dragging !== node) return;
+            dragging = null;
+            node.element.classList.remove(&#x27;dragging&#x27;);
+            if (node.element.hasPointerCapture(event.pointerId)) node.element.releasePointerCapture(event.pointerId);
+            reheat(moved ? 0.7 : 0.25);
+          };
+          node.element.addEventListener(&#x27;pointerup&#x27;, endDrag);
+          node.element.addEventListener(&#x27;pointercancel&#x27;, endDrag);
+        });
+
+        measure();
+        paint();
+        const observer = new ResizeObserver(() =&gt; reheat(0.55));
+        observer.observe(area);
+        const scene = { reheat };
+        forceScenes.set(screen, scene);
+        reheat(0.9);
+        return scene;
+      };
+
+      const activate = (name) =&gt; {
+        const target = screens.some((screen) =&gt; screen.dataset.screen === name) ? name : &#x27;agent-setup&#x27;;
+        buttons.forEach((button) =&gt; button.setAttribute(&#x27;aria-pressed&#x27;, String(button.dataset.target === target)));
+        screens.forEach((screen) =&gt; screen.classList.toggle(&#x27;active&#x27;, screen.dataset.screen === target));
+        const activeScreen = screens.find((screen) =&gt; screen.dataset.screen === target);
+        if (activeScreen) requestAnimationFrame(() =&gt; initializeForceScene(activeScreen));
+        window.top.postMessage({ type: &#x27;relayer:walkthrough-scenario&#x27;, scenario: target }, &#x27;*&#x27;);
+      };
+
+      buttons.forEach((button) =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; activate(button.dataset.target));
+      });
+
+      root.querySelectorAll(&#x27;[data-open-eval]&#x27;).forEach((button) =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; activate(&#x27;eval-thread&#x27;));
+      });
+      const openReport = root.querySelector(&#x27;[data-open-report]&#x27;);
+      if (openReport) openReport.addEventListener(&#x27;click&#x27;, () =&gt; activate(&#x27;eval-report&#x27;));
+
+      const annotationsToggle = root.querySelector(&#x27;[data-annotations-toggle]&#x27;);
+      if (annotationsToggle) {
+        annotationsToggle.addEventListener(&#x27;click&#x27;, () =&gt; {
+          const visible = root.classList.toggle(&#x27;show-annotations&#x27;);
+          annotationsToggle.setAttribute(&#x27;aria-pressed&#x27;, String(visible));
+          annotationsToggle.textContent = visible ? &#x27;Hide annotations&#x27; : &#x27;Show annotations&#x27;;
+        });
+      }
+
+      const pickerButtons = Array.from(root.querySelectorAll(&#x27;[data-picker]&#x27;));
+      const pickerPanels = Array.from(root.querySelectorAll(&#x27;[data-picker-panel]&#x27;));
+      pickerButtons.forEach((button) =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; {
+          const target = button.dataset.picker;
+          pickerButtons.forEach((candidate) =&gt; {
+            candidate.setAttribute(&#x27;aria-expanded&#x27;, String(candidate.dataset.picker === target));
+          });
+          pickerPanels.forEach((panel) =&gt; {
+            panel.classList.toggle(&#x27;active&#x27;, panel.dataset.pickerPanel === target);
+          });
+        });
+      });
+
+      const contextAnnotation = root.querySelector(&#x27;[data-context-annotation]&#x27;);
+      const contextTrigger = contextAnnotation?.querySelector(&#x27;.context-annotation-trigger&#x27;);
+      const contextNodes = Array.from(contextAnnotation?.querySelectorAll(&#x27;[data-context-node]&#x27;) || []);
+      const contextTitle = contextAnnotation?.querySelector(&#x27;[data-context-title-display]&#x27;);
+      const contextNote = contextAnnotation?.querySelector(&#x27;[data-context-note-display]&#x27;);
+      if (contextAnnotation &amp;&amp; contextTrigger) {
+        contextTrigger.addEventListener(&#x27;click&#x27;, () =&gt; {
+          const open = contextAnnotation.classList.toggle(&#x27;open&#x27;);
+          contextTrigger.setAttribute(&#x27;aria-expanded&#x27;, String(open));
+        });
+      }
+      contextNodes.forEach((button) =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; {
+          contextNodes.forEach((candidate) =&gt; {
+            candidate.setAttribute(&#x27;aria-pressed&#x27;, String(candidate === button));
+          });
+          if (contextTitle) contextTitle.textContent = button.dataset.contextTitle || &#x27;&#x27;;
+          if (contextNote) contextNote.textContent = button.dataset.contextNote || &#x27;&#x27;;
+        });
+      });
+      activate(&#x27;agent-setup&#x27;);
+    })();
+  &lt;/script&gt;
+&lt;/div&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>

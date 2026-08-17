@@ -32,6 +32,23 @@ The intended recursive loop is:
 
 See [Architecture](docs/architecture.md) and [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
 
+## Desktop Slice 1
+
+The first Relayer Desktop slice is an Electron shell for Codex provider setup, the New Thread entry surface, full-page Settings, appearance, folder selection, and the initial local interaction view. Agent execution and graph output are intentionally not connected in this slice.
+
+```sh
+npm install
+npm run desktop:dev
+```
+
+Build an unsigned Apple Silicon development application with:
+
+```sh
+npm run desktop:pack
+```
+
+The living [Product Requirements](docs/prd/index.html) webpage records what is verified, partial, open, deferred, and planned for the updater slice. Run `npm run prd` to review it and save local comments to the ignored `docs/prd/comments.json` file. User-visible proof is stored with the PRD under `docs/prd/assets/evidence/`.
+
 ## Development
 
 Requires Node.js 22.8 or newer.
@@ -45,4 +62,3 @@ npm run build
 ## License
 
 Apache-2.0
-
