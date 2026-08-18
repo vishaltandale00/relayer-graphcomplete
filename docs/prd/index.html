@@ -1415,8 +1415,9 @@ interface Harness {
   &quot;prime-agent&quot;: createPrimeAgentHarness,
 };
 </code></pre>
-<p>The thread stores a copy of its selected named harness configuration. The configuration's <code>implementation</code> field selects a factory from the map; the host does not interpret the implementation-specific <code>settings</code> object. The host keeps the same JavaScript harness object and underlying provider session alive across turns. Factories may initialize asynchronously. If the Node process or provider session expires, trusted control code first registers a fresh graph capability, then the host recreates the object from stored configuration and opaque provider resume state. Continuous conversation must not rediscover, reload, or start a brand-new Codex conversation on every Complete call.</p>
-<p>The Relayer app server will own one-active-root-completion coordination for a thread. The Node host owns the live JavaScript object, serializes construction and Complete calls on that object, forwards cancellation through an <code>AbortSignal</code>, and disposes live harnesses during shutdown; different thread harness objects may run concurrently. Prime Agent remains the owner of recursive child-agent scheduling inside a completion.</p>
+<p>The thread stores a copy of its selected named harness configuration. The configuration's <code>implementation</code> field selects a factory from the map. The host does not interpret the implementation-specific <code>settings</code> object. The host keeps the same JavaScript harness object and provider session alive across turns. Factories may initialize asynchronously.</p>
+<p>If the Node process or provider session expires, trusted control code first registers a fresh graph capability. The host then recreates the object from stored configuration and opaque provider resume state. Continuous conversation must not start a new Codex conversation on every Complete call.</p>
+<p>The Relayer app server owns one-active-root-completion coordination for a thread. The Node host owns the live JavaScript object. It serializes construction and Complete calls, forwards cancellation through an <code>AbortSignal</code>, and disposes live harnesses during shutdown. Harness objects for different threads can run concurrently. Prime Agent owns recursive child-agent scheduling inside a completion.</p>
 <h3>12.3 Minimal harness configuration</h3>
 <p>Each YAML file has a unique machine-readable <code>name</code>, selects an implementation type and version, and carries implementation-owned settings. The host validates only the common envelope. Each implementation validates its own settings, so a later Prime Agent harness can add model policy, recursion, review, and budget settings without changing host types.</p>
 <pre><code class="language-yaml">schemaVersion: 1
@@ -1429,8 +1430,8 @@ settings:
   networkAccessEnabled: true
   skipGitRepoCheck: true
 </code></pre>
-<p>The implementation registry and configuration catalog solve different problems: the registry says which code can run, while the catalog says which named production setups users and evaluations can select. Many configurations are expected to select the same implementation with different settings; only configuration names must be unique. Duplicate names fail catalog loading. A thread is pinned to the full copied configuration, not merely to an implementation type.</p>
-<p>Harness configurations are selected by a test run, not encoded in test cases. An opt-in live run may select both <code>codex-basic</code> and <code>codex-basic-high</code>; the runner expands the same harness-agnostic cases across both configurations even though they resolve to the same <code>codex.basic</code> implementation.</p>
+<p>The implementation registry defines which code can run. The configuration catalog defines the named production setups that users and evaluations can select. Many configurations can select the same implementation with different settings. Only configuration names must be unique. Duplicate names fail catalog loading. A thread is pinned to the full copied configuration, not only to an implementation type.</p>
+<p>A test run selects harness configurations. Test cases do not encode them. An opt-in live run can select <code>codex-basic</code> and <code>codex-basic-high</code>. The runner expands the same harness-agnostic cases across both configurations. Both configurations can resolve to the same <code>codex.basic</code> implementation.</p>
 <h3>12.4 First <code>codex.basic</code> implementation</h3>
 <p>The first harness uses the OpenAI Codex TypeScript package and the user&#39;s Relayer-scoped Codex login. Its purpose is to test whether the graph contract is simple enough for a coding agent to use, not to approximate the final GraphComplete policy.</p>
 <ul>
@@ -1609,7 +1610,7 @@ settings:
 <li>Receive the first resolved root layer and run its deterministic checks.</li>
 <li>Create the second interaction in the same thread. Issue a different capability and register the session again. Verify that the host adopts the new capability. It must not construct another harness object.</li>
 <li>Call Complete for the second interaction and run the same deterministic checks. The opt-in live path runs an independent structured Codex judge for each accepted turn.</li>
-<li>Save the accepted graph records, resolved display payload, checks, judge result, timing, exact harness-configuration snapshot and digest, implementation key/version, and trace reference in one immutable result bundle.</li>
+<li>Save one immutable result bundle. It contains accepted graph records, display data, checks, judge result, timing, configuration snapshot and digest, implementation version, and trace reference.</li>
 <li>For this lower-level slice, save a minimal HTML inspection artifact. The forthcoming Eval application reviews executions through the real product app-server and shared production graph/chat workspace.</li>
 </ol>
 <h3>15D.3 Deterministic acceptance checks</h3>
@@ -1673,7 +1674,7 @@ settings:
     R --&gt; CHECK[&quot;Deterministic checks and judge&quot;]
     R --&gt; UX[&quot;Relayer renderer and See in App&quot;]
 </code></pre>
-<p>A run selects test-case IDs, harness-configuration names, and a judge configuration. The runner resolves configuration files at its boundary and expands the selections into executions. Each execution records its exact harness-configuration snapshot and stable digest in addition to case version, implementation key/version, graph schema version, client versions, judge version, and component build digests.</p>
+<p>A run selects test-case IDs, harness-configuration names, and a judge configuration. The runner resolves configuration files at its boundary and expands the selections into executions. Each execution records its exact configuration snapshot and stable digest. It also records case, implementation, schema, client, judge, and component build versions.</p>
 <h3>13.2 Shared source and result catalog</h3>
 <pre><code class="language-text">packages/eval-runner/
   cases/&lt;case-id&gt;.json                  # small versioned interaction definition
