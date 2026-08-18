@@ -136,7 +136,6 @@ impl RuntimeClient {
                     "threadId": command.thread_id,
                     "configuration": selected.configuration,
                     "workingDirectory": command.working_directory,
-                    "graph": graph,
                 }),
                 StatusCode::CREATED,
             )
@@ -145,7 +144,7 @@ impl RuntimeClient {
             .post(
                 self.harness_url
                     .join(&format!("sessions/{}/complete", command.thread_id))?,
-                &serde_json::json!({"nodeId": interaction.node.id}),
+                &serde_json::json!({"graph": graph}),
                 StatusCode::OK,
             )
             .await?;

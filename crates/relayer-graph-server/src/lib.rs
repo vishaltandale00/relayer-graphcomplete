@@ -38,7 +38,10 @@ pub fn router(state: ServerState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/control/interactions", post(create_interaction))
-        .route("/api/control/capabilities", post(remint_capability))
+        .route(
+            "/api/control/capabilities",
+            post(remint_capability).delete(revoke_capability),
+        )
         .route("/api/graph/nodes", post(submit_node))
         .route("/api/graph/nodes/{id}", get(get_node))
         .route("/api/graph/nodes/{id}/neighbors", get(neighbors))
@@ -120,6 +123,27 @@ fn mint_capability(state: &ServerState, node_id: NodeId) -> Result<String, ApiEr
         .map_err(|_| ApiError::internal("session lock poisoned"))?
         .insert(graph_token.clone(), node_id);
     Ok(graph_token)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RevokeCapabilityRequest {
+    graph_token: String,
+}
+
+async fn revoke_capability(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<RevokeCapabilityRequest>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let revoked = state
+        .sessions
+        .lock()
+        .map_err(|_| ApiError::internal("session lock poisoned"))?
+        .remove(&input.graph_token)
+        .is_some();
+    Ok(Json(json!({"revoked": revoked})))
 }
 
 async fn submit_node(
@@ -490,6 +514,60 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(readable.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn control_authority_can_revoke_a_graph_capability() {
+        let state = ServerState::new(GraphDatabase::in_memory().await.unwrap(), "control");
+        let app = router(state);
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/interactions")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(
+                        r#"{"projectId":41,"threadId":73,"text":"hello"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let created: CreateInteractionResponse =
+            serde_json::from_slice(&to_bytes(created.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+
+        let revoked = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/control/capabilities")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(format!(
+                        r#"{{"graphToken":"{}"}}"#,
+                        created.graph_token
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(revoked.status(), StatusCode::OK);
+
+        let denied = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/graph/nodes/{}", created.node.id.value()))
+                    .header("authorization", format!("Bearer {}", created.graph_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

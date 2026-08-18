@@ -86,8 +86,8 @@ export async function runBasicRuntimeEval(options: {
       const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, controlToken, { projectId, threadId, text: prompt });
       const capability = { url: graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
-      await requestJson(`${harnessHost.url}/sessions`, controlToken, { threadId, configuration, workingDirectory, graph: capability }, 201);
-      const complete = await requestJson<{ output: CompletionOutput }>(`${harnessHost.url}/sessions/${threadId}/complete`, controlToken, { nodeId: interaction.node.id });
+      await requestJson(`${harnessHost.url}/sessions`, controlToken, { threadId, configuration, workingDirectory }, 201);
+      const complete = await requestJson<{ output: CompletionOutput }>(`${harnessHost.url}/sessions/${threadId}/complete`, controlToken, { graph: capability });
       const checks = checkBasicOutput(complete.output, interaction.node.id);
       const deterministicPassed = checks.every((check) => check.passed);
       const judge = options.execution.judgeConfiguration.name === "codex-structured" && deterministicPassed
@@ -102,9 +102,16 @@ export async function runBasicRuntimeEval(options: {
         passed: deterministicPassed && (judge === undefined || judge.verdict === "pass"),
       });
     }
+    const revokedCapabilities = await Promise.all(capabilities.map(async (capability) => {
+      const response = await fetch(`${capability.url}/api/graph/nodes/${capability.nodeId}`, {
+        headers: { authorization: `Bearer ${capability.token}` },
+      });
+      return response.status === 401;
+    }));
     const sessionChecks: EvalCheck[] = [
       { name: "single-harness-object", passed: harnessFactoryCalls === 1, detail: `Harness factory called ${harnessFactoryCalls} time${harnessFactoryCalls === 1 ? "" : "s"} for two interactions.` },
-      { name: "rotated-interaction-capability", passed: capabilities.length === 2 && capabilities[0]!.nodeId !== capabilities[1]!.nodeId && capabilities[0]!.token !== capabilities[1]!.token, detail: "The second interaction used a distinct node and opaque capability token." },
+      { name: "distinct-interaction-capabilities", passed: capabilities.length === 2 && capabilities[0]!.nodeId !== capabilities[1]!.nodeId && capabilities[0]!.token !== capabilities[1]!.token, detail: "Each interaction used a distinct node and opaque capability token." },
+      { name: "revoked-interaction-capabilities", passed: revokedCapabilities.every(Boolean), detail: "The host revoked every graph capability after its Complete call settled." },
     ];
     const deterministicPassed = sessionChecks.every((check) => check.passed) && turns.every((turn) => turn.checks.every((check) => check.passed));
     const passed = deterministicPassed && turns.every((turn) => turn.passed);

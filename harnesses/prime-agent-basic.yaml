@@ -1,0 +1,8 @@
+schemaVersion: 1
+name: prime-agent-basic
+implementation: prime.agent
+implementationVersion: 1
+settings:
+  thinkingLevel: medium
+  rlmMaxDepth: 2
+  prewarmIpythonKernel: true

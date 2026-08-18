@@ -1,4 +1,4 @@
-import type { CompletionOutput, GraphCapability, GraphNode } from "@relayer/graph-client";
+import type { CompletionOutput, GraphCapability, GraphId, GraphNode } from "@relayer/graph-client";
 
 export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export type JsonObject = Readonly<Record<string, JsonValue>>;
@@ -13,9 +13,18 @@ export interface HarnessConfiguration {
 
 export type HarnessSessionState = JsonObject;
 
+export interface HarnessGraphScope {
+  readonly interactionNodeId: GraphId;
+  acquireCapability(): GraphCapability;
+}
+
+export interface HarnessRunContext {
+  readonly inputGraph: GraphNode;
+  readonly graph: HarnessGraphScope;
+}
+
 export interface Harness {
-  complete(interactionNode: GraphNode, signal?: AbortSignal): Promise<CompletionOutput>;
-  setGraphCapability(graph: GraphCapability): void | Promise<void>;
+  complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void>;
   state(): HarnessSessionState;
   dispose?(): void | Promise<void>;
 }
@@ -23,7 +32,6 @@ export interface Harness {
 export interface HarnessFactoryContext {
   readonly threadId: number;
   readonly workingDirectory: string;
-  readonly graph: GraphCapability;
   readonly configuration: HarnessConfiguration;
   readonly savedState?: HarnessSessionState;
 }
@@ -35,7 +43,6 @@ export interface HarnessSessionDescriptor {
   readonly threadId: number;
   readonly configuration: HarnessConfiguration;
   readonly workingDirectory: string;
-  readonly graph: GraphCapability;
   readonly state?: HarnessSessionState;
 }
 

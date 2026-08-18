@@ -20,3 +20,17 @@ async with RelayerGraphClient.from_env() as graph:
 
 Configuration is read from `RELAYER_GRAPH_URL`, `RELAYER_GRAPH_TOKEN`, and
 `RELAYER_NODE_ID`. The client uses only Python's standard library.
+
+Inside a Prime Agent IPython run, acquire the current call's host-owned scope instead:
+
+```python
+from relayer_graph import GraphSession
+
+graph = await GraphSession.current()
+```
+
+`GraphSession.current()` uses Prime Agent's typed `rlm.host_request` bridge. The
+credential is selected by the host-side run context, so Python cannot request a
+different interaction by supplying an ID or token.
+The returned client is intentionally not serializable, so Prime Agent's kernel
+snapshot skips it instead of persisting an expired graph credential.

@@ -1,6 +1,6 @@
 import { Codex, type ApprovalMode, type ModelReasoningEffort, type SandboxMode, type ThreadOptions, type WebSearchMode } from "@openai/codex-sdk";
-import { RELAYER_ICON_NAMES, RelayerGraphClient, type CompletionOutput, type GraphCapability, type GraphNode } from "@relayer/graph-client";
-import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessSessionState } from "../types.js";
+import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relayer/graph-client";
+import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState } from "../types.js";
 
 export const CODEX_BASIC_KEY = "codex.basic";
 
@@ -24,43 +24,22 @@ interface CodexBasicConfiguration {
 }
 
 export class CodexBasicHarness implements Harness {
-  private graphClient: RelayerGraphClient;
-  private codex: Codex;
-  private graph: GraphCapability;
   private readonly clientModuleUrl: string;
   private readonly threadOptions: CodexBasicConfiguration;
-  private thread: CodexThread | undefined;
   private codexThreadId: string | undefined;
 
   constructor(private readonly context: HarnessFactoryContext, private readonly dependencies: CodexBasicDependencies = {}) {
-    this.graph = context.graph;
-    this.graphClient = new RelayerGraphClient(context.graph);
-    this.codex = this.createCodex(context.graph);
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
     this.threadOptions = parseCodexBasicConfiguration(context);
     const codexThreadId = context.savedState?.codexThreadId;
     this.codexThreadId = typeof codexThreadId === "string" ? codexThreadId : undefined;
   }
 
-  setGraphCapability(graph: GraphCapability): void {
-    if (sameCapability(this.graph, graph)) return;
-    this.graph = graph;
-    this.graphClient = new RelayerGraphClient(graph);
-    this.codex = this.createCodex(graph);
-    this.thread = undefined;
-  }
-
-  async complete(interactionNode: GraphNode, signal?: AbortSignal): Promise<CompletionOutput> {
-    const thread = this.thread ?? this.openThread();
-    this.thread = thread;
+  async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+    const capability = context.graph.acquireCapability();
+    const thread = this.openThread(this.createCodex(capability));
     try {
-      const turn = await thread.run(this.prompt(interactionNode), signal === undefined ? {} : { signal });
-      try {
-        return await this.graphClient.getCompletionOutput(interactionNode.id);
-      } catch (error) {
-        const suffix = turn.finalResponse.trim() ? ` Codex said: ${turn.finalResponse.trim()}` : "";
-        throw new Error(`Codex ended its turn without accepting a graph completion.${suffix}`, { cause: error });
-      }
+      await thread.run(this.prompt(context.inputGraph), signal === undefined ? {} : { signal });
     } finally {
       this.codexThreadId = thread.id ?? this.codexThreadId;
     }
@@ -83,14 +62,14 @@ export class CodexBasicHarness implements Harness {
     });
   }
 
-  private openThread(): CodexThread {
+  private openThread(codex: Codex): CodexThread {
     const { additionalDirectories, ...configuredOptions } = this.threadOptions;
     const options: ThreadOptions = {
       workingDirectory: this.context.workingDirectory,
       ...configuredOptions,
       ...(additionalDirectories === undefined ? {} : { additionalDirectories: [...additionalDirectories] }),
     };
-    return this.codexThreadId === undefined ? this.codex.startThread(options) : this.codex.resumeThread(this.codexThreadId, options);
+    return this.codexThreadId === undefined ? codex.startThread(options) : codex.resumeThread(this.codexThreadId, options);
   }
 
   private prompt(interactionNode: GraphNode): string {
@@ -196,8 +175,4 @@ function optionalStringArray(value: unknown, field: string): readonly string[] |
 
 export function createCodexBasicFactory(dependencies: CodexBasicDependencies = {}): HarnessFactory {
   return (context) => new CodexBasicHarness(context, dependencies);
-}
-
-function sameCapability(left: GraphCapability, right: GraphCapability): boolean {
-  return left.url === right.url && left.token === right.token && left.nodeId === right.nodeId;
 }

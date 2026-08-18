@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, resolve } from "node:path";
-import { GraphApiError, RelayerGraphClient } from "@relayer/graph-client";
+import { GraphApiError, RelayerGraphClient, type GraphCapability } from "@relayer/graph-client";
 import { isJsonObject, parseHarnessConfiguration, sameHarnessConfiguration } from "./configuration.js";
 import { resolveHarnessFactory } from "./registry.js";
 import type {
@@ -10,6 +10,7 @@ import type {
   HarnessCompleteResult,
   HarnessConfiguration,
   HarnessImplementationMap,
+  HarnessGraphScope,
   HarnessSessionDescriptor,
   HarnessSessionRegistration,
   HarnessSessionState,
@@ -79,7 +80,6 @@ export class HarnessHost {
         if (!sameHarnessConfiguration(live.descriptor.configuration, descriptor.configuration) || live.descriptor.workingDirectory !== descriptor.workingDirectory) {
           throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${live.descriptor.configuration.name}`);
         }
-        await live.harness.setGraphCapability(descriptor.graph);
         live.descriptor = {
           ...descriptor,
           state: captureHarnessState(live.harness),
@@ -96,7 +96,6 @@ export class HarnessHost {
     const harness = await resolveHarnessFactory(this.options.implementations, descriptor.configuration.implementation)({
       threadId: descriptor.threadId,
       workingDirectory: descriptor.workingDirectory,
-      graph: descriptor.graph,
       configuration: descriptor.configuration,
       ...(prior?.state === undefined ? {} : { savedState: prior.state }),
     });
@@ -121,33 +120,67 @@ export class HarnessHost {
     await this.persist();
   }
 
-  async complete(threadId: number, nodeId?: number, signal?: AbortSignal): Promise<HarnessCompleteResult> {
+  async complete(threadId: number, capability: GraphCapability, signal?: AbortSignal): Promise<HarnessCompleteResult> {
     if (this.closed) throw new Error("Harness host is closed");
+    validateGraphCapability(capability);
     const session = await this.liveSession(threadId);
     return this.withSessionLock(session, async () => {
       const controller = new AbortController();
       const detachSignal = forwardAbort(signal, controller);
       session.activeCompletion = controller;
+      let result: HarnessCompleteResult | undefined;
+      let operationError: unknown;
       try {
-        const graph = new RelayerGraphClient(session.descriptor.graph);
-        const interactionNodeId = nodeId ?? session.descriptor.graph.nodeId;
-        try {
-          const output = await graph.getCompletionOutput(interactionNodeId);
-          return { threadId, configurationName: session.descriptor.configuration.name, output };
-        } catch (error) {
-          if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) throw error;
-        }
-        const interaction = await graph.getNode(interactionNodeId);
-        const output = await session.harness.complete(interaction, controller.signal);
-        return { threadId, configurationName: session.descriptor.configuration.name, output };
-      } finally {
-        if (session.activeCompletion === controller) delete session.activeCompletion;
-        detachSignal();
+        result = await this.executeCompletion(threadId, session, capability, controller.signal);
+      } catch (error) {
+        operationError = error;
+      }
+      if (session.activeCompletion === controller) delete session.activeCompletion;
+      detachSignal();
+      const errors: unknown[] = operationError === undefined ? [] : [operationError];
+      try {
+        await revokeGraphCapability(capability, this.options.controlToken);
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
         session.descriptor = { ...session.descriptor, state: captureHarnessState(session.harness) };
         this.saved.set(threadId, persistedDescriptor(session.descriptor));
         await this.persist();
+      } catch (error) {
+        errors.push(error);
       }
+      if (errors.length === 1) throw errors[0];
+      if (errors.length > 1) throw new AggregateError(errors, "Harness completion and cleanup failed");
+      return result!;
     });
+  }
+
+  private async executeCompletion(threadId: number, session: LiveSession, capability: GraphCapability, signal: AbortSignal): Promise<HarnessCompleteResult> {
+    const graph = new RelayerGraphClient(capability);
+    const interactionNodeId = capability.nodeId;
+    try {
+      const output = await graph.getCompletionOutput(interactionNodeId);
+      return { threadId, configurationName: session.descriptor.configuration.name, output };
+    } catch (error) {
+      if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) throw error;
+    }
+    const interaction = await graph.getNode(interactionNodeId);
+    const scope = new ActiveHarnessGraphScope(capability);
+    try {
+      await session.harness.complete({ inputGraph: interaction, graph: scope }, signal);
+    } finally {
+      scope.close();
+    }
+    try {
+      const output = await graph.getCompletionOutput(interactionNodeId);
+      return { threadId, configurationName: session.descriptor.configuration.name, output };
+    } catch (error) {
+      if (error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found") {
+        throw new Error("Harness ended its turn without accepting a graph completion.", { cause: error });
+      }
+      throw error;
+    }
   }
 
   cancel(threadId: number): boolean {
@@ -192,7 +225,7 @@ export class HarnessHost {
     if (live !== undefined) return live;
     const saved = this.saved.get(threadId);
     if (saved === undefined) throw new Error(`Unknown harness thread: ${threadId}`);
-    throw new Error(`Thread ${threadId} requires a fresh graph capability before its harness can resume`);
+    throw new Error(`Thread ${threadId} must be registered before its harness can resume`);
   }
 
   private async withSessionLock<T>(session: LiveSession, operation: () => Promise<T>): Promise<T> {
@@ -281,12 +314,13 @@ async function route(host: HarnessHost, token: string, request: IncomingMessage,
     if (request.method === "POST" && match?.[1] !== undefined) {
       const threadId = Number(decodeURIComponent(match[1]));
       if (!Number.isSafeInteger(threadId) || threadId < 1) return reply(response, 400, { error: "invalid_thread_id" });
-      const input = await body(request) as { nodeId?: number };
+      const input = await body(request);
+      const capability = readGraphCapability(input);
       const controller = new AbortController();
       const abort = () => controller.abort(new Error("Harness completion request disconnected"));
       request.once("aborted", abort);
       try {
-        return reply(response, 200, await host.complete(threadId, input.nodeId, controller.signal));
+        return reply(response, 200, await host.complete(threadId, capability, controller.signal));
       } finally {
         request.off("aborted", abort);
       }
@@ -354,4 +388,57 @@ function forwardAbort(signal: AbortSignal | undefined, controller: AbortControll
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readGraphCapability(value: unknown): GraphCapability {
+  if (!isRecord(value) || !isRecord(value.graph)) throw new Error("Harness completion requires a graph capability");
+  const { url, token, nodeId } = value.graph;
+  if (typeof url !== "string" || url.trim() === "" || typeof token !== "string" || token === "" || typeof nodeId !== "number" || !Number.isSafeInteger(nodeId) || nodeId < 1) {
+    throw new Error("Harness completion contains an invalid graph capability");
+  }
+  const capability = { url, token, nodeId };
+  validateGraphCapability(capability);
+  return capability;
+}
+
+function validateGraphCapability(capability: GraphCapability): void {
+  if (capability.token === "" || !Number.isSafeInteger(capability.nodeId) || capability.nodeId < 1) {
+    throw new Error("Harness completion contains an invalid graph capability");
+  }
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(capability.url);
+  } catch {
+    throw new Error("Harness completion contains an invalid graph capability URL");
+  }
+  if (parsedUrl.protocol !== "http:" || parsedUrl.hostname !== "127.0.0.1" || parsedUrl.port === "" || parsedUrl.username !== "" || parsedUrl.password !== "" || parsedUrl.pathname !== "/" || parsedUrl.search !== "" || parsedUrl.hash !== "") {
+    throw new Error("Harness graph capability URL must use authenticated 127.0.0.1 HTTP");
+  }
+}
+
+class ActiveHarnessGraphScope implements HarnessGraphScope {
+  readonly interactionNodeId: number;
+  private active = true;
+
+  constructor(private readonly capability: GraphCapability) {
+    this.interactionNodeId = capability.nodeId;
+  }
+
+  acquireCapability(): GraphCapability {
+    if (!this.active) throw new Error("The graph scope is no longer active");
+    return { ...this.capability };
+  }
+
+  close(): void {
+    this.active = false;
+  }
+}
+
+async function revokeGraphCapability(capability: GraphCapability, controlToken: string): Promise<void> {
+  const response = await fetch(`${capability.url.replace(/\/$/, "")}/api/control/capabilities`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json", authorization: `Bearer ${controlToken}` },
+    body: JSON.stringify({ graphToken: capability.token }),
+  });
+  if (!response.ok) throw new Error(`Graph capability revocation failed with ${response.status}`);
 }

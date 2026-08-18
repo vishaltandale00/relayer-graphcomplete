@@ -8,7 +8,7 @@ The canonical future product boundary remains conceptually:
 const result = await complete(inputGraph);
 ```
 
-This top-level function is not exported by the first runtime slice yet. `inputGraph` is the pointer to the current user-interaction node. The selected thread harness already holds its graph capability, working directory, and provider session. A root model ending its turn does not mean the graph is complete; the harness must finish with `graph.submit(interactionNode)`.
+This top-level function is not exported by the first runtime slice yet. `inputGraph` is the pointer to the current user-interaction node. The selected thread harness keeps its working directory and provider session, while each `complete()` call receives a separate graph scope. A root model ending its turn does not mean the graph is complete; the harness must finish with `graph.submit(interactionNode)`.
 
 The executable first slice enters through the persistent `HarnessHost` while the app-server integration behind the canonical product boundary remains future work. There is intentionally no second structured-output harness path: accepted product output must come from graph-tool writes and explicit submission.
 
@@ -20,6 +20,7 @@ Pre-alpha executable runtime slice. The repository now includes:
 - object-based TypeScript and Python clients for nodes, undirected edges, layers, actions, and submission;
 - a persistent Node harness host that loads named file-backed configurations, caches one harness object per thread, persists opaque provider resume state without graph credentials, and supports cancellation and deterministic disposal;
 - a graph-tool `codex.basic` harness using the OpenAI Codex TypeScript SDK;
+- a `prime.agent` harness that passes the current graph scope through Prime Agent's run-scoped IPython host context;
 - an inference-free evaluation that starts the real Rust server and Node host and checks two interactions in one empty-project thread;
 - a separate internal Relayer Eval desktop application that runs test-case × harness matrices through the product app server and opens their threads in the production graph/chat workspace;
 - Rust, TypeScript, Python, and process-level integration tests.
@@ -28,7 +29,7 @@ The Node runtime is split into explicit workspace packages: `@relayer/graph-clie
 
 ## Core design
 
-- Prime Agent owns recursive model execution when the production harness is added; GraphComplete does not add another scheduler.
+- Prime Agent owns recursive model execution; GraphComplete does not add another scheduler.
 - GraphComplete owns graph records, active-interaction write authority, validation, immutable accepted history, and explicit submission.
 - Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
 - The Node harness host owns live per-thread harness objects and provider-session resume state, not graph rules or product lifecycle.
@@ -37,11 +38,19 @@ The implemented basic loop is:
 
 1. A trusted runtime supplies its existing positive-integer project/thread IDs; graph core creates the canonical user-interaction node and activates a capability for that node.
 2. The Node host resolves the thread's harness once and keeps that object alive.
-3. The harness submits node objects, creates undirected edges, packages the exact visible layer, and adds the interaction's response navigate action. It may also attach useful navigate or invoke actions to output nodes; nested layers are an available authoring capability, not a per-node requirement.
-4. `graph.submit(interactionNode)` recursively validates navigate targets and atomically accepts only the reachable drafts.
-5. Complete returns the resolved root layer for immediate display; later navigation reads the persisted layer.
+3. The host supplies the current graph scope only for that `complete()` call. The harness submits node objects, creates undirected edges, packages the exact visible layer, and adds the interaction's response navigate action. It may also attach useful navigate or invoke actions to output nodes; nested layers are an available authoring capability, not a per-node requirement.
+4. The host reads the accepted output and revokes the turn's graph token. A cached client from an earlier IPython turn cannot modify a later interaction.
+5. `graph.submit(interactionNode)` recursively validates navigate targets and atomically accepts only the reachable drafts.
+6. Complete returns the resolved root layer for immediate display; later navigation reads the persisted layer.
 
 Independent self-assessment will later add an optional review gate to this same loop.
+
+The `prime.agent` adapter targets the run-context API in
+[Prime Agent PR #1538](https://github.com/PrimeIntellect-ai/prime-agent/pull/1538).
+Its inference-free adapter tests run in this repository. A clean live install
+still needs that forked package exposed under its canonical
+`@earendil-works/pi-coding-agent` package name; the PR branch is a monorepo, not
+an installable npm subdirectory.
 
 See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/architecture.md), and [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
 

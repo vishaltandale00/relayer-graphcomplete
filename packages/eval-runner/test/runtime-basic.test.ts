@@ -106,7 +106,8 @@ describe("first runtime evaluation", () => {
     expect(artifact.turns.every((turn) => checkBasicFacts(turn.output).every((check) => check.passed))).toBe(true);
     expect(artifact.sessionChecks).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "single-harness-object", passed: true }),
-      expect.objectContaining({ name: "rotated-interaction-capability", passed: true }),
+      expect.objectContaining({ name: "distinct-interaction-capabilities", passed: true }),
+      expect.objectContaining({ name: "revoked-interaction-capabilities", passed: true }),
     ]));
     const directory = executionDirectory(outputDirectory, execution);
     expect(JSON.parse(await readFile(join(directory, "result.json"), "utf8"))).toMatchObject({

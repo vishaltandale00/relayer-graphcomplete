@@ -24,7 +24,6 @@ describe("CodexBasicHarness", () => {
     expect(() => new CodexBasicHarness({
       threadId: 1,
       workingDirectory: process.cwd(),
-      graph: { url: "http://127.0.0.1:43123", token: "token", nodeId: 1 },
       configuration: { ...codexBasicConfiguration, implementationVersion: 2 },
       savedState: { codexThreadId: "codex-thread" },
     }, { createCodex: () => ({}) as Codex })).toThrow("Unsupported codex.basic implementation version: 2");
@@ -48,20 +47,12 @@ describe("CodexBasicHarness", () => {
       {
         threadId: 1,
         workingDirectory: process.cwd(),
-        graph: { url: "http://127.0.0.1:43123", token: "token", nodeId: 1 },
         configuration: codexBasicConfiguration,
       },
       { createCodex: () => codex as unknown as Codex },
     );
 
-    await expect(harness.complete({
-      id: 1,
-      kind: "user-interaction",
-      icon: "user",
-      title: "Question",
-      detail: "Question",
-      state: "accepted",
-    })).rejects.toThrow("turn failed");
+    await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("turn failed");
     expect(harness.state()).toEqual({ codexThreadId: "codex-thread-after-start" });
     expect(submittedPrompt).toContain("Relayer graph affordances:");
     expect(submittedPrompt).toContain("system temporary directory, not in the project checkout");
@@ -86,17 +77,18 @@ describe("CodexBasicHarness", () => {
     });
   });
 
-  it("passes the packaged executable override to the Codex process", () => {
-    const createCodex = vi.fn(() => ({}) as Codex);
-    new CodexBasicHarness({
+  it("passes the packaged executable override to the Codex process", async () => {
+    const thread = { id: "codex-thread", run: vi.fn(async () => ({ finalResponse: "", items: [], usage: null })) };
+    const createCodex = vi.fn(() => ({ startThread: () => thread }) as unknown as Codex);
+    const harness = new CodexBasicHarness({
       threadId: 1,
       workingDirectory: process.cwd(),
-      graph: { url: "http://127.0.0.1:43123", token: "token", nodeId: 1 },
       configuration: codexBasicConfiguration,
     }, {
       createCodex,
       codexPathOverride: "/Applications/Relayer.app/Contents/Resources/codex",
     });
+    await harness.complete(runContext(1, "token"));
 
     expect(createCodex).toHaveBeenCalledWith(
       expect.objectContaining({ RELAYER_GRAPH_TOKEN: "token", RELAYER_NODE_ID: "1" }),
@@ -114,41 +106,23 @@ describe("CodexBasicHarness", () => {
       environments.push(environment);
       return (environments.length === 1 ? firstCodex : secondCodex) as unknown as Codex;
     });
-    const authorizations: string[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      authorizations.push(new Headers(init?.headers).get("authorization") ?? "");
-      const nodeId = authorizations.length === 1 ? 1 : 2;
-      return new Response(JSON.stringify({
-        nodeId,
-        rootAction: { id: nodeId, sourceNodeId: nodeId, kind: "navigate", label: "Response", variant: "pill", targetLayerId: nodeId, response: true, state: "accepted" },
-        rootLayer: { layer: { id: nodeId, nodes: [], edges: [], state: "accepted" }, nodes: [], edges: [], actions: [] },
-      }), { status: 200, headers: { "content-type": "application/json" } });
-    }));
-
-    try {
-      const harness = new CodexBasicHarness({
+    const harness = new CodexBasicHarness({
         threadId: 1,
         workingDirectory: process.cwd(),
-        graph: { url: "http://127.0.0.1:43123", token: "first-token", nodeId: 1 },
         configuration: codexBasicConfiguration,
       }, { createCodex });
 
-      await harness.complete(interaction(1));
-      harness.setGraphCapability({ url: "http://127.0.0.1:43123", token: "second-token", nodeId: 2 });
-      await harness.complete(interaction(2));
+    await harness.complete(runContext(1, "first-token"));
+    await harness.complete(runContext(2, "second-token"));
 
-      expect(createCodex).toHaveBeenCalledTimes(2);
-      expect(environments.map((environment) => [environment.RELAYER_GRAPH_TOKEN, environment.RELAYER_NODE_ID])).toEqual([
-        ["first-token", "1"],
-        ["second-token", "2"],
-      ]);
-      expect(firstCodex.startThread).toHaveBeenCalledTimes(1);
-      expect(secondCodex.resumeThread).toHaveBeenCalledWith("codex-thread-1", expect.any(Object));
-      expect(authorizations).toEqual(["Bearer first-token", "Bearer second-token"]);
-      expect(harness.state()).toEqual({ codexThreadId: "codex-thread-1" });
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    expect(createCodex).toHaveBeenCalledTimes(2);
+    expect(environments.map((environment) => [environment.RELAYER_GRAPH_TOKEN, environment.RELAYER_NODE_ID])).toEqual([
+      ["first-token", "1"],
+      ["second-token", "2"],
+    ]);
+    expect(firstCodex.startThread).toHaveBeenCalledTimes(1);
+    expect(secondCodex.resumeThread).toHaveBeenCalledWith("codex-thread-1", expect.any(Object));
+    expect(harness.state()).toEqual({ codexThreadId: "codex-thread-1" });
   });
 });
 
@@ -160,5 +134,15 @@ function interaction(id: number) {
     title: "Question",
     detail: "Question",
     state: "accepted" as const,
+  };
+}
+
+function runContext(id: number, token: string) {
+  return {
+    inputGraph: interaction(id),
+    graph: {
+      interactionNodeId: id,
+      acquireCapability: () => ({ url: "http://127.0.0.1:43123", token, nodeId: id }),
+    },
   };
 }
