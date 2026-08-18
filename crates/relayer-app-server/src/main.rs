@@ -89,8 +89,10 @@ fn watch_parent_connection() -> oneshot::Receiver<()> {
         let mut buffer = [0_u8; 256];
         loop {
             match input.read(&mut buffer) {
-                Ok(0) | Err(_) => break,
+                Ok(0) => break,
                 Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
             }
         }
         let _ = disconnected.send(());
