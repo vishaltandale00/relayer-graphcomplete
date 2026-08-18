@@ -18,6 +18,13 @@ impl ApiError {
         )
     }
 
+    pub(crate) fn read_only() -> Self {
+        Self(
+            StatusCode::FORBIDDEN,
+            json!({ "code": "read_only_session", "error": "This Relayer session is read-only." }),
+        )
+    }
+
     pub(crate) fn invalid(message: impl Into<String>) -> Self {
         Self(
             StatusCode::UNPROCESSABLE_ENTITY,

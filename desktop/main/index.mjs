@@ -68,6 +68,13 @@ if (primaryInstance) {
     configurationPaths: [join(harnessDirectory, "codex-basic.yaml")],
     codexBasicClientModuleUrl: graphClientModuleUrl,
     codexPathOverride: bundledCodexBinary,
+    onUnexpectedStop: () => {
+      dialog.showErrorBox(
+        "Relayer graph service stopped",
+        "Relayer needs to close because its local graph service stopped. Reopen the app to continue.",
+      );
+      app.quit();
+    },
   });
   let productServer;
 

@@ -83,6 +83,19 @@ describe("Relayer Eval application service", () => {
       "Two-worker pool",
       "Results store",
     ]);
+    expect(layer.actions).toEqual([
+      expect.objectContaining({
+        sourceNodeId: layer.nodes[0].id,
+        kind: "navigate",
+        label: "See queue behavior",
+        response: false,
+      }),
+    ]);
+    const childLayer = await productRequest(
+      productSession,
+      `/api/threads/${selected.threadIds[0]}/interactions/${detail.interactions[0].id}/layers/${layer.actions[0].targetLayerId}`,
+    );
+    expect(childLayer.nodes.map((node) => node.title)).toEqual(["Waiting tasks", "Next claim"]);
   }, 20_000);
 });
 

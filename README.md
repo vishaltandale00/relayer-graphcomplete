@@ -37,7 +37,7 @@ The implemented basic loop is:
 
 1. A trusted runtime supplies its existing positive-integer project/thread IDs; graph core creates the canonical user-interaction node and activates a capability for that node.
 2. The Node host resolves the thread's harness once and keeps that object alive.
-3. The harness submits node objects, creates undirected edges, packages the exact visible layer, and adds the interaction's response navigate action.
+3. The harness submits node objects, creates undirected edges, packages the exact visible layer, and adds the interaction's response navigate action. It may also attach useful navigate or invoke actions to output nodes; nested layers are an available authoring capability, not a per-node requirement.
 4. `graph.submit(interactionNode)` recursively validates navigate targets and atomically accepts only the reachable drafts.
 5. Complete returns the resolved root layer for immediate display; later navigation reads the persisted layer.
 

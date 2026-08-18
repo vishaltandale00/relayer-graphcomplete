@@ -1,6 +1,6 @@
 use super::{
     ApiState,
-    auth::authorize,
+    auth::authorize_read,
     error::ApiError,
     types::{CapabilitiesResponse, ProductStateResponse},
 };
@@ -27,7 +27,7 @@ pub(super) async fn capabilities(
     State(state): State<ApiState>,
     headers: HeaderMap,
 ) -> Result<Json<CapabilitiesResponse>, ApiError> {
-    authorize(&state, &headers)?;
+    authorize_read(&state, &headers)?;
     Ok(Json(state.product.capabilities().into()))
 }
 
@@ -36,7 +36,7 @@ pub(super) async fn product_state(
     headers: HeaderMap,
     Query(query): Query<StateQuery>,
 ) -> Result<Json<ProductStateResponse>, ApiError> {
-    authorize(&state, &headers)?;
+    authorize_read(&state, &headers)?;
     let thread_id = query.thread_id.map(ThreadId::try_from).transpose()?;
     Ok(Json(state.product.load_state(thread_id).await?.into()))
 }

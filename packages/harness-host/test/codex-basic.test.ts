@@ -31,9 +31,11 @@ describe("CodexBasicHarness", () => {
   });
 
   it("retains a provider thread ID when the first turn fails", async () => {
+    let submittedPrompt = "";
     const thread = {
       id: null as string | null,
-      run: vi.fn(async () => {
+      run: vi.fn(async (prompt: string) => {
+        submittedPrompt = prompt;
         thread.id = "codex-thread-after-start";
         throw new Error("turn failed");
       }),
@@ -61,6 +63,9 @@ describe("CodexBasicHarness", () => {
       state: "accepted",
     })).rejects.toThrow("turn failed");
     expect(harness.state()).toEqual({ codexThreadId: "codex-thread-after-start" });
+    expect(submittedPrompt).toContain("A response may contain additional layers.");
+    expect(submittedPrompt).toContain("This is optional");
+    expect(submittedPrompt).toContain('graph.addAction(node, { kind: "navigate"');
     expect(codex.startThread).toHaveBeenCalledWith({
       workingDirectory: process.cwd(),
       model: "gpt-test",

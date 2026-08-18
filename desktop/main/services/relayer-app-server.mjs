@@ -41,6 +41,7 @@ export class RelayerAppServerService {
     runtimeSession = null,
     defaultHarnessConfiguration = "codex-basic",
     allowHarnessOverride = false,
+    enableReadOnlySession = false,
     spawnProcess = spawn,
     startupTimeoutMs = 10_000,
     shutdownTimeoutMs = 2_000,
@@ -52,6 +53,7 @@ export class RelayerAppServerService {
     this.runtimeSession = runtimeSession;
     this.defaultHarnessConfiguration = defaultHarnessConfiguration;
     this.allowHarnessOverride = allowHarnessOverride;
+    this.enableReadOnlySession = enableReadOnlySession;
     this.spawnProcess = spawnProcess;
     this.startupTimeoutMs = startupTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
@@ -81,6 +83,9 @@ export class RelayerAppServerService {
     await chmod(dataDirectory, 0o700);
     if (this.closing) throw new Error("Relayer app server is shutting down.");
     const controlToken = randomBytes(32).toString("hex");
+    const readOnlyControlToken = this.enableReadOnlySession
+      ? randomBytes(32).toString("hex")
+      : null;
     const serverArguments = [
       "--data-dir", dataDirectory,
       "--web-dir", this.webDirectory,
@@ -96,6 +101,7 @@ export class RelayerAppServerService {
       );
       if (this.allowHarnessOverride) serverArguments.push("--allow-harness-override");
     }
+    if (readOnlyControlToken) serverArguments.push("--read-only-control-token-stdin");
     const child = this.spawnProcess(this.binaryPath, serverArguments, {
       env: { ...process.env },
       stdio: ["pipe", "pipe", "pipe"],
@@ -104,7 +110,7 @@ export class RelayerAppServerService {
     const stderr = [];
     try {
       child.stdin?.on("error", () => {});
-      child.stdin?.write(`${controlToken}\n`);
+      child.stdin?.write(`${controlToken}\n${readOnlyControlToken ? `${readOnlyControlToken}\n` : ""}`);
       child.stderr?.on("data", (chunk) => {
         stderr.push(String(chunk));
         if (stderr.join("").length > 8_000) stderr.shift();
@@ -116,6 +122,12 @@ export class RelayerAppServerService {
           name: ready.cookieName,
           value: controlToken,
         },
+        ...(readOnlyControlToken ? {
+          readOnlyCookie: {
+            name: ready.cookieName,
+            value: readOnlyControlToken,
+          },
+        } : {}),
       };
       const onStopped = (code, signal) => {
         const expected = this.closing;

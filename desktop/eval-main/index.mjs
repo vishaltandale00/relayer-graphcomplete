@@ -8,6 +8,7 @@ import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 import { EvalService } from "./eval-service.mjs";
 import { GraphCompleteRuntimeService } from "../main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../main/services/relayer-app-server.mjs";
+import { claimPrimaryDesktopInstance } from "../main/single-instance.mjs";
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(desktopDirectory, "..");
@@ -39,6 +40,8 @@ const bundledCodexBinary = app.isPackaged
   : join(repositoryRoot, "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex");
 
 let dashboardWindow;
+const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => dashboardWindow });
+
 const reviewWindows = new Set();
 const graphRuntime = new GraphCompleteRuntimeService({
   userDataDirectory,
@@ -47,10 +50,12 @@ const graphRuntime = new GraphCompleteRuntimeService({
   additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory },
   codexBasicClientModuleUrl: graphClientModuleUrl,
   codexPathOverride: bundledCodexBinary,
+  onUnexpectedStop: () => app.quit(),
 });
 let productServer;
 let evalService;
 let stopping = false;
+let stopPromise;
 
 function windowSecurity(window, trustedOrigin = null) {
   const blockUntrusted = (event, target) => {
@@ -92,6 +97,7 @@ async function createReviewWindow(executionId) {
   const threadId = selected?.threadIds?.[0];
   if (!threadId) throw new Error("This case × harness execution has no product thread to review.");
   const productSession = await productServer.start();
+  if (!productSession.readOnlyCookie) throw new Error("Relayer Eval review session is unavailable.");
   const productOrigin = new URL(productSession.origin).origin;
   const window = new BrowserWindow({
     width: 1480,
@@ -113,8 +119,8 @@ async function createReviewWindow(executionId) {
   windowSecurity(window, productOrigin);
   await window.webContents.session.cookies.set({
     url: productSession.origin,
-    name: productSession.cookie.name,
-    value: productSession.cookie.value,
+    name: productSession.readOnlyCookie.name,
+    value: productSession.readOnlyCookie.value,
     httpOnly: true,
     sameSite: "strict",
     secure: false,
@@ -144,6 +150,7 @@ async function start() {
     runtimeSession,
     defaultHarnessConfiguration: "fixture-task-system",
     allowHarnessOverride: true,
+    enableReadOnlySession: true,
     onUnexpectedStop: () => app.quit(),
   });
   const productSession = await productServer.start();
@@ -155,31 +162,41 @@ async function start() {
   }).open();
   registerEvalIpc();
   dashboardWindow = await createDashboardWindow();
+  primaryInstance.presentPendingWindow();
 }
 
-async function stop() {
-  const errors = [];
-  if (productServer) {
-    try { await productServer.close(); } catch (error) { errors.push(error); }
-  }
-  try { await graphRuntime.close(); } catch (error) { errors.push(error); }
-  if (errors.length) throw new AggregateError(errors, "Relayer Eval services did not stop cleanly.");
+function stop() {
+  stopPromise ??= (async () => {
+    const errors = [];
+    if (productServer) {
+      try { await productServer.close(); } catch (error) { errors.push(error); }
+    }
+    try { await graphRuntime.close(); } catch (error) { errors.push(error); }
+    if (errors.length) throw new AggregateError(errors, "Relayer Eval services did not stop cleanly.");
+  })();
+  return stopPromise;
 }
 
-app.whenReady().then(start).catch((error) => {
-  console.error("Relayer Eval startup failed:", error);
-  dialog.showErrorBox("Relayer Eval could not start", error.message);
-  app.quit();
-});
-app.on("activate", async () => {
-  if (BrowserWindow.getAllWindows().length === 0 && evalService) dashboardWindow = await createDashboardWindow();
-});
-app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("before-quit", (event) => {
-  if (stopping) return;
-  event.preventDefault();
-  void stop().catch((error) => console.error("Relayer Eval shutdown failed:", error)).finally(() => {
-    stopping = true;
+if (primaryInstance) {
+  app.whenReady().then(start).catch((error) => {
+    console.error("Relayer Eval startup failed:", error);
+    dialog.showErrorBox("Relayer Eval could not start", error.message);
     app.quit();
   });
-});
+  app.on("activate", async () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      if (evalService) dashboardWindow = await createDashboardWindow();
+    } else {
+      primaryInstance.presentPrimaryWindow();
+    }
+  });
+  app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+  app.on("before-quit", (event) => {
+    if (stopping) return;
+    event.preventDefault();
+    stopping = true;
+    void stop().catch((error) => console.error("Relayer Eval shutdown failed:", error)).finally(() => {
+      app.quit();
+    });
+  });
+}

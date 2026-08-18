@@ -4,10 +4,12 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-credential-adapter.mjs";
 import { CredentialAdapter } from "../desktop/main/credentials/credential-adapter.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
+import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "../desktop/main/services/updater.mjs";
 import { claimPrimaryDesktopInstance } from "../desktop/main/single-instance.mjs";
@@ -136,6 +138,11 @@ describe("desktop skeleton", () => {
     expect(JSON.parse(packageManifest).devDependencies).not.toHaveProperty("@openai/codex");
     expect(JSON.parse(packageManifest).devDependencies).not.toHaveProperty("electron-updater");
     expect(packageManifest).toContain("desktop/packaging/electron-builder.mjs");
+    expect(JSON.parse(packageManifest).scripts).toMatchObject({
+      "predesktop:pack": "npm run prepare:desktop-runtime",
+      "predesktop:dist": "npm run prepare:desktop-runtime",
+      "predesktop:dist:preview": "npm run prepare:desktop-runtime",
+    });
     expect(packaging).toContain('"macos/entitlements.mac.plist"');
     expect(packaging).toContain('"!packaging/**/*"');
     expect(packaging).toContain('"target/aarch64-apple-darwin/release/relayer-app-server"');
@@ -177,11 +184,15 @@ describe("desktop skeleton", () => {
     expect(productPackaging).toContain('"!preload/eval-*.cjs"');
     expect(evalPackaging).toContain('appId: "ai.relayer.eval"');
     expect(evalPackaging).toContain('main: "eval-main/index.mjs"');
+    expect(evalPackaging).toContain('"main/single-instance.mjs"');
     expect(evalPackaging).toContain('{ from: resolve(desktopRoot, "renderer"), to: "renderer" }');
     expect(evalPackaging).toContain('"packages/graph-client/dist"');
     expect(evalMain).toContain("GraphCompleteRuntimeService");
     expect(evalMain).toContain("RelayerAppServerService");
     expect(evalMain).toContain("allowHarnessOverride: true");
+    expect(evalMain).toContain("enableReadOnlySession: true");
+    expect(evalMain).toContain("productSession.readOnlyCookie");
+    expect(evalMain).toContain("claimPrimaryDesktopInstance");
     expect(evalMain).toContain("createReviewWindow(executionId)");
     expect(evalDashboard).toContain("Test cases");
     expect(evalDashboard).toContain("Harnesses under test");
@@ -268,6 +279,7 @@ describe("desktop skeleton", () => {
       userDataDirectory: directory,
       binaryPath: "/test/bin/relayer-app-server",
       webDirectory: "/test/renderer",
+      enableReadOnlySession: true,
       spawnProcess: (binary, args, options) => {
         invocations.push({ binary, args, options });
         queueMicrotask(() => child.stdout.write(`${JSON.stringify({
@@ -289,16 +301,21 @@ describe("desktop skeleton", () => {
         cookie: { name: "relayer_control" },
       });
       expect(session.cookie.value).toMatch(/^[a-f0-9]{64}$/);
+      expect(session.readOnlyCookie).toMatchObject({ name: "relayer_control" });
+      expect(session.readOnlyCookie.value).toMatch(/^[a-f0-9]{64}$/);
+      expect(session.readOnlyCookie.value).not.toBe(session.cookie.value);
       expect(invocations).toHaveLength(1);
       expect(invocations[0].binary).toBe("/test/bin/relayer-app-server");
       expect(invocations[0].args).toEqual([
         "--data-dir", join(directory, "product-data"),
         "--web-dir", "/test/renderer",
         "--port", "0",
+        "--read-only-control-token-stdin",
       ]);
-      expect(suppliedToken).toBe(`${session.cookie.value}\n`);
+      expect(suppliedToken).toBe(`${session.cookie.value}\n${session.readOnlyCookie.value}\n`);
       expect(child.stdin.writableEnded).toBe(false);
       expect(invocations[0].args).not.toContain(session.cookie.value);
+      expect(invocations[0].args).not.toContain(session.readOnlyCookie.value);
       expect((await stat(join(directory, "product-data"))).mode & 0o777).toBe(0o700);
       expect(await service.start()).toBe(session);
       await service.close();
@@ -451,6 +468,49 @@ describe("desktop skeleton", () => {
       await new Promise((resolve) => setImmediate(resolve));
       expect(unexpectedStops).toEqual([{ code: 2, signal: null }]);
     } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps graph authority off argv and reports a graph server that stops after readiness", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-graph-runtime-service-"));
+    let suppliedToken = "";
+    const unexpectedStops = [];
+    const invocations = [];
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write(chunk, _encoding, callback) { suppliedToken += String(chunk); callback(); } }),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+      kill: vi.fn(),
+    });
+    const service = new GraphCompleteRuntimeService({
+      userDataDirectory: directory,
+      graphServerBinary: "/test/bin/relayer-graph-server",
+      configurationPaths: [fileURLToPath(new URL("../harnesses/codex-basic.yaml", import.meta.url))],
+      onUnexpectedStop: (event) => unexpectedStops.push(event),
+      spawnProcess: (binary, args, options) => {
+        invocations.push({ binary, args, options });
+        queueMicrotask(() => child.stdout.write(`${JSON.stringify({ ready: true, url: "http://127.0.0.1:43125" })}\n`));
+        return child;
+      },
+    });
+
+    try {
+      const session = await service.start();
+      expect(session.controlToken).toMatch(/^[a-f0-9]{64}$/);
+      expect(suppliedToken).toBe(`${session.controlToken}\n`);
+      expect(invocations[0].args).not.toContain("--control-token");
+      expect(invocations[0].args).not.toContain(session.controlToken);
+      expect(invocations[0].options.stdio).toEqual(["pipe", "pipe", "pipe"]);
+
+      child.exitCode = 9;
+      child.emit("exit", 9, null);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unexpectedStops).toEqual([{ code: 9, signal: null }]);
+    } finally {
+      await service.close();
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -779,19 +839,34 @@ describe("desktop skeleton", () => {
       const bundledBinary = join(appPath, "Contents", "Resources", "bin", "relayer-app-server");
       const bundledGraphBinary = join(appPath, "Contents", "Resources", "bin", "relayer-graph-server");
       const bundledGraphClient = join(appPath, "Contents", "Resources", "graph-client", "index.js");
+      const bundledMarked = join(appPath, "Contents", "Resources", "renderer", "vendor", "marked.umd.js");
       await mkdir(join(appPath, "Contents", "Resources", "bin"), { recursive: true });
       await mkdir(join(appPath, "Contents", "Resources", "graph-client"), { recursive: true });
+      await mkdir(join(appPath, "Contents", "Resources", "renderer", "vendor"), { recursive: true });
       await Promise.all([
         writeFile(bundledBinary, "binary-fixture"),
         writeFile(bundledGraphBinary, "binary-fixture"),
         writeFile(bundledGraphClient, "client-fixture"),
+        writeFile(bundledMarked, "marked-fixture"),
       ]);
+      const packagedRuntimeEntries = () => [
+        "main/single-instance.mjs",
+        "node_modules/@relayer/graph-client/dist/index.js",
+        "node_modules/@relayer/harness-host/dist/index.js",
+        "node_modules/@relayer/eval-runner/dist/index.js",
+      ];
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        listPackageEntries: packagedRuntimeEntries,
       })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "arm64" });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
+        listPackageEntries: packagedRuntimeEntries,
       })).rejects.toThrow("must contain only arm64");
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/@relayer/graph-client/dist/index.js"),
+      })).rejects.toThrow("missing node_modules/@relayer/graph-client/dist/index.js");
 
       const names = desktopReleaseArtifactNames(contract);
       const dmg = Buffer.from("signed-notarized-dmg-fixture");

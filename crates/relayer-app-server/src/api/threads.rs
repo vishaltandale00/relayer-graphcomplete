@@ -1,6 +1,6 @@
 use super::{
     ApiState,
-    auth::authorize,
+    auth::{authorize_read, authorize_write},
     error::ApiError,
     types::{InteractionResponse, ThreadDetailResponse, ThreadResponse, ThreadViewResponse},
 };
@@ -46,7 +46,7 @@ pub(super) async fn list(
     State(state): State<ApiState>,
     headers: HeaderMap,
 ) -> Result<Json<ThreadsResponse>, ApiError> {
-    authorize(&state, &headers)?;
+    authorize_read(&state, &headers)?;
     let threads = state
         .product
         .list_threads()
@@ -62,7 +62,7 @@ pub(super) async fn create(
     headers: HeaderMap,
     Json(request): Json<CreateThreadRequest>,
 ) -> Result<(StatusCode, Json<ThreadViewResponse>), ApiError> {
-    authorize(&state, &headers)?;
+    authorize_write(&state, &headers)?;
     let project_id = request.project_id.map(ProjectId::try_from).transpose()?;
     let harness_configuration_name =
         selected_harness_configuration(&state, request.harness_configuration_name.as_deref())?;
@@ -97,7 +97,7 @@ pub(super) async fn get(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<ThreadDetailResponse>, ApiError> {
-    authorize(&state, &headers)?;
+    authorize_read(&state, &headers)?;
     Ok(Json(
         state
             .product
@@ -112,7 +112,7 @@ pub(super) async fn list_interactions(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<InteractionsResponse>, ApiError> {
-    authorize(&state, &headers)?;
+    authorize_read(&state, &headers)?;
     let interactions = state
         .product
         .list_interactions(ThreadId::try_from(id)?)
@@ -129,7 +129,7 @@ pub(super) async fn create_interaction(
     Path(id): Path<i64>,
     Json(request): Json<CreateInteractionRequest>,
 ) -> Result<(StatusCode, Json<InteractionResponse>), ApiError> {
-    authorize(&state, &headers)?;
+    authorize_write(&state, &headers)?;
     let thread_id = ThreadId::try_from(id)?;
     let thread = state.product.get_thread(thread_id).await?.thread;
     let interaction = state
@@ -145,7 +145,7 @@ pub(super) async fn get_layer(
     headers: HeaderMap,
     Path((thread_id, interaction_id, layer_id)): Path<(i64, i64, i64)>,
 ) -> Result<Json<Value>, ApiError> {
-    authorize(&state, &headers)?;
+    authorize_read(&state, &headers)?;
     let thread_id = ThreadId::try_from(thread_id)?;
     let interaction_id = InteractionId::try_from(interaction_id)?;
     let interaction = state.product.get_interaction(interaction_id).await?;

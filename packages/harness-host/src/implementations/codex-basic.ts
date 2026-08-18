@@ -110,7 +110,11 @@ The module exports RelayerGraphClient, NodeObject, EdgeObject, and LayerObject. 
 5. await graph.addAction(${interactionNode.id}, { kind: "navigate", label: "Response", target: layer, response: true });
 6. await graph.submit(${interactionNode.id}).
 
-The visible layer must contain 1 to 8 nodes and must be connected. Layer edges are exactly what the user sees. If a graph call rejects an object, read its error message, repair only that object, and retry. The graph is complete only after graph.submit succeeds.`;
+The visible layer must contain 1 to 8 nodes and must be connected. Layer edges are exactly what the user sees.
+
+A response may contain additional layers. When a concept benefits from deeper explanation, you may submit another LayerObject and attach it to an output node with await graph.addAction(node, { kind: "navigate", label: "Useful label", target: childLayer }). This is optional: use it only when the additional layer materially improves the answer. You may similarly add an invoke action with { kind: "invoke", label: "Useful label", interactionText: "A useful follow-up" } when a suggested follow-up is valuable. Submit every referenced node, edge, and layer before adding its action.
+
+If a graph call rejects an object, read its error message, repair only that object, and retry. The graph is complete only after graph.submit succeeds.`;
   }
 }
 

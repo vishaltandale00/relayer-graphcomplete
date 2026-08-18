@@ -15,6 +15,7 @@ export default {
     "package.json",
     "eval-main/**/*",
     "main/services/**/*",
+    "main/single-instance.mjs",
     "preload/eval-*.cjs",
     "node_modules/**/*",
   ],

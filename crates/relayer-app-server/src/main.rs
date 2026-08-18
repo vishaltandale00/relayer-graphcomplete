@@ -33,18 +33,18 @@ struct Arguments {
     default_harness_configuration: String,
     #[arg(long, default_value_t = false)]
     allow_harness_override: bool,
+    #[arg(long, default_value_t = false)]
+    read_only_control_token_stdin: bool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let arguments = Arguments::parse();
-    let control_token = read_control_token()?;
+    let (control_token, read_only_control_token) =
+        read_control_tokens(arguments.read_only_control_token_stdin)?;
     let parent_disconnected = watch_parent_connection();
     if arguments.host != IpAddr::V4(Ipv4Addr::LOCALHOST) {
         anyhow::bail!("Relayer app server only binds to 127.0.0.1");
-    }
-    if control_token.len() < 32 {
-        anyhow::bail!("control token must contain at least 32 characters");
     }
     std::fs::create_dir_all(&arguments.data_dir).context("create product data directory")?;
     if !arguments.web_dir.is_dir() {
@@ -78,6 +78,7 @@ async fn main() -> anyhow::Result<()> {
         database_path: database,
         web_directory: arguments.web_dir,
         control_token,
+        read_only_control_token,
         runtime,
     })
     .await
@@ -101,18 +102,30 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn read_control_token() -> anyhow::Result<String> {
+fn read_control_tokens(read_only_enabled: bool) -> anyhow::Result<(String, Option<String>)> {
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    let control_token = read_token_line(&mut input, "desktop control token")?;
+    let read_only_control_token = read_only_enabled
+        .then(|| read_token_line(&mut input, "read-only desktop control token"))
+        .transpose()?;
+    if read_only_control_token.as_deref() == Some(control_token.as_str()) {
+        anyhow::bail!("read-only desktop control token must be distinct");
+    }
+    Ok((control_token, read_only_control_token))
+}
+
+fn read_token_line(input: &mut impl BufRead, label: &str) -> anyhow::Result<String> {
     let mut token = String::new();
-    io::stdin()
-        .lock()
+    input
         .read_line(&mut token)
-        .context("read desktop control token")?;
+        .with_context(|| format!("read {label}"))?;
     if !token.ends_with('\n') {
-        anyhow::bail!("desktop control token must be newline terminated");
+        anyhow::bail!("{label} must be newline terminated");
     }
     let token = token.trim_end_matches(['\r', '\n']).to_owned();
-    if token.is_empty() {
-        anyhow::bail!("desktop control token was not supplied");
+    if token.len() < 32 {
+        anyhow::bail!("{label} must contain at least 32 characters");
     }
     Ok(token)
 }

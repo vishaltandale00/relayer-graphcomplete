@@ -38,6 +38,7 @@ export class GraphCompleteRuntimeService {
     spawnProcess = spawn,
     startupTimeoutMs = 10_000,
     shutdownTimeoutMs = 2_000,
+    onUnexpectedStop = () => {},
   }) {
     this.userDataDirectory = userDataDirectory;
     this.graphServerBinary = graphServerBinary;
@@ -48,6 +49,7 @@ export class GraphCompleteRuntimeService {
     this.spawnProcess = spawnProcess;
     this.startupTimeoutMs = startupTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
+    this.onUnexpectedStop = onUnexpectedStop;
     this.graphProcess = null;
     this.harnessHost = null;
     this.session = null;
@@ -73,12 +75,17 @@ export class GraphCompleteRuntimeService {
     const controlToken = randomBytes(32).toString("hex");
     const graphProcess = this.spawnProcess(this.graphServerBinary, [
       "--database", join(runtimeDirectory, "graph.sqlite3"),
-      "--control-token", controlToken,
       "--port", "0",
-    ], { stdio: ["ignore", "pipe", "pipe"] });
+    ], { stdio: ["pipe", "pipe", "pipe"] });
     this.graphProcess = graphProcess;
     try {
+      graphProcess.stdin?.on("error", () => {});
+      graphProcess.stdin?.write(`${controlToken}\n`);
       const graphUrl = await this.#waitForGraph(graphProcess);
+      this.#superviseGraph(graphProcess);
+      if (graphProcess.exitCode !== null || graphProcess.signalCode !== null) {
+        throw new Error(`Relayer graph server stopped after readiness (${graphProcess.signalCode || graphProcess.exitCode || "unknown"}).`);
+      }
       this.harnessHost = await startHarnessHost({
         implementations: productHarnessImplementations({
           ...(this.codexBasicClientModuleUrl || this.codexPathOverride ? {
@@ -170,5 +177,22 @@ export class GraphCompleteRuntimeService {
       child.once("exit", onExit);
       child.once("error", onError);
     });
+  }
+
+  #superviseGraph(child) {
+    const onStopped = (code, signal) => {
+      const expected = this.closing || this.graphProcess !== child;
+      if (this.graphProcess === child) {
+        this.graphProcess = null;
+        this.session = null;
+      }
+      if (!expected) {
+        console.error(`Relayer graph server stopped (${signal || code || "unknown"}).`);
+        Promise.resolve(this.onUnexpectedStop({ code, signal })).catch((error) => {
+          console.error("Relayer graph-server stop handler failed:", error);
+        });
+      }
+    };
+    child.once("exit", onStopped);
   }
 }

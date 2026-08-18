@@ -26,16 +26,17 @@ pub(crate) struct ApiState {
 
 pub(crate) fn router(
     product: ProductService,
-    control_token: impl Into<String>,
+    control_tokens: (String, Option<String>),
     web_directory: PathBuf,
     runtime: Option<RuntimeClient>,
     default_harness_configuration: String,
     allow_harness_override: bool,
     standalone_workspaces_directory: PathBuf,
 ) -> Router {
+    let (control_token, read_only_control_token) = control_tokens;
     let state = ApiState {
         product,
-        authenticator: DesktopSessionAuthenticator::new(control_token),
+        authenticator: DesktopSessionAuthenticator::new(control_token, read_only_control_token),
         runtime,
         default_harness_configuration,
         allow_harness_override,
