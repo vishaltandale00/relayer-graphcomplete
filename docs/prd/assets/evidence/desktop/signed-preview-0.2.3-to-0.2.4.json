@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-18",
+  "environment": {
+    "host": "remote-mac-mini",
+    "architecture": "arm64",
+    "macOS": "15.6"
+  },
+  "seed": {
+    "version": "0.2.3",
+    "sourceCommit": "07935eda20e6e1fd4312ede96df71fcf9297cd27",
+    "workflowRunId": "32099544204",
+    "dmgSha256": "7f23f15df503f3f1ff791ab5d3bd8379b53d8eb2f3ad9c37f7802497e7c91df9",
+    "zipSha256": "dd69cedbaaefc7b4e54e5e9eb953eb126aa19ac581960c5b5659b7e7e7f4f352"
+  },
+  "target": {
+    "version": "0.2.4",
+    "sourceCommit": "52be38632a1328294ebba176cc5141e690450897",
+    "workflowRunId": "32103757098",
+    "dmgSha256": "05738dd508123362d6e630597efa29f50c185d8188834d661977f508a8640b16",
+    "zipSha256": "f5e683120aa08f6d502110236ba304154eb0b892fff3c788ca187f5442af22e4"
+  },
+  "productFlow": [
+    { "phase": "idle", "version": "0.2.3", "channel": "preview", "error": null },
+    { "phase": "available", "version": "0.2.3", "availableVersion": "0.2.4", "channel": "preview", "error": null },
+    { "phase": "downloading", "version": "0.2.3", "availableVersion": "0.2.4", "channel": "preview", "displayedPercentages": [18, 36, 56, 71, 85, 99, 100], "error": null },
+    { "phase": "ready", "version": "0.2.3", "availableVersion": "0.2.4", "channel": "preview", "error": null },
+    { "phase": "installed-and-relaunched", "version": "0.2.4", "channel": "preview", "error": null }
+  ],
+  "postUpdate": {
+    "installedVersion": "0.2.4",
+    "running": true,
+    "codeSignatureVerified": true,
+    "gatekeeperAccepted": true,
+    "codexAccountConnected": true,
+    "appearance": "light",
+    "channel": "preview",
+    "updateStatus": "idle"
+  },
+  "screenshots": {
+    "installed": {
+      "file": "signed-preview-0.2.4-installed.png",
+      "sha256": "5692cdf10f1f806c6298d542e83a8af9b23bc44ff5888eff25d6a5220e181033"
+    }
+  }
+}
