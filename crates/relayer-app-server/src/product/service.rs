@@ -62,26 +62,19 @@ impl ProductService {
         &self,
         requested_thread_id: Option<ThreadId>,
     ) -> Result<ProductState, ProductError> {
-        let projects = self.storage.list_projects().await?;
-        let threads = self.storage.list_threads().await?;
-        let selected_id = requested_thread_id
-            .filter(|id| threads.iter().any(|thread| thread.id == *id))
-            .or_else(|| threads.first().map(|thread| thread.id));
-        let interactions = match selected_id {
-            Some(thread_id) => self.storage.list_interactions(thread_id).await?,
-            None => Vec::new(),
-        };
-        let threads = threads
+        let snapshot = self.storage.load_product_state(requested_thread_id).await?;
+        let threads = snapshot
+            .threads
             .into_iter()
             .map(|thread| ThreadView {
-                active: selected_id == Some(thread.id),
+                active: snapshot.selected_thread_id == Some(thread.id),
                 thread,
             })
             .collect();
         Ok(ProductState {
-            projects,
+            projects: snapshot.projects,
             threads,
-            interactions,
+            interactions: snapshot.interactions,
             capabilities: self.capabilities(),
         })
     }
@@ -168,15 +161,13 @@ impl ProductService {
     }
 
     pub(crate) async fn get_thread(&self, id: ThreadId) -> Result<ThreadDetail, ProductError> {
-        let thread = self
-            .storage
-            .get_thread(id)
-            .await?
+        let snapshot = self.storage.load_thread(id).await?;
+        let thread = snapshot
+            .thread
             .ok_or_else(|| ProductError::NotFound(format!("thread {id}")))?;
-        let interactions = self.storage.list_interactions(id).await?;
         Ok(ThreadDetail {
             thread,
-            interactions,
+            interactions: snapshot.interactions,
         })
     }
 
@@ -203,7 +194,7 @@ impl ProductService {
             return Err(ProductError::NotFound(format!("thread {thread_id}")));
         }
         self.storage
-            .insert_interaction(thread_id, text, &now())
+            .insert_interaction(thread_id, text)
             .await
             .map_err(Into::into)
     }

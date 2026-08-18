@@ -1,7 +1,7 @@
 use super::SqliteProductStore;
 use crate::product::{InteractionId, ProjectId, Thread, ThreadId};
 use crate::storage::StorageError;
-use sqlx::{Row, sqlite::SqliteRow};
+use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 
 const THREAD_COLUMNS: &str = r#"
     SELECT t.id,t.title,t.project_id,t.created_at,t.updated_at,
@@ -11,22 +11,13 @@ const THREAD_COLUMNS: &str = r#"
 
 impl SqliteProductStore {
     pub(crate) async fn list_threads(&self) -> Result<Vec<Thread>, StorageError> {
-        let rows = sqlx::query(&format!(
-            "{THREAD_COLUMNS} ORDER BY t.updated_at DESC, t.created_at DESC, t.id DESC"
-        ))
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter().map(thread_from_row).collect()
+        let mut connection = self.pool.acquire().await?;
+        fetch_threads(&mut connection).await
     }
 
     pub(crate) async fn get_thread(&self, id: ThreadId) -> Result<Option<Thread>, StorageError> {
-        sqlx::query(&format!("{THREAD_COLUMNS} WHERE t.id=?1"))
-            .bind(id.value())
-            .fetch_optional(&self.pool)
-            .await?
-            .as_ref()
-            .map(thread_from_row)
-            .transpose()
+        let mut connection = self.pool.acquire().await?;
+        fetch_thread(&mut connection, id).await
     }
 
     pub(crate) async fn insert_thread_with_initial_interaction(
@@ -59,6 +50,30 @@ impl SqliteProductStore {
             .await?
             .ok_or_else(|| sqlx::Error::RowNotFound.into())
     }
+}
+
+pub(super) async fn fetch_threads(
+    connection: &mut SqliteConnection,
+) -> Result<Vec<Thread>, StorageError> {
+    let rows = sqlx::query(&format!(
+        "{THREAD_COLUMNS} ORDER BY t.updated_at DESC, t.created_at DESC, t.id DESC"
+    ))
+    .fetch_all(connection)
+    .await?;
+    rows.iter().map(thread_from_row).collect()
+}
+
+pub(super) async fn fetch_thread(
+    connection: &mut SqliteConnection,
+    id: ThreadId,
+) -> Result<Option<Thread>, StorageError> {
+    sqlx::query(&format!("{THREAD_COLUMNS} WHERE t.id=?1"))
+        .bind(id.value())
+        .fetch_optional(connection)
+        .await?
+        .as_ref()
+        .map(thread_from_row)
+        .transpose()
 }
 
 fn thread_from_row(row: &SqliteRow) -> Result<Thread, StorageError> {

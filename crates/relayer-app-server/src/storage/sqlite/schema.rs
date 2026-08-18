@@ -38,10 +38,19 @@ pub(super) async fn validate_existing_or_empty(pool: &SqlitePool) -> Result<(), 
     .fetch_one(pool)
     .await?;
     if table_count == 0 {
-        Ok(())
-    } else {
-        validate(pool).await
+        return Ok(());
     }
+    let has_migration_history: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='_sqlx_migrations')",
+    )
+    .fetch_one(pool)
+    .await?;
+    if !has_migration_history {
+        return Err(incompatible(
+            "product tables exist without Relayer migration history",
+        ));
+    }
+    Ok(())
 }
 
 pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
@@ -65,6 +74,16 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         .await?;
     if !violations.is_empty() {
         return Err(incompatible("stored rows violate product foreign keys"));
+    }
+    let thread_without_interaction: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM threads t WHERE NOT EXISTS (SELECT 1 FROM interactions i WHERE i.thread_id=t.id))",
+    )
+    .fetch_one(pool)
+    .await?;
+    if thread_without_interaction {
+        return Err(incompatible(
+            "every stored thread must have a root interaction",
+        ));
     }
     Ok(())
 }
@@ -120,6 +139,9 @@ async fn validate_index(
         .await?;
     for index in indexes {
         if (index.try_get::<i64, _>("unique")? == 1) != unique {
+            continue;
+        }
+        if index.try_get::<i64, _>("partial")? == 1 {
             continue;
         }
         let name: String = index.try_get("name")?;

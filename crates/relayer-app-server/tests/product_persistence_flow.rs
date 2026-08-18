@@ -8,10 +8,75 @@ use serde_json::{Value, json};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{
     fs,
+    io::{BufRead, BufReader, Write},
     path::Path,
+    process::{Command, Stdio},
+    thread,
+    time::Duration,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tower::ServiceExt;
+
+#[test]
+fn exits_when_desktop_control_pipe_closes() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-app-server-parent-exit-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_relayer-app-server"))
+        .args([
+            "--data-dir",
+            root.join("data").to_str().unwrap(),
+            "--web-dir",
+            root.to_str().unwrap(),
+            "--port",
+            "0",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let mut control_pipe = child.stdin.take().unwrap();
+    writeln!(
+        control_pipe,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    )
+    .unwrap();
+    control_pipe.flush().unwrap();
+
+    let mut ready_line = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut ready_line)
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&ready_line).unwrap()["ready"],
+        true
+    );
+
+    drop(control_pipe);
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let exit_status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("Relayer app server remained alive after its desktop control pipe closed");
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert!(exit_status.success());
+    fs::remove_dir_all(root).unwrap();
+}
 
 #[tokio::test]
 async fn persists_project_thread_and_interaction_across_restart() {
@@ -152,7 +217,14 @@ async fn persists_project_thread_and_interaction_across_restart() {
     };
 
     let timestamp_pool = sqlite_pool(&database).await;
-    sqlx::query("UPDATE threads SET created_at='same', updated_at='same'")
+    let future_timestamp = (SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        + 60_000)
+        .to_string();
+    sqlx::query("UPDATE threads SET created_at=?1, updated_at=?1")
+        .bind(&future_timestamp)
         .execute(&timestamp_pool)
         .await
         .unwrap();
@@ -263,6 +335,19 @@ async fn persists_project_thread_and_interaction_across_restart() {
         .map(|interaction| interaction["sequence"].as_i64().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(sequences, (1..=13).collect::<Vec<_>>());
+    let timestamps = interactions["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|interaction| interaction["createdAt"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(timestamps.windows(2).all(|pair| pair[0] <= pair[1]));
+    assert!(
+        timestamps
+            .iter()
+            .skip(1)
+            .all(|timestamp| *timestamp == future_timestamp)
+    );
 
     drop(app);
     let migration_pool = sqlite_pool(&database).await;
@@ -292,6 +377,67 @@ async fn persists_project_thread_and_interaction_across_restart() {
         Err(error) => error,
     };
     assert!(error.to_string().contains("schema is incompatible"));
+
+    let rootless_database = root.join("rootless.sqlite3");
+    drop(open_app(&rootless_database, &root).await);
+    let rootless_pool = sqlite_pool(&rootless_database).await;
+    sqlx::query(
+        "INSERT INTO threads(title,project_id,created_at,updated_at) VALUES ('rootless',NULL,'1','1')",
+    )
+    .execute(&rootless_pool)
+    .await
+    .unwrap();
+    rootless_pool.close().await;
+    let rootless = RelayerAppServer::open(RelayerAppServerConfig {
+        database_path: rootless_database,
+        web_directory: root.clone(),
+        control_token: "control".to_owned(),
+    })
+    .await;
+    let rootless_error = match rootless {
+        Ok(_) => panic!("thread without a root interaction was accepted"),
+        Err(error) => error,
+    };
+    assert!(
+        rootless_error
+            .to_string()
+            .contains("must have a root interaction")
+    );
+
+    let partial_index_database = root.join("partial-index.sqlite3");
+    drop(open_app(&partial_index_database, &root).await);
+    let partial_index_pool = sqlite_pool(&partial_index_database).await;
+    for statement in [
+        "DROP TABLE interactions",
+        "DROP TABLE threads",
+        "DROP TABLE projects",
+        "CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,path TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
+        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
+        "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL)",
+        "CREATE UNIQUE INDEX projects_path_partial ON projects(path) WHERE id > 0",
+        "CREATE UNIQUE INDEX interactions_sequence_partial ON interactions(thread_id,sequence) WHERE id > 0",
+    ] {
+        sqlx::query(statement)
+            .execute(&partial_index_pool)
+            .await
+            .unwrap();
+    }
+    partial_index_pool.close().await;
+    let partial_index = RelayerAppServer::open(RelayerAppServerConfig {
+        database_path: partial_index_database,
+        web_directory: root.clone(),
+        control_token: "control".to_owned(),
+    })
+    .await;
+    let partial_index_error = match partial_index {
+        Ok(_) => panic!("partial unique indexes were accepted"),
+        Err(error) => error,
+    };
+    assert!(
+        partial_index_error
+            .to_string()
+            .contains("missing its required unique index")
+    );
     fs::remove_dir_all(root).unwrap();
 }
 

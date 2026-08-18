@@ -396,7 +396,7 @@ type CompleteResult = {
 <tr class="requirement-row status-verified">
 <td>Electron owns the Rust app-server lifecycle</td>
 <td><span class="delivery-status verified">Met</span></td>
-<td>Electron starts one bundled or development server, sends its control token through child standard input rather than process arguments, accepts only its authenticated loopback readiness message, and stops it during shutdown. Failed startup and normal shutdown wait for process exit, escalating from <code>SIGTERM</code> to <code>SIGKILL</code> after a bounded grace period. If the child exits unexpectedly, the desktop shows an actionable error and closes instead of leaving an unusable window.</td>
+<td>Electron starts one bundled or development server, sends its control token through child standard input rather than process arguments, keeps that pipe open as the parent-ownership signal, accepts only its authenticated loopback readiness message, and stops it during shutdown. The Rust server also exits when the pipe closes after an Electron exit or crash. Failed startup and normal shutdown wait for process exit, escalating from <code>SIGTERM</code> to <code>SIGKILL</code> after a bounded grace period. If the child exits unexpectedly, the desktop shows an actionable error and closes instead of leaving an unusable window. A real-binary integration test closes the parent pipe and requires the server to exit promptly.</td>
 <td>Release signing and a clean-machine packaged smoke belong to distribution validation.</td>
 </tr>
 <tr class="requirement-row status-verified">
@@ -414,7 +414,7 @@ type CompleteResult = {
 <tr class="requirement-row status-verified">
 <td>Product SQLite stores project metadata and atomically creates a thread with its first chronology entry</td>
 <td><span class="delivery-status verified">Met</span></td>
-<td>One Rust integration scenario creates a project plus project-backed and standalone threads, races duplicate project creation, concurrently appends interactions, forces equal thread timestamps, closes the store, reopens the same database, and reads the same records. It proves one project creation winner, contiguous interaction sequence numbers, deterministic newest-thread selection, and positive integer IDs. Thread and first-interaction creation share one transaction. The app server validates an existing schema before and after its embedded migration and refuses an incompatible database.</td>
+<td>One Rust integration scenario creates a project plus project-backed and standalone threads, races duplicate project creation, concurrently appends interactions against a future thread timestamp, forces equal thread timestamps, closes the store, reopens the same database, and reads the same records. It proves one project creation winner, contiguous interaction sequence numbers, nondecreasing interaction timestamps, deterministic newest-thread selection, and positive integer IDs. Thread and first-interaction creation share one transaction. The app server permits only SQLx-managed predecessor schemas into embedded migrations, then validates exact columns, full unique indexes, foreign keys, and the required root interaction before accepting the database.</td>
 <td>Canonical graph nodes, graph snapshots, attempts, drafts, later schema upgrades beyond the initial version, export, and recovery from an operating-system interruption are not represented yet.</td>
 </tr>
 <tr class="requirement-row status-verified">

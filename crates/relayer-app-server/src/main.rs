@@ -3,10 +3,11 @@ use clap::Parser;
 use relayer_app_server::{CONTROL_COOKIE, RelayerAppServer, RelayerAppServerConfig};
 use serde_json::json;
 use std::{
-    io,
+    io::{self, BufRead, Read},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
+use tokio::sync::oneshot;
 
 #[derive(Debug, Parser)]
 struct Arguments {
@@ -24,6 +25,7 @@ struct Arguments {
 async fn main() -> anyhow::Result<()> {
     let arguments = Arguments::parse();
     let control_token = read_control_token()?;
+    let parent_disconnected = watch_parent_connection();
     if arguments.host != IpAddr::V4(Ipv4Addr::LOCALHOST) {
         anyhow::bail!("Relayer app server only binds to 127.0.0.1");
     }
@@ -58,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
         })
     );
     axum::serve(listener, app_server.router())
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(parent_disconnected))
         .await
         .context("serve Relayer app server")?;
     Ok(())
@@ -67,8 +69,12 @@ async fn main() -> anyhow::Result<()> {
 fn read_control_token() -> anyhow::Result<String> {
     let mut token = String::new();
     io::stdin()
+        .lock()
         .read_line(&mut token)
         .context("read desktop control token")?;
+    if !token.ends_with('\n') {
+        anyhow::bail!("desktop control token must be newline terminated");
+    }
     let token = token.trim_end_matches(['\r', '\n']).to_owned();
     if token.is_empty() {
         anyhow::bail!("desktop control token was not supplied");
@@ -76,7 +82,23 @@ fn read_control_token() -> anyhow::Result<String> {
     Ok(token)
 }
 
-async fn shutdown_signal() {
+fn watch_parent_connection() -> oneshot::Receiver<()> {
+    let (disconnected, parent_disconnected) = oneshot::channel();
+    std::thread::spawn(move || {
+        let mut input = io::stdin().lock();
+        let mut buffer = [0_u8; 256];
+        loop {
+            match input.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        let _ = disconnected.send(());
+    });
+    parent_disconnected
+}
+
+async fn shutdown_signal(parent_disconnected: oneshot::Receiver<()>) {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{SignalKind, signal};
@@ -84,10 +106,14 @@ async fn shutdown_signal() {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {},
             _ = terminate.recv() => {},
+            _ = parent_disconnected => {},
         }
     }
     #[cfg(not(unix))]
     {
-        let _ = tokio::signal::ctrl_c().await;
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = parent_disconnected => {},
+        }
     }
 }

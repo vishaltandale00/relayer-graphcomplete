@@ -208,6 +208,7 @@ describe("desktop skeleton", () => {
         "--port", "0",
       ]);
       expect(suppliedToken).toBe(`${session.cookie.value}\n`);
+      expect(child.stdin.writableEnded).toBe(false);
       expect(invocations[0].args).not.toContain(session.cookie.value);
       expect(await service.start()).toBe(session);
       await service.close();

@@ -84,7 +84,7 @@ export class RelayerAppServerService {
     });
     this.child = child;
     child.stdin?.on("error", () => {});
-    child.stdin?.end(`${controlToken}\n`);
+    child.stdin?.write(`${controlToken}\n`);
 
     const stderr = [];
     child.stderr?.on("data", (chunk) => {

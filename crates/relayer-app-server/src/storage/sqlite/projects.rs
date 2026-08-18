@@ -1,16 +1,12 @@
 use super::SqliteProductStore;
 use crate::product::{Project, ProjectId};
 use crate::storage::StorageError;
-use sqlx::{Row, sqlite::SqliteRow};
+use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 
 impl SqliteProductStore {
     pub(crate) async fn list_projects(&self) -> Result<Vec<Project>, StorageError> {
-        let rows = sqlx::query(
-            "SELECT id,name,path,created_at,updated_at FROM projects ORDER BY created_at ASC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter().map(project_from_row).collect()
+        let mut connection = self.pool.acquire().await?;
+        fetch_projects(&mut connection).await
     }
 
     pub(crate) async fn get_project(&self, id: ProjectId) -> Result<Option<Project>, StorageError> {
@@ -57,6 +53,17 @@ impl SqliteProductStore {
             .ok_or(sqlx::Error::RowNotFound)?;
         Ok((project, created))
     }
+}
+
+pub(super) async fn fetch_projects(
+    connection: &mut SqliteConnection,
+) -> Result<Vec<Project>, StorageError> {
+    let rows = sqlx::query(
+        "SELECT id,name,path,created_at,updated_at FROM projects ORDER BY created_at ASC",
+    )
+    .fetch_all(connection)
+    .await?;
+    rows.iter().map(project_from_row).collect()
 }
 
 fn project_from_row(row: &SqliteRow) -> Result<Project, StorageError> {
