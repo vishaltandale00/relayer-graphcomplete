@@ -84,16 +84,14 @@ export class RelayerAppServerService {
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
-    child.stdin?.on("error", () => {});
-    child.stdin?.write(`${controlToken}\n`);
-
     const stderr = [];
-    child.stderr?.on("data", (chunk) => {
-      stderr.push(String(chunk));
-      if (stderr.join("").length > 8_000) stderr.shift();
-    });
-
     try {
+      child.stdin?.on("error", () => {});
+      child.stdin?.write(`${controlToken}\n`);
+      child.stderr?.on("data", (chunk) => {
+        stderr.push(String(chunk));
+        if (stderr.join("").length > 8_000) stderr.shift();
+      });
       const ready = await this.#waitForReady(child, stderr);
       this.listening = {
         origin: ready.origin,

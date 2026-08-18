@@ -297,6 +297,32 @@ describe("desktop skeleton", () => {
       await expect(unavailable.start()).rejects.toThrow("could not start: spawn ENOENT");
       expect(failedChild.kill).toHaveBeenCalledWith("SIGTERM");
 
+      const rejectedHandshakeChild = Object.assign(new EventEmitter(), {
+        stdin: {
+          on: vi.fn(),
+          write: vi.fn(() => { throw new Error("control pipe closed"); }),
+        },
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null,
+        signalCode: null,
+        killed: false,
+        kill: vi.fn(function kill(signal) {
+          this.killed = true;
+          this.signalCode = signal;
+          queueMicrotask(() => this.emit("exit", null, signal));
+          return true;
+        }),
+      });
+      const rejectedHandshake = new RelayerAppServerService({
+        userDataDirectory: directory,
+        binaryPath: "/test/bin/rejected-handshake",
+        webDirectory: "/test/renderer",
+        spawnProcess: () => rejectedHandshakeChild,
+      });
+      await expect(rejectedHandshake.start()).rejects.toThrow("control pipe closed");
+      expect(rejectedHandshakeChild.kill).toHaveBeenCalledWith("SIGTERM");
+
       const remoteChild = Object.assign(new EventEmitter(), {
         stdout: new PassThrough(),
         stderr: new PassThrough(),
