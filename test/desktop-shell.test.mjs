@@ -8,7 +8,11 @@ import { describe, expect, it, vi } from "vitest";
 import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-credential-adapter.mjs";
 import { CredentialAdapter } from "../desktop/main/credentials/credential-adapter.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
-import { createDesktopUpdater, packagedUpdateChannel } from "../desktop/main/services/updater.mjs";
+import { createDesktopUpdater } from "../desktop/main/services/updater.mjs";
+import {
+  DESKTOP_UPDATE_BASE_URL,
+  packagedDesktopReleaseMetadata,
+} from "../desktop/shared/release-metadata.mjs";
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
 import {
   DESKTOP_RELEASE,
@@ -25,6 +29,7 @@ import {
   classifyPreviewPointer,
   createPreviewPublicationPlan,
   preparePreviewManifest,
+  publishDesktopPreview,
   validatePreviewCandidate,
   validatePreviewPublicationProvenance,
 } from "../desktop/release/publish-preview.mjs";
@@ -159,10 +164,23 @@ describe("desktop skeleton", () => {
   });
 
   it("drives the packaged update lifecycle through one state service", async () => {
-    expect(packagedUpdateChannel({ relayerArtifactMode: "release", relayerUpdateChannel: "preview" })).toBe("preview");
-    expect(packagedUpdateChannel({ relayerArtifactMode: "release", relayerUpdateChannel: "stable" })).toBe("stable");
-    expect(packagedUpdateChannel({ relayerArtifactMode: "development", relayerUpdateChannel: "preview" })).toBeNull();
-    expect(packagedUpdateChannel({ relayerArtifactMode: "release", relayerUpdateChannel: "beta" })).toBeNull();
+    expect(packagedDesktopReleaseMetadata({
+      relayerArtifactMode: "release",
+      relayerUpdateChannel: "preview",
+      relayerUpdateBaseUrl: DESKTOP_UPDATE_BASE_URL,
+    })).toEqual({ channel: "preview", updateBaseUrl: DESKTOP_UPDATE_BASE_URL });
+    expect(packagedDesktopReleaseMetadata({
+      relayerArtifactMode: "release",
+      relayerUpdateChannel: "stable",
+      relayerUpdateBaseUrl: DESKTOP_UPDATE_BASE_URL,
+    })).toEqual({ channel: "stable", updateBaseUrl: DESKTOP_UPDATE_BASE_URL });
+    for (const metadata of [
+      { relayerArtifactMode: "development", relayerUpdateChannel: "preview", relayerUpdateBaseUrl: DESKTOP_UPDATE_BASE_URL },
+      { relayerArtifactMode: "release", relayerUpdateChannel: "beta", relayerUpdateBaseUrl: DESKTOP_UPDATE_BASE_URL },
+      { relayerArtifactMode: "release", relayerUpdateChannel: "preview", relayerUpdateBaseUrl: "https://example.test" },
+    ]) {
+      expect(packagedDesktopReleaseMetadata(metadata)).toBeNull();
+    }
 
     const autoUpdater = Object.assign(new EventEmitter(), {
       checkForUpdates: vi.fn(async () => undefined),
@@ -433,6 +451,179 @@ describe("desktop skeleton", () => {
       version,
       manifestText: preparedManifest,
     })).toThrow("must be newer");
+  });
+
+  it("publishes one Preview candidate atomically and recovers without mutating live bytes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-preview-publication-"));
+    try {
+      const version = "0.2.0";
+      const sourceCommit = "c".repeat(40);
+      const prefix = `Relayer-${version}-mac-arm64`;
+      const contents = new Map([
+        [`${prefix}.dmg`, Buffer.from("signed-notarized-dmg")],
+        [`${prefix}.dmg.blockmap`, Buffer.from("dmg-blockmap")],
+        [`${prefix}.zip`, Buffer.from("signed-notarized-update-zip")],
+        [`${prefix}.zip.blockmap`, Buffer.from("zip-blockmap")],
+      ]);
+      const evidenceFor = (name) => {
+        const content = contents.get(name);
+        return {
+          name,
+          size: content.length,
+          sha256: createHash("sha256").update(content).digest("hex"),
+          sha512: createHash("sha512").update(content).digest("base64"),
+        };
+      };
+      const dmg = evidenceFor(`${prefix}.dmg`);
+      const zip = evidenceFor(`${prefix}.zip`);
+      const dmgBlockmap = evidenceFor(`${prefix}.dmg.blockmap`);
+      const zipBlockmap = evidenceFor(`${prefix}.zip.blockmap`);
+      const checksumText = `${dmg.sha256}  ${dmg.name}\n${zip.sha256}  ${zip.name}\n`;
+      const releaseReceipt = {
+        schemaVersion: 1,
+        product: DESKTOP_RELEASE.productName,
+        appId: DESKTOP_RELEASE.productionAppId,
+        version,
+        architecture: DESKTOP_RELEASE.architecture,
+        minimumMacOSVersion: DESKTOP_RELEASE.minimumMacOSVersion,
+        channel: "preview",
+        manifest: "beta-mac.yml",
+        updateBaseUrl: DESKTOP_RELEASE.updateBaseUrl,
+        sourceCommit,
+        appleTeamId: DESKTOP_RELEASE.appleTeamId,
+        artifacts: [dmg, zip],
+      };
+      contents.set(`${prefix}-SHA256SUMS.txt`, Buffer.from(checksumText));
+      contents.set(`${prefix}-RELEASE.json`, Buffer.from(JSON.stringify(releaseReceipt)));
+      await Promise.all([...contents].map(([name, content]) => writeFile(join(directory, name), content)));
+      await writeFile(join(directory, "beta-mac.yml"), [
+        `version: ${version}`,
+        "files:",
+        `  - url: ${zip.name}`,
+        `    sha512: ${zip.sha512}`,
+        `    size: ${zip.size}`,
+        `    blockMapSize: ${zipBlockmap.size}`,
+        `  - url: ${dmg.name}`,
+        `    sha512: ${dmg.sha512}`,
+        `    size: ${dmg.size}`,
+        `    blockMapSize: ${dmgBlockmap.size}`,
+        `path: ${zip.name}`,
+        `sha512: ${zip.sha512}`,
+        "",
+      ].join("\n"));
+
+      const objects = new Map();
+      const writes = [];
+      const argument = (args, name) => args[args.indexOf(name) + 1];
+      const execute = async (command, args) => {
+        expect(command).toBe("aws");
+        const operation = args[1];
+        const key = argument(args, "--key");
+        if (operation === "head-object") {
+          const object = objects.get(key);
+          if (!object) {
+            const error = new Error("Not Found");
+            error.stderr = "404 Not Found";
+            throw error;
+          }
+          return { stdout: JSON.stringify({
+            ContentLength: object.body.length,
+            Metadata: object.metadata,
+            ChecksumSHA256: object.checksumSha256,
+            ETag: object.etag,
+          }) };
+        }
+        if (operation === "get-object") {
+          const object = objects.get(key);
+          if (!object) throw new Error(`missing object ${key}`);
+          await writeFile(args.at(-1), object.body);
+          return { stdout: "{}" };
+        }
+        if (operation !== "put-object") throw new Error(`unexpected AWS operation ${operation}`);
+        const existing = objects.get(key);
+        if (args.includes("--if-none-match") && existing) throw new Error("PreconditionFailed");
+        if (args.includes("--if-match") && existing?.etag !== argument(args, "--if-match")) {
+          throw new Error("PreconditionFailed");
+        }
+        const body = await readFile(argument(args, "--body"));
+        const metadata = Object.fromEntries(argument(args, "--metadata").split(",").map((item) => item.split("=")));
+        const object = {
+          body,
+          metadata,
+          checksumSha256: argument(args, "--checksum-sha256"),
+          etag: `"${createHash("sha256").update(body).digest("hex").slice(0, 32)}"`,
+        };
+        objects.set(key, object);
+        writes.push(key);
+        return { stdout: JSON.stringify({ ETag: object.etag }) };
+      };
+      let failPublicArtifact = true;
+      const fetchImpl = async (url) => {
+        const parsed = new URL(url);
+        const key = parsed.pathname.replace(/^\//, "");
+        if (failPublicArtifact && key.endsWith(`/${zip.name}`)) {
+          return new Response("temporarily unavailable", { status: 503 });
+        }
+        const object = objects.get(key);
+        return object ? new Response(object.body, { status: 200 }) : new Response("missing", { status: 404 });
+      };
+      const environment = {
+        GITHUB_SHA: sourceCommit,
+        GITHUB_REF_NAME: `desktop-v${version}`,
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "1",
+      };
+      const pointerKey = "desktop/macos/arm64/beta-mac.yml";
+      const historyKey = `private/history/beta/${version}/beta-mac.yml`;
+      const receiptKey = `private/receipts/preview/${version}.json`;
+
+      await expect(publishDesktopPreview({
+        bucket: "updates",
+        distRoot: directory,
+        environment,
+        execute,
+        fetchImpl,
+      })).rejects.toThrow("Public update object is unavailable");
+      expect(objects.has(pointerKey)).toBe(false);
+      expect(objects.has(receiptKey)).toBe(false);
+
+      failPublicArtifact = false;
+      await expect(publishDesktopPreview({
+        bucket: "updates",
+        distRoot: directory,
+        environment,
+        execute,
+        fetchImpl,
+      })).resolves.toMatchObject({ receipt: { version, sourceCommit } });
+      const releaseWriteIndexes = writes
+        .map((key, index) => key.startsWith(`desktop/macos/arm64/releases/${version}/`) ? index : -1)
+        .filter((index) => index >= 0);
+      expect(writes.indexOf(pointerKey)).toBeGreaterThan(Math.max(...releaseWriteIndexes));
+      expect(writes.indexOf(pointerKey)).toBeGreaterThan(writes.indexOf(historyKey));
+      expect(writes.indexOf(receiptKey)).toBeGreaterThan(writes.indexOf(pointerKey));
+
+      const writesAfterSuccess = [...writes];
+      await expect(publishDesktopPreview({
+        bucket: "updates",
+        distRoot: directory,
+        environment: { ...environment, GITHUB_RUN_ATTEMPT: "2" },
+        execute,
+        fetchImpl,
+      })).resolves.toMatchObject({ receipt: { workflowRunAttempt: "1" } });
+      expect(writes).toEqual(writesAfterSuccess);
+
+      objects.get(`desktop/macos/arm64/releases/${version}/${zip.name}`).metadata.sha256 = "0".repeat(64);
+      await expect(publishDesktopPreview({
+        bucket: "updates",
+        distRoot: directory,
+        environment: { ...environment, GITHUB_RUN_ATTEMPT: "3" },
+        execute,
+        fetchImpl,
+      })).rejects.toThrow("already exists with different evidence");
+      expect(writes).toEqual(writesAfterSuccess);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("keeps settings writes atomic and local thread graph state scoped to its owning thread", async () => {

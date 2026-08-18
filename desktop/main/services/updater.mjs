@@ -1,10 +1,3 @@
-export function packagedUpdateChannel(metadata) {
-  if (metadata?.relayerArtifactMode !== "release") return null;
-  return metadata.relayerUpdateChannel === "stable" || metadata.relayerUpdateChannel === "preview"
-    ? metadata.relayerUpdateChannel
-    : null;
-}
-
 export function createDesktopUpdater({ autoUpdater, app, emit, updateBaseUrl }) {
   let channel = "stable";
   let state = { phase: app.isPackaged ? "idle" : "development", channel, version: app.getVersion() };

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { compareNumericVersions, isNumericVersion } from "./numeric-version.mjs";
+import { DESKTOP_UPDATE_BASE_URL } from "../shared/release-metadata.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,7 +16,7 @@ export const DESKTOP_RELEASE = Object.freeze({
   architecture: "arm64",
   minimumMacOSVersion: "13.0.0",
   firstVersion: "0.2.0",
-  updateBaseUrl: "https://updates.relayerlabs.ai/desktop/macos/arm64",
+  updateBaseUrl: DESKTOP_UPDATE_BASE_URL,
   appleTeamId: "NZ253AL7U6",
 });
 

@@ -8,8 +8,12 @@ import { fileURLToPath } from "node:url";
 import { CodexCredentialAdapter } from "./credentials/codex-credential-adapter.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
-import { createDesktopUpdater, packagedUpdateChannel } from "./services/updater.mjs";
+import { createDesktopUpdater } from "./services/updater.mjs";
 import { createWindowFactory } from "./window.mjs";
+import {
+  DESKTOP_UPDATE_BASE_URL,
+  packagedDesktopReleaseMetadata,
+} from "../shared/release-metadata.mjs";
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(desktopDirectory, "..");
@@ -19,13 +23,15 @@ if (process.env.RELAYER_DESKTOP_USER_DATA_DIR) {
 
 const metadataPath = app.isPackaged ? join(app.getAppPath(), "package.json") : join(repositoryRoot, "package.json");
 const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
-const releaseChannel = packagedUpdateChannel(metadata);
-const releaseArtifact = releaseChannel !== null;
+const packagedRelease = packagedDesktopReleaseMetadata(metadata);
+const releaseArtifact = packagedRelease !== null;
 app.setName(metadata.relayerProductName || "Relayer Dev");
 
 const userDataPath = app.getPath("userData");
 const codexHome = process.env.RELAYER_CODEX_HOME || join(userDataPath, "codex-home");
-const updateBaseUrl = process.env.RELAYER_DESKTOP_UPDATE_BASE_URL || "https://updates.relayerlabs.ai/desktop/macos/arm64";
+const updateBaseUrl = packagedRelease?.updateBaseUrl || (
+  app.isPackaged ? null : process.env.RELAYER_DESKTOP_UPDATE_BASE_URL || DESKTOP_UPDATE_BASE_URL
+);
 const bundledCodexBinary = app.isPackaged
   ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex")
   : join(repositoryRoot, "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex");
@@ -70,7 +76,7 @@ app.whenReady().then(async () => {
   nativeTheme.themeSource = appearance;
   const channel = saved.updateChannel === "preview" || saved.updateChannel === "stable"
     ? saved.updateChannel
-    : releaseChannel || "stable";
+    : packagedRelease?.channel || "stable";
   if (channel === "preview") updater.setChannel("preview");
 
   registerDesktopIpc({
