@@ -9,7 +9,7 @@ import { CodexCredentialAdapter } from "./credentials/codex-credential-adapter.m
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
-import { createDesktopUpdater } from "./services/updater.mjs";
+import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
 import { claimPrimaryDesktopInstance } from "./single-instance.mjs";
 import { createWindowFactory } from "./window.mjs";
 import {
@@ -110,9 +110,7 @@ if (primaryInstance) {
     const saved = await settings.read();
     appearance = saved.appearance === "light" ? "light" : "dark";
     nativeTheme.themeSource = appearance;
-    const channel = saved.updateChannel === "preview" || saved.updateChannel === "stable"
-      ? saved.updateChannel
-      : packagedRelease?.channel || "stable";
+    const channel = resolveUpdateChannel(saved.updateChannel);
     if (channel === "preview") updater.setChannel("preview");
     const productSession = await productServer.start();
 

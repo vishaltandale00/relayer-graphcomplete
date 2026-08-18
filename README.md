@@ -59,6 +59,8 @@ Preview and Stable are channels for the same `ai.relayer.desktop` application. P
 
 The `Desktop Signed Preview Candidate` workflow always builds a sealed candidate, but publishes only for a matching protected `desktop-vX.Y.Z` tag whose commit is on `origin/main`. Publication uploads immutable versioned artifacts, verifies their public bytes, and conditionally moves `beta-mac.yml` last. A manual workflow run never changes the update feed.
 
+After that exact Preview version passes the committed previous-version updater canary, the protected `Promote Relayer Desktop to Stable` workflow can move `latest-mac.yml` to the same artifact bytes. Stable promotion does not rebuild or re-sign the application and rejects downgrades, replacement bytes, unverified canaries, and concurrent pointer changes.
+
 The living [Product Requirements](docs/prd/index.html) webpage records what is verified, partial, open, deferred, and planned for the updater slice. Run `npm run prd` to review it and save local comments to the ignored `docs/prd/comments.json` file. User-visible proof is stored with the PRD under `docs/prd/assets/evidence/`.
 
 ## Development

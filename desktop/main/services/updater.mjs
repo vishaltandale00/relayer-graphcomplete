@@ -1,21 +1,51 @@
+export function resolveUpdateChannel(savedChannel) {
+  return savedChannel === "preview" ? "preview" : "stable";
+}
+
 export function createDesktopUpdater({ autoUpdater, app, emit, updateBaseUrl }) {
   let channel = "stable";
+  let displayedDownloadPercent = 0;
   let state = { phase: app.isPackaged ? "idle" : "development", channel, version: app.getVersion() };
   const publish = (patch) => {
     state = { ...state, ...patch, channel, version: app.getVersion() };
     emit(state);
     return state;
   };
+  const resetDownloadProgress = () => {
+    displayedDownloadPercent = 0;
+  };
+  const nextDownloadPercent = (reportedPercent) => {
+    const roundedPercent = Number.isFinite(reportedPercent) ? Math.round(reportedPercent) : 0;
+    // electron-updater can emit a second progress pass while Squirrel stages
+    // the update. Keep product progress monotonic and reserve 100% for ready.
+    displayedDownloadPercent = Math.max(displayedDownloadPercent, Math.min(99, Math.max(0, roundedPercent)));
+    return displayedDownloadPercent;
+  };
 
   if (app.isPackaged) {
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.allowDowngrade = false;
-    autoUpdater.on("checking-for-update", () => publish({ phase: "checking", error: null }));
-    autoUpdater.on("update-available", (info) => publish({ phase: "available", availableVersion: info.version, error: null }));
-    autoUpdater.on("update-not-available", () => publish({ phase: "idle", availableVersion: null, error: null }));
-    autoUpdater.on("download-progress", (progress) => publish({ phase: "downloading", percent: Math.round(progress.percent) }));
-    autoUpdater.on("update-downloaded", (info) => publish({ phase: "ready", availableVersion: info.version, percent: 100 }));
+    autoUpdater.on("checking-for-update", () => {
+      resetDownloadProgress();
+      publish({ phase: "checking", percent: null, error: null });
+    });
+    autoUpdater.on("update-available", (info) => {
+      resetDownloadProgress();
+      publish({ phase: "available", availableVersion: info.version, percent: null, error: null });
+    });
+    autoUpdater.on("update-not-available", () => {
+      resetDownloadProgress();
+      publish({ phase: "idle", availableVersion: null, percent: null, error: null });
+    });
+    autoUpdater.on("download-progress", (progress) => {
+      if (state.phase === "ready") return;
+      publish({ phase: "downloading", percent: nextDownloadPercent(progress.percent) });
+    });
+    autoUpdater.on("update-downloaded", (info) => {
+      displayedDownloadPercent = 100;
+      publish({ phase: "ready", availableVersion: info.version, percent: 100 });
+    });
     autoUpdater.on("error", (error) => publish({ phase: "failed", error: error.message }));
   }
 
@@ -25,6 +55,10 @@ export function createDesktopUpdater({ autoUpdater, app, emit, updateBaseUrl }) 
     autoUpdater.allowPrerelease = channel === "preview";
     autoUpdater.setFeedURL({ provider: "generic", url: updateBaseUrl, channel: providerChannel });
     autoUpdater.channel = providerChannel;
+    // electron-updater's channel setter enables downgrades. Relayer channels
+    // share one application identity, so restore the release-contract guard
+    // after every channel assignment.
+    autoUpdater.allowDowngrade = false;
   };
 
   return {
@@ -36,7 +70,13 @@ export function createDesktopUpdater({ autoUpdater, app, emit, updateBaseUrl }) 
       }
       channel = next;
       configureFeed();
-      return publish({ phase: app.isPackaged ? "idle" : "development", availableVersion: null, error: null });
+      resetDownloadProgress();
+      return publish({
+        phase: app.isPackaged ? "idle" : "development",
+        availableVersion: null,
+        percent: null,
+        error: null,
+      });
     },
     async check() {
       if (!app.isPackaged) return publish({ phase: "development", error: null });
@@ -50,6 +90,7 @@ export function createDesktopUpdater({ autoUpdater, app, emit, updateBaseUrl }) 
     },
     async download() {
       if (!app.isPackaged) throw new Error("Updates are available only in packaged builds.");
+      resetDownloadProgress();
       await autoUpdater.downloadUpdate();
       return state;
     },

@@ -9,7 +9,7 @@ import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-creden
 import { CredentialAdapter } from "../desktop/main/credentials/credential-adapter.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
-import { createDesktopUpdater } from "../desktop/main/services/updater.mjs";
+import { createDesktopUpdater, resolveUpdateChannel } from "../desktop/main/services/updater.mjs";
 import { claimPrimaryDesktopInstance } from "../desktop/main/single-instance.mjs";
 import {
   DESKTOP_UPDATE_BASE_URL,
@@ -36,6 +36,11 @@ import {
   validatePreviewCandidate,
   validatePreviewPublicationProvenance,
 } from "../desktop/release/publish-preview.mjs";
+import {
+  classifyStablePointer,
+  promoteDesktopStable,
+  validateStablePromotionProvenance,
+} from "../desktop/release/promote-stable.mjs";
 import { addLocalThread, interactionForThread, responseNodesForThread } from "../desktop/renderer/src/thread-model.js";
 
 describe("desktop skeleton", () => {
@@ -543,6 +548,10 @@ describe("desktop skeleton", () => {
   });
 
   it("drives the packaged update lifecycle through one state service", async () => {
+    expect(resolveUpdateChannel(undefined)).toBe("stable");
+    expect(resolveUpdateChannel("stable")).toBe("stable");
+    expect(resolveUpdateChannel("preview")).toBe("preview");
+    expect(resolveUpdateChannel("invalid")).toBe("stable");
     expect(packagedDesktopReleaseMetadata({
       relayerArtifactMode: "release",
       relayerUpdateChannel: "preview",
@@ -567,6 +576,16 @@ describe("desktop skeleton", () => {
       setFeedURL: vi.fn(),
       quitAndInstall: vi.fn(),
     });
+    let selectedProviderChannel = null;
+    Object.defineProperty(autoUpdater, "channel", {
+      configurable: true,
+      get: () => selectedProviderChannel,
+      set(value) {
+        selectedProviderChannel = value;
+        // Match electron-updater: choosing a channel opts into downgrades.
+        autoUpdater.allowDowngrade = true;
+      },
+    });
     const states = [];
     const updater = createDesktopUpdater({
       autoUpdater,
@@ -576,26 +595,41 @@ describe("desktop skeleton", () => {
     });
     autoUpdater.checkForUpdates.mockRejectedValueOnce(new Error("offline"));
     await expect(updater.check()).resolves.toMatchObject({ phase: "failed", error: "offline" });
+    expect(autoUpdater.allowDowngrade).toBe(false);
     expect(updater.setChannel("preview")).toMatchObject({ phase: "idle", channel: "preview" });
+    expect(autoUpdater.channel).toBe("beta");
+    expect(autoUpdater.allowDowngrade).toBe(false);
     autoUpdater.emit("checking-for-update");
     expect(() => updater.setChannel("stable")).toThrow("Finish the current update");
     autoUpdater.emit("update-available", { version: "0.1.1" });
     expect(() => updater.setChannel("stable")).toThrow("Finish the current update");
     await updater.download();
+    autoUpdater.emit("download-progress", { percent: 29.4 });
+    autoUpdater.emit("download-progress", { percent: 100 });
+    autoUpdater.emit("download-progress", { percent: 16.2 });
+    autoUpdater.emit("download-progress", { percent: 92 });
     autoUpdater.emit("update-downloaded", { version: "0.1.1" });
+    autoUpdater.emit("download-progress", { percent: 3 });
     updater.install();
 
-    expect(states.map((state) => state.phase)).toEqual(["failed", "idle", "checking", "available", "ready"]);
+    expect(states.filter((state) => state.phase === "downloading").map((state) => state.percent)).toEqual([29, 99, 99, 99]);
+    expect(states.at(-1)).toMatchObject({ phase: "ready", percent: 100 });
     expect(autoUpdater.setFeedURL).toHaveBeenCalledWith(expect.objectContaining({ channel: "beta" }));
+    expect(autoUpdater.allowDowngrade).toBe(false);
     expect(autoUpdater.downloadUpdate).toHaveBeenCalledOnce();
     expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
   });
 
   it("enforces one signed desktop release contract and seals its candidate artifacts", async () => {
     const releaseWorkflow = await readFile(new URL("../.github/workflows/desktop-signed-preview.yml", import.meta.url), "utf8");
+    const stableWorkflow = await readFile(new URL("../.github/workflows/desktop-promote-stable.yml", import.meta.url), "utf8");
     expect(releaseWorkflow).toContain('if: startsWith(github.ref, \'refs/tags/desktop-v\')');
     expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main');
     expect(releaseWorkflow).toContain("environment:\n      name: desktop-update-preview");
+    expect(stableWorkflow).toContain("workflow_dispatch:");
+    expect(stableWorkflow).toContain("name: desktop-update-stable-promotion");
+    expect(stableWorkflow).toContain("DESKTOP_UPDATE_STABLE_ROLE_ARN");
+    expect(stableWorkflow).toContain("--canary-evidence");
     const releaseEnvironment = {
       RELAYER_DESKTOP_RELEASE: "1",
       RELAYER_DESKTOP_CHANNEL: "preview",
@@ -638,6 +672,10 @@ describe("desktop skeleton", () => {
       },
       publish: [{ provider: "generic", url: DESKTOP_RELEASE.updateBaseUrl, channel: "beta" }],
     });
+    // Electron 43's Squirrel.Mac implementation rejects valid numeric versions when
+    // this native flag is enabled. Version monotonicity remains enforced by the
+    // application updater above and by Preview publication.
+    expect(builder.mac.extendInfo).toBeUndefined();
 
     const development = resolveDesktopReleaseContract({ environment: {}, version: "0.2.0" });
     expect(development).toMatchObject({
@@ -842,12 +880,46 @@ describe("desktop skeleton", () => {
       version,
       manifestText: preparedManifest,
     })).toThrow("must be newer");
+    expect(validateStablePromotionProvenance({
+      GITHUB_REF: "refs/heads/main",
+      GITHUB_SHA: sourceCommit,
+      GITHUB_RUN_ID: "456",
+      GITHUB_RUN_ATTEMPT: "1",
+      GITHUB_ACTOR: "release-operator",
+      STABLE_PROMOTION_CONFIRMATION: `promote-${version}`,
+    }, version)).toEqual({
+      workflowCommit: sourceCommit,
+      workflowRunId: "456",
+      workflowRunAttempt: "1",
+      actor: "release-operator",
+    });
+    expect(() => validateStablePromotionProvenance({
+      GITHUB_REF: "refs/heads/main",
+      GITHUB_SHA: sourceCommit,
+      GITHUB_RUN_ID: "456",
+      GITHUB_RUN_ATTEMPT: "1",
+      GITHUB_ACTOR: "release-operator",
+      STABLE_PROMOTION_CONFIRMATION: "promote-wrong-version",
+    }, version)).toThrow(`promote-${version}`);
+    expect(classifyStablePointer({ version, manifestText: preparedManifest })).toEqual({ recovery: false });
+    expect(classifyStablePointer({
+      currentVersion: version,
+      currentContent: preparedManifest,
+      version,
+      manifestText: preparedManifest,
+    })).toEqual({ recovery: true });
+    expect(() => classifyStablePointer({
+      currentVersion: version,
+      currentContent: "different bytes",
+      version,
+      manifestText: preparedManifest,
+    })).toThrow("cannot be replaced");
   });
 
   it("publishes one Preview candidate atomically and recovers without mutating live bytes", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-preview-publication-"));
     try {
-      const version = "0.2.0";
+      const { version } = JSON.parse(await readFile(new URL("../desktop/package.json", import.meta.url), "utf8"));
       const sourceCommit = "c".repeat(40);
       const prefix = `Relayer-${version}-mac-arm64`;
       const contents = new Map([
@@ -1003,6 +1075,84 @@ describe("desktop skeleton", () => {
       })).resolves.toMatchObject({ receipt: { workflowRunAttempt: "1" } });
       expect(writes).toEqual(writesAfterSuccess);
 
+      const installedScreenshot = Buffer.from("signed-app-installed-screenshot");
+      const installedScreenshotName = "installed.png";
+      await writeFile(join(directory, installedScreenshotName), installedScreenshot);
+      const canaryEvidenceName = "signed-preview-canary.json";
+      await writeFile(join(directory, canaryEvidenceName), JSON.stringify({
+        schemaVersion: 1,
+        capturedAt: "2026-08-18",
+        environment: { host: "test-mac", architecture: "arm64", macOS: "15.6" },
+        seed: { version: "0.2.2" },
+        target: {
+          version,
+          sourceCommit,
+          workflowRunId: "123",
+          dmgSha256: dmg.sha256,
+          zipSha256: zip.sha256,
+        },
+        productFlow: [
+          { phase: "available", version: "0.2.2", availableVersion: version, channel: "preview", error: null },
+          { phase: "installed-and-relaunched", version, channel: "preview", error: null },
+        ],
+        postUpdate: {
+          installedVersion: version,
+          running: true,
+          codeSignatureVerified: true,
+          channel: "preview",
+          updateStatus: "idle",
+        },
+        screenshots: {
+          installed: {
+            file: installedScreenshotName,
+            sha256: createHash("sha256").update(installedScreenshot).digest("hex"),
+          },
+        },
+      }));
+      const stableEnvironment = {
+        GITHUB_REF: "refs/heads/main",
+        GITHUB_SHA: "d".repeat(40),
+        GITHUB_RUN_ID: "456",
+        GITHUB_RUN_ATTEMPT: "1",
+        GITHUB_ACTOR: "release-operator",
+        STABLE_PROMOTION_CONFIRMATION: `promote-${version}`,
+      };
+      await expect(promoteDesktopStable({
+        bucket: "updates",
+        version,
+        canaryEvidencePath: canaryEvidenceName,
+        repositoryRoot: directory,
+        environment: stableEnvironment,
+        execute,
+        fetchImpl,
+      })).resolves.toMatchObject({
+        receipt: {
+          channel: "stable",
+          version,
+          sourceCommit,
+          previewReceipt: { key: receiptKey },
+          canaryEvidence: { repositoryPath: canaryEvidenceName },
+        },
+      });
+      const stablePointerKey = "desktop/macos/arm64/latest-mac.yml";
+      const stableHistoryKey = `private/history/latest/${version}/latest-mac.yml`;
+      const stableReceiptKey = `private/receipts/stable/${version}.json`;
+      expect(objects.get(stablePointerKey).body).toEqual(objects.get(pointerKey).body);
+      expect(writes.indexOf(stablePointerKey)).toBeGreaterThan(writes.indexOf(stableHistoryKey));
+      expect(writes.indexOf(stableReceiptKey)).toBeGreaterThan(writes.indexOf(stablePointerKey));
+
+      const writesAfterPromotion = [...writes];
+      await expect(promoteDesktopStable({
+        bucket: "updates",
+        version,
+        canaryEvidencePath: canaryEvidenceName,
+        repositoryRoot: directory,
+        environment: { ...stableEnvironment, GITHUB_RUN_ID: "457", GITHUB_RUN_ATTEMPT: "2" },
+        execute,
+        fetchImpl,
+      })).resolves.toMatchObject({ receipt: { promotion: { workflowRunId: "456" } } });
+      expect(writes).toEqual(writesAfterPromotion);
+
       objects.get(`desktop/macos/arm64/releases/${version}/${zip.name}`).metadata.sha256 = "0".repeat(64);
       await expect(publishDesktopPreview({
         bucket: "updates",
@@ -1011,7 +1161,7 @@ describe("desktop skeleton", () => {
         execute,
         fetchImpl,
       })).rejects.toThrow("already exists with different evidence");
-      expect(writes).toEqual(writesAfterSuccess);
+      expect(writes).toEqual(writesAfterPromotion);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
