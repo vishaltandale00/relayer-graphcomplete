@@ -363,11 +363,11 @@ type CompleteResult = {
 <td>Abandoned authorization and rapid replacement are covered.</td>
 <td>Add compact coverage for explicit authorization rejection, credential expiration/revocation on a later launch, and recovery without freezing the setup page.</td>
 </tr>
-<tr class="requirement-row status-next">
+<tr class="requirement-row status-partial">
 <td>Desktop updater and distributable packaging</td>
-<td><span class="delivery-status partial">Partial — Stable candidate ready</span></td>
-<td>The protected CI workflow has signed, notarized, and immutably published real <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code> Apple Silicon releases. A remote Mac mini completed the visible update and relaunch flows through <code>0.2.4</code>; the latest canary preserved an explicitly saved Preview choice, connected Codex account, and Light appearance and is committed as the gate for exact-artifact Stable promotion.</td>
-<td>The first Stable pointer move, the macOS 13-through-current support matrix, and update deferral around active Complete commits remain unverified. Automatic application downgrade is prohibited; failed local-data migration recovery belongs to the future persistence contract rather than this updater slice. Section 5.7 contains the exact proof and remaining boundary.</td>
+<td><span class="delivery-status partial">Partial — Stable verified</span></td>
+<td>The protected CI workflow has signed, notarized, and immutably published real <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code> Apple Silicon releases. A remote Mac mini completed the visible update and relaunch flows through <code>0.2.4</code>. Protected workflow <code>32105585844</code> then promoted those exact Preview bytes to Stable, and the installed <code>0.2.4</code> app consumed the live Stable feed and reported <strong>Up to date</strong>.</td>
+<td>The macOS 13-through-current support matrix, corrupt hosted artifact behavior, and update deferral around active Complete commits remain unverified. Automatic application downgrade is prohibited. A failed later-version SQLite migration is a separate persistence-recovery requirement, not an updater rollback mechanism. Section 5.7 contains the exact proof and remaining boundary.</td>
 </tr>
 <tr class="requirement-row status-deferred">
 <td>Relayer login and additional providers</td>
@@ -802,10 +802,10 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <li>When an update is available, a small highlighted circular download icon appears at the bottom-right of the sidebar. No version number or update label is permanently shown.</li>
 <li>Clicking the icon opens one compact prompt describing the update with a single <code>Download update</code> action and a dismiss control.</li>
 <li>Download and verification occur without blocking chat. Installation is deferred while Complete is committing graph work.</li>
-<li>Before installation, product state is flushed and the target migration is prepared. Activation is atomic; failed startup health or migration restores the prior binary and preserves local data.</li>
+<li>Before installation, product state is flushed. On first launch, SQLite applies recognized migrations transactionally and validates the resulting schema before serving product data. If migration or startup health fails, Relayer must fail closed without mutating the last recoverable database state and offer a recovery path; it does not automatically install an older binary.</li>
 </ol>
 <h3>5.5 Verification</h3>
-<p>Event-driven tests must cover persistence and UI state transitions: app launch, thread reopen, interrupted write, stopped run, retry, settings disclosure, trace enablement, update unavailable/downloading/verified/restart-deferred/activated/rolled-back, corrupt manifest, signature failure, offline check, and migration failure. The current compact updater scenario covers check failure, retry, available, download, ready, and install request; the gaps remain explicit below. Every release also requires a signed previous-version-to-current desktop smoke on the supported macOS versions.</p>
+<p>Event-driven tests must cover persistence and UI state transitions: app launch, thread reopen, interrupted write, stopped run, retry, settings disclosure, trace enablement, update unavailable/downloading/verified/restart-deferred/activated, corrupt manifest, signature failure, offline check, and migration failure. The current compact updater scenario covers check failure, retry, available, download, ready, and install request; release recovery is verified through immutable history, a withdrawable channel pointer, and forward-only versions rather than an automatic downgrade state. Every release also requires a signed previous-version-to-current desktop smoke on the supported macOS versions.</p>
 <h3>5.6 Current delivery evidence — Settings and shell</h3>
 <table>
 <thead>
@@ -833,10 +833,10 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </tr>
 <tr>
 <td>Application updater</td>
-<td><span class="delivery-status partial">Partial — Stable candidate ready</span></td>
-<td>One compact updater scenario covers check, available, monotonic download progress, ready, install, retry, channel persistence, and the downgrade guard without network access. Release scenarios cover identity, version, channel, manifest sealing, final ZIP reconstruction, checksums, receipts, tamper rejection, tag provenance, immutable publication keys, conditional writes, retry recovery, exact-artifact Stable promotion, downgrade rejection, and same-version byte-replacement rejection. The complete repository suite is 2 files and 9 tests.</td>
-<td><code>UPD-002-E1</code> through <code>UPD-002-E5</code> include signed launch, historical empty-feed behavior, the failed diagnostic canary, the corrected <code>0.2.2 → 0.2.3</code> product flow, and the <code>0.2.3 → 0.2.4</code> Stable-candidate canary. The current screenshots below cover the manually inspected visible states, and the privacy-redacted <code>0.2.4</code> screenshot is cryptographically bound to its machine-readable promotion evidence.</td>
-<td>The first Stable pointer move, the macOS 13-through-current support matrix, active-Complete restart deferral, and corrupt hosted artifact behavior remain undone. Failed local-data migration recovery is deferred to the persistence slice, where an actual schema and transaction boundary can be tested.</td>
+<td><span class="delivery-status partial">Partial — Stable verified</span></td>
+<td>One compact updater scenario covers check, available, monotonic download progress, ready, install, retry, channel persistence, and the downgrade guard without network access. Release scenarios cover identity, version, channel, manifest sealing, final ZIP reconstruction, checksums, receipts, tamper rejection, tag provenance, immutable publication keys, conditional writes, retry recovery, exact-artifact Stable promotion, downgrade rejection, and same-version byte-replacement rejection. The desktop suite keeps these flows in one scenario file with 10 tests rather than one test per event.</td>
+<td><code>UPD-002-E1</code> through <code>UPD-002-E6</code> include signed launch, historical empty-feed behavior, the failed diagnostic canary, two corrected Preview updates, exact-artifact Stable promotion, and the installed app consuming Stable. The current screenshots below cover the manually inspected visible states, and machine-readable receipts bind the candidate, canary, promoted manifest, and public artifact hashes.</td>
+<td>The macOS 13-through-current support matrix, active-Complete restart deferral, and corrupt hosted artifact behavior remain undone. A real later-version migration and failed-migration recovery now belong to the app-server persistence track and are not claimed by updater evidence.</td>
 </tr>
 </tbody></table>
 <h4><code>SET-001-E1</code> — full-page Settings</h4>
@@ -867,15 +867,15 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 
 <h3>5.7 Slice 2 — packaged desktop and updates</h3>
 <p>This slice turns the development shell into a safely installable and updateable macOS arm64 product. It does not add project/thread persistence, invoke a harness, or render graph output.</p>
-<p><strong>Current checkpoint:</strong> the Preview release loop and Stable gate are product-verified through the candidate boundary. Protected tag workflows built, signed, notarized, and immutably published <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code>. On a remote arm64 Mac running macOS 15.6, the signed <code>0.2.3</code> seed used the actual Relayer controls to discover, download, restart, replace, and relaunch into <code>0.2.4</code>. It preserved the connected Codex account, Light appearance, and an explicitly saved Preview choice, passed macOS code-signature and Gatekeeper checks, and returned to an error-free <strong>Up to date</strong> state. The committed canary now makes the exact <code>0.2.4</code> Preview bytes eligible for the first Stable pointer move.</p>
+<p><strong>Current checkpoint:</strong> the Preview release loop and first Stable promotion are product-verified. Protected tag workflows built, signed, notarized, and immutably published <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code>. On a remote arm64 Mac running macOS 15.6, the signed <code>0.2.3</code> seed used the actual Relayer controls to discover, download, restart, replace, and relaunch into <code>0.2.4</code>. It preserved the connected Codex account, Light appearance, and an explicitly saved Preview choice, passed macOS code-signature and Gatekeeper checks, and returned to an error-free <strong>Up to date</strong> state. Protected workflow <code>32105585844</code> then promoted the exact same bytes: Stable <code>latest-mac.yml</code> has the same SHA-256 as the verified Preview manifest, and the installed <code>0.2.4</code> app selected Stable, checked that live feed, and reported <strong>Up to date</strong>.</p>
 <section class="release-status-card verified-card" aria-label="Desktop update slice status">
   <div class="release-status-header">
     <div class="release-status-title">
-      <span class="delivery-status verified">Preview distribution and update verified</span>
+      <span class="delivery-status verified">Preview update and Stable promotion verified</span>
       <strong>Desktop update delivery status</strong>
       <small>Status reflects saved proof, not the presence of implementation code.</small>
     </div>
-    <span class="release-status-count">7 verified · 1 ready · 2 open</span>
+    <span class="release-status-count">8 verified · 2 open</span>
   </div>
   <div class="release-checkpoints">
     <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Release contract</strong><small>Identity, version, provenance, signing requirements, manifests, hashes, retry, downgrade, and mutation rules pass deterministic tests.</small></article>
@@ -885,7 +885,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
     <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Visible update lifecycle</strong><small>The signed app displayed available, prompt, downloading, ready, restart, and post-update states through the actual product controls.</small></article>
     <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Replacement and continuity</strong><small>The <code>0.2.3</code> process quit, the bundle advanced to <code>0.2.4</code>, the new process launched, and Light appearance, the connected Codex account, and the explicit Preview choice survived.</small></article>
     <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Stable promotion contract</strong><small>The protected workflow assumes its narrow AWS role, reads the immutable Preview receipt, rejects absent canary evidence before writes, and requires increasing versions plus exact artifact bytes.</small></article>
-    <article class="release-checkpoint"><span class="delivery-status next">Ready to verify</span><strong>First Stable pointer</strong><small>The exact signed <code>0.2.4</code> candidate and committed canary are ready; <code>latest-mac.yml</code> has not moved yet.</small></article>
+    <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>First Stable pointer</strong><small>Protected workflow <code>32105585844</code> promoted the exact <code>0.2.4</code> Preview bytes, recorded an immutable receipt, and moved <code>latest-mac.yml</code>. The installed app consumed Stable and reported <strong>Up to date</strong>.</small></article>
     <article class="release-checkpoint"><span class="delivery-status open">Open</span><strong>Supported macOS matrix</strong><small>The product flow is verified on Apple Silicon macOS 15.6; macOS 13, 14, and newer supported versions still require release smoke coverage.</small></article>
     <article class="release-checkpoint"><span class="delivery-status open">Open</span><strong>Active-work restart deferral</strong><small>Restart deferral around a future active Complete commit cannot be product-tested until that execution path exists.</small></article>
   </div>
@@ -954,6 +954,16 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
     </div>
     <figcaption><span class="delivery-status verified">Stable candidate canary verified</span><strong>The exact signed <code>0.2.4</code> Preview candidate returned healthy after replacement.</strong><span><b>1</b> proves Light appearance persisted. <b>2</b> preserves proof of the connected Codex account while redacting personal identity. <b>3</b> proves an explicitly saved Preview choice survived. <b>4</b> proves <code>0.2.4</code> is running and up to date.</span></figcaption>
   </figure>
+  <figure class="release-proof-card" id="upd-002-e6-stable">
+    <div class="evidence-image">
+      <img src="assets/evidence/desktop/signed-stable-0.2.4-up-to-date.png" alt="Signed Relayer 0.2.4 consuming the promoted Stable feed and reporting Up to date">
+      <span class="evidence-callout" style="--x:84%;--y:23%">1</span>
+      <span class="evidence-callout" style="--x:37%;--y:36%">2</span>
+      <span class="evidence-callout" style="--x:84%;--y:51%">3</span>
+      <span class="evidence-callout" style="--x:35%;--y:56%">4</span>
+    </div>
+    <figcaption><span class="delivery-status verified">Stable product check verified</span><strong>The installed signed <code>0.2.4</code> application consumes the promoted Stable feed.</strong><span><b>1</b> proves Light appearance remained intact. <b>2</b> preserves the connected Codex proof while redacting personal identity. <b>3</b> is the selected Stable channel. <b>4</b> proves the running Stable version is <code>0.2.4</code> and up to date.</span></figcaption>
+  </figure>
 </div>
 <h4>Slice boundary</h4>
 <table>
@@ -981,11 +991,11 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </tr>
 <tr>
 <td>In-app check, available, download progress, ready, restart, success, and retryable failure states</td>
-<td>Full data-schema migration and failed-migration rollback, which require the persistence slice</td>
+<td>Later-version SQLite migration and failed-migration recovery, which are validated in the app-server persistence track</td>
 </tr>
 <tr>
 <td>Previous-Preview-version to current-Preview-version update smoke</td>
-<td>Automatic binary downgrade; local-data migration recovery before the persistence contract exists</td>
+<td>Automatic binary downgrade; treating an older application as a safe database recovery mechanism</td>
 </tr>
 </tbody></table>
 <h4>Release decisions</h4>
@@ -995,7 +1005,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <li><strong>Signing automation:</strong> release builds use the existing Developer ID Application identity for Apple team <code>NZ253AL7U6</code> and App Store Connect notarization credentials supplied locally or through a protected GitHub environment. Secrets are never stored in the repository.</li>
 <li><strong>Update prompt timing:</strong> use the existing compact sidebar indicator; downloading is user-triggered, and restart remains explicitly deferrable.</li>
 <li><strong>Minimum supported macOS:</strong> V1 supports Apple Silicon on macOS 13 or newer. Release evidence records the floor and validates both identity and architecture.</li>
-<li><strong>Release recovery:</strong> withdraw a bad channel pointer before more installations or publish a newer forward-fix version. Do not automatically downgrade application code. Failed local-data schema migration recovery is designed with the future persistence transaction, not guessed inside the updater.</li>
+<li><strong>Release recovery:</strong> withdraw a bad channel pointer before more installations or publish a newer forward-fix version. Do not automatically downgrade application code because an older binary may not understand data written by the newer version. SQLite migration recovery is a separate app-server contract: recognized migrations run transactionally, the resulting schema is validated before startup, and a future N→N+1 test must prove a forced migration failure leaves the prior database recoverable.</li>
 </ol>
 <h4>Minimal validation plan</h4>
 <table>
@@ -1027,6 +1037,11 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <td><span class="delivery-status verified">Verified for Preview</span> The signed <code>0.2.2 → 0.2.3</code> and <code>0.2.3 → 0.2.4</code> canaries updated through the UI, relaunched N, and proved the new version, connected Codex account, explicit Preview choice, and preference continuity. No harness call was made.</td>
 </tr>
 <tr>
+<td>Stable promotion</td>
+<td>Revalidate the immutable Preview receipt, exact six hosted artifacts, committed canary hash, monotonic version, and conditional Stable pointer write. Never rebuild the candidate during promotion.</td>
+<td><span class="delivery-status verified">Verified</span> Workflow <code>32105585844</code> promoted <code>0.2.4</code>; the public Stable manifest hash equals Preview, the immutable promotion receipt records all six artifact hashes, and the installed app checked Stable successfully.</td>
+</tr>
+<tr>
 <td>Failure safety</td>
 <td>Serve an offline feed, missing manifest, and invalid/tampered artifact through one fixture-driven integration scenario.</td>
 <td>The packaged app remains launchable on the old version, presents a retryable error, and does not lose the test preference.</td>
@@ -1047,7 +1062,10 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <h4><code>UPD-002-E5</code> — signed Preview <code>0.2.3 → 0.2.4</code> Stable-candidate canary</h4>
 <p>The actual signed <code>0.2.3</code> application explicitly saved Preview, discovered the immutable <code>0.2.4</code> candidate, downloaded it without displayed progress regression, reached ready, stopped, replaced the bundle, and relaunched signed <code>0.2.4</code>. The final app passed deep code-signature verification and Gatekeeper assessment, retained its connected Codex account, Light appearance, and explicit Preview choice, and returned to <strong>Up to date</strong> without an updater error.</p>
 <p>Privacy-redacted screenshot: <a href="#upd-002-e5-installed"><code>assets/evidence/desktop/signed-preview-0.2.4-installed.png</code></a>. Machine-readable promotion evidence: <code>assets/evidence/desktop/signed-preview-0.2.3-to-0.2.4.json</code>.</p>
-<p>The Preview distribution and Stable-candidate gate are complete for this slice. The broader desktop distribution requirement remains partial until the first Stable pointer is product-proven, the macOS 13-through-current test matrix is run, and restart deferral around active Complete work can be tested. Local-data migration recovery remains deferred to the persistence slice.</p>
+<h4><code>UPD-002-E6</code> — exact-artifact Stable promotion and product check</h4>
+<p>Protected workflow <code>32105585844</code> promoted <code>0.2.4</code> from the immutable Preview receipt after validating the committed <code>0.2.3 → 0.2.4</code> canary. It did not rebuild or re-sign the application. Stable <code>latest-mac.yml</code> has SHA-256 <code>1737ebd5d5393970c73f5b1ef41ac128e7090dc0e58d6d57a1f87a7675e430f2</code>, identical to the verified Preview manifest. The installed, notarized <code>0.2.4</code> app then selected Stable, checked the live feed, and reported <strong>Up to date</strong>.</p>
+<p>Privacy-redacted screenshot: <a href="#upd-002-e6-stable"><code>assets/evidence/desktop/signed-stable-0.2.4-up-to-date.png</code></a>. Machine-readable receipt: <code>assets/evidence/desktop/signed-stable-0.2.4-promotion.json</code>.</p>
+<p>The Preview distribution, previous-version update canary, and first Stable promotion are complete for this slice. The broader desktop distribution requirement remains partial until the macOS 13-through-current test matrix is run, corrupt hosted artifact behavior is product-tested, and restart deferral around active Complete work can be tested. The initial SQLite schema and fail-closed validation now exist; a real later-version migration and forced-failure recovery test remain in the persistence track.</p>
 <h1>Part II — Relayer graph engine and Complete harness</h1>
 <h2>6. Graph engine: stable product contract</h2>
 <p>The graph engine is a stable deterministic package inside Relayer Harness and is the only API that reads or changes persisted Relayer graph state. Complete and Relayer Desktop are separate clients of this engine. Neither reads the JSONL journal directly or invents compatibility behavior. Relayer Desktop sees the graph only through the engine&#39;s product read/write contracts.</p>
@@ -1670,7 +1688,7 @@ npm run eval:web
 <h3>12.1 V1 desktop shell decision and current gap</h3>
 <p>V1 uses an Electron shell in the Relayer Desktop package of this repository and direct macOS distribution outside the Mac App Store. Relayer Desktop packages the shell, graph renderer, local app server, eval runner, result catalog, and updater. Each desktop release locks and bundles the compatible Relayer Harness package from the same verified source revision, containing the graph engine, Complete implementation, Prime Agent runtime dependencies, Python/IPython capability, graph tools, and graph skill.</p>
 <p>Electron&#39;s macOS distribution guidance requires code signing and Apple notarization for normal distribution, and its automatic updater requires a signed macOS app. V1 treats those as release gates, not optional polish.</p>
-<p>The repository now has an Electron shell, an unsigned Apple Silicon development package, a fail-closed release contract, CI-produced Developer-ID-signed/notarized Preview artifacts, and a protected exact-artifact Stable promotion workflow. Protected tag workflows published immutable <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code> releases through narrow AWS OIDC roles, and their public artifacts, metadata, checksums, source commits, Gatekeeper acceptance, and stapled notarization tickets were verified. A remote Mac completed the actual in-app update and relaunch through <code>0.2.4</code> with its Codex connection, explicit Preview choice, and Light appearance intact. The first Stable pointer, macOS 13-through-current matrix, and active-Complete restart deferral remain unverified; failed local-data migration recovery belongs to the future persistence slice. Existing graph-engine, Complete, Prime Agent runtime, graph-tool, and eval code remain behind the Relayer Harness package boundary; Slice 2 packages the desktop without claiming those experimental paths work in the product.</p>
+<p>The repository now has an Electron shell, an unsigned Apple Silicon development package, a fail-closed release contract, CI-produced Developer-ID-signed/notarized Preview artifacts, and a protected exact-artifact Stable promotion workflow. Protected tag workflows published immutable <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code> releases through narrow AWS OIDC roles, and their public artifacts, metadata, checksums, source commits, Gatekeeper acceptance, and stapled notarization tickets were verified. A remote Mac completed the actual in-app update and relaunch through <code>0.2.4</code> with its Codex connection, explicit Preview choice, and Light appearance intact. Protected workflow <code>32105585844</code> promoted the exact <code>0.2.4</code> Preview bytes to Stable, and the installed app successfully consumed the live Stable feed. The macOS 13-through-current matrix, corrupt hosted artifact behavior, and active-Complete restart deferral remain unverified. The app server now owns an initial SQLite schema and fail-closed validation; a real later-version migration and forced-failure recovery test remain separate persistence work. Existing graph-engine, Complete, Prime Agent runtime, graph-tool, and eval code remain behind the Relayer Harness package boundary; Slice 2 packages the desktop without claiming those experimental paths work in the product.</p>
 <h3>12.2 Required developer and release modes</h3>
 <table>
 <thead>
