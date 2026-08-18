@@ -18,6 +18,31 @@ async function executableExists(path) {
   }
 }
 
+function waitForSpawn(child) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      child.off("spawn", onSpawn);
+      child.off("error", onError);
+      child.off("exit", onExit);
+    };
+    const onSpawn = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const onExit = (code, signal) => {
+      cleanup();
+      reject(new Error(`Codex app-server stopped before startup (${signal || code || "unknown"}).`));
+    };
+    child.once("spawn", onSpawn);
+    child.once("error", onError);
+    child.once("exit", onExit);
+  });
+}
+
 export async function findCodexExecutable(environment = process.env) {
   const explicit = String(environment.RELAYER_CODEX_BINARY || "").trim();
   const pathEntries = String(environment.PATH || "").split(delimiter).filter(Boolean);
@@ -82,6 +107,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.process = child;
+    child.stdin.on("error", () => {});
     createInterface({ input: child.stdout }).on("line", (line) => this.#handleLine(line));
     child.stderr.on("data", (chunk) => {
       const message = String(chunk).trim();
@@ -103,6 +129,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     child.once("error", (error) => {
       if (this.process === child) this.onAccountChanged({ status: "unavailable", error: error.message });
     });
+    await waitForSpawn(child);
     await this.request("initialize", {
       clientInfo: { name: "relayer-desktop", title: "Relayer", version: "0.1.0" },
       capabilities: { experimentalApi: false },

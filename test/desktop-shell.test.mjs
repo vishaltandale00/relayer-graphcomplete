@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
@@ -246,6 +246,7 @@ describe("desktop skeleton", () => {
       expect(suppliedToken).toBe(`${session.cookie.value}\n`);
       expect(child.stdin.writableEnded).toBe(false);
       expect(invocations[0].args).not.toContain(session.cookie.value);
+      expect((await stat(join(directory, "product-data"))).mode & 0o777).toBe(0o700);
       expect(await service.start()).toBe(session);
       await service.close();
       expect(child.kill).toHaveBeenCalledWith("SIGTERM");
@@ -395,7 +396,10 @@ describe("desktop skeleton", () => {
     } });
     const client = new CodexCredentialAdapter({
       environment: { RELAYER_CODEX_BINARY: "/usr/bin/true", PATH: "" },
-      spawnProcess: () => child,
+      spawnProcess: () => {
+        queueMicrotask(() => child.emit("spawn"));
+        return child;
+      },
       onAccountChanged: (event) => accountEvents.push(event),
     });
 
@@ -458,6 +462,7 @@ describe("desktop skeleton", () => {
           }
           callback();
         } });
+        queueMicrotask(() => failedChild.emit("spawn"));
         return failedChild;
       },
     });
@@ -489,7 +494,10 @@ describe("desktop skeleton", () => {
     const closingClient = new CodexCredentialAdapter({
       environment: { RELAYER_CODEX_BINARY: "/usr/bin/true", PATH: "" },
       shutdownTimeoutMs: 5,
-      spawnProcess: () => stubbornCodex,
+      spawnProcess: () => {
+        queueMicrotask(() => stubbornCodex.emit("spawn"));
+        return stubbornCodex;
+      },
     });
     expect(await closingClient.account()).toMatchObject({ status: "disconnected" });
     await closingClient.close();
@@ -507,6 +515,31 @@ describe("desktop skeleton", () => {
       error: "Codex app-server is shutting down.",
     });
     expect(neverSpawned).not.toHaveBeenCalled();
+
+    const spawnErrorChild = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+    });
+    spawnErrorChild.kill = vi.fn((signal) => {
+      spawnErrorChild.signalCode = signal;
+      queueMicrotask(() => spawnErrorChild.emit("close", null, signal));
+      return true;
+    });
+    const spawnFailure = new CodexCredentialAdapter({
+      environment: { RELAYER_CODEX_BINARY: "/usr/bin/true", PATH: "" },
+      spawnProcess: () => {
+        queueMicrotask(() => spawnErrorChild.emit("error", new Error("spawn EACCES")));
+        return spawnErrorChild;
+      },
+    });
+    await expect(spawnFailure.account()).resolves.toMatchObject({
+      status: "unavailable",
+      error: "spawn EACCES",
+    });
+    expect(spawnErrorChild.kill).toHaveBeenCalledWith("SIGTERM");
   });
 
   it("drives the packaged update lifecycle through one state service", async () => {

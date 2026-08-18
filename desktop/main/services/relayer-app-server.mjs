@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { terminateChildProcess } from "./child-process.mjs";
@@ -72,6 +72,7 @@ export class RelayerAppServerService {
   async #start() {
     const dataDirectory = join(this.userDataDirectory, "product-data");
     await mkdir(dataDirectory, { recursive: true });
+    await chmod(dataDirectory, 0o700);
     if (this.closing) throw new Error("Relayer app server is shutting down.");
     const controlToken = randomBytes(32).toString("hex");
     const child = this.spawnProcess(this.binaryPath, [
