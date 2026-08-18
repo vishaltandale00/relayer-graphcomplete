@@ -2,7 +2,11 @@ node_modules/
 target/
 dist/
 coverage/
+target/
+.playwright-mcp/
 *.log
 .DS_Store
+.relayer/
 desktop/dist/
 docs/prd/comments.json
+docs/prd/annotations.json

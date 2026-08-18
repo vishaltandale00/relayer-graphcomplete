@@ -17,4 +17,3 @@ export type {
 } from "./contracts.js";
 export { PrimeAgentRuntime } from "./runtime/prime-agent.js";
 export type { PrimeAgentRuntimeOptions } from "./runtime/prime-agent.js";
-

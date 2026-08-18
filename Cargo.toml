@@ -1,11 +1,15 @@
 [workspace]
-members = ["crates/relayer-app-server"]
+members = [
+  "crates/relayer-app-server",
+  "crates/relayer-graph-core",
+  "crates/relayer-graph-server",
+]
 resolver = "2"
 
 [workspace.package]
-version = "0.0.0"
 edition = "2024"
 license = "Apache-2.0"
+version = "0.0.0"
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -17,3 +21,5 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 thiserror = "2.0"
 tokio = { version = "1.49", features = ["fs", "macros", "net", "rt-multi-thread", "signal"] }
 tower-http = { version = "0.6", features = ["fs"] }
+tempfile = "3.23"
+uuid = { version = "1.20", features = ["serde", "v4"] }

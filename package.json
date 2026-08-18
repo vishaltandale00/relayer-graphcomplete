@@ -6,13 +6,15 @@
   "type": "module",
   "private": false,
   "workspaces": [
-    "desktop"
+    "desktop",
+    "packages/*"
   ],
   "engines": {
     "node": ">=22.8.0"
   },
   "files": [
-    "dist"
+    "dist",
+    "python/relayer-graph"
   ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,20 +25,20 @@
     }
   },
   "scripts": {
-    "build": "cargo build -p relayer-app-server && tsc -p tsconfig.build.json",
-    "check": "cargo test --workspace && tsc --noEmit && vitest run",
-    "test": "cargo test --workspace && vitest run",
+    "build": "node scripts/clean-dist.mjs && cargo build -p relayer-app-server -p relayer-graph-server && tsc -p tsconfig.build.json && npm run build:packages",
+    "build:packages": "npm run build -w @relayer/graph-client && npm run build -w @relayer/harness-host && npm run build -w @relayer/eval-runner",
+    "check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && cargo build -p relayer-graph-server && npm run build:packages && tsc --noEmit && npm run check --workspaces --if-present && vitest run && PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests",
+    "test": "cargo build -p relayer-graph-server && npm run build:packages && vitest run",
     "prd": "node docs/prd/server.mjs",
     "desktop:dev": "npm run build && electron desktop/main/index.mjs",
+    "eval:basic": "npm run build && node packages/eval-runner/dist/runtime-basic.js",
+    "eval:basic:live": "npm run build && node packages/eval-runner/dist/runtime-basic.js --live",
     "desktop:pack": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && electron-builder --config desktop/packaging/electron-builder.mjs --dir --arm64",
     "desktop:dist": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs stable",
     "desktop:dist:preview": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs preview",
     "desktop:release:verify": "node desktop/release/verify-artifacts.mjs",
     "desktop:release:publish-preview": "node desktop/release/publish-preview.mjs",
     "desktop:release:promote-stable": "node desktop/release/promote-stable.mjs"
-  },
-  "dependencies": {
-    "prime-agent": "https://github.com/PrimeIntellect-ai/prime-agent/releases/download/v0.7.0/prime-agent-0.7.0.tgz"
   },
   "devDependencies": {
     "@electron/asar": "3.4.1",

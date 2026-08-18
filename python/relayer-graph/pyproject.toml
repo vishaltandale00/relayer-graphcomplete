@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "relayer-graph"
+version = "0.1.0"
+description = "Dependency-light async client for the Relayer Graph service"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Relayer" }]
+classifiers = ["Programming Language :: Python :: 3"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/relayer_graph"]

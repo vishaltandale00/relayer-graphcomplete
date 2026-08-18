@@ -9,10 +9,5 @@ export async function complete(inputGraph: InputGraph, options: CompleteOptions)
     throw new Error(`Graph root node does not exist: ${inputGraph.rootNodeId}`);
   }
 
-  return options.runtime.run({
-    inputGraph,
-    policy: options.policy,
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-  });
+  return options.runtime.run({ inputGraph, policy: options.policy, ...(options.signal === undefined ? {} : { signal: options.signal }) });
 }
-

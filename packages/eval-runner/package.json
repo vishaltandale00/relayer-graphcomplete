@@ -1,0 +1,23 @@
+{
+  "name": "@relayer/eval-runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/runtime-basic.js",
+  "types": "./dist/runtime-basic.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/runtime-basic.d.ts",
+      "import": "./dist/runtime-basic.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "^0.147.0",
+    "@relayer/graph-client": "*",
+    "@relayer/harness-host": "*"
+  }
+}

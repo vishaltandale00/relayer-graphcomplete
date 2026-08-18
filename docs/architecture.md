@@ -6,12 +6,16 @@ Prime Agent is the execution runtime. GraphComplete is the graph algorithm. Rela
 
 ```text
 Product host
-    -> complete(input graph)
-        -> Prime Agent root content owner
-            -> child content owners
-            -> independent self-assess reviewers
-            -> targeted revisers
-        -> accepted or explicitly stopped graph
+    -> complete(interaction-node pointer)
+        -> persistent Node host resolves the thread's selected harness object
+        -> selected harness implementation
+            -> Prime Agent root content owner (production target)
+                -> child content owners
+                -> independent self-assess reviewers
+                -> targeted revisers
+            -> or basic Codex reference harness (first eval)
+        -> graph.submit(interaction node)
+        -> accepted resolved root layer or explicit failure
     -> product persistence and activation
 ```
 
@@ -39,7 +43,21 @@ SQLite migrations are storage implementation details. `SqliteProductStore::open`
 
 This path deliberately ends before graph or harness execution. Those capabilities are reported as unavailable until their product contracts are integrated. A later integration will let graph core create the canonical user-interaction node with the product interaction's positive integer ID in the app server's SQLite transaction; PR #4 does not depend on that graph operation.
 
-## Required invariants
+## Base graph-completion invariants
+
+1. Product hosts own project and thread records. Graph core stores their positive-integer IDs only as graph-record provenance; it does not create parallel project or thread objects.
+2. Accepted graph records are visible to every thread with the same project ID. A standalone thread has no project ID and can see only records carrying its own thread ID.
+3. A turn is centered on one canonical user-interaction graph node. Its `NodeId` is the interaction identity; there is no separate interaction-graph record.
+4. Harnesses inspect and mutate graph state only through the typed graph clients and loopback Rust API.
+5. Every capability maps to one canonical interaction `NodeId`. `GraphDatabase::writer_for_subgraph(node_id)` derives project/thread visibility and draft-write ownership from that node instead of trusting repeated caller context.
+6. Prior stable nodes may be referenced across turns rather than duplicated.
+7. Draft records remain distinct from atomically accepted completion closures. Accepted layers snapshot their exact node, edge, and action membership so later graph writes cannot rewrite prior output.
+8. A model turn ending is not completion; the root must explicitly submit or stop.
+9. Prime Agent owns recursive execution; GraphComplete does not add another scheduler.
+
+## Target self-assessing policy invariants
+
+The following apply when the optional recursive self-assessment policy is enabled; they are not prerequisites for the initial direct recursive completion slice.
 
 1. Every scope has one content owner.
 2. Every scope is reviewed by a separate self-assess agent.
@@ -62,9 +80,36 @@ The initial policy is configurable rather than hard-coded:
 
 Model and thinking level are separate choices. The runtime must fail clearly when the requested model or effort cannot be provided.
 
-## First implementation slice
+## Basic Codex reference harness and eval
 
-Implement one root content owner that can create one child owner, invoke one separate reviewer, and return an explicitly accepted or stopped graph. Use Prime Agent's native child sessions and messaging. Do not build a second agent scheduler.
+`codex.basic` proves the harness boundary before the production Prime Agent policy is implemented. The string key resolves through a code-owned implementation map; selector UI, prompt ablations, and generalized capability configuration are deferred.
+
+The reference harness uses the TypeScript Codex SDK with the existing local Codex login. It keeps one resumable Codex thread per Relayer thread and asks Codex to execute the TypeScript graph client. The graph is not returned as structured JSON: Codex submits objects to the Rust engine, reacts to repairable validation errors, and ends with `graph.submit(interactionNode)`.
+
+The default and opt-in live evals start from an empty temporary folder and run two interactions through one cached harness object. Each interaction receives a distinct graph capability; the host rotates that capability between serialized Complete calls while the harness retains its provider-session identity. The live path applies two gates to each turn:
+
+1. deterministic graph-contract checks; and
+2. a fresh structured Codex judge that scores six declared task-system facts plus graph and detail usefulness.
+
+The ordinary test suite never invokes inference. The pre-app-server slice saves a movable-node HTML result; replay inside the product is a later app-server acceptance requirement.
+
+## Runtime package boundaries
+
+- `crates/relayer-graph-core/src/graph.rs` is the graph behavior boundary. `graph/database` and `graph/writer` expose the public control flow, `graph/model` owns the node, edge, layer, action, ID, and state objects, and `graph/completion` separates closure planning from atomic acceptance.
+- `crates/relayer-graph-core/src/storage.rs` is the persistence boundary. `SqliteGraphStore` owns the SQLx pool and connection lifecycle, its table-specific modules contain all queries, and `storage/sqlite/migrations` contains both the embedded migration runner and versioned SQL. Graph behavior does not import SQLx. This mirrors the app server's `SqliteProductStore` boundary without introducing a transport API inside graph core.
+- `crates/relayer-graph-server` exposes that same core through the loopback API.
+- `packages/graph-client` is the typed Node authoring client and contains no graph persistence.
+- `packages/harness-host` owns persistent per-thread harness objects and code-owned implementations such as `codex.basic`.
+- `packages/eval-runner` starts the real graph server and harness host, evaluates accepted output, and writes replayable artifacts.
+- `python/relayer-graph` is the Python authoring client and contains no graph persistence.
+
+The root `src` directory contains only the canonical GraphComplete boundary and its runtime contract. There is intentionally no TypeScript graph kernel alongside the Rust graph core.
+
+The standalone server keeps only an in-memory map from opaque graph capability token to root `NodeId`. It does not cache project/thread authority supplied by the caller. After a server restart, the trusted control authority can remint a token for a persisted canonical interaction node; ordinary harness clients cannot. Each request resolves a short-lived `GraphWriter` from the persisted node, so graph authority is never reconstructed from caller-supplied project/thread values. `GraphDatabase` is cheaply cloneable because it holds an async SQLx pool; SQLite writes use short `BEGIN IMMEDIATE` transactions while reads remain pooled, and the HTTP server never holds a Rust lock across agent work.
+
+Registering a newer interaction for an existing thread is serialized on that thread's host queue. The live harness object receives the replacement capability before its descriptor is persisted. `codex.basic` rebuilds its lightweight SDK execution wrapper so the next turn receives the new URL, token, and node ID, then resumes the same persisted Codex thread ID; it does not start a new provider conversation.
+
+This runtime slice does not make product metadata writes and graph writes share one SQLite transaction. The desktop app-server slice remains independently mergeable with provisional product interaction chronology. A later integration change will pass real product IDs into graph core, store the returned canonical `NodeId` as the product interaction identity, and decide the shared transaction boundary without adding a duplicate interaction node.
 
 ## Desktop release boundary
 

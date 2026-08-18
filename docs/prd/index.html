@@ -151,7 +151,7 @@
 <p>The repository is a monorepo: Relayer Desktop and Relayer Harness have explicit package and runtime boundaries, but V1 does not split them into separate repositories. V1 does not define a general-purpose harness desktop, arbitrary harness plug-ins, or a custom conversation-view framework. Those abstractions are deferred until the concrete Relayer product proves which seams are actually stable. Part I defines the desktop screens and ordinary user flows. Part II defines the Relayer graph engine and Complete boundary. Part III defines the Relayer eval runner, cases, and product replay. Part IV defines desktop packaging, distribution, verification, and V1 acceptance.</p>
 <h2>1. Product definition and whole-product view</h2>
 <p>The delivered product is Relayer Desktop running the pinned Relayer Harness bundled with that application release. A user connects an agent credential, creates a no-folder or project-backed chat, optionally selects a Git checkout or new worktree, sends interactions, stops or retries work, navigates accepted history, reopens persisted chats, and installs desktop updates. Each accepted Complete call persists a graph response. Relayer Desktop renders the returned layer as movable icon-title nodes, shows selected-node detail and actions in the right inspector, and lets prior nodes be navigated or attached to later messages.</p>
-<p>A harness configuration can ship only when the same immutable configuration has passed its required deterministic tests, live evaluations, saved-result replay, and human visual review defined in Part II.</p>
+<p>A harness implementation/build can ship only when that exact recorded version has passed its required deterministic tests, live evaluations, saved-result replay, and human visual review defined in Part III.</p>
 <h3>1.1 One end-to-end flow</h3>
 <pre><code class="language-mermaid">flowchart LR
     A[&quot;Connect agent login&quot;] --&gt; B[&quot;Open New thread&quot;]
@@ -162,8 +162,8 @@
     E --&gt; F
     F --&gt; G[&quot;Call complete(inputGraph)&quot;]
     G --&gt; H[&quot;Harness constructs response through graph tools&quot;]
-    H --&gt; I[&quot;Graph engine validates and commits accepted run output&quot;]
-    I --&gt; J[&quot;Resolve interaction plus run and render exact layer&quot;]
+    H --&gt; I[&quot;graph.submit interaction validates and accepts reachable response&quot;]
+    I --&gt; J[&quot;Return resolved root layer and render it immediately&quot;]
     J --&gt; K{&quot;Next user move&quot;}
     K --&gt;|Message| F
     K --&gt;|Authored node action| F
@@ -173,24 +173,28 @@
 <h3>1.2 Concrete monorepo package boundary</h3>
 <pre><code class="language-mermaid">flowchart LR
     subgraph REPO[&quot;relayer-graphcomplete repository&quot;]
-      subgraph RD[&quot;Relayer Desktop package&quot;]
-        UI[&quot;Desktop shell and graph interface&quot;]
-        AS[&quot;Local app server&quot;]
-        ER[&quot;Relayer eval runner, report, and See in App&quot;]
-        DS[&quot;Projects, threads, credentials, Git, persistence, updates&quot;]
+      subgraph CORE[&quot;GraphComplete runtime — built and evaluated together&quot;]
+        GE[&quot;Rust graph core&quot;]
+        GA[&quot;Local Rust graph API&quot;]
+        CL[&quot;TypeScript and Python graph clients&quot;]
+        HH[&quot;Persistent Node harness host&quot;]
+        CH[&quot;codex.basic harness&quot;]
+        ER[&quot;Evaluation runner&quot;]
       end
-      subgraph RH[&quot;Relayer Harness package&quot;]
-        GE[&quot;Stable graph engine package&quot;]
-        GC[&quot;Complete plus Prime Agent implementation&quot;]
-        ES[&quot;Relayer cases, operator, checks, and judge rubric&quot;]
+      subgraph PRODUCT[&quot;Relayer product host — built with desktop work&quot;]
+        AS[&quot;Rust Relayer app server&quot;]
+        UI[&quot;Electron shell and graph interface&quot;]
       end
     end
-    UI --&gt; AS
+    GE --&gt; GA
+    CL --&gt; GA
+    CH --&gt; CL
+    HH --&gt; CH
+    ER --&gt; HH
+    ER --&gt; GA
     AS --&gt; GE
-    AS --&gt; GC
-    ER --&gt; ES
-    ER --&gt; GC
-    GC --&gt; GE
+    AS --&gt; HH
+    UI --&gt; AS
 </code></pre>
 <p>Relayer Desktop owns the user-facing product:</p>
 <ul>
@@ -202,32 +206,26 @@
 <li>product capabilities for filesystem, Git, secret references, app data, deep links, and cancellation.</li>
 </ul>
 <p>It does <strong>not</strong> implement agent recursion, decide graph semantics, or own Complete prompts and evaluation rubrics. It renders and interacts with graph state only through the graph engine&#39;s stable product APIs.</p>
-<p>Relayer Harness owns the graph product:</p>
+<p>The GraphComplete runtime owns the graph and harness contract:</p>
 <ul>
-<li>the graph engine&#39;s schemas, versions, layers, actions, accepted snapshots, persistence, migrations, compatibility, and read/write authority;</li>
-<li>Complete, Prime Agent, IPython state, graph tools/skills, topology policy, search/reuse policy, and repair behavior;</li>
-<li>Relayer-specific cases, deterministic checks, operator tasks, judge rubric, and promotion manifest.</li>
+<li>the Rust graph engine, local graph API, schemas, layers, actions, accepted graph state, persistence, migrations, and read/write authority;</li>
+<li>typed TypeScript and Python graph clients used directly by harness code;</li>
+<li>the persistent Node harness host, <code>codex.basic</code>, Complete, and later Prime Agent/IPython execution;</li>
+<li>the evaluation runner, cases, deterministic checks, quality judge, and replay bundle.</li>
 </ul>
-<p>The graph engine remains a stable package boundary inside Relayer Harness. Complete uses its public tool API; Relayer Desktop uses its product read/write APIs through the local app server. Neither reads the journal directly. Package imports and contract tests enforce this boundary even though both packages live in one repository.</p>
+<p>These runtime pieces are implemented and evaluated together, but remain separate packages. The graph engine is authoritative; clients never open its database directly, the harness host does not implement graph rules, and the evaluation runner does not contain a second product or completion implementation. A later Relayer app-server integration will embed the same Rust graph core and call the same Node harness host that passed evaluation.</p>
 <h3>1.3 Stable Desktop-to-Harness contract</h3>
-<p>Relayer Desktop and Relayer Harness integrate through one versioned product boundary:</p>
+<p>The canonical external boundary remains one Complete call. <code>inputGraph</code> is a small pointer whose root is the current user-interaction node; it is not a serialized copy of the project graph.</p>
 <pre><code class="language-ts">interface RelayerHarnessClient {
-  complete(inputGraph: InputGraph, options: CompleteOptions): Promise&lt;CompleteResult&gt;;
-  stop(runId: string): Promise&lt;void&gt;;
+  complete(inputGraph: { interactionNode: NodeReference }): Promise&lt;CompleteResult&gt;;
 }
 
-type CompleteResult = {
-  runId: string;
-  inputNodeId: string;
-  status: &quot;accepted&quot; | &quot;stopped&quot; | &quot;failed&quot;;
-  retryable: boolean;
-  acceptedLayerId?: string;
-  graphVersion: number;
-  diagnosticRef?: string;
-};
+type CompleteResult =
+  | { status: &quot;accepted&quot;; interactionNode: NodeReference; display: ResolvedGraphLayer }
+  | { status: &quot;stopped&quot; | &quot;failed&quot;; interactionNode: NodeReference; retryable: boolean; message?: string };
 </code></pre>
-<p>Desktop creates the user interaction and context/action relationships through the graph engine, then passes the resulting input graph to <code>complete(inputGraph, options)</code>. Complete constructs and submits the response through graph tools. Desktop resolves <code>acceptedLayerId</code> through the graph read API and displays that exact layer. A model turn ending does not produce an accepted result.</p>
-<p>The bundled desktop release pins one compatible Relayer Harness package version and refuses incompatible graph schema, graph tool, renderer contract, or harness configuration versions before starting a run.</p>
+<p>The app server creates the interaction and passes its pointer to Complete. The selected harness uses its bound graph client to construct nodes, edges, layers, and actions, then ends by calling <code>graph.submit(interactionNode)</code>. The accepted result includes the fully resolved first layer so the desktop can display it immediately without a second request. The graph engine persists the same layer and serves later navigation. A model turn ending without submission is incomplete.</p>
+<p>The harness choice is stored on the thread. V1 code resolves that key through a code-owned implementation map; the ordinary product does not expose a harness catalog or require users to understand harness configuration.</p>
 <h3>1.4 Deferred abstraction</h3>
 <p>V1 does not include arbitrary harness adapters, third-party conversation views, a generic agent protocol, or a public multi-harness conformance kit. The eval system may compare Relayer Harness configurations, Prime Agent versions, and model/provider choices, but every run still exercises the Relayer product contract. A general platform should be reconsidered only after the Relayer Desktop/Harness boundary has shipped and repeated implementations reveal a concrete reusable seam.</p>
 <h2>2. Canonical visual product reference</h2>
@@ -306,7 +304,7 @@ type CompleteResult = {
 <tr>
 <td>Evaluation thread</td>
 <td>The exact graph result opens in the normal renderer under Evaluations</td>
-<td>Product-real replay plus continuation pinned to the tested harness configuration</td>
+<td>Product-real replay plus continuation pinned to the tested harness implementation/build</td>
 </tr>
 </tbody></table>
 <h3>2.2 Visual acceptance rule</h3>
@@ -548,13 +546,13 @@ type CompleteResult = {
 };
 
 type ThreadAgentBinding = {
-  threadRootInteractionId: string;
+  threadRootNodeId: number;
   harnessId: string;
   harnessVersion: string;
 };
 
 type InteractionModelBinding = {
-  interactionNodeId: string;
+  nodeId: number;
   providerId: string;
   credentialRef: string;
   modelId: string;
@@ -604,7 +602,7 @@ type InteractionModelBinding = {
 <td>Explicit rejected/expired/revoked-credential copy and behavior; signed-release real-auth smoke. Relayer login, API keys, additional providers, provider URLs, secure secret storage, model listing, and harness selection remain planned after Sprint 1.</td>
 </tr>
 </tbody></table>
-<p>The default validation command remains fast: on 2026-08-18, <code>npm run check</code> completed with <strong>2 test files and 12 tests passing</strong>, and <code>npm run build</code> passed. Only the desktop structure and provider-lifecycle scenarios are provider-setup evidence; GraphComplete contract tests must not be counted as proof of this desktop flow.</p>
+<p>The default validation command remains fast: on 2026-08-18, <code>npm run check</code> completed with <strong>29 TypeScript tests, 22 Rust tests, and 6 Python tests passing</strong>, and <code>npm run build</code> passed. Only the desktop structure and provider-lifecycle scenarios are provider-setup evidence; GraphComplete contract tests must not be counted as proof of this desktop flow.</p>
 <h4><code>PROV-001-E1</code> — disconnected provider setup, dark appearance</h4>
 <p>Captured from the Electron development application with an isolated empty Relayer profile. This proves the full-page setup, Relayer branding, Codex as the first provider, and the initial Connect action.</p>
 <figure class="evidence-figure">
@@ -652,7 +650,7 @@ type InteractionModelBinding = {
   <ol class="evidence-legend"><li><b>1</b><span>Connected restart enters the desktop shell rather than provider setup.</span></li><li><b>2</b><span>New Thread is immediately available from the sidebar.</span></li><li><b>3</b><span>The ordinary task composer is the post-login destination.</span></li></ol>
 </figure>
 
-<p>The numbered callouts above are the evidence metadata and requirement associations. Screenshots are implementation evidence, not design mocks and not proof of unrelated features visible in the frame.</p>
+<p>Screenshots are implementation evidence, not design mocks and not proof of unrelated features visible in the frame.</p>
 <h2>4. Projects, no-folder chats, and Git execution</h2>
 <h3>4.1 New thread is the project entry point</h3>
 <p>After Agent setup, Relayer opens the ordinary New thread composer. The user writes a task and chooses one of these scopes before sending:</p>
@@ -1067,231 +1065,191 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <p>Privacy-redacted screenshot: <a href="#upd-002-e6-stable"><code>assets/evidence/desktop/signed-stable-0.2.4-up-to-date.png</code></a>. Machine-readable receipt: <code>assets/evidence/desktop/signed-stable-0.2.4-promotion.json</code>.</p>
 <p>The Preview distribution, previous-version update canary, and first Stable promotion are complete for this slice. The broader desktop distribution requirement remains partial until the macOS 13-through-current test matrix is run, corrupt hosted artifact behavior is product-tested, and restart deferral around active Complete work can be tested. The initial SQLite schema and fail-closed validation now exist; a real later-version migration and forced-failure recovery test remain in the persistence track.</p>
 <h1>Part II — Relayer graph engine and Complete harness</h1>
-<h2>6. Graph engine: stable product contract</h2>
-<p>The graph engine is a stable deterministic package inside Relayer Harness and is the only API that reads or changes persisted Relayer graph state. Complete and Relayer Desktop are separate clients of this engine. Neither reads the JSONL journal directly or invents compatibility behavior. Relayer Desktop sees the graph only through the engine&#39;s product read/write contracts.</p>
-<h3>6.1 Engine ownership</h3>
-<p>The engine owns:</p>
-<ul>
-<li>node, undirected edge, layer, action, scope, graph-version, and accepted-snapshot schemas;</li>
-<li>append-only persistence, replay, optimistic version checks, atomic commit, and migration;</li>
-<li>deterministic integrity and authority validation;</li>
-<li>typed traversal, lookup, and search primitives;</li>
-<li>draft versus submitted state and accepted versus stopped outcomes;</li>
-<li>the mapping from an interaction plus Complete run to its accepted output layer;</li>
-<li>compatibility checks across graph schema, graph-tool, renderer, and harness versions.</li>
-</ul>
-<p>The engine does not decide what an answer should say, which concepts deserve nodes, whether an old concept is relevant, or when recursive agents are useful. Those are harness decisions.</p>
-<h3>6.2 Stable graph schema required by the product</h3>
-<pre><code class="language-ts">type GraphNode = {
-  id: string;
-  revision: number;
-  kind: string;
-  semanticKey?: string;
+<h2>6. Graph engine and local graph API</h2>
+<p>The graph engine is a small Rust graph database specialized for Relayer. It is the only component that opens persisted graph storage or decides whether graph writes are valid. The first GraphComplete milestone builds the Rust engine, its local server, both typed clients, the Node harness host, and the evaluation runner together. The later Relayer app server embeds the same Rust engine rather than introducing another graph implementation.</p>
+<h3>6.1 Runtime components and delivery grouping</h3>
+<table>
+<thead><tr><th>Component</th><th>Implementation</th><th>Owns</th><th>Must not own</th></tr></thead>
+<tbody>
+<tr><td>Graph engine</td><td>Rust library</td><td>Storage, graph records, validation, transactions, accepted display closure</td><td>Prompts, model sessions, projects, desktop behavior</td></tr>
+<tr><td>Local graph API</td><td>Reusable Rust router plus standalone binary</td><td>Loopback transport, token enforcement, request serialization</td><td>A second copy of graph rules</td></tr>
+<tr><td>Graph clients</td><td>TypeScript and Python</td><td>Agent-friendly objects, references, requests, repairable errors</td><td>Database access or authoritative validation</td></tr>
+<tr><td>Node harness host</td><td>Persistent Node process</td><td>Harness implementation map, live Codex/Prime sessions, Complete calls</td><td>Graph storage or product thread lifecycle</td></tr>
+<tr><td>Evaluation runner</td><td>Node package and local service</td><td>Cases, component startup, checks, judge, immutable result bundle</td><td>A separate mock Complete or product graph model</td></tr>
+<tr><td>Relayer app server</td><td>Rust process, developed with desktop</td><td>Projects, threads, interactions, worktrees, harness coordination, product reads</td><td>Harness prompts or duplicated graph rules</td></tr>
+</tbody></table>
+<p>The standalone graph-server binary exists so the harness and evaluation can run before the full product server is built. Production mounts the same graph router and links the same graph core inside the Relayer app server; it does not ship two competing graph authorities.</p>
+<h3>6.1.1 GraphComplete runtime delivery checkpoint</h3>
+<div class="delivery-legend"><span class="delivery-status verified">Verified</span><span class="delivery-status partial">Partial</span><span class="delivery-status deferred">Deferred</span></div>
+<p>This checkpoint tracks the pre-app-server slice separately from the desktop-shell checkpoint. Backend components can be Verified through automated process-level proof; a user-visible renderer additionally requires saved visual evidence.</p>
+<table>
+<thead><tr><th>Requirement</th><th>Status</th><th>Current proof or remaining gap</th></tr></thead>
+<tbody>
+<tr><td>Rust SQLx/SQLite graph core and standalone async loopback server</td><td><span class="delivery-status verified">Verified</span></td><td>The crate separates graph behavior and models under <code>graph/</code> from SQLx persistence under <code>storage/sqlite/</code>. <code>SqliteGraphStore</code> owns the pool and connection lifecycle; graph behavior does not import SQLx. The embedded runner and versioned SQL are colocated in <code>storage/sqlite/migrations/</code>. Reads use the async pool while short <code>BEGIN IMMEDIATE</code> write transactions prevent SQLite snapshot-upgrade failures. Rust tests cover externally supplied positive project/thread IDs, shared-project reads, standalone-thread isolation, connected and recursive layers, action snapshots, per-source action keys, duplicate-edge rejection, draft resubmission, accepted immutability, atomic acceptance, concurrent writes, and control-token interaction creation.</td></tr>
+<tr><td>Opaque graph capability and active-interaction authority</td><td><span class="delivery-status partial">Partial</span></td><td>The server maps each graph token to one canonical interaction <code>NodeId</code>. Every request derives its project/thread visibility and writable subgraph from that persisted node. Trusted control authority can remint a capability for a canonical persisted interaction after server restart. Capability expiry and the full invalid/cross-scope API matrix remain.</td></tr>
+<tr><td>Object-based TypeScript client</td><td><span class="delivery-status verified">Verified</span></td><td>The process-level eval uses the real client against the Rust server to submit nodes, edges, a layer, an action, and the final interaction submission.</td></tr>
+<tr><td>Object-based Python client</td><td><span class="delivery-status partial">Partial</span></td><td>The async client and object composition tests exist. A shared real-server conformance fixture with the TypeScript client remains.</td></tr>
+<tr><td>Persistent Node harness host</td><td><span class="delivery-status partial">Partial</span></td><td>The host caches one harness object per thread, serializes completions and capability rotation on that object, persists provider session IDs and graph capabilities with owner-only file permissions, and returns already accepted output on retry. The two-interaction eval verifies that a new interaction node and token are adopted without rebuilding the harness object. A process-restart capability-remint eval remains.</td></tr>
+<tr><td><code>codex.basic</code> graph-tool harness</td><td><span class="delivery-status verified">Verified</span></td><td>The opt-in live case proved that Codex can execute the bundled TypeScript client, reach the loopback Rust server, submit an accepted graph, and return the resolved layer.</td></tr>
+<tr><td>Inference-free correctness-boundary eval</td><td><span class="delivery-status verified">Verified</span></td><td><code>npm run eval:basic</code> launches the real Rust server and Node host, completes two interactions through one harness object with distinct capabilities, checks both accepted graphs plus session reuse, saves <code>result.json</code>, and saves a turn-navigable movable-node HTML result.</td></tr>
+<tr><td>Live independent judge</td><td><span class="delivery-status verified">Verified</span></td><td><code>npm run eval:basic:live</code> passed the deterministic gate and independent structured judge using the exact saved visible layer.</td></tr>
+<tr><td>Immutable full bundle and Desktop See in App</td><td><span class="delivery-status partial">Partial</span></td><td>The current result viewer is a local HTML equivalent. App replay, retained graph database, digests, and immutable catalog belong to the later app-server integration.</td></tr>
+</tbody></table>
+<h4><code>RUNTIME-001-E1</code> — live <code>codex.basic</code> accepted result</h4>
+<p>Captured from live run <code>4bcc6075-3d06-4eb2-b425-fe3dadca4369</code> after both deterministic checks and the independent judge passed. This proves the pre-app-server runtime and local visual result; it does not claim Desktop See in App.</p>
+<figure class="evidence-figure">
+  <div class="evidence-image"><img src="assets/evidence/runtime-slice/runtime-live-eval.png" alt="RUNTIME-001-E1: passing live codex.basic graph with movable nodes and all checks"></div>
+  <ol class="evidence-legend"><li><b>1</b><span>The live Codex harness authored four icon-title-detail nodes through graph tools.</span></li><li><b>2</b><span>The displayed edges are the exact undirected edge records returned by the accepted layer.</span></li><li><b>3</b><span>All graph-contract and six declared task-fact checks passed before the independent judge.</span></li></ol>
+</figure>
+<h3>6.2 One cumulative graph and four records</h3>
+<p>Relayer product storage owns projects and threads. Graph core does not create project records, thread records, project graphs, thread graphs, graph spaces, or a separate interaction graph. It stores the product-owned positive-integer <code>projectId</code> and <code>threadId</code> on graph records as provenance. Threads with the same project ID read the same accepted graph records. A no-project thread stores <code>projectId = null</code> and reads only records carrying its own thread ID, so standalone threads never share graph records.</p>
+<p>Every user turn is represented by one canonical <code>user-interaction</code> graph node. That node's <code>NodeReference</code> is also the product interaction identity after integration; no second <code>interactionNodeId</code> is synthesized. The host supplies project/thread IDs when it asks graph core to create this node. A graph capability stores only the node reference. On every graph request, the engine calls <code>GraphDatabase::writer_for_subgraph(node)</code> and derives read visibility plus draft-write authority from the persisted node.</p>
+<pre><code class="language-ts">type NodeReference = number; // positive SQLite integer assigned after successful submission
+type EdgeReference = number;
+type LayerReference = number;
+type ActionReference = number;
+
+type GraphNode = {
+  ref?: NodeReference;
   icon: string;
   title: string;
-  detail: string;
-  status: &quot;draft&quot; | &quot;accepted&quot; | &quot;stopped&quot;;
-  metadata?: Record&lt;string, JsonValue&gt;;
+  detail: string; // Markdown/HTML-compatible product detail
 };
 
 type GraphEdge = {
-  id: string;
-  revision: number;
-  kind: string;
-  endpoints: readonly [string, string];
-  metadata?: Record&lt;string, JsonValue&gt;;
+  ref: EdgeReference;
+  endpoints: readonly [NodeReference, NodeReference]; // undirected
 };
 
 type GraphLayer = {
-  id: string;
-  ownerNodeId: string;
-  nodeIds: string[];
-  graphVersion: number;
-};
-</code></pre>
-<p><code>semanticKey</code> is optional for ordinary product display but required when a harness wants stable reuse and when an evaluation must select a generated node without depending on its title or random ID. Edges are stored and displayed without arrow direction. Directional behavior belongs in explicit fields such as an action target or layer owner rather than visual edge direction.</p>
-<h3>6.3 UX read contract</h3>
-<pre><code class="language-ts">interface ProductGraphReadApi {
-  getNode(nodeId: string, snapshotVersion?: number): Promise&lt;GraphNode&gt;;
-  getLayer(layerId: string, snapshotVersion?: number): Promise&lt;GraphLayerView&gt;;
-  getNodeActions(nodeId: string, snapshotVersion?: number): Promise&lt;NodeAction[]&gt;;
-  getCompletionOutput(inputNodeId: string, runId: string): Promise&lt;{
-    actionId: string;
-    layerId: string;
-    graphVersion: number;
-  }&gt;;
-  listAcceptedTurns(threadRootId: string): Promise&lt;AcceptedTurn[]&gt;;
-}
-</code></pre>
-<p>The renderer receives a resolved layer view containing its exact nodes, induced edges, breadcrumb owner, and accepted snapshot version. It does not traverse the graph to guess what belongs on screen. If one interaction has multiple attempts or accepted children, <code>runId</code> selects the exact completion output.</p>
-<h3>6.4 Product write contract</h3>
-<pre><code class="language-ts">interface ProductGraphWriteApi {
-  createInteraction(input: CreateInteractionInput): Promise&lt;UserInteractionNode&gt;;
-  attachContext(inputNodeId: string, attachment: ContextAttachment): Promise&lt;void&gt;;
-  invokeAction(sourceNodeId: string, actionId: string, text?: string): Promise&lt;UserInteractionNode&gt;;
-}
-</code></pre>
-<p>The product may create user-interaction nodes and their user-selected attachment or action-reference relationships. It cannot create agent answer nodes, modify accepted answer content, submit scopes, or bypass engine validation.</p>
-<h3>6.5 Harness graph-tool contract</h3>
-<pre><code class="language-ts">interface HarnessGraphTools {
-  readNode(id: string): Promise&lt;GraphNode&gt;;
-  traverse(input: TraverseInput): Promise&lt;GraphSubgraph&gt;;
-  search(input: SearchInput): Promise&lt;GraphNode[]&gt;;
-  createNode(input: CreateNodeInput): Promise&lt;GraphNode&gt;;
-  updateNode(input: UpdateNodeInput): Promise&lt;GraphNode&gt;;
-  createEdge(input: CreateEdgeInput): Promise&lt;GraphEdge&gt;;
-  authorAction(input: CreateActionInput): Promise&lt;NodeAction&gt;;
-  createLayer(input: CreateLayerInput): Promise&lt;GraphLayer&gt;;
-  submit(input: SubmitRunInput): Promise&lt;SubmittedGraphVersion&gt;;
-  stop(input: StopRunInput): Promise&lt;StoppedRun&gt;;
-}
-</code></pre>
-<p>Every mutation is attributed to a run, turn, agent, and writable scope. Child scopes can change only their owned content; the root can integrate submitted child work. Validation errors return structured repair guidance to the harness. Only <code>submit</code> makes a response available to ordinary UX reads.</p>
-<h3>6.6 Compatibility contract</h3>
-<p>Every persisted graph and evaluation bundle records <code>graphSchemaVersion</code>, <code>graphToolVersion</code>, <code>rendererContractVersion</code>, and <code>harnessConfigurationId</code>. On open:</p>
-<ol>
-<li>the engine validates the stored schema;</li>
-<li>a supported migration produces a new journal version without rewriting prior records;</li>
-<li>unsupported newer schemas fail read-only with an actionable update requirement;</li>
-<li>the renderer refuses a layer contract it cannot display;</li>
-<li>a harness configuration runs only against declared compatible engine and graph-tool ranges.</li>
-</ol>
-<h3>6.7 Current repository versus required V1 engine</h3>
-<table>
-<thead>
-<tr>
-<th>Area</th>
-<th>Present executable slice</th>
-<th>Required V1 addition</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>Persistence</td>
-<td>Append-only JSONL journal and replay</td>
-<td>Snapshot index, migration registry, recovery verification</td>
-</tr>
-<tr>
-<td>Authority</td>
-<td>Root/child scope ownership and attributed mutations</td>
-<td>Product-versus-harness write capabilities</td>
-</tr>
-<tr>
-<td>Versions</td>
-<td>Draft/submitted records and optimistic base version</td>
-<td>Accepted turn snapshots and run-to-output lookup</td>
-</tr>
-<tr>
-<td>Entities</td>
-<td>Generic nodes and edges</td>
-<td>First-class layers, actions, interaction relationships, semantic keys</td>
-</tr>
-<tr>
-<td>Reads</td>
-<td>Latest/submitted replay plus basic node/search routes</td>
-<td>Stable product layer/action/turn APIs and typed traversal</td>
-</tr>
-<tr>
-<td>Validation</td>
-<td>JSON shape, referential integrity, scope authority</td>
-<td>Display-layer, action-target, compatibility, and topology validation</td>
-</tr>
-</tbody></table>
-<h2>7. Complete harness boundary</h2>
-<h3>7.1 Input contract</h3>
-<p><code>complete(inputGraph, options)</code> remains the only agent entry point. <code>inputGraph</code> is an immutable submitted snapshot whose root is the user-interaction node being answered. The root may be unconnected for a first interaction or connected to any amount of prior conversation and context.</p>
-<pre><code class="language-ts">type CompleteInputGraph = GraphSnapshot &amp; {
-  rootNodeId: string; // the UserInteractionNode being completed
+  ref: LayerReference;
+  nodes: NodeReference[];
+  edges: EdgeReference[]; // exact visible connections, never inferred
 };
 
-type CompleteOptions = {
-  runId: string;
-  harnessConfigurationRef: string;
-  workspaceBindingRef?: string;
-  signal?: AbortSignal;
-};
+type NodeAction =
+  | { ref: ActionReference; source: NodeReference; kind: &quot;navigate&quot;; label: string; targetLayer: LayerReference }
+  | { ref: ActionReference; source: NodeReference; kind: &quot;invoke&quot;; label: string; interactionText?: string };
 </code></pre>
-<p>A project-backed interaction connects to a <code>WorkspaceBinding</code> recorded by the product. That binding identifies the project, checkout, worktree, Git snapshot, and authorized filesystem capability. The Complete host resolves it into filesystem and Git tools; raw desktop permission objects and secrets are never embedded in graph content. A no-folder interaction may omit the binding.</p>
-<h3>7.2 Required Complete outcome</h3>
-<p>Complete has one required job: <strong>build and submit one response graph layer under the input interaction node, or stop/fail explicitly without exposing draft work.</strong></p>
-<p>On acceptance, the engine must contain exactly one <code>completion-output</code> navigate action for the pair <code>(inputNodeId, runId)</code>. That action targets the accepted response layer. This engine record—not extra layer IDs in the function return—is the source of truth used by the UX.</p>
-<h3>7.3 Result contract</h3>
-<pre><code class="language-ts">type CompleteResult = {
-  contractVersion: string;
-  runId: string;
-  interactionNodeId: string; // echoed for logging and integration simplicity
-  status: &quot;accepted&quot; | &quot;stopped&quot; | &quot;failed&quot;;
-  accepted: boolean;         // must equal status === &quot;accepted&quot;
-  graphVersion: number;
-  changes: {
-    nodesCreated: number;
-    nodesUpdated: number;
-    nodesReused: number;
-    edgesCreated: number;
-    actionsAuthored: number;
-  };
-  retryable: boolean;
-  failure?: { code: string; userMessage: string };
-  diagnosticRef?: string;
-  metrics: { durationMs: number; modelUsage?: ModelUsage };
-};
-</code></pre>
-<p>The desktop already knows the interaction it submitted. After an accepted result it calls <code>getCompletionOutput(interactionNodeId, runId)</code> and opens that layer. <code>runId</code> disambiguates multiple retries or accepted children on one interaction. The result reports outcome and change counts; it does not duplicate graph content or transmit graph deltas.</p>
-<h3>7.4 Harness implementation responsibilities</h3>
-<p>The stable Complete outcome does not prescribe how the harness reaches it. The selected harness owns:</p>
-<ul>
-<li>prompt construction and model/provider calls;</li>
-<li>deciding which connected input state and workspace ground truth to inspect;</li>
-<li>graph traversal, lexical or embedding search, and cache/reuse strategy;</li>
-<li>node grouping, detail, authored actions, and when to revise an existing node;</li>
-<li>Prime Agent recursion, IPython kernel state, tool sequencing, and repair loops;</li>
-<li>responding to structured engine validation errors until it submits, stops, or fails.</li>
-</ul>
-<p>The harness does not own graph persistence, write authority, schema compatibility, accepted-layer resolution, rendering, projects/worktrees, credentials, app updates, or release grading.</p>
-<h3>7.5 Versioned harness configuration</h3>
-<pre><code class="language-ts">type HarnessConfigurationManifest = {
-  schemaVersion: string;
-  configurationId: string;
-  contentDigest: string;
-  completeImplementation: string;
-  harnessId: string;
-  harnessVersion: string;
-  promptBundleVersion: string;
-  graphSkillVersion: string;
-  graphPolicyVersion: string;
-  compatibleGraphSchemaRange: string;
-  compatibleGraphToolRange: string;
-  modelProvider: string;
-  modelId: string;
-  modelParameters: Record&lt;string, unknown&gt;;
-  toolPolicyVersion: string;
-  allowedTools: string[];
-};
-</code></pre>
-<p>Prime Agent is the only enabled V1 implementation. Candidate Relayer Harness configurations and test doubles implement the same Complete interface:</p>
-<pre><code class="language-ts">interface CompleteImplementation {
-  complete(inputGraph: CompleteInputGraph, options: CompleteOptions): Promise&lt;CompleteResult&gt;;
+<p>A layer packages the exact node references and exact edge references rendered together. A navigate action always opens a layer, even when that layer contains only one node. Actions are separate graph records associated with a source node; adding an action does not require resubmitting the node.</p>
+<h3>6.3 Agent-facing TypeScript and Python client</h3>
+<pre><code class="language-ts">interface GraphClient {
+  getNode(ref: NodeReference): Promise&lt;GraphNode&gt;;
+  getNeighbors(ref: NodeReference): Promise&lt;GraphNode[]&gt;;
+
+  submitNode(node: GraphNode): Promise&lt;NodeReference&gt;;
+  createEdge(left: GraphNode | NodeReference, right: GraphNode | NodeReference): Promise&lt;EdgeReference&gt;;
+  createEdges(pairs: ReadonlyArray&lt;readonly [GraphNode | NodeReference, GraphNode | NodeReference]&gt;): Promise&lt;EdgeReference[]&gt;;
+  submitLayer(layer: GraphLayer): Promise&lt;LayerReference&gt;;
+  addAction(source: GraphNode | NodeReference, action: NodeAction): Promise&lt;ActionReference&gt;;
+
+  submit(interactionNode: NodeReference): Promise&lt;ResolvedGraphLayer&gt;;
 }
 </code></pre>
-<p>The same immutable manifest digest is used by local evaluation, an evaluation replay thread, an interactive candidate thread, and production promotion. Credentials remain local secret references outside the manifest.</p>
-<h3>7.6 Runtime architecture</h3>
-<pre><code class="language-mermaid">flowchart LR
-    UI[&quot;Relayer Desktop shell and graph interface&quot;] --&gt; AS[&quot;Relayer Desktop app server&quot;]
-    AS --&gt; P[&quot;Projects, threads, secrets, Git, updates&quot;]
-    AS --&gt;|&quot;create interaction, attach context, invoke action&quot;| GE[&quot;Relayer graph engine package&quot;]
-    UI --&gt;|&quot;read layers, nodes, actions&quot;| GE
-    AS --&gt; C[&quot;complete(inputGraph, options)&quot;]
-    C --&gt; H[&quot;Prime Agent implementation&quot;]
-    H --&gt; K[&quot;IPython kernel and recursive agents&quot;]
-    H --&gt;|&quot;read, traverse, mutate, submit&quot;| GE
-    H --&gt; F[&quot;Desktop-authorized filesystem and Git tools&quot;]
-    GE --&gt;|&quot;accepted layer ID and snapshot&quot;| AS
-    AS --&gt; UI
+<p>The clients are object-oriented because models are better at constructing and repairing nodes and layers than remembering large collections of raw IDs. A local node object receives its stable reference after its first successful <code>submitNode</code>. Resubmitting that same local object updates its current draft rather than creating a duplicate. A rejected edit preserves the last valid draft and returns a field-specific error so the harness can repair and resubmit it.</p>
+<p><code>createEdge</code> accepts node objects or references. Creating an edge from a new node to an accepted historical node does not resubmit or modify the historical node. Adding an accepted node to a new layer also does not modify it. Accepted historical records are immutable; a changed explanation is represented by a new node connected to the old node.</p>
+<h3>6.4 Validation at each write boundary</h3>
+<table>
+<thead><tr><th>Operation</th><th>Deterministic checks</th><th>Repair behavior</th></tr></thead>
+<tbody>
+<tr><td><code>submitNode</code></td><td>Required icon/title/detail, supported markup, field and payload limits</td><td>Return exact invalid field and keep the last valid draft</td></tr>
+<tr><td><code>createEdge</code></td><td>Both endpoints submitted, no self-edge, no duplicate undirected edge</td><td>Return the offending endpoint or existing edge</td></tr>
+<tr><td><code>submitLayer</code></td><td>Every node/edge exists, every edge endpoint is in the layer, no duplicate references, required connectivity and node-count rules</td><td>Return the precise missing/disconnected object and suggested next operation</td></tr>
+<tr><td><code>addAction</code></td><td>Source exists; navigate target is a submitted layer; label and action kind valid</td><td>Return the invalid source, target, or field</td></tr>
+<tr><td><code>submit(interaction)</code></td><td>Interaction is active; exactly one new response navigate action targets a valid root layer; every recursively reachable navigate target is valid</td><td>Leave drafts hidden and return the unresolved path</td></tr>
+</tbody></table>
+<p>Error responses contain a stable code, object path, and natural-language repair message. The message is part of the agent contract: it should tell the model what failed and what operation can correct it without requiring the engine to make semantic judgments.</p>
+<h3>6.5 Recursive completion submission</h3>
+<p><code>graph.submit(interactionNode)</code> is the deterministic completion boundary. Starting from the interaction&#39;s newly authored response navigate action, the engine traverses the target layer, its exact nodes and edges, and any navigate actions on those nodes. It validates the reachable closure with a visited set, atomically accepts the reachable new drafts, and leaves unrelated drafts unaccepted.</p>
+<p>The accepted return value is a <code>ResolvedGraphLayer</code> containing full node objects, exact visible edges, and node actions for the root layer. This is the immediate display payload returned by Complete. The persisted layer reference remains the source for later navigation and reload.</p>
+<h3>6.6 Local server and token contract</h3>
+<p>The Rust graph router is exposed on loopback HTTP; a Unix-domain-socket transport may replace loopback only if the Codex sandbox cannot reach it. Harnesses do not use MCP, do not open SQLite directly, and do not treat a CLI as the primary API. Prime Agent calls the Python client from its IPython kernel; Node/Codex harnesses call the TypeScript client or execute a small TypeScript program.</p>
+<pre><code class="language-text">POST /api/control/capabilities  (trusted remint after restart)
+POST /api/graph/nodes
+POST /api/graph/edges
+POST /api/graph/layers
+POST /api/graph/actions
+POST /api/graph/submit
+GET  /api/graph/nodes/:id
+GET  /api/graph/nodes/:id/neighbors
+GET  /api/graph/layers/:id
+GET  /api/graph/nodes/:id/output
 </code></pre>
-<p><code>complete(inputGraph, options)</code> is the canonical agent entry point. The local app server may handle process startup and transport details, but it cannot replace the graph semantics or completion acceptance rule.</p>
+<p>Every harness request carries an opaque, random capability token maintained by the server. In the current slice, the server stores only <code>token -&gt; canonical NodeId</code>. Project/thread visibility and the writable draft subgraph are derived from that node when a request creates its short-lived <code>GraphWriter</code>. <code>submit(node)</code> must receive the same root node. The engine rejects writes after that node already has an accepted completion.</p>
+<p>The token never enters graph content, evaluation evidence, or the renderer. Re-registering the same live thread with a newer interaction serializes the update behind any active Complete call, gives the existing harness object the new URL/token/node capability, and persists the new descriptor. <code>codex.basic</code> refreshes its SDK execution environment and resumes the same persisted Codex thread ID. The two-turn evaluation verifies this lifecycle for a running graph server; reminting and adopting a capability after a graph-server process restart remains a separate recovery eval. Provider credentials remain in product-owned secret storage.</p>
+<h3>6.7 Required graph-engine proof</h3>
+<ul>
+<li>Rust unit tests cover every node, edge, layer, action, submission, transaction, migration, and concurrent-read/write rule without inference.</li>
+<li>One shared conformance fixture runs through the Rust API, TypeScript client, and Python client and produces equivalent accepted records and errors.</li>
+<li>Token tests prove wrong-project, wrong-thread, inactive-interaction, missing-token, and expired-session requests cannot write.</li>
+<li>Layer-view tests prove the renderer receives only the edges explicitly declared by the layer.</li>
+<li>Crash/transaction tests prove partial submission never becomes visible as an accepted response.</li>
+</ul>
+<h2>7. Node harness host and Complete</h2>
+<h3>7.1 Canonical input and accepted output</h3>
+<pre><code class="language-ts">type CompleteInputGraph = NodeReference;
+
+interface Harness {
+  complete(interactionNode: GraphNode): Promise&lt;CompleteResult&gt;;
+}
+</code></pre>
+<p>The external name remains <code>complete(inputGraph)</code>, and that input graph is only a pointer to the current interaction node. The host resolves the pointer once and calls the selected harness with the interaction node. The harness object already holds its graph client, thread/project context, working-directory capability, and provider session. It resolves broader graph or filesystem context only when needed.</p>
+<p>Complete has one required job: build and submit one response graph under that interaction, or stop/fail explicitly. A successful Complete call is the successful return from <code>graph.submit(interactionNode)</code>. The accepted result includes the resolved root layer used for immediate display; later movement through the graph uses app-server reads.</p>
+<h3>7.2 Persistent Node harness host</h3>
+<p>The Node harness host is a long-lived child process of the evaluator or Relayer app server. It resolves a small code-owned implementation map and lazily constructs one harness object per thread:</p>
+<pre><code class="language-ts">const harnessImplementations: Record&lt;string, HarnessFactory&gt; = {
+  &quot;codex.basic&quot;: createBasicCodexHarness,
+  &quot;prime-agent&quot;: createPrimeAgentHarness,
+};
+</code></pre>
+<p>The thread stores its selected harness key and copied configuration. The host keeps the same JavaScript harness object and underlying provider session alive across turns. If the Node process or provider session expires, the host recreates the object from the stored configuration and persisted provider session ID. Continuous conversation must not rediscover, reload, or start a brand-new Codex conversation on every Complete call.</p>
+<p>The Relayer app server will own one-active-root-completion coordination for a thread. The Node host owns the live JavaScript object and refuses unsafe concurrent calls on that same object; different thread harness objects may run concurrently. Prime Agent remains the owner of recursive child-agent scheduling inside a completion.</p>
+<h3>7.3 Minimal harness configuration</h3>
+<p>V1 configuration is intentionally code-oriented. A literal YAML file identifies an implementation key and its version. A separate product mapping assigns configuration filenames to user-facing harness names. Prompts, capability flags, and ablation parameters are not generalized configuration fields in the first milestone.</p>
+<pre><code class="language-yaml">schemaVersion: 1
+implementation: codex.basic
+implementationVersion: 1
+</code></pre>
+<h3>7.4 First <code>codex.basic</code> implementation</h3>
+<p>The first harness uses the OpenAI Codex TypeScript package and the user&#39;s Relayer-scoped Codex login. Its purpose is to test whether the graph contract is simple enough for a coding agent to use, not to approximate the final GraphComplete policy.</p>
+<ul>
+<li>Start or resume one Codex session for the thread.</li>
+<li>Provide a short instruction describing the product-visible graph response and the required final <code>graph.submit(interactionNode)</code>.</li>
+<li>Expose the loopback graph URL and session token only to the harness process.</li>
+<li>Let Codex write and run TypeScript using the bundled graph client; structured output may be used for ordinary model text, but the accepted graph is created through graph operations.</li>
+<li>Return the accepted resolved layer from the graph engine. A model final response without submission is incomplete.</li>
+</ul>
+<p>This harness does not initially implement graph search, grounding, self-assessment, recursive agents, or a large policy prompt. Those are added only after the basic graph-writing contract and eval are stable.</p>
+<h3>7.5 Product and evaluation use the same host</h3>
+<pre><code class="language-mermaid">flowchart LR
+    EV[&quot;Eval runner&quot;] --&gt; HH[&quot;Node harness host&quot;]
+    AS[&quot;Relayer Rust app server&quot;] --&gt; HH
+    HH --&gt; CX[&quot;Persistent Codex or Prime harness object&quot;]
+    CX --&gt; CL[&quot;Typed graph client&quot;]
+    CL --&gt; API[&quot;Local Rust graph API&quot;]
+    API --&gt; GE[&quot;Rust graph engine and store&quot;]
+    GE --&gt;|&quot;Resolved accepted layer&quot;| CL
+</code></pre>
+<p>The evaluator supplies temporary storage and interaction lifecycle; the product app server supplies durable projects, threads, worktrees, and interaction lifecycle. Neither path changes the harness implementation or graph contract. Passing evaluation therefore proves the same executable seam that the desktop later invokes.</p>
+<h3>7.6 First implementation milestone</h3>
+<p>The GraphComplete runtime milestone is complete when this exact path works:</p>
+<pre><code class="language-text">interaction created
+→ harness session activated
+→ codex.basic starts or resumes its Codex session
+→ Codex uses the typed graph client
+→ nodes submitted
+→ undirected edges created
+→ layer submitted
+→ response navigate action added to the interaction
+→ graph.submit(interaction) accepts the reachable closure
+→ deterministic eval passes
+→ saved resolved layer opens in the local movable-node result viewer
+</code></pre>
+<p>The current pre-app-server slice ends at that local visual result. The Relayer app-server/desktop milestone then embeds these proven components and adds projects, threads, worktrees, normal interaction creation, cancellation, persistence, Desktop See in App, and packaged distribution. It must not recreate graph submission or harness behavior in Electron.</p>
 <h2>8. Interaction, response, and graph-memory contract</h2>
 <h3>8.1 Messages and multiple turns</h3>
 <p>A message creates one interaction node, connects any selected prior state to it, and makes one Complete call. On acceptance, the engine records the run&#39;s output navigate action and response layer under that interaction. Later interaction nodes connect into the existing conversation graph and may refer to any prior node. The thread graph is the V1 conversation memory; V1 does not maintain a separate continuously updated summary.</p>
-<p>If a later turn needs a stale node, the harness reassesses and updates that node through the staged graph tools before referring to it. Otherwise stale nodes remain unchanged. Broader recursive freshness propagation is deferred.</p>
+<p>If a later turn needs a stale explanation, the harness creates a new node and connects it to the accepted historical node. It does not rewrite accepted history. Otherwise the old node remains unchanged. Broader recursive freshness propagation is deferred.</p>
 <h3>8.2 Add as context</h3>
 <p>The permanent inline <code>+</code> action exists on every selectable node. It opens an optional annotation field in the inspector. After attachment:</p>
 <ul>
@@ -1312,7 +1270,7 @@ type CompleteOptions = {
   sourceNodeId: string;
   label: string;
   mode: &quot;navigate&quot; | &quot;invoke&quot;;
-  targetNodeId?: string;
+  targetLayerId?: string; // required for navigate; a layer may contain one node
   interactionTemplate?: {
     kind: &quot;message&quot; | &quot;node-action&quot;;
     text?: string;
@@ -1320,7 +1278,7 @@ type CompleteOptions = {
 };
 </code></pre>
 <ul>
-<li><code>navigate</code> opens an existing node, layer, thread entry, or subthread without Complete.</li>
+<li><code>navigate</code> opens an already submitted layer without Complete. A one-node destination is still represented as a layer.</li>
 <li><code>invoke</code> creates one user-interaction node referring to the selected node and action, then calls Complete once.</li>
 <li>The accepted response becomes a child subgraph/subthread and is enterable from the parent through a navigate action and from its durable sidebar entry.</li>
 <li>Subthreads are recursive without a fixed depth.</li>
@@ -1335,7 +1293,7 @@ type CompleteOptions = {
 <li>An <code>invoke</code> selection creates a new <code>node-action</code> interaction containing the source node ID, action ID/key, optional user text, and inherited workspace binding. That new interaction is the root of the next Complete input graph.</li>
 <li>The original action remains part of its accepted snapshot. It is not consumed or converted into the new turn.</li>
 <li>Stop or failure leaves the invoked interaction retryable and does not create an accepted child layer.</li>
-<li>Retry creates a new <code>runId</code> for the same interaction. The accepted run-to-output mapping identifies which child layer the UX opens.</li>
+<li>Retry uses the same interaction node. Only one accepted response navigate action may become the canonical output for that interaction.</li>
 <li>If a later graph revision removes or replaces an action, old accepted snapshots retain the old action; the current snapshot may mark it unavailable rather than silently redirecting it.</li>
 </ol>
 <p>The output navigate action created for a successful Complete run follows the same persisted action schema. It is automatically followed once by the desktop after acceptance; later selections are ordinary local navigation.</p>
@@ -1352,161 +1310,106 @@ type CompleteOptions = {
 </ul>
 <h1>Part III — Evaluation and product replay</h1>
 <h2>9. Exact basic Complete evaluation</h2>
-<p>The first paid evaluation is one fixed case named <code>basic-graph-conversation-v1</code>. It tests the smallest end-to-end conversation that exercises graph construction and product interactions without requiring a prebuilt workspace graph.</p>
-<h3>9.1 Public sample repository</h3>
-<p>The basic case clones the small MIT-licensed public repository <a href="https://github.com/sindresorhus/p-limit"><code>sindresorhus/p-limit</code></a> at commit <code>df476048d023ff868cd45b35ee47f5fb0ca2b25a</code> with Git tree <code>21d1b1115ab955f499ca0de32b8819b936775dd9</code>. The case primarily grounds against <code>index.js</code>, <code>readme.md</code>, and <code>test.js</code>: together they expose a compact but real concurrency scheduler, documented behavior, and executable examples. The runner verifies both hashes before starting. A changed upstream default branch cannot change an existing case.</p>
-<p>The repository is cached once in the local eval catalog and materialized into a temporary checkout per run. It is not copied into this repository, checked into every worktree, or described as a synthetic fixture workspace.</p>
-<p>The conversation graph starts empty. The runner creates the first user-interaction node exactly as Relayer Desktop would. The source URL, commit, tree digest, graph schema version, case definition, harness manifest, candidate model, operator manifest, and quality-judge manifest are pinned in the run record.</p>
-<h3>9.2 Exact interaction sequence</h3>
-<table>
-<thead>
-<tr>
-<th>Step</th>
-<th>Product interaction created by runner</th>
-<th>Real graph target selection</th>
-<th>Required observable result</th>
-</tr>
-</thead>
-<tbody><tr>
-<td><code>initial-message</code></td>
-<td>Message: “Explain how p-limit schedules work. Show how queued work becomes active and distinguish activeCount, pendingCount, and clearQueue.”</td>
-<td>New unconnected interaction root</td>
-<td>Accepted layer with 3–7 coherent nodes, grounded lifecycle detail, undirected connections, and an authored action for tracing a concurrency change</td>
-</tr>
-<tr>
-<td><code>attached-follow-up</code></td>
-<td>Attach the clear-queue node with annotation “Use this exact behavior as the reference point,” then ask “Why does clearQueue not cancel work that is already running?”</td>
-<td>Node from step 1 selected by <code>semanticKey = p-limit.clear-queue</code></td>
-<td>Response uses the attachment and source evidence without duplicating the clear-queue concept</td>
-</tr>
-<tr>
-<td><code>operator-navigation</code></td>
-<td>Give the operator the goal: “Find how changing concurrency wakes pending work, inspect the relevant node, and use the graph&#39;s authored action to trace it.”</td>
-<td>Operator sees only the same layer, node-detail, navigate, and action surfaces available to a product user</td>
-<td>Operator opens the relevant node, invokes its authored action, and produces an accepted child layer grounded in the setter and <code>queueMicrotask</code> path</td>
-</tr>
-<tr>
-<td><code>context-summary</code></td>
-<td>Attach the operator-created result with annotation “Focus on what a caller can observe,” then ask “Summarize the behavior in two practical rules.”</td>
-<td>Node selected from the accepted operator step</td>
-<td>Ordinary message uses the selected result and prior graph memory; no separate feedback interaction or duplicated scheduling concepts</td>
-</tr>
-</tbody></table>
-<p>The scripted steps intentionally require stable <code>semanticKey</code> values so deterministic checks can target nodes actually generated by the harness. The operator step does not receive semantic keys or hidden graph JSON; it must discover and use the visible graph as a person would.</p>
-<h3>9.3 Case schema for messages and real-node interactions</h3>
-<pre><code class="language-ts">type EvalNodeSelector =
-  | { by: &quot;nodeId&quot;; value: string }
-  | { by: &quot;semanticKey&quot;; value: string; fromStep?: string };
-
-type EvalActionSelector = {
-  source: EvalNodeSelector;
-  actionKey: string;
-};
-
-type EvalInteraction =
-  | { stepId: string; type: &quot;message&quot;; text: string }
-  | { stepId: string; type: &quot;message&quot;; text: string; attachments: Array&lt;{
-      node: EvalNodeSelector; annotation?: string;
-    }&gt; }
-  | { stepId: string; type: &quot;invoke-action&quot;; action: EvalActionSelector; text?: string }
-  | { stepId: string; type: &quot;operator-task&quot;; goal: string; maxOperations: number };
-</code></pre>
-<p>At runtime every scripted selector resolves against the accepted graph snapshot from the named prior step. Resolution must return exactly one node/action or the step fails before Complete is called. Resolved IDs and every operator observation/action are saved so the run can be replayed exactly.</p>
-<h3>9.4 Operator agent contract</h3>
-<p>The evaluation judge system has two separate roles. The <strong>operator agent</strong> uses the product; the <strong>quality judge</strong> grades the resulting graph and operator trajectory. The operator is not allowed to read the graph journal, semantic keys, expected node IDs, candidate harness name, or answer key.</p>
-<pre><code class="language-ts">interface EvalProductDriver {
-  readCurrentLayer(): Promise&lt;VisibleLayerSummary&gt;;
-  openNode(visibleNodeId: string): Promise&lt;VisibleNodeDetail&gt;;
-  navigate(actionId: string): Promise&lt;VisibleLayerSummary&gt;;
-  invoke(actionId: string, text?: string): Promise&lt;AcceptedViewResult&gt;;
-  attachContext(visibleNodeId: string, annotation?: string): Promise&lt;void&gt;;
-  sendMessage(text: string): Promise&lt;AcceptedViewResult&gt;;
-}
-
-type OperatorTrajectory = {
-  operatorManifestDigest: string;
-  goal: string;
-  operations: Array&lt;{
-    sequence: number;
-    observationDigest: string;
-    operation: &quot;open-node&quot; | &quot;navigate&quot; | &quot;invoke&quot; | &quot;attach-context&quot; | &quot;send-message&quot;;
-    visibleTarget?: string;
-    resultingInteractionNodeId?: string;
-  }&gt;;
-  completed: boolean;
-  finalEvidenceNodeIds: string[];
-};
-</code></pre>
-<p>The driver is the same interaction state machine used by Relayer Desktop, exposed through an accessibility-oriented test adapter rather than screen coordinates. The operator has a fixed operation budget, cannot mutate an immutable saved run, and acts only while the case is still executing. Its success assertion is task-level: it found the correct concept through visible information, invoked a valid authored action, and reached an accepted child layer. This tests whether the graph is usable, not only whether its JSON looks plausible.</p>
-<h3>9.5 Deterministic and judged assertions</h3>
-<p>Every step first checks:</p>
+<p>The first evaluation is one fixed, two-interaction case named <code>empty-project.task-system.two-turn</code>. It proves the smallest real conversation path through the Rust graph engine, typed client, persistent Node harness host, Codex session, Complete boundary, deterministic evaluator, quality judge, and product renderer. The second interaction receives a new canonical interaction node and capability token while reusing the same harness object and provider thread. It deliberately has no existing codebase, grounding requirement, graph search, or subagent dependency.</p>
+<h3>9.1 Initial state and exact input</h3>
+<p>The runner creates a temporary empty folder and isolated graph database, supplies synthetic positive project/thread IDs, selects <code>codex.basic</code>, and asks graph core to create two canonical user-interaction nodes in the same thread. It does not start or imitate the Relayer app server. The exact messages are:</p>
+<blockquote>“A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.”</blockquote>
+<blockquote>“Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.”</blockquote>
+<p>The expected answer facts are declared in the case rather than hidden in harness code: tasks enter the queue; an available worker claims a task; at most two tasks are active; additional tasks wait; a completed task is written to the result store; and a freed worker claims the next queued task.</p>
+<h3>9.2 Exact runner sequence</h3>
+<ol>
+<li>Start the standalone Rust graph server with an isolated database and wait for health.</li>
+<li>Supply synthetic product-owned project/thread IDs, ask graph core to create the first canonical interaction node, create the active harness session, and issue an opaque graph token bound to that node.</li>
+<li>Start the Node harness host and resolve <code>codex.basic</code>.</li>
+<li>Call <code>complete({ interactionNode })</code>; Codex constructs the response using the TypeScript graph client.</li>
+<li>Require Codex to submit nodes, undirected edges, a layer, the interaction&#39;s response navigate action, and finally <code>graph.submit(interactionNode)</code>.</li>
+<li>Receive the first resolved root layer and run its deterministic checks.</li>
+<li>Create the second interaction in the same thread, issue a distinct capability, re-register the session, and verify the host adopts the new capability without constructing another harness object.</li>
+<li>Call Complete for the second interaction and run the same deterministic checks. The opt-in live path runs an independent structured Codex judge for each accepted turn.</li>
+<li>Save the accepted graph records, resolved display payload, checks, judge result, timing, harness key/version, and trace reference in one immutable result bundle.</li>
+<li>Load that bundle into the existing force-graph product renderer for human inspection.</li>
+</ol>
+<h3>9.3 Deterministic acceptance checks</h3>
+<p>The first gate uses no model judgment. All checks must pass:</p>
 <ul>
-<li>valid Complete result and accepted boolean/status invariant;</li>
-<li>one submitted run output for <code>(interactionNodeId, runId)</code>;</li>
-<li>output layer, node, edge, action, authority, and snapshot integrity;</li>
-<li>node-count bounds and unique semantic/action keys required by the case;</li>
-<li>file-grounding references resolve inside the pinned repository commit;</li>
-<li>the next interaction targets the exact persisted node/action selected by the case;</li>
-<li>the operator used only allowed product operations, stayed within budget, and its recorded observations match the displayed snapshots;</li>
-<li>stopped/failed draft work is absent from product reads.</li>
+<li>Complete returned <code>accepted</code> only after <code>graph.submit(interactionNode)</code> succeeded;</li>
+<li>both Complete outputs and response actions belong to their requested interaction nodes;</li>
+<li>the second interaction uses a distinct capability token and node ID while the harness factory is called exactly once;</li>
+<li>the interaction has exactly one accepted response navigate action;</li>
+<li>that action targets the returned submitted root layer;</li>
+<li>the layer contains between one and eight submitted nodes;</li>
+<li>every visible node has a non-empty icon, title, and detail;</li>
+<li>every layer edge is undirected, non-self, unique, and has both endpoints in the layer;</li>
+<li>the layer is connected when it contains more than one node;</li>
+<li>the resolved display payload contains exactly the layer&#39;s nodes, edges, and actions;</li>
+<li>the response action, layer, every resolved node, every resolved edge, and every resolved action are explicitly <code>accepted</code>;</li>
+<li>no unrelated or rejected draft is reachable from the accepted response;</li>
+<li>the saved result can be read back and rendered without consulting harness-private state.</li>
 </ul>
-<p>The pinned quality judge then scores instruction fulfillment, factual grounding, attachment use, continuity, reuse versus duplication, topology, node detail, action usefulness, operator task completion, and final practical summary. Each score includes evidence node IDs. Unsupported claims, broken target selection, invalid action output, operator use of hidden state, or loss of conversation memory are critical failures regardless of average score.</p>
-<p>The configuration passes the basic unit only when every deterministic assertion passes, no critical judge failure occurs, every scored dimension meets its threshold, and the saved result successfully opens in the desktop replay view.</p>
+<p>Local keys used by Codex while constructing one layer are temporary builder references, not persisted semantic identities and not an evaluation requirement.</p>
+<h3>9.4 First quality-judge gate</h3>
+<p>For each turn, the independent judge receives only that user message, six declared facts, and the visible resolved layer. It does not receive the candidate harness name, private Codex conversation, token, database, or expected graph topology.</p>
+<p>The structured judge lists the fact IDs clearly present, whether the graph connections are useful, whether the details are useful, and any problems. A turn passes only when all six fact IDs are present, both usefulness booleans are true, and the problem list is empty.</p>
+<h3>9.5 Required saved visual proof</h3>
+<p>A passing JSON result is insufficient. The current pre-app-server evaluator saves an <code>index.html</code> beside <code>result.json</code>; previous/next arrows select either accepted turn, and each view shows its exact layer and movable nodes and edges. Desktop <strong>See in App</strong>, the right-side product inspector, and read-only evaluation threads remain app-server integration requirements. This separates current visual proof from the later claim that the result is running inside the product.</p>
+<h3>9.6 Next evaluations after the first slice</h3>
+<p>The current case verifies two interactions, capability rotation, one harness construction, and the accepted output contract for both turns. The next memory case must additionally require the second interaction to use prior accepted graph state. Later capability cases add context attachments, invoke and navigate actions, repository grounding, graph reuse, recursive Prime Agent work, and harder tasks.</p>
 <h2>10. Evaluation catalog, runner, results, and promotion</h2>
 <h3>10.1 Evaluation boundary and data model</h3>
-<p>The Relayer evaluation target is <code>complete(inputGraph, options)</code> under a pinned <code>HarnessConfigurationManifest</code>. Relayer Desktop owns local run orchestration, storage, report UI, and replay. Relayer Harness supplies cases, Complete, deterministic checks, operator goals, and judge rubrics. Product and evaluation execution use the same graph engine, Complete implementation, and configuration digest:</p>
+<p>The evaluation target is one harness implementation key executing <code>complete(inputGraph)</code> against the real graph engine. The runner supplies synthetic product-owned project/thread IDs and manages temporary interaction, active-session, and storage lifecycle directly through the graph server. It never starts the real Relayer app server and may not replace the Node harness host, typed graph client, graph API, validation, or submission path. The later integration supplies real product IDs and coordinates product persistence.</p>
 <pre><code class="language-mermaid">flowchart LR
-    PF[&quot;Relayer Desktop persists interaction&quot;] --&gt; C[&quot;complete(inputGraph, options)&quot;]
-    EF[&quot;Relayer eval runner loads case&quot;] --&gt; C
-    C --&gt; GE[&quot;Graph engine commits run output&quot;]
-    GE --&gt; PV[&quot;Product resolves and renders layer&quot;]
-    GE --&gt; EV[&quot;Eval validates, judges, and saves run&quot;]
-    EV --&gt; UX[&quot;See in App&quot;]
+    ER[&quot;Eval runner creates temporary interaction&quot;] --&gt; HH[&quot;Persistent Node harness host&quot;]
+    AS[&quot;Relayer app server creates product interaction&quot;] --&gt; HH
+    HH --&gt; H[&quot;Same selected harness implementation&quot;]
+    H --&gt; C[&quot;Typed graph client&quot;]
+    C --&gt; G[&quot;Same Rust graph API and engine&quot;]
+    G --&gt; R[&quot;Resolved accepted layer&quot;]
+    R --&gt; CHECK[&quot;Deterministic checks and judge&quot;]
+    R --&gt; UX[&quot;Relayer renderer and See in App&quot;]
 </code></pre>
-<p>Established evaluation products store cases as versioned datasets and runs as immutable experiments rather than copying source repositories into every algorithm branch. For example, <a href="https://www.braintrust.dev/docs/guides/datasets">Braintrust datasets</a> are versioned and experiments are immutable run snapshots. This product follows that pattern locally: lightweight Relayer case definitions are versioned in the Relayer Harness package; cloned source and result artifacts live once in Relayer Desktop&#39;s content-addressed catalog. <a href="https://git-scm.com/docs/git-worktree.html">Git linked worktrees</a> share repository state but still have distinct materialized working trees, so source repositories are not checked into every worktree.</p>
+<p>A run records the case version, harness implementation key/version, graph schema version, client versions, model, judge version, and component build digests. The first milestone does not require a generalized production configuration manifest or product selector. Those abstractions are added only when more than one real configuration must be promoted.</p>
 <h3>10.2 Shared source and result catalog without worktree duplication</h3>
-<pre><code class="language-text">relayer-harness/evals/
+<pre><code class="language-text">packages/eval-runner/
   cases/&lt;case-id&gt;.json                  # small versioned interaction definition
   suites/&lt;suite-id&gt;.json                # ordered case IDs and gates
-  configurations/&lt;configuration-id&gt;.json
-  operators/&lt;operator-id&gt;.json
   judges/&lt;judge-id&gt;.json
 
 ~/.relayer/evals/
   repositories/&lt;source-id&gt;.git          # one cached public Git repository
   objects/sha256/&lt;digest&gt;               # immutable non-Git artifacts
   runs/&lt;run-id&gt;/bundle.json             # immutable experiment record
-  runs/&lt;run-id&gt;/graph.jsonl             # accepted graph journal
+  runs/&lt;run-id&gt;/graph.db                # isolated accepted Rust graph store
+  runs/&lt;run-id&gt;/display.json            # resolved layer used for product replay
   runs/&lt;run-id&gt;/screenshots/             # optional rendered evidence
   materialized/&lt;run-id&gt;/                 # temporary copy-on-write checkout
 </code></pre>
-<p>Case definitions reference a public repository URL, pinned commit, and expected tree digest; they do not contain a source directory. All local Relayer worktrees share the same user-level repository and object catalog. The runner creates a detached temporary checkout from the cached commit, then removes it after the run. A mutating case always gets a private checkout. Result bundles live outside both the source checkout and either code repository.</p>
+<p>The empty-project case needs no repository entry. Later codebase cases reference a public repository URL, pinned commit, and expected tree digest; they never contain a developer-specific source directory. All local Relayer worktrees share the same user-level repository and object catalog. A mutating case always receives a private materialization. Result bundles live outside source checkouts.</p>
 <p>The catalog verifies every object digest before use and garbage-collects only unreferenced materializations and runs according to an explicit retention policy. Checked-in case/config/judge JSON stays small enough to review normally in pull requests.</p>
 <h3>10.3 Runner execution</h3>
 <p>Local commands are standardized target interfaces:</p>
-<pre><code class="language-sh">npm run eval -- --suite basic --configuration prime-agent-v1
-npm run eval -- --suite capability:memory --configuration prime-agent-v1
-npm run eval:compare -- --baseline prime-agent-v1 --candidate prime-agent-v2
+<pre><code class="language-sh">npm run eval -- --case empty-project.task-system.two-turn --harness codex.basic
+npm run eval -- --suite capability:memory --harness codex.basic
+npm run eval:compare -- --baseline codex.basic@1 --candidate prime-agent@1
 npm run eval:web
 </code></pre>
-<p><code>eval:web</code> opens the Relayer evaluation runner shown in Mock 10. The left column lists versioned cases, capability suites, and recent runs. The selected case shows the source repository/commit and three explicit inputs: candidate harness configuration, candidate model, and judge system. <code>Run evaluation</code> starts one local run. The execution panel reports clone/verification, each scripted interaction, operator activity, deterministic checks, quality judging, timing, cost, and failures. A completed run offers <strong>Open report</strong> and <strong>See in App</strong>. The web UI and CLI call the same runner service and produce the same bundle; the UI is not a separate eval implementation.</p>
+<p><code>eval:web</code> opens the Relayer evaluation runner shown in Mock 10. The first slice needs only case, harness implementation, candidate model, judge, live progress, final checks, and <strong>See in App</strong>. The web UI and CLI call the same runner service and produce the same bundle; the UI is not a separate evaluation implementation.</p>
 <p>For each case the runner:</p>
 <ol>
-<li>resolves and verifies the source repository commit/tree, case, operator, judge, graph schema, and harness configuration digests;</li>
-<li>creates an isolated materialization and empty graph store;</li>
-<li>resolves scripted node/action selectors against the preceding accepted snapshot and gives operator steps only the product driver;</li>
-<li>creates the exact product interaction node and relationships;</li>
-<li>invokes the same Complete adapter used by the desktop;</li>
-<li>runs deterministic checks, the bounded operator task, and then the pinned quality judge in the order declared by the case;</li>
-<li>saves graph journal, per-step selections, operator trajectory, results, scores, traces, cost, and screenshots into one immutable run directory;</li>
+<li>resolves the case, harness implementation, graph schema, client builds, model, and judge versions;</li>
+<li>starts an isolated Rust graph server and persistent Node harness host;</li>
+<li>creates the same interaction and active harness-session context the product will create;</li>
+<li>invokes <code>complete(inputGraph)</code> through the Node host;</li>
+<li>runs deterministic graph checks before any model judge;</li>
+<li>runs the pinned quality judge only when deterministic checks pass;</li>
+<li>saves graph store, resolved display layer, results, scores, traces, timing, and screenshots into one immutable run directory;</li>
 <li>prints the run ID, summary, local report URL, and <code>See in App</code> deep link;</li>
-<li>removes the temporary workspace unless retention was explicitly requested.</li>
+<li>stops the temporary processes and removes the workspace unless retention was explicitly requested.</li>
 </ol>
 <p>Live commands require an explicit confirmation in the web runner or command flag plus an available credential reference and declared cost cap. They never run inside <code>npm run check</code> or the default test suite. CI may run them only in a separately authorized, budget-limited job. Closing the web page does not orphan a run: the local runner service retains status, cancellation, and the immutable partial failure record.</p>
 <h3>10.4 Judge design</h3>
-<p>Deterministic checks run first and fail the case before model-based evaluation if the contract, graph integrity, run-output mapping, grounding references, or display layer is invalid. Operator steps then execute through <code>EvalProductDriver</code>; the operator receives the task goal and visible product observations but not hidden graph fields or the expected answer. The quality judge receives the case goal, per-step interaction, pinned source ground truth, attachments, returned result, accepted graph snapshot, and operator trajectory. Neither model role receives the candidate harness name.</p>
-<p>The pinned quality-judge rubric emits structured scores for instruction fulfillment, factual grounding, use of conversation memory, node reuse versus duplication, semantic grouping and connections, detail/action usefulness, operator task success, and overall response usefulness. Each dimension includes evidence node IDs and a short rationale. Critical failures—unsupported claims, missing requested output, invalid action target, hidden-state use by the operator, or broken turn continuity—are separate booleans rather than averages that can be hidden by other scores.</p>
-<p>For configuration comparison, the judge also performs a blind pairwise preference on the two replay bundles. Promotion thresholds, judge model/version, prompt version, rubric version, repeat count, and tie policy are stored in the judge manifest. A sample of passing, failing, and close-call bundles is rendered in the desktop UX for human review; human ratings calibrate the judge but do not silently rewrite recorded model scores.</p>
+<p>Deterministic checks always run first. The first empty-project case then uses only the six-fact structured judge defined in Section 9.4. It does not require an operator agent, pairwise comparison, grounding rubric, repeat policy, or promotion threshold.</p>
+<p>Later capability suites add the dimensions they actually exercise: conversation memory, node reuse, attachments, authored actions, repository grounding, topology, and operator task success. Each score cites visible node references and a short rationale. Critical failures remain separate booleans rather than averages hidden by other scores.</p>
+<p>Configuration comparison and blind pairwise judging are later evaluation-runner capabilities. When added, the judge model/version, prompt version, rubric version, repeat count, thresholds, and tie policy are recorded with the run. Human review in the real graph UX remains required before product promotion.</p>
 <h3>10.5 Evaluation ladder</h3>
 <table>
 <thead>
@@ -1525,8 +1428,8 @@ npm run eval:web
 </tr>
 <tr>
 <td>Basic Complete unit</td>
-<td>Run the exact four-step case in Section 9</td>
-<td><code>basic-graph-conversation-v1</code> against one pinned configuration</td>
+<td>Run the exact two-interaction case in Section 9</td>
+<td><code>empty-project.task-system.two-turn</code> against <code>codex.basic</code></td>
 <td>Required before larger evals</td>
 </tr>
 <tr>
@@ -1617,23 +1520,20 @@ npm run eval:web
   runId: string;
   caseId: string;
   caseDigest: string;
-  sourceDigest: string;
-  source: { repositoryUrl: string; commit: string; treeDigest: string };
+  source?: { repositoryUrl: string; commit: string; treeDigest: string };
+  harness: { implementation: string; version: string; buildDigest: string };
   graphSchemaVersion: string;
+  graphClientVersions: { typescript: string; python: string };
   stepResults: Array&lt;{
     stepId: string;
-    interactionNodeId: string;
-    resolvedSelections: Array&lt;{ selector: unknown; nodeId: string; actionId?: string }&gt;;
+    nodeId: number;
     result: CompleteResult;
-    acceptedGraphSnapshot?: GraphSnapshot;
+    display: ResolvedGraphLayer;
     deterministicChecks: CheckResult[];
     judgeResults: JudgeResult[];
   }&gt;;
   inputGraph: CompleteInputGraph;
-  configuration: HarnessConfigurationManifest;
-  configurationDigest: string;
   judgeConfigurationId: string;
-  operatorTrajectory?: OperatorTrajectory;
   diagnosticTraceRef?: string;
   timing: { startedAt: string; completedAt: string; durationMs: number };
   cost?: { currency: &quot;USD&quot;; amount: number };
@@ -1641,15 +1541,15 @@ npm run eval:web
 </code></pre>
 <p>The bundle is immutable evidence. Continuing to chat must never modify it; interactive use clones its accepted graph and pinned configuration into a new product thread.</p>
 <h3>10.8 Promotion to production</h3>
-<p>A candidate is promoted by publishing the exact immutable configuration manifest exercised by the passing eval bundle. Its content digest becomes the production reference resolved by <code>harnessConfigurationRef</code>; promotion does not copy prompts by hand, rebuild an approximate product configuration, or introduce product-only defaults.</p>
+<p>In the first milestone, promotion means mapping the exact passing harness implementation key/version and component build digests into the product harness file. A generalized signed configuration manifest is deferred until there are real prompt or policy ablations to promote.</p>
 <p>Release checks verify:</p>
 <ul>
-<li>the production app resolves the same configuration values recorded in the passing eval bundle;</li>
+<li>the production app resolves the same harness implementation and component versions recorded in the passing eval bundle;</li>
 <li>the Complete request and result contract versions are supported;</li>
 <li>affected capability evals pass relative to the current production baseline;</li>
 <li>no deterministic regression or critical judge regression is introduced;</li>
 <li>at least one saved result is reviewed in the real product UX;</li>
-<li>rollback can restore the previous configuration without migrating graph data backward.</li>
+<li>rollback can restore the previous harness mapping without migrating graph data backward.</li>
 </ul>
 <h2>11. Relayer evaluation replay: See in App</h2>
 <h3>11.1 Eval report action</h3>
@@ -1663,7 +1563,7 @@ npm run eval:web
 <ul>
 <li>the graph canvas renders the exact accepted layer through <code>ProductGraphReadApi</code>;</li>
 <li>the breadcrumb, node inspector, details, authored actions, attached context, and turn arrows behave exactly as they do in a product thread;</li>
-<li>an evaluation banner shows case ID, pass/fail, configuration digest, model, judge version, run time, and cost;</li>
+<li>an evaluation banner shows case ID, pass/fail, harness implementation/version, component build digest, model, judge version, run time, and cost;</li>
 <li>previous/next moves across the case&#39;s interaction steps;</li>
 <li>failed deterministic or judge checks can be opened alongside the node IDs used as evidence;</li>
 <li>diagnostic traces remain behind the developer setting.</li>
@@ -1674,19 +1574,19 @@ npm run eval:web
 <ol>
 <li>clones the selected accepted graph snapshot into a new ordinary thread;</li>
 <li>creates a writable checkout from the bundle&#39;s pinned source repository commit;</li>
-<li>pins the exact <code>HarnessConfigurationManifest.contentDigest</code> used by the eval;</li>
+<li>pins the exact harness implementation key/version and component build digests used by the eval;</li>
 <li>records the source evaluation <code>runId</code> on the new thread;</li>
 <li>enables the normal composer and authored invoke actions;</li>
 <li>sends all new interactions through the production Complete adapter.</li>
 </ol>
-<p>The cloned thread can diverge without changing the evaluation evidence. If the manifest is unavailable, incompatible, or lacks a current credential, Continue is disabled and states the exact missing requirement.</p>
+<p>The cloned thread can diverge without changing the evaluation evidence. If the recorded harness build is unavailable, incompatible, or lacks a current credential, Continue is disabled and states the exact missing requirement.</p>
 <h3>11.4 Deep-link security and tests</h3>
 <p>The desktop accepts only a run ID, never an arbitrary command or filesystem path. The local app server resolves the ID inside the eval catalog, validates bundle and object digests, and rejects path traversal, unsupported schema, missing objects, or mutated artifacts.</p>
 <p>Product tests cover deep-link activation with the app closed or running, duplicate activation, missing run, corrupt bundle, incompatible graph schema, read-only replay, step navigation, evidence display, configuration pinning, copy-on-write continuation, and proof that continuation cannot mutate the source bundle.</p>
 <h1>Part IV — Desktop delivery and acceptance</h1>
 <h2>12. Desktop build, local packaging, signing, and distribution</h2>
 <h3>12.1 V1 desktop shell decision and current gap</h3>
-<p>V1 uses an Electron shell in the Relayer Desktop package of this repository and direct macOS distribution outside the Mac App Store. Relayer Desktop packages the shell, graph renderer, local app server, eval runner, result catalog, and updater. Each desktop release locks and bundles the compatible Relayer Harness package from the same verified source revision, containing the graph engine, Complete implementation, Prime Agent runtime dependencies, Python/IPython capability, graph tools, and graph skill.</p>
+<p>V1 uses an Electron shell and direct macOS distribution outside the Mac App Store. Relayer Desktop packages the shell, graph renderer, Rust app server with the embedded graph core/API, persistent Node harness host, typed graph clients, eval runner, result catalog, and updater. Each release records the exact build digests and versions that passed the bundled compatibility and evaluation checks.</p>
 <p>Electron&#39;s macOS distribution guidance requires code signing and Apple notarization for normal distribution, and its automatic updater requires a signed macOS app. V1 treats those as release gates, not optional polish.</p>
 <p>The repository now has an Electron shell, an unsigned Apple Silicon development package, a fail-closed release contract, CI-produced Developer-ID-signed/notarized Preview artifacts, and a protected exact-artifact Stable promotion workflow. Protected tag workflows published immutable <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code> releases through narrow AWS OIDC roles, and their public artifacts, metadata, checksums, source commits, Gatekeeper acceptance, and stapled notarization tickets were verified. A remote Mac completed the actual in-app update and relaunch through <code>0.2.4</code> with its Codex connection, explicit Preview choice, and Light appearance intact. Protected workflow <code>32105585844</code> promoted the exact <code>0.2.4</code> Preview bytes to Stable, and the installed app successfully consumed the live Stable feed. The macOS 13-through-current matrix, corrupt hosted artifact behavior, and active-Complete restart deferral remain unverified. The app server now owns an initial SQLite schema and fail-closed validation; a real later-version migration and forced-failure recovery test remain separate persistence work. Existing graph-engine, Complete, Prime Agent runtime, graph-tool, and eval code remain behind the Relayer Harness package boundary; Slice 2 packages the desktop without claiming those experimental paths work in the product.</p>
 <h3>12.2 Required developer and release modes</h3>
@@ -1729,9 +1629,9 @@ npm run eval:web
 <p>The build produces an inventory manifest and verifies that the <code>.app</code> contains:</p>
 <ul>
 <li>Electron main/preload code and the built renderer;</li>
-<li>compiled local app server, graph renderer, and Relayer eval runner;</li>
-<li>a lockfile and inventory for the exact bundled Relayer Harness release;</li>
-<li>the Relayer graph engine, Prime Agent package, harness configuration resolver, Python/IPython environment, and <code>relayer_graph</code> skill required by that distribution;</li>
+<li>compiled Rust app server with graph core/API, graph renderer, and Relayer eval runner;</li>
+<li>the persistent Node harness host, exact bundled harness implementations, and TypeScript graph client;</li>
+<li>the Python graph client, Prime Agent package, and Python/IPython environment required when the Prime harness is enabled;</li>
 <li>migration files, default configuration manifests, licenses, and icons;</li>
 <li>no development credentials, cached eval source repositories, user graphs, source maps with secrets, or absolute developer paths.</li>
 </ul>
@@ -1764,28 +1664,33 @@ npm run eval:web
 </thead>
 <tbody><tr>
 <td>Projects, threads, providers, worktrees, persistence, updater, and graph renderer</td>
-<td>Relayer Desktop</td>
+<td>Rust Relayer app server plus Electron Desktop</td>
 <td>Deterministic unit/integration tests plus packaged desktop smoke</td>
 </tr>
 <tr>
-<td>Relayer eval runner, report, immutable catalog, deep links, See in App</td>
-<td>Relayer Desktop</td>
-<td>Fake/replay Complete suite plus browser/desktop E2E</td>
+<td>Rust graph core, local API, token authority, migrations, and resolved layers</td>
+<td>Graph engine crates</td>
+<td>Rust unit/property/transaction tests and server integration tests</td>
 </tr>
 <tr>
-<td>Graph schemas, tools, snapshots, migrations, view projection</td>
-<td>Relayer Harness</td>
-<td>Deterministic graph-engine and view-contract tests</td>
+<td>TypeScript and Python graph clients</td>
+<td>Graph client packages</td>
+<td>Shared cross-language conformance fixtures against the Rust server</td>
 </tr>
 <tr>
-<td><code>complete(inputGraph)</code>, Prime Agent, graph search/reuse/topology</td>
-<td>Relayer Harness</td>
-<td>Relayer basic/capability/hard-task live evals</td>
+<td>Node harness host, session reuse, <code>codex.basic</code>, and later Prime Agent</td>
+<td>Harness-host and harness implementation packages</td>
+<td>Fake-provider lifecycle tests plus opt-in live Complete evals</td>
+</tr>
+<tr>
+<td>Eval runner, immutable catalog, report, and See in App</td>
+<td>Evaluation runner package; Desktop owns final replay UX</td>
+<td>Runner lifecycle tests, real-component basic eval, and browser/desktop replay E2E</td>
 </tr>
 <tr>
 <td>Bundled Relayer Desktop distribution</td>
-<td>Desktop release manifest plus Harness package manifest</td>
-<td>Cross-package compatibility test, signed package smoke, and exact version inventory</td>
+<td>Desktop release inventory</td>
+<td>Cross-component compatibility test, signed package smoke, and exact version/build inventory</td>
 </tr>
 </tbody></table>
 <h3>13.1 Product tests without paid inference</h3>
@@ -1793,27 +1698,28 @@ npm run eval:web
 <ul>
 <li>every visible choice and event in Agent setup, New thread, projects, Git/worktrees, thread management, settings, updates, graph navigation, context attachment, stop, retry, and recovery;</li>
 <li>desktop interaction/session assembly plus Relayer input-graph and workspace-binding assembly for messages, attached context, and node actions;</li>
-<li>graph-engine read/write authorization, schema/version compatibility, run-output lookup, and migration rules;</li>
-<li>staged graph-tool integrity, atomic acceptance, <code>(interactionNodeId, runId)</code> output resolution, snapshot immutability, and exact target-layer rendering;</li>
+<li>graph-engine read/write authorization, active-interaction token checks, schema compatibility, resolved-layer reads, and migration rules;</li>
+<li>node/edge/layer/action validation, recursive submission closure, atomic acceptance, historical immutability, and exact target-layer rendering;</li>
 <li>secret redaction and local persistence boundaries;</li>
 <li>accessibility and visual-structure assertions for all canonical mocks.</li>
 </ul>
 <h3>13.2 Live evaluations</h3>
-<p>Live Prime Agent/model runs are opt-in, metered, and never part of the default <code>npm run check</code>. They run through the evaluation runner, produce bundles, and use pinned configurations. LLM judges are versioned and calibrated against human decisions; their scores are not treated as ground truth.</p>
+<p>Live Codex, Prime Agent, or other model runs are opt-in, metered, and never part of the default <code>npm run check</code>. They run through the evaluation runner and produce immutable bundles. LLM judges are versioned and calibrated against human decisions; their scores are not treated as ground truth.</p>
 <h3>13.3 Human product evaluation</h3>
-<p>Human graders load saved results into the actual desktop graph UX and judge whether they can understand the response, find important detail, follow connections, use actions, and continue the task. This is separate from judging raw JSON or traces. The primary comparison is Complete configuration A versus B on the same pinned source repository and interaction case.</p>
+<p>Human graders load saved results into the actual desktop graph UX and judge whether they can understand the response, find important detail, follow connections, use actions, and continue the task. This is separate from judging raw JSON or traces. Later comparisons hold the case constant and change only the recorded harness implementation/model configuration.</p>
 <h2>14. V1 boundary and open decisions</h2>
 <h3>14.1 Included in V1</h3>
 <ul>
 <li>local profile with Codex or API-key agent login;</li>
-<li>one OSS monorepo containing concrete Relayer Desktop and Relayer Harness packages;</li>
+<li>one OSS monorepo containing graph-engine crates, typed clients, Node harness host, harness implementations, eval runner, Rust Relayer app server, and Electron desktop packages;</li>
 <li>Prime Agent behind the Relayer Complete interface;</li>
 <li>no-folder and project-backed threads;</li>
 <li>non-Git folders, local Git checkout, new worktree, and fork-to-worktree;</li>
 <li>graph messages, corrective or explanatory annotations through attached context, authored node actions, recursive subthreads, turn navigation, stop, retry, and local persistence;</li>
-<li>graph-engine product and harness APIs with explicit compatibility versions;</li>
-<li>exact basic Complete evaluation against a pinned public sample repository, shared source/result catalog, operator navigation, capability evals, replay bundles, quality judging, and human UX review;</li>
-<li>Relayer eval runner/report plus See in App evaluation threads and interactive continuation pinned to the tested harness configuration;</li>
+<li>Rust graph core/API, opaque session-token enforcement, and TypeScript/Python graph clients;</li>
+<li>persistent Node harness host, <code>codex.basic</code> first proof, and Prime Agent production target behind the same Complete boundary;</li>
+<li>exact empty-project Complete evaluation, followed by multi-turn, interaction, grounding, recursive-work, and hard-task capability suites;</li>
+<li>Relayer eval runner/report plus See in App evaluation threads and interactive continuation pinned to the tested harness implementation/build;</li>
 <li>Electron local packages, Developer-ID-signed/notarized macOS distribution, and signed desktop updates.</li>
 </ul>
 <h3>14.2 Excluded or deferred</h3>
@@ -1827,22 +1733,23 @@ npm run eval:web
 <li>a formal side-by-side evaluation application;</li>
 <li>Mac App Store distribution and non-macOS desktop builds;</li>
 <li>canonical user-facing agent-activity or diagnostic-trace views.</li>
+<li>a generalized public harness protocol, user-facing harness catalog, prompt/capability ablation manifest, or harness selector outside developer settings;</li>
 </ul>
 <h3>14.3 Decisions still open</h3>
 <ul>
-<li>final field-level GraphNode, GraphEdge, GraphLayer, NodeAction, and migration schemas consistent with Section 6;</li>
 <li>engine indexing and compaction implementation behind the stable read/write contract;</li>
+<li>whether loopback HTTP is reachable from every supported Codex sandbox or the packaged product needs HTTP over a Unix-domain socket;</li>
 <li>graph search/retrieval policy and when embeddings are worth adding;</li>
 <li>graph topology limits and semantic-grouping rules used by GraphComplete;</li>
-<li>thresholds and calibration examples for the first LLM-judge rubric;</li>
-<li>production configuration-manifest signing and hosting;</li>
+<li>thresholds and calibration examples beyond the fixed first six-fact LLM-judge rubric;</li>
+<li>when multiple real harness ablations justify a generalized signed configuration manifest;</li>
 <li>exact supported macOS floor and release artifact hosting;</li>
 <li>default maximum number of Relayer-managed worktrees, whether the limit is global or per project, and the limit-reached cleanup flow;</li>
 <li>exact thread archive, delete-entry, graph-retention, and remove-local-data behavior;</li>
 <li>exact product persistence database, export bundle, restore, and migration format.</li>
 </ul>
 <h2>15. Product acceptance statement</h2>
-<p>V1 is acceptable when the Relayer Desktop and Relayer Harness packages pass their independent and cross-package contracts; a new local user can install a signed/notarized Relayer Desktop build, configure Prime Agent with Codex or a securely stored provider API key, start a no-folder or project-backed thread, receive an accepted response through the stable graph-engine contract, inspect and navigate the exact movable output layer, use attachments and their annotations, authored actions, recursive subthreads, history, stop, retry, persistence, and updates; and a developer can run <code>basic-graph-conversation-v1</code> from the web runner or CLI, watch an operator use the same graph interaction surfaces, inspect the immutable result through See in App, continue in a normal thread with the exact passing harness configuration, and promote that same configuration and verified desktop artifact without hidden behavioral drift.</p>
+<p>V1 is acceptable when the Rust graph engine/API, TypeScript and Python clients, persistent Node harness host, evaluation runner, Rust Relayer app server, and Electron desktop pass their independent and end-to-end contracts; a developer can run <code>empty-project.task-system.two-turn</code> through <code>codex.basic</code>, receive explicitly submitted graphs from one reused harness session, pass deterministic and judge gates, and inspect both exact results in the Relayer graph UX; and a local user can install a signed/notarized Relayer Desktop build, configure the supported agent, start a no-folder or project-backed thread, reuse the same live harness session across turns, inspect and navigate exact movable layers, use context and authored actions, and preserve projects, threads, graph state, and settings across restart and update.</p>
 </main>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11.16.1/dist/mermaid.min.js"></script>
   <script>
@@ -2012,7 +1919,7 @@ npm run eval:web
       });
       window.addEventListener('resize', () => goToPage(activePage, 'auto'));
 
-      const annotationStorageKey = 'relayer-graphcomplete:prd-comments:v1';
+      const annotationStorageKey = 'relayer-graphcomplete:prd-annotations:v1';
       let annotationDocument = { schemaVersion: 1, document: 'docs/prd/index.html', updatedAt: null, annotations: [] };
       let annotationBackend = 'file';
       let pendingAnnotation = null;
@@ -2086,7 +1993,7 @@ npm run eval:web
       };
 
       const annotationLabel = (annotation) => {
-        if (annotation.target?.kind === 'text') return '“' + annotation.target.quote.trim().replace(/\s+/g, ' ').slice(0, 76) + '”';
+        if (annotation.target?.kind === 'text') return '“' + annotation.target.quote.trim().replace(/s+/g, ' ').slice(0, 76) + '”';
         if (annotation.target?.kind === 'image') return annotation.target.alt || 'Image';
         if (annotation.target?.kind === 'embed') return annotation.target.title || 'Interactive mock';
         return annotation.section?.label || 'Section';
@@ -2254,7 +2161,7 @@ npm run eval:web
           if (!startPath || !endPath) return;
           const quote = range.toString();
           const target = {
-            preview: quote.trim().replace(/\s+/g, ' ').slice(0, 240),
+            preview: quote.trim().replace(/s+/g, ' ').slice(0, 240),
             section: { index: pageIndex, label: page.dataset.label },
             target: { kind: 'text', quote, startPath, endPath, startOffset: range.startOffset, endOffset: range.endOffset },
           };
