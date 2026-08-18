@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-18",
+  "environment": {
+    "host": "remote-mac-mini",
+    "architecture": "arm64",
+    "macOS": "15.6"
+  },
+  "seed": {
+    "version": "0.2.2",
+    "sourceCommit": "1069a8ed1ddf91359817f91d4af06f234cd0c3dc",
+    "workflowRunId": "32098888395",
+    "dmgSha256": "129185ee50c5f25f381a0a169cbe6daef54d1ffff0477e40266c37227fbde389",
+    "zipSha256": "dc96b69869f219d83ba9fa324b1495347b6e7d4ef12a23b293c287df10b31b5e",
+    "developerIdVerified": true,
+    "gatekeeperAccepted": true,
+    "appStapleValidated": true,
+    "dmgStapleValidated": true,
+    "electronSquirrelPreventDowngradesPresent": false
+  },
+  "target": {
+    "version": "0.2.3",
+    "sourceCommit": "07935eda20e6e1fd4312ede96df71fcf9297cd27",
+    "workflowRunId": "32099544204",
+    "dmgSha256": "7f23f15df503f3f1ff791ab5d3bd8379b53d8eb2f3ad9c37f7802497e7c91df9",
+    "zipSha256": "dd69cedbaaefc7b4e54e5e9eb953eb126aa19ac581960c5b5659b7e7e7f4f352"
+  },
+  "productFlow": [
+    { "phase": "idle", "version": "0.2.2", "channel": "preview", "error": null },
+    { "phase": "available", "version": "0.2.2", "availableVersion": "0.2.3", "error": null },
+    { "phase": "downloading", "version": "0.2.2", "availableVersion": "0.2.3", "error": null },
+    { "phase": "ready", "version": "0.2.2", "availableVersion": "0.2.3", "error": null },
+    { "phase": "installed-and-relaunched", "version": "0.2.3", "channel": "preview", "error": null }
+  ],
+  "postUpdate": {
+    "installedVersion": "0.2.3",
+    "running": true,
+    "codeSignatureVerified": true,
+    "electronSquirrelPreventDowngradesPresent": false,
+    "codexAccountConnected": true,
+    "appearance": "light",
+    "channel": "preview",
+    "updateStatus": "idle"
+  },
+  "screenshots": {
+    "baseline": {
+      "file": "signed-preview-0.2.2-baseline.png",
+      "sha256": "a926913fd5bb8792e0a2231b94b32d20571ddf6f832797649a7192f250b65d99"
+    },
+    "available": {
+      "file": "signed-preview-0.2.2-update-available.png",
+      "sha256": "652940fc92671aed80fcabdf865c830c2f52358c9626953ec7d7493a0d0a4c9b"
+    },
+    "prompt": {
+      "file": "signed-preview-0.2.2-update-prompt.png",
+      "sha256": "febc0987d685cc28f6540a352929b22b1cd178c46840bc224f84ebb4009bd934"
+    },
+    "downloading": {
+      "file": "signed-preview-0.2.2-updating.png",
+      "sha256": "97e3909dbd6cad8c628754d59bca6cb1a7e394f252dfd9fb8a64ba3056c029d8"
+    },
+    "ready": {
+      "file": "signed-preview-0.2.2-ready.png",
+      "sha256": "b3ade23ae771f20cdeada0637d3c4cd2ff38d1c2f3edc5986d33bdb697ae5535"
+    },
+    "installed": {
+      "file": "signed-preview-0.2.3-installed.png",
+      "sha256": "29d874c183c158459ac1d770dea5e54258026b1eb6bb2fee4677a8b9a30ff797"
+    }
+  },
+  "observedFollowUp": {
+    "progressCanRegressWhileSquirrelStagesTheDownloadedZip": true,
+    "blocking": false
+  }
+}
