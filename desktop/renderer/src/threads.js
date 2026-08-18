@@ -62,6 +62,7 @@ export async function refreshState(threadId = viewState.currentThreadId) {
 export async function loadThread(threadId) {
   viewState.currentThreadId = threadId;
   viewState.currentInteractionId = null;
+  setMainView("thread");
   const url = new URL(location.href);
   url.searchParams.set("threadId", threadId);
   history.replaceState(null, "", url);

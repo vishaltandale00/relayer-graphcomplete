@@ -158,6 +158,7 @@ describe("desktop skeleton", () => {
     expect(packaging).toContain('to: "renderer"');
     expect(threads).not.toContain("/messages");
     expect(threads).not.toContain("EventSource");
+    expect(threads).toMatch(/function loadThread[\s\S]*setMainView\("thread"\);[\s\S]*refreshState\(threadId\)/);
     expect(rendererMain).not.toContain("/messages");
     expect(rendererMain).not.toContain("/interrupt");
     expect(prd).toContain('src="assets/product-walkthrough.html"');
