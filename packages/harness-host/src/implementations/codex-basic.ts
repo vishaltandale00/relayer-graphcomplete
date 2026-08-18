@@ -1,4 +1,4 @@
-import { Codex } from "@openai/codex-sdk";
+import { Codex, type ApprovalMode, type ModelReasoningEffort, type SandboxMode, type ThreadOptions, type WebSearchMode } from "@openai/codex-sdk";
 import { RelayerGraphClient, type CompletionOutput, type GraphCapability, type GraphNode } from "@relayer/graph-client";
 import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessSessionState } from "../types.js";
 
@@ -11,11 +11,23 @@ export interface CodexBasicDependencies {
   readonly clientModuleUrl?: string;
 }
 
+interface CodexBasicConfiguration {
+  readonly model?: string;
+  readonly modelReasoningEffort?: ModelReasoningEffort;
+  readonly sandboxMode?: SandboxMode;
+  readonly approvalPolicy?: ApprovalMode;
+  readonly networkAccessEnabled?: boolean;
+  readonly webSearchMode?: WebSearchMode;
+  readonly skipGitRepoCheck?: boolean;
+  readonly additionalDirectories?: readonly string[];
+}
+
 export class CodexBasicHarness implements Harness {
   private graphClient: RelayerGraphClient;
   private codex: Codex;
   private graph: GraphCapability;
   private readonly clientModuleUrl: string;
+  private readonly threadOptions: CodexBasicConfiguration;
   private thread: CodexThread | undefined;
   private codexThreadId: string | undefined;
 
@@ -24,10 +36,8 @@ export class CodexBasicHarness implements Harness {
     this.graphClient = new RelayerGraphClient(context.graph);
     this.codex = this.createCodex(context.graph);
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
-    if (context.savedState !== undefined && context.savedState.schemaVersion !== 1) {
-      throw new Error(`Unsupported codex.basic session state version: ${context.savedState.schemaVersion}`);
-    }
-    const codexThreadId = context.savedState?.values.codexThreadId;
+    this.threadOptions = parseCodexBasicConfiguration(context);
+    const codexThreadId = context.savedState?.codexThreadId;
     this.codexThreadId = typeof codexThreadId === "string" ? codexThreadId : undefined;
   }
 
@@ -56,10 +66,7 @@ export class CodexBasicHarness implements Harness {
   }
 
   state(): HarnessSessionState {
-    return {
-      schemaVersion: 1,
-      values: this.codexThreadId === undefined ? {} : { codexThreadId: this.codexThreadId },
-    };
+    return this.codexThreadId === undefined ? {} : { codexThreadId: this.codexThreadId };
   }
 
   private createCodex(graph: GraphCapability): Codex {
@@ -71,12 +78,11 @@ export class CodexBasicHarness implements Harness {
   }
 
   private openThread(): CodexThread {
-    const options = {
+    const { additionalDirectories, ...configuredOptions } = this.threadOptions;
+    const options: ThreadOptions = {
       workingDirectory: this.context.workingDirectory,
-      skipGitRepoCheck: true,
-      sandboxMode: "workspace-write" as const,
-      approvalPolicy: "never" as const,
-      networkAccessEnabled: true,
+      ...configuredOptions,
+      ...(additionalDirectories === undefined ? {} : { additionalDirectories: [...additionalDirectories] }),
     };
     return this.codexThreadId === undefined ? this.codex.startThread(options) : this.codex.resumeThread(this.codexThreadId, options);
   }
@@ -100,6 +106,66 @@ The module exports RelayerGraphClient, NodeObject, EdgeObject, and LayerObject. 
 
 The visible layer must contain 1 to 8 nodes and must be connected. Layer edges are exactly what the user sees. If a graph call rejects an object, read its error message, repair only that object, and retry. The graph is complete only after graph.submit succeeds.`;
   }
+}
+
+function parseCodexBasicConfiguration(context: HarnessFactoryContext): CodexBasicConfiguration {
+  const selected = context.configuration;
+  if (selected.implementation !== CODEX_BASIC_KEY) {
+    throw new Error(`codex.basic cannot run implementation ${selected.implementation}`);
+  }
+  if (selected.implementationVersion !== 1) {
+    throw new Error(`Unsupported codex.basic implementation version: ${selected.implementationVersion}`);
+  }
+  const configuration = selected.settings;
+  const allowed = new Set(["model", "modelReasoningEffort", "sandboxMode", "approvalPolicy", "networkAccessEnabled", "webSearchMode", "skipGitRepoCheck", "additionalDirectories"]);
+  const unknown = Object.keys(configuration).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) throw new Error(`Unknown codex.basic configuration field: ${unknown.join(", ")}`);
+
+  const model = optionalString(configuration.model, "model");
+  const modelReasoningEffort = optionalEnum(configuration.modelReasoningEffort, ["minimal", "low", "medium", "high", "xhigh"] as const, "modelReasoningEffort");
+  const sandboxMode = optionalEnum(configuration.sandboxMode, ["read-only", "workspace-write", "danger-full-access"] as const, "sandboxMode");
+  const approvalPolicy = optionalEnum(configuration.approvalPolicy, ["never", "on-request", "on-failure", "untrusted"] as const, "approvalPolicy");
+  const webSearchMode = optionalEnum(configuration.webSearchMode, ["disabled", "cached", "live"] as const, "webSearchMode");
+  const networkAccessEnabled = optionalBoolean(configuration.networkAccessEnabled, "networkAccessEnabled");
+  const skipGitRepoCheck = optionalBoolean(configuration.skipGitRepoCheck, "skipGitRepoCheck");
+  const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
+
+  return {
+    ...(model === undefined ? {} : { model }),
+    ...(modelReasoningEffort === undefined ? {} : { modelReasoningEffort }),
+    ...(sandboxMode === undefined ? {} : { sandboxMode }),
+    ...(approvalPolicy === undefined ? {} : { approvalPolicy }),
+    ...(networkAccessEnabled === undefined ? {} : { networkAccessEnabled }),
+    ...(webSearchMode === undefined ? {} : { webSearchMode }),
+    ...(skipGitRepoCheck === undefined ? {} : { skipGitRepoCheck }),
+    ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
+  };
+}
+
+function optionalString(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.trim() === "") throw new Error(`codex.basic ${field} must be a non-empty string`);
+  return value;
+}
+
+function optionalBoolean(value: unknown, field: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") throw new Error(`codex.basic ${field} must be a boolean`);
+  return value;
+}
+
+function optionalEnum<const T extends readonly string[]>(value: unknown, allowed: T, field: string): T[number] | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !allowed.includes(value)) throw new Error(`codex.basic ${field} must be one of: ${allowed.join(", ")}`);
+  return value as T[number];
+}
+
+function optionalStringArray(value: unknown, field: string): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || entry.trim() === "")) {
+    throw new Error(`codex.basic ${field} must be an array of non-empty strings`);
+  }
+  return value;
 }
 
 export function createCodexBasicFactory(dependencies: CodexBasicDependencies = {}): HarnessFactory {

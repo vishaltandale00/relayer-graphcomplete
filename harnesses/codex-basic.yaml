@@ -1,0 +1,9 @@
+schemaVersion: 1
+name: codex-basic
+implementation: codex.basic
+implementationVersion: 1
+settings:
+  sandboxMode: workspace-write
+  approvalPolicy: never
+  networkAccessEnabled: true
+  skipGitRepoCheck: true

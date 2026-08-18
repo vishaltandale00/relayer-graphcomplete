@@ -6,15 +6,23 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EdgeObject, LayerObject, NodeObject, RelayerGraphClient, type CompletionOutput, type GraphCapability, type GraphNode } from "@relayer/graph-client";
-import { startHarnessHost, productHarnessMap, type Harness, type HarnessFactory, type HarnessSessionState } from "@relayer/harness-host";
+import { loadHarnessConfiguration, productHarnessImplementations, startHarnessHost, type Harness, type HarnessConfiguration, type HarnessFactory, type HarnessSessionState } from "@relayer/harness-host";
 
 export const basicEvalPrompt = "A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.";
 export const basicEvalFollowUpPrompt = "Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.";
+const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
+const fixtureHarnessConfiguration: HarnessConfiguration = {
+  schemaVersion: 1,
+  name: "fixture-task-system",
+  implementation: "fixture.task-system",
+  implementationVersion: 1,
+  settings: {},
+};
 
 export const basicEvalFacts = [
   { id: "enters-queue", description: "Tasks enter the incoming queue.", patterns: [/task.{0,30}(enter|arriv).{0,30}queue/i, /incoming queue/i] },
   { id: "worker-claims", description: "An available worker claims a queued task.", patterns: [/worker.{0,40}(claim|take|pull|pick)/i] },
-  { id: "two-active-limit", description: "At most two tasks can be active.", patterns: [/(at most|maximum|max|up to).{0,15}two/i, /two.{0,20}(active|concurrent|workers)/i] },
+  { id: "two-active-limit", description: "At most two tasks can be active.", patterns: [/(at most|maximum|max|up to).{0,15}two/i, /two.{0,20}(active|concurrent|workers)/i, /both.{0,30}busy.{0,30}no new task (starts|can start)/i] },
   { id: "wait-when-busy", description: "Additional tasks wait while both workers are busy.", patterns: [/(wait|remain|stay).{0,35}queue/i, /both workers.{0,35}busy/i] },
   { id: "write-result", description: "A completed task is written to the results store.", patterns: [/(result|output).{0,35}(store|write|save)/i, /(store|write|save).{0,35}(result|output)/i] },
   { id: "claim-next", description: "A freed worker claims the next queued task.", patterns: [/(free|available|finish).{0,45}(next|queue)/i, /(next).{0,35}(worker|claim|task)/i] },
@@ -45,7 +53,7 @@ export interface BasicJudge { readonly factIds: readonly string[]; readonly grap
 class TaskSystemFixtureHarness implements Harness {
   constructor(private graph: RelayerGraphClient) {}
   setGraphCapability(graph: GraphCapability): void { this.graph = new RelayerGraphClient(graph); }
-  state(): HarnessSessionState { return { schemaVersion: 1, values: {} }; }
+  state(): HarnessSessionState { return {}; }
   async complete(interaction: GraphNode): Promise<CompletionOutput> {
     const queue = new NodeObject("queue", "Incoming queue", "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.", "concept", "queue");
     const workers = new NodeObject("workers", "Two-worker pool", "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.", "concept", "workers");
@@ -74,18 +82,20 @@ export async function runBasicRuntimeEval(options: { outputDirectory: string; li
     const threadId = 1;
     let harnessFactoryCalls = 0;
     const fixtureFactory: HarnessFactory = (context) => new TaskSystemFixtureHarness(new RelayerGraphClient(context.graph));
-    const harnessKey = options.live ? "codex.basic" : "fixture.task-system";
-    const registeredHarnesses = productHarnessMap({ "fixture.task-system": fixtureFactory });
-    const selectedFactory = registeredHarnesses[harnessKey];
-    if (selectedFactory === undefined) throw new Error(`Unknown eval harness: ${harnessKey}`);
-    const harnesses = {
-      ...registeredHarnesses,
-      [harnessKey]: ((context) => {
+    const configuration = options.live
+      ? await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-basic.yaml"))
+      : fixtureHarnessConfiguration;
+    const registeredImplementations = productHarnessImplementations({ "fixture.task-system": fixtureFactory });
+    const selectedFactory = registeredImplementations[configuration.implementation];
+    if (selectedFactory === undefined) throw new Error(`Unknown eval harness implementation: ${configuration.implementation}`);
+    const implementations = {
+      ...registeredImplementations,
+      [configuration.implementation]: ((context) => {
         harnessFactoryCalls += 1;
         return selectedFactory(context);
       }) satisfies HarnessFactory,
     };
-    harnessHost = await startHarnessHost({ harnesses, stateFile: join(stateDirectory, "harness-sessions.json"), controlToken });
+    harnessHost = await startHarnessHost({ implementations, stateFile: join(stateDirectory, "harness-sessions.json"), controlToken });
 
     const capabilities: GraphCapability[] = [];
     const turns: RuntimeEvalTurn[] = [];
@@ -93,7 +103,7 @@ export async function runBasicRuntimeEval(options: { outputDirectory: string; li
       const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, controlToken, { projectId, threadId, text: prompt });
       const capability = { url: graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
-      await requestJson(`${harnessHost.url}/sessions`, controlToken, { threadId, harnessKey, workingDirectory, graph: capability }, 201);
+      await requestJson(`${harnessHost.url}/sessions`, controlToken, { threadId, configuration, workingDirectory, graph: capability }, 201);
       const complete = await requestJson<{ output: CompletionOutput }>(`${harnessHost.url}/sessions/${threadId}/complete`, controlToken, { nodeId: interaction.node.id });
       const checks = checkBasicOutput(complete.output, interaction.node.id);
       const deterministicPassed = checks.every((check) => check.passed);
@@ -113,7 +123,7 @@ export async function runBasicRuntimeEval(options: { outputDirectory: string; li
     ];
     const deterministicPassed = sessionChecks.every((check) => check.passed) && turns.every((turn) => turn.checks.every((check) => check.passed));
     const passed = deterministicPassed && turns.every((turn) => turn.passed);
-    const artifact: RuntimeEvalArtifact = { schemaVersion: 2, caseId: "empty-project.task-system.two-turn", runId, createdAt: new Date().toISOString(), harness: harnessKey, turns, sessionChecks, deterministicPassed, passed };
+    const artifact: RuntimeEvalArtifact = { schemaVersion: 2, caseId: "empty-project.task-system.two-turn", runId, createdAt: new Date().toISOString(), harness: configuration.name, turns, sessionChecks, deterministicPassed, passed };
     const runDirectory = join(resolve(options.outputDirectory), runId);
     await mkdir(runDirectory, { recursive: true });
     await writeFile(join(runDirectory, "result.json"), `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
@@ -175,7 +185,6 @@ export function judgeVisibleGraph(output: CompletionOutput): { nodes: readonly {
 }
 
 async function startGraphServer(binary: string | undefined, database: string, controlToken: string, readyTimeoutMs = 10_000): Promise<{ url: string; process: ChildProcessWithoutNullStreams }> {
-  const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
   const executable = resolve(binary ?? process.env.RELAYER_GRAPH_SERVER_BIN ?? join(repositoryRoot, "target/debug/relayer-graph-server"));
   try { await access(executable); } catch { throw new Error(`Rust graph server not found at ${executable}. Run: cargo build -p relayer-graph-server`); }
   await mkdir(resolve(database, ".."), { recursive: true });

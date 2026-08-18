@@ -18,7 +18,7 @@ Pre-alpha executable runtime slice. The repository now includes:
 
 - a Rust SQLx/SQLite graph core and async loopback server with interaction-scoped capability tokens;
 - object-based TypeScript and Python clients for nodes, undirected edges, layers, actions, and submission;
-- a persistent Node harness host that caches one harness object per thread, persists versioned provider session state without graph credentials, and supports cancellation and deterministic disposal;
+- a persistent Node harness host that loads named file-backed configurations, caches one harness object per thread, persists opaque provider resume state without graph credentials, and supports cancellation and deterministic disposal;
 - a graph-tool `codex.basic` harness using the OpenAI Codex TypeScript SDK;
 - an inference-free evaluation that starts the real Rust server and Node host, checks two interactions in one empty-project thread, and saves a turn-navigable movable-node HTML result;
 - Rust, TypeScript, Python, and process-level integration tests.
@@ -52,7 +52,7 @@ The default case is deterministic and makes no inference calls. It launches the 
 npm run eval:basic
 ```
 
-The opt-in live path uses `@openai/codex-sdk`, reuses the local Codex login, runs `codex.basic`, and then runs the structured judge:
+The opt-in live path loads `harnesses/codex-basic.yaml`, resolves its `codex.basic` implementation, reuses the local Codex login, and then runs the structured judge:
 
 ```sh
 npm run eval:basic:live

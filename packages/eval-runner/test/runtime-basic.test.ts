@@ -11,6 +11,7 @@ describe("first runtime evaluation", () => {
   it("recognizes equivalent concurrency language and gives the judge endpoint-resolvable node IDs", () => {
     const concurrency = basicEvalFacts.find((fact) => fact.id === "two-active-limit")!;
     expect(concurrency.patterns.some((pattern) => pattern.test("allowing up to two tasks to run at the same time"))).toBe(true);
+    expect(concurrency.patterns.some((pattern) => pattern.test("While both workers are busy: no new task starts."))).toBe(true);
     const visible = judgeVisibleGraph({
       nodeId: 1,
       rootAction: { id: 1, sourceNodeId: 1, kind: "navigate", label: "Response", targetLayerId: 3, response: true, state: "accepted" },

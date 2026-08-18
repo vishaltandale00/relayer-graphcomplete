@@ -82,7 +82,14 @@ Model and thinking level are separate choices. The runtime must fail clearly whe
 
 ## Basic Codex reference harness and eval
 
-`codex.basic` proves the harness boundary before the production Prime Agent policy is implemented. The string key resolves through a code-owned implementation map; selector UI, prompt ablations, and generalized capability configuration are deferred.
+`codex.basic` proves the harness boundary before the production Prime Agent policy is implemented. A named YAML configuration selects the `codex.basic` implementation and contains only that implementation's settings. The host treats those settings as opaque; the selected implementation validates and interprets them. A code-owned implementation map still connects implementation types to executable factories, so adding a Prime Agent configuration does not require adding Prime Agent-specific fields to the host.
+
+Configuration, implementation code, session state, and live authority are deliberately separate:
+
+1. Files such as `harnesses/codex-basic.yaml` are durable production configurations. Each has a unique `name`, while `implementation` selects executable code. Many configurations commonly select the same implementation with different settings.
+2. The implementation registry maps `codex.basic`, `prime-agent`, or a test implementation to a factory.
+3. The host copies the selected configuration onto the thread and persists the implementation's opaque JSON resume state. For `codex.basic`, that state is only the Codex thread ID.
+4. The current graph URL, token, and interaction node are live capabilities. They are rotated between turns and are never written to the harness state file.
 
 The reference harness uses the TypeScript Codex SDK with the existing local Codex login. It keeps one resumable Codex thread per Relayer thread and asks Codex to execute the TypeScript graph client. The graph is not returned as structured JSON: Codex submits objects to the Rust engine, reacts to repairable validation errors, and ends with `graph.submit(interactionNode)`.
 
@@ -107,7 +114,7 @@ The root `src` directory contains only the canonical GraphComplete boundary and 
 
 The standalone server keeps only an in-memory map from opaque graph capability token to root `NodeId`. It does not cache project/thread authority supplied by the caller. After a server restart, the trusted control authority can remint a token for a persisted canonical interaction node; ordinary harness clients cannot. Each request resolves a short-lived `GraphWriter` from the persisted node, so graph authority is never reconstructed from caller-supplied project/thread values. `GraphDatabase` is cheaply cloneable because it holds an async SQLx pool; SQLite writes use short `BEGIN IMMEDIATE` transactions while reads remain pooled, and the HTTP server never holds a Rust lock across agent work.
 
-Registering a newer interaction for an existing thread is serialized on that thread's host queue. The live harness object receives the replacement capability, but the host persists only the thread binding and the harness implementation's versioned resumable state. Graph URLs, tokens, and interaction-node capabilities remain live runtime authority and never enter the harness state file. After a host or graph-server restart, trusted control code must remint and register a fresh capability before the host recreates the harness object. `codex.basic` then rebuilds its lightweight SDK execution wrapper with the fresh URL, token, and node ID while resuming the same persisted Codex thread ID; it does not start a new provider conversation.
+Registering a newer interaction for an existing thread is serialized on that thread's host queue. The live harness object receives the replacement capability, but the host persists only the thread's copied harness configuration and the implementation's opaque JSON resume state. Graph URLs, tokens, and interaction-node capabilities remain live runtime authority and never enter the harness state file. After a host or graph-server restart, trusted control code must remint and register a fresh capability before the host recreates the harness object. `codex.basic` then rebuilds its lightweight SDK execution wrapper with the fresh URL, token, and node ID while resuming the same persisted Codex thread ID; it does not start a new provider conversation.
 
 Harness factories may initialize asynchronously so provider runtimes such as Prime Agent can open durable sessions before registration completes. The host serializes both first construction and capability rotation per thread, forwards cancellation through an `AbortSignal`, aborts active work during shutdown, and disposes every live harness object exactly once.
 
