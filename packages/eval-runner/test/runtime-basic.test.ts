@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { productHarnessImplementations } from "@relayer/harness-host";
+import type { CompletionOutput } from "@relayer/graph-client";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
-import { basicEvalCaseId, basicEvalFacts, checkBasicFacts, checkBasicOutput, executionDirectory, judgeVisibleGraph, renderArtifact, runBasicRuntimeEval } from "../src/runtime-basic.js";
+import { basicEvalCaseId, basicEvalFacts, checkBasicFacts, checkBasicOutput, checkNodeNavigation, executionDirectory, judgeVisibleGraph, renderArtifact, runBasicRuntimeEval } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -18,6 +19,19 @@ function fixtureExecution() {
     harnessConfigurationNames: [taskSystemFixtureConfiguration.name],
     judgeConfiguration: { name: "none" as const },
   }, new Map([[taskSystemFixtureConfiguration.name, taskSystemFixtureConfiguration]]))[0]!;
+}
+
+function navigationOutput(actions: CompletionOutput["rootLayer"]["actions"] = []): CompletionOutput {
+  return {
+    nodeId: 1,
+    rootAction: { id: 1, sourceNodeId: 1, kind: "navigate" as const, label: "Response", targetLayerId: 3, response: true, state: "accepted" as const },
+    rootLayer: {
+      layer: { id: 3, nodes: [2], edges: [], state: "accepted" as const },
+      nodes: [{ id: 2, kind: "concept", icon: "N", title: "Overview", detail: "Details", state: "accepted" as const }],
+      edges: [],
+      actions,
+    },
+  };
 }
 
 describe("first runtime evaluation", () => {
@@ -56,6 +70,25 @@ describe("first runtime evaluation", () => {
     expect(checks.find((check) => check.name === "accepted-closure")?.passed).toBe(false);
     expect(checks.some((check) => check.name.startsWith("fact:"))).toBe(false);
     expect(checkBasicFacts(mismatched).some((check) => check.name.startsWith("fact:"))).toBe(true);
+  });
+
+  it("distinguishes a node-level child-layer action from the required response action", () => {
+    const output = navigationOutput();
+    expect(checkNodeNavigation(output)).toEqual([
+      expect.objectContaining({ name: "node-navigation", passed: false }),
+    ]);
+    const withNavigation = navigationOutput([{
+      id: 9,
+      sourceNodeId: output.rootLayer.nodes[0]!.id,
+      kind: "navigate",
+      label: "Open details",
+      targetLayerId: 10,
+      response: false,
+      state: "accepted" as const,
+    }]);
+    expect(checkNodeNavigation(withNavigation)).toEqual([
+      expect.objectContaining({ name: "node-navigation", passed: true }),
+    ]);
   });
 
   it("runs two interactions through one live harness object and saves both fixture graphs", async () => {

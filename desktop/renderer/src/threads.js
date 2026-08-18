@@ -6,6 +6,22 @@ import { $, threadTitle, toast } from "./ui.js";
 import { addLocalThread } from "./thread-model.js";
 
 let creatingFirstThread = false;
+let pendingRefreshTimer;
+const PENDING_REFRESH_INTERVAL_MS = 500;
+
+function schedulePendingRefresh(threadId) {
+  clearTimeout(pendingRefreshTimer);
+  pendingRefreshTimer = undefined;
+  const hasPendingInteraction = appState.interactions.some((interaction) => (
+    String(interaction.threadId) === String(threadId)
+    && ["not_started", "running", "submitted"].includes(interaction.completionStatus)
+  ));
+  if (!threadId || !hasPendingInteraction) return;
+  pendingRefreshTimer = setTimeout(() => {
+    if (String(viewState.currentThreadId) !== String(threadId)) return;
+    void refreshState(threadId).catch(() => schedulePendingRefresh(threadId));
+  }, PENDING_REFRESH_INTERVAL_MS);
+}
 
 export async function refreshState(threadId = viewState.currentThreadId) {
   if (!productApiAvailable) {
@@ -40,6 +56,7 @@ export async function refreshState(threadId = viewState.currentThreadId) {
   if (viewState.mainView === "settings") setMainView("settings");
   else if (viewState.currentThreadId) renderThread();
   else setMainView("new");
+  schedulePendingRefresh(viewState.currentThreadId);
 }
 
 export async function loadThread(threadId) {

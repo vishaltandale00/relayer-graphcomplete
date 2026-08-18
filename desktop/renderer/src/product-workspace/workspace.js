@@ -17,6 +17,10 @@ function hash(value) {
 
 export const GRAPH_NODE_ICON_RADIUS = 24;
 
+export function graphScreenPoint(point, camera) {
+  return { x: point.x + camera.x, y: point.y + camera.y };
+}
+
 export function graphEdgeSegment(source, target, radius = GRAPH_NODE_ICON_RADIUS) {
   const dx = target.x - source.x;
   const dy = target.y - source.y;
@@ -54,6 +58,8 @@ export function createProductWorkspace({
   let graphSignature = "";
   let graphThreadId = "";
   let dragging = null;
+  let panning = null;
+  let camera = { x: 0, y: 0 };
 
   const $ = (selector) => root.querySelector(selector);
   const $$ = (selector) => [...root.querySelectorAll(selector)];
@@ -64,6 +70,36 @@ export function createProductWorkspace({
   $("#closeInspector").onclick = () => $("#inspector").classList.add("hidden");
   $("#previousTurn").onclick = () => onSelectTurn(-1);
   $("#nextTurn").onclick = () => onSelectTurn(1);
+  const graphStage = $("#graphStage");
+  graphStage.onpointerdown = (event) => {
+    if (event.target.closest?.(".graph-node, button") || event.button !== 0) return;
+    panning = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startCameraX: camera.x,
+      startCameraY: camera.y,
+    };
+    graphStage.classList.add("panning");
+    graphStage.setPointerCapture(event.pointerId);
+  };
+  graphStage.onpointermove = (event) => {
+    if (!panning || panning.pointerId !== event.pointerId) return;
+    camera.x = panning.startCameraX + event.clientX - panning.startClientX;
+    camera.y = panning.startCameraY + event.clientY - panning.startClientY;
+    drawGraph();
+  };
+  const finishPan = (event) => {
+    if (!panning || panning.pointerId !== event.pointerId) return;
+    panning = null;
+    graphStage.classList.remove("panning");
+  };
+  graphStage.onpointerup = finishPan;
+  graphStage.onpointercancel = finishPan;
+  $("#recenterGraph").onclick = () => {
+    camera = { x: 0, y: 0 };
+    drawGraph();
+  };
   const prompt = $("#threadPrompt");
   const send = $("#sendInteraction");
   prompt.oninput = () => { send.disabled = !prompt.value.trim(); };
@@ -125,14 +161,17 @@ export function createProductWorkspace({
 
   function renderRunState(state) {
     const status = state.status || "idle";
+    const pending = ["not_started", "running", "submitted"].includes(status);
     const display = status === "accepted" ? "Complete"
-      : status === "submitted" ? "Submitted"
-        : status === "running" ? "Thinking"
-          : status === "idle" ? "Ready"
-            : status[0].toUpperCase() + status.slice(1);
+      : pending ? "…"
+        : status === "idle" ? "Ready"
+          : status[0].toUpperCase() + status.slice(1);
     const runState = $("#runState");
-    runState.className = `run-state ${status === "running" ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
+    runState.className = `run-state ${pending ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
+    runState.setAttribute("aria-label", pending ? "Waiting for graph" : display);
     runState.querySelector("span").textContent = display;
+    prompt.disabled = !capabilities.canCompose || pending;
+    send.disabled = prompt.disabled || !prompt.value.trim();
   }
 
   function renderGraph(state, thread) {
@@ -140,10 +179,12 @@ export function createProductWorkspace({
     $("#graphEmpty").classList.toggle("hidden", responseNodes.length > 0);
     $("#graphStage").classList.toggle("hidden", responseNodes.length === 0);
     if (!responseNodes.length) {
-      const message = state.status === "failed" ? "This interaction failed before producing an accepted graph."
-        : state.status === "running" ? "Relayer is building the graph…"
-          : "This interaction has no accepted graph yet.";
-      $("#graphEmpty p").textContent = message;
+      const pending = ["not_started", "running", "submitted"].includes(state.status);
+      $("#thinkingDots").classList.toggle("hidden", !pending);
+      $("#graphEmptyMessage").classList.toggle("hidden", pending);
+      $("#graphEmptyMessage").textContent = state.status === "failed"
+        ? "This interaction failed before producing an accepted graph."
+        : "This interaction has no accepted graph yet.";
       return;
     }
 
@@ -152,6 +193,7 @@ export function createProductWorkspace({
     const previous = nextThreadId === graphThreadId
       ? new Map(graphNodes.map((node) => [node.id, node]))
       : new Map();
+    if (nextThreadId !== graphThreadId) camera = { x: 0, y: 0 };
     graphThreadId = nextThreadId;
     graphNodes = responseNodes.map((node, index) => {
       const prior = previous.get(node.id);
@@ -190,6 +232,7 @@ export function createProductWorkspace({
       element.onclick = () => selectNode(state, element.dataset.node);
       element.onpointerdown = (event) => {
         event.preventDefault();
+        event.stopPropagation();
         const node = graphNodes.find((candidate) => String(candidate.id) === element.dataset.node);
         dragging = node ? {
           node,
@@ -207,8 +250,8 @@ export function createProductWorkspace({
           event.clientY - dragging.startClientY,
         );
         dragging.moved ||= distance >= 3;
-        dragging.node.x = Math.max(82, Math.min(rect.width - 82, event.clientX - rect.left));
-        dragging.node.y = Math.max(32, Math.min(rect.height - 76, event.clientY - rect.top));
+        dragging.node.x = event.clientX - rect.left - camera.x;
+        dragging.node.y = event.clientY - rect.top - camera.y;
         dragging.node.vx = 0;
         dragging.node.vy = 0;
         if (dragging.moved) dragging.node.pinned = true;
@@ -280,8 +323,8 @@ export function createProductWorkspace({
       }
       node.vx = (node.vx + (centerX - node.x) * 0.0014) * 0.88;
       node.vy = (node.vy + (centerY - node.y) * 0.0014) * 0.88;
-      node.x = Math.max(82, Math.min(bounds.width - 82, node.x + node.vx));
-      node.y = Math.max(32, Math.min(bounds.height - 76, node.y + node.vy));
+      node.x += node.vx;
+      node.y += node.vy;
     }
   }
 
@@ -289,8 +332,9 @@ export function createProductWorkspace({
     for (const node of graphNodes) {
       const element = $$('[data-node]').find((item) => item.dataset.node === String(node.id));
       if (element) {
-        element.style.left = `${node.x}px`;
-        element.style.top = `${node.y}px`;
+        const point = graphScreenPoint(node, camera);
+        element.style.left = `${point.x}px`;
+        element.style.top = `${point.y}px`;
       }
     }
     $("#edgeCanvas").innerHTML = graphEdges.map((edge) => {
@@ -298,7 +342,10 @@ export function createProductWorkspace({
       const a = graphNodes.find((node) => String(node.id) === String(source));
       const b = graphNodes.find((node) => String(node.id) === String(target));
       if (!a || !b) return "";
-      const segment = graphEdgeSegment(a, b);
+      const segment = graphEdgeSegment(
+        graphScreenPoint(a, camera),
+        graphScreenPoint(b, camera),
+      );
       return `<line class="graph-edge" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/>`;
     }).join("");
   }
@@ -331,6 +378,8 @@ export function createProductWorkspace({
   function dispose() {
     cancelAnimationFrame(physicsFrame);
     dragging = null;
+    panning = null;
+    camera = { x: 0, y: 0 };
     graphNodes = [];
     graphEdges = [];
     graphSignature = "";

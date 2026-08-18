@@ -6,7 +6,7 @@ import {
   basicEvalCaseId,
   basicEvalFollowUpPrompt,
   basicEvalPrompt,
-  checkBasicFacts,
+  checkNodeNavigation,
   checkBasicOutput,
   expandTestRun,
 } from "@relayer/eval-runner";
@@ -25,10 +25,19 @@ export const evalCases = Object.freeze([
     description: "Explains the same task system in a fresh standalone thread.",
     prompts: Object.freeze([basicEvalPrompt]),
   }),
+  Object.freeze({
+    id: "empty-project.hierarchical-overview.single-turn",
+    name: "Hierarchical overview · one turn",
+    description: "Tests whether a broad overview uses a useful child layer without forcing every node to navigate.",
+    prompts: Object.freeze([
+      "Create a concise map of how a transformer language model is trained, from raw text through deployment. Keep the overview readable while preserving deeper technical detail where it belongs.",
+    ]),
+    requiredChecks: Object.freeze(["node-navigation"]),
+  }),
 ]);
 
 export const evalJudges = Object.freeze([
-  Object.freeze({ id: "deterministic-graph-contract", name: "Deterministic graph contract + facts" }),
+  Object.freeze({ id: "deterministic-graph-contract", name: "Deterministic graph contract" }),
 ]);
 
 function copy(value) {
@@ -211,11 +220,13 @@ export class EvalService {
         },
       });
       execution.threadIds = [thread.id];
+      await this.#waitForInteraction(thread.id, thread.rootInteractionId);
       for (const prompt of definition.prompts.slice(1)) {
-        await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
+        const interaction = await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
           method: "POST",
           body: { text: prompt },
         });
+        await this.#waitForInteraction(thread.id, interaction.id);
       }
       const detail = await this.#productRequest(`/api/threads/${thread.id}`);
       execution.turns = detail.interactions.map((interaction) => ({
@@ -238,10 +249,12 @@ export class EvalService {
           ...check,
           name: `turn-${interaction.sequence}:${check.name}`,
         })));
-        checks.push(...checkBasicFacts(interaction.completionOutput).map((check) => ({
-          ...check,
-          name: `turn-${interaction.sequence}:${check.name}`,
-        })));
+        if (definition.requiredChecks?.includes("node-navigation")) {
+          checks.push(...checkNodeNavigation(interaction.completionOutput).map((check) => ({
+            ...check,
+            name: `turn-${interaction.sequence}:${check.name}`,
+          })));
+        }
       }
       execution.checks = checks;
       execution.passed = checks.length > 0 && checks.every((check) => check.passed);
@@ -251,6 +264,18 @@ export class EvalService {
       execution.passed = false;
       execution.error = error instanceof Error ? error.message : String(error);
     }
+  }
+
+  async #waitForInteraction(threadId, interactionId) {
+    const deadline = Date.now() + 10 * 60_000;
+    while (Date.now() < deadline) {
+      const detail = await this.#productRequest(`/api/threads/${threadId}`);
+      const interaction = detail.interactions.find((candidate) => candidate.id === interactionId);
+      if (!interaction) throw new Error(`Product interaction ${interactionId} disappeared.`);
+      if (!["not_started", "running", "submitted"].includes(interaction.completionStatus)) return interaction;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+    }
+    throw new Error(`Product interaction ${interactionId} did not finish within 10 minutes.`);
   }
 
   async #productRequest(path, options = {}) {

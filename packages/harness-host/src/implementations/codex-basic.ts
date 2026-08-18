@@ -112,7 +112,12 @@ The module exports RelayerGraphClient, NodeObject, EdgeObject, and LayerObject. 
 
 The visible layer must contain 1 to 8 nodes and must be connected. Layer edges are exactly what the user sees.
 
-A response may contain additional layers. When a concept benefits from deeper explanation, you may submit another LayerObject and attach it to an output node with await graph.addAction(node, { kind: "navigate", label: "Useful label", target: childLayer }). This is optional: use it only when the additional layer materially improves the answer. You may similarly add an invoke action with { kind: "invoke", label: "Useful label", interactionText: "A useful follow-up" } when a suggested follow-up is valuable. Submit every referenced node, edge, and layer before adding its action.
+Relayer graph affordances:
+- A node can be a complete explanation in the current layer.
+- A node can open a more detailed child layer. Submit the child LayerObject, then attach it with await graph.addAction(node, { kind: "navigate", label: "Useful label", target: childLayer }).
+- A node can offer a useful follow-up interaction with await graph.addAction(node, { kind: "invoke", label: "Useful label", interactionText: "A useful follow-up" }).
+
+Navigate and invoke actions are first-class options, not requirements for every node. Use them where they materially improve the answer, and submit every referenced node, edge, and layer before adding its action.
 
 If a graph call rejects an object, read its error message, repair only that object, and retry. The graph is complete only after graph.submit succeeds.`;
   }

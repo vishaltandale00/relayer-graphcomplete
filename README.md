@@ -76,7 +76,7 @@ npm install
 npm run desktop:dev
 ```
 
-Ask a question in the composer to run the default `codex-basic` harness and render its accepted graph. Follow-up turns reuse the same harness/provider session while receiving a fresh graph capability.
+Ask a question in the composer to open the thread immediately while the default `codex-basic` harness builds its graph in the background. Follow-up turns reuse the same harness/provider session while receiving a fresh graph capability. The graph workspace supports node arrangement and background-drag canvas panning; the same interactions are available in read-only Eval review windows.
 
 ## Relayer Eval
 

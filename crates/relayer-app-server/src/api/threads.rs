@@ -79,7 +79,7 @@ pub(super) async fn create(
         .product
         .get_interaction(thread.root_interaction_id)
         .await?;
-    let _ = execute_interaction(&state, &thread, interaction).await?;
+    start_interaction(&state, &thread, interaction).await?;
     Ok((
         StatusCode::CREATED,
         Json(
@@ -136,7 +136,7 @@ pub(super) async fn create_interaction(
         .product
         .create_interaction(thread_id, &request.text)
         .await?;
-    let interaction = execute_interaction(&state, &thread, interaction).await?;
+    let interaction = start_interaction(&state, &thread, interaction).await?;
     Ok((StatusCode::CREATED, Json(interaction.into())))
 }
 
@@ -189,29 +189,55 @@ fn selected_harness_configuration(
     Ok(selected.to_owned())
 }
 
-async fn execute_interaction(
+async fn start_interaction(
     state: &ApiState,
     thread: &Thread,
     interaction: Interaction,
 ) -> Result<Interaction, ApiError> {
-    let Some(runtime) = &state.runtime else {
+    if state.runtime.is_none() {
         return Ok(interaction);
+    }
+    state
+        .product
+        .mark_interaction_running(interaction.id, &thread.harness_configuration_name)
+        .await?;
+    let running = state.product.get_interaction(interaction.id).await?;
+    let state = state.clone();
+    let thread = thread.clone();
+    tokio::spawn(async move {
+        execute_interaction(state, thread, interaction).await;
+    });
+    Ok(running)
+}
+
+async fn execute_interaction(state: ApiState, thread: Thread, interaction: Interaction) {
+    let Some(runtime) = &state.runtime else {
+        return;
     };
     let working_directory = match thread.project_id {
-        Some(project_id) => state.product.project_path(project_id).await?,
+        Some(project_id) => match state.product.project_path(project_id).await {
+            Ok(path) => path,
+            Err(error) => {
+                record_background_failure(&state, &thread, &interaction, error.to_string()).await;
+                return;
+            }
+        },
         None => state
             .standalone_workspaces_directory
             .join(thread.id.value().to_string())
             .to_string_lossy()
             .into_owned(),
     };
-    tokio::fs::create_dir_all(&working_directory)
-        .await
-        .map_err(|error| ApiError::invalid(format!("cannot create thread workspace: {error}")))?;
-    state
-        .product
-        .mark_interaction_running(interaction.id, &thread.harness_configuration_name)
-        .await?;
+    if let Err(error) = tokio::fs::create_dir_all(&working_directory).await {
+        record_background_failure(
+            &state,
+            &thread,
+            &interaction,
+            format!("cannot create thread workspace: {error}"),
+        )
+        .await;
+        return;
+    }
     match runtime
         .complete(CompleteInteraction {
             project_id: thread.project_id.map(ProjectId::value),
@@ -223,7 +249,7 @@ async fn execute_interaction(
         .await
     {
         Ok(completion) => {
-            state
+            if let Err(error) = state
                 .product
                 .accept_interaction_completion(
                     interaction.id,
@@ -232,22 +258,34 @@ async fn execute_interaction(
                     &completion.harness_configuration_digest,
                     &completion.output,
                 )
-                .await?;
+                .await
+            {
+                eprintln!(
+                    "could not persist accepted interaction {}: {error}",
+                    interaction.id
+                );
+            }
         }
         Err(error) => {
-            state
-                .product
-                .fail_interaction_completion(
-                    interaction.id,
-                    &thread.harness_configuration_name,
-                    &error.to_string(),
-                )
-                .await?;
+            record_background_failure(&state, &thread, &interaction, error.to_string()).await;
         }
     }
-    state
+}
+
+async fn record_background_failure(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: &Interaction,
+    error: String,
+) {
+    if let Err(persistence_error) = state
         .product
-        .get_interaction(interaction.id)
+        .fail_interaction_completion(interaction.id, &thread.harness_configuration_name, &error)
         .await
-        .map_err(Into::into)
+    {
+        eprintln!(
+            "could not persist failed interaction {}: {persistence_error}; original failure: {error}",
+            interaction.id
+        );
+    }
 }

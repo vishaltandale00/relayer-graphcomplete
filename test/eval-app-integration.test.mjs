@@ -48,15 +48,15 @@ describe("Relayer Eval application service", () => {
     }).open();
 
     const created = await evalService.createRun({
-      testCaseIds: ["empty-project.task-system.two-turn", "empty-project.task-system.single-turn"],
+      testCaseIds: ["empty-project.task-system.two-turn", "empty-project.task-system.single-turn", "empty-project.hierarchical-overview.single-turn"],
       harnessConfigurationNames: ["fixture-task-system"],
       judgeConfigurationName: "deterministic-graph-contract",
     });
     const completed = await waitForCompletedRun(evalService, created.id);
 
     expect(completed.status).toBe("passed");
-    expect(completed.summary).toMatchObject({ passed: 2, total: 2 });
-    expect(completed.executions).toHaveLength(2);
+    expect(completed.summary).toMatchObject({ passed: 3, total: 3 });
+    expect(completed.executions).toHaveLength(3);
     expect(completed.executions.every((execution) => execution.threadIds.length === 1)).toBe(true);
     expect(completed.executions.find((execution) => execution.testCaseId.endsWith("two-turn")).turns).toHaveLength(2);
 
@@ -68,7 +68,7 @@ describe("Relayer Eval application service", () => {
       selectedExecutionId: selected.id,
       readOnly: true,
     });
-    expect(context.cases).toHaveLength(2);
+    expect(context.cases).toHaveLength(3);
     expect(context.cases.every((testCase) => testCase.threadIds.length === 1)).toBe(true);
 
     const detail = await productRequest(productSession, `/api/threads/${selected.threadIds[0]}`);

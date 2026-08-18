@@ -8,11 +8,12 @@ export function productWorkspaceMarkup() {
     <div class="thread-workspace">
       <div class="graph-column">
         <div class="interaction-banner" id="interactionBanner"><span class="interaction-icon">›_</span><div><small>Your interaction</small><p id="interactionText"></p></div></div>
-        <div class="graph-empty" id="graphEmpty"><div class="thinking-dot"></div><p>Agent execution is not connected in this desktop slice.</p></div>
+        <div class="graph-empty" id="graphEmpty"><div class="thinking-dots" id="thinkingDots" role="status" aria-label="Waiting for graph"><i></i><i></i><i></i></div><p id="graphEmptyMessage">This interaction has no accepted graph yet.</p></div>
         <div class="graph-stage hidden" id="graphStage">
           <svg id="edgeCanvas" aria-hidden="true"></svg>
           <div id="nodeLayer"></div>
-          <div class="graph-hint">Drag nodes to explore the response</div>
+          <div class="graph-hint">Drag canvas to pan · Drag nodes to arrange</div>
+          <button class="graph-recenter" id="recenterGraph" title="Recenter graph" aria-label="Recenter graph">⌾</button>
         </div>
         <div class="thread-composer" id="threadComposer"><textarea id="threadPrompt" rows="2" placeholder="Follow up…"></textarea><button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div>
       </div>

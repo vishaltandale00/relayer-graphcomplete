@@ -47,10 +47,14 @@ import { apiUrl } from "../desktop/renderer/src/api.js";
 import { addLocalThread, interactionForThread, responseNodesForThread } from "../desktop/renderer/src/thread-model.js";
 import { workspaceModeCapabilities } from "../desktop/renderer/src/product-workspace/model.js";
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
-import { graphEdgeSegment } from "../desktop/renderer/src/product-workspace/workspace.js";
+import { graphEdgeSegment, graphScreenPoint } from "../desktop/renderer/src/product-workspace/workspace.js";
 import { isSafeMarkdownLink } from "../desktop/renderer/src/product-workspace/markdown.js";
 
 describe("desktop skeleton", () => {
+  it("moves graph world coordinates through a shared camera offset", () => {
+    expect(graphScreenPoint({ x: 120, y: 80 }, { x: -35, y: 24 })).toEqual({ x: 85, y: 104 });
+  });
+
   it("keeps one desktop authority and presents its window on later launches", () => {
     const handlers = new Map();
     let window;
