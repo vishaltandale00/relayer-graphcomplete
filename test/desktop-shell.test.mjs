@@ -456,7 +456,7 @@ describe("desktop skeleton", () => {
   it("publishes one Preview candidate atomically and recovers without mutating live bytes", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-preview-publication-"));
     try {
-      const version = "0.2.0";
+      const { version } = JSON.parse(await readFile(new URL("../desktop/package.json", import.meta.url), "utf8"));
       const sourceCommit = "c".repeat(40);
       const prefix = `Relayer-${version}-mac-arm64`;
       const contents = new Map([
