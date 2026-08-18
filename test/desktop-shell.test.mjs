@@ -191,7 +191,10 @@ describe("desktop skeleton", () => {
     });
 
     try {
-      const session = await service.start();
+      const firstStart = service.start();
+      const duplicateStart = service.start();
+      const [session, duplicateSession] = await Promise.all([firstStart, duplicateStart]);
+      expect(duplicateSession).toBe(session);
       expect(session).toMatchObject({
         origin: "http://127.0.0.1:43123",
         cookie: { name: "relayer_control" },
@@ -209,6 +212,18 @@ describe("desktop skeleton", () => {
       expect(await service.start()).toBe(session);
       await service.close();
       expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+
+      const neverSpawned = vi.fn();
+      const closedWhilePreparing = new RelayerAppServerService({
+        userDataDirectory: join(directory, "closed-while-preparing"),
+        binaryPath: "/test/bin/should-not-start",
+        webDirectory: "/test/renderer",
+        spawnProcess: neverSpawned,
+      });
+      const pendingStart = closedWhilePreparing.start();
+      await closedWhilePreparing.close();
+      await expect(pendingStart).rejects.toThrow("shutting down");
+      expect(neverSpawned).not.toHaveBeenCalled();
 
       const failedChild = Object.assign(new EventEmitter(), {
         stdout: new PassThrough(),
@@ -442,6 +457,19 @@ describe("desktop skeleton", () => {
     expect(await closingClient.account()).toMatchObject({ status: "disconnected" });
     await closingClient.close();
     expect(stubbornCodex.kill.mock.calls.map(([signal]) => signal)).toEqual(["SIGTERM", "SIGKILL"]);
+
+    const neverSpawned = vi.fn();
+    const closedWhileDiscovering = new CodexCredentialAdapter({
+      environment: { RELAYER_CODEX_BINARY: "/usr/bin/true", PATH: "" },
+      spawnProcess: neverSpawned,
+    });
+    const pendingAccount = closedWhileDiscovering.account();
+    await closedWhileDiscovering.close();
+    await expect(pendingAccount).resolves.toMatchObject({
+      status: "unavailable",
+      error: "Codex app-server is shutting down.",
+    });
+    expect(neverSpawned).not.toHaveBeenCalled();
   });
 
   it("drives the packaged update lifecycle through one state service", async () => {

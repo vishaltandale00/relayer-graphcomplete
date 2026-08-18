@@ -52,15 +52,27 @@ export class RelayerAppServerService {
     this.onUnexpectedStop = onUnexpectedStop;
     this.child = null;
     this.listening = null;
+    this.startPromise = null;
     this.closing = false;
   }
 
   async start() {
+    if (this.closing) throw new Error("Relayer app server is shutting down.");
     if (this.listening) return this.listening;
-    if (this.child) throw new Error("Relayer app server is already starting.");
+    if (this.startPromise) return this.startPromise;
+    const operation = this.#start();
+    this.startPromise = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.startPromise === operation) this.startPromise = null;
+    }
+  }
 
+  async #start() {
     const dataDirectory = join(this.userDataDirectory, "product-data");
     await mkdir(dataDirectory, { recursive: true });
+    if (this.closing) throw new Error("Relayer app server is shutting down.");
     const controlToken = randomBytes(32).toString("hex");
     const child = this.spawnProcess(this.binaryPath, [
       "--data-dir", dataDirectory,
@@ -71,7 +83,6 @@ export class RelayerAppServerService {
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
-    this.closing = false;
     child.stdin?.on("error", () => {});
     child.stdin?.end(`${controlToken}\n`);
 
@@ -117,10 +128,16 @@ export class RelayerAppServerService {
   }
 
   async close() {
-    const child = this.child;
-    if (!child) return;
     this.closing = true;
-    await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
+    const child = this.child;
+    if (child) {
+      await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
+    }
+    await this.startPromise?.catch(() => undefined);
+    const lateChild = this.child;
+    if (lateChild && lateChild !== child) {
+      await terminateChildProcess(lateChild, { gracePeriodMs: this.shutdownTimeoutMs });
+    }
     if (this.child === child) this.child = null;
     this.listening = null;
   }

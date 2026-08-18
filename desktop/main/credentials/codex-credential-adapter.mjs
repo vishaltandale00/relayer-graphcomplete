@@ -76,6 +76,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     if (!executable) {
       throw new Error("Codex CLI is not installed. Install Codex, then try Connect Codex again.");
     }
+    if (this.closing) throw new Error("Codex app-server is shutting down.");
     const child = this.spawnProcess(executable, ["app-server", "--listen", "stdio://"], {
       env: this.environment,
       stdio: ["pipe", "pipe", "pipe"],
@@ -191,8 +192,14 @@ export class CodexCredentialAdapter extends CredentialAdapter {
   async close() {
     this.closing = true;
     const child = this.process;
-    if (!child) return;
-    await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
+    if (child) {
+      await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
+    }
+    await this.startPromise?.catch(() => undefined);
+    const lateChild = this.process;
+    if (lateChild && lateChild !== child) {
+      await terminateChildProcess(lateChild, { gracePeriodMs: this.shutdownTimeoutMs });
+    }
     if (this.process === child) this.process = null;
     this.startPromise = null;
     this.activeLoginId = null;
