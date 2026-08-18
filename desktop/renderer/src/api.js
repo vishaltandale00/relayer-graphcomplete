@@ -1,8 +1,4 @@
-import { query } from "./state.js";
-
-const API_BASE = (query.get("api") || window.GRAPHCOMPLETE_CONFIG?.apiBase || "").replace(/\/$/, "");
-
-export const apiUrl = (path) => `${API_BASE}${path}`;
+export const apiUrl = (path) => path;
 
 export async function request(path, options = {}) {
   const response = await fetch(apiUrl(path), {

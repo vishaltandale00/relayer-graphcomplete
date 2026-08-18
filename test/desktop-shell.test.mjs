@@ -41,6 +41,7 @@ import {
   promoteDesktopStable,
   validateStablePromotionProvenance,
 } from "../desktop/release/promote-stable.mjs";
+import { apiUrl } from "../desktop/renderer/src/api.js";
 import { addLocalThread, interactionForThread, responseNodesForThread } from "../desktop/renderer/src/thread-model.js";
 
 describe("desktop skeleton", () => {
@@ -104,6 +105,9 @@ describe("desktop skeleton", () => {
     expect(html).toContain("relayer-logo");
     expect(html).toContain('class="settings-view hidden"');
     expect(html).toContain('type="module" src="./src/main.js"');
+    expect(html).toContain("connect-src 'self'");
+    expect(html).not.toContain("http://127.0.0.1:*");
+    expect(apiUrl("/api/state")).toBe("/api/state");
     expect(html).not.toContain("<dialog");
     expect(html.toLowerCase()).not.toContain("harness selector");
     expect(desktopMain).not.toContain("PrimeAgentThreadRunner");
