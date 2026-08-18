@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { parse } from "yaml";
 import type { HarnessConfiguration, JsonObject, JsonValue } from "./types.js";
@@ -31,6 +32,10 @@ export function parseHarnessConfiguration(value: unknown): HarnessConfiguration 
 
 export function sameHarnessConfiguration(left: HarnessConfiguration, right: HarnessConfiguration): boolean {
   return canonicalJson(left) === canonicalJson(right);
+}
+
+export function digestHarnessConfiguration(configuration: HarnessConfiguration): string {
+  return `sha256:${createHash("sha256").update(canonicalJson(configuration)).digest("hex")}`;
 }
 
 function canonicalJson(value: JsonValue | HarnessConfiguration): string {

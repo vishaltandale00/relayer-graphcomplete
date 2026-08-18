@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { loadHarnessConfiguration, loadHarnessConfigurations, parseHarnessConfiguration } from "../src/configuration.js";
+import { digestHarnessConfiguration, loadHarnessConfiguration, loadHarnessConfigurations, parseHarnessConfiguration } from "../src/configuration.js";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 
@@ -32,6 +32,28 @@ describe("harness configuration", () => {
       implementationVersion: 7,
       settings: { root: { model: "luna" }, reviewers: [{ model: "sol", effort: "high" }] },
     }).settings).toEqual({ root: { model: "luna" }, reviewers: [{ model: "sol", effort: "high" }] });
+  });
+
+  it("creates a stable digest from the exact configuration snapshot", () => {
+    const left = parseHarnessConfiguration({
+      schemaVersion: 1,
+      name: "prime-production",
+      implementation: "prime-agent",
+      implementationVersion: 1,
+      settings: { reviewers: [{ effort: "high", model: "sol" }], root: { model: "luna" } },
+    });
+    const reordered = parseHarnessConfiguration({
+      settings: { root: { model: "luna" }, reviewers: [{ model: "sol", effort: "high" }] },
+      implementationVersion: 1,
+      implementation: "prime-agent",
+      name: "prime-production",
+      schemaVersion: 1,
+    });
+    const changed = { ...left, settings: { ...left.settings, root: { model: "terra" } } };
+
+    expect(digestHarnessConfiguration(left)).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(digestHarnessConfiguration(reordered)).toBe(digestHarnessConfiguration(left));
+    expect(digestHarnessConfiguration(changed)).not.toBe(digestHarnessConfiguration(left));
   });
 
   it("allows many named configurations to select the same implementation", async () => {

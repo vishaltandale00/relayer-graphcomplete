@@ -1220,7 +1220,7 @@ settings:
   skipGitRepoCheck: true
 </code></pre>
 <p>The implementation registry and configuration catalog solve different problems: the registry says which code can run, while the catalog says which named production setups users and evaluations can select. Many configurations are expected to select the same implementation with different settings; only configuration names must be unique. Duplicate names fail catalog loading. A thread is pinned to the full copied configuration, not merely to an implementation type.</p>
-<p>The live configuration matrix loads <code>codex-basic</code> and <code>codex-basic-high</code>, verifies that both resolve <code>codex.basic</code>, and runs the same two-turn graph acceptance and judge gates for both. This live-inference matrix remains opt-in.</p>
+<p>Harness configurations are selected by a test run, not encoded in test cases. An opt-in live run may select both <code>codex-basic</code> and <code>codex-basic-high</code>; the runner expands the same harness-agnostic cases across both configurations even though they resolve to the same <code>codex.basic</code> implementation.</p>
 <h3>7.4 First <code>codex.basic</code> implementation</h3>
 <p>The first harness uses the OpenAI Codex TypeScript package and the user&#39;s Relayer-scoped Codex login. Its purpose is to test whether the graph contract is simple enough for a coding agent to use, not to approximate the final GraphComplete policy.</p>
 <ul>
@@ -1323,22 +1323,23 @@ settings:
 <h2>9. Exact basic Complete evaluation</h2>
 <p>The first evaluation is one fixed, two-interaction case named <code>empty-project.task-system.two-turn</code>. It proves the smallest real conversation path through the Rust graph engine, typed client, persistent Node harness host, Codex session, Complete boundary, deterministic evaluator, quality judge, and product renderer. The second interaction receives a new canonical interaction node and capability token while reusing the same harness object and provider thread. It deliberately has no existing codebase, grounding requirement, graph search, or subagent dependency.</p>
 <h3>9.1 Initial state and exact input</h3>
-<p>The runner creates a temporary empty folder and isolated graph database, supplies synthetic positive project/thread IDs, selects the <code>codex-basic</code> configuration (which resolves <code>codex.basic</code>), and asks graph core to create two canonical user-interaction nodes in the same thread. It does not start or imitate the Relayer app server. The exact messages are:</p>
+<p>The case defines a temporary empty folder, isolated graph database, synthetic positive project/thread IDs, and two canonical user-interaction nodes in the same thread. It does not name or select a harness. The runner supplies an already-resolved harness configuration for each execution. This lower-level integration case does not start or imitate the Relayer app server. The exact messages are:</p>
 <blockquote>“A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.”</blockquote>
 <blockquote>“Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.”</blockquote>
 <p>The expected answer facts are declared in the case rather than hidden in harness code: tasks enter the queue; an available worker claims a task; at most two tasks are active; additional tasks wait; a completed task is written to the result store; and a freed worker claims the next queued task.</p>
 <h3>9.2 Exact runner sequence</h3>
 <ol>
+<li>Resolve the test run's selected case IDs, harness-configuration names, and judge configuration, then expand them into executions.</li>
 <li>Start the standalone Rust graph server with an isolated database and wait for health.</li>
 <li>Supply synthetic product-owned project/thread IDs, ask graph core to create the first canonical interaction node, create the active harness session, and issue an opaque graph token bound to that node.</li>
-<li>Load the named harness configuration, start the Node harness host, and resolve its <code>codex.basic</code> implementation.</li>
+<li>Pass the already-resolved harness configuration to case execution, start the Node harness host, and resolve its implementation.</li>
 <li>Call <code>complete({ interactionNode })</code>; Codex constructs the response using the TypeScript graph client.</li>
 <li>Require Codex to submit nodes, undirected edges, a layer, the interaction&#39;s response navigate action, and finally <code>graph.submit(interactionNode)</code>.</li>
 <li>Receive the first resolved root layer and run its deterministic checks.</li>
 <li>Create the second interaction in the same thread, issue a distinct capability, re-register the session, and verify the host adopts the new capability without constructing another harness object.</li>
 <li>Call Complete for the second interaction and run the same deterministic checks. The opt-in live path runs an independent structured Codex judge for each accepted turn.</li>
-<li>Save the accepted graph records, resolved display payload, checks, judge result, timing, harness key/version, and trace reference in one immutable result bundle.</li>
-<li>Load that bundle into the existing force-graph product renderer for human inspection.</li>
+<li>Save the accepted graph records, resolved display payload, checks, judge result, timing, exact harness-configuration snapshot and digest, implementation key/version, and trace reference in one immutable result bundle.</li>
+<li>For this lower-level slice, save a minimal HTML inspection artifact. The forthcoming Eval application reviews executions through the real product app-server and shared production graph/chat workspace.</li>
 </ol>
 <h3>9.3 Deterministic acceptance checks</h3>
 <p>The first gate uses no model judgment. All checks must pass:</p>
@@ -1367,7 +1368,7 @@ settings:
 <p>The current case verifies two interactions, capability rotation, one harness construction, and the accepted output contract for both turns. The next memory case must additionally require the second interaction to use prior accepted graph state. Later capability cases add context attachments, invoke and navigate actions, repository grounding, graph reuse, recursive Prime Agent work, and harder tasks.</p>
 <h2>10. Evaluation catalog, runner, results, and promotion</h2>
 <h3>10.1 Evaluation boundary and data model</h3>
-<p>The evaluation target is one harness implementation key executing <code>complete(inputGraph)</code> against the real graph engine. The runner supplies synthetic product-owned project/thread IDs and manages temporary interaction, active-session, and storage lifecycle directly through the graph server. It never starts the real Relayer app server and may not replace the Node harness host, typed graph client, graph API, validation, or submission path. The later integration supplies real product IDs and coordinates product persistence.</p>
+<p>An evaluation execution is one harness configuration executing one harness-agnostic case through <code>complete(inputGraph)</code> against the real graph engine. It is identified by <code>(testRunId, testCaseId, harnessConfigurationName)</code>. The lower-level runner supplies synthetic product-owned project/thread IDs and manages temporary interaction, active-session, and storage lifecycle directly through the graph server. It never starts the real Relayer app server and may not replace the Node harness host, typed graph client, graph API, validation, or submission path. The Eval application later supplies real product IDs and coordinates product persistence.</p>
 <pre><code class="language-mermaid">flowchart LR
     ER[&quot;Eval runner creates temporary interaction&quot;] --&gt; HH[&quot;Persistent Node harness host&quot;]
     AS[&quot;Relayer app server creates product interaction&quot;] --&gt; HH
@@ -1378,7 +1379,7 @@ settings:
     R --&gt; CHECK[&quot;Deterministic checks and judge&quot;]
     R --&gt; UX[&quot;Relayer renderer and See in App&quot;]
 </code></pre>
-<p>A run records the case version, harness implementation key/version, graph schema version, client versions, model, judge version, and component build digests. The first milestone does not require a generalized production configuration manifest or product selector. Those abstractions are added only when more than one real configuration must be promoted.</p>
+<p>A run selects test-case IDs, harness-configuration names, and a judge configuration. The runner resolves configuration files at its boundary and expands the selections into executions. Each execution records its exact harness-configuration snapshot and stable digest in addition to case version, implementation key/version, graph schema version, client versions, judge version, and component build digests.</p>
 <h3>10.2 Shared source and result catalog without worktree duplication</h3>
 <pre><code class="language-text">packages/eval-runner/
   cases/&lt;case-id&gt;.json                  # small versioned interaction definition
@@ -1403,10 +1404,10 @@ npm run eval -- --suite capability:memory --configuration codex-basic
 npm run eval:compare -- --baseline codex-basic --candidate prime-production
 npm run eval:web
 </code></pre>
-<p><code>eval:web</code> opens the Relayer evaluation runner shown in Mock 10. The first slice needs only case, harness implementation, candidate model, judge, live progress, final checks, and <strong>See in App</strong>. The web UI and CLI call the same runner service and produce the same bundle; the UI is not a separate evaluation implementation.</p>
+<p><code>eval:web</code> opens the Relayer evaluation runner shown in Mock 10. It selects cases, named harness configurations, and a judge configuration; model settings belong inside the selected harness configuration. The web UI and CLI call the same runner service and produce the same execution records; the UI is not a separate evaluation implementation.</p>
 <p>For each case the runner:</p>
 <ol>
-<li>resolves the case, harness implementation, graph schema, client builds, model, and judge versions;</li>
+<li>resolves cases, harness configurations, graph schema, client builds, and judge configuration at the runner boundary;</li>
 <li>starts an isolated Rust graph server and persistent Node harness host;</li>
 <li>creates the same interaction and active harness-session context the product will create;</li>
 <li>invokes <code>complete(inputGraph)</code> through the Node host;</li>
@@ -1528,10 +1529,13 @@ npm run eval:web
 <p>Every evaluation run saves:</p>
 <pre><code class="language-ts">type CompleteEvaluationBundle = {
   bundleSchemaVersion: string;
-  runId: string;
-  caseId: string;
+  testRunId: string;
+  testCaseId: string;
   caseDigest: string;
   source?: { repositoryUrl: string; commit: string; treeDigest: string };
+  harnessConfigurationName: string;
+  harnessConfiguration: HarnessConfiguration;
+  harnessConfigurationDigest: string;
   harness: { implementation: string; version: string; buildDigest: string };
   graphSchemaVersion: string;
   graphClientVersions: { typescript: string; python: string };
@@ -1552,10 +1556,10 @@ npm run eval:web
 </code></pre>
 <p>The bundle is immutable evidence. Continuing to chat must never modify it; interactive use clones its accepted graph and pinned configuration into a new product thread.</p>
 <h3>10.8 Promotion to production</h3>
-<p>In the first milestone, promotion means mapping the exact passing harness implementation key/version and component build digests into the product harness file. A generalized signed configuration manifest is deferred until there are real prompt or policy ablations to promote.</p>
+<p>In the first milestone, promotion means selecting the exact passing named harness configuration and verifying its recorded snapshot, digest, implementation key/version, and component build digests. Signing and distributing a production configuration catalog is deferred until the product needs that release boundary.</p>
 <p>Release checks verify:</p>
 <ul>
-<li>the production app resolves the same harness implementation and component versions recorded in the passing eval bundle;</li>
+<li>the production app resolves the same harness configuration snapshot, digest, implementation, and component versions recorded in the passing eval bundle;</li>
 <li>the Complete request and result contract versions are supported;</li>
 <li>affected capability evals pass relative to the current production baseline;</li>
 <li>no deterministic regression or critical judge regression is introduced;</li>
@@ -1585,8 +1589,8 @@ npm run eval:web
 <ol>
 <li>clones the selected accepted graph snapshot into a new ordinary thread;</li>
 <li>creates a writable checkout from the bundle&#39;s pinned source repository commit;</li>
-<li>pins the exact harness implementation key/version and component build digests used by the eval;</li>
-<li>records the source evaluation <code>runId</code> on the new thread;</li>
+<li>pins the exact harness configuration snapshot and digest plus the implementation key/version and component build digests used by the eval;</li>
+<li>records the source evaluation <code>testRunId</code> on the new thread;</li>
 <li>enables the normal composer and authored invoke actions;</li>
 <li>sends all new interactions through the production Complete adapter.</li>
 </ol>

@@ -93,14 +93,14 @@ Configuration, implementation code, session state, and live authority are delibe
 
 The reference harness uses the TypeScript Codex SDK with the existing local Codex login. It keeps one resumable Codex thread per Relayer thread and asks Codex to execute the TypeScript graph client. The graph is not returned as structured JSON: Codex submits objects to the Rust engine, reacts to repairable validation errors, and ends with `graph.submit(interactionNode)`.
 
-The default and opt-in live evals start from an empty temporary folder and run two interactions through one cached harness object. Each interaction receives a distinct graph capability; the host rotates that capability between serialized Complete calls while the harness retains its provider-session identity. The live path applies two gates to each turn:
+The default and opt-in live evals start from an empty temporary folder and run two interactions through one cached harness object. Each interaction receives a distinct graph capability; the host rotates that capability between serialized Complete calls while the harness retains its provider-session identity. The case owns harness-agnostic graph-contract checks. A selected judge configuration may add semantic scoring without changing the case:
 
 1. deterministic graph-contract checks; and
 2. a fresh structured Codex judge that scores six declared task-system facts plus graph and detail usefulness.
 
-The opt-in `eval:codex-basic:matrix:live` command loads two uniquely named configurations with different reasoning-effort settings, verifies that both resolve the same `codex.basic` implementation, and runs the complete two-turn graph eval for each configuration. It is excluded from the default suite because it performs live inference.
+The runner input is a test-run ID, selected test-case IDs, selected harness-configuration names, and one judge configuration. At the CLI boundary, configuration names resolve to validated snapshots. The runner expands their Cartesian product into executions identified by `(testRunId, testCaseId, harnessConfigurationName)` and passes each resolved `HarnessConfiguration` into case execution. Every execution artifact stores that exact snapshot and its canonical SHA-256 digest. Two configurations may select the same implementation; that is ordinary run selection, not a harness-specific case or matrix.
 
-The ordinary test suite never invokes inference. The pre-app-server slice saves a movable-node HTML result; replay inside the product is a later app-server acceptance requirement.
+The ordinary test suite never invokes inference. `runtime-basic` remains a harness-agnostic lower-level integration case. Its pre-app-server movable-node HTML is intentionally minimal; execution review through the product app-server and shared production graph/chat workspace belongs to the Eval application.
 
 ## Runtime package boundaries
 

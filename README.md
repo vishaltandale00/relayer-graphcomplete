@@ -46,25 +46,25 @@ See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/
 
 ## Run the GraphComplete runtime eval
 
-The default case is deterministic and makes no inference calls. It launches the Rust graph server and Node host, completes two interactions through one live harness object with separately scoped graph capabilities, exercises the real TypeScript client, and saves `result.json` plus an interactive turn-navigable `index.html` under `.relayer/evals/runtime/<run-id>/`:
+The default run is deterministic and makes no inference calls. It launches the Rust graph server and Node host, completes two interactions through one live harness object with separately scoped graph capabilities, exercises the real TypeScript client, and saves `result.json` plus an interactive turn-navigable `index.html` under `.relayer/evals/runtime/<test-run-id>/<test-case-id>/<harness-configuration-name>/`:
 
 ```sh
 npm run eval:basic
 ```
 
-The opt-in live path loads `harnesses/codex-basic.yaml`, resolves its `codex.basic` implementation, reuses the local Codex login, and then runs the structured judge:
+The opt-in live path requires the runner to select one or more named harness configurations. This command loads `harnesses/codex-basic.yaml`, resolves its `codex.basic` implementation, reuses the local Codex login, and then runs the structured judge:
 
 ```sh
-npm run eval:basic:live
+npm run eval:basic:live -- --configuration codex-basic
 ```
 
-To exercise the many-configurations-per-implementation contract end to end, the live matrix runs both `codex-basic` (medium reasoning) and `codex-basic-high` (high reasoning) through the same `codex.basic` implementation:
+Selecting two configurations expands the same harness-agnostic case into two executions in one test run. `codex-basic` and `codex-basic-high` both select the `codex.basic` implementation with different settings:
 
 ```sh
-npm run eval:codex-basic:matrix:live
+npm run eval:basic:live -- --configuration codex-basic --configuration codex-basic-high
 ```
 
-Live inference is deliberately excluded from `npm test` and `npm run check`. Desktop `See in App` is not claimed by this slice; the saved HTML is the current pre-app-server visual proof.
+The CLI resolves configuration files before case execution. Every saved execution records its `(testRunId, testCaseId, harnessConfigurationName)` identity, exact resolved configuration snapshot, and stable digest. Live inference is deliberately excluded from `npm test` and `npm run check`. Desktop `See in App` is not claimed by this slice; the saved HTML is only the current pre-app-server integration artifact.
 
 ## Relayer Desktop
 
