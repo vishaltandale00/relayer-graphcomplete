@@ -188,6 +188,16 @@ describe("desktop skeleton", () => {
       setFeedURL: vi.fn(),
       quitAndInstall: vi.fn(),
     });
+    let selectedProviderChannel = null;
+    Object.defineProperty(autoUpdater, "channel", {
+      configurable: true,
+      get: () => selectedProviderChannel,
+      set(value) {
+        selectedProviderChannel = value;
+        // Match electron-updater: choosing a channel opts into downgrades.
+        autoUpdater.allowDowngrade = true;
+      },
+    });
     const states = [];
     const updater = createDesktopUpdater({
       autoUpdater,
@@ -197,7 +207,10 @@ describe("desktop skeleton", () => {
     });
     autoUpdater.checkForUpdates.mockRejectedValueOnce(new Error("offline"));
     await expect(updater.check()).resolves.toMatchObject({ phase: "failed", error: "offline" });
+    expect(autoUpdater.allowDowngrade).toBe(false);
     expect(updater.setChannel("preview")).toMatchObject({ phase: "idle", channel: "preview" });
+    expect(autoUpdater.channel).toBe("beta");
+    expect(autoUpdater.allowDowngrade).toBe(false);
     autoUpdater.emit("checking-for-update");
     expect(() => updater.setChannel("stable")).toThrow("Finish the current update");
     autoUpdater.emit("update-available", { version: "0.1.1" });
