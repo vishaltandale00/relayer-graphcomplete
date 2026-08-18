@@ -68,6 +68,8 @@ describe("desktop skeleton", () => {
     expect(desktopMain).toContain("RelayerAppServerService");
     expect(desktopMain).toContain("productServer.start()");
     expect(desktopMain).toContain("productServer.close()");
+    expect(desktopMain).toContain("Promise.allSettled");
+    expect(desktopMain).toContain("Relayer app server stopped");
     expect(desktopMain).toContain("app.isPackaged");
     expect(desktopWindow).toContain('window.webContents.on("will-navigate"');
     expect(desktopWindow).toContain('window.webContents.on("will-redirect"');
@@ -105,7 +107,9 @@ describe("desktop skeleton", () => {
   it("starts and stops the Rust product server with an isolated profile and private session", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-app-server-service-"));
     const invocations = [];
+    let suppliedToken = "";
     const child = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write(chunk, _encoding, callback) { suppliedToken += String(chunk); callback(); } }),
       stdout: new PassThrough(),
       stderr: new PassThrough(),
       exitCode: null,
@@ -145,9 +149,10 @@ describe("desktop skeleton", () => {
       expect(invocations[0].args).toEqual([
         "--data-dir", join(directory, "product-data"),
         "--web-dir", "/test/renderer",
-        "--control-token", session.cookie.value,
         "--port", "0",
       ]);
+      expect(suppliedToken).toBe(`${session.cookie.value}\n`);
+      expect(invocations[0].args).not.toContain(session.cookie.value);
       expect(await service.start()).toBe(session);
       await service.close();
       expect(child.kill).toHaveBeenCalledWith("SIGTERM");
@@ -195,6 +200,36 @@ describe("desktop skeleton", () => {
       });
       await expect(untrusted.start()).rejects.toThrow("must use an authenticated 127.0.0.1 origin");
       expect(remoteChild.kill).toHaveBeenCalledWith("SIGTERM");
+
+      const unexpectedStops = [];
+      const crashingChild = Object.assign(new EventEmitter(), {
+        stdin: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null,
+        signalCode: null,
+        killed: false,
+        kill: vi.fn(),
+      });
+      const crashing = new RelayerAppServerService({
+        userDataDirectory: directory,
+        binaryPath: "/test/bin/crashing-server",
+        webDirectory: "/test/renderer",
+        onUnexpectedStop: (event) => unexpectedStops.push(event),
+        spawnProcess: () => {
+          queueMicrotask(() => crashingChild.stdout.write(`${JSON.stringify({
+            ready: true,
+            origin: "http://127.0.0.1:43124",
+            cookieName: "relayer_control",
+          })}\n`));
+          return crashingChild;
+        },
+      });
+      await crashing.start();
+      crashingChild.exitCode = 2;
+      crashingChild.emit("exit", 2, null);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unexpectedStops).toEqual([{ code: 2, signal: null }]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

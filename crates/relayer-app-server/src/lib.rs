@@ -9,8 +9,8 @@ use axum::{
     routing::get,
 };
 use model::{
-    CreateInteraction, CreateProject, CreateThread, InteractionNode, ProductCapabilities,
-    ProductState, ThreadView,
+    CreateInteraction, CreateProject, CreateThread, ProductCapabilities, ProductState, ThreadId,
+    ThreadView,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -73,7 +73,7 @@ async fn capabilities(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StateQuery {
-    thread_id: Option<String>,
+    thread_id: Option<i64>,
 }
 
 async fn product_state(
@@ -87,40 +87,25 @@ async fn product_state(
     let threads = store.list_threads()?;
     let selected_id = query
         .thread_id
+        .filter(|id| *id > 0)
+        .map(ThreadId)
         .filter(|id| threads.iter().any(|thread| thread.id == *id))
-        .or_else(|| threads.first().map(|thread| thread.id.clone()));
-    let interactions = match selected_id.as_deref() {
+        .or_else(|| threads.first().map(|thread| thread.id));
+    let interactions = match selected_id {
         Some(thread_id) => store.list_interactions(thread_id)?,
         None => Vec::new(),
     };
-    let title = selected_id
-        .as_deref()
-        .and_then(|id| threads.iter().find(|thread| thread.id == id))
-        .map(|thread| thread.title.clone())
-        .unwrap_or_default();
     let thread_views = threads
         .into_iter()
         .map(|thread| ThreadView {
-            root_node_id: thread.root_interaction_id.clone(),
-            active: selected_id.as_deref() == Some(thread.id.as_str()),
+            active: selected_id == Some(thread.id),
             thread,
-        })
-        .collect();
-    let nodes = interactions
-        .into_iter()
-        .map(|interaction| InteractionNode {
-            id: interaction.id,
-            kind: "user-interaction",
-            title: title.clone(),
-            summary: interaction.text,
         })
         .collect();
     Ok(Json(ProductState {
         projects,
         threads: thread_views,
-        nodes,
-        edges: Vec::new(),
-        status: "idle",
+        interactions,
         capabilities: ProductCapabilities::default(),
     }))
 }
@@ -143,7 +128,7 @@ async fn create_project(
     let outcome = match store.create_project(input) {
         Ok(outcome) => outcome,
         Err(StoreError::ProjectExists(id)) => {
-            let project = store.get_project(&id)?;
+            let project = store.get_project(id)?;
             return Err(ApiError(
                 StatusCode::CONFLICT,
                 json!({
@@ -181,7 +166,6 @@ async fn create_thread(
     Ok((
         StatusCode::CREATED,
         Json(json!(ThreadView {
-            root_node_id: thread.root_interaction_id.clone(),
             active: true,
             thread,
         })),
@@ -191,12 +175,13 @@ async fn create_thread(
 async fn get_thread(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(id): Path<i64>,
 ) -> Result<Json<Value>, ApiError> {
     authorize(&state, &headers)?;
+    let id = product_thread_id(id)?;
     let store = lock(&state)?;
-    let thread = store.get_thread(&id)?;
-    let interactions = store.list_interactions(&id)?;
+    let thread = store.get_thread(id)?;
+    let interactions = store.list_interactions(id)?;
     Ok(Json(
         json!({ "thread": thread, "interactions": interactions }),
     ))
@@ -205,22 +190,23 @@ async fn get_thread(
 async fn list_interactions(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(id): Path<i64>,
 ) -> Result<Json<Value>, ApiError> {
     authorize(&state, &headers)?;
+    let id = product_thread_id(id)?;
     Ok(Json(
-        json!({ "interactions": lock(&state)?.list_interactions(&id)? }),
+        json!({ "interactions": lock(&state)?.list_interactions(id)? }),
     ))
 }
 
 async fn create_interaction(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(id): Path<i64>,
     Json(input): Json<CreateInteraction>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     authorize(&state, &headers)?;
-    let interaction = lock(&state)?.create_interaction(&id, &input.text)?;
+    let interaction = lock(&state)?.create_interaction(product_thread_id(id)?, &input.text)?;
     Ok((StatusCode::CREATED, Json(json!(interaction))))
 }
 
@@ -246,6 +232,14 @@ fn lock(state: &AppState) -> Result<std::sync::MutexGuard<'_, ProductStore>, Api
         .store
         .lock()
         .map_err(|_| ApiError::internal("product store lock poisoned"))
+}
+
+fn product_thread_id(value: i64) -> Result<ThreadId, ApiError> {
+    if value > 0 {
+        Ok(ThreadId(value))
+    } else {
+        Err(StoreError::Invalid("thread id must be a positive integer".into()).into())
+    }
 }
 
 pub struct ApiError(StatusCode, Value);
@@ -313,12 +307,19 @@ mod tests {
         http::Request,
     };
     use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tower::ServiceExt;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn persists_project_thread_and_interaction_across_restart() {
-        let root = std::env::temp_dir().join(format!("relayer-app-server-{}", Uuid::new_v4()));
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "relayer-app-server-{}-{unique}",
+            std::process::id()
+        ));
         let project_folder = root.join("project");
         fs::create_dir_all(&project_folder).unwrap();
         let database = root.join("product.sqlite3");
@@ -349,6 +350,7 @@ mod tests {
             let project: Value =
                 serde_json::from_slice(&to_bytes(project.into_body(), usize::MAX).await.unwrap())
                     .unwrap();
+            assert!(project["id"].as_i64().is_some_and(|id| id > 0));
 
             let duplicate = app
                 .clone()
@@ -449,14 +451,14 @@ mod tests {
             ("Persist me", "Map the project"),
             ("Standalone thread", "Keep this local"),
         ] {
-            let thread_id = state["threads"]
+            let persisted_thread = state["threads"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .find(|thread| thread["title"] == title)
-                .unwrap()["id"]
-                .as_str()
                 .unwrap();
+            let thread_id = persisted_thread["id"].as_i64().unwrap();
+            assert!(thread_id > 0);
             let interactions = app
                 .clone()
                 .oneshot(api_request(
@@ -474,9 +476,17 @@ mod tests {
             )
             .unwrap();
             assert_eq!(interactions["interactions"][0]["text"], expected_message);
+            assert_eq!(
+                persisted_thread["rootInteractionId"],
+                interactions["interactions"][0]["id"]
+            );
         }
         assert_eq!(state["capabilities"]["graph"], false);
         assert_eq!(state["capabilities"]["harness"], false);
+        assert!(state["interactions"].is_array());
+        assert!(state.get("nodes").is_none());
+        assert!(state.get("edges").is_none());
+        assert!(state.get("status").is_none());
 
         fs::remove_dir_all(root).unwrap();
     }

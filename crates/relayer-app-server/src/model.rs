@@ -1,9 +1,27 @@
 use serde::{Deserialize, Serialize};
 
+macro_rules! product_id {
+    ($name:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[serde(transparent)]
+        pub struct $name(pub i64);
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.0.fmt(formatter)
+            }
+        }
+    };
+}
+
+product_id!(ProjectId);
+product_id!(ThreadId);
+product_id!(InteractionId);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
-    pub id: String,
+    pub id: ProjectId,
     pub name: String,
     pub path: String,
     pub created_at: String,
@@ -13,10 +31,10 @@ pub struct Project {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Thread {
-    pub id: String,
+    pub id: ThreadId,
     pub title: String,
-    pub project_id: Option<String>,
-    pub root_interaction_id: String,
+    pub project_id: Option<ProjectId>,
+    pub root_interaction_id: InteractionId,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -24,8 +42,8 @@ pub struct Thread {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Interaction {
-    pub id: String,
-    pub thread_id: String,
+    pub id: InteractionId,
+    pub thread_id: ThreadId,
     pub sequence: i64,
     pub text: String,
     pub created_at: String,
@@ -44,7 +62,7 @@ pub struct CreateProject {
 #[serde(rename_all = "camelCase")]
 pub struct CreateThread {
     pub title: Option<String>,
-    pub project_id: Option<String>,
+    pub project_id: Option<ProjectId>,
     pub initial_message: String,
 }
 
@@ -83,9 +101,7 @@ impl Default for ProductCapabilities {
 pub struct ProductState {
     pub projects: Vec<Project>,
     pub threads: Vec<ThreadView>,
-    pub nodes: Vec<InteractionNode>,
-    pub edges: Vec<serde_json::Value>,
-    pub status: &'static str,
+    pub interactions: Vec<Interaction>,
     pub capabilities: ProductCapabilities,
 }
 
@@ -94,15 +110,5 @@ pub struct ProductState {
 pub struct ThreadView {
     #[serde(flatten)]
     pub thread: Thread,
-    pub root_node_id: String,
     pub active: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InteractionNode {
-    pub id: String,
-    pub kind: &'static str,
-    pub title: String,
-    pub summary: String,
 }

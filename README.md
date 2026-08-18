@@ -34,7 +34,7 @@ See [Architecture](docs/architecture.md) and [ADR 0001](docs/decisions/0001-prim
 
 ## Relayer Desktop
 
-Relayer Desktop is an Electron application backed by a local Rust app server and SQLite product database. The current product path persists projects, threads, and their user interactions. Codex provider setup remains an Electron-owned service. Agent execution and graph output are intentionally not connected.
+Relayer Desktop is an Electron application backed by a local Rust app server and SQLite product database. The current product path persists projects, threads, and product interaction chronology without projecting those records into graph nodes. Codex provider setup remains an Electron-owned service. Agent execution and graph output are intentionally not connected.
 
 ```sh
 npm install

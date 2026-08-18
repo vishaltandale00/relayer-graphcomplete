@@ -24,9 +24,9 @@ Electron desktop
         -> desktop renderer
 ```
 
-Electron owns native windows, provider setup, updates, and the Rust child-process lifecycle. The Rust app server owns durable project, thread, and interaction records and serves the renderer over a random loopback port. The renderer uses the app server as its product API.
+Electron owns native windows, provider setup, updates, and the Rust child-process lifecycle. The Rust app server owns durable project, thread, and product interaction chronology records and serves the renderer over a random loopback port. The renderer uses the app server as its product API. Product state does not project those chronology records into graph nodes.
 
-This path deliberately ends before graph or harness execution. Those capabilities are reported as unavailable until their product contracts are integrated.
+This path deliberately ends before graph or harness execution. Those capabilities are reported as unavailable until their product contracts are integrated. A later integration will let graph core create the canonical user-interaction node with the product interaction's positive integer ID in the app server's SQLite transaction; PR #4 does not depend on that graph operation.
 
 ## Required invariants
 

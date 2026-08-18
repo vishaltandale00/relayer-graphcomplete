@@ -396,19 +396,25 @@ type CompleteResult = {
 <tr class="requirement-row status-verified">
 <td>Electron owns the Rust app-server lifecycle</td>
 <td><span class="delivery-status verified">Met</span></td>
-<td>Electron starts one bundled or development server, accepts only its authenticated loopback readiness message, and stops it during shutdown. The renderer is restricted to that exact origin.</td>
+<td>Electron starts one bundled or development server, sends its control token through child standard input rather than process arguments, accepts only its authenticated loopback readiness message, and stops it during shutdown. If the child exits unexpectedly, the desktop shows an actionable error and closes instead of leaving an unusable window.</td>
 <td>Release signing and a clean-machine packaged smoke belong to distribution validation.</td>
 </tr>
 <tr class="requirement-row status-verified">
-<td>Product SQLite stores projects, threads, and first interactions atomically</td>
+<td>PR #4 remains independent from graph core and the harness</td>
 <td><span class="delivery-status verified">Met</span></td>
-<td>One Rust integration scenario creates project-backed and standalone threads, validates their interaction nodes, closes the store, reopens the same database, and reads the same records.</td>
-<td>Graph snapshots, attempts, drafts, migrations, export, and recovery from interrupted writes are not represented yet.</td>
+<td>The product-state response exposes projects, threads, and <code>interactions</code> chronology with <code>graph: false</code> and <code>harness: false</code>. It does not synthesize <code>nodes</code>, <code>edges</code>, <code>status</code>, or a second graph-node identifier.</td>
+<td>A later integration PR will have graph core create the canonical user-interaction node with the same integer identity inside the app server's SQLite transaction.</td>
+</tr>
+<tr class="requirement-row status-verified">
+<td>Product SQLite stores project metadata and atomically creates a thread with its first chronology entry</td>
+<td><span class="delivery-status verified">Met</span></td>
+<td>One Rust integration scenario creates a project plus project-backed and standalone threads, validates positive integer IDs and product interaction chronology, closes the store, reopens the same database, and reads the same records. Thread and first-interaction creation share one transaction; project creation is a separate operation.</td>
+<td>Canonical graph nodes, graph snapshots, attempts, drafts, migrations, export, and recovery from interrupted writes are not represented yet.</td>
 </tr>
 <tr class="requirement-row status-verified">
 <td><code>SCP-001</code>: first send requires non-empty text and creates a desktop-owned thread</td>
 <td><span class="delivery-status verified">Met</span></td>
-<td>The send control is disabled for empty input. A valid send creates the thread and root user interaction through the Rust API without invoking a harness.</td>
+<td>The send control is disabled for empty input. A valid send creates the thread and first product interaction chronology record through the Rust API without invoking a harness or synthesizing a graph node.</td>
 <td>Project-scope validity will need additional UI rules when project selection is completed.</td>
 </tr>
 <tr class="requirement-row status-verified">
@@ -444,7 +450,7 @@ type CompleteResult = {
 <tr class="requirement-row status-partial">
 <td>Section 5.2 local persistence and recovery</td>
 <td><span class="delivery-status partial">Partially met</span></td>
-<td>Projects, threads, and first interaction text use local SQLite transactions and survive a real process restart.</td>
+<td>Projects, threads, and first product interaction text use local SQLite storage and survive a real process restart. Thread plus first interaction creation is transactional.</td>
 <td>Settings, credential references, graph data, accepted states, execution state, update state, schema migration, and crash recovery remain.</td>
 </tr>
 <tr class="requirement-row status-verified">
@@ -463,7 +469,7 @@ type CompleteResult = {
 </table>
 
 <h4><code>APP-001-E1</code> — first standalone thread created</h4>
-<p>Captured from the Electron development application using an isolated product profile. The existing Codex connection was used only to pass the current provider gate; no harness was started.</p>
+<p>Captured from the unsigned packaged <code>Relayer Dev.app</code> using an isolated product profile. The existing Codex connection was used only to pass the current provider gate; no harness was started.</p>
 <figure class="evidence-figure">
   <div class="evidence-image">
     <img src="assets/evidence/app-server/thread-created.png" alt="APP-001-E1: First standalone thread created through the Rust app server">
@@ -590,7 +596,7 @@ type InteractionModelBinding = {
 <td>Explicit rejected/expired/revoked-credential copy and behavior; signed-release real-auth smoke. Relayer login, API keys, additional providers, provider URLs, secure secret storage, model listing, and harness selection remain planned after Sprint 1.</td>
 </tr>
 </tbody></table>
-<p>The default validation command remains fast: on 2026-08-17, <code>npm run check</code> completed with <strong>2 test files and 7 tests passing</strong>, and <code>npm run build</code> passed. Only the desktop structure and provider-lifecycle scenarios are provider-setup evidence; GraphComplete contract tests must not be counted as proof of this desktop flow.</p>
+<p>The default validation command remains fast: on 2026-08-17, <code>npm run check</code> completed with <strong>2 test files and 10 tests passing</strong>, and <code>npm run build</code> passed. Only the desktop structure and provider-lifecycle scenarios are provider-setup evidence; GraphComplete contract tests must not be counted as proof of this desktop flow.</p>
 <h4><code>PROV-001-E1</code> — disconnected provider setup, dark appearance</h4>
 <p>Captured from the Electron development application with an isolated empty Relayer profile. This proves the full-page setup, Relayer branding, Codex as the first provider, and the initial Connect action.</p>
 <figure class="evidence-figure">

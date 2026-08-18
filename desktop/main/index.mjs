@@ -50,6 +50,13 @@ const productServer = new RelayerAppServerService({
   userDataDirectory: userDataPath,
   binaryPath: relayerAppServerBinary,
   webDirectory: rendererDirectory,
+  onUnexpectedStop: () => {
+    dialog.showErrorBox(
+      "Relayer app server stopped",
+      "Relayer needs to close because its local product service stopped. Reopen the app to continue.",
+    );
+    app.quit();
+  },
 });
 
 const credentials = new CodexCredentialAdapter({
@@ -84,7 +91,13 @@ let shutdownPromise;
 let shutdownComplete = false;
 
 async function shutdownServices() {
-  shutdownPromise ??= Promise.all([credentials.close(), productServer.close()]);
+  shutdownPromise ??= (async () => {
+    const results = await Promise.allSettled([credentials.close(), productServer.close()]);
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length) {
+      throw new AggregateError(failures.map((result) => result.reason), "Relayer services did not all stop cleanly.");
+    }
+  })();
   await shutdownPromise;
 }
 
@@ -137,7 +150,9 @@ app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(
 app.on("before-quit", (event) => {
   if (shutdownComplete) return;
   event.preventDefault();
-  void shutdownServices().finally(() => {
+  void shutdownServices().catch((error) => {
+    console.error("Relayer shutdown failed:", error);
+  }).finally(() => {
     shutdownComplete = true;
     app.quit();
   });

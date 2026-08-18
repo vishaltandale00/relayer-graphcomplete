@@ -39,12 +39,14 @@ export class RelayerAppServerService {
     webDirectory,
     spawnProcess = spawn,
     startupTimeoutMs = 10_000,
+    onUnexpectedStop = () => {},
   }) {
     this.userDataDirectory = userDataDirectory;
     this.binaryPath = binaryPath;
     this.webDirectory = webDirectory;
     this.spawnProcess = spawnProcess;
     this.startupTimeoutMs = startupTimeoutMs;
+    this.onUnexpectedStop = onUnexpectedStop;
     this.child = null;
     this.listening = null;
     this.closing = false;
@@ -60,14 +62,15 @@ export class RelayerAppServerService {
     const child = this.spawnProcess(this.binaryPath, [
       "--data-dir", dataDirectory,
       "--web-dir", this.webDirectory,
-      "--control-token", controlToken,
       "--port", "0",
     ], {
       env: { ...process.env },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
     this.closing = false;
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(`${controlToken}\n`);
 
     const stderr = [];
     child.stderr?.on("data", (chunk) => {
@@ -90,6 +93,9 @@ export class RelayerAppServerService {
         this.listening = null;
         if (!expected) {
           console.error(`Relayer app server stopped (${signal || code || "unknown"}).`);
+          Promise.resolve(this.onUnexpectedStop({ code, signal })).catch((error) => {
+            console.error("Relayer app-server stop handler failed:", error);
+          });
         }
       };
       child.once("exit", onStopped);

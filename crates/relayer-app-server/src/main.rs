@@ -3,6 +3,7 @@ use clap::Parser;
 use relayer_app_server::{AppState, CONTROL_COOKIE, router, store::ProductStore};
 use serde_json::json;
 use std::{
+    io,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
@@ -17,17 +18,16 @@ struct Arguments {
     data_dir: PathBuf,
     #[arg(long)]
     web_dir: PathBuf,
-    #[arg(long)]
-    control_token: String,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let arguments = Arguments::parse();
+    let control_token = read_control_token()?;
     if arguments.host != IpAddr::V4(Ipv4Addr::LOCALHOST) {
         anyhow::bail!("Relayer app server only binds to 127.0.0.1");
     }
-    if arguments.control_token.len() < 32 {
+    if control_token.len() < 32 {
         anyhow::bail!("control token must contain at least 32 characters");
     }
     std::fs::create_dir_all(&arguments.data_dir).context("create product data directory")?;
@@ -53,15 +53,24 @@ async fn main() -> anyhow::Result<()> {
     );
     axum::serve(
         listener,
-        router(
-            AppState::new(store, arguments.control_token),
-            arguments.web_dir,
-        ),
+        router(AppState::new(store, control_token), arguments.web_dir),
     )
     .with_graceful_shutdown(shutdown_signal())
     .await
     .context("serve Relayer app server")?;
     Ok(())
+}
+
+fn read_control_token() -> anyhow::Result<String> {
+    let mut token = String::new();
+    io::stdin()
+        .read_line(&mut token)
+        .context("read desktop control token")?;
+    let token = token.trim_end_matches(['\r', '\n']).to_owned();
+    if token.is_empty() {
+        anyhow::bail!("desktop control token was not supplied");
+    }
+    Ok(token)
 }
 
 async fn shutdown_signal() {

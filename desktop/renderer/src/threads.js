@@ -15,9 +15,15 @@ export async function refreshState(threadId = viewState.currentThreadId) {
     return;
   }
   const state = await request(`/api/state${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ""}`);
-  Object.assign(appState, state);
+  appState.projects = state.projects || [];
+  appState.threads = state.threads || [];
+  appState.interactions = state.interactions || [];
+  appState.nodes = [];
+  appState.edges = [];
+  appState.status = "idle";
+  appState.capabilities = state.capabilities;
   const active = state.threads.find((thread) => thread.active);
-  if (threadId || active) viewState.currentThreadId = threadId || active.id;
+  if (threadId || active) viewState.currentThreadId = active?.id ?? threadId;
   renderSidebar();
   renderScopeMenu();
   if (viewState.mainView === "settings") setMainView("settings");

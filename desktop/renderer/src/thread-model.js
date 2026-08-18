@@ -1,5 +1,7 @@
 export function interactionForThread(state, thread) {
-  return state.nodes.find((node) => node.id === thread?.rootNodeId);
+  const interactionId = thread?.rootInteractionId ?? thread?.rootNodeId;
+  return state.interactions?.find((interaction) => String(interaction.id) === String(interactionId))
+    || state.nodes.find((node) => String(node.id) === String(interactionId));
 }
 
 export function responseNodesForThread(state, thread) {
@@ -31,6 +33,7 @@ export function addLocalThread(state, { selectedScope, prompt, title, createId }
     active: true,
   };
   state.threads.push(thread);
+  state.interactions ??= [];
   state.nodes.push({
     id: interactionId,
     kind: "user-interaction",

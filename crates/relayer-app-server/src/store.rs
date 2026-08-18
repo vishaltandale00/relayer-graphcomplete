@@ -1,11 +1,12 @@
-use crate::model::{CreateProject, CreateThread, Interaction, Project, Thread};
+use crate::model::{
+    CreateProject, CreateThread, Interaction, InteractionId, Project, ProjectId, Thread, ThreadId,
+};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use std::{
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
-use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -14,7 +15,7 @@ pub enum StoreError {
     #[error("invalid input: {0}")]
     Invalid(String),
     #[error("project already exists: {0}")]
-    ProjectExists(String),
+    ProjectExists(ProjectId),
     #[error("folder unavailable at {path}: {reason}")]
     FolderUnavailable { path: String, reason: String },
     #[error("storage failed: {0}")]
@@ -52,22 +53,22 @@ impl ProductStore {
         self.connection.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS projects (
-              id TEXT PRIMARY KEY,
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
               name TEXT NOT NULL,
               path TEXT NOT NULL UNIQUE,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS threads (
-              id TEXT PRIMARY KEY,
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
               title TEXT NOT NULL,
-              project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+              project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS interactions (
-              id TEXT PRIMARY KEY,
-              thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
               sequence INTEGER NOT NULL,
               text TEXT NOT NULL,
               created_at TEXT NOT NULL,
@@ -118,23 +119,23 @@ impl ProductStore {
                     .map(|value| value.to_string_lossy().into_owned())
             })
             .ok_or_else(|| StoreError::Invalid("project name cannot be determined".into()))?;
-        let id = Uuid::new_v4().to_string();
         let timestamp = now();
         self.connection.execute(
-            "INSERT INTO projects(id,name,path,created_at,updated_at) VALUES (?1,?2,?3,?4,?4)",
-            params![id, name, path_text, timestamp],
+            "INSERT INTO projects(name,path,created_at,updated_at) VALUES (?1,?2,?3,?3)",
+            params![name, path_text, timestamp],
         )?;
+        let id = ProjectId(self.connection.last_insert_rowid());
         Ok(ProjectWriteOutcome {
-            project: self.get_project(&id)?,
+            project: self.get_project(id)?,
             created: true,
         })
     }
 
-    pub fn get_project(&self, id: &str) -> Result<Project, StoreError> {
+    pub fn get_project(&self, id: ProjectId) -> Result<Project, StoreError> {
         self.connection
             .query_row(
                 "SELECT id,name,path,created_at,updated_at FROM projects WHERE id=?1",
-                [id],
+                [id.0],
                 project_from_row,
             )
             .optional()?
@@ -163,13 +164,13 @@ impl ProductStore {
             .map_err(StoreError::from)
     }
 
-    pub fn get_thread(&self, id: &str) -> Result<Thread, StoreError> {
+    pub fn get_thread(&self, id: ThreadId) -> Result<Thread, StoreError> {
         self.connection
             .query_row(
                 r#"SELECT t.id,t.title,t.project_id,t.created_at,t.updated_at,
                           (SELECT id FROM interactions WHERE thread_id=t.id ORDER BY sequence ASC LIMIT 1)
                    FROM threads t WHERE t.id=?1"#,
-                [id],
+                [id.0],
                 thread_from_row,
             )
             .optional()?
@@ -178,7 +179,7 @@ impl ProductStore {
 
     pub fn create_thread(&mut self, input: CreateThread) -> Result<Thread, StoreError> {
         let message = required(&input.initial_message, "initialMessage")?;
-        if let Some(project_id) = input.project_id.as_deref() {
+        if let Some(project_id) = input.project_id {
             self.get_project(project_id)?;
         }
         let title = input
@@ -190,35 +191,34 @@ impl ProductStore {
             .chars()
             .take(120)
             .collect::<String>();
-        let thread_id = Uuid::new_v4().to_string();
-        let interaction_id = Uuid::new_v4().to_string();
         let timestamp = now();
         let transaction = self.connection.transaction()?;
         transaction.execute(
-            "INSERT INTO threads(id,title,project_id,created_at,updated_at) VALUES (?1,?2,?3,?4,?4)",
-            params![thread_id, title, input.project_id, timestamp],
+            "INSERT INTO threads(title,project_id,created_at,updated_at) VALUES (?1,?2,?3,?3)",
+            params![title, input.project_id.map(|id| id.0), timestamp],
         )?;
+        let thread_id = ThreadId(transaction.last_insert_rowid());
         transaction.execute(
-            "INSERT INTO interactions(id,thread_id,sequence,text,created_at) VALUES (?1,?2,1,?3,?4)",
-            params![interaction_id, thread_id, message, timestamp],
+            "INSERT INTO interactions(thread_id,sequence,text,created_at) VALUES (?1,1,?2,?3)",
+            params![thread_id.0, message, timestamp],
         )?;
         transaction.commit()?;
-        self.get_thread(&thread_id)
+        self.get_thread(thread_id)
     }
 
-    pub fn list_interactions(&self, thread_id: &str) -> Result<Vec<Interaction>, StoreError> {
+    pub fn list_interactions(&self, thread_id: ThreadId) -> Result<Vec<Interaction>, StoreError> {
         self.get_thread(thread_id)?;
         let mut statement = self.connection.prepare(
             "SELECT id,thread_id,sequence,text,created_at FROM interactions WHERE thread_id=?1 ORDER BY sequence ASC",
         )?;
-        let rows = statement.query_map([thread_id], interaction_from_row)?;
+        let rows = statement.query_map([thread_id.0], interaction_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::from)
     }
 
     pub fn create_interaction(
         &mut self,
-        thread_id: &str,
+        thread_id: ThreadId,
         text: &str,
     ) -> Result<Interaction, StoreError> {
         let text = required(text, "text")?;
@@ -226,23 +226,26 @@ impl ProductStore {
         let transaction = self.connection.transaction()?;
         let sequence: i64 = transaction.query_row(
             "SELECT COALESCE(MAX(sequence),0)+1 FROM interactions WHERE thread_id=?1",
-            [thread_id],
+            [thread_id.0],
             |row| row.get(0),
         )?;
         let interaction = Interaction {
-            id: Uuid::new_v4().to_string(),
-            thread_id: thread_id.to_owned(),
+            id: InteractionId(0),
+            thread_id,
             sequence,
             text: text.to_owned(),
             created_at: now(),
         };
-        insert_interaction(&transaction, &interaction)?;
+        let interaction_id = insert_interaction(&transaction, &interaction)?;
         transaction.execute(
             "UPDATE threads SET updated_at=?1 WHERE id=?2",
-            params![interaction.created_at, thread_id],
+            params![interaction.created_at, thread_id.0],
         )?;
         transaction.commit()?;
-        Ok(interaction)
+        Ok(Interaction {
+            id: interaction_id,
+            ..interaction
+        })
     }
 }
 
@@ -282,7 +285,7 @@ fn now() -> String {
 
 fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     Ok(Project {
-        id: row.get(0)?,
+        id: ProjectId(row.get(0)?),
         name: row.get(1)?,
         path: row.get(2)?,
         created_at: row.get(3)?,
@@ -292,19 +295,19 @@ fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
 
 fn thread_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
     Ok(Thread {
-        id: row.get(0)?,
+        id: ThreadId(row.get(0)?),
         title: row.get(1)?,
-        project_id: row.get(2)?,
+        project_id: row.get::<_, Option<i64>>(2)?.map(ProjectId),
         created_at: row.get(3)?,
         updated_at: row.get(4)?,
-        root_interaction_id: row.get(5)?,
+        root_interaction_id: InteractionId(row.get(5)?),
     })
 }
 
 fn interaction_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Interaction> {
     Ok(Interaction {
-        id: row.get(0)?,
-        thread_id: row.get(1)?,
+        id: InteractionId(row.get(0)?),
+        thread_id: ThreadId(row.get(1)?),
         sequence: row.get(2)?,
         text: row.get(3)?,
         created_at: row.get(4)?,
@@ -314,16 +317,15 @@ fn interaction_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Interaction
 fn insert_interaction(
     transaction: &Transaction<'_>,
     interaction: &Interaction,
-) -> Result<(), StoreError> {
+) -> Result<InteractionId, StoreError> {
     transaction.execute(
-        "INSERT INTO interactions(id,thread_id,sequence,text,created_at) VALUES (?1,?2,?3,?4,?5)",
+        "INSERT INTO interactions(thread_id,sequence,text,created_at) VALUES (?1,?2,?3,?4)",
         params![
-            interaction.id,
-            interaction.thread_id,
+            interaction.thread_id.0,
             interaction.sequence,
             interaction.text,
             interaction.created_at
         ],
     )?;
-    Ok(())
+    Ok(InteractionId(transaction.last_insert_rowid()))
 }

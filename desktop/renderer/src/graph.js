@@ -16,10 +16,10 @@ export function renderThread() {
   }
   setMainView("thread");
   $("#threadTitle").textContent = thread.title;
-  const project = appState.projects.find((item) => item.id === thread.projectId);
+  const project = appState.projects.find((item) => String(item.id) === String(thread.projectId));
   $("#threadScope").textContent = project?.name || "No folder";
   const interaction = interactionForThread(appState, thread);
-  $("#interactionText").textContent = interaction?.summary || interaction?.content || thread.title;
+  $("#interactionText").textContent = interaction?.text || interaction?.summary || interaction?.content || thread.title;
   renderRunState();
   renderGraph();
 }
