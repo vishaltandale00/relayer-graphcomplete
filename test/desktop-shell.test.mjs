@@ -216,10 +216,16 @@ describe("desktop skeleton", () => {
     autoUpdater.emit("update-available", { version: "0.1.1" });
     expect(() => updater.setChannel("stable")).toThrow("Finish the current update");
     await updater.download();
+    autoUpdater.emit("download-progress", { percent: 29.4 });
+    autoUpdater.emit("download-progress", { percent: 100 });
+    autoUpdater.emit("download-progress", { percent: 16.2 });
+    autoUpdater.emit("download-progress", { percent: 92 });
     autoUpdater.emit("update-downloaded", { version: "0.1.1" });
+    autoUpdater.emit("download-progress", { percent: 3 });
     updater.install();
 
-    expect(states.map((state) => state.phase)).toEqual(["failed", "idle", "checking", "available", "ready"]);
+    expect(states.filter((state) => state.phase === "downloading").map((state) => state.percent)).toEqual([29, 99, 99, 99]);
+    expect(states.at(-1)).toMatchObject({ phase: "ready", percent: 100 });
     expect(autoUpdater.setFeedURL).toHaveBeenCalledWith(expect.objectContaining({ channel: "beta" }));
     expect(autoUpdater.allowDowngrade).toBe(false);
     expect(autoUpdater.downloadUpdate).toHaveBeenCalledOnce();
