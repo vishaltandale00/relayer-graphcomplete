@@ -15,6 +15,7 @@ const completion = {
     actions: [],
   },
 };
+const emptyState = (): HarnessSessionState => ({ schemaVersion: 1, values: {} });
 
 describe("HarnessHost", () => {
   it("persists resumable harness state even when completion fails", async () => {
@@ -35,7 +36,7 @@ describe("HarnessHost", () => {
           test: () => ({
             async complete() { throw new Error("model failed"); },
             setGraphCapability() {},
-            state: () => ({ codexThreadId: "resume-after-failure" }),
+            state: () => ({ schemaVersion: 2, values: { primeAgentSessionId: "resume-after-failure" } }),
           }),
         },
       });
@@ -53,16 +54,225 @@ describe("HarnessHost", () => {
             return {
               async complete() { throw new Error("unused"); },
               setGraphCapability() {},
-              state: () => context.savedState ?? {},
+              state: () => context.savedState ?? emptyState(),
             };
           },
         },
       });
       await restored.initialize();
       await restored.createSession(descriptor);
-      expect(restoredState).toEqual({ codexThreadId: "resume-after-failure" });
+      expect(restoredState).toEqual({ schemaVersion: 2, values: { primeAgentSessionId: "resume-after-failure" } });
     } finally {
       vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("awaits asynchronous harness construction", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-async-factory-"));
+    let releaseFactory!: () => void;
+    const factoryReady = new Promise<void>((resolveReady) => { releaseFactory = resolveReady; });
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        harnesses: {
+          test: async () => {
+            await factoryReady;
+            return { async complete() { return completion; }, setGraphCapability() {}, state: emptyState };
+          },
+        },
+      });
+      await host.initialize();
+      const creating = host.createSession({
+        threadId: 1,
+        harnessKey: "test",
+        workingDirectory: directory,
+        graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 },
+      });
+      await new Promise((resolveTurn) => setTimeout(resolveTurn, 0));
+      expect(host.sessionCount()).toBe(0);
+
+      releaseFactory();
+      await creating;
+      expect(host.sessionCount()).toBe(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("constructs only one harness when a thread is registered concurrently", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-concurrent-factory-"));
+    let factoryCalls = 0;
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        harnesses: { test: async () => {
+          factoryCalls += 1;
+          await new Promise((resolveTurn) => setTimeout(resolveTurn, 5));
+          return { async complete() { return completion; }, setGraphCapability() {}, state: emptyState };
+        } },
+      });
+      await host.initialize();
+      const descriptor = { threadId: 1, harnessKey: "test", workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } };
+
+      await Promise.all([host.createSession(descriptor), host.createSession(descriptor)]);
+
+      expect(factoryCalls).toBe(1);
+      expect(host.sessionCount()).toBe(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("disposes a harness that finishes starting after the host closes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-close-during-factory-"));
+    let releaseFactory!: () => void;
+    const factoryReady = new Promise<void>((resolveReady) => { releaseFactory = resolveReady; });
+    const dispose = vi.fn(async () => undefined);
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        harnesses: { test: async () => {
+          await factoryReady;
+          return { async complete() { return completion; }, setGraphCapability() {}, state: emptyState, dispose };
+        } },
+      });
+      await host.initialize();
+      const creating = host.createSession({ threadId: 1, harnessKey: "test", workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } });
+      await new Promise((resolveTurn) => setTimeout(resolveTurn, 0));
+
+      await host.close();
+      releaseFactory();
+
+      await expect(creating).rejects.toThrow("closed while the session was starting");
+      expect(dispose).toHaveBeenCalledTimes(1);
+      expect(host.sessionCount()).toBe(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("disposes a newly constructed harness when its initial state is invalid", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-invalid-state-"));
+    const dispose = vi.fn(async () => undefined);
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        harnesses: { test: () => ({
+          async complete() { return completion; },
+          setGraphCapability() {},
+          state: () => ({ schemaVersion: 0, values: {} }),
+          dispose,
+        }) },
+      });
+      await host.initialize();
+
+      await expect(host.createSession({
+        threadId: 1,
+        harnessKey: "test",
+        workingDirectory: directory,
+        graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 },
+      })).rejects.toThrow("invalid versioned implementation state");
+      expect(dispose).toHaveBeenCalledTimes(1);
+      expect(host.sessionCount()).toBe(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("requires a freshly minted graph capability before resuming saved state", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-fresh-capability-"));
+    const stateFile = join(directory, "sessions.json");
+    const descriptor = {
+      threadId: 1,
+      harnessKey: "test",
+      workingDirectory: directory,
+      graph: { url: "http://127.0.0.1:1", token: "old-token", nodeId: 1 },
+    };
+    try {
+      const first = new HarnessHost({
+        stateFile,
+        controlToken: "control",
+        harnesses: { test: () => ({ async complete() { return completion; }, setGraphCapability() {}, state: () => ({ schemaVersion: 1, values: { sessionId: "saved" } }) }) },
+      });
+      await first.initialize();
+      await first.createSession(descriptor);
+
+      let restoredState: HarnessSessionState | undefined;
+      const restored = new HarnessHost({
+        stateFile,
+        controlToken: "control",
+        harnesses: { test: (context) => {
+          restoredState = context.savedState;
+          return { async complete() { return completion; }, setGraphCapability() {}, state: () => context.savedState ?? emptyState() };
+        } },
+      });
+      await restored.initialize();
+      await expect(restored.complete(1)).rejects.toThrow("requires a fresh graph capability");
+      await restored.createSession({ ...descriptor, graph: { ...descriptor.graph, token: "new-token", nodeId: 2 } });
+      expect(restoredState).toEqual({ schemaVersion: 1, values: { sessionId: "saved" } });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("cancels the active completion through its abort signal", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-cancel-"));
+    let completionStarted!: () => void;
+    const started = new Promise<void>((resolveStarted) => { completionStarted = resolveStarted; });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        harnesses: { test: () => ({
+          complete(_interaction, signal) {
+            completionStarted();
+            return new Promise<never>((_resolve, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
+          },
+          setGraphCapability() {},
+          state: emptyState,
+        }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, harnessKey: "test", workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } });
+
+      const completing = host.complete(1);
+      await started;
+      expect(host.cancel(1)).toBe(true);
+      await expect(completing).rejects.toThrow("cancelled for thread 1");
+      expect(host.cancel(1)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("disposes live harnesses when the host closes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-dispose-"));
+    const dispose = vi.fn(async () => undefined);
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        harnesses: { test: () => ({ async complete() { return completion; }, setGraphCapability() {}, state: emptyState, dispose }) },
+      });
+      await host.initialize();
+      const descriptor = { threadId: 1, harnessKey: "test", workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } };
+      await host.createSession(descriptor);
+
+      await host.close();
+      await host.close();
+      expect(dispose).toHaveBeenCalledTimes(1);
+      expect(host.sessionCount()).toBe(0);
+      await expect(host.createSession(descriptor)).rejects.toThrow("closed");
+    } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -75,7 +285,7 @@ describe("HarnessHost", () => {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
         controlToken: "control",
-        harnesses: { test: () => ({ async complete() { calls += 1; return completion; }, setGraphCapability() {}, state: () => ({}) }) },
+        harnesses: { test: () => ({ async complete() { calls += 1; return completion; }, setGraphCapability() {}, state: emptyState }) },
       });
       await host.initialize();
       await host.createSession({ threadId: 1, harnessKey: "test", workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } });
@@ -107,7 +317,7 @@ describe("HarnessHost", () => {
           return {
             async complete() { return output; },
             setGraphCapability(graph) { adopted.push(graph); },
-            state: () => ({}),
+            state: emptyState,
           };
         } },
       });
@@ -146,7 +356,7 @@ describe("HarnessHost", () => {
         harnesses: { test: () => ({
           async complete() { completionStarted(); await finish; return completion; },
           setGraphCapability(graph) { adopted.push(graph.token); },
-          state: () => ({}),
+          state: emptyState,
         }) },
       });
       await host.initialize();
@@ -182,7 +392,7 @@ describe("HarnessHost", () => {
         harnesses: { test: () => ({
           async complete() { return completion; },
           setGraphCapability() {},
-          state() { if (stateCalls++ === 0) throw new Error("state failed"); return {}; },
+          state() { if (stateCalls++ === 1) throw new Error("state failed"); return emptyState(); },
         }) },
       });
       await host.initialize();
@@ -203,7 +413,7 @@ describe("HarnessHost", () => {
     const host = new HarnessHost({
       stateFile,
       controlToken: "control",
-      harnesses: { test: () => ({ async complete() { return completion; }, setGraphCapability() {}, state: () => ({}) }) },
+      harnesses: { test: () => ({ async complete() { return completion; }, setGraphCapability() {}, state: emptyState }) },
     });
     const descriptor = { threadId: 1, harnessKey: "test", workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } };
     try {
@@ -221,20 +431,87 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("stores capability state with owner-only permissions", async () => {
+  it("stores resumable state without graph capabilities and with owner-only permissions", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-mode-"));
     const stateFile = join(directory, "sessions.json");
     try {
       const host = new HarnessHost({
         stateFile,
         controlToken: "control",
-        harnesses: { test: () => ({ async complete() { return completion; }, setGraphCapability() {}, state: () => ({}) }) },
+        harnesses: { test: () => ({ async complete() { return completion; }, setGraphCapability() {}, state: () => ({ schemaVersion: 1, values: { providerSessionId: "session" } }) }) },
       });
       await host.initialize();
       await host.createSession({ threadId: 1, harnessKey: "test", workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "secret", nodeId: 1 } });
 
       expect((await stat(stateFile)).mode & 0o777).toBe(0o600);
+      const persisted = await readFile(stateFile, "utf8");
+      expect(persisted).not.toContain("secret");
+      expect(JSON.parse(persisted)).toEqual({
+        schemaVersion: 2,
+        sessions: [{
+          threadId: 1,
+          harnessKey: "test",
+          workingDirectory: directory,
+          state: { schemaVersion: 1, values: { providerSessionId: "session" } },
+        }],
+      });
     } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("migrates legacy Codex state and removes its persisted graph token", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-migration-"));
+    const stateFile = join(directory, "sessions.json");
+    try {
+      await writeFile(stateFile, JSON.stringify({
+        schemaVersion: 1,
+        sessions: [{
+          threadId: 1,
+          harnessKey: "codex.basic",
+          workingDirectory: directory,
+          graph: { url: "http://127.0.0.1:1", token: "legacy-secret", nodeId: 1 },
+          state: { codexThreadId: "codex-thread" },
+        }],
+      }), { mode: 0o600 });
+      const host = new HarnessHost({ stateFile, controlToken: "control", harnesses: {} });
+
+      await host.initialize();
+
+      const persisted = await readFile(stateFile, "utf8");
+      expect(persisted).not.toContain("legacy-secret");
+      expect(JSON.parse(persisted)).toEqual({
+        schemaVersion: 2,
+        sessions: [{
+          threadId: 1,
+          harnessKey: "codex.basic",
+          workingDirectory: directory,
+          state: { schemaVersion: 1, values: { codexThreadId: "codex-thread" } },
+        }],
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("exposes authenticated cancellation through the host API", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-cancel-route-"));
+    let running: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
+    try {
+      running = await startHarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        harnesses: {},
+      });
+      const response = await fetch(`${running.url}/sessions/1/cancel`, {
+        method: "POST",
+        headers: { authorization: "Bearer control" },
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ cancelled: false });
+    } finally {
+      await running?.close();
       await rm(directory, { recursive: true, force: true });
     }
   });

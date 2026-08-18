@@ -24,7 +24,11 @@ export class CodexBasicHarness implements Harness {
     this.graphClient = new RelayerGraphClient(context.graph);
     this.codex = this.createCodex(context.graph);
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
-    this.codexThreadId = context.savedState?.codexThreadId;
+    if (context.savedState !== undefined && context.savedState.schemaVersion !== 1) {
+      throw new Error(`Unsupported codex.basic session state version: ${context.savedState.schemaVersion}`);
+    }
+    const codexThreadId = context.savedState?.values.codexThreadId;
+    this.codexThreadId = typeof codexThreadId === "string" ? codexThreadId : undefined;
   }
 
   setGraphCapability(graph: GraphCapability): void {
@@ -52,7 +56,10 @@ export class CodexBasicHarness implements Harness {
   }
 
   state(): HarnessSessionState {
-    return this.codexThreadId === undefined ? {} : { codexThreadId: this.codexThreadId };
+    return {
+      schemaVersion: 1,
+      values: this.codexThreadId === undefined ? {} : { codexThreadId: this.codexThreadId },
+    };
   }
 
   private createCodex(graph: GraphCapability): Codex {

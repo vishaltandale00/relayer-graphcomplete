@@ -1176,7 +1176,7 @@ GET  /api/graph/layers/:id
 GET  /api/graph/nodes/:id/output
 </code></pre>
 <p>Every harness request carries an opaque, random capability token maintained by the server. In the current slice, the server stores only <code>token -&gt; canonical NodeId</code>. Project/thread visibility and the writable draft subgraph are derived from that node when a request creates its short-lived <code>GraphWriter</code>. <code>submit(node)</code> must receive the same root node. The engine rejects writes after that node already has an accepted completion.</p>
-<p>The token never enters graph content, evaluation evidence, or the renderer. Re-registering the same live thread with a newer interaction serializes the update behind any active Complete call, gives the existing harness object the new URL/token/node capability, and persists the new descriptor. <code>codex.basic</code> refreshes its SDK execution environment and resumes the same persisted Codex thread ID. The two-turn evaluation verifies this lifecycle for a running graph server; reminting and adopting a capability after a graph-server process restart remains a separate recovery eval. Provider credentials remain in product-owned secret storage.</p>
+<p>The token never enters graph content, evaluation evidence, the renderer, or the harness state file. Re-registering the same live thread with a newer interaction serializes the update behind any active Complete call and gives the existing harness object the new URL/token/node capability. The host persists only the stable thread binding and versioned implementation-owned resume state. After a host or graph-server restart, trusted control code must remint and register a fresh graph capability before the host recreates the harness object. <code>codex.basic</code> then refreshes its SDK execution environment and resumes the same persisted Codex thread ID. The two-turn evaluation verifies live capability rotation; recovery now fails closed until fresh capability registration, while a full process-restart recovery eval remains future work. Provider credentials remain in product-owned secret storage.</p>
 <h3>6.7 Required graph-engine proof</h3>
 <ul>
 <li>Rust unit tests cover every node, edge, layer, action, submission, transaction, migration, and concurrent-read/write rule without inference.</li>
@@ -1190,7 +1190,10 @@ GET  /api/graph/nodes/:id/output
 <pre><code class="language-ts">type CompleteInputGraph = NodeReference;
 
 interface Harness {
-  complete(interactionNode: GraphNode): Promise&lt;CompleteResult&gt;;
+  complete(interactionNode: GraphNode, signal?: AbortSignal): Promise&lt;CompleteResult&gt;;
+  setGraphCapability(graph: GraphCapability): void | Promise&lt;void&gt;;
+  state(): HarnessSessionState;
+  dispose?(): void | Promise&lt;void&gt;;
 }
 </code></pre>
 <p>The external name remains <code>complete(inputGraph)</code>, and that input graph is only a pointer to the current interaction node. The host resolves the pointer once and calls the selected harness with the interaction node. The harness object already holds its graph client, thread/project context, working-directory capability, and provider session. It resolves broader graph or filesystem context only when needed.</p>
@@ -1202,8 +1205,8 @@ interface Harness {
   &quot;prime-agent&quot;: createPrimeAgentHarness,
 };
 </code></pre>
-<p>The thread stores its selected harness key and copied configuration. The host keeps the same JavaScript harness object and underlying provider session alive across turns. If the Node process or provider session expires, the host recreates the object from the stored configuration and persisted provider session ID. Continuous conversation must not rediscover, reload, or start a brand-new Codex conversation on every Complete call.</p>
-<p>The Relayer app server will own one-active-root-completion coordination for a thread. The Node host owns the live JavaScript object and refuses unsafe concurrent calls on that same object; different thread harness objects may run concurrently. Prime Agent remains the owner of recursive child-agent scheduling inside a completion.</p>
+<p>The thread stores its selected harness key and copied configuration. The host keeps the same JavaScript harness object and underlying provider session alive across turns. Factories may initialize asynchronously. If the Node process or provider session expires, trusted control code first registers a fresh graph capability, then the host recreates the object from stored configuration and opaque, versioned provider resume state. Continuous conversation must not rediscover, reload, or start a brand-new Codex conversation on every Complete call.</p>
+<p>The Relayer app server will own one-active-root-completion coordination for a thread. The Node host owns the live JavaScript object, serializes construction and Complete calls on that object, forwards cancellation through an <code>AbortSignal</code>, and disposes live harnesses during shutdown; different thread harness objects may run concurrently. Prime Agent remains the owner of recursive child-agent scheduling inside a completion.</p>
 <h3>7.3 Minimal harness configuration</h3>
 <p>V1 configuration is intentionally code-oriented. A literal YAML file identifies an implementation key and its version. A separate product mapping assigns configuration filenames to user-facing harness names. Prompts, capability flags, and ablation parameters are not generalized configuration fields in the first milestone.</p>
 <pre><code class="language-yaml">schemaVersion: 1

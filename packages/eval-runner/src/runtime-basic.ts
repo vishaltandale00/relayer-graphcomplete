@@ -45,7 +45,7 @@ export interface BasicJudge { readonly factIds: readonly string[]; readonly grap
 class TaskSystemFixtureHarness implements Harness {
   constructor(private graph: RelayerGraphClient) {}
   setGraphCapability(graph: GraphCapability): void { this.graph = new RelayerGraphClient(graph); }
-  state(): HarnessSessionState { return {}; }
+  state(): HarnessSessionState { return { schemaVersion: 1, values: {} }; }
   async complete(interaction: GraphNode): Promise<CompletionOutput> {
     const queue = new NodeObject("queue", "Incoming queue", "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.", "concept", "queue");
     const workers = new NodeObject("workers", "Two-worker pool", "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.", "concept", "workers");

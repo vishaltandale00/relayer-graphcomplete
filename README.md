@@ -18,7 +18,7 @@ Pre-alpha executable runtime slice. The repository now includes:
 
 - a Rust SQLx/SQLite graph core and async loopback server with interaction-scoped capability tokens;
 - object-based TypeScript and Python clients for nodes, undirected edges, layers, actions, and submission;
-- a persistent Node harness host that caches one harness object per thread and persists resumable provider session IDs;
+- a persistent Node harness host that caches one harness object per thread, persists versioned provider session state without graph credentials, and supports cancellation and deterministic disposal;
 - a graph-tool `codex.basic` harness using the OpenAI Codex TypeScript SDK;
 - an inference-free evaluation that starts the real Rust server and Node host, checks two interactions in one empty-project thread, and saves a turn-navigable movable-node HTML result;
 - Rust, TypeScript, Python, and process-level integration tests.
