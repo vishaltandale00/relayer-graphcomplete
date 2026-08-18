@@ -10,6 +10,7 @@ import { CredentialAdapter } from "../desktop/main/credentials/credential-adapte
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
 import { createDesktopUpdater } from "../desktop/main/services/updater.mjs";
+import { claimPrimaryDesktopInstance } from "../desktop/main/single-instance.mjs";
 import {
   DESKTOP_UPDATE_BASE_URL,
   packagedDesktopReleaseMetadata,
@@ -38,6 +39,41 @@ import {
 import { addLocalThread, interactionForThread, responseNodesForThread } from "../desktop/renderer/src/thread-model.js";
 
 describe("desktop skeleton", () => {
+  it("keeps one desktop authority and presents its window on later launches", () => {
+    const handlers = new Map();
+    let window;
+    const app = {
+      requestSingleInstanceLock: vi.fn(() => true),
+      on: vi.fn((event, handler) => handlers.set(event, handler)),
+      quit: vi.fn(),
+    };
+    const primary = claimPrimaryDesktopInstance({ app, getWindow: () => window });
+    expect(primary).not.toBeNull();
+    expect(app.requestSingleInstanceLock).toHaveBeenCalledOnce();
+
+    handlers.get("second-instance")();
+    window = {
+      isMinimized: vi.fn(() => true),
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+    };
+    expect(primary.presentPendingWindow()).toBe(true);
+    expect(window.restore).toHaveBeenCalledOnce();
+    expect(window.show).toHaveBeenCalledOnce();
+    expect(window.focus).toHaveBeenCalledOnce();
+    expect(primary.presentPendingWindow()).toBe(false);
+
+    const secondaryApp = {
+      requestSingleInstanceLock: vi.fn(() => false),
+      on: vi.fn(),
+      quit: vi.fn(),
+    };
+    expect(claimPrimaryDesktopInstance({ app: secondaryApp, getWindow: () => null })).toBeNull();
+    expect(secondaryApp.quit).toHaveBeenCalledOnce();
+    expect(secondaryApp.on).not.toHaveBeenCalled();
+  });
+
   it("exposes Codex setup, New thread, and updates without a harness selector", async () => {
     const html = await readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8");
     const desktopMain = await readFile(new URL("../desktop/main/index.mjs", import.meta.url), "utf8");

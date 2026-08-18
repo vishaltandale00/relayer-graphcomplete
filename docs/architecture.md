@@ -26,7 +26,7 @@ Electron desktop
         -> desktop renderer files
 ```
 
-Electron owns native windows, provider setup, updates, and the Rust child-process lifecycle. It sends the per-launch control token through the child's standard input and keeps that pipe open as the ownership signal; the Rust server shuts down on pipe EOF if Electron exits or crashes, as well as on the normal termination signals. The Rust app server owns durable project, thread, and product interaction chronology records and serves the renderer over a random loopback port. The renderer uses the app server as its product API. Product state does not project those chronology records into graph nodes.
+Electron owns native windows, provider setup, updates, and the Rust child-process lifecycle. One Electron main process owns each desktop profile; a later application launch exits after asking the primary process to restore and focus its window. The primary process sends the per-launch control token through the Rust child's standard input and keeps that pipe open as the ownership signal; the Rust server shuts down on pipe EOF if Electron exits or crashes, as well as on the normal termination signals. The Rust app server owns durable project, thread, and product interaction chronology records and serves the renderer over a random loopback port. The renderer uses the app server as its product API. Product state does not project those chronology records into graph nodes.
 
 Within the app-server crate, each layer has one concrete responsibility:
 
