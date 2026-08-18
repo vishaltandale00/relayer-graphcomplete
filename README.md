@@ -58,6 +58,12 @@ The opt-in live path loads `harnesses/codex-basic.yaml`, resolves its `codex.bas
 npm run eval:basic:live
 ```
 
+To exercise the many-configurations-per-implementation contract end to end, the live matrix runs both `codex-basic` (medium reasoning) and `codex-basic-high` (high reasoning) through the same `codex.basic` implementation:
+
+```sh
+npm run eval:codex-basic:matrix:live
+```
+
 Live inference is deliberately excluded from `npm test` and `npm run check`. Desktop `See in App` is not claimed by this slice; the saved HTML is the current pre-app-server visual proof.
 
 ## Relayer Desktop

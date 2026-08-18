@@ -15,6 +15,7 @@ describe("harness configuration", () => {
       implementation: "codex.basic",
       implementationVersion: 1,
       settings: {
+        modelReasoningEffort: "medium",
         sandboxMode: "workspace-write",
         approvalPolicy: "never",
         networkAccessEnabled: true,

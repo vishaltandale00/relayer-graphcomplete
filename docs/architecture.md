@@ -86,7 +86,7 @@ Model and thinking level are separate choices. The runtime must fail clearly whe
 
 Configuration, implementation code, session state, and live authority are deliberately separate:
 
-1. Files such as `harnesses/codex-basic.yaml` are durable production configurations. Each has a unique `name`, while `implementation` selects executable code. Many configurations commonly select the same implementation with different settings.
+1. Files such as `harnesses/codex-basic.yaml` and `harnesses/codex-basic-high.yaml` are durable production configurations. Each has a unique `name`, while `implementation` selects executable code. Many configurations commonly select the same implementation with different settings.
 2. The implementation registry maps `codex.basic`, `prime-agent`, or a test implementation to a factory.
 3. The host copies the selected configuration onto the thread and persists the implementation's opaque JSON resume state. For `codex.basic`, that state is only the Codex thread ID.
 4. The current graph URL, token, and interaction node are live capabilities. They are rotated between turns and are never written to the harness state file.
@@ -97,6 +97,8 @@ The default and opt-in live evals start from an empty temporary folder and run t
 
 1. deterministic graph-contract checks; and
 2. a fresh structured Codex judge that scores six declared task-system facts plus graph and detail usefulness.
+
+The opt-in `eval:codex-basic:matrix:live` command loads two uniquely named configurations with different reasoning-effort settings, verifies that both resolve the same `codex.basic` implementation, and runs the complete two-turn graph eval for each configuration. It is excluded from the default suite because it performs live inference.
 
 The ordinary test suite never invokes inference. The pre-app-server slice saves a movable-node HTML result; replay inside the product is a later app-server acceptance requirement.
 

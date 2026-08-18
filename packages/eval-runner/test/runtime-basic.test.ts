@@ -41,6 +41,7 @@ describe("first runtime evaluation", () => {
     const checks = checkBasicOutput(mismatched);
     expect(checks.find((check) => check.name === "resolved-membership")?.passed).toBe(false);
     expect(checks.find((check) => check.name === "accepted-closure")?.passed).toBe(false);
+    expect(checkBasicOutput(mismatched, mismatched.nodeId, false).some((check) => check.name.startsWith("fact:"))).toBe(false);
   });
 
   it("runs two interactions through one live harness object and saves both fixture graphs", async () => {

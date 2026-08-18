@@ -34,6 +34,7 @@
     "desktop:dev": "npm run build && electron desktop/main/index.mjs",
     "eval:basic": "npm run build && node packages/eval-runner/dist/runtime-basic.js",
     "eval:basic:live": "npm run build && node packages/eval-runner/dist/runtime-basic.js --live",
+    "eval:codex-basic:matrix:live": "npm run build && node packages/eval-runner/dist/codex-basic-matrix.js",
     "desktop:pack": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && electron-builder --config desktop/packaging/electron-builder.mjs --dir --arm64",
     "desktop:dist": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs stable",
     "desktop:dist:preview": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs preview",

@@ -69,7 +69,7 @@ class TaskSystemFixtureHarness implements Harness {
   }
 }
 
-export async function runBasicRuntimeEval(options: { outputDirectory: string; live: boolean; judge?: boolean; serverBinary?: string; serverReadyTimeoutMs?: number }): Promise<RuntimeEvalArtifact> {
+export async function runBasicRuntimeEval(options: { outputDirectory: string; live: boolean; configurationPath?: string; judge?: boolean; serverBinary?: string; serverReadyTimeoutMs?: number }): Promise<RuntimeEvalArtifact> {
   const runId = randomUUID();
   const workingDirectory = await mkdtemp(join(tmpdir(), "relayer-runtime-eval-"));
   const stateDirectory = join(workingDirectory, "state");
@@ -83,7 +83,7 @@ export async function runBasicRuntimeEval(options: { outputDirectory: string; li
     let harnessFactoryCalls = 0;
     const fixtureFactory: HarnessFactory = (context) => new TaskSystemFixtureHarness(new RelayerGraphClient(context.graph));
     const configuration = options.live
-      ? await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-basic.yaml"))
+      ? await loadHarnessConfiguration(options.configurationPath ?? join(repositoryRoot, "harnesses/codex-basic.yaml"))
       : fixtureHarnessConfiguration;
     const registeredImplementations = productHarnessImplementations({ "fixture.task-system": fixtureFactory });
     const selectedFactory = registeredImplementations[configuration.implementation];
@@ -105,7 +105,7 @@ export async function runBasicRuntimeEval(options: { outputDirectory: string; li
       capabilities.push(capability);
       await requestJson(`${harnessHost.url}/sessions`, controlToken, { threadId, configuration, workingDirectory, graph: capability }, 201);
       const complete = await requestJson<{ output: CompletionOutput }>(`${harnessHost.url}/sessions/${threadId}/complete`, controlToken, { nodeId: interaction.node.id });
-      const checks = checkBasicOutput(complete.output, interaction.node.id);
+      const checks = checkBasicOutput(complete.output, interaction.node.id, options.judge !== true);
       const deterministicPassed = checks.every((check) => check.passed);
       const judge = options.judge && deterministicPassed ? await judgeOutput(complete.output, prompt, workingDirectory) : undefined;
       turns.push({
@@ -139,7 +139,7 @@ export async function runBasicRuntimeEval(options: { outputDirectory: string; li
   }
 }
 
-export function checkBasicOutput(output: CompletionOutput, expectedInteractionNodeId = output.nodeId): EvalCheck[] {
+export function checkBasicOutput(output: CompletionOutput, expectedInteractionNodeId = output.nodeId, includeContentFacts = true): EvalCheck[] {
   const layer = output.rootLayer;
   const declaredNodeIds = layer.layer.nodes;
   const resolvedNodeIds = layer.nodes.map((node) => node.id);
@@ -160,7 +160,7 @@ export function checkBasicOutput(output: CompletionOutput, expectedInteractionNo
     { name: "visible-layer", passed: layer.nodes.length >= 1 && layer.nodes.length <= 8 && layer.nodes.every((node) => node.icon.trim() && node.title.trim() && node.detail.trim()), detail: `${layer.nodes.length} complete visible nodes.` },
     { name: "exact-edges", passed: layer.edges.every((edge) => edge.endpoints[0] !== edge.endpoints[1] && nodeIds.has(edge.endpoints[0]) && nodeIds.has(edge.endpoints[1])), detail: `${layer.edges.length} visible undirected edges stay inside the layer.` },
     { name: "connected", passed: visited.size === layer.nodes.length, detail: `${visited.size}/${layer.nodes.length} nodes connected.` },
-    ...facts,
+    ...(includeContentFacts ? facts : []),
   ];
 }
 
@@ -328,6 +328,27 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
 }
 
-function argument(name:string):string|undefined{const index=process.argv.indexOf(name);return index<0?undefined:process.argv[index+1];}
-async function main():Promise<void>{const live=process.argv.includes("--live");const artifact=await runBasicRuntimeEval({outputDirectory:resolve(argument("--output-dir")??".relayer/evals/runtime"),live,judge:live&&!process.argv.includes("--no-judge")});console.log(JSON.stringify({runId:artifact.runId,harness:artifact.harness,passed:artifact.passed,viewer:resolve(argument("--output-dir")??".relayer/evals/runtime",artifact.runId,"index.html")}));if(!artifact.passed)process.exitCode=1;}
-if(process.argv[1]!==undefined&&resolve(process.argv[1])===fileURLToPath(import.meta.url))void main();
+function argument(name: string): string | undefined {
+  const index = process.argv.indexOf(name);
+  return index < 0 ? undefined : process.argv[index + 1];
+}
+
+async function main(): Promise<void> {
+  const live = process.argv.includes("--live");
+  const outputDirectory = resolve(argument("--output-dir") ?? ".relayer/evals/runtime");
+  const configurationName = argument("--configuration");
+  if (configurationName !== undefined && !/^[a-z0-9][a-z0-9._-]*$/i.test(configurationName)) {
+    throw new Error("--configuration must be a harness configuration name");
+  }
+  const configurationPath = configurationName === undefined ? undefined : join(repositoryRoot, "harnesses", `${configurationName}.yaml`);
+  const artifact = await runBasicRuntimeEval({
+    outputDirectory,
+    live,
+    ...(configurationPath === undefined ? {} : { configurationPath }),
+    judge: live && !process.argv.includes("--no-judge"),
+  });
+  console.log(JSON.stringify({ runId: artifact.runId, harness: artifact.harness, passed: artifact.passed, viewer: resolve(outputDirectory, artifact.runId, "index.html") }));
+  if (!artifact.passed) process.exitCode = 1;
+}
+
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) void main();
