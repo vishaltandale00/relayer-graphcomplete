@@ -1,3 +1,7 @@
+export function resolveUpdateChannel(savedChannel) {
+  return savedChannel === "preview" ? "preview" : "stable";
+}
+
 export function createDesktopUpdater({ autoUpdater, app, emit, updateBaseUrl }) {
   let channel = "stable";
   let displayedDownloadPercent = 0;

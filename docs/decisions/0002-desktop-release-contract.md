@@ -20,5 +20,7 @@ The signed-candidate workflow may be run manually from `main` without changing t
 - Preview and Stable cannot be installed side by side, while `Relayer Dev` can coexist with either.
 - A Preview user cannot downgrade to an older Stable version. Stable promotion therefore follows a successful Preview canary and uses monotonically increasing numeric versions.
 - Intel and macOS 12-or-older support require separate release decisions and validation.
-- The updater UI, publication pipeline, and rollback tooling consume this contract; they do not redefine release identity or channel semantics.
+- A bad release is withdrawn before further installation or repaired by publishing a newer version. Relayer does not automatically downgrade application code because a future older binary may not understand newer local data.
+- Recovery from a failed local-data schema migration belongs to the future persistence contract, where the schema and transaction boundary can be tested. It is not an updater acceptance criterion before that persistence layer exists.
+- The updater UI and publication pipeline consume this contract; they do not redefine release identity or channel semantics.
 - A tag is publication authority, not merely a version label. Deleting or recreating a tag cannot overwrite immutable artifacts for that version.
