@@ -6,6 +6,7 @@ import {
 } from "../release/contract.mjs";
 
 const desktopRoot = resolve(import.meta.dirname, "..");
+const repositoryRoot = resolve(desktopRoot, "..");
 
 export function createDesktopBuilderConfig(contract) {
   const release = contract.release;
@@ -31,8 +32,13 @@ export function createDesktopBuilderConfig(contract) {
       relayerAppleTeamId: contract.appleTeamId,
       relayerMinimumMacOSVersion: contract.minimumMacOSVersion,
     },
-    files: ["**/*", "!dist/**/*", "!packaging/**/*", "!release/**/*"],
+    files: ["**/*", "!dist/**/*", "!packaging/**/*", "!release/**/*", "!renderer/**/*"],
+    extraResources: [
+      { from: resolve(repositoryRoot, "target/aarch64-apple-darwin/release/relayer-app-server"), to: "bin/relayer-app-server" },
+      { from: resolve(desktopRoot, "renderer"), to: "renderer" },
+    ],
     artifactName: `${release ? "Relayer" : "Relayer-DEV"}-\${version}-mac-\${arch}.\${ext}`,
+    afterPack: "desktop/packaging/verify-bundled-app-server.mjs",
     afterSign: release ? "desktop/release/verify-macos-app.mjs" : undefined,
     // Do not set ElectronSquirrelPreventDowngrades with Electron 43. Its bundled
     // Squirrel predicate rejects valid numeric versions. The updater service and

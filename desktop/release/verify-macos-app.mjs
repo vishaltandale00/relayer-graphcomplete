@@ -3,6 +3,7 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import { verifyBundledAppServer } from "../packaging/verify-bundled-app-server.mjs";
 import { DESKTOP_RELEASE } from "./contract.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -48,6 +49,10 @@ export async function verifyMacOSApplication(
   if (String(architectures.stdout || "").trim() !== DESKTOP_RELEASE.architecture) {
     throw new Error(`Signed Relayer.app must contain only ${DESKTOP_RELEASE.architecture} executable code.`);
   }
+  await verifyBundledAppServer(appPath, {
+    execute,
+    expectedArchitecture: DESKTOP_RELEASE.architecture,
+  });
 
   if (assessNotarization) {
     await execute("/usr/sbin/spctl", ["--assess", "--type", "execute", "--verbose=4", appPath]);

@@ -1,11 +1,11 @@
-import { apiUrl, request } from "./api.js";
+import { request } from "./api.js";
 import { renderThread } from "./graph.js";
 import { renderScopeMenu, renderSidebar, setMainView } from "./navigation.js";
 import { appState, productApiAvailable, viewState } from "./state.js";
 import { $, threadTitle, toast } from "./ui.js";
 import { addLocalThread } from "./thread-model.js";
 
-let eventSource;
+let creatingFirstThread = false;
 
 export async function refreshState(threadId = viewState.currentThreadId) {
   if (!productApiAvailable) {
@@ -17,9 +17,15 @@ export async function refreshState(threadId = viewState.currentThreadId) {
     return;
   }
   const state = await request(`/api/state${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ""}`);
-  Object.assign(appState, state);
+  appState.projects = state.projects || [];
+  appState.threads = state.threads || [];
+  appState.interactions = state.interactions || [];
+  appState.nodes = [];
+  appState.edges = [];
+  appState.status = "idle";
+  appState.capabilities = state.capabilities;
   const active = state.threads.find((thread) => thread.active);
-  if (threadId || active) viewState.currentThreadId = threadId || active.id;
+  if (threadId || active) viewState.currentThreadId = active?.id ?? threadId;
   renderSidebar();
   renderScopeMenu();
   if (viewState.mainView === "settings") setMainView("settings");
@@ -35,10 +41,31 @@ export async function loadThread(threadId) {
   await refreshState(threadId);
 }
 
+async function createOrReuseProject(selectedScope) {
+  const input = { path: selectedScope.path, name: selectedScope.label };
+  try {
+    return await request("/api/projects", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  } catch (error) {
+    if (error.code !== "project_exists" || !error.details?.existingProject) throw error;
+    const existing = error.details.existingProject;
+    const confirmed = window.confirm(`“${existing.name}” already uses this folder. Use the existing project?`);
+    if (!confirmed) throw new Error("Project selection was cancelled. Your draft is unchanged.");
+    return request("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ ...input, reuseExisting: true }),
+    });
+  }
+}
+
 export async function createFirstThread() {
   const input = $("#newThreadPrompt");
   const promptText = input.value.trim();
-  if (!promptText) return;
+  if (!promptText || creatingFirstThread) return;
+  creatingFirstThread = true;
+  input.disabled = true;
   $("#createThread").disabled = true;
   try {
     const selectedScope = viewState.selectedScope;
@@ -57,10 +84,7 @@ export async function createFirstThread() {
     }
     let projectId = selectedScope.projectId;
     if (selectedScope.kind === "folder") {
-      const project = await request("/api/projects", {
-        method: "POST",
-        body: JSON.stringify({ path: selectedScope.path, name: selectedScope.label }),
-      });
+      const project = await createOrReuseProject(selectedScope);
       projectId = project.id;
     }
     const thread = await request("/api/threads", {
@@ -72,38 +96,17 @@ export async function createFirstThread() {
       }),
     });
     viewState.currentThreadId = thread.id;
-    await request(`/api/threads/${encodeURIComponent(thread.id)}/messages`, {
-      method: "POST",
-      body: JSON.stringify({ content: promptText, selectedNodeIds: [] }),
-    });
     input.value = "";
     await loadThread(thread.id);
   } catch (error) {
     toast(error.message);
   } finally {
-    $("#createThread").disabled = false;
+    creatingFirstThread = false;
+    input.disabled = false;
+    $("#createThread").disabled = !input.value.trim();
   }
 }
 
 export function connectEvents() {
-  if (!productApiAvailable) return;
-  eventSource?.close();
-  eventSource = new EventSource(apiUrl("/api/events"));
-  const productEvents = new Set([
-    "project.created",
-    "thread.created",
-    "turn.started",
-    "turn.submitted",
-    "turn.accepted",
-    "turn.stopped",
-    "turn.failed",
-    "turn.cancelled",
-  ]);
-  eventSource.onmessage = (event) => {
-    try {
-      const message = JSON.parse(event.data);
-      if (message.threadId && message.threadId !== viewState.currentThreadId) return;
-      if (productEvents.has(message.type)) void refreshState(viewState.currentThreadId);
-    } catch {}
-  };
+  // Live harness events are intentionally outside this product-persistence slice.
 }

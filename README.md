@@ -32,20 +32,22 @@ The intended recursive loop is:
 
 See [Architecture](docs/architecture.md) and [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
 
-## Desktop Slice 1
+## Relayer Desktop
 
-The first Relayer Desktop slice is an Electron shell for Codex provider setup, the New Thread entry surface, full-page Settings, appearance, folder selection, and the initial local interaction view. Agent execution and graph output are intentionally not connected in this slice.
+Relayer Desktop is an Electron application backed by a local Rust app server and SQLite product database. The current product path persists projects, threads, and product interaction chronology without projecting those records into graph nodes. Codex provider setup remains an Electron-owned service. Agent execution and graph output are intentionally not connected.
 
 ```sh
 npm install
 npm run desktop:dev
 ```
 
-Build an unsigned Apple Silicon development application with:
+Build an unsigned Apple Silicon development application, including the Rust server, with:
 
 ```sh
 npm run desktop:pack
 ```
+
+Desktop packaging intentionally targets Apple Silicon only. The build compiles both Electron and the nested Rust app server for `arm64`, then rejects the package if the bundled server has a different architecture. Intel Mac support is deferred.
 
 The accepted desktop release contract starts at version `0.2.0`, supports Apple Silicon on macOS 13 or newer, and uses the existing Relayer Developer ID identity. Signed candidates fail closed unless the worktree is clean and signing, notarization, provenance, and the sealed update URL are all present. Build a signed, notarized candidate without publishing it with:
 

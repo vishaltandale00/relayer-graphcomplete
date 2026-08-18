@@ -23,14 +23,14 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "check": "tsc --noEmit && vitest run",
-    "test": "vitest run",
+    "build": "cargo build -p relayer-app-server && tsc -p tsconfig.build.json",
+    "check": "cargo test --workspace && tsc --noEmit && vitest run",
+    "test": "cargo test --workspace && vitest run",
     "prd": "node docs/prd/server.mjs",
-    "desktop:dev": "electron desktop/main/index.mjs",
-    "desktop:pack": "electron-builder --config desktop/packaging/electron-builder.mjs --dir --arm64",
-    "desktop:dist": "RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs stable",
-    "desktop:dist:preview": "RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs preview",
+    "desktop:dev": "npm run build && electron desktop/main/index.mjs",
+    "desktop:pack": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && electron-builder --config desktop/packaging/electron-builder.mjs --dir --arm64",
+    "desktop:dist": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs stable",
+    "desktop:dist:preview": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs preview",
     "desktop:release:verify": "node desktop/release/verify-artifacts.mjs",
     "desktop:release:publish-preview": "node desktop/release/publish-preview.mjs",
     "desktop:release:promote-stable": "node desktop/release/promote-stable.mjs"

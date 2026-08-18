@@ -15,6 +15,30 @@ Product host
     -> product persistence and activation
 ```
 
+## Working desktop product path
+
+```text
+Electron desktop
+    -> Rust Relayer app server
+        -> HTTP API
+            -> product service
+                -> SQLite product storage
+        -> desktop renderer files
+```
+
+Electron owns native windows, provider setup, updates, and the Rust child-process lifecycle. One Electron main process owns each desktop profile; a later application launch exits after asking the primary process to restore and focus its window. The primary process keeps product data inside a permission-restricted app directory, sends the per-launch control token through the Rust child's standard input, and keeps that pipe open as the ownership signal; the Rust server shuts down on pipe EOF if Electron exits or crashes, as well as on the normal termination signals. The Rust app server owns durable project, thread, and product interaction chronology records and serves the renderer over a random loopback port. The renderer uses the app server as its product API. Product state does not project those chronology records into graph nodes.
+
+Within the app-server crate, each layer has one concrete responsibility:
+
+- `app_server.rs` composes the server and owns its startup boundary.
+- `api.rs` and `api/` own HTTP authentication, routes, request/response shapes, and product-error mapping.
+- `product.rs` and `product/` own typed identifiers, product records, validation, and use-case orchestration.
+- `storage.rs` and `storage/sqlite/` own SQL, transactions, connection policy, and schema migration.
+
+SQLite migrations are storage implementation details. `SqliteProductStore::open` requires any existing product tables to carry Relayer's SQLx migration history, applies the embedded versioned files under `storage/sqlite/migrations/`, and validates the exact resulting schema and row invariants before the store becomes available. This permits a recognized predecessor to migrate while an unmanaged, incompatible, partially initialized, or corrupt schema fails startup. Electron, the HTTP API, and the product service neither run nor interpret migrations. The storage pool is asynchronous, bounded, configured for foreign keys and WAL, and is not guarded by a process-wide blocking mutex. Composite product-state and thread-detail reads use SQLite snapshot transactions so each API response is internally consistent. Operations that allocate per-thread interaction sequence numbers acquire an immediate SQLite transaction before assigning their timestamp or sequence, so concurrent requests cannot select the same next sequence or move a thread's chronology backward.
+
+This path deliberately ends before graph or harness execution. Those capabilities are reported as unavailable until their product contracts are integrated. A later integration will let graph core create the canonical user-interaction node with the product interaction's positive integer ID in the app server's SQLite transaction; PR #4 does not depend on that graph operation.
+
 ## Required invariants
 
 1. Every scope has one content owner.

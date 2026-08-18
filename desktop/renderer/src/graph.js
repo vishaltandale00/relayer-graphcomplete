@@ -16,10 +16,10 @@ export function renderThread() {
   }
   setMainView("thread");
   $("#threadTitle").textContent = thread.title;
-  const project = appState.projects.find((item) => item.id === thread.projectId);
+  const project = appState.projects.find((item) => String(item.id) === String(thread.projectId));
   $("#threadScope").textContent = project?.name || "No folder";
   const interaction = interactionForThread(appState, thread);
-  $("#interactionText").textContent = interaction?.summary || interaction?.content || thread.title;
+  $("#interactionText").textContent = interaction?.text || interaction?.summary || interaction?.content || thread.title;
   renderRunState();
   renderGraph();
 }
@@ -33,8 +33,6 @@ function renderRunState() {
         : status[0].toUpperCase() + status.slice(1);
   $("#runState").className = `run-state ${status === "running" ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
   $("#runState span").textContent = display;
-  $("#stopRun").classList.toggle("hidden", status !== "running");
-  $("#retryRun").classList.toggle("hidden", !["failed", "cancelled", "blocked"].includes(status));
 }
 
 function hash(value) {

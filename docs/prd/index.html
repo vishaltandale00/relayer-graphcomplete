@@ -56,6 +56,13 @@
     .delivery-status.open { border-color: light-dark(#e6aaa5, #703b37); background: light-dark(#fff0ef, #391d1b); color: light-dark(#9b3029, #ef9b94); }
     .delivery-status.deferred { border-color: light-dark(#cbd1dc, #485163); background: light-dark(#f1f3f6, #242a35); color: light-dark(#606b7e, #abb4c5); }
     .delivery-status.next { border-color: light-dark(#a9c7ee, #365f91); background: light-dark(#edf5ff, #172c46); color: light-dark(#285f9f, #91bff3); }
+    .requirement-row { --row-accent: light-dark(#cbd1dc, #485163); --row-tint: transparent; background: var(--row-tint); }
+    .requirement-row td:first-child { border-left: 4px solid var(--row-accent); }
+    .requirement-row.status-verified { --row-accent: light-dark(#49a267, #6bc184); --row-tint: light-dark(rgba(234,247,238,.55), rgba(23,49,32,.34)); }
+    .requirement-row.status-partial { --row-accent: light-dark(#d4a62c, #e9c65d); --row-tint: light-dark(rgba(255,247,223,.58), rgba(53,43,19,.34)); }
+    .requirement-row.status-open { --row-accent: light-dark(#d15c54, #ef9b94); --row-tint: light-dark(rgba(255,240,239,.58), rgba(57,29,27,.34)); }
+    .requirement-row.status-next { --row-accent: light-dark(#5e90c8, #91bff3); --row-tint: light-dark(rgba(237,245,255,.58), rgba(23,44,70,.34)); }
+    .requirement-row.status-deferred { --row-accent: light-dark(#9099aa, #8993a7); --row-tint: light-dark(rgba(241,243,246,.58), rgba(36,42,53,.34)); }
     .slice-summary { margin: 18px 0 26px; padding: 16px 18px; border-left: 4px solid light-dark(#d2961d, #e4b84c); border-radius: 8px; background: light-dark(#fff9e9, #2c2515); }
     .slice-summary > :first-child { margin-top: 0; }
     .slice-summary > :last-child { margin-bottom: 0; }
@@ -305,11 +312,11 @@ type CompleteResult = {
 <h3>2.2 Visual acceptance rule</h3>
 <p>Every user-visible requirement needs structural UI assertions plus a rendered screenshot or saved-result replay in this UX. Schema validation alone does not satisfy visual acceptance.</p>
 <h3>2.3 Slice 1 delivery checkpoint — desktop front door</h3>
-<p>Slice 1 is the desktop front door: provider setup through Codex, entry into the desktop shell, full-page Settings, appearance/sidebar behavior, and the New Thread scope surface. It does <strong>not</strong> claim that project creation, durable thread creation, persistence, agent execution, or graph interaction works in the product.</p>
+<p>Slice 1 is the desktop front door: provider setup through Codex, entry into the desktop shell, full-page Settings, appearance/sidebar behavior, and the New Thread scope surface. The app-server continuation now adds desktop-owned project/thread storage and a product-verified first standalone thread. It does <strong>not</strong> claim that the complete project/Git workflow, agent execution, or graph interaction works in the product.</p>
 <div class="delivery-legend"><span class="delivery-status verified">Verified</span><span class="delivery-status partial">Partial</span><span class="delivery-status open">Open</span><span class="delivery-status next">Next slice</span><span class="delivery-status deferred">Deferred</span></div>
 
 <p>Status is based on product proof, not code presence. <strong>Verified</strong> requires automated coverage plus a screenshot for visible behavior. <strong>Partial</strong> means a visible surface or underlying component exists but the end-to-end behavior is not proven. <strong>Open</strong> is unfinished work within the stated Slice 1 boundary. <strong>Deferred</strong> remains a future PRD requirement outside this slice.</p>
-<div class="slice-summary"><b>Slice 1 result:</b> the app can be visually exercised from fresh provider setup through the connected New Thread shell. The largest remaining gap inside this slice is that selecting a folder/project and creating, persisting, and reopening a first thread have not been product-verified.</div>
+<div class="slice-summary"><b>Current result:</b> the app can be visually exercised from fresh provider setup through creation and restart recovery of a desktop-owned No folder thread. The largest remaining desktop gaps are complete project/folder/Git handling and the broader thread-management actions. Agent execution and graph output remain deliberately separate.</div>
 
 <table>
 <thead>
@@ -320,61 +327,191 @@ type CompleteResult = {
 <th>What remains</th>
 </tr>
 </thead>
-<tbody><tr>
+<tbody><tr class="requirement-row status-verified">
 <td>Codex provider setup: normal and abandoned-auth flows</td>
 <td><span class="delivery-status verified">Verified</span></td>
 <td>Disconnected, authorization-pending with <strong>Open again</strong>, successful connection, and connected restart are covered by one compact lifecycle scenario and four Electron screenshots in Section 3.6.</td>
 <td>Explicit rejection, expiration, and later credential revocation are tracked separately below; real authentication needs a signed-release smoke.</td>
 </tr>
-<tr>
+<tr class="requirement-row status-verified">
 <td>Desktop shell and appearance</td>
 <td><span class="delivery-status verified">Verified</span></td>
 <td>Light and dark provider setup, Relayer branding, expanded shell, and the collapsed-sidebar layout are structurally tested and visually captured.</td>
 <td>Keyboard navigation, accessibility, small-window layout, and restart persistence remain broader desktop requirements.</td>
 </tr>
-<tr>
+<tr class="requirement-row status-partial">
 <td>Full-page Settings surface</td>
 <td><span class="delivery-status partial">Partial</span></td>
 <td>Full-page layout, theme selector, connected Codex row, Disconnect control, channel selector, and update control are structurally tested and captured in <code>SET-001-E1</code>.</td>
 <td>Disconnect/reconnect behavior and retention of local data are not verified. Advanced project, storage, Git, and provider settings are not built.</td>
 </tr>
-<tr>
+<tr class="requirement-row status-partial">
 <td>New Thread entry and scope menu</td>
 <td><span class="delivery-status partial">Partial</span></td>
 <td>The connected landing page, composer, explicit <strong>No folder</strong> state, and <strong>Open another folder</strong> choice are structurally tested and captured in <code>SCP-001-E1</code> and <code>SCP-001-E2</code>.</td>
 <td>Folder picker completion, project creation/selection, Git detection, and local-checkout/new-worktree choice need choice-driven product tests and screenshots.</td>
 </tr>
-<tr>
+<tr class="requirement-row status-verified">
 <td>Create and persist the first thread</td>
-<td><span class="delivery-status open">Open</span></td>
-<td>A static/experimental thread surface has been viewed, but it is not proof of a desktop-owned thread lifecycle.</td>
-<td>Create a no-folder or project thread without relying on agent execution; show it in the sidebar; quit; reopen; prove the same thread, scope, and draft/interaction state survive.</td>
+<td><span class="delivery-status verified">Verified</span></td>
+<td>The Electron desktop creates a No folder thread through the Rust app server, lists it in Chats, and restores the same title, scope, and first interaction after a process restart. <code>APP-001-E1</code> and <code>APP-001-E2</code> show the two product states; the Rust integration scenario proves database reopen.</td>
+<td>Project-backed visual proof, unsent-draft recovery, rename/archive/pin/delete, and interrupted-write recovery remain separate requirements.</td>
 </tr>
-<tr>
+<tr class="requirement-row status-open">
 <td>Provider failure edges</td>
 <td><span class="delivery-status open">Open</span></td>
 <td>Abandoned authorization and rapid replacement are covered.</td>
 <td>Add compact coverage for explicit authorization rejection, credential expiration/revocation on a later launch, and recovery without freezing the setup page.</td>
 </tr>
-<tr>
+<tr class="requirement-row status-next">
 <td>Desktop updater and distributable packaging</td>
 <td><span class="delivery-status partial">Partial — Stable candidate ready</span></td>
 <td>The protected CI workflow has signed, notarized, and immutably published real <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code> Apple Silicon releases. A remote Mac mini completed the visible update and relaunch flows through <code>0.2.4</code>; the latest canary preserved an explicitly saved Preview choice, connected Codex account, and Light appearance and is committed as the gate for exact-artifact Stable promotion.</td>
 <td>The first Stable pointer move, the macOS 13-through-current support matrix, and update deferral around active Complete commits remain unverified. Automatic application downgrade is prohibited; failed local-data migration recovery belongs to the future persistence contract rather than this updater slice. Section 5.7 contains the exact proof and remaining boundary.</td>
 </tr>
-<tr>
+<tr class="requirement-row status-deferred">
 <td>Relayer login and additional providers</td>
 <td><span class="delivery-status deferred">Deferred</span></td>
 <td>Future product requirements remain documented.</td>
 <td>Relayer account login, API-key login, additional providers, custom URLs, secure key storage, connection tests, and model listing are outside Slice 1.</td>
 </tr>
-<tr>
+<tr class="requirement-row status-deferred">
 <td>Harness execution, graph output, and graph interactions</td>
 <td><span class="delivery-status deferred">Deferred</span></td>
 <td>Experimental harness, graph, and eval work is separate engineering evidence and is not counted as desktop proof.</td>
 <td>Invocation, stop/retry, accepted graph rendering, node details, context attachment, actions, subthreads, turns, and graph persistence belong to later slices.</td>
 </tr>
 </tbody></table>
+<h3>2.4 App-server and persistence delivery checkpoint</h3>
+<p>This checkpoint maps the current Rust app-server PR to the product requirements and implementation boundaries it actually proves. The status label and the matching row color are intentionally redundant so the table remains readable without relying on color alone.</p>
+<div class="delivery-legend"><span class="delivery-status verified">Met</span><span class="delivery-status partial">Partially met</span><span class="delivery-status open">Not met</span><span class="delivery-status deferred">Out of scope</span></div>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Status</th>
+<th>Evidence in this PR</th>
+<th>Remaining work</th>
+</tr>
+</thead>
+<tbody>
+<tr class="requirement-row status-verified">
+<td>Electron owns the Rust app-server lifecycle</td>
+<td><span class="delivery-status verified">Met</span></td>
+<td>One Electron main process owns the desktop profile, Rust server, provider process, updater, and settings. A later Relayer launch exits after asking the primary process to restore and focus its existing window, including when that request arrives before the first window finishes opening. The primary process permission-restricts the product-data directory, starts one bundled or development server, sends its control token through child standard input rather than process arguments, keeps that pipe open as the parent-ownership signal, accepts only its authenticated loopback readiness message, and stops it during shutdown. The Rust server also exits when the pipe closes after an Electron exit or crash. Failed startup and normal shutdown wait for process exit, escalating from <code>SIGTERM</code> to <code>SIGKILL</code> after a bounded grace period. If the child exits unexpectedly, the desktop shows an actionable error and closes instead of leaving an unusable window. Automated lifecycle scenarios cover single-instance focus, private product storage, immediate provider-spawn failure, and real-binary parent-pipe exit.</td>
+<td>Release signing and a clean-machine packaged smoke belong to distribution validation.</td>
+</tr>
+<tr class="requirement-row status-verified">
+<td>App-server responsibilities have explicit production boundaries</td>
+<td><span class="delivery-status verified">Met</span></td>
+<td><code>RelayerAppServer</code> composes four visible layers: server lifecycle, HTTP API, product service, and SQLite product storage. HTTP handlers own authentication and wire formats; the product service owns typed IDs, validation, and product operations; SQLite storage owns SQL, transactions, connection policy, and embedded migrations. The public Rust library exposes only the server boundary needed by the executable and integration test.</td>
+<td>Graph core, harness hosting, credential propagation, and their integration boundaries remain intentionally absent. Split the product layer by feature only when additional product areas make the current project/thread service too broad.</td>
+</tr>
+<tr class="requirement-row status-verified">
+<td>PR #4 remains independent from graph core and the harness</td>
+<td><span class="delivery-status verified">Met</span></td>
+<td>The product-state response exposes projects, threads, and <code>interactions</code> chronology with <code>graph: false</code> and <code>harness: false</code>. It does not synthesize <code>nodes</code>, <code>edges</code>, <code>status</code>, or a second graph-node identifier.</td>
+<td>A later integration PR will have graph core create the canonical user-interaction node with the same integer identity inside the app server's SQLite transaction.</td>
+</tr>
+<tr class="requirement-row status-verified">
+<td>Product SQLite stores project metadata and atomically creates a thread with its first chronology entry</td>
+<td><span class="delivery-status verified">Met</span></td>
+<td>One Rust integration scenario creates a project plus project-backed and standalone threads, races duplicate project creation, concurrently appends interactions against a future thread timestamp, forces equal thread timestamps, closes the store, reopens the same database, and reads the same records. It proves one project creation winner, contiguous interaction sequence numbers, nondecreasing interaction timestamps, deterministic newest-thread selection, and positive integer IDs. Thread and first-interaction creation share one transaction. The app server permits only SQLx-managed predecessor schemas into embedded migrations, then validates exact columns, full unique indexes, foreign keys, and the required root interaction before accepting the database.</td>
+<td>Canonical graph nodes, graph snapshots, attempts, drafts, later schema upgrades beyond the initial version, export, and recovery from an operating-system interruption are not represented yet.</td>
+</tr>
+<tr class="requirement-row status-verified">
+<td><code>SCP-001</code>: first send requires non-empty text and creates a desktop-owned thread</td>
+<td><span class="delivery-status verified">Met</span></td>
+<td>The send control is disabled for empty input. A valid send creates the thread and first product interaction chronology record through the Rust API without invoking a harness or synthesizing a graph node. Repeated click or keyboard submission while that request is pending is coalesced into one creation.</td>
+<td>Project-scope validity will need additional UI rules when project selection is completed.</td>
+</tr>
+<tr class="requirement-row status-verified">
+<td>Create, persist, and reopen the first No folder thread</td>
+<td><span class="delivery-status verified">Met</span></td>
+<td><code>APP-001-E1</code> shows the created thread. <code>APP-001-E2</code> shows the same isolated profile after Electron and the app server were stopped and restarted. The database integration scenario supplies the automated persistence proof.</td>
+<td>Unsent drafts and interrupted-write recovery are not proven.</td>
+</tr>
+<tr class="requirement-row status-partial">
+<td><code>SCP-002</code>: No folder is a standalone scope</td>
+<td><span class="delivery-status partial">Partially met</span></td>
+<td>The stored thread has no <code>projectId</code>, and the desktop displays it under Chats with <strong>No folder</strong>.</td>
+<td>The required isolated app-owned working directory is not created yet.</td>
+</tr>
+<tr class="requirement-row status-partial">
+<td><code>SCP-003</code>: project identity and duplicate-folder behavior</td>
+<td><span class="delivery-status partial">Partially met</span></td>
+<td>Projects receive stable IDs and canonical folder paths. Concurrent creation of the same canonical folder has one atomic winner; later attempts return a conflict instead of an internal error. The desktop asks before explicitly reusing the existing project. Missing folders return an actionable error.</td>
+<td>The folder picker, visible confirmation/recovery proof, authorized-folder lifecycle, and populated project sidebar are not complete.</td>
+</tr>
+<tr class="requirement-row status-open">
+<td><code>SCP-004</code>–<code>SCP-006</code>: Git and worktree choices</td>
+<td><span class="delivery-status open">Not met</span></td>
+<td>No Git or worktree behavior is claimed by this PR.</td>
+<td>Add Git detection, Local checkout/New worktree choice, failure recovery, and exact execution-location persistence.</td>
+</tr>
+<tr class="requirement-row status-partial">
+<td><code>SCP-007</code>–<code>SCP-009</code>: thread management</td>
+<td><span class="delivery-status partial">Partially met</span></td>
+<td>Create, list, select, and reopen are present for the initial thread shape.</td>
+<td>Fork, rename, archive, pin, delete-entry, move-to-project, and graph-reference preservation are not implemented.</td>
+</tr>
+<tr class="requirement-row status-partial">
+<td>Section 5.2 local persistence and recovery</td>
+<td><span class="delivery-status partial">Partially met</span></td>
+<td>Projects, threads, and product interaction text use local SQLite storage and survive a real process restart. Thread plus first interaction creation is transactional; concurrent later interactions serialize sequence allocation. The initial product schema is installed and structurally validated by versioned migration code owned by SQLite storage, and incompatible pre-existing tables prevent startup.</td>
+<td>Settings, credential references, graph data, accepted states, execution state, update state, a real later-version migration, and crash recovery remain.</td>
+</tr>
+<tr class="requirement-row status-verified">
+<td>Packaged local app-server artifact</td>
+<td><span class="delivery-status verified">Met</span></td>
+<td>The development and release commands explicitly compile the Rust server for <code>aarch64-apple-darwin</code> and package Electron for <code>arm64</code>. An <code>afterPack</code> check rejects a nested server with any other architecture, and signed verification repeats that check. <code>APP-001-E3</code> is a launch smoke of the packaged <code>.app</code> with an isolated profile.</td>
+<td>Intel Mac support is explicitly deferred. Signing, notarization, clean-machine installation, update feed, and previous-version upgrade remain release work.</td>
+</tr>
+<tr class="requirement-row status-deferred">
+<td>Credentials, harness invocation, graph engine, and response graph</td>
+<td><span class="delivery-status deferred">Out of scope</span></td>
+<td>The desktop explicitly says agent execution is not connected. This PR neither starts Prime Agent nor claims graph behavior.</td>
+<td>Integrate these only through their later product contracts.</td>
+</tr>
+</tbody>
+</table>
+
+<h4><code>APP-001-E1</code> — first standalone thread created</h4>
+<p>Captured from the unsigned packaged <code>Relayer Dev.app</code> using an isolated product profile. The existing Codex connection was used only to pass the current provider gate; no harness was started.</p>
+<figure class="evidence-figure">
+  <div class="evidence-image">
+    <img src="assets/evidence/app-server/thread-created.png" alt="APP-001-E1: First standalone thread created through the Rust app server">
+    <span class="evidence-callout" style="--x:9%;--y:20%">1</span>
+    <span class="evidence-callout" style="--x:31%;--y:5%">2</span>
+    <span class="evidence-callout" style="--x:58%;--y:13%">3</span>
+    <span class="evidence-callout" style="--x:58%;--y:56%">4</span>
+  </div>
+  <ol class="evidence-legend"><li><b>1</b><span>The newly created thread appears under Chats.</span></li><li><b>2</b><span>The durable header records the thread title and No folder scope.</span></li><li><b>3</b><span>The first user interaction is rendered from product data.</span></li><li><b>4</b><span>The product states that agent execution is not connected; no harness result is implied.</span></li></ol>
+</figure>
+
+<h4><code>APP-001-E2</code> — same thread reopened after restart</h4>
+<p>Captured after stopping both Electron and its Rust app server, then launching them again against the same isolated profile. The title, No folder scope, sidebar entry, and first interaction were restored from product SQLite.</p>
+<figure class="evidence-figure">
+  <div class="evidence-image">
+    <img src="assets/evidence/app-server/thread-reopened.png" alt="APP-001-E2: The same standalone thread reopened after Electron and Rust app-server restart">
+    <span class="evidence-callout" style="--x:9%;--y:20%">1</span>
+    <span class="evidence-callout" style="--x:31%;--y:5%">2</span>
+    <span class="evidence-callout" style="--x:58%;--y:13%">3</span>
+    <span class="evidence-callout" style="--x:58%;--y:56%">4</span>
+  </div>
+  <ol class="evidence-legend"><li><b>1</b><span>The persisted thread returns to Chats after restart.</span></li><li><b>2</b><span>The same title and No folder scope are restored.</span></li><li><b>3</b><span>The same first interaction is read from the reopened database.</span></li><li><b>4</b><span>The harness boundary remains visibly deferred after recovery.</span></li></ol>
+</figure>
+
+<h4><code>APP-001-E3</code> — packaged arm64 application starts its bundled server</h4>
+<p>Captured from the unsigned local <code>Relayer Dev.app</code> produced by <code>npm run desktop:pack</code>, using an isolated empty profile. The page origin was the ephemeral loopback address reported by the bundled Rust executable.</p>
+<figure class="evidence-figure">
+  <div class="evidence-image">
+    <img src="assets/evidence/app-server/packaged-startup.png" alt="APP-001-E3: Packaged arm64 Relayer application serving provider setup through its bundled Rust app server">
+    <span class="evidence-callout" style="--x:50%;--y:28%">1</span>
+    <span class="evidence-callout" style="--x:50%;--y:37%">2</span>
+  </div>
+  <ol class="evidence-legend"><li><b>1</b><span>The packaged application reaches the normal first-launch product screen.</span></li><li><b>2</b><span>The bundled server serves the focused Codex provider choice; agent execution is not involved.</span></li></ol>
+</figure>
 <h1>Part I — Desktop chat application</h1>
 <h2>3. Agent setup and credentials</h2>
 <h3>3.1 First launch</h3>
@@ -467,7 +604,7 @@ type InteractionModelBinding = {
 <td>Explicit rejected/expired/revoked-credential copy and behavior; signed-release real-auth smoke. Relayer login, API keys, additional providers, provider URLs, secure secret storage, model listing, and harness selection remain planned after Sprint 1.</td>
 </tr>
 </tbody></table>
-<p>The default validation command remains fast: on 2026-08-18, <code>npm run check</code> completed with <strong>2 test files and 9 tests passing</strong>, and <code>npm run build</code> passed. Only the desktop structure and provider-lifecycle scenarios are provider-setup evidence; GraphComplete contract tests must not be counted as proof of this desktop flow.</p>
+<p>The default validation command remains fast: on 2026-08-18, <code>npm run check</code> completed with <strong>2 test files and 12 tests passing</strong>, and <code>npm run build</code> passed. Only the desktop structure and provider-lifecycle scenarios are provider-setup evidence; GraphComplete contract tests must not be counted as proof of this desktop flow.</p>
 <h4><code>PROV-001-E1</code> — disconnected provider setup, dark appearance</h4>
 <p>Captured from the Electron development application with an isolated empty Relayer profile. This proves the full-page setup, Relayer branding, Codex as the first provider, and the initial Connect action.</p>
 <figure class="evidence-figure">
@@ -591,12 +728,12 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <th>Remaining work</th>
 </tr>
 </thead>
-<tbody><tr>
+<tbody><tr class="requirement-row status-partial">
 <td>New Thread shell and initial No folder/folder choice</td>
 <td><span class="delivery-status partial">Partial</span></td>
-<td>The existing structural desktop scenario asserts New Thread, <code>scopeButton</code>, and <code>scopeMenu</code> in the shipped renderer.</td>
-<td><code>SCP-001-E1</code> and <code>SCP-001-E2</code> below</td>
-<td>The send path currently reaches experimental agent integration and is not desktop-product proof. Existing-project population, folder dialog completion, Git detection, local/new-worktree choice, and persistence remain unverified.</td>
+<td>The structural desktop scenario asserts New Thread, <code>scopeButton</code>, <code>scopeMenu</code>, and disabled empty send. The Rust integration scenario proves atomic thread/interaction creation and database reopen.</td>
+<td><code>SCP-001-E1</code>, <code>SCP-001-E2</code>, <code>APP-001-E1</code>, and <code>APP-001-E2</code></td>
+<td>No folder create/reopen is verified. Existing-project population, folder-dialog completion, Git detection, and local/new-worktree choice remain unverified, so the overall requirement group stays partial.</td>
 </tr>
 </tbody></table>
 <h4><code>SCP-001-E1</code> — connected New Thread</h4>

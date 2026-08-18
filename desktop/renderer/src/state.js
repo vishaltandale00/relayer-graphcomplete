@@ -5,6 +5,7 @@ export const productApiAvailable = location.protocol === "http:" || location.pro
 export const appState = {
   projects: [],
   threads: [],
+  interactions: [],
   nodes: [],
   edges: [],
   status: "idle",
@@ -18,6 +19,6 @@ export const viewState = {
 };
 
 export function activeThread() {
-  return appState.threads.find((thread) => thread.id === viewState.currentThreadId)
+  return appState.threads.find((thread) => String(thread.id) === String(viewState.currentThreadId))
     || appState.threads.find((thread) => thread.active);
 }

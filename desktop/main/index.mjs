@@ -7,8 +7,10 @@ import { fileURLToPath } from "node:url";
 
 import { CodexCredentialAdapter } from "./credentials/codex-credential-adapter.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
+import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
+import { claimPrimaryDesktopInstance } from "./single-instance.mjs";
 import { createWindowFactory } from "./window.mjs";
 import {
   DESKTOP_UPDATE_BASE_URL,
@@ -35,69 +37,129 @@ const updateBaseUrl = packagedRelease?.updateBaseUrl || (
 const bundledCodexBinary = app.isPackaged
   ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex")
   : join(repositoryRoot, "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex");
+const relayerAppServerBinary = app.isPackaged
+  ? join(process.resourcesPath, "bin", "relayer-app-server")
+  : resolve(process.env.RELAYER_APP_SERVER_BINARY || join(repositoryRoot, "target", "debug", "relayer-app-server"));
+const rendererDirectory = app.isPackaged
+  ? join(process.resourcesPath, "renderer")
+  : join(desktopDirectory, "renderer");
 
 let mainWindow;
-let appearance = "dark";
-const settings = createSettingsStore(userDataPath);
+const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => mainWindow });
 
-const credentials = new CodexCredentialAdapter({
-  environment: { ...process.env, CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: bundledCodexBinary },
-  onAccountChanged: (event) => {
-    if (event?.status === "unavailable") {
-      mainWindow?.webContents.send("relayer:account-changed", event);
-      return;
-    }
-    void credentials.account().then((account) => mainWindow?.webContents.send("relayer:account-changed", account));
-  },
-});
+if (primaryInstance) {
+  let appearance = "dark";
+  const settings = createSettingsStore(userDataPath);
+  const productServer = new RelayerAppServerService({
+    userDataDirectory: userDataPath,
+    binaryPath: relayerAppServerBinary,
+    webDirectory: rendererDirectory,
+    onUnexpectedStop: () => {
+      dialog.showErrorBox(
+        "Relayer app server stopped",
+        "Relayer needs to close because its local product service stopped. Reopen the app to continue.",
+      );
+      app.quit();
+    },
+  });
 
-const updater = createDesktopUpdater({
-  autoUpdater: electronUpdater.autoUpdater,
-  app: {
-    get isPackaged() { return app.isPackaged && releaseArtifact; },
-    getVersion: () => app.getVersion(),
-  },
-  updateBaseUrl,
-  emit: (state) => mainWindow?.webContents.send("relayer:update-changed", state),
-});
+  const credentials = new CodexCredentialAdapter({
+    environment: { ...process.env, CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: bundledCodexBinary },
+    onAccountChanged: (event) => {
+      if (event?.status === "unavailable") {
+        mainWindow?.webContents.send("relayer:account-changed", event);
+        return;
+      }
+      void credentials.account().then((account) => mainWindow?.webContents.send("relayer:account-changed", account));
+    },
+  });
 
-const createWindow = createWindowFactory({
-  BrowserWindow,
-  app,
-  desktopDirectory,
-  getAppearance: () => appearance,
-  updater,
-});
+  const updater = createDesktopUpdater({
+    autoUpdater: electronUpdater.autoUpdater,
+    app: {
+      get isPackaged() { return app.isPackaged && releaseArtifact; },
+      getVersion: () => app.getVersion(),
+    },
+    updateBaseUrl,
+    emit: (state) => mainWindow?.webContents.send("relayer:update-changed", state),
+  });
 
-app.whenReady().then(async () => {
-  await mkdir(codexHome, { recursive: true });
-  const saved = await settings.read();
-  appearance = saved.appearance === "light" ? "light" : "dark";
-  nativeTheme.themeSource = appearance;
-  const channel = resolveUpdateChannel(saved.updateChannel);
-  if (channel === "preview") updater.setChannel("preview");
-
-  registerDesktopIpc({
-    ipcMain,
-    dialog,
-    shell,
-    nativeTheme,
-    credentials,
-    settings,
-    updater,
-    getWindow: () => mainWindow,
+  const createWindow = createWindowFactory({
+    BrowserWindow,
+    desktopDirectory,
     getAppearance: () => appearance,
-    setAppearance: (value) => { appearance = value; },
+    updater,
   });
-  mainWindow = await createWindow();
-  mainWindow.on("closed", () => { mainWindow = undefined; });
-  app.on("activate", async () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = await createWindow();
-      mainWindow.on("closed", () => { mainWindow = undefined; });
-    }
-  });
-});
 
-app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("before-quit", () => { void credentials.close(); });
+  let shutdownPromise;
+  let shutdownComplete = false;
+
+  async function shutdownServices() {
+    shutdownPromise ??= (async () => {
+      const results = await Promise.allSettled([credentials.close(), productServer.close()]);
+      const failures = results.filter((result) => result.status === "rejected");
+      if (failures.length) {
+        throw new AggregateError(failures.map((result) => result.reason), "Relayer services did not all stop cleanly.");
+      }
+    })();
+    await shutdownPromise;
+  }
+
+  app.whenReady().then(async () => {
+    await mkdir(codexHome, { recursive: true });
+    const saved = await settings.read();
+    appearance = saved.appearance === "light" ? "light" : "dark";
+    nativeTheme.themeSource = appearance;
+    const channel = resolveUpdateChannel(saved.updateChannel);
+    if (channel === "preview") updater.setChannel("preview");
+    const productSession = await productServer.start();
+
+    registerDesktopIpc({
+      ipcMain,
+      dialog,
+      shell,
+      nativeTheme,
+      credentials,
+      settings,
+      updater,
+      getWindow: () => mainWindow,
+      getAppearance: () => appearance,
+      setAppearance: (value) => { appearance = value; },
+      beforeUpdateInstall: async () => {
+        await shutdownServices();
+        shutdownComplete = true;
+      },
+      onUpdateInstallFailure: () => {
+        app.relaunch();
+        app.exit(1);
+      },
+    });
+    mainWindow = await createWindow(productSession);
+    primaryInstance.presentPendingWindow();
+    mainWindow.on("closed", () => { mainWindow = undefined; });
+    app.on("activate", async () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        mainWindow = await createWindow(await productServer.start());
+        mainWindow.on("closed", () => { mainWindow = undefined; });
+      } else {
+        primaryInstance.presentPrimaryWindow();
+      }
+    });
+  }).catch((error) => {
+    console.error("Relayer startup failed:", error);
+    dialog.showErrorBox("Relayer could not start", error.message);
+    app.quit();
+  });
+
+  app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+  app.on("before-quit", (event) => {
+    if (shutdownComplete) return;
+    event.preventDefault();
+    void shutdownServices().catch((error) => {
+      console.error("Relayer shutdown failed:", error);
+    }).finally(() => {
+      shutdownComplete = true;
+      app.quit();
+    });
+  });
+}

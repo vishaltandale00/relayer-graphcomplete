@@ -1,19 +1,22 @@
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-credential-adapter.mjs";
 import { CredentialAdapter } from "../desktop/main/credentials/credential-adapter.mjs";
+import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "../desktop/main/services/updater.mjs";
+import { claimPrimaryDesktopInstance } from "../desktop/main/single-instance.mjs";
 import {
   DESKTOP_UPDATE_BASE_URL,
   packagedDesktopReleaseMetadata,
 } from "../desktop/shared/release-metadata.mjs";
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
+import { verifyBundledAppServer } from "../desktop/packaging/verify-bundled-app-server.mjs";
 import {
   DESKTOP_RELEASE,
   resolveDesktopReleaseContract,
@@ -38,15 +41,55 @@ import {
   promoteDesktopStable,
   validateStablePromotionProvenance,
 } from "../desktop/release/promote-stable.mjs";
+import { apiUrl } from "../desktop/renderer/src/api.js";
 import { addLocalThread, interactionForThread, responseNodesForThread } from "../desktop/renderer/src/thread-model.js";
 
 describe("desktop skeleton", () => {
+  it("keeps one desktop authority and presents its window on later launches", () => {
+    const handlers = new Map();
+    let window;
+    const app = {
+      requestSingleInstanceLock: vi.fn(() => true),
+      on: vi.fn((event, handler) => handlers.set(event, handler)),
+      quit: vi.fn(),
+    };
+    const primary = claimPrimaryDesktopInstance({ app, getWindow: () => window });
+    expect(primary).not.toBeNull();
+    expect(app.requestSingleInstanceLock).toHaveBeenCalledOnce();
+
+    handlers.get("second-instance")();
+    window = {
+      isMinimized: vi.fn(() => true),
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+    };
+    expect(primary.presentPendingWindow()).toBe(true);
+    expect(window.restore).toHaveBeenCalledOnce();
+    expect(window.show).toHaveBeenCalledOnce();
+    expect(window.focus).toHaveBeenCalledOnce();
+    expect(primary.presentPendingWindow()).toBe(false);
+
+    const secondaryApp = {
+      requestSingleInstanceLock: vi.fn(() => false),
+      on: vi.fn(),
+      quit: vi.fn(),
+    };
+    expect(claimPrimaryDesktopInstance({ app: secondaryApp, getWindow: () => null })).toBeNull();
+    expect(secondaryApp.quit).toHaveBeenCalledOnce();
+    expect(secondaryApp.on).not.toHaveBeenCalled();
+  });
+
   it("exposes Codex setup, New thread, and updates without a harness selector", async () => {
     const html = await readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8");
     const desktopMain = await readFile(new URL("../desktop/main/index.mjs", import.meta.url), "utf8");
     const packageManifest = await readFile(new URL("../package.json", import.meta.url), "utf8");
     const desktopManifest = await readFile(new URL("../desktop/package.json", import.meta.url), "utf8");
     const packaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
+    const desktopWindow = await readFile(new URL("../desktop/main/window.mjs", import.meta.url), "utf8");
+    const desktopIpc = await readFile(new URL("../desktop/main/ipc/register-ipc.mjs", import.meta.url), "utf8");
+    const rendererMain = await readFile(new URL("../desktop/renderer/src/main.js", import.meta.url), "utf8");
+    const threads = await readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8");
     const prd = await readFile(new URL("../docs/prd/index.html", import.meta.url), "utf8");
     const prdServer = await readFile(new URL("../docs/prd/server.mjs", import.meta.url), "utf8");
     expect(html).toContain("Connect a provider");
@@ -57,15 +100,30 @@ describe("desktop skeleton", () => {
     expect(html).toContain('id="collapseSidebar"');
     expect(html).toContain('id="scopeButton"');
     expect(html).toContain('id="scopeMenu"');
+    expect(html).toContain('id="createThread" title="Create thread and send" disabled');
     expect(html).toContain('id="disconnectCodex"');
     expect(html).toContain('id="updateChannel"');
     expect(html).toContain("relayer-logo");
     expect(html).toContain('class="settings-view hidden"');
     expect(html).toContain('type="module" src="./src/main.js"');
+    expect(html).toContain("connect-src 'self'");
+    expect(html).not.toContain("http://127.0.0.1:*");
+    expect(html).not.toContain('id="stopRun"');
+    expect(html).not.toContain('id="retryRun"');
+    expect(apiUrl("/api/state")).toBe("/api/state");
     expect(html).not.toContain("<dialog");
     expect(html.toLowerCase()).not.toContain("harness selector");
     expect(desktopMain).not.toContain("PrimeAgentThreadRunner");
-    expect(desktopMain).not.toContain("RelayerAppServer");
+    expect(desktopMain).toContain("RelayerAppServerService");
+    expect(desktopMain).toContain("productServer.start()");
+    expect(desktopMain).toContain("productServer.close()");
+    expect(desktopMain).toContain("Promise.allSettled");
+    expect(desktopMain).toContain("Relayer app server stopped");
+    expect(desktopMain).toContain("app.isPackaged");
+    expect(desktopWindow).toContain('window.webContents.on("will-navigate"');
+    expect(desktopWindow).toContain('window.webContents.on("will-redirect"');
+    expect(desktopWindow).toContain('setWindowOpenHandler(() => ({ action: "deny" }))');
+    expect(desktopIpc).toContain("onUpdateInstallFailure");
     expect(packageManifest).not.toContain("@openai/codex-sdk");
     expect(desktopManifest).not.toContain("prime-agent");
     expect(desktopManifest).not.toContain("@openai/codex-sdk");
@@ -76,10 +134,286 @@ describe("desktop skeleton", () => {
     expect(packageManifest).toContain("desktop/packaging/electron-builder.mjs");
     expect(packaging).toContain('"macos/entitlements.mac.plist"');
     expect(packaging).toContain('"!packaging/**/*"');
+    expect(packaging).toContain('"target/aarch64-apple-darwin/release/relayer-app-server"');
+    expect(packaging).toContain('afterPack: "desktop/packaging/verify-bundled-app-server.mjs"');
+    expect(packaging).toContain('to: "renderer"');
+    expect(threads).not.toContain("/messages");
+    expect(threads).not.toContain("EventSource");
+    expect(rendererMain).not.toContain("/messages");
+    expect(rendererMain).not.toContain("/interrupt");
     expect(prd).toContain('src="assets/product-walkthrough.html"');
+    expect(prd).toContain("App-server and persistence delivery checkpoint");
+    expect(prd).toContain('class="requirement-row status-verified"');
+    expect(prd).toContain('class="requirement-row status-open"');
+    expect(prd).toContain("APP-001-E1");
+    expect(prd).toContain("APP-001-E2");
+    expect(prd).toContain("APP-001-E3");
+    expect(prd).toContain('assets/evidence/app-server/thread-created.png');
+    expect(prd).toContain('assets/evidence/app-server/thread-reopened.png');
+    expect(prd).toContain('assets/evidence/app-server/packaged-startup.png');
     expect(prd).toContain('document: \'docs/prd/index.html\'');
     expect(prdServer).toContain('join(prdDirectory, "comments.json")');
     expect(packageManifest).not.toContain('"marked"');
+  });
+
+  it("coalesces repeated first-thread submissions while creation is pending", async () => {
+    const globalNames = ["document", "fetch", "history", "location", "localStorage", "window"];
+    const originalGlobals = new Map(
+      globalNames.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]),
+    );
+    const input = { value: "Build the first thread", disabled: false };
+    const button = { disabled: false };
+    const toastElement = {
+      textContent: "",
+      classList: { add: vi.fn(), remove: vi.fn() },
+    };
+    let rejectRequest;
+    const fetch = vi.fn(() => new Promise((_resolve, reject) => { rejectRequest = reject; }));
+    const elements = new Map([
+      ["#newThreadPrompt", input],
+      ["#createThread", button],
+      ["#toast", toastElement],
+    ]);
+    Object.assign(globalThis, {
+      document: { querySelector: (selector) => elements.get(selector) },
+      fetch,
+      history: { replaceState: vi.fn() },
+      location: new URL("http://127.0.0.1:43123/"),
+      localStorage: { setItem: vi.fn() },
+      window: { GRAPHCOMPLETE_CONFIG: null, relayerDesktop: undefined },
+    });
+    vi.useFakeTimers();
+    try {
+      const { createFirstThread } = await import("../desktop/renderer/src/threads.js?submission-guard");
+      const first = createFirstThread();
+      const repeated = createFirstThread();
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(input.disabled).toBe(true);
+      expect(button.disabled).toBe(true);
+
+      rejectRequest(new Error("test request stopped"));
+      await Promise.all([first, repeated]);
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(input.disabled).toBe(false);
+      expect(button.disabled).toBe(false);
+      expect(toastElement.textContent).toBe("test request stopped");
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      for (const [name, descriptor] of originalGlobals) {
+        if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+        else delete globalThis[name];
+      }
+    }
+  });
+
+  it("starts and stops the Rust product server with an isolated profile and private session", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-app-server-service-"));
+    const invocations = [];
+    let suppliedToken = "";
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write(chunk, _encoding, callback) { suppliedToken += String(chunk); callback(); } }),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+      killed: false,
+    });
+    child.kill = vi.fn((signal) => {
+      child.killed = true;
+      child.signalCode = signal;
+      queueMicrotask(() => child.emit("exit", null, signal));
+      return true;
+    });
+    const service = new RelayerAppServerService({
+      userDataDirectory: directory,
+      binaryPath: "/test/bin/relayer-app-server",
+      webDirectory: "/test/renderer",
+      spawnProcess: (binary, args, options) => {
+        invocations.push({ binary, args, options });
+        queueMicrotask(() => child.stdout.write(`${JSON.stringify({
+          ready: true,
+          origin: "http://127.0.0.1:43123",
+          cookieName: "relayer_control",
+        })}\n`));
+        return child;
+      },
+    });
+
+    try {
+      const firstStart = service.start();
+      const duplicateStart = service.start();
+      const [session, duplicateSession] = await Promise.all([firstStart, duplicateStart]);
+      expect(duplicateSession).toBe(session);
+      expect(session).toMatchObject({
+        origin: "http://127.0.0.1:43123",
+        cookie: { name: "relayer_control" },
+      });
+      expect(session.cookie.value).toMatch(/^[a-f0-9]{64}$/);
+      expect(invocations).toHaveLength(1);
+      expect(invocations[0].binary).toBe("/test/bin/relayer-app-server");
+      expect(invocations[0].args).toEqual([
+        "--data-dir", join(directory, "product-data"),
+        "--web-dir", "/test/renderer",
+        "--port", "0",
+      ]);
+      expect(suppliedToken).toBe(`${session.cookie.value}\n`);
+      expect(child.stdin.writableEnded).toBe(false);
+      expect(invocations[0].args).not.toContain(session.cookie.value);
+      expect((await stat(join(directory, "product-data"))).mode & 0o777).toBe(0o700);
+      expect(await service.start()).toBe(session);
+      await service.close();
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+
+      const neverSpawned = vi.fn();
+      const closedWhilePreparing = new RelayerAppServerService({
+        userDataDirectory: join(directory, "closed-while-preparing"),
+        binaryPath: "/test/bin/should-not-start",
+        webDirectory: "/test/renderer",
+        spawnProcess: neverSpawned,
+      });
+      const pendingStart = closedWhilePreparing.start();
+      await closedWhilePreparing.close();
+      await expect(pendingStart).rejects.toThrow("shutting down");
+      expect(neverSpawned).not.toHaveBeenCalled();
+
+      const failedChild = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null,
+        signalCode: null,
+        killed: false,
+        kill: vi.fn(function kill(signal) {
+          this.killed = true;
+          this.signalCode = signal;
+          queueMicrotask(() => this.emit("exit", null, signal));
+          return true;
+        }),
+      });
+      const unavailable = new RelayerAppServerService({
+        userDataDirectory: directory,
+        binaryPath: "/missing/relayer-app-server",
+        webDirectory: "/test/renderer",
+        spawnProcess: () => {
+          queueMicrotask(() => failedChild.emit("error", new Error("spawn ENOENT")));
+          return failedChild;
+        },
+      });
+      await expect(unavailable.start()).rejects.toThrow("could not start: spawn ENOENT");
+      expect(failedChild.kill).toHaveBeenCalledWith("SIGTERM");
+
+      const rejectedHandshakeChild = Object.assign(new EventEmitter(), {
+        stdin: {
+          on: vi.fn(),
+          write: vi.fn(() => { throw new Error("control pipe closed"); }),
+        },
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null,
+        signalCode: null,
+        killed: false,
+        kill: vi.fn(function kill(signal) {
+          this.killed = true;
+          this.signalCode = signal;
+          queueMicrotask(() => this.emit("exit", null, signal));
+          return true;
+        }),
+      });
+      const rejectedHandshake = new RelayerAppServerService({
+        userDataDirectory: directory,
+        binaryPath: "/test/bin/rejected-handshake",
+        webDirectory: "/test/renderer",
+        spawnProcess: () => rejectedHandshakeChild,
+      });
+      await expect(rejectedHandshake.start()).rejects.toThrow("control pipe closed");
+      expect(rejectedHandshakeChild.kill).toHaveBeenCalledWith("SIGTERM");
+
+      const remoteChild = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null,
+        signalCode: null,
+        killed: false,
+        kill: vi.fn(function kill(signal) {
+          this.killed = true;
+          this.signalCode = signal;
+          queueMicrotask(() => this.emit("exit", null, signal));
+          return true;
+        }),
+      });
+      const untrusted = new RelayerAppServerService({
+        userDataDirectory: directory,
+        binaryPath: "/test/bin/untrusted-server",
+        webDirectory: "/test/renderer",
+        spawnProcess: () => {
+          queueMicrotask(() => remoteChild.stdout.write(`${JSON.stringify({
+            ready: true,
+            origin: "https://example.test",
+            cookieName: "relayer_control",
+          })}\n`));
+          return remoteChild;
+        },
+      });
+      await expect(untrusted.start()).rejects.toThrow("must use an authenticated 127.0.0.1 origin");
+      expect(remoteChild.kill).toHaveBeenCalledWith("SIGTERM");
+
+      const stubbornChild = Object.assign(new EventEmitter(), {
+        stdin: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null,
+        signalCode: null,
+      });
+      stubbornChild.kill = vi.fn((signal) => {
+        if (signal === "SIGKILL") {
+          stubbornChild.signalCode = signal;
+          queueMicrotask(() => stubbornChild.emit("exit", null, signal));
+        }
+        return true;
+      });
+      const timedOut = new RelayerAppServerService({
+        userDataDirectory: directory,
+        binaryPath: "/test/bin/stubborn-server",
+        webDirectory: "/test/renderer",
+        startupTimeoutMs: 5,
+        shutdownTimeoutMs: 5,
+        spawnProcess: () => stubbornChild,
+      });
+      await expect(timedOut.start()).rejects.toThrow("did not become ready in time");
+      expect(stubbornChild.kill.mock.calls.map(([signal]) => signal)).toEqual(["SIGTERM", "SIGKILL"]);
+
+      const unexpectedStops = [];
+      const crashingChild = Object.assign(new EventEmitter(), {
+        stdin: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null,
+        signalCode: null,
+        killed: false,
+        kill: vi.fn(),
+      });
+      const crashing = new RelayerAppServerService({
+        userDataDirectory: directory,
+        binaryPath: "/test/bin/crashing-server",
+        webDirectory: "/test/renderer",
+        onUnexpectedStop: (event) => unexpectedStops.push(event),
+        spawnProcess: () => {
+          queueMicrotask(() => crashingChild.stdout.write(`${JSON.stringify({
+            ready: true,
+            origin: "http://127.0.0.1:43124",
+            cookieName: "relayer_control",
+          })}\n`));
+          return crashingChild;
+        },
+      });
+      await crashing.start();
+      crashingChild.exitCode = 2;
+      crashingChild.emit("exit", 2, null);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unexpectedStops).toEqual([{ code: 2, signal: null }]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("covers the provider authorization lifecycle and its retryable edge cases in one scenario", async () => {
@@ -102,7 +436,10 @@ describe("desktop skeleton", () => {
     } });
     const client = new CodexCredentialAdapter({
       environment: { RELAYER_CODEX_BINARY: "/usr/bin/true", PATH: "" },
-      spawnProcess: () => child,
+      spawnProcess: () => {
+        queueMicrotask(() => child.emit("spawn"));
+        return child;
+      },
       onAccountChanged: (event) => accountEvents.push(event),
     });
 
@@ -149,7 +486,12 @@ describe("desktop skeleton", () => {
           stderr: new PassThrough(),
           killed: false,
         });
-        failedChild.kill = vi.fn(() => { failedChild.killed = true; });
+        failedChild.kill = vi.fn((signal) => {
+          failedChild.killed = true;
+          failedChild.signalCode = signal;
+          queueMicrotask(() => failedChild.emit("exit", null, signal));
+          return true;
+        });
         failedChild.stdin = new Writable({ write(chunk, _encoding, callback) {
           const request = JSON.parse(String(chunk));
           if (request.id !== undefined) {
@@ -160,12 +502,84 @@ describe("desktop skeleton", () => {
           }
           callback();
         } });
+        queueMicrotask(() => failedChild.emit("spawn"));
         return failedChild;
       },
     });
     expect(await failingClient.account()).toMatchObject({ status: "unavailable", error: "initialize failed" });
     expect(await failingClient.account()).toMatchObject({ status: "unavailable", error: "initialize failed" });
     expect(failedStarts).toBe(2);
+
+    const stubbornCodex = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+    });
+    stubbornCodex.stdin = new Writable({ write(chunk, _encoding, callback) {
+      const request = JSON.parse(String(chunk));
+      if (request.id !== undefined) {
+        const result = request.method === "account/read" ? { account: null } : {};
+        queueMicrotask(() => stubbornCodex.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`));
+      }
+      callback();
+    } });
+    stubbornCodex.kill = vi.fn((signal) => {
+      if (signal === "SIGKILL") {
+        stubbornCodex.signalCode = signal;
+        queueMicrotask(() => stubbornCodex.emit("exit", null, signal));
+      }
+      return true;
+    });
+    const closingClient = new CodexCredentialAdapter({
+      environment: { RELAYER_CODEX_BINARY: "/usr/bin/true", PATH: "" },
+      shutdownTimeoutMs: 5,
+      spawnProcess: () => {
+        queueMicrotask(() => stubbornCodex.emit("spawn"));
+        return stubbornCodex;
+      },
+    });
+    expect(await closingClient.account()).toMatchObject({ status: "disconnected" });
+    await closingClient.close();
+    expect(stubbornCodex.kill.mock.calls.map(([signal]) => signal)).toEqual(["SIGTERM", "SIGKILL"]);
+
+    const neverSpawned = vi.fn();
+    const closedWhileDiscovering = new CodexCredentialAdapter({
+      environment: { RELAYER_CODEX_BINARY: "/usr/bin/true", PATH: "" },
+      spawnProcess: neverSpawned,
+    });
+    const pendingAccount = closedWhileDiscovering.account();
+    await closedWhileDiscovering.close();
+    await expect(pendingAccount).resolves.toMatchObject({
+      status: "unavailable",
+      error: "Codex app-server is shutting down.",
+    });
+    expect(neverSpawned).not.toHaveBeenCalled();
+
+    const spawnErrorChild = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+    });
+    spawnErrorChild.kill = vi.fn((signal) => {
+      spawnErrorChild.signalCode = signal;
+      queueMicrotask(() => spawnErrorChild.emit("close", null, signal));
+      return true;
+    });
+    const spawnFailure = new CodexCredentialAdapter({
+      environment: { RELAYER_CODEX_BINARY: "/usr/bin/true", PATH: "" },
+      spawnProcess: () => {
+        queueMicrotask(() => spawnErrorChild.emit("error", new Error("spawn EACCES")));
+        return spawnErrorChild;
+      },
+    });
+    await expect(spawnFailure.account()).resolves.toMatchObject({
+      status: "unavailable",
+      error: "spawn EACCES",
+    });
+    expect(spawnErrorChild.kill).toHaveBeenCalledWith("SIGTERM");
   });
 
   it("drives the packaged update lifecycle through one state service", async () => {
@@ -283,6 +697,7 @@ describe("desktop skeleton", () => {
       appId: "ai.relayer.desktop",
       productName: "Relayer",
       forceCodeSigning: true,
+      afterPack: "desktop/packaging/verify-bundled-app-server.mjs",
       afterSign: "desktop/release/verify-macos-app.mjs",
       mac: {
         identity: "VISHAL TANDALE (NZ253AL7U6)",
@@ -321,6 +736,17 @@ describe("desktop skeleton", () => {
 
     const directory = await mkdtemp(join(tmpdir(), "relayer-release-contract-"));
     try {
+      const appPath = join(directory, "Relayer.app");
+      const bundledBinary = join(appPath, "Contents", "Resources", "bin", "relayer-app-server");
+      await mkdir(join(appPath, "Contents", "Resources", "bin"), { recursive: true });
+      await writeFile(bundledBinary, "binary-fixture");
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+      })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "arm64" });
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
+      })).rejects.toThrow("must contain only arm64");
+
       const names = desktopReleaseArtifactNames(contract);
       const dmg = Buffer.from("signed-notarized-dmg-fixture");
       const originalZip = Buffer.from("electron-builder-zip-fixture");
@@ -345,7 +771,7 @@ describe("desktop skeleton", () => {
         ].join("\n")),
       ]);
       await finalizeDesktopUpdateArtifact({
-        appPath: join(directory, "Relayer.app"),
+        appPath,
         contract,
         distRoot: directory,
         execute: async (_command, args) => {

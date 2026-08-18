@@ -10,7 +10,7 @@ export function setMainView(view) {
 }
 
 function threadEntry(thread) {
-  return `<button class="entry ${thread.id === viewState.currentThreadId ? "active" : ""}" data-thread="${escapeHtml(thread.id)}"><span class="entry-icon">◌</span><span>${escapeHtml(thread.title)}</span></button>`;
+  return `<button class="entry ${String(thread.id) === String(viewState.currentThreadId) ? "active" : ""}" data-thread="${escapeHtml(thread.id)}"><span class="entry-icon">◌</span><span>${escapeHtml(thread.title)}</span></button>`;
 }
 
 export function renderSidebar() {
@@ -19,7 +19,7 @@ export function renderSidebar() {
     ? standalone.map(threadEntry).join("")
     : `<div class="entry"><span class="entry-icon">—</span><span>No chats yet</span></div>`;
   $("#projectList").innerHTML = appState.projects.map((project) => {
-    const threads = appState.threads.filter((thread) => thread.projectId === project.id);
+    const threads = appState.threads.filter((thread) => String(thread.projectId) === String(project.id));
     return `<div><button class="project-button"><i></i><span>${escapeHtml(project.name)}</span><span>${threads.length}</span></button><div class="project-threads">${threads.map(threadEntry).join("")}</div></div>`;
   }).join("");
 }
@@ -50,12 +50,12 @@ export async function chooseFolder() {
 
 export function renderScopeMenu() {
   const projectItems = appState.projects.map((project) => `<button data-scope="project" data-project="${escapeHtml(project.id)}"><span>${escapeHtml(project.name)}</span><small>${escapeHtml(project.path)}</small></button>`).join("");
-  $("#scopeMenu").innerHTML = `<button data-scope="standalone"><span>No folder</span><small>Use an isolated Relayer working directory</small></button>${projectItems}<button data-scope="folder"><span>Open another folder…</span><small>Create a local project when you send</small></button>`;
+  $("#scopeMenu").innerHTML = `<button data-scope="standalone"><span>No folder</span><small>Start without a project folder</small></button>${projectItems}<button data-scope="folder"><span>Open another folder…</span><small>Create a local project when you send</small></button>`;
   $$('[data-scope]', $("#scopeMenu")).forEach((button) => {
     button.onclick = async () => {
       if (button.dataset.scope === "standalone") selectScope({ kind: "standalone", label: "No folder" });
       if (button.dataset.scope === "project") {
-        const project = appState.projects.find((item) => item.id === button.dataset.project);
+        const project = appState.projects.find((item) => String(item.id) === button.dataset.project);
         if (project) selectScope({ kind: "project", projectId: project.id, label: project.name, path: project.path });
       }
       if (button.dataset.scope === "folder") await chooseFolder();

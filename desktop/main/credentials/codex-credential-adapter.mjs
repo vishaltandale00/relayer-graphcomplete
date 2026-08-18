@@ -4,6 +4,7 @@ import { delimiter } from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { CredentialAdapter } from "./credential-adapter.mjs";
+import { terminateChildProcess } from "../services/child-process.mjs";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 
@@ -15,6 +16,31 @@ async function executableExists(path) {
   } catch {
     return false;
   }
+}
+
+function waitForSpawn(child) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      child.off("spawn", onSpawn);
+      child.off("error", onError);
+      child.off("exit", onExit);
+    };
+    const onSpawn = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const onExit = (code, signal) => {
+      cleanup();
+      reject(new Error(`Codex app-server stopped before startup (${signal || code || "unknown"}).`));
+    };
+    child.once("spawn", onSpawn);
+    child.once("error", onError);
+    child.once("exit", onExit);
+  });
 }
 
 export async function findCodexExecutable(environment = process.env) {
@@ -34,11 +60,17 @@ export async function findCodexExecutable(environment = process.env) {
 }
 
 export class CodexCredentialAdapter extends CredentialAdapter {
-  constructor({ environment = process.env, onAccountChanged = () => {}, spawnProcess = spawn } = {}) {
+  constructor({
+    environment = process.env,
+    onAccountChanged = () => {},
+    spawnProcess = spawn,
+    shutdownTimeoutMs = 2_000,
+  } = {}) {
     super("codex");
     this.environment = environment;
     this.onAccountChanged = onAccountChanged;
     this.spawnProcess = spawnProcess;
+    this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.pending = new Map();
     this.nextId = 1;
     this.process = null;
@@ -56,10 +88,10 @@ export class CodexCredentialAdapter extends CredentialAdapter {
       await this.startPromise;
     } catch (error) {
       const child = this.process;
-      this.process = null;
+      await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
+      if (this.process === child) this.process = null;
       this.startPromise = null;
       this.activeLoginId = null;
-      if (child && !child.killed) child.kill("SIGTERM");
       throw error;
     }
   }
@@ -69,11 +101,13 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     if (!executable) {
       throw new Error("Codex CLI is not installed. Install Codex, then try Connect Codex again.");
     }
+    if (this.closing) throw new Error("Codex app-server is shutting down.");
     const child = this.spawnProcess(executable, ["app-server", "--listen", "stdio://"], {
       env: this.environment,
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.process = child;
+    child.stdin.on("error", () => {});
     createInterface({ input: child.stdout }).on("line", (line) => this.#handleLine(line));
     child.stderr.on("data", (chunk) => {
       const message = String(chunk).trim();
@@ -95,6 +129,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     child.once("error", (error) => {
       if (this.process === child) this.onAccountChanged({ status: "unavailable", error: error.message });
     });
+    await waitForSpawn(child);
     await this.request("initialize", {
       clientInfo: { name: "relayer-desktop", title: "Relayer", version: "0.1.0" },
       capabilities: { experimentalApi: false },
@@ -184,11 +219,17 @@ export class CodexCredentialAdapter extends CredentialAdapter {
   async close() {
     this.closing = true;
     const child = this.process;
-    this.process = null;
+    if (child) {
+      await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
+    }
+    await this.startPromise?.catch(() => undefined);
+    const lateChild = this.process;
+    if (lateChild && lateChild !== child) {
+      await terminateChildProcess(lateChild, { gracePeriodMs: this.shutdownTimeoutMs });
+    }
+    if (this.process === child) this.process = null;
     this.startPromise = null;
     this.activeLoginId = null;
-    if (!child || child.killed) return;
-    child.kill("SIGTERM");
   }
 }
 
