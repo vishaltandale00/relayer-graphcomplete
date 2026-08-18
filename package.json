@@ -14,6 +14,7 @@
   },
   "files": [
     "dist",
+    "harnesses",
     "python/relayer-graph"
   ],
   "main": "./dist/index.js",
@@ -31,8 +32,8 @@
     "test": "cargo build -p relayer-graph-server && npm run build:packages && vitest run",
     "prd": "node docs/prd/server.mjs",
     "desktop:dev": "npm run build && electron desktop/main/index.mjs",
-    "eval:basic": "npm run build && node packages/eval-runner/dist/runtime-basic.js",
-    "eval:basic:live": "npm run build && node packages/eval-runner/dist/runtime-basic.js --live",
+    "eval:basic": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js",
+    "eval:basic:live": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --require-configuration --judge-configuration codex-structured",
     "desktop:pack": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && electron-builder --config desktop/packaging/electron-builder.mjs --dir --arm64",
     "desktop:dist": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs stable",
     "desktop:dist:preview": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs preview",

@@ -5,16 +5,19 @@ import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { EdgeObject, LayerObject, NodeObject, RelayerGraphClient, type CompletionOutput, type GraphCapability, type GraphNode } from "@relayer/graph-client";
-import { startHarnessHost, productHarnessMap, type Harness, type HarnessFactory, type HarnessSessionState } from "@relayer/harness-host";
+import type { CompletionOutput, GraphCapability, GraphNode } from "@relayer/graph-client";
+import { digestHarnessConfiguration, startHarnessHost, type HarnessFactory, type HarnessImplementationMap } from "@relayer/harness-host";
+import type { TestExecutionPlan } from "./run-plan.js";
 
+export const basicEvalCaseId = "empty-project.task-system.two-turn";
 export const basicEvalPrompt = "A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.";
 export const basicEvalFollowUpPrompt = "Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.";
+const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 
 export const basicEvalFacts = [
   { id: "enters-queue", description: "Tasks enter the incoming queue.", patterns: [/task.{0,30}(enter|arriv).{0,30}queue/i, /incoming queue/i] },
   { id: "worker-claims", description: "An available worker claims a queued task.", patterns: [/worker.{0,40}(claim|take|pull|pick)/i] },
-  { id: "two-active-limit", description: "At most two tasks can be active.", patterns: [/(at most|maximum|max|up to).{0,15}two/i, /two.{0,20}(active|concurrent|workers)/i] },
+  { id: "two-active-limit", description: "At most two tasks can be active.", patterns: [/(at most|maximum|max|up to).{0,15}two/i, /two.{0,20}(active|concurrent|workers)/i, /both.{0,30}busy.{0,30}no new task (starts|can start)/i] },
   { id: "wait-when-busy", description: "Additional tasks wait while both workers are busy.", patterns: [/(wait|remain|stay).{0,35}queue/i, /both workers.{0,35}busy/i] },
   { id: "write-result", description: "A completed task is written to the results store.", patterns: [/(result|output).{0,35}(store|write|save)/i, /(store|write|save).{0,35}(result|output)/i] },
   { id: "claim-next", description: "A freed worker claims the next queued task.", patterns: [/(free|available|finish).{0,45}(next|queue)/i, /(next).{0,35}(worker|claim|task)/i] },
@@ -30,39 +33,31 @@ export interface RuntimeEvalTurn {
   readonly passed: boolean;
 }
 export interface RuntimeEvalArtifact {
-  readonly schemaVersion: 2;
-  readonly caseId: "empty-project.task-system.two-turn";
-  readonly runId: string;
+  readonly schemaVersion: 3;
+  readonly execution: TestExecutionPlan<BasicJudgeConfiguration>;
   readonly createdAt: string;
-  readonly harness: string;
   readonly turns: readonly RuntimeEvalTurn[];
   readonly sessionChecks: readonly EvalCheck[];
   readonly deterministicPassed: boolean;
   readonly passed: boolean;
 }
 export interface BasicJudge { readonly factIds: readonly string[]; readonly graphUseful: boolean; readonly detailsUseful: boolean; readonly problems: readonly string[]; readonly verdict: "pass" | "fail" }
+export interface BasicJudgeConfiguration { readonly name: "none" | "codex-structured" }
 
-class TaskSystemFixtureHarness implements Harness {
-  constructor(private graph: RelayerGraphClient) {}
-  setGraphCapability(graph: GraphCapability): void { this.graph = new RelayerGraphClient(graph); }
-  state(): HarnessSessionState { return {}; }
-  async complete(interaction: GraphNode): Promise<CompletionOutput> {
-    const queue = new NodeObject("queue", "Incoming queue", "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.", "concept", "queue");
-    const workers = new NodeObject("workers", "Two-worker pool", "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.", "concept", "workers");
-    const results = new NodeObject("database", "Results store", "When a worker completes a task, it writes the output to the results store. The freed worker then claims the next task from the queue.", "concept", "results");
-    await this.graph.submitNode(queue); await this.graph.submitNode(workers); await this.graph.submitNode(results);
-    const queueWorkers = new EdgeObject([queue, workers], "queue-workers");
-    const workersResults = new EdgeObject([workers, results], "workers-results");
-    await this.graph.createEdge(queueWorkers); await this.graph.createEdge(workersResults);
-    const layer = new LayerObject([queue, workers, results], [queueWorkers, workersResults], "root-layer");
-    await this.graph.submitLayer(layer);
-    await this.graph.addAction(interaction.id, { kind: "navigate", label: "Response", target: layer, response: true, clientKey: "response" });
-    return this.graph.submit(interaction.id);
+export async function runBasicRuntimeEval(options: {
+  outputDirectory: string;
+  execution: TestExecutionPlan<BasicJudgeConfiguration>;
+  implementations: HarnessImplementationMap;
+  serverBinary?: string;
+  serverReadyTimeoutMs?: number;
+}): Promise<RuntimeEvalArtifact> {
+  if (options.execution.testCaseId !== basicEvalCaseId) throw new Error(`Unsupported runtime-basic test case: ${options.execution.testCaseId}`);
+  if (options.execution.harnessConfiguration.name !== options.execution.harnessConfigurationName) {
+    throw new Error("Execution harness configuration name does not match its resolved snapshot");
   }
-}
-
-export async function runBasicRuntimeEval(options: { outputDirectory: string; live: boolean; judge?: boolean; serverBinary?: string; serverReadyTimeoutMs?: number }): Promise<RuntimeEvalArtifact> {
-  const runId = randomUUID();
+  if (digestHarnessConfiguration(options.execution.harnessConfiguration) !== options.execution.harnessConfigurationDigest) {
+    throw new Error("Execution harness configuration digest does not match its resolved snapshot");
+  }
   const workingDirectory = await mkdtemp(join(tmpdir(), "relayer-runtime-eval-"));
   const stateDirectory = join(workingDirectory, "state");
   const controlToken = randomUUID();
@@ -73,19 +68,17 @@ export async function runBasicRuntimeEval(options: { outputDirectory: string; li
     const projectId = 1;
     const threadId = 1;
     let harnessFactoryCalls = 0;
-    const fixtureFactory: HarnessFactory = (context) => new TaskSystemFixtureHarness(new RelayerGraphClient(context.graph));
-    const harnessKey = options.live ? "codex.basic" : "fixture.task-system";
-    const registeredHarnesses = productHarnessMap({ "fixture.task-system": fixtureFactory });
-    const selectedFactory = registeredHarnesses[harnessKey];
-    if (selectedFactory === undefined) throw new Error(`Unknown eval harness: ${harnessKey}`);
-    const harnesses = {
-      ...registeredHarnesses,
-      [harnessKey]: ((context) => {
+    const configuration = options.execution.harnessConfiguration;
+    const selectedFactory = options.implementations[configuration.implementation];
+    if (selectedFactory === undefined) throw new Error(`Unknown eval harness implementation: ${configuration.implementation}`);
+    const implementations = {
+      ...options.implementations,
+      [configuration.implementation]: ((context) => {
         harnessFactoryCalls += 1;
         return selectedFactory(context);
       }) satisfies HarnessFactory,
     };
-    harnessHost = await startHarnessHost({ harnesses, stateFile: join(stateDirectory, "harness-sessions.json"), controlToken });
+    harnessHost = await startHarnessHost({ implementations, stateFile: join(stateDirectory, "harness-sessions.json"), controlToken });
 
     const capabilities: GraphCapability[] = [];
     const turns: RuntimeEvalTurn[] = [];
@@ -93,11 +86,13 @@ export async function runBasicRuntimeEval(options: { outputDirectory: string; li
       const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, controlToken, { projectId, threadId, text: prompt });
       const capability = { url: graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
-      await requestJson(`${harnessHost.url}/sessions`, controlToken, { threadId, harnessKey, workingDirectory, graph: capability }, 201);
+      await requestJson(`${harnessHost.url}/sessions`, controlToken, { threadId, configuration, workingDirectory, graph: capability }, 201);
       const complete = await requestJson<{ output: CompletionOutput }>(`${harnessHost.url}/sessions/${threadId}/complete`, controlToken, { nodeId: interaction.node.id });
       const checks = checkBasicOutput(complete.output, interaction.node.id);
       const deterministicPassed = checks.every((check) => check.passed);
-      const judge = options.judge && deterministicPassed ? await judgeOutput(complete.output, prompt, workingDirectory) : undefined;
+      const judge = options.execution.judgeConfiguration.name === "codex-structured" && deterministicPassed
+        ? await judgeOutput(complete.output, prompt, workingDirectory)
+        : undefined;
       turns.push({
         interactionNodeId: interaction.node.id,
         prompt,
@@ -113,8 +108,16 @@ export async function runBasicRuntimeEval(options: { outputDirectory: string; li
     ];
     const deterministicPassed = sessionChecks.every((check) => check.passed) && turns.every((turn) => turn.checks.every((check) => check.passed));
     const passed = deterministicPassed && turns.every((turn) => turn.passed);
-    const artifact: RuntimeEvalArtifact = { schemaVersion: 2, caseId: "empty-project.task-system.two-turn", runId, createdAt: new Date().toISOString(), harness: harnessKey, turns, sessionChecks, deterministicPassed, passed };
-    const runDirectory = join(resolve(options.outputDirectory), runId);
+    const artifact: RuntimeEvalArtifact = {
+      schemaVersion: 3,
+      execution: structuredClone(options.execution),
+      createdAt: new Date().toISOString(),
+      turns,
+      sessionChecks,
+      deterministicPassed,
+      passed,
+    };
+    const runDirectory = executionDirectory(options.outputDirectory, options.execution);
     await mkdir(runDirectory, { recursive: true });
     await writeFile(join(runDirectory, "result.json"), `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
     await writeFile(join(runDirectory, "index.html"), renderArtifact(artifact), "utf8");
@@ -140,8 +143,6 @@ export function checkBasicOutput(output: CompletionOutput, expectedInteractionNo
   for (const edge of layer.edges) { adjacency.get(edge.endpoints[0])?.add(edge.endpoints[1]); adjacency.get(edge.endpoints[1])?.add(edge.endpoints[0]); }
   const visited = new Set<number>(); const pending = layer.nodes[0] === undefined ? [] : [layer.nodes[0].id];
   while (pending.length) { const id = pending.pop()!; if (visited.has(id)) continue; visited.add(id); pending.push(...(adjacency.get(id) ?? [])); }
-  const text = layer.nodes.map((node) => `${node.title}\n${node.detail}`).join("\n");
-  const facts = basicEvalFacts.map((fact) => ({ name: `fact:${fact.id}`, passed: fact.patterns.some((pattern) => pattern.test(text)), detail: fact.description }));
   return [
     { name: "interaction-output", passed: output.nodeId === expectedInteractionNodeId && output.rootAction.sourceNodeId === expectedInteractionNodeId, detail: "Completion output and response action belong to the requested interaction." },
     { name: "accepted-closure", passed: output.rootAction.state === "accepted" && layer.layer.state === "accepted" && layer.nodes.every((node) => node.state === "accepted") && layer.edges.every((edge) => edge.state === "accepted") && layer.actions.every((action) => action.state === "accepted"), detail: "The response action and complete visible closure are accepted." },
@@ -150,8 +151,16 @@ export function checkBasicOutput(output: CompletionOutput, expectedInteractionNo
     { name: "visible-layer", passed: layer.nodes.length >= 1 && layer.nodes.length <= 8 && layer.nodes.every((node) => node.icon.trim() && node.title.trim() && node.detail.trim()), detail: `${layer.nodes.length} complete visible nodes.` },
     { name: "exact-edges", passed: layer.edges.every((edge) => edge.endpoints[0] !== edge.endpoints[1] && nodeIds.has(edge.endpoints[0]) && nodeIds.has(edge.endpoints[1])), detail: `${layer.edges.length} visible undirected edges stay inside the layer.` },
     { name: "connected", passed: visited.size === layer.nodes.length, detail: `${visited.size}/${layer.nodes.length} nodes connected.` },
-    ...facts,
   ];
+}
+
+export function checkBasicFacts(output: CompletionOutput): EvalCheck[] {
+  const text = output.rootLayer.nodes.map((node) => `${node.title}\n${node.detail}`).join("\n");
+  return basicEvalFacts.map((fact) => ({
+    name: `fact:${fact.id}`,
+    passed: fact.patterns.some((pattern) => pattern.test(text)),
+    detail: fact.description,
+  }));
 }
 
 function arraysEqual(left: readonly number[], right: readonly number[]): boolean {
@@ -175,7 +184,6 @@ export function judgeVisibleGraph(output: CompletionOutput): { nodes: readonly {
 }
 
 async function startGraphServer(binary: string | undefined, database: string, controlToken: string, readyTimeoutMs = 10_000): Promise<{ url: string; process: ChildProcessWithoutNullStreams }> {
-  const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
   const executable = resolve(binary ?? process.env.RELAYER_GRAPH_SERVER_BIN ?? join(repositoryRoot, "target/debug/relayer-graph-server"));
   try { await access(executable); } catch { throw new Error(`Rust graph server not found at ${executable}. Run: cargo build -p relayer-graph-server`); }
   await mkdir(resolve(database, ".."), { recursive: true });
@@ -215,7 +223,7 @@ export function renderArtifact(artifact: RuntimeEvalArtifact): string {
 <html>
 <head>
   <meta charset="utf-8">
-  <title>${escapeHtml(artifact.caseId)}</title>
+  <title>${escapeHtml(artifact.execution.testCaseId)}</title>
   <style>
     body{margin:0;background:#111317;color:#edf0f5;font:14px system-ui}
     .bar{padding:18px 24px;border-bottom:1px solid #343842}
@@ -237,7 +245,7 @@ export function renderArtifact(artifact: RuntimeEvalArtifact): string {
 </head>
 <body>
   <div class="bar">
-    <div class="summary"><b>${escapeHtml(artifact.caseId)}</b> · <span class="${artifact.passed ? "pass" : "fail"}">${artifact.passed ? "PASS" : "FAIL"}</span></div>
+    <div class="summary"><b>${escapeHtml(artifact.execution.testCaseId)}</b> · ${escapeHtml(artifact.execution.harnessConfigurationName)} · <span class="${artifact.passed ? "pass" : "fail"}">${artifact.passed ? "PASS" : "FAIL"}</span></div>
     <div class="turns"><button id="previous" aria-label="Previous turn">←</button><span id="turn-label"></span><button id="next" aria-label="Next turn">→</button></div>
     <div class="prompt" id="prompt"></div>
   </div>
@@ -319,6 +327,9 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
 }
 
-function argument(name:string):string|undefined{const index=process.argv.indexOf(name);return index<0?undefined:process.argv[index+1];}
-async function main():Promise<void>{const live=process.argv.includes("--live");const artifact=await runBasicRuntimeEval({outputDirectory:resolve(argument("--output-dir")??".relayer/evals/runtime"),live,judge:live&&!process.argv.includes("--no-judge")});console.log(JSON.stringify({runId:artifact.runId,harness:artifact.harness,passed:artifact.passed,viewer:resolve(argument("--output-dir")??".relayer/evals/runtime",artifact.runId,"index.html")}));if(!artifact.passed)process.exitCode=1;}
-if(process.argv[1]!==undefined&&resolve(process.argv[1])===fileURLToPath(import.meta.url))void main();
+export function executionDirectory(
+  outputDirectory: string,
+  execution: Pick<TestExecutionPlan<unknown>, "testRunId" | "testCaseId" | "harnessConfigurationName">,
+): string {
+  return join(resolve(outputDirectory), execution.testRunId, execution.testCaseId, execution.harnessConfigurationName);
+}

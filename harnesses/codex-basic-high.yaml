@@ -1,0 +1,10 @@
+schemaVersion: 1
+name: codex-basic-high
+implementation: codex.basic
+implementationVersion: 1
+settings:
+  modelReasoningEffort: high
+  sandboxMode: workspace-write
+  approvalPolicy: never
+  networkAccessEnabled: true
+  skipGitRepoCheck: true

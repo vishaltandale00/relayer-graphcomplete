@@ -2,15 +2,29 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { basicEvalFacts, checkBasicOutput, judgeVisibleGraph, renderArtifact, runBasicRuntimeEval } from "../src/runtime-basic.js";
+import { productHarnessImplementations } from "@relayer/harness-host";
+import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
+import { expandTestRun } from "../src/run-plan.js";
+import { basicEvalCaseId, basicEvalFacts, checkBasicFacts, checkBasicOutput, executionDirectory, judgeVisibleGraph, renderArtifact, runBasicRuntimeEval } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
+const implementations = productHarnessImplementations({ "fixture.task-system": taskSystemFixtureFactory });
+
+function fixtureExecution() {
+  return expandTestRun({
+    testRunId: "fixture-run",
+    testCaseIds: [basicEvalCaseId],
+    harnessConfigurationNames: [taskSystemFixtureConfiguration.name],
+    judgeConfiguration: { name: "none" as const },
+  }, new Map([[taskSystemFixtureConfiguration.name, taskSystemFixtureConfiguration]]))[0]!;
+}
 
 describe("first runtime evaluation", () => {
   it("recognizes equivalent concurrency language and gives the judge endpoint-resolvable node IDs", () => {
     const concurrency = basicEvalFacts.find((fact) => fact.id === "two-active-limit")!;
     expect(concurrency.patterns.some((pattern) => pattern.test("allowing up to two tasks to run at the same time"))).toBe(true);
+    expect(concurrency.patterns.some((pattern) => pattern.test("While both workers are busy: no new task starts."))).toBe(true);
     const visible = judgeVisibleGraph({
       nodeId: 1,
       rootAction: { id: 1, sourceNodeId: 1, kind: "navigate", label: "Response", targetLayerId: 3, response: true, state: "accepted" },
@@ -40,23 +54,40 @@ describe("first runtime evaluation", () => {
     const checks = checkBasicOutput(mismatched);
     expect(checks.find((check) => check.name === "resolved-membership")?.passed).toBe(false);
     expect(checks.find((check) => check.name === "accepted-closure")?.passed).toBe(false);
+    expect(checks.some((check) => check.name.startsWith("fact:"))).toBe(false);
+    expect(checkBasicFacts(mismatched).some((check) => check.name.startsWith("fact:"))).toBe(true);
   });
 
   it("runs two interactions through one live harness object and saves both fixture graphs", async () => {
     const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-test-")); temporary.push(outputDirectory);
-    const artifact = await runBasicRuntimeEval({ outputDirectory, live: false });
+    const execution = fixtureExecution();
+    const artifact = await runBasicRuntimeEval({ outputDirectory, execution, implementations });
     expect(artifact.passed).toBe(true);
+    expect(artifact.execution).toEqual(execution);
     expect(artifact.turns).toHaveLength(2);
     expect(artifact.turns.map((turn) => turn.output.nodeId)).toEqual(artifact.turns.map((turn) => turn.interactionNodeId));
     expect(artifact.turns.every((turn) => turn.output.rootLayer.nodes.length === 3)).toBe(true);
     expect(artifact.turns.every((turn) => turn.output.rootLayer.edges.length === 2)).toBe(true);
     expect(artifact.turns.every((turn) => turn.checks.every((check) => check.passed))).toBe(true);
+    expect(artifact.turns.every((turn) => checkBasicFacts(turn.output).every((check) => check.passed))).toBe(true);
     expect(artifact.sessionChecks).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "single-harness-object", passed: true }),
       expect.objectContaining({ name: "rotated-interaction-capability", passed: true }),
     ]));
-    expect(JSON.parse(await readFile(join(outputDirectory, artifact.runId, "result.json"), "utf8"))).toMatchObject({ schemaVersion: 2, runId: artifact.runId, passed: true, turns: [{ passed: true }, { passed: true }] });
-    expect(await readFile(join(outputDirectory, artifact.runId, "index.html"), "utf8")).toContain("Incoming queue");
+    const directory = executionDirectory(outputDirectory, execution);
+    expect(JSON.parse(await readFile(join(directory, "result.json"), "utf8"))).toMatchObject({
+      schemaVersion: 3,
+      execution: {
+        testRunId: "fixture-run",
+        testCaseId: basicEvalCaseId,
+        harnessConfigurationName: "fixture-task-system",
+        harnessConfiguration: taskSystemFixtureConfiguration,
+        harnessConfigurationDigest: execution.harnessConfigurationDigest,
+      },
+      passed: true,
+      turns: [{ passed: true }, { passed: true }],
+    });
+    expect(await readFile(join(directory, "index.html"), "utf8")).toContain("Incoming queue");
     const unsafe = {
       ...artifact,
       turns: artifact.turns.map((turn, turnIndex) => turnIndex === 0 ? {
@@ -84,7 +115,8 @@ describe("first runtime evaluation", () => {
 
     await expect(runBasicRuntimeEval({
       outputDirectory: join(directory, "output"),
-      live: false,
+      execution: fixtureExecution(),
+      implementations,
       serverBinary: executable,
     })).rejects.toThrow("Graph server could not start");
   });
@@ -97,7 +129,8 @@ describe("first runtime evaluation", () => {
 
     await expect(runBasicRuntimeEval({
       outputDirectory: join(directory, "output"),
-      live: false,
+      execution: fixtureExecution(),
+      implementations,
       serverBinary: executable,
       serverReadyTimeoutMs: 300,
     })).rejects.toThrow("did not become ready");
@@ -111,7 +144,8 @@ describe("first runtime evaluation", () => {
 
     await expect(runBasicRuntimeEval({
       outputDirectory: join(directory, "output"),
-      live: false,
+      execution: fixtureExecution(),
+      implementations,
       serverBinary: executable,
     })).rejects.toThrow("Unexpected token");
   });

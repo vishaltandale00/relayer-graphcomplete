@@ -1,8 +1,35 @@
 import type { Codex } from "@openai/codex-sdk";
 import { describe, expect, it, vi } from "vitest";
 import { CodexBasicHarness } from "../src/implementations/codex-basic.js";
+import type { HarnessConfiguration } from "../src/types.js";
+
+const codexBasicConfiguration: HarnessConfiguration = {
+  schemaVersion: 1,
+  name: "codex-basic",
+  implementation: "codex.basic",
+  implementationVersion: 1,
+  settings: {
+    model: "gpt-test",
+    modelReasoningEffort: "medium",
+    sandboxMode: "workspace-write",
+    approvalPolicy: "never",
+    networkAccessEnabled: true,
+    webSearchMode: "disabled",
+    skipGitRepoCheck: true,
+  },
+};
 
 describe("CodexBasicHarness", () => {
+  it("rejects an unsupported implementation version", () => {
+    expect(() => new CodexBasicHarness({
+      threadId: 1,
+      workingDirectory: process.cwd(),
+      graph: { url: "http://127.0.0.1:43123", token: "token", nodeId: 1 },
+      configuration: { ...codexBasicConfiguration, implementationVersion: 2 },
+      savedState: { codexThreadId: "codex-thread" },
+    }, { createCodex: () => ({}) as Codex })).toThrow("Unsupported codex.basic implementation version: 2");
+  });
+
   it("retains a provider thread ID when the first turn fails", async () => {
     const thread = {
       id: null as string | null,
@@ -20,6 +47,7 @@ describe("CodexBasicHarness", () => {
         threadId: 1,
         workingDirectory: process.cwd(),
         graph: { url: "http://127.0.0.1:43123", token: "token", nodeId: 1 },
+        configuration: codexBasicConfiguration,
       },
       { createCodex: () => codex as unknown as Codex },
     );
@@ -33,6 +61,16 @@ describe("CodexBasicHarness", () => {
       state: "accepted",
     })).rejects.toThrow("turn failed");
     expect(harness.state()).toEqual({ codexThreadId: "codex-thread-after-start" });
+    expect(codex.startThread).toHaveBeenCalledWith({
+      workingDirectory: process.cwd(),
+      model: "gpt-test",
+      modelReasoningEffort: "medium",
+      sandboxMode: "workspace-write",
+      approvalPolicy: "never",
+      networkAccessEnabled: true,
+      webSearchMode: "disabled",
+      skipGitRepoCheck: true,
+    });
   });
 
   it("rotates graph credentials while resuming the same provider thread", async () => {
@@ -61,6 +99,7 @@ describe("CodexBasicHarness", () => {
         threadId: 1,
         workingDirectory: process.cwd(),
         graph: { url: "http://127.0.0.1:43123", token: "first-token", nodeId: 1 },
+        configuration: codexBasicConfiguration,
       }, { createCodex });
 
       await harness.complete(interaction(1));

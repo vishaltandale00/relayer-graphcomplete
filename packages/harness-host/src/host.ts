@@ -3,17 +3,34 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, resolve } from "node:path";
 import { GraphApiError, RelayerGraphClient } from "@relayer/graph-client";
+import { isJsonObject, parseHarnessConfiguration, sameHarnessConfiguration } from "./configuration.js";
 import { resolveHarnessFactory } from "./registry.js";
-import type { Harness, HarnessCompleteResult, HarnessMap, HarnessSessionDescriptor } from "./types.js";
+import type {
+  Harness,
+  HarnessCompleteResult,
+  HarnessConfiguration,
+  HarnessImplementationMap,
+  HarnessSessionDescriptor,
+  HarnessSessionRegistration,
+  HarnessSessionState,
+} from "./types.js";
 
 interface LiveSession {
   descriptor: HarnessSessionDescriptor;
   harness: Harness;
   tail: Promise<void>;
+  activeCompletion?: AbortController;
+}
+
+interface PersistedHarnessSessionDescriptor {
+  readonly threadId: number;
+  readonly configuration: HarnessConfiguration;
+  readonly workingDirectory: string;
+  readonly state?: HarnessSessionState;
 }
 
 export interface HarnessHostOptions {
-  readonly harnesses: HarnessMap;
+  readonly implementations: HarnessImplementationMap;
   readonly stateFile: string;
   readonly controlToken: string;
   readonly host?: string;
@@ -28,74 +45,144 @@ export interface RunningHarnessHost {
 
 export class HarnessHost {
   private readonly sessions = new Map<number, LiveSession>();
-  private saved = new Map<number, HarnessSessionDescriptor>();
+  private readonly registrationTails = new Map<number, Promise<void>>();
+  private saved = new Map<number, PersistedHarnessSessionDescriptor>();
   private persistTail: Promise<void> = Promise.resolve();
+  private closed = false;
 
   constructor(private readonly options: HarnessHostOptions) {}
 
   async initialize(): Promise<void> {
     try {
-      const parsed = JSON.parse(await readFile(this.options.stateFile, "utf8")) as { sessions?: HarnessSessionDescriptor[] };
-      this.saved = new Map((parsed.sessions ?? []).map((session) => [session.threadId, session]));
+      const parsed = JSON.parse(await readFile(this.options.stateFile, "utf8")) as unknown;
+      if (!isRecord(parsed) || parsed.schemaVersion !== 3 || !Array.isArray(parsed.sessions)) {
+        throw new Error("Unsupported harness host state; expected schema version 3");
+      }
+      const sessions = parsed.sessions.map(readPersistedSession);
+      this.saved = new Map(sessions.map((session) => [session.threadId, session]));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
 
-  async createSession(descriptor: Omit<HarnessSessionDescriptor, "state">): Promise<void> {
+  async createSession(descriptor: HarnessSessionRegistration): Promise<void> {
+    if (this.closed) throw new Error("Harness host is closed");
+    const normalized = { ...descriptor, configuration: parseHarnessConfiguration(descriptor.configuration) };
+    return this.withRegistrationLock(normalized.threadId, () => this.registerSession(normalized));
+  }
+
+  private async registerSession(descriptor: HarnessSessionRegistration): Promise<void> {
+    if (this.closed) throw new Error("Harness host is closed");
     const live = this.sessions.get(descriptor.threadId);
     if (live !== undefined) {
       await this.withSessionLock(live, async () => {
-        if (live.descriptor.harnessKey !== descriptor.harnessKey || live.descriptor.workingDirectory !== descriptor.workingDirectory) {
-          throw new Error(`Thread ${descriptor.threadId} is already pinned to ${live.descriptor.harnessKey}`);
+        if (!sameHarnessConfiguration(live.descriptor.configuration, descriptor.configuration) || live.descriptor.workingDirectory !== descriptor.workingDirectory) {
+          throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${live.descriptor.configuration.name}`);
         }
         await live.harness.setGraphCapability(descriptor.graph);
         live.descriptor = {
           ...descriptor,
-          ...(live.descriptor.state === undefined ? {} : { state: live.descriptor.state }),
+          state: captureHarnessState(live.harness),
         };
-        this.saved.set(descriptor.threadId, live.descriptor);
+        this.saved.set(descriptor.threadId, persistedDescriptor(live.descriptor));
         await this.persist();
       });
       return;
     }
     const prior = this.saved.get(descriptor.threadId);
-    if (prior !== undefined && (prior.harnessKey !== descriptor.harnessKey || prior.workingDirectory !== descriptor.workingDirectory)) {
-      throw new Error(`Thread ${descriptor.threadId} is already pinned to ${prior.harnessKey}`);
+    if (prior !== undefined && (!sameHarnessConfiguration(prior.configuration, descriptor.configuration) || prior.workingDirectory !== descriptor.workingDirectory)) {
+      throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${prior.configuration.name}`);
     }
-    const persisted: HarnessSessionDescriptor = { ...descriptor, ...(prior?.state === undefined ? {} : { state: prior.state }) };
-    const harness = resolveHarnessFactory(this.options.harnesses, descriptor.harnessKey)({
+    const harness = await resolveHarnessFactory(this.options.implementations, descriptor.configuration.implementation)({
       threadId: descriptor.threadId,
       workingDirectory: descriptor.workingDirectory,
       graph: descriptor.graph,
-      ...(persisted.state === undefined ? {} : { savedState: persisted.state }),
+      configuration: descriptor.configuration,
+      ...(prior?.state === undefined ? {} : { savedState: prior.state }),
     });
+    if (this.closed) {
+      await harness.dispose?.();
+      throw new Error("Harness host closed while the session was starting");
+    }
+    let state: HarnessSessionState;
+    try {
+      state = captureHarnessState(harness);
+    } catch (error) {
+      try {
+        await harness.dispose?.();
+      } catch (disposeError) {
+        throw new AggregateError([error, disposeError], "Harness session initialization and cleanup failed");
+      }
+      throw error;
+    }
+    const persisted: HarnessSessionDescriptor = { ...descriptor, state };
     this.sessions.set(descriptor.threadId, { descriptor: persisted, harness, tail: Promise.resolve() });
-    this.saved.set(descriptor.threadId, persisted);
+    this.saved.set(descriptor.threadId, persistedDescriptor(persisted));
     await this.persist();
   }
 
-  async complete(threadId: number, nodeId?: number): Promise<HarnessCompleteResult> {
+  async complete(threadId: number, nodeId?: number, signal?: AbortSignal): Promise<HarnessCompleteResult> {
+    if (this.closed) throw new Error("Harness host is closed");
     const session = await this.liveSession(threadId);
     return this.withSessionLock(session, async () => {
+      const controller = new AbortController();
+      const detachSignal = forwardAbort(signal, controller);
+      session.activeCompletion = controller;
       try {
         const graph = new RelayerGraphClient(session.descriptor.graph);
         const interactionNodeId = nodeId ?? session.descriptor.graph.nodeId;
         try {
           const output = await graph.getCompletionOutput(interactionNodeId);
-          return { threadId, harnessKey: session.descriptor.harnessKey, output };
+          return { threadId, configurationName: session.descriptor.configuration.name, output };
         } catch (error) {
           if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) throw error;
         }
         const interaction = await graph.getNode(interactionNodeId);
-        const output = await session.harness.complete(interaction);
-        return { threadId, harnessKey: session.descriptor.harnessKey, output };
+        const output = await session.harness.complete(interaction, controller.signal);
+        return { threadId, configurationName: session.descriptor.configuration.name, output };
       } finally {
-        session.descriptor = { ...session.descriptor, state: session.harness.state() };
-        this.saved.set(threadId, session.descriptor);
+        if (session.activeCompletion === controller) delete session.activeCompletion;
+        detachSignal();
+        session.descriptor = { ...session.descriptor, state: captureHarnessState(session.harness) };
+        this.saved.set(threadId, persistedDescriptor(session.descriptor));
         await this.persist();
       }
     });
+  }
+
+  cancel(threadId: number): boolean {
+    const controller = this.sessions.get(threadId)?.activeCompletion;
+    if (controller === undefined || controller.signal.aborted) return false;
+    controller.abort(new Error(`Harness completion cancelled for thread ${threadId}`));
+    return true;
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    for (const session of this.sessions.values()) session.activeCompletion?.abort(new Error("Harness host closed"));
+    const errors: unknown[] = [];
+    await Promise.all([...this.sessions.entries()].map(async ([threadId, session]) => {
+      await session.tail;
+      try {
+        session.descriptor = { ...session.descriptor, state: captureHarnessState(session.harness) };
+        this.saved.set(threadId, persistedDescriptor(session.descriptor));
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
+        await session.harness.dispose?.();
+      } catch (error) {
+        errors.push(error);
+      }
+    }));
+    this.sessions.clear();
+    try {
+      await this.persist();
+    } catch (error) {
+      errors.push(error);
+    }
+    if (errors.length > 0) throw new AggregateError(errors, "Harness host did not close cleanly");
   }
 
   sessionCount(): number { return this.sessions.size; }
@@ -105,8 +192,7 @@ export class HarnessHost {
     if (live !== undefined) return live;
     const saved = this.saved.get(threadId);
     if (saved === undefined) throw new Error(`Unknown harness thread: ${threadId}`);
-    await this.createSession(saved);
-    return this.sessions.get(threadId)!;
+    throw new Error(`Thread ${threadId} requires a fresh graph capability before its harness can resume`);
   }
 
   private async withSessionLock<T>(session: LiveSession, operation: () => Promise<T>): Promise<T> {
@@ -121,8 +207,22 @@ export class HarnessHost {
     }
   }
 
+  private async withRegistrationLock<T>(threadId: number, operation: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const previous = this.registrationTails.get(threadId) ?? Promise.resolve();
+    const tail = new Promise<void>((resolveTail) => { release = resolveTail; });
+    this.registrationTails.set(threadId, tail);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.registrationTails.get(threadId) === tail) this.registrationTails.delete(threadId);
+    }
+  }
+
   private persist(): Promise<void> {
-    const serialized = `${JSON.stringify({ schemaVersion: 1, sessions: [...this.saved.values()] }, null, 2)}\n`;
+    const serialized = `${JSON.stringify({ schemaVersion: 3, sessions: [...this.saved.values()] }, null, 2)}\n`;
     const operation = this.persistTail.then(() => this.writeState(serialized));
     this.persistTail = operation.catch(() => undefined);
     return operation;
@@ -149,7 +249,18 @@ export async function startHarnessHost(options: HarnessHostOptions): Promise<Run
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("Harness host did not bind a TCP address");
   const boundHost = address.family === "IPv6" ? `[${address.address}]` : address.address;
-  return { url: `http://${boundHost}:${address.port}`, host, close: () => close(server) };
+  return {
+    url: `http://${boundHost}:${address.port}`,
+    host,
+    close: async () => {
+      const closingServer = close(server);
+      try {
+        await host.close();
+      } finally {
+        await closingServer;
+      }
+    },
+  };
 }
 
 async function route(host: HarnessHost, token: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -157,15 +268,28 @@ async function route(host: HarnessHost, token: string, request: IncomingMessage,
     if (request.headers.authorization !== `Bearer ${token}`) return reply(response, 401, { error: "unauthorized" });
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     if (request.method === "POST" && url.pathname === "/sessions") {
-      await host.createSession(await body(request) as Omit<HarnessSessionDescriptor, "state">);
+      await host.createSession(await body(request) as HarnessSessionRegistration);
       return reply(response, 201, { ok: true });
+    }
+    const cancelMatch = /^\/sessions\/([^/]+)\/cancel$/.exec(url.pathname);
+    if (request.method === "POST" && cancelMatch?.[1] !== undefined) {
+      const threadId = Number(decodeURIComponent(cancelMatch[1]));
+      if (!Number.isSafeInteger(threadId) || threadId < 1) return reply(response, 400, { error: "invalid_thread_id" });
+      return reply(response, 200, { cancelled: host.cancel(threadId) });
     }
     const match = /^\/sessions\/([^/]+)\/complete$/.exec(url.pathname);
     if (request.method === "POST" && match?.[1] !== undefined) {
       const threadId = Number(decodeURIComponent(match[1]));
       if (!Number.isSafeInteger(threadId) || threadId < 1) return reply(response, 400, { error: "invalid_thread_id" });
       const input = await body(request) as { nodeId?: number };
-      return reply(response, 200, await host.complete(threadId, input.nodeId));
+      const controller = new AbortController();
+      const abort = () => controller.abort(new Error("Harness completion request disconnected"));
+      request.once("aborted", abort);
+      try {
+        return reply(response, 200, await host.complete(threadId, input.nodeId, controller.signal));
+      } finally {
+        request.off("aborted", abort);
+      }
     }
     if (request.method === "GET" && url.pathname === "/health") return reply(response, 200, { ok: true });
     return reply(response, 404, { error: "not_found" });
@@ -182,3 +306,52 @@ async function body(request: IncomingMessage): Promise<unknown> {
 function reply(response: ServerResponse, status: number, value: unknown): void { const data = JSON.stringify(value); response.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(data) }); response.end(data); }
 function listen(server: Server, port: number, host: string): Promise<void> { return new Promise((resolveListen, reject) => { server.once("error", reject); server.listen(port, host, () => { server.off("error", reject); resolveListen(); }); }); }
 function close(server: Server): Promise<void> { return new Promise((resolveClose, reject) => server.close((error) => error === undefined ? resolveClose() : reject(error))); }
+
+function persistedDescriptor(descriptor: HarnessSessionDescriptor): PersistedHarnessSessionDescriptor {
+  return {
+    threadId: descriptor.threadId,
+    configuration: descriptor.configuration,
+    workingDirectory: descriptor.workingDirectory,
+    ...(descriptor.state === undefined ? {} : { state: descriptor.state }),
+  };
+}
+
+function readPersistedSession(value: unknown): PersistedHarnessSessionDescriptor {
+  if (!isRecord(value)) throw new Error("Harness state contains an invalid session descriptor");
+  const { threadId, workingDirectory } = value;
+  if (typeof threadId !== "number" || !Number.isSafeInteger(threadId) || threadId < 1 || typeof workingDirectory !== "string") {
+    throw new Error("Harness state contains an invalid session descriptor");
+  }
+  const configuration = parseHarnessConfiguration(value.configuration);
+  const state = readHarnessState(value.state);
+  return {
+    threadId,
+    configuration,
+    workingDirectory,
+    ...(state === undefined ? {} : { state }),
+  };
+}
+
+function readHarnessState(value: unknown): HarnessSessionState | undefined {
+  if (value === undefined) return undefined;
+  if (isJsonObject(value)) return value;
+  throw new Error("Harness state contains invalid implementation state");
+}
+
+function captureHarnessState(harness: Harness): HarnessSessionState {
+  const state = readHarnessState(harness.state());
+  if (state === undefined) throw new Error("Harness did not return implementation state");
+  return state;
+}
+
+function forwardAbort(signal: AbortSignal | undefined, controller: AbortController): () => void {
+  if (signal === undefined) return () => undefined;
+  const abort = () => controller.abort(signal.reason);
+  if (signal.aborted) abort();
+  else signal.addEventListener("abort", abort, { once: true });
+  return () => signal.removeEventListener("abort", abort);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

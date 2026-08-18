@@ -18,7 +18,7 @@ Pre-alpha executable runtime slice. The repository now includes:
 
 - a Rust SQLx/SQLite graph core and async loopback server with interaction-scoped capability tokens;
 - object-based TypeScript and Python clients for nodes, undirected edges, layers, actions, and submission;
-- a persistent Node harness host that caches one harness object per thread and persists resumable provider session IDs;
+- a persistent Node harness host that loads named file-backed configurations, caches one harness object per thread, persists opaque provider resume state without graph credentials, and supports cancellation and deterministic disposal;
 - a graph-tool `codex.basic` harness using the OpenAI Codex TypeScript SDK;
 - an inference-free evaluation that starts the real Rust server and Node host, checks two interactions in one empty-project thread, and saves a turn-navigable movable-node HTML result;
 - Rust, TypeScript, Python, and process-level integration tests.
@@ -46,19 +46,25 @@ See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/
 
 ## Run the GraphComplete runtime eval
 
-The default case is deterministic and makes no inference calls. It launches the Rust graph server and Node host, completes two interactions through one live harness object with separately scoped graph capabilities, exercises the real TypeScript client, and saves `result.json` plus an interactive turn-navigable `index.html` under `.relayer/evals/runtime/<run-id>/`:
+The default run is deterministic and makes no inference calls. It launches the Rust graph server and Node host, completes two interactions through one live harness object with separately scoped graph capabilities, exercises the real TypeScript client, and saves `result.json` plus an interactive turn-navigable `index.html` under `.relayer/evals/runtime/<test-run-id>/<test-case-id>/<harness-configuration-name>/`:
 
 ```sh
 npm run eval:basic
 ```
 
-The opt-in live path uses `@openai/codex-sdk`, reuses the local Codex login, runs `codex.basic`, and then runs the structured judge:
+The opt-in live path requires the runner to select one or more named harness configurations. This command loads `harnesses/codex-basic.yaml`, resolves its `codex.basic` implementation, reuses the local Codex login, and then runs the structured judge:
 
 ```sh
-npm run eval:basic:live
+npm run eval:basic:live -- --configuration codex-basic
 ```
 
-Live inference is deliberately excluded from `npm test` and `npm run check`. Desktop `See in App` is not claimed by this slice; the saved HTML is the current pre-app-server visual proof.
+Selecting two configurations expands the same harness-agnostic case into two executions in one test run. `codex-basic` and `codex-basic-high` both select the `codex.basic` implementation with different settings:
+
+```sh
+npm run eval:basic:live -- --configuration codex-basic --configuration codex-basic-high
+```
+
+The CLI resolves configuration files before case execution. Every saved execution records its `(testRunId, testCaseId, harnessConfigurationName)` identity, exact resolved configuration snapshot, and stable digest. Live inference is deliberately excluded from `npm test` and `npm run check`. Desktop `See in App` is not claimed by this slice; the saved HTML is only the current pre-app-server integration artifact.
 
 ## Relayer Desktop
 
