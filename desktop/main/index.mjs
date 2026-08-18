@@ -11,6 +11,7 @@ import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
 import { GraphCompleteRuntimeService } from "./services/graphcomplete-runtime.mjs";
+import { resolveDesktopHarnessConfiguration } from "./services/desktop-harness-configuration.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
 import { claimPrimaryDesktopInstance } from "./single-instance.mjs";
@@ -58,6 +59,10 @@ const graphClientModuleUrl = app.isPackaged
 const rendererDirectory = app.isPackaged
   ? join(process.resourcesPath, "renderer")
   : join(desktopDirectory, "renderer");
+const defaultHarnessConfiguration = resolveDesktopHarnessConfiguration({
+  isPackaged: app.isPackaged,
+  environment: process.env,
+});
 
 let mainWindow;
 const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => mainWindow });
@@ -69,7 +74,7 @@ if (primaryInstance) {
   const graphRuntime = new GraphCompleteRuntimeService({
     userDataDirectory: userDataPath,
     graphServerBinary: relayerGraphServerBinary,
-    configurationPaths: [join(harnessDirectory, "codex-basic.yaml")],
+    configurationPaths: [join(harnessDirectory, `${defaultHarnessConfiguration}.yaml`)],
     codexBasicClientModuleUrl: graphClientModuleUrl,
     codexPathOverride: bundledCodexBinary,
     onUnexpectedStop: () => {
@@ -154,7 +159,7 @@ if (primaryInstance) {
       binaryPath: relayerAppServerBinary,
       webDirectory: rendererDirectory,
       runtimeSession,
-      defaultHarnessConfiguration: "codex-basic",
+      defaultHarnessConfiguration,
       onUnexpectedStop: () => {
         dialog.showErrorBox(
           "Relayer app server stopped",

@@ -87,6 +87,28 @@ npm run desktop:dev
 
 Ask a question in the composer to open the thread immediately while the default `codex-basic` harness builds its graph in the background. Follow-up turns reuse the same harness/provider session while receiving a fresh graph capability. The graph workspace supports node arrangement and background-drag canvas panning; the same interactions are available in read-only Eval review windows.
 
+To try the Prime Agent harness in the real Relayer chat, first build the Prime Agent
+[run-context branch](https://github.com/vishaltandale00/prime-agent/tree/codex/run-scoped-kernel-context)
+and expose its coding-agent workspace under the package's canonical name:
+
+```sh
+cd /path/to/prime-agent
+npm install
+npm run build
+
+cd /path/to/relayer-graphcomplete
+npm install
+npm install --no-save /path/to/prime-agent/packages/coding-agent
+npm run desktop:dev:prime
+```
+
+The Prime launcher selects `prime-agent-basic`, adds the local Python graph client
+to every IPython kernel, and uses a separate ignored desktop profile. Prime Agent
+reads its normal local provider credentials. Use
+`npm run desktop:dev:prime -- --configuration prime-agent-deep` to try the deeper
+configuration. The packaged Relayer application remains pinned to its production
+harness configuration.
+
 ## Relayer Eval
 
 Relayer Eval is a separate internal application and profile. Its dashboard configures cases, named harness configurations, and a judge; shows persisted test runs and aggregate results by harness; and opens any specific case × harness execution in a separate read-only production workspace window.
