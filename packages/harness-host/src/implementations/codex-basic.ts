@@ -7,8 +7,9 @@ export const CODEX_BASIC_KEY = "codex.basic";
 type CodexThread = ReturnType<Codex["startThread"]>;
 
 export interface CodexBasicDependencies {
-  readonly createCodex?: (environment: Record<string, string>) => Codex;
+  readonly createCodex?: (environment: Record<string, string>, codexPathOverride?: string) => Codex;
   readonly clientModuleUrl?: string;
+  readonly codexPathOverride?: string;
 }
 
 interface CodexBasicConfiguration {
@@ -74,7 +75,12 @@ export class CodexBasicHarness implements Harness {
     environment.RELAYER_GRAPH_URL = graph.url;
     environment.RELAYER_GRAPH_TOKEN = graph.token;
     environment.RELAYER_NODE_ID = String(graph.nodeId);
-    return this.dependencies.createCodex?.(environment) ?? new Codex({ env: environment });
+    return this.dependencies.createCodex?.(environment, this.dependencies.codexPathOverride) ?? new Codex({
+      env: environment,
+      ...(this.dependencies.codexPathOverride === undefined ? {} : {
+        codexPathOverride: this.dependencies.codexPathOverride,
+      }),
+    });
   }
 
   private openThread(): CodexThread {
@@ -104,7 +110,16 @@ The module exports RelayerGraphClient, NodeObject, EdgeObject, and LayerObject. 
 5. await graph.addAction(${interactionNode.id}, { kind: "navigate", label: "Response", target: layer, response: true });
 6. await graph.submit(${interactionNode.id}).
 
-The visible layer must contain 1 to 8 nodes and must be connected. Layer edges are exactly what the user sees. If a graph call rejects an object, read its error message, repair only that object, and retry. The graph is complete only after graph.submit succeeds.`;
+The visible layer must contain 1 to 8 nodes and must be connected. Layer edges are exactly what the user sees.
+
+Relayer graph affordances:
+- A node can be a complete explanation in the current layer.
+- A node can open a more detailed child layer. Submit the child LayerObject, then attach it with await graph.addAction(node, { kind: "navigate", label: "Useful label", target: childLayer }).
+- A node can offer a useful follow-up interaction with await graph.addAction(node, { kind: "invoke", label: "Useful label", interactionText: "A useful follow-up" }).
+
+Navigate and invoke actions are first-class options, not requirements for every node. Use them where they materially improve the answer, and submit every referenced node, edge, and layer before adding its action.
+
+If a graph call rejects an object, read its error message, repair only that object, and retry. The graph is complete only after graph.submit succeeds.`;
   }
 }
 

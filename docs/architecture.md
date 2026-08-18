@@ -23,14 +23,18 @@ Product host
 
 ```text
 Electron desktop
+    -> Rust graph server + Node harness host
     -> Rust Relayer app server
         -> HTTP API
             -> product service
                 -> SQLite product storage
+            -> authenticated runtime client
+                -> canonical graph interaction
+                -> pinned thread harness completion
         -> desktop renderer files
 ```
 
-Electron owns native windows, provider setup, updates, and the Rust child-process lifecycle. One Electron main process owns each desktop profile; a later application launch exits after asking the primary process to restore and focus its window. The primary process keeps product data inside a permission-restricted app directory, sends the per-launch control token through the Rust child's standard input, and keeps that pipe open as the ownership signal; the Rust server shuts down on pipe EOF if Electron exits or crashes, as well as on the normal termination signals. The Rust app server owns durable project, thread, and product interaction chronology records and serves the renderer over a random loopback port. The renderer uses the app server as its product API. Product state does not project those chronology records into graph nodes.
+Electron owns native windows, provider setup, updates, the Rust child-process lifecycles, and the in-process Node harness host. One Electron main process owns each desktop profile; a later application launch exits after asking the primary process to restore and focus its window. The primary process keeps product and runtime data inside permission-restricted app directories, gives the app server authenticated loopback coordinates for the graph server and harness host, sends product and graph control tokens through each Rust child's standard input, and keeps those pipes open as ownership signals. An unexpected service exit closes the owning application instead of leaving a partially live runtime. The Rust app server owns durable project, thread, and product interaction chronology records and serves the renderer over a random loopback port. The renderer uses only the app server as its product API.
 
 Within the app-server crate, each layer has one concrete responsibility:
 
@@ -41,7 +45,13 @@ Within the app-server crate, each layer has one concrete responsibility:
 
 SQLite migrations are storage implementation details. `SqliteProductStore::open` requires any existing product tables to carry Relayer's SQLx migration history, applies the embedded versioned files under `storage/sqlite/migrations/`, and validates the exact resulting schema and row invariants before the store becomes available. This permits a recognized predecessor to migrate while an unmanaged, incompatible, partially initialized, or corrupt schema fails startup. Electron, the HTTP API, and the product service neither run nor interpret migrations. The storage pool is asynchronous, bounded, configured for foreign keys and WAL, and is not guarded by a process-wide blocking mutex. Composite product-state and thread-detail reads use SQLite snapshot transactions so each API response is internally consistent. Operations that allocate per-thread interaction sequence numbers acquire an immediate SQLite transaction before assigning their timestamp or sequence, so concurrent requests cannot select the same next sequence or move a thread's chronology backward.
 
-This path deliberately ends before graph or harness execution. Those capabilities are reported as unavailable until their product contracts are integrated. A later integration will let graph core create the canonical user-interaction node with the product interaction's positive integer ID in the app server's SQLite transaction; PR #4 does not depend on that graph operation.
+For every product interaction, the app server durably creates the product interaction and marks it running before acknowledging the write. It then creates the canonical user-interaction graph node with product project/thread provenance, rotates the thread harness to that graph capability, awaits explicit graph submission in background work owned by the app-server process, and persists the accepted output or explicit failure on the product interaction. This lets every product host display the thread and waiting state immediately while polling the same product record to terminal state. Product and graph writes remain separate SQLite transactions; the stored graph node ID is the durable join between them.
+
+## Shared product and Eval workspace
+
+Relayer and Relayer Eval are separate Electron build targets. Relayer exposes the ordinary product window and a fixed production harness configuration. Relayer Eval exposes a test-run dashboard and enables named harness overrides, but executes each case through the same product app server. A case may create one or more ordinary product threads and interactions.
+
+Opening one case × harness execution creates a separate review window using the exact production renderer and `ProductWorkspace` component. The review preload supplies only Eval navigation context: the run's cases and product thread IDs for the selected harness. Product graph reads, accepted-layer navigation, turn navigation, layout, and node inspection remain owned by the ordinary product API and workspace. The same app server issues the review window a read-only session capability and rejects writes at the API boundary; workspace review mode also removes composition and mutating controls. See [ADR 0003](decisions/0003-shared-product-eval-workspace.md).
 
 ## Base graph-completion invariants
 
@@ -93,10 +103,12 @@ Configuration, implementation code, session state, and live authority are delibe
 
 The reference harness uses the TypeScript Codex SDK with the existing local Codex login. It keeps one resumable Codex thread per Relayer thread and asks Codex to execute the TypeScript graph client. The graph is not returned as structured JSON: Codex submits objects to the Rust engine, reacts to repairable validation errors, and ends with `graph.submit(interactionNode)`.
 
-The default and opt-in live evals start from an empty temporary folder and run two interactions through one cached harness object. Each interaction receives a distinct graph capability; the host rotates that capability between serialized Complete calls while the harness retains its provider-session identity. The case owns harness-agnostic graph-contract checks. A selected judge configuration may add semantic scoring without changing the case:
+The default and opt-in live evals start from an empty temporary folder and run two interactions through one cached harness object. Each interaction receives a distinct graph capability; the host rotates that capability between serialized Complete calls while the harness retains its provider-session identity. The case owns harness-agnostic graph-contract checks. The Eval application waits for each product interaction to reach a terminal state before starting the next turn. A selected judge configuration may add semantic scoring without changing the case:
 
 1. deterministic graph-contract checks; and
 2. a fresh structured Codex judge that scores six declared task-system facts plus graph and detail usefulness.
+
+The Eval application's deterministic graph-contract judge scores only durable graph structure; it does not use phrase matching as a semantic proxy. A separate hierarchical-overview case checks for a useful node-level navigate action so navigation capability is measured without requiring artificial child layers in every answer.
 
 The runner input is a test-run ID, selected test-case IDs, selected harness-configuration names, and one judge configuration. At the CLI boundary, configuration names resolve to validated snapshots. The runner expands their Cartesian product into executions identified by `(testRunId, testCaseId, harnessConfigurationName)` and passes each resolved `HarnessConfiguration` into case execution. Every execution artifact stores that exact snapshot and its canonical SHA-256 digest. Two configurations may select the same implementation; that is ordinary run selection, not a harness-specific case or matrix.
 
@@ -109,7 +121,7 @@ The ordinary test suite never invokes inference. `runtime-basic` remains a harne
 - `crates/relayer-graph-server` exposes that same core through the loopback API.
 - `packages/graph-client` is the typed Node authoring client and contains no graph persistence.
 - `packages/harness-host` owns persistent per-thread harness objects and code-owned implementations such as `codex.basic`.
-- `packages/eval-runner` starts the real graph server and harness host, evaluates accepted output, and writes replayable artifacts.
+- `packages/eval-runner` owns harness-agnostic case/run expansion, deterministic checks, and the lower-level CLI artifact path. The Relayer Eval shell composes those contracts around the production app server and renderer.
 - `python/relayer-graph` is the Python authoring client and contains no graph persistence.
 
 The root `src` directory contains only the canonical GraphComplete boundary and its runtime contract. There is intentionally no TypeScript graph kernel alongside the Rust graph core.

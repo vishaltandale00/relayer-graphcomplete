@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>Relayer Eval</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand"><span class="mark"></span><div><b>Relayer Eval</b><small>Internal evaluation</small></div></div>
+      <button class="primary wide" id="newRun">＋ New test run</button>
+      <div class="section-label">Test runs</div>
+      <div id="runList" class="run-list"></div>
+    </aside>
+    <main>
+      <section id="emptyView" class="empty-view">
+        <div><span class="eyebrow">Evaluation workspace</span><h1>Run the product, judge the result.</h1><p>Select a previous test run or configure a new one.</p><button class="primary" id="emptyNewRun">Create test run</button></div>
+      </section>
+      <section id="configureView" class="view hidden">
+        <header><span class="eyebrow">New test run</span><h1>Configure the matrix</h1><p>Each selected test case runs once against each selected harness configuration.</p></header>
+        <div class="configuration-grid">
+          <fieldset><legend>Test cases</legend><div id="caseOptions" class="option-list"></div></fieldset>
+          <fieldset><legend>Harnesses under test</legend><div id="harnessOptions" class="option-list"></div></fieldset>
+          <fieldset><legend>Judge</legend><div id="judgeOptions" class="option-list"></div></fieldset>
+        </div>
+        <div class="actions"><button class="secondary" id="cancelRun">Cancel</button><button class="primary" id="startRun">Run evaluation</button></div>
+      </section>
+      <section id="runView" class="view hidden">
+        <header class="run-header"><div><span class="eyebrow">Test run</span><h1 id="runTitle"></h1><p id="runMetadata"></p></div><span id="runStatus" class="status"></span></header>
+        <div id="aggregate" class="aggregate"></div>
+        <section class="panel"><div class="panel-heading"><div><h2>Test cases</h2><p>Open a case for one specific harness in the production workspace.</p></div></div><div class="table-wrap"><table><thead id="matrixHead"></thead><tbody id="matrixBody"></tbody></table></div></section>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

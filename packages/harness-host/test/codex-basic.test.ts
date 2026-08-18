@@ -31,9 +31,11 @@ describe("CodexBasicHarness", () => {
   });
 
   it("retains a provider thread ID when the first turn fails", async () => {
+    let submittedPrompt = "";
     const thread = {
       id: null as string | null,
-      run: vi.fn(async () => {
+      run: vi.fn(async (prompt: string) => {
+        submittedPrompt = prompt;
         thread.id = "codex-thread-after-start";
         throw new Error("turn failed");
       }),
@@ -61,6 +63,9 @@ describe("CodexBasicHarness", () => {
       state: "accepted",
     })).rejects.toThrow("turn failed");
     expect(harness.state()).toEqual({ codexThreadId: "codex-thread-after-start" });
+    expect(submittedPrompt).toContain("Relayer graph affordances:");
+    expect(submittedPrompt).toContain("first-class options");
+    expect(submittedPrompt).toContain('graph.addAction(node, { kind: "navigate"');
     expect(codex.startThread).toHaveBeenCalledWith({
       workingDirectory: process.cwd(),
       model: "gpt-test",
@@ -71,6 +76,24 @@ describe("CodexBasicHarness", () => {
       webSearchMode: "disabled",
       skipGitRepoCheck: true,
     });
+  });
+
+  it("passes the packaged executable override to the Codex process", () => {
+    const createCodex = vi.fn(() => ({}) as Codex);
+    new CodexBasicHarness({
+      threadId: 1,
+      workingDirectory: process.cwd(),
+      graph: { url: "http://127.0.0.1:43123", token: "token", nodeId: 1 },
+      configuration: codexBasicConfiguration,
+    }, {
+      createCodex,
+      codexPathOverride: "/Applications/Relayer.app/Contents/Resources/codex",
+    });
+
+    expect(createCodex).toHaveBeenCalledWith(
+      expect.objectContaining({ RELAYER_GRAPH_TOKEN: "token", RELAYER_NODE_ID: "1" }),
+      "/Applications/Relayer.app/Contents/Resources/codex",
+    );
   });
 
   it("rotates graph credentials while resuming the same provider thread", async () => {

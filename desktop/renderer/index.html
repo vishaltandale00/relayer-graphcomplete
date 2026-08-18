@@ -59,31 +59,7 @@
         </div>
       </section>
 
-      <section class="thread-view hidden" id="threadView">
-        <header class="thread-header">
-          <div class="turn-navigation"><button disabled title="Previous turn">←</button><button disabled title="Next turn">→</button></div>
-          <div><h2 id="threadTitle">New thread</h2><p id="threadScope">No folder</p></div>
-          <div class="run-state" id="runState"><i></i><span>Ready</span></div>
-        </header>
-        <div class="thread-workspace">
-          <div class="graph-column">
-            <div class="interaction-banner" id="interactionBanner"><span class="interaction-icon">›_</span><div><small>Your interaction</small><p id="interactionText"></p></div></div>
-            <div class="graph-empty" id="graphEmpty"><div class="thinking-dot"></div><p>Agent execution is not connected in this desktop slice.</p></div>
-            <div class="graph-stage hidden" id="graphStage">
-              <svg id="edgeCanvas" aria-hidden="true"></svg>
-              <div id="nodeLayer"></div>
-              <div class="graph-hint">Drag nodes to explore the response</div>
-            </div>
-            <div class="thread-composer disabled-composer"><span>Agent execution and graph output are intentionally deferred.</span></div>
-          </div>
-          <aside class="inspector hidden" id="inspector">
-            <div class="inspector-header"><span>Node details</span><button class="icon-button" id="closeInspector">×</button></div>
-            <div class="node-heading"><div class="node-icon" id="detailIcon">N</div><div><small id="detailKind">CONCEPT</small><h2 id="detailTitle"></h2></div></div>
-            <div class="node-content" id="detailContent"></div>
-            <div class="inline-actions hidden" id="detailActions"></div>
-          </aside>
-        </div>
-      </section>
+      <section class="thread-view hidden" id="threadView"></section>
 
       <section class="settings-view hidden" id="settingsView" aria-labelledby="settingsTitle">
         <header class="settings-header">
@@ -110,6 +86,7 @@
 
   <div class="update-popover hidden" id="updatePopover"><button class="icon-button close-popover" id="closeUpdate">×</button><small>Relayer update</small><h3 id="updateTitle">Update available</h3><p id="updateDetail"></p><button class="primary wide" id="updateAction">Download update</button></div>
   <div class="toast hidden" id="toast"></div>
+  <script src="./vendor/marked.umd.js"></script>
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>

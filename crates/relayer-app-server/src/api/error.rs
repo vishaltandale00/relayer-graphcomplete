@@ -1,5 +1,6 @@
 use super::types::ProjectResponse;
 use crate::product::{InvalidProductId, ProductError};
+use crate::runtime::RuntimeError;
 use axum::{
     Json,
     http::StatusCode,
@@ -17,7 +18,14 @@ impl ApiError {
         )
     }
 
-    fn invalid(message: impl Into<String>) -> Self {
+    pub(crate) fn read_only() -> Self {
+        Self(
+            StatusCode::FORBIDDEN,
+            json!({ "code": "read_only_session", "error": "This Relayer session is read-only." }),
+        )
+    }
+
+    pub(crate) fn invalid(message: impl Into<String>) -> Self {
         Self(
             StatusCode::UNPROCESSABLE_ENTITY,
             json!({ "code": "invalid_input", "error": message.into() }),
@@ -29,6 +37,12 @@ impl ApiError {
             StatusCode::INTERNAL_SERVER_ERROR,
             json!({ "error": message }),
         )
+    }
+}
+
+impl From<RuntimeError> for ApiError {
+    fn from(error: RuntimeError) -> Self {
+        Self::internal(&error.to_string())
     }
 }
 

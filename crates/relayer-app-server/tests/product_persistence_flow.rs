@@ -103,6 +103,28 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .unwrap();
         assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
 
+        let review_state = app
+            .clone()
+            .oneshot(api_request_with_token("GET", "/api/state", None, "review"))
+            .await
+            .unwrap();
+        assert_eq!(review_state.status(), StatusCode::OK);
+        let review_write = app
+            .clone()
+            .oneshot(api_request_with_token(
+                "POST",
+                "/api/projects",
+                Some(json!({ "path": project_folder })),
+                "review",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(review_write.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(review_write).await["code"],
+            "read_only_session"
+        );
+
         let project = app
             .clone()
             .oneshot(api_request(
@@ -356,7 +378,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 1);
+    assert_eq!(applied_migrations, 2);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -370,6 +392,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         database_path: incompatible_database,
         web_directory: root.clone(),
         control_token: "control".to_owned(),
+        read_only_control_token: None,
+        runtime: None,
     })
     .await;
     let error = match incompatible {
@@ -392,6 +416,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         database_path: rootless_database,
         web_directory: root.clone(),
         control_token: "control".to_owned(),
+        read_only_control_token: None,
+        runtime: None,
     })
     .await;
     let rootless_error = match rootless {
@@ -412,8 +438,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         "DROP TABLE threads",
         "DROP TABLE projects",
         "CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,path TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
-        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
-        "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL)",
+        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic')",
+        "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL,graph_node_id INTEGER,completion_status TEXT NOT NULL DEFAULT 'not_started',harness_configuration_name TEXT,harness_configuration_digest TEXT,completion_output_json TEXT,completion_error TEXT)",
         "CREATE UNIQUE INDEX projects_path_partial ON projects(path) WHERE id > 0",
         "CREATE UNIQUE INDEX interactions_sequence_partial ON interactions(thread_id,sequence) WHERE id > 0",
     ] {
@@ -427,6 +453,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         database_path: partial_index_database,
         web_directory: root.clone(),
         control_token: "control".to_owned(),
+        read_only_control_token: None,
+        runtime: None,
     })
     .await;
     let partial_index_error = match partial_index {
@@ -462,6 +490,8 @@ async fn open_app(database: &Path, web_directory: &Path) -> Router {
         database_path: database.to_owned(),
         web_directory: web_directory.to_owned(),
         control_token: "control".to_owned(),
+        read_only_control_token: Some("review".to_owned()),
+        runtime: None,
     })
     .await
     .unwrap()
@@ -469,9 +499,23 @@ async fn open_app(database: &Path, web_directory: &Path) -> Router {
 }
 
 fn api_request(method: &str, uri: &str, body: Option<Value>, authenticated: bool) -> Request<Body> {
+    api_request_with_token(
+        method,
+        uri,
+        body,
+        if authenticated { "control" } else { "" },
+    )
+}
+
+fn api_request_with_token(
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: &str,
+) -> Request<Body> {
     let mut builder = Request::builder().method(method).uri(uri);
-    if authenticated {
-        builder = builder.header("cookie", format!("{CONTROL_COOKIE}=control"));
+    if !token.is_empty() {
+        builder = builder.header("cookie", format!("{CONTROL_COOKIE}={token}"));
     }
     if body.is_some() {
         builder = builder.header("content-type", "application/json");

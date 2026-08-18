@@ -154,6 +154,24 @@ export function checkBasicOutput(output: CompletionOutput, expectedInteractionNo
   ];
 }
 
+export function checkNodeNavigation(output: CompletionOutput): EvalCheck[] {
+  const visibleNodeIds = new Set(output.rootLayer.nodes.map((node) => node.id));
+  const navigation = output.rootLayer.actions.find((action) => (
+    action.kind === "navigate"
+    && action.state === "accepted"
+    && action.response === false
+    && Number.isInteger(action.targetLayerId)
+    && visibleNodeIds.has(action.sourceNodeId)
+  ));
+  return [{
+    name: "node-navigation",
+    passed: navigation !== undefined,
+    detail: navigation
+      ? "A visible output node opens an accepted child layer."
+      : "No visible output node opens a child layer.",
+  }];
+}
+
 export function checkBasicFacts(output: CompletionOutput): EvalCheck[] {
   const text = output.rootLayer.nodes.map((node) => `${node.title}\n${node.detail}`).join("\n");
   return basicEvalFacts.map((fact) => ({

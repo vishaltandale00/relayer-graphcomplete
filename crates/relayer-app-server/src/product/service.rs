@@ -18,6 +18,7 @@ pub(crate) struct CreateThreadCommand {
     pub(crate) title: Option<String>,
     pub(crate) project_id: Option<ProjectId>,
     pub(crate) initial_message: String,
+    pub(crate) harness_configuration_name: String,
 }
 
 pub(crate) struct ProjectWriteOutcome {
@@ -47,15 +48,23 @@ pub(crate) enum ProductError {
 #[derive(Clone)]
 pub(crate) struct ProductService {
     storage: SqliteProductStore,
+    runtime_available: bool,
 }
 
 impl ProductService {
-    pub(crate) fn new(storage: SqliteProductStore) -> Self {
-        Self { storage }
+    pub(crate) fn new(storage: SqliteProductStore, runtime_available: bool) -> Self {
+        Self {
+            storage,
+            runtime_available,
+        }
     }
 
     pub(crate) fn capabilities(&self) -> ProductCapabilities {
-        ProductCapabilities::default()
+        ProductCapabilities {
+            graph: self.runtime_available,
+            harness: self.runtime_available,
+            ..ProductCapabilities::default()
+        }
     }
 
     pub(crate) async fn load_state(
@@ -155,7 +164,13 @@ impl ProductService {
             .take(120)
             .collect::<String>();
         self.storage
-            .insert_thread_with_initial_interaction(&title, command.project_id, message, &now())
+            .insert_thread_with_initial_interaction(
+                &title,
+                command.project_id,
+                message,
+                &command.harness_configuration_name,
+                &now(),
+            )
             .await
             .map_err(Into::into)
     }
@@ -197,6 +212,67 @@ impl ProductService {
             .insert_interaction(thread_id, text)
             .await
             .map_err(Into::into)
+    }
+
+    pub(crate) async fn get_interaction(
+        &self,
+        interaction_id: super::InteractionId,
+    ) -> Result<Interaction, ProductError> {
+        self.storage
+            .get_interaction(interaction_id)
+            .await?
+            .ok_or_else(|| ProductError::NotFound(format!("interaction {interaction_id}")))
+    }
+
+    pub(crate) async fn mark_interaction_running(
+        &self,
+        interaction_id: super::InteractionId,
+        harness_configuration_name: &str,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .mark_interaction_running(interaction_id, harness_configuration_name)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn accept_interaction_completion(
+        &self,
+        interaction_id: super::InteractionId,
+        graph_node_id: i64,
+        harness_configuration_name: &str,
+        harness_configuration_digest: &str,
+        output: &serde_json::Value,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .accept_interaction_completion(
+                interaction_id,
+                graph_node_id,
+                harness_configuration_name,
+                harness_configuration_digest,
+                output,
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn fail_interaction_completion(
+        &self,
+        interaction_id: super::InteractionId,
+        harness_configuration_name: &str,
+        error: &str,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .fail_interaction_completion(interaction_id, harness_configuration_name, error)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn project_path(&self, project_id: ProjectId) -> Result<String, ProductError> {
+        self.storage
+            .get_project(project_id)
+            .await?
+            .map(|project| project.path)
+            .ok_or_else(|| ProductError::NotFound(format!("project {project_id}")))
     }
 }
 

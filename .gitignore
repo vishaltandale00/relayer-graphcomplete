@@ -8,5 +8,7 @@ target/
 .DS_Store
 .relayer/
 desktop/dist/
+desktop/eval-dist/
+desktop/renderer/vendor/
 docs/prd/comments.json
 docs/prd/annotations.json

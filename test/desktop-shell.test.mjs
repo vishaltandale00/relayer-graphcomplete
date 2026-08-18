@@ -4,10 +4,12 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-credential-adapter.mjs";
 import { CredentialAdapter } from "../desktop/main/credentials/credential-adapter.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
+import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "../desktop/main/services/updater.mjs";
 import { claimPrimaryDesktopInstance } from "../desktop/main/single-instance.mjs";
@@ -43,8 +45,16 @@ import {
 } from "../desktop/release/promote-stable.mjs";
 import { apiUrl } from "../desktop/renderer/src/api.js";
 import { addLocalThread, interactionForThread, responseNodesForThread } from "../desktop/renderer/src/thread-model.js";
+import { workspaceModeCapabilities } from "../desktop/renderer/src/product-workspace/model.js";
+import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
+import { graphEdgeSegment, graphScreenPoint } from "../desktop/renderer/src/product-workspace/workspace.js";
+import { isSafeMarkdownLink } from "../desktop/renderer/src/product-workspace/markdown.js";
 
 describe("desktop skeleton", () => {
+  it("moves graph world coordinates through a shared camera offset", () => {
+    expect(graphScreenPoint({ x: 120, y: 80 }, { x: -35, y: 24 })).toEqual({ x: 85, y: 104 });
+  });
+
   it("keeps one desktop authority and presents its window on later launches", () => {
     const handlers = new Map();
     let window;
@@ -132,13 +142,23 @@ describe("desktop skeleton", () => {
     expect(JSON.parse(packageManifest).devDependencies).not.toHaveProperty("@openai/codex");
     expect(JSON.parse(packageManifest).devDependencies).not.toHaveProperty("electron-updater");
     expect(packageManifest).toContain("desktop/packaging/electron-builder.mjs");
+    expect(JSON.parse(packageManifest).scripts).toMatchObject({
+      "predesktop:pack": "npm run prepare:desktop-runtime",
+      "predesktop:dist": "npm run prepare:desktop-runtime",
+      "predesktop:dist:preview": "npm run prepare:desktop-runtime",
+    });
     expect(packaging).toContain('"macos/entitlements.mac.plist"');
     expect(packaging).toContain('"!packaging/**/*"');
     expect(packaging).toContain('"target/aarch64-apple-darwin/release/relayer-app-server"');
     expect(packaging).toContain('afterPack: "desktop/packaging/verify-bundled-app-server.mjs"');
+    expect(packaging).toContain('"packages/graph-client/dist"');
+    expect(desktopMain).toContain('"graph-client", "index.js"');
+    expect(desktopMain).toContain("codexBasicClientModuleUrl: graphClientModuleUrl");
+    expect(desktopMain).toContain("codexPathOverride: bundledCodexBinary");
     expect(packaging).toContain('to: "renderer"');
     expect(threads).not.toContain("/messages");
     expect(threads).not.toContain("EventSource");
+    expect(threads).toMatch(/function loadThread[\s\S]*setMainView\("thread"\);[\s\S]*refreshState\(threadId\)/);
     expect(rendererMain).not.toContain("/messages");
     expect(rendererMain).not.toContain("/interrupt");
     expect(prd).toContain('src="assets/product-walkthrough.html"');
@@ -154,6 +174,41 @@ describe("desktop skeleton", () => {
     expect(prd).toContain('document: \'docs/prd/index.html\'');
     expect(prdServer).toContain('join(prdDirectory, "comments.json")');
     expect(packageManifest).not.toContain('"marked"');
+  });
+
+  it("keeps the Eval shell separate while reusing the production product workspace", async () => {
+    const productPackaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
+    const evalPackaging = await readFile(new URL("../desktop/packaging/eval-electron-builder.mjs", import.meta.url), "utf8");
+    const evalMain = await readFile(new URL("../desktop/eval-main/index.mjs", import.meta.url), "utf8");
+    const evalDashboard = await readFile(new URL("../desktop/eval-renderer/index.html", import.meta.url), "utf8");
+    const graphAdapter = await readFile(new URL("../desktop/renderer/src/graph.js", import.meta.url), "utf8");
+    const navigation = await readFile(new URL("../desktop/renderer/src/navigation.js", import.meta.url), "utf8");
+
+    expect(productPackaging).toContain('"!eval-main/**/*"');
+    expect(productPackaging).toContain('"!eval-renderer/**/*"');
+    expect(productPackaging).toContain('"!preload/eval-*.cjs"');
+    expect(evalPackaging).toContain('appId: "ai.relayer.eval"');
+    expect(evalPackaging).toContain('main: "eval-main/index.mjs"');
+    expect(evalPackaging).toContain('"main/single-instance.mjs"');
+    expect(evalPackaging).toContain('{ from: resolve(desktopRoot, "renderer"), to: "renderer" }');
+    expect(evalPackaging).toContain('"packages/graph-client/dist"');
+    expect(evalMain).toContain("GraphCompleteRuntimeService");
+    expect(evalMain).toContain("RelayerAppServerService");
+    expect(evalMain).toContain("allowHarnessOverride: true");
+    expect(evalMain).toContain("enableReadOnlySession: true");
+    expect(evalMain).toContain("productSession.readOnlyCookie");
+    expect(evalMain).toContain("claimPrimaryDesktopInstance");
+    expect(evalMain).toContain("createReviewWindow(executionId)");
+    expect(evalDashboard).toContain("Test cases");
+    expect(evalDashboard).toContain("Harnesses under test");
+    expect(evalDashboard).toContain("Open a case for one specific harness in the production workspace.");
+    expect(graphAdapter).toContain('mode: evalReview || query.get("review") === "1" ? "review" : "interactive"');
+    expect(navigation).toContain("viewState.evalContext.cases");
+    expect(workspaceModeCapabilities("review")).toEqual({
+      canCompose: false,
+      canNavigate: true,
+      canInvokeMutatingActions: false,
+    });
   });
 
   it("coalesces repeated first-thread submissions while creation is pending", async () => {
@@ -229,6 +284,7 @@ describe("desktop skeleton", () => {
       userDataDirectory: directory,
       binaryPath: "/test/bin/relayer-app-server",
       webDirectory: "/test/renderer",
+      enableReadOnlySession: true,
       spawnProcess: (binary, args, options) => {
         invocations.push({ binary, args, options });
         queueMicrotask(() => child.stdout.write(`${JSON.stringify({
@@ -250,16 +306,21 @@ describe("desktop skeleton", () => {
         cookie: { name: "relayer_control" },
       });
       expect(session.cookie.value).toMatch(/^[a-f0-9]{64}$/);
+      expect(session.readOnlyCookie).toMatchObject({ name: "relayer_control" });
+      expect(session.readOnlyCookie.value).toMatch(/^[a-f0-9]{64}$/);
+      expect(session.readOnlyCookie.value).not.toBe(session.cookie.value);
       expect(invocations).toHaveLength(1);
       expect(invocations[0].binary).toBe("/test/bin/relayer-app-server");
       expect(invocations[0].args).toEqual([
         "--data-dir", join(directory, "product-data"),
         "--web-dir", "/test/renderer",
         "--port", "0",
+        "--read-only-control-token-stdin",
       ]);
-      expect(suppliedToken).toBe(`${session.cookie.value}\n`);
+      expect(suppliedToken).toBe(`${session.cookie.value}\n${session.readOnlyCookie.value}\n`);
       expect(child.stdin.writableEnded).toBe(false);
       expect(invocations[0].args).not.toContain(session.cookie.value);
+      expect(invocations[0].args).not.toContain(session.readOnlyCookie.value);
       expect((await stat(join(directory, "product-data"))).mode & 0o777).toBe(0o700);
       expect(await service.start()).toBe(session);
       await service.close();
@@ -412,6 +473,49 @@ describe("desktop skeleton", () => {
       await new Promise((resolve) => setImmediate(resolve));
       expect(unexpectedStops).toEqual([{ code: 2, signal: null }]);
     } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps graph authority off argv and reports a graph server that stops after readiness", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-graph-runtime-service-"));
+    let suppliedToken = "";
+    const unexpectedStops = [];
+    const invocations = [];
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write(chunk, _encoding, callback) { suppliedToken += String(chunk); callback(); } }),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+      kill: vi.fn(),
+    });
+    const service = new GraphCompleteRuntimeService({
+      userDataDirectory: directory,
+      graphServerBinary: "/test/bin/relayer-graph-server",
+      configurationPaths: [fileURLToPath(new URL("../harnesses/codex-basic.yaml", import.meta.url))],
+      onUnexpectedStop: (event) => unexpectedStops.push(event),
+      spawnProcess: (binary, args, options) => {
+        invocations.push({ binary, args, options });
+        queueMicrotask(() => child.stdout.write(`${JSON.stringify({ ready: true, url: "http://127.0.0.1:43125" })}\n`));
+        return child;
+      },
+    });
+
+    try {
+      const session = await service.start();
+      expect(session.controlToken).toMatch(/^[a-f0-9]{64}$/);
+      expect(suppliedToken).toBe(`${session.controlToken}\n`);
+      expect(invocations[0].args).not.toContain("--control-token");
+      expect(invocations[0].args).not.toContain(session.controlToken);
+      expect(invocations[0].options.stdio).toEqual(["pipe", "pipe", "pipe"]);
+
+      child.exitCode = 9;
+      child.emit("exit", 9, null);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unexpectedStops).toEqual([{ code: 9, signal: null }]);
+    } finally {
+      await service.close();
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -738,14 +842,36 @@ describe("desktop skeleton", () => {
     try {
       const appPath = join(directory, "Relayer.app");
       const bundledBinary = join(appPath, "Contents", "Resources", "bin", "relayer-app-server");
+      const bundledGraphBinary = join(appPath, "Contents", "Resources", "bin", "relayer-graph-server");
+      const bundledGraphClient = join(appPath, "Contents", "Resources", "graph-client", "index.js");
+      const bundledMarked = join(appPath, "Contents", "Resources", "renderer", "vendor", "marked.umd.js");
       await mkdir(join(appPath, "Contents", "Resources", "bin"), { recursive: true });
-      await writeFile(bundledBinary, "binary-fixture");
+      await mkdir(join(appPath, "Contents", "Resources", "graph-client"), { recursive: true });
+      await mkdir(join(appPath, "Contents", "Resources", "renderer", "vendor"), { recursive: true });
+      await Promise.all([
+        writeFile(bundledBinary, "binary-fixture"),
+        writeFile(bundledGraphBinary, "binary-fixture"),
+        writeFile(bundledGraphClient, "client-fixture"),
+        writeFile(bundledMarked, "marked-fixture"),
+      ]);
+      const packagedRuntimeEntries = () => [
+        "main/single-instance.mjs",
+        "node_modules/@relayer/graph-client/dist/index.js",
+        "node_modules/@relayer/harness-host/dist/index.js",
+        "node_modules/@relayer/eval-runner/dist/index.js",
+      ];
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        listPackageEntries: packagedRuntimeEntries,
       })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "arm64" });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
+        listPackageEntries: packagedRuntimeEntries,
       })).rejects.toThrow("must contain only arm64");
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/@relayer/graph-client/dist/index.js"),
+      })).rejects.toThrow("missing node_modules/@relayer/graph-client/dist/index.js");
 
       const names = desktopReleaseArtifactNames(contract);
       const dmg = Buffer.from("signed-notarized-dmg-fixture");
@@ -1237,5 +1363,62 @@ describe("desktop skeleton", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("uses one product workspace implementation for interactive and eval-review contexts", async () => {
+    const productAdapter = await readFile(new URL("../desktop/renderer/src/graph.js", import.meta.url), "utf8");
+    const workspace = await readFile(new URL("../desktop/renderer/src/product-workspace/workspace.js", import.meta.url), "utf8");
+    const productShell = await readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8");
+
+    expect(productAdapter).toContain("createProductWorkspace");
+    expect(productAdapter).not.toContain("function physicsStep");
+    expect(workspace).toContain("function physicsStep");
+    expect(productShell).toContain('<section class="thread-view hidden" id="threadView"></section>');
+    expect(productShell).not.toContain('id="graphStage"');
+    expect(productWorkspaceMarkup()).toContain('id="graphStage"');
+    expect(productWorkspaceMarkup()).toContain('id="closeInspector"');
+    expect(workspaceModeCapabilities("interactive")).toEqual({
+      canNavigate: true,
+      canCompose: true,
+      canInvokeMutatingActions: true,
+    });
+    expect(workspaceModeCapabilities("review")).toEqual({
+      canNavigate: true,
+      canCompose: false,
+      canInvokeMutatingActions: false,
+    });
+    expect(() => workspaceModeCapabilities("comparison")).toThrow("Unknown product workspace mode");
+  });
+
+  it("anchors graph edges at icon boundaries and preserves dragged node positions", async () => {
+    expect(graphEdgeSegment({ x: 10, y: 20 }, { x: 110, y: 20 }, 24)).toEqual({
+      x1: 34,
+      y1: 20,
+      x2: 86,
+      y2: 20,
+    });
+
+    const workspace = await readFile(new URL("../desktop/renderer/src/product-workspace/workspace.js", import.meta.url), "utf8");
+    const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
+    expect(workspace).toContain("dragging.node.pinned = true");
+    expect(workspace).toContain("node.pinned || dragging?.node.id === node.id");
+    expect(styles).toContain("flex-direction:column");
+    expect(styles).toContain("width:46px;height:46px");
+  });
+
+  it("renders node details as restricted Markdown without exposing internal kinds on graph cards", async () => {
+    const html = await readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8");
+    const workspace = await readFile(new URL("../desktop/renderer/src/product-workspace/workspace.js", import.meta.url), "utf8");
+    const markdown = await readFile(new URL("../desktop/renderer/src/product-workspace/markdown.js", import.meta.url), "utf8");
+
+    expect(html).toContain('<script src="./vendor/marked.umd.js"></script>');
+    expect(workspace).toContain('renderMarkdown($("#detailContent")');
+    expect(workspace).not.toContain('<small>${escapeHtml(node.kind)}</small>');
+    expect(markdown).toContain("ALLOWED_MARKDOWN_ELEMENTS");
+    expect(markdown).toContain("DANGEROUS_MARKDOWN_ELEMENTS");
+    expect(isSafeMarkdownLink("https://relayerlabs.ai/docs")).toBe(true);
+    expect(isSafeMarkdownLink("http://127.0.0.1:3000/help")).toBe(true);
+    expect(isSafeMarkdownLink("javascript:alert(1)")).toBe(false);
+    expect(isSafeMarkdownLink("data:text/html,bad")).toBe(false);
   });
 });

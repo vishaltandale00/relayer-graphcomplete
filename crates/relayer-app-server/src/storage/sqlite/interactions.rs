@@ -5,6 +5,22 @@ use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 impl SqliteProductStore {
+    pub(crate) async fn get_interaction(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<Option<Interaction>, StorageError> {
+        let mut connection = self.pool.acquire().await?;
+        sqlx::query(
+            "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error FROM interactions WHERE id=?1",
+        )
+        .bind(interaction_id.value())
+        .fetch_optional(&mut *connection)
+        .await?
+        .as_ref()
+        .map(interaction_from_row)
+        .transpose()
+    }
+
     pub(crate) async fn list_interactions(
         &self,
         thread_id: ThreadId,
@@ -51,9 +67,62 @@ impl SqliteProductStore {
             sequence,
             text: text.to_owned(),
             created_at: timestamp,
+            graph_node_id: None,
+            completion_status: "not_started".into(),
+            harness_configuration_name: None,
+            harness_configuration_digest: None,
+            completion_output: None,
+            completion_error: None,
         };
         transaction.commit().await?;
         Ok(interaction)
+    }
+
+    pub(crate) async fn mark_interaction_running(
+        &self,
+        interaction_id: InteractionId,
+        harness_configuration_name: &str,
+    ) -> Result<(), StorageError> {
+        sqlx::query("UPDATE interactions SET completion_status='running',harness_configuration_name=?1,harness_configuration_digest=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2")
+            .bind(harness_configuration_name)
+            .bind(interaction_id.value())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn accept_interaction_completion(
+        &self,
+        interaction_id: InteractionId,
+        graph_node_id: i64,
+        harness_configuration_name: &str,
+        harness_configuration_digest: &str,
+        output: &serde_json::Value,
+    ) -> Result<(), StorageError> {
+        sqlx::query("UPDATE interactions SET graph_node_id=?1,completion_status='accepted',harness_configuration_name=?2,harness_configuration_digest=?3,completion_output_json=?4,completion_error=NULL WHERE id=?5")
+            .bind(graph_node_id)
+            .bind(harness_configuration_name)
+            .bind(harness_configuration_digest)
+            .bind(serde_json::to_string(output).map_err(|error| StorageError::Serialization(error.to_string()))?)
+            .bind(interaction_id.value())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn fail_interaction_completion(
+        &self,
+        interaction_id: InteractionId,
+        harness_configuration_name: &str,
+        error: &str,
+    ) -> Result<(), StorageError> {
+        sqlx::query("UPDATE interactions SET completion_status='failed',harness_configuration_name=?1,completion_error=?2 WHERE id=?3")
+            .bind(harness_configuration_name)
+            .bind(error)
+            .bind(interaction_id.value())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 }
 
@@ -62,7 +131,7 @@ pub(super) async fn fetch_interactions(
     thread_id: ThreadId,
 ) -> Result<Vec<Interaction>, StorageError> {
     let rows = sqlx::query(
-        "SELECT id,thread_id,sequence,text,created_at FROM interactions WHERE thread_id=?1 ORDER BY sequence ASC",
+        "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error FROM interactions WHERE thread_id=?1 ORDER BY sequence ASC",
     )
     .bind(thread_id.value())
     .fetch_all(connection)
@@ -88,5 +157,15 @@ fn interaction_from_row(row: &SqliteRow) -> Result<Interaction, StorageError> {
         sequence: row.try_get(2)?,
         text: row.try_get(3)?,
         created_at: row.try_get(4)?,
+        graph_node_id: row.try_get(5)?,
+        completion_status: row.try_get(6)?,
+        harness_configuration_name: row.try_get(7)?,
+        harness_configuration_digest: row.try_get(8)?,
+        completion_output: row
+            .try_get::<Option<String>, _>(9)?
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(|error| StorageError::Serialization(error.to_string()))?,
+        completion_error: row.try_get(10)?,
     })
 }

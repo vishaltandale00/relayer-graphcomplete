@@ -5,6 +5,7 @@ use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 
 const THREAD_COLUMNS: &str = r#"
     SELECT t.id,t.title,t.project_id,t.created_at,t.updated_at,
+           t.harness_configuration_name,
            (SELECT id FROM interactions WHERE thread_id=t.id ORDER BY sequence ASC LIMIT 1)
     FROM threads t
 "#;
@@ -25,15 +26,17 @@ impl SqliteProductStore {
         title: &str,
         project_id: Option<ProjectId>,
         initial_message: &str,
+        harness_configuration_name: &str,
         timestamp: &str,
     ) -> Result<Thread, StorageError> {
         let mut transaction = self.pool.begin().await?;
         let thread = sqlx::query(
-            "INSERT INTO threads(title,project_id,created_at,updated_at) VALUES (?1,?2,?3,?3)",
+            "INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name) VALUES (?1,?2,?3,?3,?4)",
         )
         .bind(title)
         .bind(project_id.map(ProjectId::value))
         .bind(timestamp)
+        .bind(harness_configuration_name)
         .execute(&mut *transaction)
         .await?;
         let thread_id = ThreadId::from_database(thread.last_insert_rowid());
@@ -85,6 +88,7 @@ fn thread_from_row(row: &SqliteRow) -> Result<Thread, StorageError> {
             .map(ProjectId::from_database),
         created_at: row.try_get(3)?,
         updated_at: row.try_get(4)?,
-        root_interaction_id: InteractionId::from_database(row.try_get(5)?),
+        harness_configuration_name: row.try_get(5)?,
+        root_interaction_id: InteractionId::from_database(row.try_get(6)?),
     })
 }

@@ -1,4 +1,9 @@
-use super::{ApiState, auth::authorize, error::ApiError, types::ProjectResponse};
+use super::{
+    ApiState,
+    auth::{authorize_read, authorize_write},
+    error::ApiError,
+    types::ProjectResponse,
+};
 use crate::product::CreateProjectCommand;
 use axum::{Json, extract::State, http::HeaderMap, http::StatusCode};
 use serde::{Deserialize, Serialize};
@@ -21,7 +26,7 @@ pub(super) async fn list(
     State(state): State<ApiState>,
     headers: HeaderMap,
 ) -> Result<Json<ProjectsResponse>, ApiError> {
-    authorize(&state, &headers)?;
+    authorize_read(&state, &headers)?;
     let projects = state
         .product
         .list_projects()
@@ -37,7 +42,7 @@ pub(super) async fn create(
     headers: HeaderMap,
     Json(request): Json<CreateProjectRequest>,
 ) -> Result<(StatusCode, Json<ProjectResponse>), ApiError> {
-    authorize(&state, &headers)?;
+    authorize_write(&state, &headers)?;
     let outcome = state
         .product
         .create_project(CreateProjectCommand {
