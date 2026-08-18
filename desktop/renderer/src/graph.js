@@ -33,8 +33,6 @@ function renderRunState() {
         : status[0].toUpperCase() + status.slice(1);
   $("#runState").className = `run-state ${status === "running" ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
   $("#runState span").textContent = display;
-  $("#stopRun").classList.toggle("hidden", status !== "running");
-  $("#retryRun").classList.toggle("hidden", !["failed", "cancelled", "blocked"].includes(status));
 }
 
 function hash(value) {

@@ -88,6 +88,7 @@ describe("desktop skeleton", () => {
     const packaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
     const desktopWindow = await readFile(new URL("../desktop/main/window.mjs", import.meta.url), "utf8");
     const desktopIpc = await readFile(new URL("../desktop/main/ipc/register-ipc.mjs", import.meta.url), "utf8");
+    const rendererMain = await readFile(new URL("../desktop/renderer/src/main.js", import.meta.url), "utf8");
     const threads = await readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8");
     const prd = await readFile(new URL("../docs/prd/index.html", import.meta.url), "utf8");
     const prdServer = await readFile(new URL("../docs/prd/server.mjs", import.meta.url), "utf8");
@@ -107,6 +108,8 @@ describe("desktop skeleton", () => {
     expect(html).toContain('type="module" src="./src/main.js"');
     expect(html).toContain("connect-src 'self'");
     expect(html).not.toContain("http://127.0.0.1:*");
+    expect(html).not.toContain('id="stopRun"');
+    expect(html).not.toContain('id="retryRun"');
     expect(apiUrl("/api/state")).toBe("/api/state");
     expect(html).not.toContain("<dialog");
     expect(html.toLowerCase()).not.toContain("harness selector");
@@ -136,6 +139,8 @@ describe("desktop skeleton", () => {
     expect(packaging).toContain('to: "renderer"');
     expect(threads).not.toContain("/messages");
     expect(threads).not.toContain("EventSource");
+    expect(rendererMain).not.toContain("/messages");
+    expect(rendererMain).not.toContain("/interrupt");
     expect(prd).toContain('src="assets/product-walkthrough.html"');
     expect(prd).toContain("App-server and persistence delivery checkpoint");
     expect(prd).toContain('class="requirement-row status-verified"');

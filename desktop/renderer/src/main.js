@@ -1,5 +1,4 @@
 import { connectCodex, refreshAccount, showApplication, showAuth } from "./auth.js";
-import { request } from "./api.js";
 import { selectScope, setMainView } from "./navigation.js";
 import { desktop, viewState } from "./state.js";
 import { connectEvents, createFirstThread, loadThread, refreshState } from "./threads.js";
@@ -26,26 +25,6 @@ function bindEvents() {
     }
   };
   $("#closeInspector").onclick = () => $("#inspector").classList.add("hidden");
-  $("#stopRun").onclick = async () => {
-    try {
-      await request(`/api/threads/${encodeURIComponent(viewState.currentThreadId)}/interrupt`, { method: "POST" });
-    } catch (error) {
-      toast(error.message);
-    }
-  };
-  $("#retryRun").onclick = async () => {
-    const message = $("#interactionText").textContent.trim();
-    if (!message) return;
-    try {
-      await request(`/api/threads/${encodeURIComponent(viewState.currentThreadId)}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ content: message, selectedNodeIds: [] }),
-      });
-      await refreshState(viewState.currentThreadId);
-    } catch (error) {
-      toast(error.message);
-    }
-  };
   $("#collapseSidebar").onclick = () => {
     const collapsed = document.body.classList.toggle("sidebar-collapsed");
     const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
