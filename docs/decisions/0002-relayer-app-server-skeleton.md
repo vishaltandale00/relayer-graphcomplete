@@ -10,10 +10,14 @@ The server exposes no agent, graph-mutation, or harness-execution API in this sl
 
 Electron starts the server on a random loopback port with an application-profile data directory and renderer directory. It sends a random control token to the child through standard input rather than exposing the token in process arguments. Before loading the renderer, Electron installs that token as an HTTP-only same-site cookie. Electron terminates the child process during application shutdown and before update installation.
 
+The server is composed from an HTTP API, a product service, and a concrete SQLite product store. The product service owns validation and product use cases; the SQLite store owns connection policy, SQL, transactions, and schema migration. Versioned migrations are embedded in the app-server binary and are applied by `SqliteProductStore::open`, before the server announces readiness. No outer layer knows migration filenames or SQL.
+
 ## Consequences
 
 - Project and thread recovery can be exercised independently from model inference.
 - A thread and its first product interaction record are committed atomically.
+- Product storage uses a bounded asynchronous connection pool rather than a blocking connection behind a process-wide mutex.
+- The initial product schema is represented by a versioned, storage-owned migration whose application is checked in the persistence integration scenario.
 - Standalone threads have no project identifier; project threads reference a validated local folder record.
 - No TypeScript product server, graph engine, or harness runner is introduced in this slice.
 - The product-state API returns interaction chronology, not desktop-synthesized graph nodes. Graph core will later create the canonical user-interaction node using the same integer identity inside a shared SQLite transaction.

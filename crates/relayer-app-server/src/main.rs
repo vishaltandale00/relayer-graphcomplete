@@ -1,6 +1,6 @@
 use anyhow::Context;
 use clap::Parser;
-use relayer_app_server::{AppState, CONTROL_COOKIE, router, store::ProductStore};
+use relayer_app_server::{CONTROL_COOKIE, RelayerAppServer, RelayerAppServerConfig};
 use serde_json::json;
 use std::{
     io,
@@ -38,7 +38,13 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     let database = arguments.data_dir.join("product.sqlite3");
-    let store = ProductStore::open(&database).context("open product database")?;
+    let app_server = RelayerAppServer::open(RelayerAppServerConfig {
+        database_path: database,
+        web_directory: arguments.web_dir,
+        control_token,
+    })
+    .await
+    .context("open Relayer app server")?;
     let listener = tokio::net::TcpListener::bind(SocketAddr::new(arguments.host, arguments.port))
         .await
         .context("bind Relayer app server")?;
@@ -51,13 +57,10 @@ async fn main() -> anyhow::Result<()> {
             "cookieName": CONTROL_COOKIE,
         })
     );
-    axum::serve(
-        listener,
-        router(AppState::new(store, control_token), arguments.web_dir),
-    )
-    .with_graceful_shutdown(shutdown_signal())
-    .await
-    .context("serve Relayer app server")?;
+    axum::serve(listener, app_server.router())
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .context("serve Relayer app server")?;
     Ok(())
 }
 

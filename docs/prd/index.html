@@ -408,8 +408,8 @@ type CompleteResult = {
 <tr class="requirement-row status-verified">
 <td>Product SQLite stores project metadata and atomically creates a thread with its first chronology entry</td>
 <td><span class="delivery-status verified">Met</span></td>
-<td>One Rust integration scenario creates a project plus project-backed and standalone threads, validates positive integer IDs and product interaction chronology, closes the store, reopens the same database, and reads the same records. Thread and first-interaction creation share one transaction; project creation is a separate operation.</td>
-<td>Canonical graph nodes, graph snapshots, attempts, drafts, migrations, export, and recovery from interrupted writes are not represented yet.</td>
+<td>One Rust integration scenario creates a project plus project-backed and standalone threads, validates positive integer IDs and product interaction chronology, closes the store, reopens the same database, and reads the same records. Thread and first-interaction creation share one transaction; project creation is a separate operation. The app server applies an embedded, versioned product-schema migration before accepting requests, and the same scenario verifies that migration record.</td>
+<td>Canonical graph nodes, graph snapshots, attempts, drafts, later schema upgrades, export, and recovery from interrupted writes are not represented yet.</td>
 </tr>
 <tr class="requirement-row status-verified">
 <td><code>SCP-001</code>: first send requires non-empty text and creates a desktop-owned thread</td>
@@ -450,8 +450,8 @@ type CompleteResult = {
 <tr class="requirement-row status-partial">
 <td>Section 5.2 local persistence and recovery</td>
 <td><span class="delivery-status partial">Partially met</span></td>
-<td>Projects, threads, and first product interaction text use local SQLite storage and survive a real process restart. Thread plus first interaction creation is transactional.</td>
-<td>Settings, credential references, graph data, accepted states, execution state, update state, schema migration, and crash recovery remain.</td>
+<td>Projects, threads, and first product interaction text use local SQLite storage and survive a real process restart. Thread plus first interaction creation is transactional. The initial product schema is installed by a versioned migration owned by SQLite storage.</td>
+<td>Settings, credential references, graph data, accepted states, execution state, update state, future schema-upgrade and failed-migration behavior, and crash recovery remain.</td>
 </tr>
 <tr class="requirement-row status-verified">
 <td>Packaged local app-server artifact</td>

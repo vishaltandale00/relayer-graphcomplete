@@ -20,11 +20,22 @@ Product host
 ```text
 Electron desktop
     -> Rust Relayer app server
-        -> product SQLite
-        -> desktop renderer
+        -> HTTP API
+            -> product service
+                -> SQLite product storage
+        -> desktop renderer files
 ```
 
 Electron owns native windows, provider setup, updates, and the Rust child-process lifecycle. The Rust app server owns durable project, thread, and product interaction chronology records and serves the renderer over a random loopback port. The renderer uses the app server as its product API. Product state does not project those chronology records into graph nodes.
+
+Within the app-server crate, each layer has one concrete responsibility:
+
+- `app_server.rs` composes the server and owns its startup boundary.
+- `api.rs` and `api/` own HTTP authentication, routes, request/response shapes, and product-error mapping.
+- `product.rs` and `product/` own typed identifiers, product records, validation, and use-case orchestration.
+- `storage.rs` and `storage/sqlite/` own SQL, transactions, connection policy, and schema migration.
+
+SQLite migrations are storage implementation details. `SqliteProductStore::open` embeds and applies the versioned files under `storage/sqlite/migrations/` before the store becomes available. Electron, the HTTP API, and the product service neither run nor interpret migrations. The storage pool is asynchronous, bounded, configured for foreign keys and WAL, and is not guarded by a process-wide blocking mutex.
 
 This path deliberately ends before graph or harness execution. Those capabilities are reported as unavailable until their product contracts are integrated. A later integration will let graph core create the canonical user-interaction node with the product interaction's positive integer ID in the app server's SQLite transaction; PR #4 does not depend on that graph operation.
 
