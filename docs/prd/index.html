@@ -381,7 +381,7 @@ type CompleteResult = {
 </tr>
 </tbody></table>
 <h3>2.4 App-server and persistence delivery checkpoint</h3>
-<p>This checkpoint maps the Rust app-server PR to the product requirements it actually proves. The status label and the matching row color are intentionally redundant so the table remains readable without relying on color alone.</p>
+<p>This checkpoint maps the current Rust app-server PR to the product requirements and implementation boundaries it actually proves. The status label and the matching row color are intentionally redundant so the table remains readable without relying on color alone.</p>
 <div class="delivery-legend"><span class="delivery-status verified">Met</span><span class="delivery-status partial">Partially met</span><span class="delivery-status open">Not met</span><span class="delivery-status deferred">Out of scope</span></div>
 <table>
 <thead>
@@ -398,6 +398,12 @@ type CompleteResult = {
 <td><span class="delivery-status verified">Met</span></td>
 <td>Electron starts one bundled or development server, sends its control token through child standard input rather than process arguments, accepts only its authenticated loopback readiness message, and stops it during shutdown. If the child exits unexpectedly, the desktop shows an actionable error and closes instead of leaving an unusable window.</td>
 <td>Release signing and a clean-machine packaged smoke belong to distribution validation.</td>
+</tr>
+<tr class="requirement-row status-verified">
+<td>App-server responsibilities have explicit production boundaries</td>
+<td><span class="delivery-status verified">Met</span></td>
+<td><code>RelayerAppServer</code> composes four visible layers: server lifecycle, HTTP API, product service, and SQLite product storage. HTTP handlers own authentication and wire formats; the product service owns typed IDs, validation, and product operations; SQLite storage owns SQL, transactions, connection policy, and embedded migrations. The public Rust library exposes only the server boundary needed by the executable and integration test.</td>
+<td>Graph core, harness hosting, credential propagation, and their integration boundaries remain intentionally absent. Split the product layer by feature only when additional product areas make the current project/thread service too broad.</td>
 </tr>
 <tr class="requirement-row status-verified">
 <td>PR #4 remains independent from graph core and the harness</td>
