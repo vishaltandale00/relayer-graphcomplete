@@ -25,6 +25,10 @@ export function createDesktopUpdater({ autoUpdater, app, emit, updateBaseUrl }) 
     autoUpdater.allowPrerelease = channel === "preview";
     autoUpdater.setFeedURL({ provider: "generic", url: updateBaseUrl, channel: providerChannel });
     autoUpdater.channel = providerChannel;
+    // electron-updater's channel setter enables downgrades. Relayer channels
+    // share one application identity, so restore the release-contract guard
+    // after every channel assignment.
+    autoUpdater.allowDowngrade = false;
   };
 
   return {
