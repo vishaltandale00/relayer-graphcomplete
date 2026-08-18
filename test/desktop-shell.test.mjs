@@ -208,6 +208,7 @@ describe("desktop skeleton", () => {
 
     expect(states.map((state) => state.phase)).toEqual(["failed", "idle", "checking", "available", "ready"]);
     expect(autoUpdater.setFeedURL).toHaveBeenCalledWith(expect.objectContaining({ channel: "beta" }));
+    expect(autoUpdater.allowDowngrade).toBe(false);
     expect(autoUpdater.downloadUpdate).toHaveBeenCalledOnce();
     expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
   });
@@ -258,6 +259,10 @@ describe("desktop skeleton", () => {
       },
       publish: [{ provider: "generic", url: DESKTOP_RELEASE.updateBaseUrl, channel: "beta" }],
     });
+    // Electron 43's Squirrel.Mac implementation rejects valid numeric versions when
+    // this native flag is enabled. Version monotonicity remains enforced by the
+    // application updater above and by Preview publication.
+    expect(builder.mac.extendInfo).toBeUndefined();
 
     const development = resolveDesktopReleaseContract({ environment: {}, version: "0.2.0" });
     expect(development).toMatchObject({

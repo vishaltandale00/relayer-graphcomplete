@@ -34,6 +34,9 @@ export function createDesktopBuilderConfig(contract) {
     files: ["**/*", "!dist/**/*", "!packaging/**/*", "!release/**/*"],
     artifactName: `${release ? "Relayer" : "Relayer-DEV"}-\${version}-mac-\${arch}.\${ext}`,
     afterSign: release ? "desktop/release/verify-macos-app.mjs" : undefined,
+    // Do not set ElectronSquirrelPreventDowngrades with Electron 43. Its bundled
+    // Squirrel predicate rejects valid numeric versions. The updater service and
+    // publisher enforce monotonic versions before native installation begins.
     mac: {
       category: "public.app-category.developer-tools",
       icon: resolve(desktopRoot, "renderer/assets/relayer-logo.svg"),
@@ -49,7 +52,6 @@ export function createDesktopBuilderConfig(contract) {
       entitlementsInherit: resolve(import.meta.dirname, "macos/entitlements.mac.inherit.plist"),
       notarize: release,
       strictVerify: true,
-      extendInfo: release ? { ElectronSquirrelPreventDowngrades: true } : undefined,
     },
     publish: release
       ? [{ provider: "generic", url: contract.updateBaseUrl, channel: contract.providerChannel }]
