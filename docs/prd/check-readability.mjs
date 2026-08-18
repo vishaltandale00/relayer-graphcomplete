@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 
 const MAX_WORDS = 25;
 const SOURCE_URL = new URL("./index.html", import.meta.url);
-const CHECKED_ELEMENTS = ["p", "li", "td", "figcaption"];
+const CHECKED_ELEMENTS = ["p", "li", "td", "figcaption", "small", "blockquote"];
 
 const html = await readFile(SOURCE_URL, "utf8");
 const mainStart = html.indexOf("<main>");

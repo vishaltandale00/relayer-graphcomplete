@@ -85,6 +85,10 @@
     .journey-card p { margin: 8px 0 0; color: light-dark(#626d80, #a9b2c2); font-size: 11px; line-height: 1.48; }
     .journey-card p strong { color: light-dark(#263145, #edf1fb); }
     .journey-card .journey-evidence { margin-bottom: 10px; }
+    .capability-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; margin: -8px 0 34px; padding: 17px 18px; border: 1px solid light-dark(#d8ddea, #373f50); border-left: 4px solid #7557e8; border-radius: 10px; background: light-dark(#f8f9fb, #121720); }
+    .capability-summary p { margin: 0; color: light-dark(#626d80, #a9b2c2); font-size: 12px; line-height: 1.5; }
+    .capability-summary p strong { color: light-dark(#263145, #edf1fb); }
+    .capability-summary .capability-evidence { grid-column: 1 / -1; padding-top: 9px; border-top: 1px solid light-dark(#dce1e9, #343c4d); }
     h2[data-prd-layer]::before { content: attr(data-prd-layer) " reading layer"; }
     .document-nav-group { margin: 12px 8px 4px; color: light-dark(#7b8495, #8f99ac); font-size: 8px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
     .release-status-card { margin: 20px 0 30px; padding: 20px; border: 1px solid light-dark(#e3ca83, #655526); border-radius: 12px; background: light-dark(#fffbef, #241f12); }
@@ -158,6 +162,8 @@
       .product-walkthrough { height: 720px; }
       .scenario-reading-header { align-items: start; flex-direction: column; }
       .reading-path-grid, .journey-grid { grid-template-columns: 1fr; }
+      .capability-summary { grid-template-columns: 1fr; }
+      .capability-summary .capability-evidence { grid-column: auto; }
     }
   </style>
 </head>
@@ -183,7 +189,7 @@
 <article class="reading-path-card evidence">
 <h4>Evidence</h4>
 <p>Review product mocks, status tables, tests, and release proof.</p>
-<a href="#14-canonical-visual-product-reference">Start the Evidence path →</a>
+<a href="#15-canonical-visual-product-reference">Start the Evidence path →</a>
 </article>
 </div>
 <span class="reading-map-eyebrow">Product capabilities</span>
@@ -258,7 +264,7 @@
 <p><strong>Observable result:</strong> A report can open its saved result in Relayer Desktop.</p>
 <p><strong>Acceptance:</strong> Promotion requires automated checks and human visual review.</p>
 <p class="journey-evidence"><strong>Status and evidence:</strong> Partial. Basic evaluation works; desktop replay is open.</p>
-<a href="#9a-evaluate-a-harness-basic-complete-case">Read evaluation requirements →</a>
+<a href="#9-evaluate-a-harness">Read evaluation requirements →</a>
 </article>
 <article class="journey-card">
 <h4>Manage and update the desktop</h4>
@@ -378,11 +384,11 @@ type CompleteResult =
 <p>The product stores the harness choice on the thread. V1 code resolves that key through a code-owned implementation map. The normal product does not show a harness catalog. Users do not need to understand harness configuration.</p>
 <h3>1.5 Items not in V1</h3>
 <p>V1 does not include arbitrary harness adapters, third-party conversation views, a generic agent protocol, or a public multi-harness conformance kit. The eval system may compare Relayer Harness configurations, Prime Agent versions, and model/provider choices, but every run still exercises the Relayer product contract. A general platform should be reconsidered only after the Relayer Desktop/Harness boundary has shipped and repeated implementations reveal a concrete reusable seam.</p>
-<h2 data-prd-layer="Evidence" data-prd-order="14">14. Canonical visual product reference</h2>
+<h2 data-prd-layer="Evidence" data-prd-order="15">15. Canonical visual product reference</h2>
 <p>The walkthrough is the current product mock. Each scenario must correspond to a requirements subsection directly beneath it in the rendered review site. The optional annotation overlay is review tooling, not product chrome.</p>
 <iframe class="product-walkthrough" src="assets/product-walkthrough.html" title="Interactive Relayer desktop product walkthrough"></iframe>
 
-<h3>14.1 Mock inventory</h3>
+<h3>15.1 Mock inventory</h3>
 <table>
 <thead>
 <tr>
@@ -457,9 +463,9 @@ type CompleteResult =
 <td>Product-real replay plus continuation pinned to the tested harness implementation/build</td>
 </tr>
 </tbody></table>
-<h3>14.2 Visual acceptance rule</h3>
+<h3>15.2 Visual acceptance rule</h3>
 <p>Every user-visible requirement needs structural UI assertions plus a rendered screenshot or saved-result replay in this UX. Schema validation alone does not satisfy visual acceptance.</p>
-<h3>14.3 Slice 1 delivery checkpoint — desktop front door</h3>
+<h3>15.3 Slice 1 delivery checkpoint — desktop front door</h3>
 <p>Slice 1 contains the first desktop workflow. It includes Codex setup, the desktop shell, Settings, appearance, the sidebar, and New Thread scope selection. The app-server work adds project and thread storage. It also verifies the first no-folder thread.</p>
 <p>Slice 1 does <strong>not</strong> verify the complete project or Git workflow. It does not verify agent execution or graph interaction.</p>
 <div class="delivery-legend"><span class="delivery-status verified">Verified</span><span class="delivery-status partial">Partial</span><span class="delivery-status open">Open</span><span class="delivery-status next">Next slice</span><span class="delivery-status deferred">Deferred</span></div>
@@ -479,7 +485,7 @@ type CompleteResult =
 <tbody><tr class="requirement-row status-verified">
 <td>Codex provider setup: normal and abandoned-auth flows</td>
 <td><span class="delivery-status verified">Verified</span></td>
-<td>Disconnected, authorization-pending with <strong>Open again</strong>, successful connection, and connected restart are covered by one compact lifecycle scenario and four Electron screenshots in Section 2.6.</td>
+<td>Disconnected, authorization-pending with <strong>Open again</strong>, successful connection, and connected restart are covered by one compact lifecycle scenario and four Electron screenshots in Section 15A.</td>
 <td>Explicit rejection, expiration, and later credential revocation are tracked separately below; real authentication needs a signed-release smoke.</td>
 </tr>
 <tr class="requirement-row status-verified">
@@ -516,7 +522,7 @@ type CompleteResult =
 <td>Desktop updater and distributable packaging</td>
 <td><span class="delivery-status partial">Partial — Stable verified</span></td>
 <td>The protected CI workflow signed, notarized, and published immutable Apple Silicon releases. The releases are <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code>. A remote Mac mini completed the visible updates through <code>0.2.4</code>. Workflow <code>32105585844</code> promoted the exact Preview bytes to Stable. The installed app used the live Stable feed and showed <strong>Up to date</strong>.</td>
-<td>The macOS 13-through-current support matrix, corrupt hosted artifact behavior, and update deferral around active Complete commits remain unverified. Automatic application downgrade is prohibited. A failed later-version SQLite migration is a separate persistence-recovery requirement, not an updater rollback mechanism. Section 10.5 contains the exact proof and remaining boundary.</td>
+<td>The macOS 13-through-current support matrix, corrupt hosted artifact behavior, and update deferral around active Complete commits remain unverified. Automatic application downgrade is prohibited. A failed later-version SQLite migration is a separate persistence-recovery requirement, not an updater rollback mechanism. Section 15C.2 contains the exact proof and remaining boundary.</td>
 </tr>
 <tr class="requirement-row status-deferred">
 <td>Relayer login and additional providers</td>
@@ -531,7 +537,7 @@ type CompleteResult =
 <td>Invocation, stop/retry, accepted graph rendering, node details, context attachment, actions, subthreads, turns, and graph persistence belong to later slices.</td>
 </tr>
 </tbody></table>
-<h3>14.4 App-server and persistence delivery checkpoint</h3>
+<h3>15.4 App-server and persistence delivery checkpoint</h3>
 <p>This checkpoint maps the current Rust app-server PR to the product requirements and implementation boundaries it actually proves. The status label and the matching row color are intentionally redundant so the table remains readable without relying on color alone.</p>
 <div class="delivery-legend"><span class="delivery-status verified">Met</span><span class="delivery-status partial">Partially met</span><span class="delivery-status open">Not met</span><span class="delivery-status deferred">Out of scope</span></div>
 <table>
@@ -662,6 +668,13 @@ type CompleteResult =
   <ol class="evidence-legend"><li><b>1</b><span>The packaged application reaches the normal first-launch product screen.</span></li><li><b>2</b><span>The bundled server serves the focused Codex provider choice; agent execution is not involved.</span></li></ol>
 </figure>
 <h2 data-prd-layer="Product" data-prd-order="2">2. Connect an agent</h2>
+<section class="capability-summary" aria-label="Connect an agent summary">
+<p><strong>User goal:</strong> Connect a supported agent credential.</p>
+<p><strong>Product rule:</strong> Agent setup stays separate from work-context selection.</p>
+<p><strong>Observable result:</strong> Relayer shows the connection state and available recovery actions.</p>
+<p><strong>Acceptance:</strong> A new desktop process recognizes the saved connection.</p>
+<p class="capability-evidence"><strong>Status and evidence:</strong> Partial. <a href="#15a-agent-connection-evidence">Review connection evidence.</a></p>
+</section>
 <h3>2.1 First launch</h3>
 <p>Relayer has no product account in V1. It uses one implicit local profile. First launch opens Agent setup and, after a valid configuration is saved, opens the normal New thread window. Folder and project choice are not onboarding steps.</p>
 <p>The setup surface is one focused <strong>Agent login</strong> card. Codex and API key are presented as horizontal login-method choices, followed by the credential and model controls for the selected method. The form should not split setup into equal Harness and Agent login columns or stack alternative methods into a long vertical option list.</p>
@@ -726,7 +739,7 @@ type InteractionModelBinding = {
 <h3>2.5 Verification</h3>
 <p>Deterministic UI tests cover each selector transition, conditional field, validation error, and disabled state. They also cover secure storage and secret removal. Credential-adapter integration tests use fake Codex and provider servers.</p>
 <p>One optional authentication smoke test runs before a signed release. It is not in the default test suite. It does not make a paid Complete call.</p>
-<h3>2.6 Current delivery evidence — <code>PROV-001 Provider setup</code></h3>
+<h2 data-prd-layer="Evidence" data-prd-order="15.1">15A. Agent connection evidence</h2>
 <p><code>PROV-001</code> is one product requirement with several observable subrequirements, not a collection of independent setup features:</p>
 <ul>
 <li>when no agent provider is connected, Relayer displays the full-page provider setup;</li>
@@ -804,6 +817,13 @@ type InteractionModelBinding = {
 
 <p>Screenshots are implementation evidence, not design mocks and not proof of unrelated features visible in the frame.</p>
 <h2 data-prd-layer="Product" data-prd-order="3">3. Choose a work context</h2>
+<section class="capability-summary" aria-label="Choose a work context summary">
+<p><strong>User goal:</strong> Work without a folder or inside an authorized project.</p>
+<p><strong>Product rule:</strong> Git projects offer the local checkout or a Relayer worktree.</p>
+<p><strong>Observable result:</strong> New Thread shows the selected scope before send.</p>
+<p><strong>Acceptance:</strong> The interaction records the exact scope selected at send time.</p>
+<p class="capability-evidence"><strong>Status and evidence:</strong> Partial. <a href="#15b-work-context-evidence">Review work-context evidence.</a></p>
+</section>
 <h3>3.1 New Thread is the context entry point</h3>
 <p>After Agent setup, Relayer opens the ordinary New thread composer. The user writes a task and chooses one of these scopes before sending:</p>
 <table>
@@ -867,7 +887,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </ul>
 <h3>3.5 Verification</h3>
 <p>Choice-driven tests cover each scope and Git option. They also cover creation failure, revoked permission, duplicate projects, project moves, and both fork options. Filesystem and Git tests use temporary repositories. They must not change a user checkout.</p>
-<h3>3.6 Current delivery evidence — New Thread and scope selection</h3>
+<h2 data-prd-layer="Evidence" data-prd-order="15.2">15B. Work-context evidence</h2>
 <table>
 <thead>
 <tr>
@@ -910,6 +930,13 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </figure>
 
 <h2 data-prd-layer="Product" data-prd-order="8">8. Return to saved work</h2>
+<section class="capability-summary" aria-label="Return to saved work summary">
+<p><strong>User goal:</strong> Reopen a thread after navigation or restart.</p>
+<p><strong>Product rule:</strong> Relayer persists accepted state and explicit interrupted states.</p>
+<p><strong>Observable result:</strong> Saved threads reopen from Chats or Projects.</p>
+<p><strong>Acceptance:</strong> Restart preserves the last accepted graph without corruption.</p>
+<p class="capability-evidence"><strong>Status and evidence:</strong> Partial. <a href="#15-4-app-server-and-persistence-delivery-checkpoint">Review persistence evidence.</a></p>
+</section>
 <h3>8.1 Saved threads and navigation</h3>
 <p>The left sidebar contains New Thread, Chats, and Projects. Chats contains no-folder chats. Projects contains saved thread entries. The footer contains a Settings icon. It also contains a Download update icon when an update is available.</p>
 <p>The sidebar is a compact list. It is not a recursive graph tree. A child conversation can become a saved sidebar entry. The sidebar does not show its full ancestry. Graph breadcrumbs show this ancestry.</p>
@@ -927,6 +954,13 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </ul>
 <p>Persistence uses atomic writes or transactions. A crash may interrupt an in-progress Complete call, but it must not corrupt the last accepted graph. On reopen, accepted turns render immediately; an interrupted interaction is marked stopped or failed and retryable. Recovery is a reliability requirement, not a primary product concept or prominent settings category.</p>
 <h2 data-prd-layer="Product" data-prd-order="10">10. Manage and update Relayer Desktop</h2>
+<section class="capability-summary" aria-label="Manage and update Relayer Desktop summary">
+<p><strong>User goal:</strong> Change settings and install a trusted update.</p>
+<p><strong>Product rule:</strong> Settings remain local; releases are signed and verified.</p>
+<p><strong>Observable result:</strong> The app shows settings and explicit update states.</p>
+<p><strong>Acceptance:</strong> An update preserves supported product data and settings.</p>
+<p class="capability-evidence"><strong>Status and evidence:</strong> Partial. <a href="#15c-desktop-management-and-update-evidence">Review desktop evidence.</a></p>
+</section>
 <h3>10.1 Settings information architecture</h3>
 <p>Normal settings contain:</p>
 <ul>
@@ -945,7 +979,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </ul>
 <p>There is no <code>workspace graph build</code> setting in V1. Graph memory is built through Complete interactions, not through a required up-front workspace indexing operation.</p>
 <p>The worktree limit applies only to worktrees that Relayer creates and manages. User-created worktrees do not count. Relayer must not delete them.</p>
-<p>Section 16.3 records three open decisions. These decisions are the default limit, the limit scope, and the flow when the user reaches the limit.</p>
+<p>Section 17.3 records three open decisions. These decisions are the default limit, the limit scope, and the flow when the user reaches the limit.</p>
 <h3>10.2 Desktop application updates</h3>
 <p>Signed desktop updates are essential V1 distribution infrastructure.</p>
 <ol>
@@ -960,7 +994,8 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <h3>10.3 Verification</h3>
 <p>Event-driven tests must cover persistence and visible state changes. The tests cover launch, reopen, interrupted writes, stopped runs, retry, settings, and traces. They also cover each update state, corrupt manifests, signature failure, offline checks, and migration failure.</p>
 <p>The current updater test covers check failure, retry, availability, download, readiness, and the install request. Release recovery uses immutable history, a removable channel pointer, and forward-only versions. It does not use automatic downgrade. Each release also requires a signed update smoke test on each supported macOS version.</p>
-<h3>10.4 Current delivery evidence — Settings and shell</h3>
+<h2 data-prd-layer="Evidence" data-prd-order="15.3">15C. Desktop management and update evidence</h2>
+<h3>15C.1 Settings and shell evidence</h3>
 <table>
 <thead>
 <tr>
@@ -1019,7 +1054,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
   <ol class="evidence-legend"><li><b>1</b><span>The collapse control stays beside the macOS window controls.</span></li><li><b>2</b><span>Relayer, New Thread, and Settings remain reachable as compact icons.</span></li><li><b>3</b><span>The main task surface expands into the released sidebar space.</span></li></ol>
 </figure>
 
-<h3>10.5 Packaged desktop and update checkpoint</h3>
+<h3>15C.2 Packaged desktop and update evidence</h3>
 <p>This slice turns the development shell into a safely installable and updateable macOS arm64 product. It does not add project/thread persistence, invoke a harness, or render graph output.</p>
 <p><strong>Current checkpoint:</strong> Product evidence verifies the Preview release loop and the first Stable promotion. Protected tag workflows built and published versions <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code>. The workflows signed and notarized each version. They published immutable artifacts.</p>
 <p>A remote arm64 Mac used macOS 15.6. The signed <code>0.2.3</code> app used the Relayer controls to find and install <code>0.2.4</code>. The update restarted the app and replaced the bundle. It kept the Codex account, Light appearance, and saved Preview choice. Code-signature and Gatekeeper checks passed. The app then showed <strong>Up to date</strong> without an error.</p>
@@ -1035,12 +1070,12 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
   </div>
   <div class="release-checkpoints">
     <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Release contract</strong><small>Identity, version, provenance, signing requirements, manifests, hashes, retry, downgrade, and mutation rules pass deterministic tests.</small></article>
-    <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Signed install seed</strong><small>The exact public <code>0.2.2</code> DMG matched its CDN checksum; Developer ID, Gatekeeper, app and DMG staples, arm64 identity, bundle ID, and version all passed before installation.</small></article>
+    <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Signed install seed</strong><small>The exact public <code>0.2.2</code> DMG matched its CDN checksum. Developer ID, Gatekeeper, both staples, arm64 identity, bundle ID, and version passed before installation.</small></article>
     <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>CI signed candidates</strong><small>Protected workflows <code>32098888395</code>, <code>32099544204</code>, and <code>32103757098</code> signed and notarized the exact merged <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code> commits.</small></article>
     <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Hosted Preview</strong><small>Versioned DMG and ZIP objects are immutable, public checksums and source-commit metadata match, and <code>beta-mac.yml</code> moved only after public-byte verification.</small></article>
     <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Visible update lifecycle</strong><small>The signed app displayed available, prompt, downloading, ready, restart, and post-update states through the actual product controls.</small></article>
-    <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Replacement and continuity</strong><small>The <code>0.2.3</code> process quit, the bundle advanced to <code>0.2.4</code>, the new process launched, and Light appearance, the connected Codex account, and the explicit Preview choice survived.</small></article>
-    <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Stable promotion contract</strong><small>The protected workflow assumes its narrow AWS role, reads the immutable Preview receipt, rejects absent canary evidence before writes, and requires increasing versions plus exact artifact bytes.</small></article>
+    <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Replacement and continuity</strong><small>The <code>0.2.3</code> process quit, and the bundle advanced to <code>0.2.4</code>. The new process preserved Light appearance, the Codex account, and the Preview choice.</small></article>
+    <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Stable promotion contract</strong><small>The protected workflow assumes its narrow AWS role and reads the immutable Preview receipt. It rejects absent canary evidence and requires increasing versions with exact artifact bytes.</small></article>
     <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>First Stable pointer</strong><small>Protected workflow <code>32105585844</code> promoted the exact <code>0.2.4</code> Preview bytes, recorded an immutable receipt, and moved <code>latest-mac.yml</code>. The installed app consumed Stable and reported <strong>Up to date</strong>.</small></article>
     <article class="release-checkpoint"><span class="delivery-status open">Open</span><strong>Supported macOS matrix</strong><small>The product flow is verified on Apple Silicon macOS 15.6; macOS 13, 14, and newer supported versions still require release smoke coverage.</small></article>
     <article class="release-checkpoint"><span class="delivery-status open">Open</span><strong>Active-work restart deferral</strong><small>Restart deferral around a future active Complete commit cannot be product-tested until that execution path exists.</small></article>
@@ -1241,29 +1276,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <tr><td>Relayer app server</td><td>Rust process, developed with desktop</td><td>Projects, threads, interactions, worktrees, harness coordination, product reads</td><td>Harness prompts or duplicated graph rules</td></tr>
 </tbody></table>
 <p>The standalone graph-server binary exists so the harness and evaluation can run before the full product server is built. Production mounts the same graph router and links the same graph core inside the Relayer app server; it does not ship two competing graph authorities.</p>
-<h3>11.2 GraphComplete runtime delivery checkpoint</h3>
-<div class="delivery-legend"><span class="delivery-status verified">Verified</span><span class="delivery-status partial">Partial</span><span class="delivery-status deferred">Deferred</span></div>
-<p>This checkpoint tracks the pre-app-server slice separately from the desktop-shell checkpoint. Backend components can be Verified through automated process-level proof; a user-visible renderer additionally requires saved visual evidence.</p>
-<table>
-<thead><tr><th>Requirement</th><th>Status</th><th>Current proof or remaining gap</th></tr></thead>
-<tbody>
-<tr><td>Rust SQLx/SQLite graph core and standalone async loopback server</td><td><span class="delivery-status verified">Verified</span></td><td>The crate separates graph behavior in <code>graph/</code> from SQLx persistence in <code>storage/sqlite/</code>. <code>SqliteGraphStore</code> owns the pool and connection lifecycle. Graph behavior does not import SQLx. The migration directory contains the embedded runner and versioned SQL. Reads use the asynchronous pool. Short <code>BEGIN IMMEDIATE</code> transactions prevent SQLite snapshot-upgrade failures. Rust tests cover IDs, visibility, layers, actions, edges, drafts, accepted records, atomic acceptance, concurrent writes, and control-token interaction creation.</td></tr>
-<tr><td>Opaque graph capability and active-interaction authority</td><td><span class="delivery-status partial">Partial</span></td><td>The server maps each graph token to one canonical interaction <code>NodeId</code>. Every request derives its project/thread visibility and writable subgraph from that persisted node. Trusted control authority can remint a capability for a canonical persisted interaction after server restart. Capability expiry and the full invalid/cross-scope API matrix remain.</td></tr>
-<tr><td>Object-based TypeScript client</td><td><span class="delivery-status verified">Verified</span></td><td>The process-level eval uses the real client against the Rust server to submit nodes, edges, a layer, an action, and the final interaction submission.</td></tr>
-<tr><td>Object-based Python client</td><td><span class="delivery-status partial">Partial</span></td><td>The async client and object composition tests exist. A shared real-server conformance fixture with the TypeScript client remains.</td></tr>
-<tr><td>Persistent Node harness host</td><td><span class="delivery-status partial">Partial</span></td><td>The host caches one harness object for each thread. It serializes Complete calls and capability changes on that object. It saves provider session IDs and graph capabilities with owner-only permissions. A retry returns an existing accepted output. The two-interaction evaluation verifies capability adoption without a new harness object. A process-restart recovery evaluation remains open.</td></tr>
-<tr><td><code>codex.basic</code> graph-tool harness</td><td><span class="delivery-status verified">Verified</span></td><td>The optional live case proved four functions. Codex runs the bundled TypeScript client and reaches the loopback Rust server. It submits an accepted graph. It returns the resolved layer.</td></tr>
-<tr><td>Inference-free correctness-boundary eval</td><td><span class="delivery-status verified">Verified</span></td><td><code>npm run eval:basic</code> starts the real Rust server and Node host. It completes two interactions through one harness object. Each interaction has a different capability. The test checks both accepted graphs and session reuse. It saves <code>result.json</code> and a navigable HTML result.</td></tr>
-<tr><td>Live independent judge</td><td><span class="delivery-status verified">Verified</span></td><td><code>npm run eval:basic:live</code> passed the deterministic gate and independent structured judge using the exact saved visible layer.</td></tr>
-<tr><td>Immutable full bundle and Desktop See in App</td><td><span class="delivery-status partial">Partial</span></td><td>The current result viewer is a local HTML equivalent. App replay, retained graph database, digests, and immutable catalog belong to the later app-server integration.</td></tr>
-</tbody></table>
-<h4><code>RUNTIME-001-E1</code> — live <code>codex.basic</code> accepted result</h4>
-<p>Captured from live run <code>4bcc6075-3d06-4eb2-b425-fe3dadca4369</code> after both deterministic checks and the independent judge passed. This proves the pre-app-server runtime and local visual result; it does not claim Desktop See in App.</p>
-<figure class="evidence-figure">
-  <div class="evidence-image"><img src="assets/evidence/runtime-slice/runtime-live-eval.png" alt="RUNTIME-001-E1: passing live codex.basic graph with movable nodes and all checks"></div>
-  <ol class="evidence-legend"><li><b>1</b><span>The live Codex harness authored four icon-title-detail nodes through graph tools.</span></li><li><b>2</b><span>The displayed edges are the exact undirected edge records returned by the accepted layer.</span></li><li><b>3</b><span>All graph-contract and six declared task-fact checks passed before the independent judge.</span></li></ol>
-</figure>
-<h3>11.3 One cumulative graph and four records</h3>
+<h3>11.2 One cumulative graph and four records</h3>
 <p>Relayer product storage owns projects and threads. Graph core does not create project records, thread records, project graphs, thread graphs, graph spaces, or a separate interaction graph. It stores the product-owned positive-integer <code>projectId</code> and <code>threadId</code> on graph records as provenance. Threads with the same project ID read the same accepted graph records. A no-project thread stores <code>projectId = null</code> and reads only records carrying its own thread ID, so standalone threads never share graph records.</p>
 <p>Every user turn is represented by one canonical <code>user-interaction</code> graph node. That node's <code>NodeReference</code> is also the product interaction identity after integration; no second <code>interactionNodeId</code> is synthesized. The host supplies project/thread IDs when it asks graph core to create this node. A graph capability stores only the node reference. On every graph request, the engine calls <code>GraphDatabase::writer_for_subgraph(node)</code> and derives read visibility plus draft-write authority from the persisted node.</p>
 <pre><code class="language-ts">type NodeReference = number; // positive SQLite integer assigned after successful submission
@@ -1294,7 +1307,7 @@ type NodeAction =
   | { ref: ActionReference; source: NodeReference; kind: &quot;invoke&quot;; label: string; interactionText?: string };
 </code></pre>
 <p>A layer packages the exact node references and exact edge references rendered together. A navigate action always opens a layer, even when that layer contains only one node. Actions are separate graph records associated with a source node; adding an action does not require resubmitting the node.</p>
-<h3>11.4 Agent-facing TypeScript and Python client</h3>
+<h3>11.3 Agent-facing TypeScript and Python client</h3>
 <pre><code class="language-ts">interface GraphClient {
   getNode(ref: NodeReference): Promise&lt;GraphNode&gt;;
   getNeighbors(ref: NodeReference): Promise&lt;GraphNode[]&gt;;
@@ -1310,7 +1323,7 @@ type NodeAction =
 </code></pre>
 <p>The clients are object-oriented because models are better at constructing and repairing nodes and layers than remembering large collections of raw IDs. A local node object receives its stable reference after its first successful <code>submitNode</code>. Resubmitting that same local object updates its current draft rather than creating a duplicate. A rejected edit preserves the last valid draft and returns a field-specific error so the harness can repair and resubmit it.</p>
 <p><code>createEdge</code> accepts node objects or references. Creating an edge from a new node to an accepted historical node does not resubmit or modify the historical node. Adding an accepted node to a new layer also does not modify it. Accepted historical records are immutable; a changed explanation is represented by a new node connected to the old node.</p>
-<h3>11.5 Validation at each write boundary</h3>
+<h3>11.4 Validation at each write boundary</h3>
 <table>
 <thead><tr><th>Operation</th><th>Deterministic checks</th><th>Repair behavior</th></tr></thead>
 <tbody>
@@ -1321,10 +1334,10 @@ type NodeAction =
 <tr><td><code>submit(interaction)</code></td><td>Interaction is active; exactly one new response navigate action targets a valid root layer; every recursively reachable navigate target is valid</td><td>Leave drafts hidden and return the unresolved path</td></tr>
 </tbody></table>
 <p>Error responses contain a stable code, an object path, and a repair message. The message is part of the agent contract. It must identify the failure and the corrective operation. The engine does not make a semantic judgment.</p>
-<h3>11.6 Recursive completion submission</h3>
+<h3>11.5 Recursive completion submission</h3>
 <p><code>graph.submit(interactionNode)</code> is the deterministic completion boundary. The engine starts at the new response navigation action. It traverses the target layer and its exact nodes and edges. It also traverses navigation actions on those nodes. A visited set prevents repeated traversal. One atomic operation accepts the reachable new drafts. Unrelated drafts stay unaccepted.</p>
 <p>The accepted return value is a <code>ResolvedGraphLayer</code> containing full node objects, exact visible edges, and node actions for the root layer. This is the immediate display payload returned by Complete. The persisted layer reference remains the source for later navigation and reload.</p>
-<h3>11.7 Local server and token contract</h3>
+<h3>11.6 Local server and token contract</h3>
 <p>The Rust graph router is exposed on loopback HTTP; a Unix-domain-socket transport may replace loopback only if the Codex sandbox cannot reach it. Harnesses do not use MCP, do not open SQLite directly, and do not treat a CLI as the primary API. Prime Agent calls the Python client from its IPython kernel; Node/Codex harnesses call the TypeScript client or execute a small TypeScript program.</p>
 <pre><code class="language-text">POST /api/control/capabilities  (trusted remint after restart)
 POST /api/graph/nodes
@@ -1341,7 +1354,7 @@ GET  /api/graph/nodes/:id/output
 <p>The token never enters graph content, evaluation evidence, the renderer, or the harness state file. A newer interaction can register the same live thread again. The host serializes this update after an active Complete call. It gives the existing harness object the new URL, token, and node capability.</p>
 <p>The host persists the copied harness configuration and implementation-owned opaque JSON resume state. Trusted control code must remint and register a capability after a restart. The host then recreates the harness object. <code>codex.basic</code> refreshes its SDK environment and resumes the persisted Codex thread ID.</p>
 <p>The two-turn evaluation verifies live capability rotation. Recovery fails closed until fresh capability registration. A full process-restart recovery evaluation remains future work. Provider credentials remain in product-owned secret storage.</p>
-<h3>11.8 Required graph-engine proof</h3>
+<h3>11.7 Required graph-engine proof</h3>
 <ul>
 <li>Rust unit tests cover every node, edge, layer, action, submission, transaction, migration, and concurrent-read/write rule without inference.</li>
 <li>One shared conformance fixture runs through the Rust API, TypeScript client, and Python client and produces equivalent accepted records and errors.</li>
@@ -1422,6 +1435,13 @@ settings:
 </code></pre>
 <p>The current pre-app-server slice ends at that local visual result. The next milestone embeds these proven components in the Relayer app server. It adds projects, threads, worktrees, interaction creation, cancellation, persistence, Desktop See in App, and packaged distribution. Electron must not recreate graph submission or harness behavior.</p>
 <h2 data-prd-layer="Product" data-prd-order="4">4. Run a task</h2>
+<section class="capability-summary" aria-label="Run a task summary">
+<p><strong>User goal:</strong> Send one interaction to the selected agent.</p>
+<p><strong>Product rule:</strong> Relayer creates one interaction node and calls Complete once.</p>
+<p><strong>Observable result:</strong> The app returns an accepted, stopped, or failed state.</p>
+<p><strong>Acceptance:</strong> An accepted layer matches the persisted graph state.</p>
+<p class="capability-evidence"><strong>Status and evidence:</strong> Partial. <a href="#15d-basic-complete-evaluation-evidence">Review runtime evidence.</a></p>
+</section>
 <h3>4.1 Messages and multiple turns</h3>
 <p>A message creates one interaction node, connects any selected prior state to it, and makes one Complete call. On acceptance, the engine records the run&#39;s output navigate action and response layer under that interaction. Later interaction nodes connect into the existing conversation graph and may refer to any prior node. The thread graph is the V1 conversation memory; V1 does not maintain a separate continuously updated summary.</p>
 <p>If a later turn needs a stale explanation, the harness creates a new node and connects it to the accepted historical node. It does not rewrite accepted history. Otherwise the old node remains unchanged. Broader recursive freshness propagation is deferred.</p>
@@ -1429,6 +1449,13 @@ settings:
 <p>Each Complete call ends in one explicit state: accepted, stopped, or failed. An accepted result contains the resolved first layer. A stopped or failed result contains a retry decision and a short user-facing message.</p>
 <p>A model turn ending is not acceptance. Only <code>graph.submit(interactionNode)</code> can accept the response graph.</p>
 <h2 data-prd-layer="Product" data-prd-order="5">5. Control a run</h2>
+<section class="capability-summary" aria-label="Control a run summary">
+<p><strong>User goal:</strong> Stop active work or retry an unsuccessful interaction.</p>
+<p><strong>Product rule:</strong> Running, stopping, stopped, failed, and accepted are explicit states.</p>
+<p><strong>Observable result:</strong> The composer shows the available control for the current state.</p>
+<p><strong>Acceptance:</strong> Stop and failure never create an accepted response layer.</p>
+<p class="capability-evidence"><strong>Status and evidence:</strong> Open. The desktop flow does not have product proof.</p>
+</section>
 <p>The composer changes its primary control to <strong>Stop</strong> while Complete is active. The user can stop the interaction without leaving the thread.</p>
 <p>A stopped or failed interaction stays visible in history. Relayer shows its exact state, message, and retry availability.</p>
 <h3>5.1 Stop</h3>
@@ -1449,6 +1476,13 @@ settings:
 <p>Product tests must cover stop during agent work, stop during graph submission, retry after failure, and repeated control selections.</p>
 <p>The tests must prove that stopped or failed work cannot appear as an accepted result.</p>
 <h2 data-prd-layer="Product" data-prd-order="7">7. Act on the result</h2>
+<section class="capability-summary" aria-label="Act on the result summary">
+<p><strong>User goal:</strong> Use a node in the next interaction.</p>
+<p><strong>Product rule:</strong> Context attachments and authored actions create explicit graph relationships.</p>
+<p><strong>Observable result:</strong> The composer shows context; authored actions navigate or invoke work.</p>
+<p><strong>Acceptance:</strong> Each invoked action creates one traceable interaction.</p>
+<p class="capability-evidence"><strong>Status and evidence:</strong> Open. <a href="#15-canonical-visual-product-reference">Review the product mock.</a></p>
+</section>
 <h3>7.1 Add as context</h3>
 <p>The permanent inline <code>+</code> action exists on every selectable node. It opens an optional annotation field in the inspector. After attachment:</p>
 <ul>
@@ -1497,6 +1531,13 @@ settings:
 </ol>
 <p>The output navigate action created for a successful Complete run follows the same persisted action schema. It is automatically followed once by the desktop after acceptance; later selections are ordinary local navigation.</p>
 <h2 data-prd-layer="Product" data-prd-order="6">6. Inspect the result</h2>
+<section class="capability-summary" aria-label="Inspect the result summary">
+<p><strong>User goal:</strong> Understand the result and its supporting nodes.</p>
+<p><strong>Product rule:</strong> The canvas and inspector show the exact accepted layer.</p>
+<p><strong>Observable result:</strong> The user can inspect nodes, parents, and prior turns.</p>
+<p><strong>Acceptance:</strong> Saved replay produces the same visible graph state.</p>
+<p class="capability-evidence"><strong>Status and evidence:</strong> Partial. <a href="#15-canonical-visual-product-reference">Review the product mock and visual evidence.</a></p>
+</section>
 <h3>6.1 Display and navigation</h3>
 <ul>
 <li>The response view contains the first layer of the accepted subgraph, including edges among those response nodes.</li>
@@ -1508,10 +1549,10 @@ settings:
 <li>Previous and next arrows move across accepted turn snapshots without Complete.</li>
 <li>The renderer shows the immutable accepted snapshot for that turn even if later turns update shared nodes.</li>
 </ul>
-<h2 data-prd-layer="Product" data-prd-order="9.1">9A. Evaluate a harness: Basic Complete case</h2>
+<h2 data-prd-layer="Evidence" data-prd-order="15.4">15D. Basic Complete evaluation evidence</h2>
 <p>The first evaluation is one fixed two-interaction case. Its name is <code>empty-project.task-system.two-turn</code>. It proves the smallest real conversation path through all runtime components. These components include the graph engine, client, harness host, Codex session, Complete boundary, evaluator, judge, and renderer.</p>
 <p>The second interaction receives a new canonical interaction node and capability token. It reuses the same harness object and provider thread. The case has no existing codebase, grounding requirement, graph search, or subagent dependency.</p>
-<h3>9A.1 Initial state and exact input</h3>
+<h3>15D.1 Initial state and exact input</h3>
 <p>The case defines a temporary empty folder and isolated graph database. It uses synthetic positive project and thread IDs. It also defines two canonical user-interaction nodes in the same thread. The case does not name or select a harness. The runner supplies an already-resolved harness configuration for each execution. This lower-level integration case does not start or imitate the Relayer app server. The exact messages are:</p>
 <blockquote>“A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.”</blockquote>
 <blockquote>“Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.”</blockquote>
@@ -1524,7 +1565,7 @@ settings:
 <li>The result store receives each completed task.</li>
 <li>A free worker claims the next queued task.</li>
 </ul>
-<h3>9A.2 Exact runner sequence</h3>
+<h3>15D.2 Exact runner sequence</h3>
 <ol>
 <li>Resolve the test run's selected case IDs, harness-configuration names, and judge configuration, then expand them into executions.</li>
 <li>Start the standalone Rust graph server with an isolated database and wait for health.</li>
@@ -1538,7 +1579,7 @@ settings:
 <li>Save the accepted graph records, resolved display payload, checks, judge result, timing, exact harness-configuration snapshot and digest, implementation key/version, and trace reference in one immutable result bundle.</li>
 <li>For this lower-level slice, save a minimal HTML inspection artifact. The forthcoming Eval application reviews executions through the real product app-server and shared production graph/chat workspace.</li>
 </ol>
-<h3>9A.3 Deterministic acceptance checks</h3>
+<h3>15D.3 Deterministic acceptance checks</h3>
 <p>The first gate uses no model judgment. All checks must pass:</p>
 <ul>
 <li>Complete returned <code>accepted</code> only after <code>graph.submit(interactionNode)</code> succeeded;</li>
@@ -1556,17 +1597,39 @@ settings:
 <li>the saved result can be read back and rendered without consulting harness-private state.</li>
 </ul>
 <p>Local keys used by Codex while constructing one layer are temporary builder references, not persisted semantic identities and not an evaluation requirement.</p>
-<h3>9A.4 First quality-judge gate</h3>
+<h3>15D.4 First quality-judge gate</h3>
 <p>For each turn, the independent judge receives only that user message, six declared facts, and the visible resolved layer. It does not receive the candidate harness name, private Codex conversation, token, database, or expected graph topology.</p>
 <p>The structured judge lists the fact IDs clearly present, whether the graph connections are useful, whether the details are useful, and any problems. A turn passes only when all six fact IDs are present, both usefulness booleans are true, and the problem list is empty.</p>
-<h3>9A.5 Required saved visual proof</h3>
+<h3>15D.5 Required saved visual proof</h3>
 <p>A passing JSON result is insufficient. The current evaluator saves <code>index.html</code> beside <code>result.json</code>. Previous and Next arrows select an accepted turn. Each view shows its exact layer with movable nodes and edges.</p>
 <p>Desktop <strong>See in App</strong>, the product inspector, and read-only evaluation threads need app-server integration. Thus, current visual proof does not claim that the result runs inside the product.</p>
-<h3>9A.6 Next evaluations after the first slice</h3>
+<h3>15D.6 Next evaluations after the first slice</h3>
 <p>The current case verifies two interactions, capability rotation, one harness construction, and the accepted output contract for both turns. The next memory case must additionally require the second interaction to use prior accepted graph state. Later capability cases add context attachments, invoke and navigate actions, repository grounding, graph reuse, recursive Prime Agent work, and harder tasks.</p>
-<h2 data-prd-layer="Product" data-prd-order="9.2">9B. Evaluate a harness: Runner and promotion</h2>
-<h3>9B.1 Evaluation boundary and data model</h3>
-<p>An evaluation execution is one harness configuration executing one harness-agnostic case through <code>complete(inputGraph)</code> against the real graph engine. It is identified by <code>(testRunId, testCaseId, harnessConfigurationName)</code>. The lower-level runner supplies synthetic product-owned project/thread IDs and manages temporary interaction, active-session, and storage lifecycle directly through the graph server. It never starts the real Relayer app server and may not replace the Node harness host, typed graph client, graph API, validation, or submission path. The Eval application later supplies real product IDs and coordinates product persistence.</p>
+<h2 data-prd-layer="Evidence" data-prd-order="15.5">15E. GraphComplete runtime evidence</h2>
+<div class="delivery-legend"><span class="delivery-status verified">Verified</span><span class="delivery-status partial">Partial</span><span class="delivery-status deferred">Deferred</span></div>
+<p>This checkpoint tracks the pre-app-server slice separately from the desktop-shell checkpoint. Automated process tests can verify backend components. A visible renderer also requires saved visual evidence.</p>
+<table>
+<thead><tr><th>Requirement</th><th>Status</th><th>Current proof or remaining gap</th></tr></thead>
+<tbody>
+<tr><td>Rust SQLx/SQLite graph core and standalone async loopback server</td><td><span class="delivery-status verified">Verified</span></td><td>The crate separates graph behavior in <code>graph/</code> from SQLx persistence in <code>storage/sqlite/</code>. <code>SqliteGraphStore</code> owns the pool and connection lifecycle. Graph behavior does not import SQLx. The migration directory contains the embedded runner and versioned SQL. Reads use the asynchronous pool. Short <code>BEGIN IMMEDIATE</code> transactions prevent SQLite snapshot-upgrade failures. Rust tests cover IDs, visibility, layers, actions, edges, drafts, accepted records, atomic acceptance, concurrent writes, and control-token interaction creation.</td></tr>
+<tr><td>Opaque graph capability and active-interaction authority</td><td><span class="delivery-status partial">Partial</span></td><td>The server maps each graph token to one canonical interaction <code>NodeId</code>. Every request derives its project/thread visibility and writable subgraph from that persisted node. Trusted control authority can remint a capability for a canonical persisted interaction after server restart. Capability expiry and the full invalid/cross-scope API matrix remain.</td></tr>
+<tr><td>Object-based TypeScript client</td><td><span class="delivery-status verified">Verified</span></td><td>The process-level eval uses the real client against the Rust server to submit nodes, edges, a layer, an action, and the final interaction submission.</td></tr>
+<tr><td>Object-based Python client</td><td><span class="delivery-status partial">Partial</span></td><td>The async client and object composition tests exist. A shared real-server conformance fixture with the TypeScript client remains.</td></tr>
+<tr><td>Persistent Node harness host</td><td><span class="delivery-status partial">Partial</span></td><td>The host caches one harness object for each thread. It serializes construction, Complete calls, and capability changes. It stores the copied configuration and opaque provider resume state. A restart requires a fresh registered graph capability. A full process-restart recovery evaluation remains open.</td></tr>
+<tr><td><code>codex.basic</code> graph-tool harness</td><td><span class="delivery-status verified">Verified</span></td><td>The optional live case proved four functions. Codex runs the bundled TypeScript client and reaches the loopback Rust server. It submits an accepted graph. It returns the resolved layer.</td></tr>
+<tr><td>Inference-free correctness-boundary eval</td><td><span class="delivery-status verified">Verified</span></td><td><code>npm run eval:basic</code> starts the real Rust server and Node host. It completes two interactions through one harness object. Each interaction has a different capability. The test checks both accepted graphs and session reuse. It saves <code>result.json</code> and a navigable HTML result.</td></tr>
+<tr><td>Live independent judge</td><td><span class="delivery-status verified">Verified</span></td><td><code>npm run eval:basic:live</code> passed the deterministic gate and independent structured judge using the exact saved visible layer.</td></tr>
+<tr><td>Immutable full bundle and Desktop See in App</td><td><span class="delivery-status partial">Partial</span></td><td>The current result viewer is a local HTML equivalent. App replay, retained graph database, digests, and immutable catalog belong to the later app-server integration.</td></tr>
+</tbody></table>
+<h3><code>RUNTIME-001-E1</code> — live <code>codex.basic</code> accepted result</h3>
+<p>Captured from live run <code>4bcc6075-3d06-4eb2-b425-fe3dadca4369</code> after both deterministic checks and the independent judge passed. This proves the pre-app-server runtime and local visual result. It does not prove Desktop See in App.</p>
+<figure class="evidence-figure">
+  <div class="evidence-image"><img src="assets/evidence/runtime-slice/runtime-live-eval.png" alt="RUNTIME-001-E1: passing live codex.basic graph with movable nodes and all checks"></div>
+  <ol class="evidence-legend"><li><b>1</b><span>The live Codex harness authored four icon-title-detail nodes through graph tools.</span></li><li><b>2</b><span>The displayed edges are the exact undirected edge records returned by the accepted layer.</span></li><li><b>3</b><span>All graph-contract and six declared task-fact checks passed before the independent judge.</span></li></ol>
+</figure>
+<h2 data-prd-layer="Contracts" data-prd-order="13">13. Evaluation runner and promotion contract</h2>
+<h3>13.1 Evaluation boundary and data model</h3>
+<p>An evaluation execution is one harness configuration executing one harness-agnostic case through <code>complete(inputGraph)</code> against the real graph engine. It is identified by <code>(testRunId, testCaseId, harnessConfigurationName)</code>. The lower-level runner supplies synthetic product-owned project/thread IDs. It manages temporary interaction, active-session, and storage lifecycle through the graph server. It never replaces the Node host, typed client, graph API, validation, or submission path. The Eval application later supplies real product IDs and coordinates product persistence.</p>
 <pre><code class="language-mermaid">flowchart LR
     ER[&quot;Eval runner creates temporary interaction&quot;] --&gt; HH[&quot;Persistent Node harness host&quot;]
     AS[&quot;Relayer app server creates product interaction&quot;] --&gt; HH
@@ -1578,7 +1641,7 @@ settings:
     R --&gt; UX[&quot;Relayer renderer and See in App&quot;]
 </code></pre>
 <p>A run selects test-case IDs, harness-configuration names, and a judge configuration. The runner resolves configuration files at its boundary and expands the selections into executions. Each execution records its exact harness-configuration snapshot and stable digest in addition to case version, implementation key/version, graph schema version, client versions, judge version, and component build digests.</p>
-<h3>9B.2 Shared source and result catalog</h3>
+<h3>13.2 Shared source and result catalog</h3>
 <pre><code class="language-text">packages/eval-runner/
   cases/&lt;case-id&gt;.json                  # small versioned interaction definition
   suites/&lt;suite-id&gt;.json                # ordered case IDs and gates
@@ -1595,7 +1658,7 @@ settings:
 </code></pre>
 <p>The empty-project case needs no repository entry. Later codebase cases reference a public repository URL, pinned commit, and expected tree digest; they never contain a developer-specific source directory. All local Relayer worktrees share the same user-level repository and object catalog. A mutating case always receives a private materialization. Result bundles live outside source checkouts.</p>
 <p>The catalog verifies every object digest before use and garbage-collects only unreferenced materializations and runs according to an explicit retention policy. Checked-in case/config/judge JSON stays small enough to review normally in pull requests.</p>
-<h3>9B.3 Runner execution</h3>
+<h3>13.3 Runner execution</h3>
 <p>Local commands are standardized target interfaces:</p>
 <pre><code class="language-sh">npm run eval -- --case empty-project.task-system.two-turn --configuration codex-basic
 npm run eval -- --suite capability:memory --configuration codex-basic
@@ -1616,11 +1679,11 @@ npm run eval:web
 <li>stops the temporary processes and removes the workspace unless retention was explicitly requested.</li>
 </ol>
 <p>Live commands require an explicit confirmation in the web runner or command flag plus an available credential reference and declared cost cap. They never run inside <code>npm run check</code> or the default test suite. CI may run them only in a separately authorized, budget-limited job. Closing the web page does not orphan a run: the local runner service retains status, cancellation, and the immutable partial failure record.</p>
-<h3>9B.4 Judge design</h3>
-<p>Deterministic checks always run first. The first empty-project case then uses only the six-fact structured judge defined in Section 9A.4. It does not require an operator agent, pairwise comparison, grounding rubric, repeat policy, or promotion threshold.</p>
+<h3>13.4 Judge design</h3>
+<p>Deterministic checks always run first. The first empty-project case then uses only the six-fact structured judge defined in Section 15D.4. It does not require an operator agent, pairwise comparison, grounding rubric, repeat policy, or promotion threshold.</p>
 <p>Later capability suites add the dimensions they actually exercise: conversation memory, node reuse, attachments, authored actions, repository grounding, topology, and operator task success. Each score cites visible node references and a short rationale. Critical failures remain separate booleans rather than averages hidden by other scores.</p>
 <p>Configuration comparison and blind pairwise judging are later evaluation-runner capabilities. When added, the judge model/version, prompt version, rubric version, repeat count, thresholds, and tie policy are recorded with the run. Human review in the real graph UX remains required before product promotion.</p>
-<h3>9B.5 Evaluation ladder</h3>
+<h3>13.5 Evaluation ladder</h3>
 <table>
 <thead>
 <tr>
@@ -1638,7 +1701,7 @@ npm run eval:web
 </tr>
 <tr>
 <td>Basic Complete unit</td>
-<td>Run the exact two-interaction case in Section 9A</td>
+<td>Run the exact two-interaction case in Section 15D</td>
 <td><code>empty-project.task-system.two-turn</code> against <code>codex.basic</code></td>
 <td>Required before larger evals</td>
 </tr>
@@ -1661,7 +1724,7 @@ npm run eval:web
 <td>Required before production promotion</td>
 </tr>
 </tbody></table>
-<h3>9B.6 Capability coverage matrix</h3>
+<h3>13.6 Capability coverage matrix</h3>
 <p>Every harness-facing product requirement must have an evaluation case:</p>
 <table>
 <thead>
@@ -1723,7 +1786,7 @@ npm run eval:web
 <td>Tool/validation feedback leads to repair or an explicit retryable failure</td>
 </tr>
 </tbody></table>
-<h3>9B.7 Result bundle</h3>
+<h3>13.7 Result bundle</h3>
 <p>Every evaluation run saves:</p>
 <pre><code class="language-ts">type CompleteEvaluationBundle = {
   bundleSchemaVersion: string;
@@ -1753,7 +1816,7 @@ npm run eval:web
 };
 </code></pre>
 <p>The bundle is immutable evidence. Continuing to chat must never modify it; interactive use clones its accepted graph and pinned configuration into a new product thread.</p>
-<h3>9B.8 Promotion to production</h3>
+<h3>13.8 Promotion to production</h3>
 <p>In the first milestone, promotion means selecting the exact passing named harness configuration and verifying its recorded snapshot, digest, implementation key/version, and component build digests. Signing and distributing a production configuration catalog is deferred until the product needs that release boundary.</p>
 <p>Release checks verify:</p>
 <ul>
@@ -1764,13 +1827,20 @@ npm run eval:web
 <li>at least one saved result is reviewed in the real product UX;</li>
 <li>rollback can restore the previous harness mapping without migrating graph data backward.</li>
 </ul>
-<h2 data-prd-layer="Product" data-prd-order="9.3">9C. Evaluate a harness: See in App</h2>
-<h3>9C.1 Eval report action</h3>
+<h2 data-prd-layer="Product" data-prd-order="9">9. Evaluate a harness</h2>
+<section class="capability-summary" aria-label="Evaluate a harness summary">
+<p><strong>User goal:</strong> Judge a pinned harness with repeatable evidence.</p>
+<p><strong>Product rule:</strong> Versioned evaluations produce immutable results and replay data.</p>
+<p><strong>Observable result:</strong> A report can open its saved result in Relayer Desktop.</p>
+<p><strong>Acceptance:</strong> Promotion requires automated checks and human visual review.</p>
+<p class="capability-evidence"><strong>Status and evidence:</strong> Partial. <a href="#15d-basic-complete-evaluation-evidence">Review the basic evaluation evidence.</a></p>
+</section>
+<h3>9.1 Evaluation report action</h3>
 <p>Every completed local eval report shows <strong>See in App</strong> when its bundle passes Relayer result-bundle and graph-integrity validation. Relayer Desktop owns this behavior for Relayer evaluation runs. The deep-link shape is:</p>
 <pre><code class="language-text">relayer://eval-runs/&lt;runId&gt;
 </code></pre>
 <p>The CLI prints the same deep link. Relayer Desktop also exposes a developer-only <strong>Open evaluation run…</strong> action for selecting a local bundle when custom-protocol activation is unavailable.</p>
-<h3>9C.2 Special evaluation thread</h3>
+<h3>9.2 Special evaluation thread</h3>
 <p>Opening the link asks Relayer Desktop to open a read-only entry under an <strong>Evaluations</strong> sidebar group using the bundled graph renderer. It is not inserted into ordinary Chats or Projects and does not alter the immutable run bundle. A missing or incompatible Relayer Harness, graph schema, or renderer contract produces an exact install/update requirement instead of a misleading partial rendering.</p>
 <p>The evaluation thread uses the normal product UI:</p>
 <ul>
@@ -1782,7 +1852,7 @@ npm run eval:web
 <li>diagnostic traces remain behind the developer setting.</li>
 </ul>
 <p>Replay mode does not invoke Complete. Invoke actions are visible as evidence but disabled with an explanation that the run is immutable.</p>
-<h3>9C.3 Continue with the tested harness</h3>
+<h3>9.3 Continue with the tested harness</h3>
 <p>The evaluation thread has one <strong>Continue with this configuration</strong> action. It:</p>
 <ol>
 <li>clones the selected accepted graph snapshot into a new ordinary thread;</li>
@@ -1793,11 +1863,11 @@ npm run eval:web
 <li>sends all new interactions through the production Complete adapter.</li>
 </ol>
 <p>The cloned thread can diverge without changing the evaluation evidence. If the recorded harness build is unavailable, incompatible, or lacks a current credential, Continue is disabled and states the exact missing requirement.</p>
-<h3>9C.4 Deep-link security and tests</h3>
+<h3>9.4 Deep-link security and tests</h3>
 <p>The desktop accepts only a run ID. It must not accept an arbitrary command or file-system path. The local app server resolves the ID in the evaluation catalog. It validates the bundle and object digests. It rejects path traversal, unsupported schemas, missing objects, and changed artifacts.</p>
 <p>Product tests cover deep-link activation when the app is closed and when it runs. They cover duplicate activation, missing runs, corrupt bundles, and incompatible graph schemas. They also cover replay, navigation, evidence, configuration pinning, and copy-on-write continuation. The tests must prove that continuation cannot change the source bundle.</p>
-<h2 data-prd-layer="Contracts" data-prd-order="13">13. Desktop build and distribution contract</h2>
-<h3>13.1 V1 desktop shell decision and current gap</h3>
+<h2 data-prd-layer="Contracts" data-prd-order="14">14. Desktop build and distribution contract</h2>
+<h3>14.1 V1 desktop shell decision and current gap</h3>
 <p>V1 uses an Electron shell. Relayer distributes the macOS app outside the Mac App Store. Relayer Desktop packages the shell, graph renderer, Rust app server, harness host, graph clients, evaluation runner, result catalog, and updater. The Rust app server contains the graph core and API. Each release records the exact builds that passed compatibility and evaluation checks.</p>
 <p>Electron&#39;s macOS distribution guidance requires code signing and Apple notarization for normal distribution, and its automatic updater requires a signed macOS app. V1 treats those as release gates, not optional polish.</p>
 <p>The repository has an Electron shell and an unsigned Apple Silicon development package. It also has a fail-closed release contract. CI produces signed and notarized Preview artifacts. A protected workflow promotes the exact Preview artifact to Stable.</p>
@@ -1805,7 +1875,7 @@ npm run eval:web
 <p>A remote Mac completed the in-app update through <code>0.2.4</code>. The update kept its Codex connection, Preview choice, and Light appearance. Protected workflow <code>32105585844</code> promoted the exact <code>0.2.4</code> Preview bytes to Stable. The installed app then used the live Stable feed.</p>
 <p>Three release checks remain open. They are the macOS support matrix, corrupt hosted artifacts, and restart deferral during an active Complete call. The app server has an initial SQLite schema and fail-closed validation. A later-version migration and forced-failure recovery test remain open.</p>
 <p>The graph engine, Complete, Prime Agent, graph tools, and evaluations remain behind the Relayer Harness package boundary. Slice 2 packages the desktop. It does not claim that these experimental functions work in the product.</p>
-<h3>13.2 Required developer and release modes</h3>
+<h3>14.2 Required developer and release modes</h3>
 <table>
 <thead>
 <tr>
@@ -1841,7 +1911,7 @@ npm run eval:web
 </tr>
 </tbody></table>
 <p>Unsigned artifacts are never uploaded or presented as distributable builds. Release mode fails closed when signing identity, notarization credentials, update signing, or required bundled-runtime inputs are missing.</p>
-<h3>13.3 Packaged application contents</h3>
+<h3>14.3 Packaged application contents</h3>
 <p>The build produces an inventory manifest and verifies that the <code>.app</code> contains:</p>
 <ul>
 <li>Electron main/preload code and the built renderer;</li>
@@ -1852,7 +1922,7 @@ npm run eval:web
 <li>no development credentials, cached eval source repositories, user graphs, source maps with secrets, or absolute developer paths.</li>
 </ul>
 <p>Startup uses an app-owned data directory and a per-launch loopback port/token. The Electron main process owns app-server startup, health, cancellation, shutdown, deep-link routing, and update installation barriers.</p>
-<h3>13.4 macOS release pipeline</h3>
+<h3>14.4 macOS release pipeline</h3>
 <pre><code class="language-mermaid">flowchart LR
     S[&quot;Clean tagged source&quot;] --&gt; T[&quot;Install locked dependencies&quot;]
     T --&gt; B[&quot;Build renderer, server, engine, runtime bundle&quot;]
@@ -1866,7 +1936,7 @@ npm run eval:web
     R --&gt; M[&quot;Publish stable update manifest last&quot;]
 </code></pre>
 <p>The initial V1 architecture is macOS arm64 on macOS 13 or newer. Universal/x64 support is a separate release requirement and cannot be implied by a successful arm64 build. The supported macOS floor is recorded in the release receipt and tested on that floor plus the current macOS version.</p>
-<h3>13.5 Distribution and update acceptance</h3>
+<h3>14.5 Distribution and update acceptance</h3>
 <p>The distributable outputs are a notarized DMG for first install and a signed ZIP plus channel metadata for Electron updates. Artifacts are content-addressed and immutable. The mutable channel manifest is published only after the referenced artifact, signature, checksum, notarization ticket, and smoke evidence are available.</p>
 <p>Before promotion, a clean machine must pass these product checks:</p>
 <ol>
@@ -1878,7 +1948,7 @@ npm run eval:web
 <li>Quit and reopen the app with saved state.</li>
 <li>Update from the previous production version without data loss.</li>
 </ol>
-<h2 data-prd-layer="Evidence" data-prd-order="15">15. Verification ownership</h2>
+<h2 data-prd-layer="Evidence" data-prd-order="16">16. Verification ownership</h2>
 <table>
 <thead>
 <tr>
@@ -1918,7 +1988,7 @@ npm run eval:web
 <td>Cross-component compatibility test, signed package smoke, and exact version/build inventory</td>
 </tr>
 </tbody></table>
-<h3>15.1 Product tests without paid inference</h3>
+<h3>16.1 Product tests without paid inference</h3>
 <p>The default suite uses a fake or replay Complete implementation. It covers:</p>
 <ul>
 <li>every visible choice and event in Agent setup, New thread, projects, Git/worktrees, thread management, settings, updates, graph navigation, context attachment, stop, retry, and recovery;</li>
@@ -1928,12 +1998,12 @@ npm run eval:web
 <li>secret redaction and local persistence boundaries;</li>
 <li>accessibility and visual-structure assertions for all canonical mocks.</li>
 </ul>
-<h3>15.2 Live evaluations</h3>
+<h3>16.2 Live evaluations</h3>
 <p>Live Codex, Prime Agent, or other model runs are opt-in, metered, and never part of the default <code>npm run check</code>. They run through the evaluation runner and produce immutable bundles. LLM judges are versioned and calibrated against human decisions; their scores are not treated as ground truth.</p>
-<h3>15.3 Human product evaluation</h3>
+<h3>16.3 Human product evaluation</h3>
 <p>Human reviewers load saved results in the desktop graph UX. They judge response clarity, important details, connections, actions, and task continuation. They do not judge raw JSON or traces. Later comparisons use one case and change only the recorded harness or model configuration.</p>
-<h2 data-prd-layer="Evidence" data-prd-order="16">16. V1 boundary and open decisions</h2>
-<h3>16.1 Included in V1</h3>
+<h2 data-prd-layer="Evidence" data-prd-order="17">17. V1 boundary and open decisions</h2>
+<h3>17.1 Included in V1</h3>
 <ul>
 <li>local profile with Codex or API-key agent login;</li>
 <li>one OSS monorepo containing graph-engine crates, typed clients, Node harness host, harness implementations, eval runner, Rust Relayer app server, and Electron desktop packages;</li>
@@ -1947,7 +2017,7 @@ npm run eval:web
 <li>Relayer eval runner/report plus See in App evaluation threads and interactive continuation pinned to the tested harness implementation/build;</li>
 <li>Electron local packages, Developer-ID-signed/notarized macOS distribution, and signed desktop updates.</li>
 </ul>
-<h3>16.2 Excluded or deferred</h3>
+<h3>17.2 Excluded or deferred</h3>
 <ul>
 <li>Relayer accounts, cloud sync, remote hosting, teams, and enterprise workspace administration;</li>
 <li>mandatory up-front workspace graph construction;</li>
@@ -1960,7 +2030,7 @@ npm run eval:web
 <li>canonical user-facing agent-activity or diagnostic-trace views.</li>
 <li>a generalized public harness protocol, user-facing harness catalog, prompt/capability ablation manifest, or harness selector outside developer settings;</li>
 </ul>
-<h3>16.3 Decisions still open</h3>
+<h3>17.3 Decisions still open</h3>
 <ul>
 <li>engine indexing and compaction implementation behind the stable read/write contract;</li>
 <li>whether loopback HTTP is reachable from every supported Codex sandbox or the packaged product needs HTTP over a Unix-domain socket;</li>
@@ -1973,7 +2043,7 @@ npm run eval:web
 <li>exact thread archive, delete-entry, graph-retention, and remove-local-data behavior;</li>
 <li>exact product persistence database, export bundle, restore, and migration format.</li>
 </ul>
-<h2 data-prd-layer="Evidence" data-prd-order="17">17. Product acceptance statement</h2>
+<h2 data-prd-layer="Evidence" data-prd-order="18">18. Product acceptance statement</h2>
 <p>V1 is acceptable only when all requirements in this section are met.</p>
 <ol>
 <li>The graph engine and API pass their package and end-to-end contracts.</li>
@@ -2482,8 +2552,8 @@ npm run eval:web
         actions: { label: 'Authored node actions', heading: () => findHeading('7.2', 'h3') },
         settings: { label: 'Settings and advanced controls', heading: () => findHeading('10.1', 'h3') },
         update: { label: 'Desktop update', heading: () => findHeading('10.2', 'h3') },
-        'eval-report': { label: 'Evaluation report and See in App', heading: () => findHeading('9C.1', 'h3') },
-        'eval-thread': { label: 'Evaluation thread replay', heading: () => findHeading('9C.2', 'h3') },
+        'eval-report': { label: 'Evaluation report and See in App', heading: () => findHeading('9.1', 'h3') },
+        'eval-thread': { label: 'Evaluation thread replay', heading: () => findHeading('9.2', 'h3') },
       };
       const walkthrough = main.querySelector('.product-walkthrough');
       const reading = document.createElement('section');
