@@ -1,4 +1,5 @@
 use super::{InteractionId, ProjectId, ThreadId};
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Project {
@@ -15,6 +16,7 @@ pub(crate) struct Thread {
     pub(crate) title: String,
     pub(crate) project_id: Option<ProjectId>,
     pub(crate) root_interaction_id: InteractionId,
+    pub(crate) harness_configuration_name: String,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
 }
@@ -25,6 +27,12 @@ pub(crate) struct Interaction {
     pub(crate) thread_id: ThreadId,
     pub(crate) sequence: i64,
     pub(crate) text: String,
+    pub(crate) graph_node_id: Option<i64>,
+    pub(crate) completion_status: String,
+    pub(crate) harness_configuration_name: Option<String>,
+    pub(crate) harness_configuration_digest: Option<String>,
+    pub(crate) completion_output: Option<Value>,
+    pub(crate) completion_error: Option<String>,
     pub(crate) created_at: String,
 }
 

@@ -22,6 +22,7 @@ const THREAD_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("project_id", "INTEGER", false, 0),
     ("created_at", "TEXT", true, 0),
     ("updated_at", "TEXT", true, 0),
+    ("harness_configuration_name", "TEXT", true, 0),
 ];
 const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "INTEGER", false, 1),
@@ -29,6 +30,12 @@ const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("sequence", "INTEGER", true, 0),
     ("text", "TEXT", true, 0),
     ("created_at", "TEXT", true, 0),
+    ("graph_node_id", "INTEGER", false, 0),
+    ("completion_status", "TEXT", true, 0),
+    ("harness_configuration_name", "TEXT", false, 0),
+    ("harness_configuration_digest", "TEXT", false, 0),
+    ("completion_output_json", "TEXT", false, 0),
+    ("completion_error", "TEXT", false, 0),
 ];
 
 pub(super) async fn validate_existing_or_empty(pool: &SqlitePool) -> Result<(), StorageError> {

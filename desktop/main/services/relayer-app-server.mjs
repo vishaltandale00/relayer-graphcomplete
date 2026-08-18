@@ -38,6 +38,9 @@ export class RelayerAppServerService {
     userDataDirectory,
     binaryPath,
     webDirectory,
+    runtimeSession = null,
+    defaultHarnessConfiguration = "codex-basic",
+    allowHarnessOverride = false,
     spawnProcess = spawn,
     startupTimeoutMs = 10_000,
     shutdownTimeoutMs = 2_000,
@@ -46,6 +49,9 @@ export class RelayerAppServerService {
     this.userDataDirectory = userDataDirectory;
     this.binaryPath = binaryPath;
     this.webDirectory = webDirectory;
+    this.runtimeSession = runtimeSession;
+    this.defaultHarnessConfiguration = defaultHarnessConfiguration;
+    this.allowHarnessOverride = allowHarnessOverride;
     this.spawnProcess = spawnProcess;
     this.startupTimeoutMs = startupTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
@@ -75,11 +81,22 @@ export class RelayerAppServerService {
     await chmod(dataDirectory, 0o700);
     if (this.closing) throw new Error("Relayer app server is shutting down.");
     const controlToken = randomBytes(32).toString("hex");
-    const child = this.spawnProcess(this.binaryPath, [
+    const serverArguments = [
       "--data-dir", dataDirectory,
       "--web-dir", this.webDirectory,
       "--port", "0",
-    ], {
+    ];
+    if (this.runtimeSession) {
+      serverArguments.push(
+        "--graph-url", this.runtimeSession.graphUrl,
+        "--harness-url", this.runtimeSession.harnessUrl,
+        "--runtime-control-token", this.runtimeSession.controlToken,
+        "--harness-configurations", this.runtimeSession.catalogPath,
+        "--default-harness-configuration", this.defaultHarnessConfiguration,
+      );
+      if (this.allowHarnessOverride) serverArguments.push("--allow-harness-override");
+    }
+    const child = this.spawnProcess(this.binaryPath, serverArguments, {
       env: { ...process.env },
       stdio: ["pipe", "pipe", "pipe"],
     });

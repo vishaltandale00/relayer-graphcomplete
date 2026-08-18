@@ -32,6 +32,7 @@ pub(crate) struct ThreadResponse {
     title: String,
     project_id: Option<i64>,
     root_interaction_id: i64,
+    harness_configuration_name: String,
     created_at: String,
     updated_at: String,
 }
@@ -43,6 +44,7 @@ impl From<Thread> for ThreadResponse {
             title: thread.title,
             project_id: thread.project_id.map(|id| id.value()),
             root_interaction_id: thread.root_interaction_id.value(),
+            harness_configuration_name: thread.harness_configuration_name,
             created_at: thread.created_at,
             updated_at: thread.updated_at,
         }
@@ -57,6 +59,12 @@ pub(crate) struct InteractionResponse {
     sequence: i64,
     text: String,
     created_at: String,
+    graph_node_id: Option<i64>,
+    completion_status: String,
+    harness_configuration_name: Option<String>,
+    harness_configuration_digest: Option<String>,
+    completion_output: Option<serde_json::Value>,
+    completion_error: Option<String>,
 }
 
 impl From<Interaction> for InteractionResponse {
@@ -67,6 +75,12 @@ impl From<Interaction> for InteractionResponse {
             sequence: interaction.sequence,
             text: interaction.text,
             created_at: interaction.created_at,
+            graph_node_id: interaction.graph_node_id,
+            completion_status: interaction.completion_status,
+            harness_configuration_name: interaction.harness_configuration_name,
+            harness_configuration_digest: interaction.harness_configuration_digest,
+            completion_output: interaction.completion_output,
+            completion_error: interaction.completion_error,
         }
     }
 }

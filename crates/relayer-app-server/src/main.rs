@@ -1,6 +1,8 @@
 use anyhow::Context;
 use clap::Parser;
-use relayer_app_server::{CONTROL_COOKIE, RelayerAppServer, RelayerAppServerConfig};
+use relayer_app_server::{
+    CONTROL_COOKIE, RelayerAppServer, RelayerAppServerConfig, RelayerRuntimeConfig,
+};
 use serde_json::json;
 use std::{
     io::{self, BufRead, Read},
@@ -19,6 +21,18 @@ struct Arguments {
     data_dir: PathBuf,
     #[arg(long)]
     web_dir: PathBuf,
+    #[arg(long)]
+    graph_url: Option<String>,
+    #[arg(long)]
+    harness_url: Option<String>,
+    #[arg(long)]
+    runtime_control_token: Option<String>,
+    #[arg(long)]
+    harness_configurations: Option<PathBuf>,
+    #[arg(long, default_value = "codex-basic")]
+    default_harness_configuration: String,
+    #[arg(long, default_value_t = false)]
+    allow_harness_override: bool,
 }
 
 #[tokio::main]
@@ -40,10 +54,31 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     let database = arguments.data_dir.join("product.sqlite3");
+    let runtime = match (
+        arguments.graph_url,
+        arguments.harness_url,
+        arguments.runtime_control_token,
+        arguments.harness_configurations,
+    ) {
+        (Some(graph_url), Some(harness_url), Some(control_token), Some(configurations)) => {
+            Some(RelayerRuntimeConfig {
+                graph_url,
+                harness_url,
+                control_token,
+                harness_configurations: configurations,
+                default_harness_configuration: arguments.default_harness_configuration,
+                allow_harness_override: arguments.allow_harness_override,
+                standalone_workspaces_directory: arguments.data_dir.join("workspaces"),
+            })
+        }
+        (None, None, None, None) => None,
+        _ => anyhow::bail!("GraphComplete runtime arguments must be supplied together"),
+    };
     let app_server = RelayerAppServer::open(RelayerAppServerConfig {
         database_path: database,
         web_directory: arguments.web_dir,
         control_token,
+        runtime,
     })
     .await
     .context("open Relayer app server")?;

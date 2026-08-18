@@ -73,6 +73,24 @@ describe("CodexBasicHarness", () => {
     });
   });
 
+  it("passes the packaged executable override to the Codex process", () => {
+    const createCodex = vi.fn(() => ({}) as Codex);
+    new CodexBasicHarness({
+      threadId: 1,
+      workingDirectory: process.cwd(),
+      graph: { url: "http://127.0.0.1:43123", token: "token", nodeId: 1 },
+      configuration: codexBasicConfiguration,
+    }, {
+      createCodex,
+      codexPathOverride: "/Applications/Relayer.app/Contents/Resources/codex",
+    });
+
+    expect(createCodex).toHaveBeenCalledWith(
+      expect.objectContaining({ RELAYER_GRAPH_TOKEN: "token", RELAYER_NODE_ID: "1" }),
+      "/Applications/Relayer.app/Contents/Resources/codex",
+    );
+  });
+
   it("rotates graph credentials while resuming the same provider thread", async () => {
     const firstThread = { id: "codex-thread-1", run: vi.fn(async () => ({ finalResponse: "", items: [], usage: null })) };
     const secondThread = { id: "codex-thread-1", run: vi.fn(async () => ({ finalResponse: "", items: [], usage: null })) };

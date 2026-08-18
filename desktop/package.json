@@ -9,6 +9,9 @@
   "main": "main/index.mjs",
   "dependencies": {
     "@openai/codex": "0.147.0",
-    "electron-updater": "6.8.9"
+    "@relayer/eval-runner": "*",
+    "@relayer/harness-host": "*",
+    "electron-updater": "6.8.9",
+    "marked": "16.4.2"
   }
 }

@@ -26,6 +26,11 @@
     }
   },
   "scripts": {
+    "prepare:renderer": "node scripts/prepare-renderer-vendor.mjs",
+    "prebuild": "npm run prepare:renderer",
+    "precheck": "npm run prepare:renderer",
+    "pretest": "npm run prepare:renderer",
+    "predesktop:pack": "npm run prepare:renderer",
     "build": "node scripts/clean-dist.mjs && cargo build -p relayer-app-server -p relayer-graph-server && tsc -p tsconfig.build.json && npm run build:packages",
     "build:packages": "npm run build -w @relayer/graph-client && npm run build -w @relayer/harness-host && npm run build -w @relayer/eval-runner",
     "check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && cargo build -p relayer-graph-server && npm run build:packages && tsc --noEmit && npm run check --workspaces --if-present && vitest run && PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests && npm run prd:check-readability",
@@ -33,11 +38,13 @@
     "prd": "node docs/prd/server.mjs",
     "prd:check-readability": "node docs/prd/check-readability.mjs",
     "desktop:dev": "npm run build && electron desktop/main/index.mjs",
+    "eval-app:dev": "npm run build && electron desktop/eval-main/index.mjs",
     "eval:basic": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js",
     "eval:basic:live": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --require-configuration --judge-configuration codex-structured",
-    "desktop:pack": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && electron-builder --config desktop/packaging/electron-builder.mjs --dir --arm64",
-    "desktop:dist": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs stable",
-    "desktop:dist:preview": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs preview",
+    "desktop:pack": "cargo build --release -p relayer-app-server -p relayer-graph-server --target aarch64-apple-darwin && electron-builder --config desktop/packaging/electron-builder.mjs --dir --arm64",
+    "eval-app:pack": "npm run build && cargo build --release -p relayer-app-server -p relayer-graph-server --target aarch64-apple-darwin && electron-builder --config desktop/packaging/eval-electron-builder.mjs --dir --arm64",
+    "desktop:dist": "cargo build --release -p relayer-app-server -p relayer-graph-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs stable",
+    "desktop:dist:preview": "cargo build --release -p relayer-app-server -p relayer-graph-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs preview",
     "desktop:release:verify": "node desktop/release/verify-artifacts.mjs",
     "desktop:release:publish-preview": "node desktop/release/publish-preview.mjs",
     "desktop:release:promote-stable": "node desktop/release/promote-stable.mjs"

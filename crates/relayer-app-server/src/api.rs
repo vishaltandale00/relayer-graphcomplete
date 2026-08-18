@@ -6,6 +6,7 @@ mod threads;
 mod types;
 
 use crate::product::ProductService;
+use crate::runtime::RuntimeClient;
 use auth::DesktopSessionAuthenticator;
 use axum::{Router, routing::get};
 use std::path::PathBuf;
@@ -17,16 +18,28 @@ pub const CONTROL_COOKIE: &str = "relayer_control";
 pub(crate) struct ApiState {
     pub(crate) product: ProductService,
     pub(crate) authenticator: DesktopSessionAuthenticator,
+    pub(crate) runtime: Option<RuntimeClient>,
+    pub(crate) default_harness_configuration: String,
+    pub(crate) allow_harness_override: bool,
+    pub(crate) standalone_workspaces_directory: PathBuf,
 }
 
 pub(crate) fn router(
     product: ProductService,
     control_token: impl Into<String>,
     web_directory: PathBuf,
+    runtime: Option<RuntimeClient>,
+    default_harness_configuration: String,
+    allow_harness_override: bool,
+    standalone_workspaces_directory: PathBuf,
 ) -> Router {
     let state = ApiState {
         product,
         authenticator: DesktopSessionAuthenticator::new(control_token),
+        runtime,
+        default_harness_configuration,
+        allow_harness_override,
+        standalone_workspaces_directory,
     };
     Router::new()
         .route("/health", get(state::health))
@@ -38,6 +51,10 @@ pub(crate) fn router(
         .route(
             "/api/threads/{id}/interactions",
             get(threads::list_interactions).post(threads::create_interaction),
+        )
+        .route(
+            "/api/threads/{thread_id}/interactions/{interaction_id}/layers/{layer_id}",
+            get(threads::get_layer),
         )
         .fallback_service(ServeDir::new(web_directory).append_index_html_on_directories(true))
         .with_state(state)

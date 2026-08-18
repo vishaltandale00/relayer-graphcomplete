@@ -1,16 +1,7 @@
-export function interactionForThread(state, thread) {
-  const interactionId = thread?.rootInteractionId ?? thread?.rootNodeId;
-  return state.interactions?.find((interaction) => String(interaction.id) === String(interactionId))
-    || state.nodes.find((node) => String(node.id) === String(interactionId));
-}
-
-export function responseNodesForThread(state, thread) {
-  if (state.status !== "accepted") return [];
-  const interaction = interactionForThread(state, thread);
-  return state.nodes.filter((node) => (
-    node.metadata?.relayer?.responseLayerOwnerNodeId === interaction?.id
-  ));
-}
+export {
+  interactionForThread,
+  responseNodesForThread,
+} from "./product-workspace/model.js";
 
 export function addLocalThread(state, { selectedScope, prompt, title, createId }) {
   let projectId = selectedScope.projectId;

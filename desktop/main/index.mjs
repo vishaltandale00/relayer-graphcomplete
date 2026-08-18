@@ -4,10 +4,12 @@ import { readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 
 import { CodexCredentialAdapter } from "./credentials/codex-credential-adapter.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
+import { GraphCompleteRuntimeService } from "./services/graphcomplete-runtime.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
 import { claimPrimaryDesktopInstance } from "./single-instance.mjs";
@@ -40,6 +42,15 @@ const bundledCodexBinary = app.isPackaged
 const relayerAppServerBinary = app.isPackaged
   ? join(process.resourcesPath, "bin", "relayer-app-server")
   : resolve(process.env.RELAYER_APP_SERVER_BINARY || join(repositoryRoot, "target", "debug", "relayer-app-server"));
+const relayerGraphServerBinary = app.isPackaged
+  ? join(process.resourcesPath, "bin", "relayer-graph-server")
+  : resolve(process.env.RELAYER_GRAPH_SERVER_BIN || join(repositoryRoot, "target", "debug", "relayer-graph-server"));
+const harnessDirectory = app.isPackaged
+  ? join(process.resourcesPath, "harnesses")
+  : join(repositoryRoot, "harnesses");
+const graphClientModuleUrl = app.isPackaged
+  ? pathToFileURL(join(process.resourcesPath, "graph-client", "index.js")).href
+  : undefined;
 const rendererDirectory = app.isPackaged
   ? join(process.resourcesPath, "renderer")
   : join(desktopDirectory, "renderer");
@@ -50,18 +61,15 @@ const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => main
 if (primaryInstance) {
   let appearance = "dark";
   const settings = createSettingsStore(userDataPath);
-  const productServer = new RelayerAppServerService({
+  process.env.CODEX_HOME = codexHome;
+  const graphRuntime = new GraphCompleteRuntimeService({
     userDataDirectory: userDataPath,
-    binaryPath: relayerAppServerBinary,
-    webDirectory: rendererDirectory,
-    onUnexpectedStop: () => {
-      dialog.showErrorBox(
-        "Relayer app server stopped",
-        "Relayer needs to close because its local product service stopped. Reopen the app to continue.",
-      );
-      app.quit();
-    },
+    graphServerBinary: relayerGraphServerBinary,
+    configurationPaths: [join(harnessDirectory, "codex-basic.yaml")],
+    codexBasicClientModuleUrl: graphClientModuleUrl,
+    codexPathOverride: bundledCodexBinary,
   });
+  let productServer;
 
   const credentials = new CodexCredentialAdapter({
     environment: { ...process.env, CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: bundledCodexBinary },
@@ -96,7 +104,15 @@ if (primaryInstance) {
 
   async function shutdownServices() {
     shutdownPromise ??= (async () => {
-      const results = await Promise.allSettled([credentials.close(), productServer.close()]);
+      const results = await Promise.allSettled([
+        credentials.close(),
+        productServer ? productServer.close() : Promise.resolve(),
+      ]);
+      try {
+        await graphRuntime.close();
+      } catch (error) {
+        results.push({ status: "rejected", reason: error });
+      }
       const failures = results.filter((result) => result.status === "rejected");
       if (failures.length) {
         throw new AggregateError(failures.map((result) => result.reason), "Relayer services did not all stop cleanly.");
@@ -112,6 +128,21 @@ if (primaryInstance) {
     nativeTheme.themeSource = appearance;
     const channel = resolveUpdateChannel(saved.updateChannel);
     if (channel === "preview") updater.setChannel("preview");
+    const runtimeSession = await graphRuntime.start();
+    productServer = new RelayerAppServerService({
+      userDataDirectory: userDataPath,
+      binaryPath: relayerAppServerBinary,
+      webDirectory: rendererDirectory,
+      runtimeSession,
+      defaultHarnessConfiguration: "codex-basic",
+      onUnexpectedStop: () => {
+        dialog.showErrorBox(
+          "Relayer app server stopped",
+          "Relayer needs to close because its local product service stopped. Reopen the app to continue.",
+        );
+        app.quit();
+      },
+    });
     const productSession = await productServer.start();
 
     registerDesktopIpc({

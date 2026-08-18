@@ -1,0 +1,5 @@
+schemaVersion: 1
+name: fixture-task-system
+implementation: fixture.task-system
+implementationVersion: 1
+settings: {}

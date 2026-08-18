@@ -20,7 +20,8 @@ Pre-alpha executable runtime slice. The repository now includes:
 - object-based TypeScript and Python clients for nodes, undirected edges, layers, actions, and submission;
 - a persistent Node harness host that loads named file-backed configurations, caches one harness object per thread, persists opaque provider resume state without graph credentials, and supports cancellation and deterministic disposal;
 - a graph-tool `codex.basic` harness using the OpenAI Codex TypeScript SDK;
-- an inference-free evaluation that starts the real Rust server and Node host, checks two interactions in one empty-project thread, and saves a turn-navigable movable-node HTML result;
+- an inference-free evaluation that starts the real Rust server and Node host and checks two interactions in one empty-project thread;
+- a separate internal Relayer Eval desktop application that runs test-case × harness matrices through the product app server and opens their threads in the production graph/chat workspace;
 - Rust, TypeScript, Python, and process-level integration tests.
 
 The Node runtime is split into explicit workspace packages: `@relayer/graph-client`, `@relayer/harness-host`, and `@relayer/eval-runner`. The Rust graph core is the only graph implementation; Node and Python code access it through typed clients rather than maintaining another graph store.
@@ -64,24 +65,38 @@ Selecting two configurations expands the same harness-agnostic case into two exe
 npm run eval:basic:live -- --configuration codex-basic --configuration codex-basic-high
 ```
 
-The CLI resolves configuration files before case execution. Every saved execution records its `(testRunId, testCaseId, harnessConfigurationName)` identity, exact resolved configuration snapshot, and stable digest. Live inference is deliberately excluded from `npm test` and `npm run check`. Desktop `See in App` is not claimed by this slice; the saved HTML is only the current pre-app-server integration artifact.
+The CLI resolves configuration files before case execution. Every saved execution records its `(testRunId, testCaseId, harnessConfigurationName)` identity, exact resolved configuration snapshot, and stable digest. Live inference is deliberately excluded from `npm test` and `npm run check`. Its saved HTML remains a lower-level debugging artifact; product-faithful review belongs to Relayer Eval.
 
 ## Relayer Desktop
 
-Relayer Desktop is an Electron application backed by a local Rust app server and SQLite product database. The current product path persists projects, threads, and product interaction chronology without projecting those records into graph nodes. Codex provider setup remains an Electron-owned service. Agent execution and graph output are intentionally not connected.
+Relayer Desktop is an Electron application backed by the Rust graph and product servers, a persistent Node harness host, and SQLite product storage. Each question becomes a canonical graph interaction, runs through the thread's pinned harness, and persists its accepted output for replay in the production graph/chat workspace. Codex provider setup remains an Electron-owned service.
 
 ```sh
 npm install
 npm run desktop:dev
 ```
 
-Build an unsigned Apple Silicon development application, including the Rust server, with:
+Ask a question in the composer to run the default `codex-basic` harness and render its accepted graph. Follow-up turns reuse the same harness/provider session while receiving a fresh graph capability.
+
+## Relayer Eval
+
+Relayer Eval is a separate internal application and profile. Its dashboard configures cases, named harness configurations, and a judge; shows persisted test runs and aggregate results by harness; and opens any specific case × harness execution in a separate read-only production workspace window.
+
+```sh
+npm run eval-app:dev
+```
+
+The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. Build the unsigned internal application with `npm run eval-app:pack`.
+
+The public Relayer and internal Relayer Eval builds use distinct application identifiers, entry points, data profiles, and dashboard assets. They share the graph runtime, harness host, app server, product records, API contracts, and production workspace. See [ADR 0003](docs/decisions/0003-shared-product-eval-workspace.md).
+
+Build an unsigned Apple Silicon development application, including both Rust servers and the external graph client used by harness-authored scripts, with:
 
 ```sh
 npm run desktop:pack
 ```
 
-Desktop packaging intentionally targets Apple Silicon only. The build compiles both Electron and the nested Rust app server for `arm64`, then rejects the package if the bundled server has a different architecture. Intel Mac support is deferred.
+Desktop packaging intentionally targets Apple Silicon only. The build packages Electron plus the Rust product and graph servers for `arm64`, then rejects the package if either bundled server has a different architecture or the external graph-client module is missing. Intel Mac support is deferred.
 
 The accepted desktop release contract starts at version `0.2.0`, supports Apple Silicon on macOS 13 or newer, and uses the existing Relayer Developer ID identity. Signed candidates fail closed unless the worktree is clean and signing, notarization, provenance, and the sealed update URL are all present. Build a signed, notarized candidate without publishing it with:
 

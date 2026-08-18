@@ -1,0 +1,119 @@
+const api = window.relayerEval;
+const $ = (selector) => document.querySelector(selector);
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]);
+let catalog;
+let runs = [];
+let selectedRunId = null;
+
+function toast(message) {
+  $("#toast").textContent = message;
+  $("#toast").classList.remove("hidden");
+  setTimeout(() => $("#toast").classList.add("hidden"), 3000);
+}
+
+function show(view) {
+  for (const id of ["emptyView", "configureView", "runView"]) $(`#${id}`).classList.toggle("hidden", id !== view);
+}
+
+function renderRunList() {
+  $("#runList").innerHTML = runs.length ? runs.map((run) => `
+    <button class="run-entry ${run.id === selectedRunId ? "active" : ""}" data-run="${escapeHtml(run.id)}">
+      <span>${escapeHtml(run.id)}</span><small>${escapeHtml(run.status)} · ${run.summary.passed}/${run.summary.total} passed</small>
+    </button>`).join("") : `<div class="run-entry"><small>No test runs yet</small></div>`;
+  document.querySelectorAll("[data-run]").forEach((button) => {
+    button.onclick = () => selectRun(button.dataset.run);
+  });
+}
+
+function optionMarkup({ id, name, description, detail }, group, checked) {
+  return `<label class="option"><input type="${group === "judge" ? "radio" : "checkbox"}" name="${group}" value="${escapeHtml(id)}" ${checked ? "checked" : ""}/><div><b>${escapeHtml(name)}</b><small>${escapeHtml(description || detail || "")}</small></div></label>`;
+}
+
+function configure() {
+  $("#caseOptions").innerHTML = catalog.cases.map((item) => optionMarkup(item, "cases", true)).join("");
+  $("#harnessOptions").innerHTML = catalog.harnessConfigurations.map((item) => optionMarkup({ id: item.name, name: item.name, detail: item.implementation }, "harnesses", item.name === "fixture-task-system")).join("");
+  $("#judgeOptions").innerHTML = catalog.judges.map((item, index) => optionMarkup(item, "judge", index === 0)).join("");
+  show("configureView");
+}
+
+async function startRun() {
+  const values = (name) => [...document.querySelectorAll(`input[name="${name}"]:checked`)].map((input) => input.value);
+  const selection = {
+    testCaseIds: values("cases"),
+    harnessConfigurationNames: values("harnesses"),
+    judgeConfigurationName: values("judge")[0],
+  };
+  if (!selection.testCaseIds.length || !selection.harnessConfigurationNames.length) return toast("Select at least one case and one harness.");
+  $("#startRun").disabled = true;
+  try {
+    const run = await api.createRun(selection);
+    selectedRunId = run.id;
+    runs = await api.listRuns();
+    renderRunList();
+    renderRun(run);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    $("#startRun").disabled = false;
+  }
+}
+
+async function selectRun(runId) {
+  try {
+    selectedRunId = runId;
+    renderRunList();
+    renderRun(await api.getRun(runId));
+  } catch (error) { toast(error.message); }
+}
+
+function renderRun(run) {
+  show("runView");
+  $("#runTitle").textContent = run.id;
+  $("#runMetadata").textContent = `${run.testCaseIds.length} cases × ${run.harnessConfigurationNames.length} harnesses · ${run.judgeConfigurationName}`;
+  $("#runStatus").className = `status ${run.status}`;
+  $("#runStatus").textContent = run.status;
+  $("#aggregate").innerHTML = run.summary.byHarness.map((item) => {
+    const percentage = item.total ? Math.round(item.passed / item.total * 100) : 0;
+    return `<div class="metric"><small>${escapeHtml(item.name)}</small><strong>${item.passed}/${item.total}</strong><progress class="bar" max="100" value="${percentage}" aria-label="${percentage}% passed"></progress></div>`;
+  }).join("");
+  $("#matrixHead").innerHTML = `<tr><th>Test case</th>${run.harnessConfigurationNames.map((name) => `<th>${escapeHtml(name)}</th>`).join("")}</tr>`;
+  $("#matrixBody").innerHTML = run.testCaseIds.map((caseId) => {
+    const definition = catalog.cases.find((item) => item.id === caseId);
+    const cells = run.harnessConfigurationNames.map((harness) => {
+      const execution = run.executions.find((item) => item.testCaseId === caseId && item.harnessConfigurationName === harness);
+      const openable = execution?.threadIds?.length > 0;
+      const score = execution?.checks?.length ? `${execution.checks.filter((check) => check.passed).length}/${execution.checks.length}` : "—";
+      return `<td><button class="execution" data-execution="${escapeHtml(execution?.id)}" ${openable ? "" : "disabled"}><b class="${escapeHtml(execution?.status)}">${escapeHtml(execution?.status || "missing")}</b><span>${score}${openable ? " ↗" : ""}</span></button></td>`;
+    }).join("");
+    return `<tr><td><div class="case-copy"><b>${escapeHtml(definition?.name || caseId)}</b><small>${escapeHtml(caseId)}</small></div></td>${cells}</tr>`;
+  }).join("");
+  document.querySelectorAll("[data-execution]:not(:disabled)").forEach((button) => {
+    button.onclick = async () => {
+      try { await api.openReview(button.dataset.execution); } catch (error) { toast(error.message); }
+    };
+  });
+}
+
+async function boot() {
+  catalog = await api.catalog();
+  runs = await api.listRuns();
+  renderRunList();
+  api.onRunsChanged((nextRuns) => {
+    runs = nextRuns;
+    renderRunList();
+    const selected = runs.find((run) => run.id === selectedRunId);
+    if (selected) renderRun(selected);
+  });
+  $("#newRun").onclick = configure;
+  $("#emptyNewRun").onclick = configure;
+  $("#cancelRun").onclick = () => selectedRunId ? selectRun(selectedRunId) : show("emptyView");
+  $("#startRun").onclick = startRun;
+  show(runs.length ? "runView" : "emptyView");
+  if (runs.length) {
+    selectedRunId = runs[0].id;
+    renderRunList();
+    renderRun(runs[0]);
+  }
+}
+
+void boot().catch((error) => toast(error.message));

@@ -24,4 +24,6 @@ pub(crate) enum StorageError {
     Migration(#[from] sqlx::migrate::MigrateError),
     #[error("product database schema is incompatible: {0}")]
     IncompatibleSchema(String),
+    #[error("stored product JSON is invalid: {0}")]
+    Serialization(String),
 }

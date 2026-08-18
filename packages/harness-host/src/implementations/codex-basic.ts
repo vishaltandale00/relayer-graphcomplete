@@ -7,8 +7,9 @@ export const CODEX_BASIC_KEY = "codex.basic";
 type CodexThread = ReturnType<Codex["startThread"]>;
 
 export interface CodexBasicDependencies {
-  readonly createCodex?: (environment: Record<string, string>) => Codex;
+  readonly createCodex?: (environment: Record<string, string>, codexPathOverride?: string) => Codex;
   readonly clientModuleUrl?: string;
+  readonly codexPathOverride?: string;
 }
 
 interface CodexBasicConfiguration {
@@ -74,7 +75,12 @@ export class CodexBasicHarness implements Harness {
     environment.RELAYER_GRAPH_URL = graph.url;
     environment.RELAYER_GRAPH_TOKEN = graph.token;
     environment.RELAYER_NODE_ID = String(graph.nodeId);
-    return this.dependencies.createCodex?.(environment) ?? new Codex({ env: environment });
+    return this.dependencies.createCodex?.(environment, this.dependencies.codexPathOverride) ?? new Codex({
+      env: environment,
+      ...(this.dependencies.codexPathOverride === undefined ? {} : {
+        codexPathOverride: this.dependencies.codexPathOverride,
+      }),
+    });
   }
 
   private openThread(): CodexThread {

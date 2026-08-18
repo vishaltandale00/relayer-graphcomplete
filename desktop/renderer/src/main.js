@@ -1,6 +1,6 @@
 import { connectCodex, refreshAccount, showApplication, showAuth } from "./auth.js";
 import { selectScope, setMainView } from "./navigation.js";
-import { desktop, viewState } from "./state.js";
+import { desktop, evalReview, viewState } from "./state.js";
 import { connectEvents, createFirstThread, loadThread, refreshState } from "./threads.js";
 import { $, applyAppearance, toast } from "./ui.js";
 import { renderUpdate, updateAction } from "./updates.js";
@@ -24,7 +24,6 @@ function bindEvents() {
       void createFirstThread();
     }
   };
-  $("#closeInspector").onclick = () => $("#inspector").classList.add("hidden");
   $("#collapseSidebar").onclick = () => {
     const collapsed = document.body.classList.toggle("sidebar-collapsed");
     const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
@@ -78,6 +77,7 @@ function bindEvents() {
 }
 
 async function boot() {
+  if (evalReview) viewState.evalContext = await evalReview.context();
   bindEvents();
   desktop?.account.onChanged((event) => {
     if (event?.status === "unavailable") showAuth(event.error || "Codex is unavailable.");

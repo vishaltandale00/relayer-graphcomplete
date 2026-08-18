@@ -10,13 +10,18 @@ export async function verifyBundledAppServer(
   { execute = execFileAsync, expectedArchitecture = "arm64" } = {},
 ) {
   const binaryPath = join(appPath, "Contents", "Resources", "bin", "relayer-app-server");
-  await access(binaryPath);
-  const result = await execute("/usr/bin/lipo", ["-archs", binaryPath]);
-  const architectures = String(result.stdout || "").trim();
-  if (architectures !== expectedArchitecture) {
-    throw new Error(
-      `Bundled Relayer app server must contain only ${expectedArchitecture} executable code; found ${architectures || "unknown"}.`,
-    );
+  const graphBinaryPath = join(appPath, "Contents", "Resources", "bin", "relayer-graph-server");
+  const graphClientPath = join(appPath, "Contents", "Resources", "graph-client", "index.js");
+  await Promise.all([access(binaryPath), access(graphBinaryPath), access(graphClientPath)]);
+  let architectures;
+  for (const [label, executable] of [["app server", binaryPath], ["graph server", graphBinaryPath]]) {
+    const result = await execute("/usr/bin/lipo", ["-archs", executable]);
+    architectures = String(result.stdout || "").trim();
+    if (architectures !== expectedArchitecture) {
+      throw new Error(
+        `Bundled Relayer ${label} must contain only ${expectedArchitecture} executable code; found ${architectures || "unknown"}.`,
+      );
+    }
   }
   return { binaryPath, architecture: architectures };
 }
