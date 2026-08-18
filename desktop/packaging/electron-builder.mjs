@@ -1,41 +1,62 @@
 import { resolve } from "node:path";
 
-const desktopRoot = resolve(import.meta.dirname, "..");
-const release = process.env.RELAYER_DESKTOP_RELEASE === "1";
-const updateChannel = process.env.RELAYER_DESKTOP_CHANNEL === "preview" ? "beta" : "latest";
+import {
+  electronBuilderSigningIdentity,
+  loadDesktopReleaseContract,
+} from "../release/contract.mjs";
 
-if (!release && process.env.CI === "true" && !process.argv.includes("--dir")) {
-  throw new Error("Distributable desktop builds require RELAYER_DESKTOP_RELEASE=1 and signing credentials.");
+const desktopRoot = resolve(import.meta.dirname, "..");
+
+export function createDesktopBuilderConfig(contract) {
+  const release = contract.release;
+  if (!release && process.env.CI === "true" && !process.argv.includes("--dir")) {
+    throw new Error("Distributable desktop builds require the explicit signed release contract.");
+  }
+
+  return {
+    appId: contract.appId,
+    productName: contract.productName,
+    electronVersion: "43.0.0",
+    npmRebuild: false,
+    asar: true,
+    forceCodeSigning: release,
+    directories: { app: desktopRoot, output: resolve(desktopRoot, "dist") },
+    extraMetadata: {
+      main: "main/index.mjs",
+      relayerArtifactMode: contract.artifactMode,
+      relayerProductName: contract.productName,
+      relayerUpdateChannel: contract.channelName,
+      relayerUpdateBaseUrl: contract.updateBaseUrl,
+      relayerReleaseSourceCommit: contract.sourceCommit,
+      relayerAppleTeamId: contract.appleTeamId,
+      relayerMinimumMacOSVersion: contract.minimumMacOSVersion,
+    },
+    files: ["**/*", "!dist/**/*", "!packaging/**/*", "!release/**/*"],
+    artifactName: `${release ? "Relayer" : "Relayer-DEV"}-\${version}-mac-\${arch}.\${ext}`,
+    afterSign: release ? "desktop/release/verify-macos-app.mjs" : undefined,
+    mac: {
+      category: "public.app-category.developer-tools",
+      icon: resolve(desktopRoot, "renderer/assets/relayer-logo.svg"),
+      target: [
+        { target: "dmg", arch: [contract.architecture] },
+        { target: "zip", arch: [contract.architecture] },
+      ],
+      identity: release ? electronBuilderSigningIdentity(contract.signingIdentity) : null,
+      hardenedRuntime: release,
+      gatekeeperAssess: false,
+      minimumSystemVersion: contract.minimumMacOSVersion,
+      entitlements: resolve(import.meta.dirname, "macos/entitlements.mac.plist"),
+      entitlementsInherit: resolve(import.meta.dirname, "macos/entitlements.mac.inherit.plist"),
+      notarize: release,
+      strictVerify: true,
+      extendInfo: release ? { ElectronSquirrelPreventDowngrades: true } : undefined,
+    },
+    publish: release
+      ? [{ provider: "generic", url: contract.updateBaseUrl, channel: contract.providerChannel }]
+      : undefined,
+  };
 }
 
-export default {
-  appId: release ? "ai.relayer.desktop" : "ai.relayer.desktop.development",
-  productName: release ? "Relayer" : "Relayer Dev",
-  electronVersion: "43.0.0",
-  npmRebuild: false,
-  asar: true,
-  forceCodeSigning: release,
-  directories: { app: desktopRoot, output: resolve(desktopRoot, "dist") },
-  extraMetadata: {
-    main: "main/index.mjs",
-    relayerProductName: release ? "Relayer" : "Relayer Dev",
-    relayerUpdateChannel: release ? updateChannel : "development",
-  },
-  files: [
-    "**/*",
-    "!dist/**/*",
-    "!packaging/**/*",
-  ],
-  artifactName: `${release ? "Relayer" : "Relayer-DEV"}-\${version}-mac-\${arch}.\${ext}`,
-  mac: {
-    category: "public.app-category.developer-tools",
-    icon: resolve(desktopRoot, "renderer/assets/relayer-logo.svg"),
-    target: [{ target: "dmg", arch: ["arm64"] }, { target: "zip", arch: ["arm64"] }],
-    identity: release ? undefined : null,
-    hardenedRuntime: release,
-    entitlements: resolve(import.meta.dirname, "macos/entitlements.mac.plist"),
-    entitlementsInherit: resolve(import.meta.dirname, "macos/entitlements.mac.inherit.plist"),
-    notarize: release,
-  },
-  publish: release ? [{ provider: "generic", url: process.env.RELAYER_DESKTOP_UPDATE_BASE_URL || "https://updates.relayerlabs.ai/desktop/macos/arm64", channel: updateChannel }] : undefined,
-};
+export default async function desktopBuilderConfig() {
+  return createDesktopBuilderConfig(await loadDesktopReleaseContract({ desktopRoot }));
+}

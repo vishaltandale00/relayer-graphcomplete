@@ -59,6 +59,21 @@
     .slice-summary { margin: 18px 0 26px; padding: 16px 18px; border-left: 4px solid light-dark(#d2961d, #e4b84c); border-radius: 8px; background: light-dark(#fff9e9, #2c2515); }
     .slice-summary > :first-child { margin-top: 0; }
     .slice-summary > :last-child { margin-bottom: 0; }
+    .release-status-card { margin: 20px 0 30px; padding: 20px; border: 1px solid light-dark(#e3ca83, #655526); border-radius: 12px; background: light-dark(#fffbef, #241f12); }
+    .release-status-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 18px; }
+    .release-status-title { display: grid; gap: 5px; }
+    .release-status-title strong { font-size: 18px; }
+    .release-status-title small { color: light-dark(#687387, #aab3c2); font-size: 11px; }
+    .release-status-count { color: light-dark(#725500, #e3c55e); font-size: 12px; font-weight: 800; }
+    .release-checkpoints { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 10px; margin-top: 18px; }
+    .release-checkpoint { display: grid; align-content: start; gap: 8px; min-height: 88px; padding: 12px; border: 1px solid light-dark(#e1dfd6, #433f32); border-radius: 9px; background: light-dark(#fff, #181a1d); }
+    .release-checkpoint strong { font-size: 12px; }
+    .release-checkpoint small { color: light-dark(#687387, #9ca6b8); font-size: 10px; line-height: 1.45; }
+    .release-proof-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin: 22px 0 30px; }
+    .release-proof-card { min-width: 0; margin: 0; padding: 12px; border: 1px solid light-dark(#dce1e9, #343c4d); border-radius: 10px; background: light-dark(#f8f9fb, #121720); }
+    .release-proof-card .evidence-image { margin-bottom: 10px; }
+    .release-proof-card figcaption { display: grid; gap: 6px; font-size: 11px; line-height: 1.45; }
+    .release-proof-card figcaption strong { font-size: 12px; }
     .product-walkthrough { display: block; width: 100%; height: 760px; margin: 24px auto 28px; border: 1px solid light-dark(#cdd3df, #3a4254); border-radius: 12px; background: light-dark(#fff, #181818); box-shadow: 0 14px 40px rgba(10, 16, 28, .15); }
     .scenario-reading { margin: 28px 0 34px; padding-top: 24px; border-top: 1px solid light-dark(#dce1e9, #323949); }
     .scenario-reading-header { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
@@ -341,9 +356,9 @@ type CompleteResult = {
 </tr>
 <tr>
 <td>Desktop updater and distributable packaging</td>
-<td><span class="delivery-status next">Next slice</span></td>
-<td>An unsigned Apple Silicon development package builds, and an isolated updater state-service scenario covers check, available, download, ready, and install events.</td>
-<td>No signed/notarized release, hosted Stable/Preview feed, previous-version upgrade, signature-failure behavior, or rollback has been product-proven. Section 5.7 defines the proposed next slice.</td>
+<td><span class="delivery-status partial">Partial</span></td>
+<td>An unsigned development package builds; a real <code>0.2.0</code> Apple Silicon candidate is signed, notarized, stapled, Gatekeeper-accepted, and captured; the Preview publisher and protected tag/OIDC infrastructure are implemented and deterministically tested.</td>
+<td>The protected CI signing and notarization credentials are configured, but the workflow has not run and the bucket remains empty. No hosted update, previous-version upgrade, visible packaged updater flow, Stable promotion, or rollback has been product-proven. Section 5.7 defines the remaining slice.</td>
 </tr>
 <tr>
 <td>Relayer login and additional providers</td>
@@ -679,10 +694,10 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </tr>
 <tr>
 <td>Application updater</td>
-<td><span class="delivery-status next">Next slice</span></td>
-<td>One updater scenario covers check, available, download, ready, and install without network access.</td>
-<td>Settings callouts 5 and 6 show the current development controls.</td>
-<td>Signed manifest/feed, real download, signature verification, restart installation, Stable/Preview publication, and rollback remain undone.</td>
+<td><span class="delivery-status partial">Partial</span></td>
+<td>One updater scenario covers check, available, download, ready, and install without network access. The release scenarios cover identity, version, channel, credentials, manifest sealing, final ZIP reconstruction, checksums, receipts, tamper rejection, tag provenance, immutable publication keys, conditional writes, retry recovery, downgrade rejection, and same-version byte-replacement rejection.</td>
+<td><code>UPD-002-E1</code> proves the real signed and notarized <code>0.2.0</code> packaged app launches with an isolated profile.</td>
+<td>The Preview AWS role, protected GitHub environments, and CI signing/notarization credentials are configured, but the feed is intentionally still empty. A CI-signed candidate run, hosted Preview publication, real download/restart installation, Stable promotion, and rollback remain undone.</td>
 </tr>
 </tbody></table>
 <h4><code>SET-001-E1</code> — full-page Settings</h4>
@@ -712,8 +727,48 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </figure>
 
 <h3>5.7 Proposed Slice 2 — packaged desktop and updates</h3>
-<p><span class="delivery-status next">Next slice</span></p>
 <p>The next slice turns the existing development shell into a safely installable and updateable macOS arm64 product. It does not add project/thread persistence, invoke a harness, or render graph output.</p>
+<p><strong>Current checkpoint:</strong> the release identity and artifact contract, local signed/notarized <code>0.2.0</code> proof, immutable Preview publisher, protected GitHub environments, CI signing/notarization credentials, and narrow AWS OIDC role are complete. The PKCS#12 was verified through an isolated Keychain import before its encrypted GitHub secrets were stored, and the temporary export was deleted. No release objects have been uploaded. After review and merge, the first controlled tag can prove hosted <code>0.2.0</code>, followed by <code>0.2.1</code> as the real in-app update.</p>
+<section class="release-status-card" aria-label="Desktop update slice status">
+  <div class="release-status-header">
+    <div class="release-status-title">
+      <span class="delivery-status partial">Partial — signed check verified, product update unverified</span>
+      <strong>Desktop update delivery status</strong>
+      <small>Status reflects saved proof, not the presence of implementation code.</small>
+    </div>
+    <span class="release-status-count">3 verified · 1 ready · 2 open · 1 deferred</span>
+  </div>
+  <div class="release-checkpoints">
+    <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Release contract</strong><small>Identity, version, provenance, signing requirements, manifests, hashes, retry, downgrade, and mutation rules pass deterministic tests.</small></article>
+    <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Local signed 0.2.0</strong><small>Developer ID signing, notarization, stapling, Gatekeeper acceptance, launch screenshot, and artifact receipt are saved below.</small></article>
+    <article class="release-checkpoint"><span class="delivery-status verified">Verified</span><strong>Signed updater check</strong><small>A Developer-ID-signed 0.2.0 build reaches the sealed Preview feed and presents its currently empty feed as a concise, retryable product state.</small></article>
+    <article class="release-checkpoint"><span class="delivery-status next">Ready to verify</span><strong>CI signed candidate</strong><small>Protected credentials and workflow are configured. The workflow has not run from <code>main</code> yet.</small></article>
+    <article class="release-checkpoint"><span class="delivery-status open">Open</span><strong>Hosted Preview 0.2.0</strong><small>The publication role is configured, but the update bucket is intentionally empty and no publication receipt exists.</small></article>
+    <article class="release-checkpoint"><span class="delivery-status open">Open</span><strong>0.2.0 → 0.2.1 update</strong><small>The signed empty-feed check is captured; available, download, restart, and preference-preservation still require a hosted 0.2.1.</small></article>
+    <article class="release-checkpoint"><span class="delivery-status deferred">Deferred</span><strong>Stable promotion and rollback</strong><small>Implemented only after the Preview update path has passed its product smoke.</small></article>
+  </div>
+</section>
+<h4>Current visual proof</h4>
+<div class="release-proof-grid">
+  <figure class="release-proof-card">
+    <div class="evidence-image">
+      <img src="assets/evidence/desktop/signed-preview-0.2.0-updater-empty-feed.png" alt="Developer-ID-signed Relayer 0.2.0 showing the Preview channel and a retryable empty-feed update result">
+      <span class="evidence-callout" style="--x:81%;--y:35%">1</span>
+      <span class="evidence-callout" style="--x:25%;--y:62%">2</span>
+      <span class="evidence-callout" style="--x:80%;--y:67%">3</span>
+    </div>
+    <figcaption><span class="delivery-status verified">Signed update check verified</span><strong>The signed app reaches the sealed Preview feed and fails safely while it is empty.</strong><span><b>1</b> is the packaged Preview channel. <b>2</b> is the concise failure state after the real feed returned <code>403</code>. <b>3</b> is the retry control. This does not prove download or restart.</span></figcaption>
+  </figure>
+  <figure class="release-proof-card" id="upd-002-e1-proof">
+    <div class="evidence-image">
+      <img src="assets/evidence/desktop/signed-preview-0.2.0.png" alt="Signed and notarized Relayer 0.2.0 Preview launched with an isolated profile">
+      <span class="evidence-callout" style="--x:36%;--y:41%">1</span>
+      <span class="evidence-callout" style="--x:50%;--y:54%">2</span>
+      <span class="evidence-callout" style="--x:64%;--y:55%">3</span>
+    </div>
+    <figcaption><span class="delivery-status verified">Packaged launch verified</span><strong>The real signed/notarized 0.2.0 application launches.</strong><span><b>1</b> is the production app surface. <b>2</b> is the empty isolated profile. <b>3</b> confirms this proof stops at provider setup and does not imply harness execution.</span></figcaption>
+  </figure>
+</div>
 <h4>Slice boundary</h4>
 <table>
 <thead>
@@ -747,13 +802,13 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <td>Stable public promotion before Preview is proven</td>
 </tr>
 </tbody></table>
-<h4>Decisions to settle before implementation</h4>
+<h4>Release decisions</h4>
 <ol>
-<li><strong>Preview isolation:</strong> decide whether Preview is a separately installable <code>Relayer Preview</code> application with its own bundle ID/data directory, or the same <code>Relayer</code> application switching feeds. A separate Preview app is recommended because it can coexist with Stable and cannot strand a user on a prerelease version when downgrades are disabled.</li>
-<li><strong>Artifact host:</strong> choose the HTTPS host and immutable directory convention for DMG, ZIP, checksums, and <code>latest</code>/<code>beta</code> channel metadata.</li>
-<li><strong>Signing automation:</strong> confirm the Apple Developer ID identity and notarization credentials already used by Relayer, then define how local release builds and CI receive them without storing secrets in the repository.</li>
+<li><strong>Product continuity:</strong> Preview and Stable are channels for the same <code>ai.relayer.desktop</code> application. Unsigned local packages use <code>ai.relayer.desktop.development</code> and can coexist with the signed app. The first signed seed is <code>0.2.0</code>; <code>0.2.1</code> is the first real update proof.</li>
+<li><strong>Artifact host:</strong> DMG, ZIP, checksums, receipts, and <code>latest</code>/<code>beta</code> metadata use <code>https://updates.relayerlabs.ai/desktop/macos/arm64</code>. Versioned artifacts are immutable; channel metadata is written last.</li>
+<li><strong>Signing automation:</strong> release builds use the existing Developer ID Application identity for Apple team <code>NZ253AL7U6</code> and App Store Connect notarization credentials supplied locally or through a protected GitHub environment. Secrets are never stored in the repository.</li>
 <li><strong>Update prompt timing:</strong> use the existing compact sidebar indicator; downloading is user-triggered, and restart remains explicitly deferrable.</li>
-<li><strong>Minimum supported macOS:</strong> record and test one floor version plus the current macOS version before calling Preview distributable.</li>
+<li><strong>Minimum supported macOS:</strong> V1 supports Apple Silicon on macOS 13 or newer. Release evidence records the floor and validates both identity and architecture.</li>
 </ol>
 <h4>Minimal validation plan</h4>
 <table>
@@ -790,6 +845,13 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <td>The packaged app remains launchable on the old version, presents a retryable error, and does not lose the test preference.</td>
 </tr>
 </tbody></table>
+<h4><code>UPD-002-E1</code> — signed Preview <code>0.2.0</code> launch</h4>
+<p>This is the actual Developer-ID-signed and Apple-notarized arm64 application built from commit <code>4e5b9c3d21d2c7bbf902313d655f8e70aac30e75</code>, launched with an empty isolated profile. Gatekeeper accepted the app, stapler validated both the application and DMG, and the generated release receipt seals the post-stapling DMG and final updater ZIP hashes and regenerated blockmaps.</p>
+<p>See the annotated packaged-launch screenshot in <a href="#upd-002-e1-proof">Current visual proof</a> above.</p>
+<p>Machine-readable evidence: <code>assets/evidence/desktop/signed-preview-0.2.0-release.json</code>.</p>
+<h4><code>UPD-002-E2</code> — signed Preview feed check</h4>
+<p>A fresh Developer-ID-signed arm64 build from commit <code>3fb0e658706fd0fd3cc5993b3f353c6f4e1b6a84</code> was launched with an isolated profile. Its packaged updater selected Preview, requested the sealed <code>beta-mac.yml</code> URL, received the expected <code>403 AccessDenied</code> while no Preview release is published, and left the application usable with a concise retry state. The screenshot above is from that signed application, not Electron development mode. This local evidence does not claim a fresh notarization or a successful N-1 to N update.</p>
+<p>Machine-readable evidence: <code>assets/evidence/desktop/signed-preview-0.2.0-updater-empty-feed.json</code>.</p>
 <p>Slice 2 is complete only when the real packaged Preview app—not Electron development mode—installs through macOS, shows the expected Relayer branding, updates from N-1 to N through the visible product flow, preserves its local preference, and leaves the old version usable after a rejected update. Every manually inspected state receives an annotated screenshot in this PRD.</p>
 <h1>Part II — Relayer graph engine and Complete harness</h1>
 <h2>6. Graph engine: stable product contract</h2>
@@ -1413,7 +1475,7 @@ npm run eval:web
 <h3>12.1 V1 desktop shell decision and current gap</h3>
 <p>V1 uses an Electron shell in the Relayer Desktop package of this repository and direct macOS distribution outside the Mac App Store. Relayer Desktop packages the shell, graph renderer, local app server, eval runner, result catalog, and updater. Each desktop release locks and bundles the compatible Relayer Harness package from the same verified source revision, containing the graph engine, Complete implementation, Prime Agent runtime dependencies, Python/IPython capability, graph tools, and graph skill.</p>
 <p>Electron&#39;s macOS distribution guidance requires code signing and Apple notarization for normal distribution, and its automatic updater requires a signed macOS app. V1 treats those as release gates, not optional polish.</p>
-<p>The current repository has an Electron shell, an unsigned Apple Silicon development package, release-mode builder configuration, and an updater state service. Those are implementation starting points, not distribution proof. Developer-ID signing, notarization, stapling, hosted Stable/Preview feeds, a real previous-version update, clean-user installation, failure safety, and release automation remain unverified. Existing graph-engine, Complete, Prime Agent runtime, graph-tool, and eval code remain behind the Relayer Harness package boundary; Slice 2 packages the desktop without claiming those experimental paths work in the product.</p>
+<p>The repository now has an Electron shell, an unsigned Apple Silicon development package, a fail-closed release contract, and a locally verified <code>0.2.0</code> Developer-ID-signed/notarized Preview DMG and updater ZIP. The package, exact ZIP contents, sealed feed metadata, checksums, provenance receipt, Gatekeeper acceptance, and stapled notarization tickets are verified. The tag-gated Preview publisher, protected GitHub environments, CI signing/notarization credentials, and narrow AWS OIDC role are configured; publication deterministically rejects stale, mutable, or unsealed inputs. The update bucket remains empty. A CI-signed candidate run, hosted Preview publication, a real previous-version update, Stable promotion, rollback, and clean-user DMG installation remain unverified. Existing graph-engine, Complete, Prime Agent runtime, graph-tool, and eval code remain behind the Relayer Harness package boundary; Slice 2 packages the desktop without claiming those experimental paths work in the product.</p>
 <h3>12.2 Required developer and release modes</h3>
 <table>
 <thead>
@@ -1439,8 +1501,8 @@ npm run eval:web
 <tr>
 <td>Signed Preview</td>
 <td><code>npm run desktop:dist:preview</code></td>
-<td>Developer-ID-signed, notarized and stapled arm64 DMG/ZIP on the Preview feed</td>
-<td>Clean-user install, Gatekeeper, visible updater states, and Preview N-1 to N smoke</td>
+<td>Developer-ID-signed, notarized and stapled arm64 DMG/ZIP candidate; a matching protected desktop tag separately publishes it to Preview</td>
+<td>Candidate contract, Preview publication receipt, clean-user install, Gatekeeper, visible updater states, and Preview N-1 to N smoke</td>
 </tr>
 <tr>
 <td>Signed Stable</td>
@@ -1474,7 +1536,7 @@ npm run eval:web
     Q --&gt; R[&quot;Publish immutable artifacts and checksums&quot;]
     R --&gt; M[&quot;Publish stable update manifest last&quot;]
 </code></pre>
-<p>The initial V1 architecture is macOS arm64. Universal/x64 support is a separate release requirement and cannot be implied by a successful arm64 build. The exact supported macOS floor is recorded in the release manifest and tested on that floor plus the current macOS version.</p>
+<p>The initial V1 architecture is macOS arm64 on macOS 13 or newer. Universal/x64 support is a separate release requirement and cannot be implied by a successful arm64 build. The supported macOS floor is recorded in the release receipt and tested on that floor plus the current macOS version.</p>
 <h3>12.5 Distribution and update acceptance</h3>
 <p>The distributable outputs are a notarized DMG for first install and a signed ZIP plus channel metadata for Electron updates. Artifacts are content-addressed and immutable. The mutable channel manifest is published only after the referenced artifact, signature, checksum, notarization ticket, and smoke evidence are available.</p>
 <p>Before promotion, a clean machine must be able to install, launch, connect an agent, run or load the basic eval, use See in App, create a normal thread pinned to the passing configuration, quit/reopen with persistence, and update from the previous production version without losing graphs or settings.</p>

@@ -16,7 +16,7 @@ export function renderUpdate(next) {
     available: `Version ${updateState.availableVersion} available`,
     downloading: `Downloading · ${updateState.percent || 0}%`,
     ready: "Ready to restart",
-    failed: updateState.error || "Update failed",
+    failed: "Couldn’t check for updates",
   };
   $("#updateStatus").textContent = labels[updateState.phase] || updateState.phase;
   $("#updateTitle").textContent = updateState.phase === "ready" ? "Ready to restart"
