@@ -79,6 +79,17 @@
     .reading-path-card p { margin: 0; color: light-dark(#626d80, #a9b2c2); font-size: 12px; }
     .reading-path-card a, .journey-card a { width: fit-content; font-size: 11px; font-weight: 750; text-decoration: none; }
     .reading-path-card a:hover, .journey-card a:hover { text-decoration: underline; }
+    .status-tracker { margin: 0 0 42px; padding: 20px; border: 1px solid light-dark(#d8ddea, #373f50); border-radius: 12px; background: light-dark(#f8f9fb, #121720); }
+    .status-tracker-header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 14px; }
+    .status-tracker-header h3 { margin: 0; font-size: clamp(24px, 3vw, 34px); }
+    .status-tracker-summary { max-width: 520px; margin: 0; color: light-dark(#626d80, #a9b2c2); font-size: 12px; }
+    .status-counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin: 18px 0; }
+    .status-count { display: grid; gap: 4px; padding: 11px 12px; border: 1px solid light-dark(#dce1e9, #343c4d); border-radius: 8px; background: light-dark(#fff, #181d26); }
+    .status-count strong { font-size: 20px; }
+    .status-count span { color: light-dark(#687387, #aab3c2); font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+    .status-tracker table { margin-bottom: 0; }
+    .status-tracker td:first-child a { font-weight: 800; text-decoration: none; }
+    .status-tracker td:first-child a:hover { text-decoration: underline; }
     .journey-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 20px 0 12px; counter-reset: journey; }
     .journey-card { position: relative; padding-left: 54px; counter-increment: journey; }
     .journey-card::before { position: absolute; top: 17px; left: 17px; width: 25px; height: 25px; display: grid; place-items: center; border-radius: 999px; background: light-dark(#ece8ff, #302751); color: light-dark(#5d43c5, #c4b8ff); content: counter(journey); font-size: 11px; font-weight: 850; }
@@ -162,6 +173,7 @@
       .product-walkthrough { height: 720px; }
       .scenario-reading-header { align-items: start; flex-direction: column; }
       .reading-path-grid, .journey-grid { grid-template-columns: 1fr; }
+      .status-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .capability-summary { grid-template-columns: 1fr; }
       .capability-summary .capability-evidence { grid-column: auto; }
     }
@@ -169,7 +181,7 @@
 </head>
 <body>
   <main><h1>Relayer Desktop and Relayer Harness: Product Requirements</h1>
-<p><strong>Status:</strong> Draft for product review.<br>
+<p><strong>Document status:</strong> Draft for product review.<br>
 <strong>Last updated:</strong> 2026-08-18.</p>
 <section class="reading-map" aria-labelledby="reading-map-title">
 <span class="reading-map-eyebrow">Start here</span>
@@ -192,6 +204,36 @@
 <a href="#15-canonical-visual-product-reference">Start the Evidence path →</a>
 </article>
 </div>
+<section class="status-tracker" id="delivery-status-tracker" aria-labelledby="delivery-status-title">
+<div class="status-tracker-header">
+<div>
+<span class="reading-map-eyebrow">Delivery status</span>
+<h3 id="delivery-status-title">Current V1 capability status</h3>
+</div>
+<p class="status-tracker-summary"><strong>Overall status: Partial.</strong> No capability has complete end-to-end product proof. Seven capabilities are partial, and two are open.</p>
+</div>
+<div class="status-counts" aria-label="Capability status totals">
+<div class="status-count"><strong>0</strong><span>Verified</span></div>
+<div class="status-count"><strong>7</strong><span>Partial</span></div>
+<div class="status-count"><strong>2</strong><span>Open</span></div>
+<div class="status-count"><strong>0</strong><span>Deferred</span></div>
+</div>
+<div class="delivery-legend"><span class="delivery-status verified">Verified</span><span class="delivery-status partial">Partial</span><span class="delivery-status open">Open</span><span class="delivery-status deferred">Deferred</span></div>
+<table>
+<thead><tr><th>Capability</th><th>Status</th><th>Proven now</th><th>Next proof</th></tr></thead>
+<tbody>
+<tr class="requirement-row status-partial"><td><a href="#2-connect-an-agent">Connect an agent</a></td><td><span class="delivery-status partial">Partial</span></td><td><a href="#15a-agent-connection-evidence">Provider setup and restart screenshots</a></td><td>Rejection, expiration, revocation, and a signed authentication smoke</td></tr>
+<tr class="requirement-row status-partial"><td><a href="#3-choose-a-work-context">Choose a work context</a></td><td><span class="delivery-status partial">Partial</span></td><td><a href="#15b-work-context-evidence">No-folder creation and saved scope</a></td><td>Complete folder, project, Git, and worktree flows</td></tr>
+<tr class="requirement-row status-partial"><td><a href="#4-run-a-task">Run a task</a></td><td><span class="delivery-status partial">Partial</span></td><td><a href="#15e-graphcomplete-runtime-evidence">Two-turn Complete runtime evaluation</a></td><td>Desktop harness invocation and accepted-result rendering</td></tr>
+<tr class="requirement-row status-open"><td><a href="#5-control-a-run">Control a run</a></td><td><span class="delivery-status open">Open</span></td><td>Requirements and state contract only</td><td>Stop and retry proof in Relayer Desktop</td></tr>
+<tr class="requirement-row status-partial"><td><a href="#6-inspect-the-result">Inspect the result</a></td><td><span class="delivery-status partial">Partial</span></td><td><a href="#15d-basic-complete-evaluation-evidence">Exact accepted layers in the local viewer</a></td><td>Desktop canvas, inspector, navigation, and saved replay</td></tr>
+<tr class="requirement-row status-open"><td><a href="#7-act-on-the-result">Act on the result</a></td><td><span class="delivery-status open">Open</span></td><td><a href="#15-canonical-visual-product-reference">Product mock and action contract</a></td><td>Context and authored-action proof in Relayer Desktop</td></tr>
+<tr class="requirement-row status-partial"><td><a href="#8-return-to-saved-work">Return to saved work</a></td><td><span class="delivery-status partial">Partial</span></td><td><a href="#15-4-app-server-and-persistence-delivery-checkpoint">No-folder thread recovery after restart</a></td><td>Accepted graph and interrupted-run recovery</td></tr>
+<tr class="requirement-row status-partial"><td><a href="#9-evaluate-a-harness">Evaluate a harness</a></td><td><span class="delivery-status partial">Partial</span></td><td><a href="#15d-basic-complete-evaluation-evidence">Runner, checks, judge, and local result</a></td><td>Immutable bundle, See in App, and desktop replay</td></tr>
+<tr class="requirement-row status-partial"><td><a href="#10-manage-and-update-relayer-desktop">Manage and update the desktop</a></td><td><span class="delivery-status partial">Partial</span></td><td><a href="#15c-desktop-management-and-update-evidence">Signed Stable update and settings screenshots</a></td><td>Remaining settings, support matrix, corrupt download, and deferral tests</td></tr>
+</tbody>
+</table>
+</section>
 <span class="reading-map-eyebrow">Product capabilities</span>
 <div class="journey-grid">
 <article class="journey-card">
@@ -200,7 +242,6 @@
 <p><strong>Product rule:</strong> Relayer keeps the agent connection separate from project selection.</p>
 <p><strong>Observable result:</strong> The app shows the connection state and available recovery actions.</p>
 <p><strong>Acceptance:</strong> A new desktop process recognizes the saved connection.</p>
-<p class="journey-evidence"><strong>Status and evidence:</strong> Partial. Codex setup has tests and product screenshots.</p>
 <a href="#2-connect-an-agent">Read connection requirements →</a>
 </article>
 <article class="journey-card">
@@ -209,7 +250,6 @@
 <p><strong>Product rule:</strong> Git projects offer the local checkout or a Relayer worktree.</p>
 <p><strong>Observable result:</strong> New Thread shows the selected scope before send.</p>
 <p><strong>Acceptance:</strong> The interaction records the exact scope selected at send time.</p>
-<p class="journey-evidence"><strong>Status and evidence:</strong> Partial. No-folder scope works; full project and Git flows are open.</p>
 <a href="#3-choose-a-work-context">Read context requirements →</a>
 </article>
 <article class="journey-card">
@@ -218,7 +258,6 @@
 <p><strong>Product rule:</strong> Relayer creates one interaction node and calls Complete once.</p>
 <p><strong>Observable result:</strong> The app returns an accepted, stopped, or failed state.</p>
 <p><strong>Acceptance:</strong> An accepted layer matches the persisted graph state.</p>
-<p class="journey-evidence"><strong>Status and evidence:</strong> Partial. Runtime evaluation passes; desktop integration is open.</p>
 <a href="#4-run-a-task">Read task requirements →</a>
 </article>
 <article class="journey-card">
@@ -227,7 +266,6 @@
 <p><strong>Product rule:</strong> Running, stopping, stopped, failed, and accepted are explicit states.</p>
 <p><strong>Observable result:</strong> The composer shows the available control for the current state.</p>
 <p><strong>Acceptance:</strong> Stop and failure never create an accepted response layer.</p>
-<p class="journey-evidence"><strong>Status and evidence:</strong> Open. Contracts exist, but the desktop flow needs proof.</p>
 <a href="#5-control-a-run">Read run-control requirements →</a>
 </article>
 <article class="journey-card">
@@ -236,7 +274,6 @@
 <p><strong>Product rule:</strong> The canvas and inspector show the exact accepted layer.</p>
 <p><strong>Observable result:</strong> The user can inspect nodes, parents, and prior turns.</p>
 <p><strong>Acceptance:</strong> Saved replay produces the same visible graph state.</p>
-<p class="journey-evidence"><strong>Status and evidence:</strong> Partial. A local viewer exists; desktop graph rendering is open.</p>
 <a href="#6-inspect-the-result">Read inspection requirements →</a>
 </article>
 <article class="journey-card">
@@ -245,7 +282,6 @@
 <p><strong>Product rule:</strong> Context attachments and authored actions create explicit graph relationships.</p>
 <p><strong>Observable result:</strong> The composer shows context; authored actions navigate or invoke work.</p>
 <p><strong>Acceptance:</strong> Each invoked action creates one traceable interaction.</p>
-<p class="journey-evidence"><strong>Status and evidence:</strong> Open. The product mock exists; desktop behavior needs proof.</p>
 <a href="#7-act-on-the-result">Read action requirements →</a>
 </article>
 <article class="journey-card">
@@ -254,7 +290,6 @@
 <p><strong>Product rule:</strong> Relayer persists accepted state and explicit interrupted states.</p>
 <p><strong>Observable result:</strong> Saved threads reopen from Chats or Projects.</p>
 <p><strong>Acceptance:</strong> Restart preserves the last accepted graph without corruption.</p>
-<p class="journey-evidence"><strong>Status and evidence:</strong> Partial. No-folder thread persistence is verified.</p>
 <a href="#8-return-to-saved-work">Read persistence requirements →</a>
 </article>
 <article class="journey-card">
@@ -263,7 +298,6 @@
 <p><strong>Product rule:</strong> Versioned evaluations produce immutable results and replay data.</p>
 <p><strong>Observable result:</strong> A report can open its saved result in Relayer Desktop.</p>
 <p><strong>Acceptance:</strong> Promotion requires automated checks and human visual review.</p>
-<p class="journey-evidence"><strong>Status and evidence:</strong> Partial. Basic evaluation works; desktop replay is open.</p>
 <a href="#9-evaluate-a-harness">Read evaluation requirements →</a>
 </article>
 <article class="journey-card">
@@ -272,7 +306,6 @@
 <p><strong>Product rule:</strong> Settings remain local; releases are signed and verified.</p>
 <p><strong>Observable result:</strong> The app shows settings and explicit update states.</p>
 <p><strong>Acceptance:</strong> An update preserves supported product data and settings.</p>
-<p class="journey-evidence"><strong>Status and evidence:</strong> Partial. Stable update delivery is verified; broader settings remain open.</p>
 <a href="#10-manage-and-update-relayer-desktop">Read desktop-management requirements →</a>
 </article>
 </div>
