@@ -1,0 +1,85 @@
+name: Promote Relayer Desktop to Stable
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Numeric Preview version to promote
+        required: true
+        type: string
+      canary_evidence:
+        description: Repository-relative path to the committed Preview canary evidence JSON
+        required: true
+        type: string
+      confirmation:
+        description: Enter promote-VERSION exactly
+        required: true
+        type: string
+
+concurrency:
+  group: relayer-desktop-stable-promotion
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    name: Promote exact Preview artifacts to Stable
+    runs-on: ubuntu-latest
+    environment:
+      name: desktop-update-stable-promotion
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require main and exact confirmation
+        env:
+          VERSION: ${{ inputs.version }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CONFIRMATION" == "promote-${VERSION}" ]]
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22.22.0"
+          cache: npm
+
+      - name: Install locked publication dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Assume Stable promotion role
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
+        with:
+          role-to-assume: ${{ vars.DESKTOP_UPDATE_STABLE_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Promote the verified Preview candidate
+        env:
+          DESKTOP_UPDATE_BUCKET: ${{ vars.DESKTOP_UPDATE_BUCKET }}
+          STABLE_PROMOTION_CONFIRMATION: ${{ inputs.confirmation }}
+        run: >-
+          npm run desktop:release:promote-stable --
+          --bucket "$DESKTOP_UPDATE_BUCKET"
+          --version "${{ inputs.version }}"
+          --canary-evidence "${{ inputs.canary_evidence }}"
+
+      - name: Preserve Stable promotion receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: relayer-desktop-stable-${{ inputs.version }}-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 90
+          path: desktop/dist/stable-promotion-${{ inputs.version }}.json
