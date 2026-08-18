@@ -34,10 +34,11 @@ export function createDesktopBuilderConfig(contract) {
     },
     files: ["**/*", "!dist/**/*", "!packaging/**/*", "!release/**/*", "!renderer/**/*"],
     extraResources: [
-      { from: resolve(repositoryRoot, "target/release/relayer-app-server"), to: "bin/relayer-app-server" },
+      { from: resolve(repositoryRoot, "target/aarch64-apple-darwin/release/relayer-app-server"), to: "bin/relayer-app-server" },
       { from: resolve(desktopRoot, "renderer"), to: "renderer" },
     ],
     artifactName: `${release ? "Relayer" : "Relayer-DEV"}-\${version}-mac-\${arch}.\${ext}`,
+    afterPack: "desktop/packaging/verify-bundled-app-server.mjs",
     afterSign: release ? "desktop/release/verify-macos-app.mjs" : undefined,
     mac: {
       category: "public.app-category.developer-tools",

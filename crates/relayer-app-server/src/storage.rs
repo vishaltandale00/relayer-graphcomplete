@@ -9,4 +9,6 @@ pub(crate) enum StorageError {
     Database(#[from] sqlx::Error),
     #[error("database migration failed: {0}")]
     Migration(#[from] sqlx::migrate::MigrateError),
+    #[error("product database schema is incompatible: {0}")]
+    IncompatibleSchema(String),
 }

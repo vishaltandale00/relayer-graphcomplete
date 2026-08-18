@@ -1,7 +1,7 @@
 use axum::{
     Router,
     body::{Body, to_bytes},
-    http::{Request, StatusCode},
+    http::{Request, Response, StatusCode},
 };
 use relayer_app_server::{CONTROL_COOKIE, RelayerAppServer, RelayerAppServerConfig};
 use serde_json::{Value, json};
@@ -24,10 +24,12 @@ async fn persists_project_thread_and_interaction_across_restart() {
         std::process::id()
     ));
     let project_folder = root.join("project");
+    let racing_project_folder = root.join("racing-project");
     fs::create_dir_all(&project_folder).unwrap();
+    fs::create_dir_all(&racing_project_folder).unwrap();
     let database = root.join("product.sqlite3");
 
-    {
+    let newest_thread_id = {
         let app = open_app(&database, &root).await;
         let denied = app
             .clone()
@@ -47,9 +49,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .await
             .unwrap();
         assert_eq!(project.status(), StatusCode::CREATED);
-        let project: Value =
-            serde_json::from_slice(&to_bytes(project.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
+        let project = response_json(project).await;
         assert!(project["id"].as_i64().is_some_and(|id| id > 0));
 
         let duplicate = app
@@ -63,9 +63,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .await
             .unwrap();
         assert_eq!(duplicate.status(), StatusCode::CONFLICT);
-        let duplicate: Value =
-            serde_json::from_slice(&to_bytes(duplicate.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
+        let duplicate = response_json(duplicate).await;
         assert_eq!(duplicate["code"], "project_exists");
         assert_eq!(duplicate["existingProject"]["id"], project["id"]);
 
@@ -97,6 +95,29 @@ async fn persists_project_thread_and_interaction_across_restart() {
                 .unwrap();
         assert_eq!(unavailable["code"], "folder_unavailable");
 
+        let first_project = app.clone().oneshot(api_request(
+            "POST",
+            "/api/projects",
+            Some(json!({ "path": racing_project_folder })),
+            true,
+        ));
+        let second_project = app.clone().oneshot(api_request(
+            "POST",
+            "/api/projects",
+            Some(json!({ "path": racing_project_folder })),
+            true,
+        ));
+        let (first_project, second_project) = tokio::join!(first_project, second_project);
+        let mut project_statuses = [
+            first_project.unwrap().status(),
+            second_project.unwrap().status(),
+        ];
+        project_statuses.sort();
+        assert_eq!(
+            project_statuses,
+            [StatusCode::CREATED, StatusCode::CONFLICT]
+        );
+
         let thread = app
             .clone()
             .oneshot(api_request(
@@ -127,7 +148,15 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .await
             .unwrap();
         assert_eq!(standalone.status(), StatusCode::CREATED);
-    }
+        response_json(standalone).await["id"].as_i64().unwrap()
+    };
+
+    let timestamp_pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE threads SET created_at='same', updated_at='same'")
+        .execute(&timestamp_pool)
+        .await
+        .unwrap();
+    timestamp_pool.close().await;
 
     let app = open_app(&database, &root).await;
     let state = app
@@ -137,8 +166,13 @@ async fn persists_project_thread_and_interaction_across_restart() {
         .unwrap();
     let state: Value =
         serde_json::from_slice(&to_bytes(state.into_body(), usize::MAX).await.unwrap()).unwrap();
-    assert_eq!(state["projects"].as_array().unwrap().len(), 1);
+    assert_eq!(state["projects"].as_array().unwrap().len(), 2);
     assert_eq!(state["threads"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        state["threads"][0]["id"].as_i64().unwrap(),
+        newest_thread_id
+    );
+    assert_eq!(state["threads"][0]["active"], true);
     assert!(
         state["threads"].as_array().unwrap().iter().any(|thread| {
             thread["title"] == "Standalone thread" && thread["projectId"].is_null()
@@ -185,12 +219,53 @@ async fn persists_project_thread_and_interaction_across_restart() {
     assert!(state.get("edges").is_none());
     assert!(state.get("status").is_none());
 
-    drop(app);
-    let migration_pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect_with(SqliteConnectOptions::new().filename(&database))
+    let persisted_thread_id = state["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|thread| thread["title"] == "Persist me")
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    let mut writes = tokio::task::JoinSet::new();
+    for index in 0..12 {
+        let app = app.clone();
+        writes.spawn(async move {
+            app.oneshot(api_request(
+                "POST",
+                &format!("/api/threads/{persisted_thread_id}/interactions"),
+                Some(json!({ "text": format!("follow-up-{index}") })),
+                true,
+            ))
+            .await
+            .unwrap()
+            .status()
+        });
+    }
+    while let Some(status) = writes.join_next().await {
+        assert_eq!(status.unwrap(), StatusCode::CREATED);
+    }
+    let interactions = app
+        .clone()
+        .oneshot(api_request(
+            "GET",
+            &format!("/api/threads/{persisted_thread_id}/interactions"),
+            None,
+            true,
+        ))
         .await
         .unwrap();
+    let interactions = response_json(interactions).await;
+    let sequences = interactions["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|interaction| interaction["sequence"].as_i64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(sequences, (1..=13).collect::<Vec<_>>());
+
+    drop(app);
+    let migration_pool = sqlite_pool(&database).await;
     let applied_migrations: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE success = 1")
             .fetch_one(&migration_pool)
@@ -198,7 +273,42 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .unwrap();
     assert_eq!(applied_migrations, 1);
     migration_pool.close().await;
+
+    let incompatible_database = root.join("incompatible.sqlite3");
+    let incompatible_pool = sqlite_pool(&incompatible_database).await;
+    sqlx::query("CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT)")
+        .execute(&incompatible_pool)
+        .await
+        .unwrap();
+    incompatible_pool.close().await;
+    let incompatible = RelayerAppServer::open(RelayerAppServerConfig {
+        database_path: incompatible_database,
+        web_directory: root.clone(),
+        control_token: "control".to_owned(),
+    })
+    .await;
+    let error = match incompatible {
+        Ok(_) => panic!("incompatible product schema was accepted"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("schema is incompatible"));
     fs::remove_dir_all(root).unwrap();
+}
+
+async fn sqlite_pool(database: &Path) -> sqlx::SqlitePool {
+    SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(database)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap()
+}
+
+async fn response_json(response: Response<Body>) -> Value {
+    serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
 }
 
 async fn open_app(database: &Path, web_directory: &Path) -> Router {

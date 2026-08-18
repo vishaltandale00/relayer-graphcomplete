@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
@@ -15,6 +15,7 @@ import {
   packagedDesktopReleaseMetadata,
 } from "../desktop/shared/release-metadata.mjs";
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
+import { verifyBundledAppServer } from "../desktop/packaging/verify-bundled-app-server.mjs";
 import {
   DESKTOP_RELEASE,
   resolveDesktopReleaseContract,
@@ -85,7 +86,8 @@ describe("desktop skeleton", () => {
     expect(packageManifest).toContain("desktop/packaging/electron-builder.mjs");
     expect(packaging).toContain('"macos/entitlements.mac.plist"');
     expect(packaging).toContain('"!packaging/**/*"');
-    expect(packaging).toContain('"target/release/relayer-app-server"');
+    expect(packaging).toContain('"target/aarch64-apple-darwin/release/relayer-app-server"');
+    expect(packaging).toContain('afterPack: "desktop/packaging/verify-bundled-app-server.mjs"');
     expect(packaging).toContain('to: "renderer"');
     expect(threads).not.toContain("/messages");
     expect(threads).not.toContain("EventSource");
@@ -102,6 +104,57 @@ describe("desktop skeleton", () => {
     expect(prd).toContain('document: \'docs/prd/index.html\'');
     expect(prdServer).toContain('join(prdDirectory, "comments.json")');
     expect(packageManifest).not.toContain('"marked"');
+  });
+
+  it("coalesces repeated first-thread submissions while creation is pending", async () => {
+    const globalNames = ["document", "fetch", "history", "location", "localStorage", "window"];
+    const originalGlobals = new Map(
+      globalNames.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]),
+    );
+    const input = { value: "Build the first thread", disabled: false };
+    const button = { disabled: false };
+    const toastElement = {
+      textContent: "",
+      classList: { add: vi.fn(), remove: vi.fn() },
+    };
+    let rejectRequest;
+    const fetch = vi.fn(() => new Promise((_resolve, reject) => { rejectRequest = reject; }));
+    const elements = new Map([
+      ["#newThreadPrompt", input],
+      ["#createThread", button],
+      ["#toast", toastElement],
+    ]);
+    Object.assign(globalThis, {
+      document: { querySelector: (selector) => elements.get(selector) },
+      fetch,
+      history: { replaceState: vi.fn() },
+      location: new URL("http://127.0.0.1:43123/"),
+      localStorage: { setItem: vi.fn() },
+      window: { GRAPHCOMPLETE_CONFIG: null, relayerDesktop: undefined },
+    });
+    vi.useFakeTimers();
+    try {
+      const { createFirstThread } = await import("../desktop/renderer/src/threads.js?submission-guard");
+      const first = createFirstThread();
+      const repeated = createFirstThread();
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(input.disabled).toBe(true);
+      expect(button.disabled).toBe(true);
+
+      rejectRequest(new Error("test request stopped"));
+      await Promise.all([first, repeated]);
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(input.disabled).toBe(false);
+      expect(button.disabled).toBe(false);
+      expect(toastElement.textContent).toBe("test request stopped");
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      for (const [name, descriptor] of originalGlobals) {
+        if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+        else delete globalThis[name];
+      }
+    }
   });
 
   it("starts and stops the Rust product server with an isolated profile and private session", async () => {
@@ -163,7 +216,12 @@ describe("desktop skeleton", () => {
         exitCode: null,
         signalCode: null,
         killed: false,
-        kill: vi.fn(function kill() { this.killed = true; }),
+        kill: vi.fn(function kill(signal) {
+          this.killed = true;
+          this.signalCode = signal;
+          queueMicrotask(() => this.emit("exit", null, signal));
+          return true;
+        }),
       });
       const unavailable = new RelayerAppServerService({
         userDataDirectory: directory,
@@ -183,7 +241,12 @@ describe("desktop skeleton", () => {
         exitCode: null,
         signalCode: null,
         killed: false,
-        kill: vi.fn(function kill() { this.killed = true; }),
+        kill: vi.fn(function kill(signal) {
+          this.killed = true;
+          this.signalCode = signal;
+          queueMicrotask(() => this.emit("exit", null, signal));
+          return true;
+        }),
       });
       const untrusted = new RelayerAppServerService({
         userDataDirectory: directory,
@@ -200,6 +263,31 @@ describe("desktop skeleton", () => {
       });
       await expect(untrusted.start()).rejects.toThrow("must use an authenticated 127.0.0.1 origin");
       expect(remoteChild.kill).toHaveBeenCalledWith("SIGTERM");
+
+      const stubbornChild = Object.assign(new EventEmitter(), {
+        stdin: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null,
+        signalCode: null,
+      });
+      stubbornChild.kill = vi.fn((signal) => {
+        if (signal === "SIGKILL") {
+          stubbornChild.signalCode = signal;
+          queueMicrotask(() => stubbornChild.emit("exit", null, signal));
+        }
+        return true;
+      });
+      const timedOut = new RelayerAppServerService({
+        userDataDirectory: directory,
+        binaryPath: "/test/bin/stubborn-server",
+        webDirectory: "/test/renderer",
+        startupTimeoutMs: 5,
+        shutdownTimeoutMs: 5,
+        spawnProcess: () => stubbornChild,
+      });
+      await expect(timedOut.start()).rejects.toThrow("did not become ready in time");
+      expect(stubbornChild.kill.mock.calls.map(([signal]) => signal)).toEqual(["SIGTERM", "SIGKILL"]);
 
       const unexpectedStops = [];
       const crashingChild = Object.assign(new EventEmitter(), {
@@ -302,7 +390,12 @@ describe("desktop skeleton", () => {
           stderr: new PassThrough(),
           killed: false,
         });
-        failedChild.kill = vi.fn(() => { failedChild.killed = true; });
+        failedChild.kill = vi.fn((signal) => {
+          failedChild.killed = true;
+          failedChild.signalCode = signal;
+          queueMicrotask(() => failedChild.emit("exit", null, signal));
+          return true;
+        });
         failedChild.stdin = new Writable({ write(chunk, _encoding, callback) {
           const request = JSON.parse(String(chunk));
           if (request.id !== undefined) {
@@ -319,6 +412,36 @@ describe("desktop skeleton", () => {
     expect(await failingClient.account()).toMatchObject({ status: "unavailable", error: "initialize failed" });
     expect(await failingClient.account()).toMatchObject({ status: "unavailable", error: "initialize failed" });
     expect(failedStarts).toBe(2);
+
+    const stubbornCodex = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+    });
+    stubbornCodex.stdin = new Writable({ write(chunk, _encoding, callback) {
+      const request = JSON.parse(String(chunk));
+      if (request.id !== undefined) {
+        const result = request.method === "account/read" ? { account: null } : {};
+        queueMicrotask(() => stubbornCodex.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`));
+      }
+      callback();
+    } });
+    stubbornCodex.kill = vi.fn((signal) => {
+      if (signal === "SIGKILL") {
+        stubbornCodex.signalCode = signal;
+        queueMicrotask(() => stubbornCodex.emit("exit", null, signal));
+      }
+      return true;
+    });
+    const closingClient = new CodexCredentialAdapter({
+      environment: { RELAYER_CODEX_BINARY: "/usr/bin/true", PATH: "" },
+      shutdownTimeoutMs: 5,
+      spawnProcess: () => stubbornCodex,
+    });
+    expect(await closingClient.account()).toMatchObject({ status: "disconnected" });
+    await closingClient.close();
+    expect(stubbornCodex.kill.mock.calls.map(([signal]) => signal)).toEqual(["SIGTERM", "SIGKILL"]);
   });
 
   it("drives the packaged update lifecycle through one state service", async () => {
@@ -407,6 +530,7 @@ describe("desktop skeleton", () => {
       appId: "ai.relayer.desktop",
       productName: "Relayer",
       forceCodeSigning: true,
+      afterPack: "desktop/packaging/verify-bundled-app-server.mjs",
       afterSign: "desktop/release/verify-macos-app.mjs",
       mac: {
         identity: "VISHAL TANDALE (NZ253AL7U6)",
@@ -441,6 +565,17 @@ describe("desktop skeleton", () => {
 
     const directory = await mkdtemp(join(tmpdir(), "relayer-release-contract-"));
     try {
+      const appPath = join(directory, "Relayer.app");
+      const bundledBinary = join(appPath, "Contents", "Resources", "bin", "relayer-app-server");
+      await mkdir(join(appPath, "Contents", "Resources", "bin"), { recursive: true });
+      await writeFile(bundledBinary, "binary-fixture");
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+      })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "arm64" });
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
+      })).rejects.toThrow("must contain only arm64");
+
       const names = desktopReleaseArtifactNames(contract);
       const dmg = Buffer.from("signed-notarized-dmg-fixture");
       const originalZip = Buffer.from("electron-builder-zip-fixture");
@@ -465,7 +600,7 @@ describe("desktop skeleton", () => {
         ].join("\n")),
       ]);
       await finalizeDesktopUpdateArtifact({
-        appPath: join(directory, "Relayer.app"),
+        appPath,
         contract,
         distRoot: directory,
         execute: async (_command, args) => {

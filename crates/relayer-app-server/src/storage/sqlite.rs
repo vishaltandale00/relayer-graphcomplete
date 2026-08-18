@@ -1,6 +1,7 @@
 mod interactions;
 mod migrations;
 mod projects;
+mod schema;
 mod threads;
 
 use super::StorageError;
@@ -26,7 +27,15 @@ impl SqliteProductStore {
             .max_connections(4)
             .connect_with(options)
             .await?;
+        if let Err(error) = schema::validate_existing_or_empty(&pool).await {
+            pool.close().await;
+            return Err(error);
+        }
         if let Err(error) = migrations::run(&pool).await {
+            pool.close().await;
+            return Err(error);
+        }
+        if let Err(error) = schema::validate(&pool).await {
             pool.close().await;
             return Err(error);
         }

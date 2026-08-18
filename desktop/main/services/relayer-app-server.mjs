@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { terminateChildProcess } from "./child-process.mjs";
 
 export const RELAYER_CONTROL_COOKIE = "relayer_control";
 
@@ -39,6 +40,7 @@ export class RelayerAppServerService {
     webDirectory,
     spawnProcess = spawn,
     startupTimeoutMs = 10_000,
+    shutdownTimeoutMs = 2_000,
     onUnexpectedStop = () => {},
   }) {
     this.userDataDirectory = userDataDirectory;
@@ -46,6 +48,7 @@ export class RelayerAppServerService {
     this.webDirectory = webDirectory;
     this.spawnProcess = spawnProcess;
     this.startupTimeoutMs = startupTimeoutMs;
+    this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.onUnexpectedStop = onUnexpectedStop;
     this.child = null;
     this.listening = null;
@@ -106,8 +109,9 @@ export class RelayerAppServerService {
       }
       return this.listening;
     } catch (error) {
-      if (!child.killed && child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-      this.child = null;
+      await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
+      if (this.child === child) this.child = null;
+      this.listening = null;
       throw error;
     }
   }
@@ -116,17 +120,9 @@ export class RelayerAppServerService {
     const child = this.child;
     if (!child) return;
     this.closing = true;
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    await new Promise((resolve) => {
-      const force = setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-      }, 2_000);
-      child.once("exit", () => {
-        clearTimeout(force);
-        resolve();
-      });
-      child.kill("SIGTERM");
-    });
+    await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
+    if (this.child === child) this.child = null;
+    this.listening = null;
   }
 
   #waitForReady(child, stderr) {

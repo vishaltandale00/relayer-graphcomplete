@@ -12,7 +12,7 @@ const THREAD_COLUMNS: &str = r#"
 impl SqliteProductStore {
     pub(crate) async fn list_threads(&self) -> Result<Vec<Thread>, StorageError> {
         let rows = sqlx::query(&format!(
-            "{THREAD_COLUMNS} ORDER BY t.updated_at DESC, t.created_at DESC"
+            "{THREAD_COLUMNS} ORDER BY t.updated_at DESC, t.created_at DESC, t.id DESC"
         ))
         .fetch_all(&self.pool)
         .await?;

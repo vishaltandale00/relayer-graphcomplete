@@ -5,6 +5,8 @@ import { appState, productApiAvailable, viewState } from "./state.js";
 import { $, threadTitle, toast } from "./ui.js";
 import { addLocalThread } from "./thread-model.js";
 
+let creatingFirstThread = false;
+
 export async function refreshState(threadId = viewState.currentThreadId) {
   if (!productApiAvailable) {
     renderSidebar();
@@ -61,7 +63,9 @@ async function createOrReuseProject(selectedScope) {
 export async function createFirstThread() {
   const input = $("#newThreadPrompt");
   const promptText = input.value.trim();
-  if (!promptText) return;
+  if (!promptText || creatingFirstThread) return;
+  creatingFirstThread = true;
+  input.disabled = true;
   $("#createThread").disabled = true;
   try {
     const selectedScope = viewState.selectedScope;
@@ -97,6 +101,8 @@ export async function createFirstThread() {
   } catch (error) {
     toast(error.message);
   } finally {
+    creatingFirstThread = false;
+    input.disabled = false;
     $("#createThread").disabled = !input.value.trim();
   }
 }

@@ -28,9 +28,9 @@
     "test": "cargo test --workspace && vitest run",
     "prd": "node docs/prd/server.mjs",
     "desktop:dev": "npm run build && electron desktop/main/index.mjs",
-    "desktop:pack": "cargo build --release -p relayer-app-server && electron-builder --config desktop/packaging/electron-builder.mjs --dir --arm64",
-    "desktop:dist": "cargo build --release -p relayer-app-server && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs stable",
-    "desktop:dist:preview": "cargo build --release -p relayer-app-server && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs preview",
+    "desktop:pack": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && electron-builder --config desktop/packaging/electron-builder.mjs --dir --arm64",
+    "desktop:dist": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs stable",
+    "desktop:dist:preview": "cargo build --release -p relayer-app-server --target aarch64-apple-darwin && RELAYER_DESKTOP_RELEASE=1 node desktop/release/build-release.mjs preview",
     "desktop:release:verify": "node desktop/release/verify-artifacts.mjs",
     "desktop:release:publish-preview": "node desktop/release/publish-preview.mjs"
   },

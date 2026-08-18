@@ -114,16 +114,6 @@ impl ProductService {
             )));
         }
         let path = canonical_path.to_string_lossy().into_owned();
-        if let Some(project) = self.storage.project_by_path(&path).await? {
-            return if command.reuse_existing {
-                Ok(ProjectWriteOutcome {
-                    project,
-                    created: false,
-                })
-            } else {
-                Err(ProductError::ProjectExists(project))
-            };
-        }
         let name = command
             .name
             .as_deref()
@@ -137,14 +127,14 @@ impl ProductService {
             })
             .ok_or_else(|| ProductError::Invalid("project name cannot be determined".into()))?;
         let timestamp = now();
-        let project = self
+        let (project, created) = self
             .storage
-            .insert_project(&name, &path, &timestamp)
+            .insert_or_get_project(&name, &path, &timestamp)
             .await?;
-        Ok(ProjectWriteOutcome {
-            project,
-            created: true,
-        })
+        if !created && !command.reuse_existing {
+            return Err(ProductError::ProjectExists(project));
+        }
+        Ok(ProjectWriteOutcome { project, created })
     }
 
     pub(crate) async fn list_threads(&self) -> Result<Vec<Thread>, ProductError> {

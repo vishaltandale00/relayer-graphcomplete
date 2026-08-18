@@ -396,7 +396,7 @@ type CompleteResult = {
 <tr class="requirement-row status-verified">
 <td>Electron owns the Rust app-server lifecycle</td>
 <td><span class="delivery-status verified">Met</span></td>
-<td>Electron starts one bundled or development server, sends its control token through child standard input rather than process arguments, accepts only its authenticated loopback readiness message, and stops it during shutdown. If the child exits unexpectedly, the desktop shows an actionable error and closes instead of leaving an unusable window.</td>
+<td>Electron starts one bundled or development server, sends its control token through child standard input rather than process arguments, accepts only its authenticated loopback readiness message, and stops it during shutdown. Failed startup and normal shutdown wait for process exit, escalating from <code>SIGTERM</code> to <code>SIGKILL</code> after a bounded grace period. If the child exits unexpectedly, the desktop shows an actionable error and closes instead of leaving an unusable window.</td>
 <td>Release signing and a clean-machine packaged smoke belong to distribution validation.</td>
 </tr>
 <tr class="requirement-row status-verified">
@@ -414,13 +414,13 @@ type CompleteResult = {
 <tr class="requirement-row status-verified">
 <td>Product SQLite stores project metadata and atomically creates a thread with its first chronology entry</td>
 <td><span class="delivery-status verified">Met</span></td>
-<td>One Rust integration scenario creates a project plus project-backed and standalone threads, validates positive integer IDs and product interaction chronology, closes the store, reopens the same database, and reads the same records. Thread and first-interaction creation share one transaction; project creation is a separate operation. The app server applies an embedded, versioned product-schema migration before accepting requests, and the same scenario verifies that migration record.</td>
-<td>Canonical graph nodes, graph snapshots, attempts, drafts, later schema upgrades, export, and recovery from interrupted writes are not represented yet.</td>
+<td>One Rust integration scenario creates a project plus project-backed and standalone threads, races duplicate project creation, concurrently appends interactions, forces equal thread timestamps, closes the store, reopens the same database, and reads the same records. It proves one project creation winner, contiguous interaction sequence numbers, deterministic newest-thread selection, and positive integer IDs. Thread and first-interaction creation share one transaction. The app server validates an existing schema before and after its embedded migration and refuses an incompatible database.</td>
+<td>Canonical graph nodes, graph snapshots, attempts, drafts, later schema upgrades beyond the initial version, export, and recovery from an operating-system interruption are not represented yet.</td>
 </tr>
 <tr class="requirement-row status-verified">
 <td><code>SCP-001</code>: first send requires non-empty text and creates a desktop-owned thread</td>
 <td><span class="delivery-status verified">Met</span></td>
-<td>The send control is disabled for empty input. A valid send creates the thread and first product interaction chronology record through the Rust API without invoking a harness or synthesizing a graph node.</td>
+<td>The send control is disabled for empty input. A valid send creates the thread and first product interaction chronology record through the Rust API without invoking a harness or synthesizing a graph node. Repeated click or keyboard submission while that request is pending is coalesced into one creation.</td>
 <td>Project-scope validity will need additional UI rules when project selection is completed.</td>
 </tr>
 <tr class="requirement-row status-verified">
@@ -438,7 +438,7 @@ type CompleteResult = {
 <tr class="requirement-row status-partial">
 <td><code>SCP-003</code>: project identity and duplicate-folder behavior</td>
 <td><span class="delivery-status partial">Partially met</span></td>
-<td>Projects receive stable IDs and canonical folder paths. A duplicate canonical folder returns a conflict; the desktop asks before explicitly reusing the existing project. Missing folders return an actionable error.</td>
+<td>Projects receive stable IDs and canonical folder paths. Concurrent creation of the same canonical folder has one atomic winner; later attempts return a conflict instead of an internal error. The desktop asks before explicitly reusing the existing project. Missing folders return an actionable error.</td>
 <td>The folder picker, visible confirmation/recovery proof, authorized-folder lifecycle, and populated project sidebar are not complete.</td>
 </tr>
 <tr class="requirement-row status-open">
@@ -456,14 +456,14 @@ type CompleteResult = {
 <tr class="requirement-row status-partial">
 <td>Section 5.2 local persistence and recovery</td>
 <td><span class="delivery-status partial">Partially met</span></td>
-<td>Projects, threads, and first product interaction text use local SQLite storage and survive a real process restart. Thread plus first interaction creation is transactional. The initial product schema is installed by a versioned migration owned by SQLite storage.</td>
-<td>Settings, credential references, graph data, accepted states, execution state, update state, future schema-upgrade and failed-migration behavior, and crash recovery remain.</td>
+<td>Projects, threads, and product interaction text use local SQLite storage and survive a real process restart. Thread plus first interaction creation is transactional; concurrent later interactions serialize sequence allocation. The initial product schema is installed and structurally validated by versioned migration code owned by SQLite storage, and incompatible pre-existing tables prevent startup.</td>
+<td>Settings, credential references, graph data, accepted states, execution state, update state, a real later-version migration, and crash recovery remain.</td>
 </tr>
 <tr class="requirement-row status-verified">
 <td>Packaged local app-server artifact</td>
 <td><span class="delivery-status verified">Met</span></td>
-<td>The arm64 development package includes the compiled Rust binary. <code>APP-001-E3</code> is a launch smoke of that packaged <code>.app</code> with an isolated profile; its provider page was served by the bundled Rust app server.</td>
-<td>Signing, notarization, clean-machine installation, update feed, and previous-version upgrade remain release work.</td>
+<td>The development and release commands explicitly compile the Rust server for <code>aarch64-apple-darwin</code> and package Electron for <code>arm64</code>. An <code>afterPack</code> check rejects a nested server with any other architecture, and signed verification repeats that check. <code>APP-001-E3</code> is a launch smoke of the packaged <code>.app</code> with an isolated profile.</td>
+<td>Intel Mac support is explicitly deferred. Signing, notarization, clean-machine installation, update feed, and previous-version upgrade remain release work.</td>
 </tr>
 <tr class="requirement-row status-deferred">
 <td>Credentials, harness invocation, graph engine, and response graph</td>

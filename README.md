@@ -47,6 +47,8 @@ Build an unsigned Apple Silicon development application, including the Rust serv
 npm run desktop:pack
 ```
 
+Desktop packaging intentionally targets Apple Silicon only. The build compiles both Electron and the nested Rust app server for `arm64`, then rejects the package if the bundled server has a different architecture. Intel Mac support is deferred.
+
 The accepted desktop release contract starts at version `0.2.0`, supports Apple Silicon on macOS 13 or newer, and uses the existing Relayer Developer ID identity. Signed candidates fail closed unless the worktree is clean and signing, notarization, provenance, and the sealed update URL are all present. Build a signed, notarized candidate without publishing it with:
 
 ```sh

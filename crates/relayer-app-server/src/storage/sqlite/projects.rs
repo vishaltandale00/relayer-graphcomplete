@@ -36,24 +36,26 @@ impl SqliteProductStore {
             .transpose()
     }
 
-    pub(crate) async fn insert_project(
+    pub(crate) async fn insert_or_get_project(
         &self,
         name: &str,
         path: &str,
         timestamp: &str,
-    ) -> Result<Project, StorageError> {
+    ) -> Result<(Project, bool), StorageError> {
         let result = sqlx::query(
-            "INSERT INTO projects(name,path,created_at,updated_at) VALUES (?1,?2,?3,?3)",
+            "INSERT INTO projects(name,path,created_at,updated_at) VALUES (?1,?2,?3,?3) ON CONFLICT(path) DO NOTHING",
         )
         .bind(name)
         .bind(path)
         .bind(timestamp)
         .execute(&self.pool)
         .await?;
-        let id = ProjectId::from_database(result.last_insert_rowid());
-        self.get_project(id)
+        let created = result.rows_affected() == 1;
+        let project = self
+            .project_by_path(path)
             .await?
-            .ok_or_else(|| sqlx::Error::RowNotFound.into())
+            .ok_or(sqlx::Error::RowNotFound)?;
+        Ok((project, created))
     }
 }
 

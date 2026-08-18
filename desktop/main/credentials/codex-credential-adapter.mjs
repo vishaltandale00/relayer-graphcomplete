@@ -4,6 +4,7 @@ import { delimiter } from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { CredentialAdapter } from "./credential-adapter.mjs";
+import { terminateChildProcess } from "../services/child-process.mjs";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 
@@ -34,11 +35,17 @@ export async function findCodexExecutable(environment = process.env) {
 }
 
 export class CodexCredentialAdapter extends CredentialAdapter {
-  constructor({ environment = process.env, onAccountChanged = () => {}, spawnProcess = spawn } = {}) {
+  constructor({
+    environment = process.env,
+    onAccountChanged = () => {},
+    spawnProcess = spawn,
+    shutdownTimeoutMs = 2_000,
+  } = {}) {
     super("codex");
     this.environment = environment;
     this.onAccountChanged = onAccountChanged;
     this.spawnProcess = spawnProcess;
+    this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.pending = new Map();
     this.nextId = 1;
     this.process = null;
@@ -56,10 +63,10 @@ export class CodexCredentialAdapter extends CredentialAdapter {
       await this.startPromise;
     } catch (error) {
       const child = this.process;
-      this.process = null;
+      await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
+      if (this.process === child) this.process = null;
       this.startPromise = null;
       this.activeLoginId = null;
-      if (child && !child.killed) child.kill("SIGTERM");
       throw error;
     }
   }
@@ -184,11 +191,11 @@ export class CodexCredentialAdapter extends CredentialAdapter {
   async close() {
     this.closing = true;
     const child = this.process;
-    this.process = null;
+    if (!child) return;
+    await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
+    if (this.process === child) this.process = null;
     this.startPromise = null;
     this.activeLoginId = null;
-    if (!child || child.killed) return;
-    child.kill("SIGTERM");
   }
 }
 
