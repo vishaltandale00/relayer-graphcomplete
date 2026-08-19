@@ -93,6 +93,7 @@ export async function loadThread(threadId) {
   abandonActionTransition(viewState.currentInteractionId);
   viewState.currentThreadId = threadId;
   viewState.currentInteractionId = null;
+  viewState.selectedNodeId = null;
   setMainView("thread");
   const url = new URL(location.href);
   url.searchParams.set("threadId", threadId);
@@ -124,6 +125,7 @@ export function selectTurn(offset) {
   const target = turns[current + offset];
   if (!target) return;
   abandonActionTransition(viewState.currentInteractionId);
+  viewState.selectedNodeId = null;
   hydrateWorkspace(target);
   renderThread();
 }
@@ -143,8 +145,35 @@ export async function navigateLayer(layerId) {
   if (!viewState.currentThreadId || !viewState.currentInteractionId) return;
   const layer = await request(`/api/threads/${encodeURIComponent(viewState.currentThreadId)}/interactions/${encodeURIComponent(viewState.currentInteractionId)}/layers/${encodeURIComponent(layerId)}`);
   const interaction = appState.interactions.find((item) => String(item.id) === String(viewState.currentInteractionId));
+  viewState.selectedNodeId = null;
   hydrateWorkspace(interaction, layer);
   renderThread();
+}
+
+export async function restoreReviewPresentation({ threadId, turnId, layerId, selectedNodeId }) {
+  if (!threadId || !turnId) throw new Error("Review history is missing its thread or turn.");
+  if (String(viewState.currentThreadId) !== String(threadId)) {
+    viewState.currentThreadId = threadId;
+    await refreshState(threadId);
+  }
+  const interaction = appState.interactions.find((item) => (
+    String(item.threadId) === String(threadId) && String(item.id) === String(turnId)
+  ));
+  if (!interaction) throw new Error(`Review history turn is unavailable: ${turnId}`);
+  let layer = interaction.completionOutput?.rootLayer ?? null;
+  const rootLayerId = layer?.layer?.id;
+  if (layerId && String(layerId) !== String(rootLayerId)) {
+    layer = await request(`/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`);
+  }
+  viewState.selectedNodeId = null;
+  hydrateWorkspace(interaction, layer);
+  renderThread();
+  if (selectedNodeId) {
+    const node = [...document.querySelectorAll("[data-node]")]
+      .find((element) => String(element.dataset.node) === String(selectedNodeId));
+    if (!node) throw new Error(`Review history node is unavailable: ${selectedNodeId}`);
+    node.click();
+  }
 }
 
 export async function invokeAction(action) {

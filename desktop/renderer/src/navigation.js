@@ -10,7 +10,7 @@ export function setMainView(view) {
 }
 
 function threadEntry(thread) {
-  return `<button class="entry ${String(thread.id) === String(viewState.currentThreadId) ? "active" : ""}" data-thread="${escapeHtml(thread.id)}"><span class="entry-icon">◌</span><span>${escapeHtml(thread.title)}</span></button>`;
+  return `<button class="entry ${String(thread.id) === String(viewState.currentThreadId) ? "active" : ""}" data-thread="${escapeHtml(thread.id)}" data-review-ref="thread-${escapeHtml(thread.id)}" data-review-kind="thread"><span class="entry-icon">◌</span><span>${escapeHtml(thread.title)}</span></button>`;
 }
 
 export function renderSidebar() {
@@ -23,7 +23,7 @@ export function renderSidebar() {
     $("#settingsButton").classList.add("hidden");
     $("#chatList").innerHTML = viewState.evalContext.cases.map((testCase) => {
       const threads = testCase.threadIds.length
-        ? testCase.threadIds.map((threadId, index) => `<button class="entry ${String(threadId) === String(viewState.currentThreadId) ? "active" : ""}" data-thread="${escapeHtml(threadId)}"><span class="entry-icon">${index + 1}</span><span>Thread ${index + 1}</span></button>`).join("")
+        ? testCase.threadIds.map((threadId, index) => `<button class="entry ${String(threadId) === String(viewState.currentThreadId) ? "active" : ""}" data-thread="${escapeHtml(threadId)}" data-review-ref="thread-${escapeHtml(threadId)}" data-review-kind="thread"><span class="entry-icon">${index + 1}</span><span>Thread ${index + 1}</span></button>`).join("")
         : `<div class="entry"><span class="entry-icon">—</span><span>No thread</span></div>`;
       return `<div class="eval-case"><div class="section-label">${escapeHtml(testCase.name)} · ${escapeHtml(testCase.status)}</div>${threads}</div>`;
     }).join("");

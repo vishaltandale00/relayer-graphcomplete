@@ -201,7 +201,8 @@ describe("desktop skeleton", () => {
     expect(evalMain).toContain("createReviewWindow(executionId)");
     expect(evalDashboard).toContain("Test cases");
     expect(evalDashboard).toContain("Harnesses under test");
-    expect(evalDashboard).toContain("Open a case for one specific harness in the production workspace.");
+    expect(evalDashboard).toContain("Inspect the saved judge output or open the case in the production workspace.");
+    expect(evalDashboard).toContain('id="judgeOutputPanel"');
     expect(graphAdapter).toContain('mode: evalReview || query.get("review") === "1" ? "review" : "interactive"');
     expect(navigation).toContain("viewState.evalContext.cases");
     expect(workspaceModeCapabilities("review")).toEqual({

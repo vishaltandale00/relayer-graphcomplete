@@ -99,7 +99,7 @@ export class CodexBasicHarness implements Harness {
 Current interaction node: ${interactionNode.id}
 User text: ${interactionNode.detail}
 
-Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a small .mjs file in the working directory and run it with Node.js. Import from:
+Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a small .mjs file in the system temporary directory, not in the project checkout, and run it with Node.js. Import from:
 ${this.clientModuleUrl}
 
 The module exports RelayerGraphClient, NodeObject, EdgeObject, and LayerObject. Use RelayerGraphClient.fromEnv(). The required order is:

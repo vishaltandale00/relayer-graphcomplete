@@ -1,7 +1,14 @@
 import { connectCodex, refreshAccount, showApplication, showAuth } from "./auth.js";
 import { selectScope, setMainView } from "./navigation.js";
-import { desktop, evalReview, viewState } from "./state.js";
-import { connectEvents, createFirstThread, loadThread, refreshState } from "./threads.js";
+import { appState, desktop, evalReview, viewState } from "./state.js";
+import {
+  connectEvents,
+  createFirstThread,
+  loadThread,
+  refreshState,
+  restoreReviewPresentation,
+} from "./threads.js";
+import { createReviewPresentationAdapter } from "./review-tools.js";
 import { $, applyAppearance, toast } from "./ui.js";
 import { renderUpdate, updateAction } from "./updates.js";
 
@@ -89,6 +96,18 @@ async function boot() {
   if (desktop) renderUpdate(await desktop.updater.status());
   await refreshAccount();
   await refreshState(viewState.currentThreadId);
+  if (evalReview) {
+    evalReview.registerPresentationAdapter(createReviewPresentationAdapter({
+      executionId: viewState.evalContext.selectedExecutionId,
+      getPresentationState: () => ({
+        threadId: viewState.currentThreadId,
+        turnId: viewState.currentInteractionId,
+        layerId: appState.visibleLayer?.layer?.id ?? null,
+        selectedNodeId: viewState.selectedNodeId,
+      }),
+      restorePresentationState: restoreReviewPresentation,
+    }));
+  }
   connectEvents();
 }
 

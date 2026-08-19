@@ -261,7 +261,11 @@ export function createProductWorkspace({
   const threadView = $("#threadView");
   if (!threadView) throw new Error("Product workspace requires a #threadView host.");
   threadView.innerHTML = productWorkspaceMarkup();
-  $("#closeInspector").onclick = () => $("#inspector").classList.add("hidden");
+  $("#closeInspector").onclick = () => {
+    selection.selectedNodeId = null;
+    $("#inspector").classList.add("hidden");
+    $$('[data-node]').forEach((element) => element.classList.remove("selected"));
+  };
   $("#previousTurn").onclick = () => onSelectTurn(-1);
   $("#nextTurn").onclick = () => onSelectTurn(1);
   const graphStage = $("#graphStage");
@@ -530,7 +534,7 @@ export function createProductWorkspace({
       ? cachedView.signature !== nextSignature || !cachedView.settled
       : nextSignature !== graphSignature;
     graphSignature = nextSignature;
-    $("#nodeLayer").innerHTML = graphNodes.map((node) => `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}"><div class="glyph"></div><div class="copy"><b>${escapeHtml(node.title)}</b></div></div>`).join("");
+    $("#nodeLayer").innerHTML = graphNodes.map((node) => `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}" data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}"><div class="glyph"></div><div class="copy"><b>${escapeHtml(node.title)}</b></div></div>`).join("");
     $$('[data-node]').forEach((element) => {
       const authoredNode = graphNodes.find((candidate) => String(candidate.id) === element.dataset.node);
       element.querySelector(".glyph").replaceChildren(createRelayerIcon(
@@ -544,6 +548,11 @@ export function createProductWorkspace({
         );
       }
       element.onclick = () => selectNode(state, element.dataset.node);
+      element.onkeydown = (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        selectNode(state, element.dataset.node);
+      };
       element.onpointerdown = (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -735,6 +744,9 @@ export function createProductWorkspace({
       button.type = "button";
       button.className = `action-control action-${presentation.variant}`;
       button.dataset.actionId = String(action.id);
+      button.dataset.reviewRef = `action-${action.id}`;
+      button.dataset.reviewKind = action.kind === "navigate" ? "navigate-action" : "invoke-action";
+      button.dataset.reviewActionId = String(action.id);
       if (presentation.icon) {
         button.append(createRelayerIcon(presentation.icon, { class: "relayer-action-icon" }));
       }

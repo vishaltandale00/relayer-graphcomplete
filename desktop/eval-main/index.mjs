@@ -6,6 +6,11 @@ import { pathToFileURL } from "node:url";
 
 import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 import { EvalService } from "./eval-service.mjs";
+import { ReviewSession } from "./review-session.mjs";
+import {
+  createLocalSimulatedUserJudgeRunner,
+  resolveLocalSimulatedUserAutorun,
+} from "./simulated-user-judge.mjs";
 import { GraphCompleteRuntimeService } from "../main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../main/services/relayer-app-server.mjs";
 import { claimPrimaryDesktopInstance } from "../main/single-instance.mjs";
@@ -43,6 +48,9 @@ let dashboardWindow;
 const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => dashboardWindow });
 
 const reviewWindows = new Set();
+const reviewSessions = new Map();
+const manualReviewWindows = new Map();
+const automatedReviewWindows = new Map();
 const graphRuntime = new GraphCompleteRuntimeService({
   userDataDirectory,
   graphServerBinary,
@@ -56,6 +64,7 @@ let productServer;
 let evalService;
 let stopping = false;
 let stopPromise;
+let localAutorunStarted = false;
 
 function windowSecurity(window, trustedOrigin = null) {
   const blockUntrusted = (event, target) => {
@@ -92,10 +101,37 @@ async function createDashboardWindow() {
 }
 
 async function createReviewWindow(executionId) {
+  const existing = manualReviewWindows.get(executionId);
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
+    return existing;
+  }
   const context = evalService.reviewContext(executionId);
   const selected = context.cases.find((item) => item.executionId === executionId);
   const threadId = selected?.threadIds?.[0];
   if (!threadId) throw new Error("This case × harness execution has no product thread to review.");
+  const { window, productOrigin } = await createReadOnlyReviewWindow(executionId);
+  manualReviewWindows.set(executionId, window);
+  let reviewSession;
+  window.on("closed", () => {
+    if (manualReviewWindows.get(executionId) === window) manualReviewWindows.delete(executionId);
+    if (reviewSessions.get(executionId) === reviewSession) reviewSessions.delete(executionId);
+  });
+  await window.loadURL(`${productOrigin}/?threadId=${encodeURIComponent(threadId)}&review=1`);
+  reviewSession = new ReviewSession({
+    executionId,
+    readOnly: context.readOnly,
+    webContents: window.webContents,
+    artifactDirectory: join(userDataDirectory, "eval-data", "review-sessions", executionId),
+    ipc: ipcMain,
+  });
+  await reviewSession.open();
+  reviewSessions.set(executionId, reviewSession);
+  return window;
+}
+
+async function createReadOnlyReviewWindow(executionId) {
   const productSession = await productServer.start();
   if (!productSession.readOnlyCookie) throw new Error("Relayer Eval review session is unavailable.");
   const productOrigin = new URL(productSession.origin).origin;
@@ -125,8 +161,56 @@ async function createReviewWindow(executionId) {
     sameSite: "strict",
     secure: false,
   });
-  await window.loadURL(`${productOrigin}/?threadId=${encodeURIComponent(threadId)}&review=1`);
-  return window;
+  return { window, productOrigin };
+}
+
+async function openAutomatedReviewSession({
+  executionId,
+  threadId,
+  turnId,
+  rootLayerId,
+  artifactDirectory,
+}) {
+  const context = evalService.reviewContext(executionId);
+  const executionCase = context.cases.find((item) => item.executionId === executionId);
+  if (!executionCase?.threadIds?.some((candidate) => String(candidate) === String(threadId))) {
+    throw new Error("The simulated-user review thread does not belong to its execution.");
+  }
+  let entry = automatedReviewWindows.get(executionId);
+  if (!entry || entry.window.isDestroyed()) {
+    entry = await createReadOnlyReviewWindow(executionId);
+    automatedReviewWindows.set(executionId, entry);
+    entry.window.on("closed", () => {
+      if (automatedReviewWindows.get(executionId)?.window === entry.window) {
+        automatedReviewWindows.delete(executionId);
+      }
+    });
+  }
+  await entry.window.loadURL(
+    `${entry.productOrigin}/?threadId=${encodeURIComponent(threadId)}`
+      + `&interactionId=${encodeURIComponent(turnId)}&review=1`,
+  );
+  const session = new ReviewSession({
+    executionId,
+    readOnly: context.readOnly,
+    webContents: entry.window.webContents,
+    artifactDirectory,
+    ipc: ipcMain,
+  });
+  const state = await session.open();
+  if (String(state.layerId) !== String(rootLayerId)) {
+    throw new Error("The simulated-user review window did not open the accepted root layer.");
+  }
+  let released = false;
+  return {
+    session,
+    state,
+    release: async ({ close }) => {
+      if (released) return;
+      released = true;
+      if (close && !entry.window.isDestroyed()) entry.window.close();
+    },
+  };
 }
 
 function registerEvalIpc() {
@@ -154,20 +238,54 @@ async function start() {
     onUnexpectedStop: () => app.quit(),
   });
   const productSession = await productServer.start();
+  const simulatedUserJudgeRunner = createLocalSimulatedUserJudgeRunner({
+    loadLayer: ({ threadId, turnId, layerId }) => productRequest(productSession, (
+      `/api/threads/${encodeURIComponent(threadId)}`
+      + `/interactions/${encodeURIComponent(turnId)}`
+      + `/layers/${encodeURIComponent(layerId)}`
+    )),
+    openReviewSession: openAutomatedReviewSession,
+  });
   evalService = await new EvalService({
     stateFile: join(userDataDirectory, "eval-data", "test-runs.json"),
     productSession,
     configurationPaths,
+    simulatedUserJudgeRunner,
     onChanged: (runs) => dashboardWindow?.webContents.send("relayer-eval:runs-changed", runs),
   }).open();
   registerEvalIpc();
   dashboardWindow = await createDashboardWindow();
   primaryInstance.presentPendingWindow();
+  const localAutorun = resolveLocalSimulatedUserAutorun({ packaged: app.isPackaged });
+  if (localAutorun && !localAutorunStarted) {
+    localAutorunStarted = true;
+    await evalService.createRun(localAutorun);
+  }
+}
+
+async function productRequest(session, path) {
+  const cookie = session.readOnlyCookie;
+  if (!cookie) throw new Error("Relayer Eval read-only product session is unavailable.");
+  const response = await fetch(new URL(path, session.origin), {
+    headers: {
+      Accept: "application/json",
+      Cookie: `${cookie.name}=${cookie.value}`,
+    },
+  });
+  const value = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(value?.error || `Product request failed (${response.status}).`);
+  return value;
 }
 
 function stop() {
   stopPromise ??= (async () => {
     const errors = [];
+    for (const window of [...reviewWindows]) {
+      try { if (!window.isDestroyed()) window.close(); } catch (error) { errors.push(error); }
+    }
+    reviewSessions.clear();
+    manualReviewWindows.clear();
+    automatedReviewWindows.clear();
     if (productServer) {
       try { await productServer.close(); } catch (error) { errors.push(error); }
     }
