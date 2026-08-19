@@ -181,6 +181,8 @@ describe("desktop skeleton", () => {
     const evalPackaging = await readFile(new URL("../desktop/packaging/eval-electron-builder.mjs", import.meta.url), "utf8");
     const evalMain = await readFile(new URL("../desktop/eval-main/index.mjs", import.meta.url), "utf8");
     const evalDashboard = await readFile(new URL("../desktop/eval-renderer/index.html", import.meta.url), "utf8");
+    const evalDashboardMain = await readFile(new URL("../desktop/eval-renderer/main.js", import.meta.url), "utf8");
+    const evalPreload = await readFile(new URL("../desktop/preload/eval-dashboard.cjs", import.meta.url), "utf8");
     const graphAdapter = await readFile(new URL("../desktop/renderer/src/graph.js", import.meta.url), "utf8");
     const navigation = await readFile(new URL("../desktop/renderer/src/navigation.js", import.meta.url), "utf8");
 
@@ -201,7 +203,14 @@ describe("desktop skeleton", () => {
     expect(evalMain).toContain("createReviewWindow(executionId)");
     expect(evalDashboard).toContain("Test cases");
     expect(evalDashboard).toContain("Harnesses under test");
-    expect(evalDashboard).toContain("Open a case for one specific harness in the production workspace.");
+    expect(evalDashboard).toContain("Open the judge review or the read-only production workspace");
+    expect(evalDashboard).not.toContain('id="judgeOutputPanel"');
+    expect(evalDashboardMain).toContain("Judge review ↗");
+    expect(evalDashboardMain).toContain("Product workspace ↗");
+    expect(evalDashboardMain).not.toContain("renderJudgeOutput");
+    expect(evalPreload).toContain("openJudgeReview");
+    expect(evalPreload).toContain("loadJudgeScreenshot");
+    expect(evalMain).toContain('join(evalRendererDirectory, "judge.html")');
     expect(graphAdapter).toContain('mode: evalReview || query.get("review") === "1" ? "review" : "interactive"');
     expect(navigation).toContain("viewState.evalContext.cases");
     expect(workspaceModeCapabilities("review")).toEqual({

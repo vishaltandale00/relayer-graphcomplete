@@ -1677,7 +1677,7 @@ settings:
 <p>A run selects test-case IDs, harness-configuration names, and a judge configuration. The runner resolves configuration files at its boundary and expands the selections into executions. Each execution records its exact configuration snapshot and stable digest. It also records case, implementation, schema, client, judge, and component build versions.</p>
 <h3>13.2 Shared source and result catalog</h3>
 <pre><code class="language-text">packages/eval-runner/
-  cases/&lt;case-id&gt;.json                  # small versioned interaction definition
+  cases/&lt;case-id&gt;.json                  # versioned project, thread, and turn definition
   suites/&lt;suite-id&gt;.json                # ordered case IDs and gates
   judges/&lt;judge-id&gt;.json
 
@@ -1687,10 +1687,21 @@ settings:
   runs/&lt;run-id&gt;/bundle.json             # immutable experiment record
   runs/&lt;run-id&gt;/graph.db                # isolated accepted Rust graph store
   runs/&lt;run-id&gt;/display.json            # resolved layer used for product replay
-  runs/&lt;run-id&gt;/screenshots/             # optional rendered evidence
+  runs/&lt;run-id&gt;/screenshots/             # rendered judge and human-review evidence
   materialized/&lt;run-id&gt;/                 # temporary copy-on-write checkout
 </code></pre>
-<p>The empty-project case needs no repository entry. Later codebase cases reference a public repository URL, pinned commit, and expected tree digest; they never contain a developer-specific source directory. All local Relayer worktrees share the same user-level repository and object catalog. A mutating case always receives a private materialization. Result bundles live outside source checkouts.</p>
+<p>The empty-project case needs no repository entry. Project cases reference a public repository URL, pinned commit, and expected tree digest; they never contain a developer-specific source directory. The initial project suite should use a real, permissively licensed project with roughly 10,000 to 40,000 lines of first-party source. The project should also have meaningful recent upstream activity. Selection records the upstream repository and activity evidence, while every evaluation remains pinned to one immutable commit. The project must install and verify locally without secrets or mandatory external services.</p>
+<p>All local Relayer worktrees share the same user-level repository and object catalog. Each case × harness execution receives a clean private materialization of the pinned source. Result bundles live outside source checkouts. A runner must never reuse a mutated checkout across harness configurations.</p>
+<h3>13.2.1 Project case and thread model</h3>
+<p>A project case is a compact simulation of sustained work inside one repository, not a single isolated prompt. One initial case creates three sequential product threads against the same materialized project and project graph:</p>
+<table>
+<thead><tr><th>Thread</th><th>Task shape</th><th>Mutation policy</th><th>Required evidence</th></tr></thead>
+<tbody>
+<tr><td>Question</td><td>Understand an architecture, behavior, or request path</td><td>Read-only</td><td>Source-grounded answer, recursive layers, node details, and useful navigation</td></tr>
+<tr><td>Diagnosis</td><td>Reproduce and explain a seeded defect without repairing it</td><td>Read-only</td><td>Reproduction, competing explanations, root-cause evidence, and zero repository diff</td></tr>
+<tr><td>Implementation</td><td>Build or repair behavior and verify it</td><td>Writable</td><td>Diff, protected-file hashes, public and hidden checks, build results, and commits</td></tr>
+</tbody></table>
+<p>Each thread may contain multiple turns. An analytical follow-up may ask the harness to inspect more deeply, challenge its prior answer, or refine an accepted graph. A mutating follow-up that requires another commit must introduce a meaningful additional requirement. It must not reward an empty or cosmetic commit merely to satisfy turn count. The execution records each turn, repository state, commit boundary, and accepted graph independently. Earlier accepted turn displays remain immutable.</p>
 <p>The catalog verifies every object digest before use and garbage-collects only unreferenced materializations and runs according to an explicit retention policy. Checked-in case/config/judge JSON stays small enough to review normally in pull requests.</p>
 <h3>13.3 Runner execution</h3>
 <p>Local commands are standardized target interfaces:</p>
@@ -1715,8 +1726,95 @@ npm run eval:web
 <p>Live commands require an explicit confirmation in the web runner or command flag plus an available credential reference and declared cost cap. They never run inside <code>npm run check</code> or the default test suite. CI may run them only in a separately authorized, budget-limited job. Closing the web page does not orphan a run: the local runner service retains status, cancellation, and the immutable partial failure record.</p>
 <h3>13.4 Judge design</h3>
 <p>Deterministic checks always run first. The first empty-project case then uses only the six-fact structured judge defined in Section 15D.4. It does not require an operator agent, pairwise comparison, grounding rubric, repeat policy, or promotion threshold.</p>
-<p>Later capability suites add the dimensions they actually exercise: conversation memory, node reuse, attachments, authored actions, repository grounding, topology, and operator task success. Each score cites visible node references and a short rationale. Critical failures remain separate booleans rather than averages hidden by other scores.</p>
+<p>The first project suite adds one <strong>simulated-user judge</strong>. The judge opens the completed turn in the exact read-only production workspace, explores the response through visible controls, and grades what the product actually communicates. It does not substitute raw graph JSON, database records, or hidden node text for the rendered experience. Every qualitative rating is supported by screenshots captured during that review session.</p>
 <p>Configuration comparison and blind pairwise judging are later evaluation-runner capabilities. When added, the judge model/version, prompt version, rubric version, repeat count, thresholds, and tie policy are recorded with the run. Human review in the real graph UX remains required before product promotion.</p>
+<h4>13.4.1 Simulated-user tool contract</h4>
+<p>The simulated-user judge receives the original request, a versioned rubric, the read-only production review window, and six tools:</p>
+<table>
+<thead><tr><th>Tool</th><th>Contract</th></tr></thead>
+<tbody>
+<tr><td><code>screenshot(target, mode, label)</code></td><td>Observe the current viewport or capture a visible element. <code>mode = full</code> captures a complete rendered element as native-scale tiles when necessary.</td></tr>
+<tr><td><code>interact(elementRef, activate)</code></td><td>Activate a visible node, action, turn control, or other accessible control through one generic operation.</td></tr>
+<tr><td><code>history(delta)</code></td><td>Move backward or forward through review-session UI history using a positive or negative delta.</td></tr>
+<tr><td><code>reviewLayer(review)</code></td><td>Write or revise one screenshot-grounded layer assessment while the judge is exploring.</td></tr>
+<tr><td><code>reviewNode(review)</code></td><td>Write or revise one screenshot-grounded node assessment, including reviews of actions visible on that node.</td></tr>
+<tr><td><code>submitReview(review)</code></td><td>Write the overall turn assessment and finalize only after required layer and node coverage is complete.</td></tr>
+</tbody></table>
+<p>There is no scroll tool and no graph-specific <code>openLayer</code> or <code>selectNode</code> shortcut. A visible viewport capture preserves the actual first impression. A full-element capture exposes an entire node-detail panel without shrinking long content into one unreadable image; tall captures return ordered tiles under one screenshot ID. Element references permit interaction but are not rubric evidence.</p>
+<p>The runner, not the judge, binds each screenshot to immutable state. This state includes execution, thread, turn, layer, selected node, activated action, navigation path, viewport, capture target, tile count, and content digest. A review cannot cite a screenshot whose recorded state does not match its claimed subject.</p>
+<h4>13.4.2 Literal recursive rubric</h4>
+<p>The rubric is a versioned manifest. Every layer uses the same criteria; the contract does not distinguish root and child layers. Node count is observable context, not a threshold. The judge decides from the rendered screenshot whether a layer is sparse, crowded, fragmented, balanced, or otherwise well organized.</p>
+<table>
+<thead><tr><th>Subject</th><th>Required criteria</th><th>Required screenshot context</th></tr></thead>
+<tbody>
+<tr><td>Layer</td><td>Purpose clarity, cohesion, visual organization, relationship clarity, coverage</td><td>Visible layer viewport</td></tr>
+<tr><td>Node</td><td>Layer fit, title-detail alignment, substance, detail presentation</td><td>Layer context plus selected-node detail; full-detail tiles when needed</td></tr>
+<tr><td>Navigate action inside its source node review</td><td>Placement, label expectation, destination delivery, added value</td><td>Visible source and destination reached through that action</td></tr>
+<tr><td>Invoke action inside its source node review</td><td>Placement, label expectation, apparent value</td><td>Visible source; invocation remains disabled in immutable review</td></tr>
+<tr><td>Turn</td><td>Answer quality, recursive coherence, navigation value, presentation quality, and follow-up progress when applicable</td><td>Representative evidence from completed layer, node, and action reviews</td></tr>
+</tbody></table>
+<p>Each criterion uses one anchored four-point scale:</p>
+<ul>
+<li><code>4</code> clearly succeeds.</li>
+<li><code>3</code> succeeds with minor weaknesses.</li>
+<li><code>2</code> has material problems.</li>
+<li><code>1</code> fails its intended role.</li>
+<li><code>null</code> means the criterion is genuinely not assessable from available UI evidence.</li>
+</ul>
+<p>A judge must capture more evidence when the UI can expose it rather than using <code>null</code> as a shortcut.</p>
+<h4>13.4.3 Incremental screenshot-grounded review records</h4>
+<p>The judge writes reviews as it explores. <code>reviewLayer</code> persists one layer record. <code>reviewNode</code> persists one node record and the actions visible on that node. Calling either tool again revises that subject's current record while preserving the prior calls in the interaction trace. Applicable rating keys come from the rubric manifest.</p>
+<pre><code class="language-typescript">reviewLayer({ layerId, evidence, ratings, summary, findings });
+reviewNode({ nodeId, layerId, evidence, ratings, actions, summary, findings });
+submitReview({ turnId, evidence, ratings, summary, findings });
+</code></pre>
+<pre><code class="language-json">{
+  "nodeId": "node-22",
+  "layerId": "layer-8",
+  "evidence": {
+    "context": ["shot-16"],
+    "detail": ["shot-17"]
+  },
+  "ratings": {
+    "layer_fit": 4,
+    "title_detail_alignment": 3,
+    "substance": 4,
+    "detail_presentation": 2
+  },
+  "actions": [
+    {
+      "actionId": "action-6",
+      "kind": "navigate",
+      "evidence": {
+        "source": ["shot-17"],
+        "destination": ["shot-21"]
+      },
+      "ratings": {
+        "placement": 4,
+        "label_expectation": 3,
+        "destination_delivery": 4,
+        "added_value": 4
+      },
+      "summary": "The destination adds useful detail, but the label is vague."
+    }
+  ],
+  "summary": "The node belongs here and contains useful evidence, but its detail layout is difficult to scan.",
+  "findings": [
+    {
+      "type": "issue",
+      "severity": "material",
+      "text": "The final table column is unreadable.",
+      "evidence": ["shot-17"]
+    }
+  ]
+}
+</code></pre>
+<p>Ratings do not require repetitive prose. One summary explains the subject-level judgment; specific strengths and problems appear as findings with screenshot references. A navigate action cannot be graded without source and destination screenshots, and the destination screenshot's recorded navigation path must contain that action. An invoke action stays inside its source node review and uses only its visible source evidence.</p>
+<p><code>submitReview</code> does not accept new layer or node assessments. It receives the overall turn ratings, representative screenshot references, summary, and findings. It finalizes the already persisted review set as one immutable judge result.</p>
+<h4>13.4.4 Coverage and completion</h4>
+<p>The review-writing tools reject unrelated evidence, unknown rubric keys, mismatched screenshot state, and an unjustified <code>null</code> rating immediately.</p>
+<p><code>submitReview</code> fails with a list of missing subjects when coverage is incomplete. Required coverage includes every reachable layer, visible node, navigate action, visible invoke action, and the overall turn. The final artifact preserves the interaction trace, screenshot files and tiles, screenshot metadata, incremental reviews, rubric version, judge configuration, and completion coverage.</p>
+<p>The simulated-user judge grades only what the product made visible. Separate deterministic graders remain authoritative for graph integrity, mutation policy, repository diff, protected-file hashes, public and hidden tests, build results, and commit history. A visually strong graph cannot compensate for broken code, and correct hidden work cannot compensate for an unusable visible response.</p>
 <h3>13.5 Evaluation ladder</h3>
 <table>
 <thead>
@@ -1750,6 +1848,12 @@ npm run eval:web
 <td>Compare output quality on longer, more complex work</td>
 <td>Multi-case runs across pinned configurations</td>
 <td>Required for promoted candidates</td>
+</tr>
+<tr>
+<td>Simulated-user review</td>
+<td>Grade every visible layer, node, and action through the production workspace</td>
+<td>Screenshot-grounded agent review with enforced recursive coverage</td>
+<td>Required for project-suite turns</td>
 </tr>
 <tr>
 <td>UX replay and human grading</td>
@@ -1808,6 +1912,18 @@ npm run eval:web
 <td>Visible nodes contain useful detail; actions are valid and specific</td>
 </tr>
 <tr>
+<td>Project question</td>
+<td>Answer is grounded in the pinned project while the read-only workspace remains unchanged</td>
+</tr>
+<tr>
+<td>Project diagnosis</td>
+<td>Harness reproduces and explains the seeded failure, considers alternatives, and leaves zero repository diff</td>
+</tr>
+<tr>
+<td>Project implementation</td>
+<td>Requested behavior works under public and hidden checks; protected files, diff scope, build, and commits pass their deterministic gates</td>
+</tr>
+<tr>
 <td>Stop and retry</td>
 <td>Stop preserves accepted memory; retry reuses the same interaction identity</td>
 </tr>
@@ -1836,12 +1952,22 @@ npm run eval:web
   graphClientVersions: { typescript: string; python: string };
   stepResults: Array&lt;{
     stepId: string;
+    threadId: string;
+    turnIndex: number;
     nodeId: number;
     result: CompleteResult;
     display: ResolvedGraphLayer;
+    repositoryState?: { before: string; after: string; commits: string[] };
     deterministicChecks: CheckResult[];
     judgeResults: JudgeResult[];
   }&gt;;
+  simulatedUserReview?: {
+    rubricVersion: string;
+    interactionTraceRef: string;
+    screenshotRefs: string[];
+    assessments: ReviewRecord[];
+    coverage: ReviewCoverage;
+  };
   inputGraph: CompleteInputGraph;
   judgeConfigurationId: string;
   diagnosticTraceRef?: string;
@@ -1866,7 +1992,7 @@ npm run eval:web
 <p><strong>User goal:</strong> Judge a pinned harness with repeatable evidence.</p>
 <p><strong>Product rule:</strong> Versioned evaluations produce immutable results and replay data.</p>
 <p><strong>Observable result:</strong> A report can open its saved result in Relayer Desktop.</p>
-<p><strong>Acceptance:</strong> Promotion requires automated checks and human visual review.</p>
+<p><strong>Acceptance:</strong> Promotion requires deterministic task checks, screenshot-grounded simulated-user review, and human visual review.</p>
 <p class="capability-evidence"><strong>Status and evidence:</strong> Partial. <a href="#15d-basic-complete-evaluation-evidence">Review the basic evaluation evidence.</a></p>
 </section>
 <h3>9.1 Evaluation report action</h3>
@@ -1886,7 +2012,10 @@ npm run eval:web
 <li>diagnostic traces remain behind the developer setting.</li>
 </ul>
 <p>Replay mode does not invoke Complete. Invoke actions are visible as evidence but disabled with an explanation that the run is immutable.</p>
-<h3>9.3 Continue with the tested harness</h3>
+<h3>9.3 Simulated-user review</h3>
+<p>A project evaluation may run several threads and turns against one pinned repository materialization. After each accepted turn, the configured simulated-user judge opens the same read-only production workspace a person reviews. It navigates visible nodes and actions and captures the screenshots it needs. It then fills the literal rubric in Section 13.4 and saves its exploration trace with the immutable run.</p>
+<p>The judge may change only review presentation state: visible selection, navigation history, and screenshot target. It cannot send a message, invoke mutating actions, change project files, alter graph records, or modify the source run. Human reviewers can open the same execution and inspect the exact screenshots cited by each finding.</p>
+<h3>9.4 Continue with the tested harness</h3>
 <p>The evaluation thread has one <strong>Continue with this configuration</strong> action. It:</p>
 <ol>
 <li>clones the selected accepted graph snapshot into a new ordinary thread;</li>
@@ -1897,7 +2026,7 @@ npm run eval:web
 <li>sends all new interactions through the production Complete adapter.</li>
 </ol>
 <p>The cloned thread can diverge without changing the evaluation evidence. If the recorded harness build is unavailable, incompatible, or lacks a current credential, Continue is disabled and states the exact missing requirement.</p>
-<h3>9.4 Deep-link security and tests</h3>
+<h3>9.5 Deep-link security and tests</h3>
 <p>The desktop accepts only a run ID. It must not accept an arbitrary command or file-system path. The local app server resolves the ID in the evaluation catalog. It validates the bundle and object digests. It rejects path traversal, unsupported schemas, missing objects, and changed artifacts.</p>
 <p>Product tests cover deep-link activation when the app is closed and when it runs. They cover duplicate activation, missing runs, corrupt bundles, and incompatible graph schemas. They also cover replay, navigation, evidence, configuration pinning, and copy-on-write continuation. The tests must prove that continuation cannot change the source bundle.</p>
 <h2 data-prd-layer="Contracts" data-prd-order="14">14. Desktop build and distribution contract</h2>
@@ -2033,7 +2162,7 @@ npm run eval:web
 <li>accessibility and visual-structure assertions for all canonical mocks.</li>
 </ul>
 <h3>16.2 Live evaluations</h3>
-<p>Live Codex, Prime Agent, or other model runs are opt-in, metered, and never part of the default <code>npm run check</code>. They run through the evaluation runner and produce immutable bundles. LLM judges are versioned and calibrated against human decisions; their scores are not treated as ground truth.</p>
+<p>Live Codex, Prime Agent, or other model runs are opt-in, metered, and never part of the default <code>npm run check</code>. They run through the evaluation runner and produce immutable bundles. LLM judges are versioned and calibrated against human decisions; their scores are not treated as ground truth. Simulated-user judge runs record their complete UI interaction trace and screenshot evidence so a human can audit every qualitative finding.</p>
 <h3>16.3 Human product evaluation</h3>
 <p>Human reviewers load saved results in the desktop graph UX. They judge response clarity, important details, connections, actions, and task continuation. They do not judge raw JSON or traces. Later comparisons use one case and change only the recorded harness or model configuration.</p>
 <h2 data-prd-layer="Evidence" data-prd-order="17">17. V1 boundary and open decisions</h2>

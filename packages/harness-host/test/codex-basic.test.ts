@@ -64,6 +64,7 @@ describe("CodexBasicHarness", () => {
     })).rejects.toThrow("turn failed");
     expect(harness.state()).toEqual({ codexThreadId: "codex-thread-after-start" });
     expect(submittedPrompt).toContain("Relayer graph affordances:");
+    expect(submittedPrompt).toContain("system temporary directory, not in the project checkout");
     expect(submittedPrompt).toContain("first-class options");
     expect(submittedPrompt).toContain("must use exactly one supported Relayer icon name");
     expect(submittedPrompt).toContain("compass");

@@ -1,8 +1,17 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { taskSystemFixtureFactory } from "@relayer/eval-runner";
+import {
+  H3_PACKAGE_MANAGER,
+  H3_PROJECT_CASE_ID,
+  H3_REPOSITORY_URL,
+  H3_SEEDED_COMMIT,
+  H3_SEEDED_TREE,
+  H3_UPSTREAM_COMMIT,
+  H3_UPSTREAM_TREE,
+  taskSystemFixtureFactory,
+} from "@relayer/eval-runner";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { EvalService } from "../desktop/eval-main/eval-service.mjs";
@@ -41,10 +50,45 @@ describe("Relayer Eval application service", () => {
     });
     services.push(product);
     const productSession = await product.start();
+    const workspaceGrades = [];
+    const acceptedTopologyGrades = [];
     const evalService = await new EvalService({
       stateFile: join(dataDirectory, "eval-data", "test-runs.json"),
       productSession,
       configurationPaths: [configurationPath],
+      projectFixtureMaterializer: async ({ workspaceDirectory }) => {
+        await mkdir(workspaceDirectory, { recursive: true });
+        return {
+          schemaVersion: 1,
+          fixtureId: H3_PROJECT_CASE_ID,
+          workspaceDirectory,
+          repositoryUrl: H3_REPOSITORY_URL,
+          upstreamCommit: H3_UPSTREAM_COMMIT,
+          upstreamTree: H3_UPSTREAM_TREE,
+          seededCommit: H3_SEEDED_COMMIT,
+          seededTree: H3_SEEDED_TREE,
+          packageManager: H3_PACKAGE_MANAGER,
+          installedWithFrozenLockfile: true,
+        };
+      },
+      workspaceGrader: async ({ grade }) => {
+        workspaceGrades.push(grade);
+        return [{ name: `workspace:${grade}`, passed: true, detail: `${grade} policy passed.` }];
+      },
+      acceptedTopologyGrader: (topology, { requireGrandchild }) => {
+        acceptedTopologyGrades.push({
+          turnId: topology.turnId,
+          layerCount: topology.layers.length,
+          requireGrandchild,
+        });
+        return [
+          { name: "graph:accepted-reachable-closure", passed: true, detail: "Accepted topology loaded." },
+          ...(requireGrandchild
+            ? [{ name: "graph:root-child-grandchild", passed: true, detail: "Test topology policy passed." }]
+            : []),
+        ];
+      },
+      platform: "darwin",
     }).open();
 
     const created = await evalService.createRun({
@@ -70,6 +114,11 @@ describe("Relayer Eval application service", () => {
     });
     expect(context.cases).toHaveLength(3);
     expect(context.cases.every((testCase) => testCase.threadIds.length === 1)).toBe(true);
+    expect(context.cases.map((testCase) => testCase.threads)).toEqual([
+      [{ id: completed.executions[0].threadIds[0], name: "Task system · two turns" }],
+      [{ id: completed.executions[1].threadIds[0], name: "Task system · one turn" }],
+      [{ id: completed.executions[2].threadIds[0], name: "Hierarchical overview · one turn" }],
+    ]);
 
     const detail = await productRequest(productSession, `/api/threads/${selected.threadIds[0]}`);
     expect(detail.interactions[0].completionStatus).toBe("accepted");
@@ -96,6 +145,43 @@ describe("Relayer Eval application service", () => {
       `/api/threads/${selected.threadIds[0]}/interactions/${detail.interactions[0].id}/layers/${layer.actions[0].targetLayerId}`,
     );
     expect(childLayer.nodes.map((node) => node.title)).toEqual(["Waiting tasks", "Next claim"]);
+
+    const h3Created = await evalService.createRun({
+      testCaseIds: [H3_PROJECT_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const h3Completed = await waitForCompletedRun(evalService, h3Created.id);
+    expect(h3Completed.executions[0].error).toBeNull();
+    expect(h3Completed.status).toBe("passed");
+    expect(h3Completed.executions).toHaveLength(1);
+    const h3Execution = h3Completed.executions[0];
+    expect(h3Execution.threadIds).toHaveLength(3);
+    expect(h3Execution.turns.map((turn) => [turn.threadDefinitionId, turn.threadTurnIndex])).toEqual([
+      ["architecture", 0],
+      ["architecture", 1],
+      ["diagnosis", 0],
+      ["diagnosis", 1],
+      ["implementation", 0],
+      ["implementation", 1],
+    ]);
+    expect(h3Execution.turns).toHaveLength(6);
+    expect(evalService.reviewContext(h3Execution.id).cases.find((testCase) => (
+      testCase.id === H3_PROJECT_CASE_ID
+    )).threads).toEqual([
+      { id: h3Execution.threadIds[0], name: "Architecture question" },
+      { id: h3Execution.threadIds[1], name: "Read-only bug diagnosis" },
+      { id: h3Execution.threadIds[2], name: "Implement and commit the repair" },
+    ]);
+    expect(workspaceGrades).toEqual(["question", "question", "diagnosis", "diagnosis", "implementation"]);
+    expect(acceptedTopologyGrades).toHaveLength(6);
+    expect(acceptedTopologyGrades.filter((grade) => grade.requireGrandchild)).toHaveLength(2);
+    expect(acceptedTopologyGrades.every((grade) => grade.layerCount === 2)).toBe(true);
+    const h3Threads = await Promise.all(h3Execution.threadIds.map((threadId) => (
+      productRequest(productSession, `/api/threads/${threadId}`)
+    )));
+    expect(new Set(h3Threads.map((threadDetail) => threadDetail.thread.projectId)).size).toBe(1);
+    expect(h3Threads.every((threadDetail) => threadDetail.interactions.length === 2)).toBe(true);
   }, 20_000);
 });
 
