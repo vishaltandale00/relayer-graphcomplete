@@ -117,7 +117,7 @@ The hosted runner proves native Intel packaging and updater behavior. It does no
 
 Use a personal Windows 11 Azure Virtual Desktop rather than a headless CI runner. Assign an eligible Microsoft 365 or Windows license to the test identity, use a small x64 session host, enable automatic shutdown/deallocation, and keep the desktop unavailable from the public internet except through Azure Virtual Desktop.
 
-The reviewable deployment definition and fail-closed post-deployment assignment script live in [`infra/azure/desktop-canary`](../infra/azure/desktop-canary/README.md). They create no resources by themselves. The test identity must be an Entra member user in the Relayer tenant, not a B2B guest, and the template must receive its temporary local-administrator password only at deployment time.
+The reviewable deployment definition and fail-closed post-deployment scripts live in [`infra/azure/desktop-canary`](../infra/azure/desktop-canary/README.md). They create no resources by themselves. The test identity must authenticate natively as an Entra member in the Relayer tenant, not merely have Member permissions on an external B2B identity. The VM uses the system-assigned identity required by `AADLoginForWindows`, and the separate Windows Cloud Login script enables and verifies the tenant-level RDP authentication prerequisite. Supply the temporary local-administrator password only at deployment time.
 
 The minimal deployment profile is:
 

@@ -31,7 +31,10 @@ $subscriptionScope = "/subscriptions/$SubscriptionId"
 
 Set-AzContext -SubscriptionId $SubscriptionId | Out-Null
 
-$testUsers = @(Get-AzADUser -ObjectId $TestUserObjectId -Select UserType -AppendSelected)
+$testUsers = @(Get-AzADUser `
+  -ObjectId $TestUserObjectId `
+  -Select UserType,CreationType,ExternalUserState `
+  -AppendSelected)
 if ($testUsers.Count -ne 1) {
   throw "Expected exactly one test user for object ID $TestUserObjectId; found $($testUsers.Count)."
 }
@@ -41,6 +44,14 @@ if ($testUser.UserType -ne 'Member') {
 }
 if ($testUser.UserPrincipalName -ne $TestUserUpn) {
   throw "Test user object ID resolves to $($testUser.UserPrincipalName), not $TestUserUpn."
+}
+$externalIdentityMarkers = @(
+  $testUser.UserPrincipalName -match '#EXT#'
+  $testUser.CreationType -eq 'Invitation'
+  -not [string]::IsNullOrWhiteSpace([string]$testUser.ExternalUserState)
+)
+if ($externalIdentityMarkers -contains $true) {
+  throw "The AVD test identity must authenticate natively in this tenant; $TestUserUpn is an external B2B identity."
 }
 
 $sessionHosts = @(Get-AzWvdSessionHost `

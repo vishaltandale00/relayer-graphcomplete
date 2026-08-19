@@ -1293,14 +1293,22 @@ describe("desktop skeleton", () => {
       ];
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
         listPackageEntries: packagedRuntimeEntries,
       })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "arm64" });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
+        expectedArchitecture: "x86_64",
+        listPackageEntries: packagedRuntimeEntries,
+      })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "x86_64" });
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
         listPackageEntries: packagedRuntimeEntries,
       })).rejects.toThrow("must contain only arm64");
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
         listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/@relayer/graph-client/dist/index.js"),
       })).rejects.toThrow("missing node_modules/@relayer/graph-client/dist/index.js");
 

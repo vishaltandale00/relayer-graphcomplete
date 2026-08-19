@@ -8,8 +8,8 @@ Nothing in this directory authorizes an Azure deployment, a Microsoft license pu
 
 - one personal/direct-assignment Azure Virtual Desktop host pool;
 - one full-desktop application group and one workspace;
-- one Entra-joined Windows 11 Enterprise multi-session 24H2 x64 VM;
-- `Standard_D2as_v5`, 2 vCPU and 8 GiB memory;
+- one Entra-joined Windows 11 Enterprise multi-session 24H2 x64 VM with a system-assigned managed identity required by `AADLoginForWindows`;
+- `Standard_D2s_v7`, 2 vCPU and 8 GiB memory;
 - a 128 GiB Standard SSD OS disk;
 - a dedicated VNet, subnet, NSG, and NIC with no public IP and no custom inbound rule;
 - Desktop Virtualization User and Virtual Machine User Login assignments for one Entra member user;
@@ -27,14 +27,32 @@ This is a deliberate cost tradeoff for one temporary test host. A NAT Gateway is
 
 Before deployment, verify all of the following:
 
-1. The test identity is a Microsoft Entra **member** user in this tenant, not an external B2B guest.
+1. The test identity is a native Microsoft Entra **member** user in this tenant, not an external B2B identity whose permission level was changed to Member.
 2. The user has an eligible AVD license, such as Microsoft 365 Business Premium.
 3. The subscription owner approves the billable VM, disk, and outbound-data costs.
 4. The deployer can create resources and role assignments in the target subscription.
 5. The `Microsoft.DesktopVirtualization`, `Microsoft.Compute`, `Microsoft.Network`, and `Microsoft.DevTestLab` providers are registered.
-6. `Standard_D2as_v5` and the `MicrosoftWindowsDesktop:windows-11:win11-24h2-avd:latest` image are available in the chosen region.
+6. `Standard_D2s_v7` and the `MicrosoftWindowsDesktop:windows-11:win11-24h2-avd:latest` image are available in the chosen region.
+7. A native administrator with Application Administrator, Cloud Application Administrator, or a stronger role has enabled Microsoft Entra authentication for RDP on the Windows Cloud Login service principal.
 
-Use a dedicated member identity such as `avd-test@relayerlabs.ai`. Do not deploy against a guest-form UPN containing `#EXT#`.
+Use a dedicated native identity such as `avd-test@vishalrelayerlabs.onmicrosoft.com`. Do not deploy against a guest-form UPN containing `#EXT#`. `complete-deployment.ps1` also rejects users whose Graph-backed `CreationType` or `ExternalUserState` identifies them as external.
+
+## Enable tenant-level Windows Cloud Login
+
+The host pool already sets `enablerdsaadauth:i:1`, but that property is not sufficient by itself. Microsoft Entra must also allow RDP authentication through the tenant's Windows Cloud Login service principal. This is a tenant-level configuration, so it is intentionally separate from the resource-group Bicep deployment.
+
+Run this once as the native tenant administrator from PowerShell or Azure Cloud Shell with Microsoft Graph PowerShell 2.9.0 or later:
+
+```powershell
+Connect-MgGraph `
+  -Scopes 'Application.Read.All','Application-RemoteDesktopConfig.ReadWrite.All' `
+  -NoWelcome
+
+./enable-windows-cloud-login.ps1 -WhatIf
+./enable-windows-cloud-login.ps1
+```
+
+The script fails closed unless the Windows Cloud Login service principal resolves exactly once, verifies the final `isRemoteDesktopProtocolEnabled` state, and leaves an already-enabled tenant unchanged.
 
 ## Review and deploy from Azure Cloud Shell
 
@@ -73,7 +91,7 @@ Wait until Azure Virtual Desktop shows exactly one `Available` session host, the
 ./complete-deployment.ps1 `
   -SubscriptionId $subscriptionId `
   -TestUserObjectId '<test-user-object-id>' `
-  -TestUserUpn 'avd-test@relayerlabs.ai' `
+  -TestUserUpn 'avd-test@vishalrelayerlabs.onmicrosoft.com' `
   -EnableStartVmOnConnect `
   -DeallocateWhenComplete `
   -WhatIf

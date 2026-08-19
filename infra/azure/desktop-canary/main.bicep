@@ -39,7 +39,7 @@ param virtualNetworkName string = 'relayer-win-canary-vnet'
 param subnetName string = 'session-hosts'
 param networkSecurityGroupName string = 'relayer-win-canary-nsg'
 param virtualMachineName string = 'relayer-win11'
-param virtualMachineSize string = 'Standard_D2as_v5'
+param virtualMachineSize string = 'Standard_D2s_v7'
 
 var desktopVirtualizationUserRoleId = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
@@ -175,6 +175,9 @@ resource sessionHost 'Microsoft.Compute/virtualMachines@2024-03-01' = {
   name: virtualMachineName
   location: location
   tags: resourceTags
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     hardwareProfile: {
       vmSize: virtualMachineSize
@@ -237,7 +240,6 @@ resource entraJoin 'Microsoft.Compute/virtualMachines/extensions@2024-03-01' = {
   location: location
   properties: {
     autoUpgradeMinorVersion: true
-    enableAutomaticUpgrade: true
     publisher: 'Microsoft.Azure.ActiveDirectory'
     type: 'AADLoginForWindows'
     typeHandlerVersion: '1.0'
@@ -250,7 +252,6 @@ resource avdAgent 'Microsoft.Compute/virtualMachines/extensions@2024-03-01' = {
   location: location
   properties: {
     autoUpgradeMinorVersion: true
-    enableAutomaticUpgrade: true
     protectedSettings: {
       properties: {
         #disable-next-line use-resource-symbol-reference
