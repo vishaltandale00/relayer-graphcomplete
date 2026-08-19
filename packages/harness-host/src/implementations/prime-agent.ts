@@ -79,13 +79,24 @@ export class PrimeAgentHarness implements Harness {
 
   async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
-    const abort = () => { void this.session.abort(); };
+    let abortOutcome: Promise<OperationOutcome<void>> | undefined;
+    const abort = () => {
+      if (abortOutcome !== undefined) return;
+      abortOutcome = operationOutcome(() => this.session.abort());
+    };
     signal?.addEventListener("abort", abort, { once: true });
+    let promptOutcome: OperationOutcome<void>;
     try {
-      await this.session.promptAndWait(this.prompt(context.inputGraph), { runContext: context });
+      promptOutcome = await operationOutcome(() => this.session.promptAndWait(this.prompt(context.inputGraph), { runContext: context }));
     } finally {
       signal?.removeEventListener("abort", abort);
     }
+    const settledAbort = await abortOutcome;
+    if (!promptOutcome.ok && settledAbort !== undefined && !settledAbort.ok) {
+      throw new AggregateError([promptOutcome.error, settledAbort.error], "Prime Agent prompt and abort failed");
+    }
+    if (!promptOutcome.ok) throw promptOutcome.error;
+    if (settledAbort !== undefined && !settledAbort.ok) throw settledAbort.error;
   }
 
   state(): HarnessSessionState {
@@ -114,6 +125,16 @@ Author nodes, edges, layers, and useful navigate or invoke actions. The visible 
 await graph.submit(${interaction.id})
 
 A model turn ending is not completion. If graph.submit() has not succeeded, continue working or report the blocking graph error.`;
+  }
+}
+
+type OperationOutcome<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown };
+
+async function operationOutcome<T>(operation: () => Promise<T>): Promise<OperationOutcome<T>> {
+  try {
+    return { ok: true, value: await operation() };
+  } catch (error) {
+    return { ok: false, error };
   }
 }
 

@@ -5,7 +5,8 @@ use std::path::PathBuf;
 pub struct RelayerRuntimeConfig {
     pub graph_url: String,
     pub harness_url: String,
-    pub control_token: String,
+    pub graph_control_token: String,
+    pub harness_control_token: String,
     pub harness_configurations: PathBuf,
     pub default_harness_configuration: String,
     pub allow_harness_override: bool,
@@ -52,7 +53,8 @@ impl RelayerAppServer {
                 RuntimeClient::open(
                     &runtime.graph_url,
                     &runtime.harness_url,
-                    runtime.control_token.clone(),
+                    runtime.graph_control_token.clone(),
+                    runtime.harness_control_token.clone(),
                     &runtime.harness_configurations,
                 )
                 .await?,

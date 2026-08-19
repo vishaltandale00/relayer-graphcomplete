@@ -64,11 +64,12 @@ export async function runBasicRuntimeEval(options: {
   }
   const workingDirectory = await mkdtemp(join(tmpdir(), "relayer-runtime-eval-"));
   const stateDirectory = join(workingDirectory, "state");
-  const controlToken = randomUUID();
+  const graphControlToken = randomUUID();
+  const harnessControlToken = randomUUID();
   let graphProcess: Awaited<ReturnType<typeof startGraphServer>> | undefined;
   let harnessHost: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
   try {
-    graphProcess = await startGraphServer(options.serverBinary, join(stateDirectory, "graph.sqlite"), controlToken, options.serverReadyTimeoutMs);
+    graphProcess = await startGraphServer(options.serverBinary, join(stateDirectory, "graph.sqlite"), graphControlToken, options.serverReadyTimeoutMs);
     const projectId = 1;
     const threadId = 1;
     let harnessFactoryCalls = 0;
@@ -82,16 +83,19 @@ export async function runBasicRuntimeEval(options: {
         return selectedFactory(context);
       }) satisfies HarnessFactory,
     };
-    harnessHost = await startHarnessHost({ implementations, stateFile: join(stateDirectory, "harness-sessions.json"), controlToken });
+    const runningHarnessHost = await startHarnessHost({ implementations, stateFile: join(stateDirectory, "harness-sessions.json"), controlToken: harnessControlToken });
+    harnessHost = runningHarnessHost;
 
     const capabilities: GraphCapability[] = [];
     const turns: RuntimeEvalTurn[] = [];
     for (const prompt of [basicEvalPrompt, basicEvalFollowUpPrompt]) {
-      const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, controlToken, { projectId, threadId, text: prompt });
+      const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, graphControlToken, { projectId, threadId, text: prompt });
       const capability = { url: graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
-      await requestJson(`${harnessHost.url}/sessions`, controlToken, { threadId, configuration, workingDirectory }, 201);
-      const complete = await requestJson<{ output: CompletionOutput }>(`${harnessHost.url}/sessions/${threadId}/complete`, controlToken, { graph: capability });
+      const complete = await completeWithCapabilityCleanup(async () => {
+        await requestJson(`${runningHarnessHost.url}/sessions`, harnessControlToken, { threadId, configuration, workingDirectory }, 201);
+        return requestJson<{ output: CompletionOutput }>(`${runningHarnessHost.url}/sessions/${threadId}/complete`, harnessControlToken, { graph: capability });
+      }, capability, graphControlToken);
       const checks = checkBasicOutput(complete.output, interaction.node.id);
       const deterministicPassed = checks.every((check) => check.passed);
       const judge = options.execution.judgeConfiguration.name === "codex-structured" && deterministicPassed
@@ -115,7 +119,7 @@ export async function runBasicRuntimeEval(options: {
     const sessionChecks: EvalCheck[] = [
       { name: "single-harness-object", passed: harnessFactoryCalls === 1, detail: `Harness factory called ${harnessFactoryCalls} time${harnessFactoryCalls === 1 ? "" : "s"} for two interactions.` },
       { name: "distinct-interaction-capabilities", passed: capabilities.length === 2 && capabilities[0]!.nodeId !== capabilities[1]!.nodeId && capabilities[0]!.token !== capabilities[1]!.token, detail: "Each interaction used a distinct node and opaque capability token." },
-      { name: "revoked-interaction-capabilities", passed: revokedCapabilities.every(Boolean), detail: "The host revoked every graph capability after its Complete call settled." },
+      { name: "revoked-interaction-capabilities", passed: revokedCapabilities.every(Boolean), detail: "The eval runtime revoked every graph capability after its Complete call settled." },
     ];
     const deterministicPassed = sessionChecks.every((check) => check.passed) && turns.every((turn) => turn.checks.every((check) => check.passed));
     const passed = deterministicPassed && turns.every((turn) => turn.passed);
@@ -248,6 +252,30 @@ async function terminate(child: ChildProcessWithoutNullStreams): Promise<void> {
   }
 }
 async function requestJson<T=unknown>(url:string,token:string,body:unknown,expected=200):Promise<T>{const response=await fetch(url,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify(body)});const value=await response.json();if(response.status!==expected)throw new Error(`Request ${url} failed (${response.status}): ${JSON.stringify(value)}`);return value as T;}
+
+async function completeWithCapabilityCleanup<T>(operation: () => Promise<T>, capability: GraphCapability, controlToken: string): Promise<T> {
+  const completion = await settle(operation);
+  const cleanup = await settle(async () => {
+    const response = await fetch(`${capability.url.replace(/\/$/, "")}/api/control/capabilities`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${controlToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ graphToken: capability.token }),
+    });
+    if (!response.ok) throw new Error(`Graph capability revocation failed with ${response.status}`);
+  });
+  if (!completion.ok && !cleanup.ok) throw new AggregateError([completion.error, cleanup.error], "Eval completion and graph capability cleanup failed");
+  if (!completion.ok) throw completion.error;
+  if (!cleanup.ok) throw cleanup.error;
+  return completion.value;
+}
+
+async function settle<T>(operation: () => Promise<T>): Promise<{ readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown }> {
+  try {
+    return { ok: true, value: await operation() };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
 
 export function renderArtifact(artifact: RuntimeEvalArtifact): string {
   const data = JSON.stringify(artifact).replace(/</g, "\\u003c");

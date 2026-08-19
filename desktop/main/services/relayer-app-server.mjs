@@ -95,7 +95,8 @@ export class RelayerAppServerService {
       serverArguments.push(
         "--graph-url", this.runtimeSession.graphUrl,
         "--harness-url", this.runtimeSession.harnessUrl,
-        "--runtime-control-token", this.runtimeSession.controlToken,
+        "--graph-control-token", this.runtimeSession.graphControlToken,
+        "--harness-control-token", this.runtimeSession.harnessControlToken,
         "--harness-configurations", this.runtimeSession.catalogPath,
         "--default-harness-configuration", this.defaultHarnessConfiguration,
       );

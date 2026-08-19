@@ -321,9 +321,7 @@ describe("desktop skeleton", () => {
     expect(evalMain).toContain("productSession.readOnlyCookie");
     expect(evalMain).toContain("claimPrimaryDesktopInstance");
     expect(evalMain).toContain("createReviewWindow(executionId)");
-    expect(evalMain).toContain('join(harnessDirectory, "prime-agent-basic.yaml")');
-    expect(evalMain).toContain('join(harnessDirectory, "prime-agent-deep.yaml")');
-    expect(evalMain).toContain("...(!app.isPackaged ? [");
+    expect(evalMain).toContain("evalHarnessConfigurationPaths({ harnessDirectory, isPackaged: app.isPackaged })");
     expect(evalMain).toContain("process.env.PYTHONPATH");
     expect(evalDashboard).toContain("Test cases");
     expect(evalDashboard).toContain("Harnesses under test");
@@ -637,11 +635,20 @@ describe("desktop skeleton", () => {
 
     try {
       const session = await service.start();
-      expect(session.controlToken).toMatch(/^[a-f0-9]{64}$/);
-      expect(suppliedToken).toBe(`${session.controlToken}\n`);
+      expect(session.graphControlToken).toMatch(/^[a-f0-9]{64}$/);
+      expect(session.harnessControlToken).toMatch(/^[a-f0-9]{64}$/);
+      expect(session.harnessControlToken).not.toBe(session.graphControlToken);
+      expect(suppliedToken).toBe(`${session.graphControlToken}\n`);
       expect(invocations[0].args).not.toContain("--control-token");
-      expect(invocations[0].args).not.toContain(session.controlToken);
+      expect(invocations[0].args).not.toContain(session.graphControlToken);
+      expect(invocations[0].args).not.toContain(session.harnessControlToken);
       expect(invocations[0].options.stdio).toEqual(["pipe", "pipe", "pipe"]);
+      expect((await fetch(`${session.harnessUrl}/health`, {
+        headers: { authorization: `Bearer ${session.graphControlToken}` },
+      })).status).toBe(401);
+      expect((await fetch(`${session.harnessUrl}/health`, {
+        headers: { authorization: `Bearer ${session.harnessControlToken}` },
+      })).status).toBe(200);
 
       child.exitCode = 9;
       child.emit("exit", 9, null);

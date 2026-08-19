@@ -859,7 +859,8 @@ async fn open_app_with_runtime(
         runtime: Some(RelayerRuntimeConfig {
             graph_url: graph_url.to_owned(),
             harness_url: harness_url.to_owned(),
-            control_token: "runtime-control".to_owned(),
+            graph_control_token: "graph-control".to_owned(),
+            harness_control_token: "harness-control".to_owned(),
             harness_configurations: catalog.to_owned(),
             default_harness_configuration: "codex-basic".to_owned(),
             allow_harness_override: false,

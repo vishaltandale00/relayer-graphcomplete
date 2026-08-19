@@ -283,13 +283,8 @@ describe("HarnessHost", () => {
     let completionStarted!: () => void;
     const started = new Promise<void>((resolveStarted) => { completionStarted = resolveStarted; });
     const calls: number[] = [];
-    const revoked: string[] = [];
     const dispose = vi.fn(async () => undefined);
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/api/control/capabilities")) {
-        revoked.push(JSON.parse(String(init?.body)).graphToken);
-        return new Response(JSON.stringify({ revoked: true }), { status: 200, headers: { "content-type": "application/json" } });
-      }
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url.endsWith("/output")) {
         return new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
       }
@@ -322,7 +317,6 @@ describe("HarnessHost", () => {
       await expect(queued).rejects.toThrow("closed");
       await closing;
       expect(calls).toEqual([1]);
-      expect(revoked).toEqual(["active-token", "queued-token"]);
       expect(dispose).toHaveBeenCalledTimes(1);
     } finally {
       vi.unstubAllGlobals();
@@ -356,7 +350,7 @@ describe("HarnessHost", () => {
     const adopted: { url: string; token: string; nodeId: number }[] = [];
     const accepted = new Set<number>();
     const scopes: { acquireCapability(): unknown }[] = [];
-    const revoked: string[] = [];
+    let revocationRequests = 0;
     let factoryCalls = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       const nodeId = Number(/nodes\/(\d+)/.exec(url)?.[1] ?? 1);
@@ -366,8 +360,7 @@ describe("HarnessHost", () => {
           : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
       }
       if (url.endsWith("/api/control/capabilities")) {
-        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer control");
-        revoked.push(JSON.parse(String(init?.body)).graphToken);
+        revocationRequests += 1;
         return new Response(JSON.stringify({ revoked: true }), { status: 200, headers: { "content-type": "application/json" } });
       }
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${nodeId === 1 ? "first-token" : "second-token"}`);
@@ -397,7 +390,7 @@ describe("HarnessHost", () => {
       await expect(host.complete(1, graph(2, "second-token"))).resolves.toMatchObject({ output: { nodeId: 2 } });
       expect(factoryCalls).toBe(1);
       expect(adopted.map(({ token, nodeId }) => [token, nodeId])).toEqual([["first-token", 1], ["second-token", 2]]);
-      expect(revoked).toEqual(["first-token", "second-token"]);
+      expect(revocationRequests).toBe(0);
       expect(() => scopes[0]!.acquireCapability()).toThrow("no longer active");
     } finally {
       vi.unstubAllGlobals();

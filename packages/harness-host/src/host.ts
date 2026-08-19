@@ -141,11 +141,6 @@ export class HarnessHost {
       detachSignal();
       const errors: unknown[] = operationError === undefined ? [] : [operationError];
       try {
-        await revokeGraphCapability(capability, this.options.controlToken);
-      } catch (error) {
-        errors.push(error);
-      }
-      try {
         session.descriptor = { ...session.descriptor, state: captureHarnessState(session.harness) };
         this.saved.set(threadId, persistedDescriptor(session.descriptor));
         await this.persist();
@@ -434,13 +429,4 @@ class ActiveHarnessGraphScope implements HarnessGraphScope {
   close(): void {
     this.active = false;
   }
-}
-
-async function revokeGraphCapability(capability: GraphCapability, controlToken: string): Promise<void> {
-  const response = await fetch(`${capability.url.replace(/\/$/, "")}/api/control/capabilities`, {
-    method: "DELETE",
-    headers: { "content-type": "application/json", authorization: `Bearer ${controlToken}` },
-    body: JSON.stringify({ graphToken: capability.token }),
-  });
-  if (!response.ok) throw new Error(`Graph capability revocation failed with ${response.status}`);
 }

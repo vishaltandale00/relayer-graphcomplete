@@ -111,6 +111,54 @@ describe("PrimeAgentHarness", () => {
     expect(session.abort).not.toHaveBeenCalled();
   });
 
+  it("does not settle a cancelled completion until Prime Agent abort settles", async () => {
+    let releasePrompt!: () => void;
+    const waitingForPrompt = new Promise<void>((resolve) => { releasePrompt = resolve; });
+    let releaseAbort!: () => void;
+    const waitingForAbort = new Promise<void>((resolve) => { releaseAbort = resolve; });
+    const session = {
+      promptAndWait: vi.fn(async () => waitingForPrompt),
+      abort: vi.fn(async () => {
+        releasePrompt();
+        await waitingForAbort;
+      }),
+      dispose: vi.fn(),
+    };
+    const harness = await createHarness(session);
+    const controller = new AbortController();
+    let settled = false;
+
+    const completing = harness.complete(runContext(11, "token"), controller.signal);
+    void completing.then(() => { settled = true; }, () => { settled = true; });
+    controller.abort();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(settled).toBe(false);
+    releaseAbort();
+    await completing;
+    expect(settled).toBe(true);
+  });
+
+  it("reports a Prime Agent abort failure", async () => {
+    let releasePrompt!: () => void;
+    const waitingForPrompt = new Promise<void>((resolve) => { releasePrompt = resolve; });
+    const session = {
+      promptAndWait: vi.fn(async () => waitingForPrompt),
+      abort: vi.fn(async () => {
+        releasePrompt();
+        throw new Error("abort failed");
+      }),
+      dispose: vi.fn(),
+    };
+    const harness = await createHarness(session);
+    const controller = new AbortController();
+
+    const completing = harness.complete(runContext(11, "token"), controller.signal);
+    controller.abort();
+
+    await expect(completing).rejects.toThrow("abort failed");
+  });
+
   it("rejects unsupported implementation settings before loading Prime Agent", async () => {
     const loadModule = vi.fn();
     await expect(PrimeAgentHarness.create({
@@ -130,6 +178,25 @@ function runContext(nodeId: number, token: string): HarnessRunContext {
       acquireCapability: () => ({ url: "http://127.0.0.1:43123", token, nodeId }),
     },
   };
+}
+
+async function createHarness(session: PrimeAgentSessionFixture): Promise<PrimeAgentHarness> {
+  return PrimeAgentHarness.create({
+    threadId: 7,
+    workingDirectory: "/tmp/project",
+    configuration,
+  }, { loadModule: async () => ({
+    SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+    createHostRequestHandler: (handler: unknown) => handler,
+    createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+    createAgentSessionFromServices: vi.fn(async () => ({ session })),
+  }) as never });
+}
+
+interface PrimeAgentSessionFixture {
+  readonly promptAndWait: ReturnType<typeof vi.fn>;
+  readonly abort: ReturnType<typeof vi.fn>;
+  readonly dispose: ReturnType<typeof vi.fn>;
 }
 
 function invocation(runContext: HarnessRunContext) {

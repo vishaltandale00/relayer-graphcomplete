@@ -72,7 +72,8 @@ export class GraphCompleteRuntimeService {
       })),
     }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 
-    const controlToken = randomBytes(32).toString("hex");
+    const graphControlToken = randomBytes(32).toString("hex");
+    const harnessControlToken = randomBytes(32).toString("hex");
     const graphProcess = this.spawnProcess(this.graphServerBinary, [
       "--database", join(runtimeDirectory, "graph.sqlite3"),
       "--port", "0",
@@ -80,7 +81,7 @@ export class GraphCompleteRuntimeService {
     this.graphProcess = graphProcess;
     try {
       graphProcess.stdin?.on("error", () => {});
-      graphProcess.stdin?.write(`${controlToken}\n`);
+      graphProcess.stdin?.write(`${graphControlToken}\n`);
       const graphUrl = await this.#waitForGraph(graphProcess);
       this.#superviseGraph(graphProcess);
       if (graphProcess.exitCode !== null || graphProcess.signalCode !== null) {
@@ -97,12 +98,13 @@ export class GraphCompleteRuntimeService {
           ...this.additionalImplementations,
         }),
         stateFile: join(runtimeDirectory, "harness-sessions.json"),
-        controlToken,
+        controlToken: harnessControlToken,
       });
       this.session = Object.freeze({
         graphUrl,
         harnessUrl: this.harnessHost.url,
-        controlToken,
+        graphControlToken,
+        harnessControlToken,
         catalogPath,
         configurationNames: Object.freeze([...configurations.keys()]),
       });
