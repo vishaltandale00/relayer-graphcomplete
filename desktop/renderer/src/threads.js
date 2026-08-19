@@ -6,6 +6,11 @@ import {
 } from "./action-invocation-state.js";
 import { renderThread } from "./graph.js";
 import { renderScopeMenu, renderSidebar, setMainView } from "./navigation.js";
+import {
+  appendLayerPath,
+  layerPathForVisibleLayer,
+  restoreLayerPath,
+} from "./product-workspace/model.js";
 import { appState, productApiAvailable, viewState } from "./state.js";
 import { $, threadTitle, toast } from "./ui.js";
 import { addLocalThread } from "./thread-model.js";
@@ -101,8 +106,27 @@ export async function loadThread(threadId) {
   await refreshState(threadId);
 }
 
-export function hydrateWorkspace(interaction, layer = interaction?.completionOutput?.rootLayer ?? null) {
+export function hydrateWorkspace(
+  interaction,
+  layer = interaction?.completionOutput?.rootLayer ?? null,
+  { layerPath } = {},
+) {
+  const previousInteractionId = viewState.currentInteractionId;
+  const previousLayerId = viewState.layerPath.at(-1)?.layerId;
+  const nextLayerPath = layerPath ?? layerPathForVisibleLayer(
+    String(previousInteractionId) === String(interaction?.id) ? viewState.layerPath : [],
+    interaction,
+    layer,
+  );
+  const nextLayerId = nextLayerPath.at(-1)?.layerId;
+  if (
+    String(previousInteractionId) !== String(interaction?.id)
+    || String(previousLayerId) !== String(nextLayerId)
+  ) {
+    viewState.selectedNodeId = null;
+  }
   viewState.currentInteractionId = interaction?.id ?? null;
+  viewState.layerPath = nextLayerPath;
   appState.currentInteractionId = interaction?.id ?? null;
   appState.status = interaction?.completionStatus || "idle";
   appState.visibleLayer = layer;
@@ -141,16 +165,25 @@ export async function submitInteraction(text) {
   await refreshState(viewState.currentThreadId);
 }
 
-export async function navigateLayer(layerId) {
+export async function navigateLayer(layerId, navigation = {}) {
   if (!viewState.currentThreadId || !viewState.currentInteractionId) return;
   const layer = await request(`/api/threads/${encodeURIComponent(viewState.currentThreadId)}/interactions/${encodeURIComponent(viewState.currentInteractionId)}/layers/${encodeURIComponent(layerId)}`);
   const interaction = appState.interactions.find((item) => String(item.id) === String(viewState.currentInteractionId));
+  const layerPath = navigation.restore
+    ? viewState.layerPath.slice(0, navigation.pathIndex + 1)
+    : appendLayerPath(viewState.layerPath, navigation.action, navigation.sourceNode);
   viewState.selectedNodeId = null;
-  hydrateWorkspace(interaction, layer);
+  hydrateWorkspace(interaction, layer, { layerPath });
   renderThread();
 }
 
-export async function restoreReviewPresentation({ threadId, turnId, layerId, selectedNodeId }) {
+export async function restoreReviewPresentation({
+  threadId,
+  turnId,
+  layerId,
+  selectedNodeId,
+  navigationPath,
+}) {
   if (!threadId || !turnId) throw new Error("Review history is missing its thread or turn.");
   if (String(viewState.currentThreadId) !== String(threadId)) {
     viewState.currentThreadId = threadId;
@@ -160,13 +193,16 @@ export async function restoreReviewPresentation({ threadId, turnId, layerId, sel
     String(item.threadId) === String(threadId) && String(item.id) === String(turnId)
   ));
   if (!interaction) throw new Error(`Review history turn is unavailable: ${turnId}`);
-  let layer = interaction.completionOutput?.rootLayer ?? null;
-  const rootLayerId = layer?.layer?.id;
-  if (layerId && String(layerId) !== String(rootLayerId)) {
-    layer = await request(`/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`);
+  const loadLayer = (targetLayerId) => request(`/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(targetLayerId)}`);
+  const restoredPath = await restoreLayerPath(interaction, navigationPath, loadLayer);
+  let layer = restoredPath?.layer ?? interaction.completionOutput?.rootLayer ?? null;
+  let layerPath = restoredPath?.layerPath;
+  if (layerId && String(layerId) !== String(layer?.layer?.id)) {
+    layer = await loadLayer(layerId);
+    layerPath = layerPathForVisibleLayer([], interaction, layer);
   }
   viewState.selectedNodeId = null;
-  hydrateWorkspace(interaction, layer);
+  hydrateWorkspace(interaction, layer, { layerPath });
   renderThread();
   if (selectedNodeId) {
     const node = [...document.querySelectorAll("[data-node]")]

@@ -22,6 +22,7 @@ export const viewState = {
   currentInteractionId: query.get("interactionId"),
   mainView: query.get("threadId") ? "thread" : "new",
   selectedNodeId: null,
+  layerPath: [],
   evalContext: null,
 };
 

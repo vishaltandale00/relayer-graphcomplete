@@ -3,6 +3,7 @@ import { actionWasInvoked } from "../action-invocation-state.js";
 import {
   interactionForThread,
   responseNodesForThread,
+  workspaceBreadcrumbItems,
   workspaceModeCapabilities,
 } from "./model.js";
 import { createRelayerIcon } from "./icons.js";
@@ -265,6 +266,7 @@ export function createProductWorkspace({
     selection.selectedNodeId = null;
     $("#inspector").classList.add("hidden");
     $$('[data-node]').forEach((element) => element.classList.remove("selected"));
+    renderBreadcrumb();
   };
   $("#previousTurn").onclick = () => onSelectTurn(-1);
   $("#nextTurn").onclick = () => onSelectTurn(1);
@@ -449,6 +451,43 @@ export function createProductWorkspace({
     $("#nextTurn").disabled = turnIndex < 0 || turnIndex >= turns.length - 1;
     renderRunState(state);
     renderGraph(state, thread);
+    renderBreadcrumb(state, thread);
+  }
+
+  function renderBreadcrumb(state = getState(), thread = getThread()) {
+    const breadcrumb = $("#workspaceBreadcrumb");
+    const items = workspaceBreadcrumbItems(state, thread, selection);
+    const children = [];
+    items.forEach((item, index) => {
+      if (index > 0) {
+        const separator = graphDocument.createElement("span");
+        separator.className = "breadcrumb-separator";
+        separator.setAttribute("aria-hidden", "true");
+        separator.textContent = "/";
+        children.push(separator);
+      }
+      const segment = graphDocument.createElement(item.interactive ? "button" : "span");
+      segment.className = `breadcrumb-segment breadcrumb-${item.kind}`;
+      segment.textContent = item.label;
+      segment.title = item.description
+        ? `${item.label}: ${item.description}`
+        : item.label;
+      if (item.current) segment.setAttribute("aria-current", "location");
+      if (item.interactive) {
+        segment.type = "button";
+        segment.setAttribute("aria-label", `Go to ${item.label}`);
+        segment.dataset.reviewRef = `breadcrumb-${item.key}`;
+        segment.dataset.reviewKind = "layer-navigation";
+        segment.dataset.reviewPathIndex = String(item.pathIndex);
+        segment.onclick = () => onNavigateLayer(item.layerId, {
+          restore: true,
+          pathIndex: item.pathIndex,
+        });
+      }
+      children.push(segment);
+    });
+    breadcrumb.replaceChildren(...children);
+    breadcrumb.scrollLeft = breadcrumb.scrollWidth;
   }
 
   function renderRunState(state) {
@@ -777,7 +816,7 @@ export function createProductWorkspace({
       button.classList.toggle("invoked", invoked);
       button.onclick = async () => {
         if (navigational) {
-          await onNavigateLayer(action.targetLayerId);
+          await onNavigateLayer(action.targetLayerId, { action, sourceNode: node });
           return;
         }
         button.disabled = true;
@@ -788,6 +827,7 @@ export function createProductWorkspace({
     $$('[data-node]').forEach((element) => {
       element.classList.toggle("selected", element.dataset.node === String(id));
     });
+    renderBreadcrumb(state, getThread());
   }
 
   function dispose() {
