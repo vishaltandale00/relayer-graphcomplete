@@ -36,6 +36,14 @@ pub(crate) struct Interaction {
     pub(crate) created_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ActionInvocation {
+    pub(crate) source_interaction_id: InteractionId,
+    pub(crate) action_id: i64,
+    pub(crate) result_interaction_id: InteractionId,
+    pub(crate) created_at: String,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ProductCapabilities {
     pub(crate) projects: bool,
@@ -63,6 +71,7 @@ pub(crate) struct ProductState {
     pub(crate) projects: Vec<Project>,
     pub(crate) threads: Vec<ThreadView>,
     pub(crate) interactions: Vec<Interaction>,
+    pub(crate) action_invocations: Vec<ActionInvocation>,
     pub(crate) capabilities: ProductCapabilities,
 }
 

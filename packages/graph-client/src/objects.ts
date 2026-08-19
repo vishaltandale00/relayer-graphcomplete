@@ -41,7 +41,12 @@ export class LayerObject {
   }
 }
 
-export interface NavigateActionObject {
+export type ActionPresentationObject =
+  | { readonly variant?: "pill"; readonly icon?: string; readonly description?: never }
+  | { readonly variant: "chip" | "wide"; readonly icon?: string; readonly description?: never }
+  | { readonly variant: "card"; readonly icon?: string; readonly description: string };
+
+export interface NavigateActionFields {
   readonly kind: "navigate";
   readonly label: string;
   readonly target: LayerReference;
@@ -50,7 +55,7 @@ export interface NavigateActionObject {
   ref?: GraphAction;
 }
 
-export interface InvokeActionObject {
+export interface InvokeActionFields {
   readonly kind: "invoke";
   readonly label: string;
   readonly interactionText: string;
@@ -58,6 +63,8 @@ export interface InvokeActionObject {
   ref?: GraphAction;
 }
 
+export type NavigateActionObject = NavigateActionFields & ActionPresentationObject;
+export type InvokeActionObject = InvokeActionFields & ActionPresentationObject;
 export type ActionObject = NavigateActionObject | InvokeActionObject;
 export type NodeReference = NodeObject | GraphNode | GraphId;
 export type EdgeReference = EdgeObject | GraphEdge | GraphId;

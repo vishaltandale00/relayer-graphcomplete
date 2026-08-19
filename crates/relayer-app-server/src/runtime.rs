@@ -53,6 +53,15 @@ pub(crate) struct RuntimeCompletion {
     pub(crate) output: Value,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RuntimeAction {
+    pub(crate) id: i64,
+    pub(crate) kind: String,
+    pub(crate) interaction_text: Option<String>,
+    pub(crate) state: String,
+}
+
 impl RuntimeClient {
     pub(crate) async fn open(
         graph_url: &str,
@@ -153,13 +162,7 @@ impl RuntimeClient {
         interaction_node_id: i64,
         layer_id: i64,
     ) -> Result<Value, RuntimeError> {
-        let capability: RemintCapabilityResponse = self
-            .post(
-                self.graph_url.join("api/control/capabilities")?,
-                &serde_json::json!({"nodeId": interaction_node_id}),
-                StatusCode::OK,
-            )
-            .await?;
+        let capability = self.remint_capability(interaction_node_id).await?;
         let response = self
             .client
             .get(
@@ -170,6 +173,37 @@ impl RuntimeClient {
             .send()
             .await?;
         response_json(response, StatusCode::OK).await
+    }
+
+    pub(crate) async fn get_action(
+        &self,
+        interaction_node_id: i64,
+        action_id: i64,
+    ) -> Result<RuntimeAction, RuntimeError> {
+        let capability = self.remint_capability(interaction_node_id).await?;
+        let response = self
+            .client
+            .get(
+                self.graph_url
+                    .join(&format!("api/graph/actions/{action_id}"))?,
+            )
+            .bearer_auth(capability.graph_token)
+            .send()
+            .await?;
+        let value = response_json(response, StatusCode::OK).await?;
+        Ok(serde_json::from_value(value["action"].clone())?)
+    }
+
+    async fn remint_capability(
+        &self,
+        interaction_node_id: i64,
+    ) -> Result<RemintCapabilityResponse, RuntimeError> {
+        self.post(
+            self.graph_url.join("api/control/capabilities")?,
+            &serde_json::json!({"nodeId": interaction_node_id}),
+            StatusCode::OK,
+        )
+        .await
     }
 
     async fn post<T: for<'de> Deserialize<'de>>(

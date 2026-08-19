@@ -2,13 +2,17 @@ use super::{
     ApiState,
     auth::{authorize_read, authorize_write},
     error::ApiError,
-    types::{InteractionResponse, ThreadDetailResponse, ThreadResponse, ThreadViewResponse},
+    types::{
+        ActionInvocationResponse, InteractionResponse, ThreadDetailResponse, ThreadResponse,
+        ThreadViewResponse,
+    },
 };
 use crate::{
     product::{
-        CreateThreadCommand, Interaction, InteractionId, ProjectId, Thread, ThreadId, ThreadView,
+        CreateThreadCommand, Interaction, InteractionId, InvokeActionOutcome, ProjectId, Thread,
+        ThreadId, ThreadView,
     },
-    runtime::CompleteInteraction,
+    runtime::{CompleteInteraction, RuntimeError},
 };
 use axum::{
     Json,
@@ -40,6 +44,14 @@ pub(super) struct ThreadsResponse {
 #[derive(Serialize)]
 pub(super) struct InteractionsResponse {
     interactions: Vec<InteractionResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct InvokeActionResponse {
+    invocation: ActionInvocationResponse,
+    interaction: InteractionResponse,
+    created: bool,
 }
 
 pub(super) async fn list(
@@ -164,6 +176,202 @@ pub(super) async fn get_layer(
     Ok(Json(runtime.get_layer(graph_node_id, layer_id).await?))
 }
 
+pub(super) async fn invoke_action(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, interaction_id, action_id)): Path<(i64, i64, i64)>,
+) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
+    authorize_write(&state, &headers)?;
+    let result = invoke_action_with_authority(&state, thread_id, interaction_id, action_id).await;
+    if let Err(error) = &result {
+        log_action_invocation_request_failure(thread_id, interaction_id, action_id, error);
+    }
+    result
+}
+
+async fn invoke_action_with_authority(
+    state: &ApiState,
+    thread_id: i64,
+    interaction_id: i64,
+    action_id: i64,
+) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
+    let thread_id = ThreadId::try_from(thread_id)?;
+    let source_interaction_id = InteractionId::try_from(interaction_id)?;
+    if action_id <= 0 {
+        return Err(ApiError::invalid("action ID must be a positive integer"));
+    }
+    let thread = state.product.get_thread(thread_id).await?.thread;
+    let source = state.product.get_interaction(source_interaction_id).await?;
+    if source.thread_id != thread_id {
+        return Err(ApiError::invalid(
+            "interaction does not belong to this thread",
+        ));
+    }
+    if source.completion_status != "accepted" {
+        return Err(ApiError::invalid(
+            "actions can only be invoked from an accepted interaction",
+        ));
+    }
+    if let Some(outcome) = state
+        .product
+        .get_action_invocation(source_interaction_id, action_id)
+        .await?
+    {
+        return spawn_action_handoff(state.clone(), thread, outcome).await;
+    }
+    let graph_node_id = source
+        .graph_node_id
+        .ok_or_else(|| ApiError::invalid("interaction has no accepted graph"))?;
+    let runtime = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
+    let action = match runtime.get_action(graph_node_id, action_id).await {
+        Ok(action) => action,
+        Err(RuntimeError::Remote { status: 404, .. }) => {
+            return Err(ApiError::invalid(
+                "action is not part of this interaction's accepted graph",
+            ));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if action.id != action_id || action.kind != "invoke" || action.state != "accepted" {
+        return Err(ApiError::invalid(
+            "action is not an accepted invoke action for this interaction",
+        ));
+    }
+    let interaction_text = action
+        .interaction_text
+        .as_deref()
+        .ok_or_else(|| ApiError::invalid("invoke action has no interaction text"))?
+        .to_owned();
+
+    // One-shot invocation is a temporary UX simplification. The durable product record is
+    // intentionally shaped so future retryable or repeatable action semantics can replace it.
+    let owned_state = state.clone();
+    let handoff = tokio::spawn(async move {
+        let outcome = owned_state
+            .product
+            .invoke_action(source_interaction_id, action_id, &interaction_text)
+            .await?;
+        finish_action_handoff(&owned_state, &thread, outcome).await
+    });
+    await_action_handoff(handoff).await
+}
+
+async fn spawn_action_handoff(
+    state: ApiState,
+    thread: Thread,
+    outcome: InvokeActionOutcome,
+) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
+    let handoff =
+        tokio::spawn(async move { finish_action_handoff(&state, &thread, outcome).await });
+    await_action_handoff(handoff).await
+}
+
+async fn await_action_handoff(
+    handoff: tokio::task::JoinHandle<Result<(StatusCode, Json<InvokeActionResponse>), ApiError>>,
+) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
+    handoff.await.map_err(|error| {
+        ApiError::internal(&format!(
+            "action invocation backend handoff stopped unexpectedly: {error}"
+        ))
+    })?
+}
+
+async fn finish_action_handoff(
+    state: &ApiState,
+    thread: &Thread,
+    outcome: InvokeActionOutcome,
+) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
+    let status = if outcome.created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    let interaction = if outcome.interaction.completion_status == "not_started" {
+        claim_and_start_action_interaction(state, thread, outcome.interaction).await?
+    } else {
+        outcome.interaction
+    };
+    Ok((
+        status,
+        Json(InvokeActionResponse {
+            invocation: outcome.invocation.into(),
+            interaction: interaction.into(),
+            created: outcome.created,
+        }),
+    ))
+}
+
+async fn claim_and_start_action_interaction(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: Interaction,
+) -> Result<Interaction, ApiError> {
+    if state.runtime.is_none() {
+        let message = "GraphComplete runtime is unavailable";
+        record_background_failure(state, thread, &interaction, message.into()).await;
+        return Err(ApiError::invalid(message));
+    }
+    let claimed = state
+        .product
+        .claim_interaction_running(interaction.id, &thread.harness_configuration_name)
+        .await?;
+    if !claimed {
+        return state
+            .product
+            .get_interaction(interaction.id)
+            .await
+            .map_err(Into::into);
+    }
+
+    let mut running = interaction.clone();
+    running.completion_status = "running".into();
+    running.harness_configuration_name = Some(thread.harness_configuration_name.clone());
+    running.harness_configuration_digest = None;
+    running.completion_output = None;
+    running.completion_error = None;
+
+    // There is no await between the durable claim and spawning execution. Once this detached
+    // handoff owns the interaction, losing the HTTP request cannot strand it as not_started.
+    let state = state.clone();
+    let thread = thread.clone();
+    tokio::spawn(async move {
+        execute_interaction(state, thread, interaction).await;
+    });
+    Ok(running)
+}
+
+fn log_action_invocation_request_failure(
+    thread_id: i64,
+    source_interaction_id: i64,
+    action_id: i64,
+    error: &ApiError,
+) {
+    eprintln!(
+        "{}",
+        action_invocation_request_failure_message(
+            thread_id,
+            source_interaction_id,
+            action_id,
+            error,
+        )
+    );
+}
+
+fn action_invocation_request_failure_message(
+    thread_id: i64,
+    source_interaction_id: i64,
+    action_id: i64,
+    error: &ApiError,
+) -> String {
+    format!(
+        "action invocation request failed before background completion: thread={thread_id} source_interaction={source_interaction_id} action={action_id}: {}",
+        error.message()
+    )
+}
+
 fn selected_harness_configuration(
     state: &ApiState,
     requested: Option<&str>,
@@ -278,6 +486,10 @@ async fn record_background_failure(
     interaction: &Interaction,
     error: String,
 ) {
+    eprintln!(
+        "interaction {} completion failed in the backend: {error}",
+        interaction.id
+    );
     if let Err(persistence_error) = state
         .product
         .fail_interaction_completion(interaction.id, &thread.harness_configuration_name, &error)
@@ -286,6 +498,21 @@ async fn record_background_failure(
         eprintln!(
             "could not persist failed interaction {}: {persistence_error}; original failure: {error}",
             interaction.id
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_invocation_request_errors_include_identifiers_in_the_backend_log() {
+        let error = ApiError::invalid("GraphComplete runtime is unavailable");
+
+        assert_eq!(
+            action_invocation_request_failure_message(4, 8, 15, &error),
+            "action invocation request failed before background completion: thread=4 source_interaction=8 action=15: GraphComplete runtime is unavailable"
         );
     }
 }

@@ -37,6 +37,16 @@ impl RelayerAppServer {
             anyhow::bail!("read-only control token must be distinct from write authority");
         }
         let storage = SqliteProductStore::open(&config.database_path).await?;
+        let interrupted = storage
+            .recover_interrupted_action_invocations(
+                "Action invocation was interrupted when Relayer stopped. Retry is unavailable while actions use the temporary one-shot UX.",
+            )
+            .await?;
+        if interrupted > 0 {
+            eprintln!(
+                "marked {interrupted} interrupted action invocation result(s) failed during backend startup"
+            );
+        }
         let runtime = match &config.runtime {
             Some(runtime) => Some(
                 RuntimeClient::open(

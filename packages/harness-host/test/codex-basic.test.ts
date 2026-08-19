@@ -65,7 +65,14 @@ describe("CodexBasicHarness", () => {
     expect(harness.state()).toEqual({ codexThreadId: "codex-thread-after-start" });
     expect(submittedPrompt).toContain("Relayer graph affordances:");
     expect(submittedPrompt).toContain("first-class options");
+    expect(submittedPrompt).toContain("must use exactly one supported Relayer icon name");
+    expect(submittedPrompt).toContain("compass");
+    expect(submittedPrompt).toContain("square-dashed-kanban");
     expect(submittedPrompt).toContain('graph.addAction(node, { kind: "navigate"');
+    expect(submittedPrompt).toContain('"chip": the most compact inline action');
+    expect(submittedPrompt).toContain('"card": a full-width action');
+    expect(submittedPrompt).toContain("footprint guidance is advisory, not a limit");
+    expect(submittedPrompt).toContain("author multiple cards");
     expect(codex.startThread).toHaveBeenCalledWith({
       workingDirectory: process.cwd(),
       model: "gpt-test",
@@ -112,7 +119,7 @@ describe("CodexBasicHarness", () => {
       const nodeId = authorizations.length === 1 ? 1 : 2;
       return new Response(JSON.stringify({
         nodeId,
-        rootAction: { id: nodeId, sourceNodeId: nodeId, kind: "navigate", label: "Response", targetLayerId: nodeId, response: true, state: "accepted" },
+        rootAction: { id: nodeId, sourceNodeId: nodeId, kind: "navigate", label: "Response", variant: "pill", targetLayerId: nodeId, response: true, state: "accepted" },
         rootLayer: { layer: { id: nodeId, nodes: [], edges: [], state: "accepted" }, nodes: [], edges: [], actions: [] },
       }), { status: 200, headers: { "content-type": "application/json" } });
     }));

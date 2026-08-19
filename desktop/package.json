@@ -12,6 +12,7 @@
     "@relayer/eval-runner": "*",
     "@relayer/harness-host": "*",
     "electron-updater": "6.8.9",
+    "lucide": "0.562.0",
     "marked": "16.4.2"
   }
 }

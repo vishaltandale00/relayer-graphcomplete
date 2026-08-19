@@ -1,5 +1,5 @@
 import { Codex, type ApprovalMode, type ModelReasoningEffort, type SandboxMode, type ThreadOptions, type WebSearchMode } from "@openai/codex-sdk";
-import { RelayerGraphClient, type CompletionOutput, type GraphCapability, type GraphNode } from "@relayer/graph-client";
+import { RELAYER_ICON_NAMES, RelayerGraphClient, type CompletionOutput, type GraphCapability, type GraphNode } from "@relayer/graph-client";
 import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessSessionState } from "../types.js";
 
 export const CODEX_BASIC_KEY = "codex.basic";
@@ -112,10 +112,21 @@ The module exports RelayerGraphClient, NodeObject, EdgeObject, and LayerObject. 
 
 The visible layer must contain 1 to 8 nodes and must be connected. Layer edges are exactly what the user sees.
 
+Every node icon, and every optional action icon, must use exactly one supported Relayer icon name. Unsupported names are rejected so that you can repair the object. Choose the closest semantic name from:
+${RELAYER_ICON_NAMES.join(", ")}
+
 Relayer graph affordances:
 - A node can be a complete explanation in the current layer.
-- A node can open a more detailed child layer. Submit the child LayerObject, then attach it with await graph.addAction(node, { kind: "navigate", label: "Useful label", target: childLayer }).
-- A node can offer a useful follow-up interaction with await graph.addAction(node, { kind: "invoke", label: "Useful label", interactionText: "A useful follow-up" }).
+- A node can open a more detailed child layer. Submit the child LayerObject, then attach it with await graph.addAction(node, { kind: "navigate", label: "Useful label", target: childLayer, variant: "pill" }).
+- A node can offer a useful follow-up interaction with await graph.addAction(node, { kind: "invoke", label: "Useful label", interactionText: "A useful follow-up", variant: "chip" }).
+
+Every action uses Relayer's renderer-independent presentation grammar. You author its order, kind and payload, label, optional supported icon, and one of these variants:
+- "chip": the most compact inline action;
+- "pill": the standard rounded action and the default when variant is omitted;
+- "wide": a full-width action for a prominent next step;
+- "card": a full-width action with both label and a required supporting description, for example { variant: "card", label: "Compare approaches", description: "Lay out the tradeoffs before choosing.", icon: "git-compare" }.
+
+Choose variants with the available inspector space in mind: chips and pills suit several concise choices, while wide actions and cards consume more vertical space. This footprint guidance is advisory, not a limit. You may freely mix variants, author multiple cards, and let a useful action list scroll. Do not author HTML, CSS, colors, dimensions, or style fields. Description is supported only by card actions.
 
 Navigate and invoke actions are first-class options, not requirements for every node. Use them where they materially improve the answer, and submit every referenced node, edge, and layer before adding its action.
 

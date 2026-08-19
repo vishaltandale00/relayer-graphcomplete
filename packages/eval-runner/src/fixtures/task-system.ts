@@ -21,11 +21,11 @@ class TaskSystemFixtureHarness implements Harness {
   }
 
   async complete(interaction: GraphNode): Promise<CompletionOutput> {
-    const queue = new NodeObject("queue", "Incoming queue", "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.", "concept", "queue");
-    const workers = new NodeObject("workers", "Two-worker pool", "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.", "concept", "workers");
+    const queue = new NodeObject("list", "Incoming queue", "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.", "concept", "queue");
+    const workers = new NodeObject("users", "Two-worker pool", "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.", "concept", "workers");
     const results = new NodeObject("database", "Results store", "When a worker completes a task, it writes the output to the results store. The freed worker then claims the next task from the queue.", "concept", "results");
     const waiting = new NodeObject("list", "Waiting tasks", "Tasks remain ordered in the queue until one of the two workers becomes available.", "detail", "waiting-tasks");
-    const claim = new NodeObject("arrow-right", "Next claim", "Immediately after a worker finishes, it claims the next waiting task and frees queue capacity.", "detail", "next-claim");
+    const claim = new NodeObject("arrow-right-circle", "Next claim", "Immediately after a worker finishes, it claims the next waiting task and frees queue capacity.", "detail", "next-claim");
     await this.graph.submitNode(queue);
     await this.graph.submitNode(workers);
     await this.graph.submitNode(results);

@@ -57,6 +57,10 @@ pub(crate) fn router(
             "/api/threads/{thread_id}/interactions/{interaction_id}/layers/{layer_id}",
             get(threads::get_layer),
         )
+        .route(
+            "/api/threads/{thread_id}/interactions/{interaction_id}/actions/{action_id}/invoke",
+            axum::routing::post(threads::invoke_action),
+        )
         .fallback_service(ServeDir::new(web_directory).append_index_html_on_directories(true))
         .with_state(state)
 }

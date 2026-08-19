@@ -91,6 +91,19 @@ impl SqliteProductStore {
         Ok(())
     }
 
+    pub(crate) async fn claim_interaction_running(
+        &self,
+        interaction_id: InteractionId,
+        harness_configuration_name: &str,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query("UPDATE interactions SET completion_status='running',harness_configuration_name=?1,harness_configuration_digest=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='not_started'")
+            .bind(harness_configuration_name)
+            .bind(interaction_id.value())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     pub(crate) async fn accept_interaction_completion(
         &self,
         interaction_id: InteractionId,
@@ -139,7 +152,7 @@ pub(super) async fn fetch_interactions(
     rows.iter().map(interaction_from_row).collect()
 }
 
-fn monotonic_timestamp(previous: &str) -> String {
+pub(super) fn monotonic_timestamp(previous: &str) -> String {
     let current = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time is before unix epoch")
@@ -150,7 +163,7 @@ fn monotonic_timestamp(previous: &str) -> String {
         .to_string()
 }
 
-fn interaction_from_row(row: &SqliteRow) -> Result<Interaction, StorageError> {
+pub(super) fn interaction_from_row(row: &SqliteRow) -> Result<Interaction, StorageError> {
     Ok(Interaction {
         id: InteractionId::from_database(row.try_get(0)?),
         thread_id: ThreadId::from_database(row.try_get(1)?),

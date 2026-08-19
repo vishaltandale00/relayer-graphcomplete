@@ -1,8 +1,8 @@
 use sqlx::{FromRow, SqliteConnection};
 
 use crate::{
-    ActionDraft, ActionId, ActionKind, GraphAction, GraphError, LayerId, NodeId, ProjectId,
-    RecordState, graph::InteractionScope,
+    ActionDraft, ActionId, ActionKind, ActionVariant, GraphAction, GraphError, LayerId, NodeId,
+    ProjectId, RecordState, graph::InteractionScope,
 };
 
 pub(crate) struct ActionTable<'connection> {
@@ -20,6 +20,9 @@ struct ActionRow {
     source_node_id: i64,
     kind: String,
     label: String,
+    variant: String,
+    icon: Option<String>,
+    description: Option<String>,
     target_layer_id: Option<i64>,
     interaction_text: Option<String>,
     response: bool,
@@ -38,7 +41,7 @@ impl<'connection> ActionTable<'connection> {
         id: ActionId,
     ) -> Result<Option<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,kind,label,target_layer_id,interaction_text,response,state,owner_interaction_id FROM actions WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
+            "SELECT id,source_node_id,kind,label,variant,icon,description,target_layer_id,interaction_text,response,state,owner_interaction_id FROM actions WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
         )
         .bind(id.value())
         .bind(scope.project_id.map(ProjectId::value))
@@ -58,7 +61,7 @@ impl<'connection> ActionTable<'connection> {
     ) -> Result<Vec<ActionRecord>, GraphError> {
         let rows = match (owner, accepted_only) {
             (Some(owner), _) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,kind,label,target_layer_id,interaction_text,response,state,owner_interaction_id FROM actions WHERE source_node_id=?1 AND owner_interaction_id=?2 AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+                "SELECT id,source_node_id,kind,label,variant,icon,description,target_layer_id,interaction_text,response,state,owner_interaction_id FROM actions WHERE source_node_id=?1 AND owner_interaction_id=?2 AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
             )
             .bind(source.value())
             .bind(owner.value())
@@ -67,7 +70,7 @@ impl<'connection> ActionTable<'connection> {
             .fetch_all(&mut *self.connection)
             .await?,
             (None, true) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,kind,label,target_layer_id,interaction_text,response,state,owner_interaction_id FROM actions WHERE source_node_id=?1 AND state='accepted' AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3)) ORDER BY id",
+                "SELECT id,source_node_id,kind,label,variant,icon,description,target_layer_id,interaction_text,response,state,owner_interaction_id FROM actions WHERE source_node_id=?1 AND state='accepted' AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3)) ORDER BY id",
             )
             .bind(source.value())
             .bind(scope.project_id.map(ProjectId::value))
@@ -75,7 +78,7 @@ impl<'connection> ActionTable<'connection> {
             .fetch_all(&mut *self.connection)
             .await?,
             (None, false) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,kind,label,target_layer_id,interaction_text,response,state,owner_interaction_id FROM actions WHERE source_node_id=?1 AND (state='accepted' OR owner_interaction_id=?2) AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+                "SELECT id,source_node_id,kind,label,variant,icon,description,target_layer_id,interaction_text,response,state,owner_interaction_id FROM actions WHERE source_node_id=?1 AND (state='accepted' OR owner_interaction_id=?2) AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
             )
             .bind(source.value())
             .bind(scope.root_node_id.value())
@@ -94,7 +97,7 @@ impl<'connection> ActionTable<'connection> {
         client_key: &str,
     ) -> Result<Option<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,kind,label,target_layer_id,interaction_text,response,state,owner_interaction_id FROM actions WHERE owner_interaction_id=?1 AND source_node_id=?2 AND client_key=?3",
+            "SELECT id,source_node_id,kind,label,variant,icon,description,target_layer_id,interaction_text,response,state,owner_interaction_id FROM actions WHERE owner_interaction_id=?1 AND source_node_id=?2 AND client_key=?3",
         )
         .bind(owner.value())
         .bind(source.value())
@@ -111,13 +114,16 @@ impl<'connection> ActionTable<'connection> {
         draft: &ActionDraft,
     ) -> Result<GraphAction, GraphError> {
         let result = sqlx::query(
-            "INSERT INTO actions(project_id,thread_id,source_node_id,kind,label,target_layer_id,interaction_text,response,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'draft',?9,?10)",
+            "INSERT INTO actions(project_id,thread_id,source_node_id,kind,label,variant,icon,description,target_layer_id,interaction_text,response,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'draft',?12,?13)",
         )
         .bind(scope.project_id.map(ProjectId::value))
         .bind(scope.thread_id.value())
         .bind(draft.source_node_id.value())
         .bind(draft.kind.as_str())
         .bind(&draft.label)
+        .bind(draft.variant.as_str())
+        .bind(&draft.icon)
+        .bind(&draft.description)
         .bind(draft.target_layer_id.map(LayerId::value))
         .bind(&draft.interaction_text)
         .bind(draft.response)
@@ -136,10 +142,13 @@ impl<'connection> ActionTable<'connection> {
         id: ActionId,
         draft: &ActionDraft,
     ) -> Result<GraphAction, GraphError> {
-        sqlx::query("UPDATE actions SET source_node_id=?1,kind=?2,label=?3,target_layer_id=?4,interaction_text=?5,response=?6 WHERE id=?7")
+        sqlx::query("UPDATE actions SET source_node_id=?1,kind=?2,label=?3,variant=?4,icon=?5,description=?6,target_layer_id=?7,interaction_text=?8,response=?9 WHERE id=?10")
             .bind(draft.source_node_id.value())
             .bind(draft.kind.as_str())
             .bind(&draft.label)
+            .bind(draft.variant.as_str())
+            .bind(&draft.icon)
+            .bind(&draft.description)
             .bind(draft.target_layer_id.map(LayerId::value))
             .bind(&draft.interaction_text)
             .bind(draft.response)
@@ -173,6 +182,9 @@ impl TryFrom<ActionRow> for ActionRecord {
                 source_node_id: valid_node_id(row.source_node_id)?,
                 kind: ActionKind::parse(&row.kind)?,
                 label: row.label,
+                variant: ActionVariant::parse(&row.variant)?,
+                icon: row.icon,
+                description: row.description,
                 target_layer_id: row.target_layer_id.map(valid_layer_id).transpose()?,
                 interaction_text: row.interaction_text,
                 response: row.response,
@@ -189,6 +201,9 @@ fn draft_action(id: ActionId, draft: &ActionDraft) -> GraphAction {
         source_node_id: draft.source_node_id,
         kind: draft.kind,
         label: draft.label.clone(),
+        variant: draft.variant.clone(),
+        icon: draft.icon.clone(),
+        description: draft.description.clone(),
         target_layer_id: draft.target_layer_id,
         interaction_text: draft.interaction_text.clone(),
         response: draft.response,

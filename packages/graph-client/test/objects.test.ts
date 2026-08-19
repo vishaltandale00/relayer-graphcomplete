@@ -20,11 +20,13 @@ describe("agent-facing graph objects", () => {
 
   it("retains a generated action key when the same object is retried", async () => {
     const keys: string[] = [];
+    const requests: Record<string, unknown>[] = [];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
-      const body = JSON.parse(String(init.body)) as { clientKey: string };
+      const body = JSON.parse(String(init.body)) as { clientKey: string } & Record<string, unknown>;
       keys.push(body.clientKey);
+      requests.push(body);
       return new Response(JSON.stringify({
-        action: { id: 40, sourceNodeId: 1, kind: "invoke", label: "Ask", interactionText: "Continue", response: false, state: "draft" },
+        action: { id: 40, sourceNodeId: 1, kind: "invoke", label: "Ask", variant: "pill", icon: null, description: null, interactionText: "Continue", response: false, state: "draft" },
       }), { status: 200, headers: { "content-type": "application/json" } });
     }));
     const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
@@ -35,5 +37,47 @@ describe("agent-facing graph objects", () => {
 
     expect(action.clientKey).toBeTypeOf("string");
     expect(keys).toEqual([action.clientKey, action.clientKey]);
+    expect(requests[0]).toMatchObject({ variant: "pill", icon: null, description: null });
+  });
+
+  it("serializes card presentation as canonical action data", async () => {
+    let request: Record<string, unknown> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      request = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        action: {
+          id: 41,
+          sourceNodeId: 1,
+          kind: "navigate",
+          label: "Compare approaches",
+          variant: "card",
+          icon: "git-compare",
+          description: "Lay out the tradeoffs before choosing.",
+          targetLayerId: 9,
+          response: false,
+          state: "draft",
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    const action = await graph.addAction(1, {
+      kind: "navigate",
+      label: "Compare approaches",
+      target: 9,
+      variant: "card",
+      icon: "git-compare",
+      description: "Lay out the tradeoffs before choosing.",
+    });
+
+    expect(request).toMatchObject({
+      kind: "navigate",
+      label: "Compare approaches",
+      targetLayerId: 9,
+      variant: "card",
+      icon: "git-compare",
+      description: "Lay out the tradeoffs before choosing.",
+    });
+    expect(action.variant).toBe("card");
   });
 });
