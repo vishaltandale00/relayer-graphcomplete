@@ -134,7 +134,7 @@ describe("h3 deterministic workspace grading", () => {
       if (command === "git" && args[0] === "rev-parse") return { exitCode: 0, stdout: `${H3_SEEDED_COMMIT}\n`, stderr: "" };
       if (command === "git" && args[0] === "status") return { exitCode: 0, stdout: "", stderr: "" };
       if (command === "git" && args[0] === "diff") return { exitCode: 0, stdout: "", stderr: "" };
-      if (command === process.execPath) return { exitCode: 1, stdout: "", stderr: "decimal leaked" };
+      if (command === "node") return { exitCode: 1, stdout: "", stderr: "decimal leaked" };
       throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
     };
     expect((await gradeH3Workspace({ workspaceDirectory: "/fixture", grade: "question", runCommand })).every((check) => check.passed)).toBe(true);
@@ -157,7 +157,7 @@ describe("h3 deterministic workspace grading", () => {
       'sanitizeStatusCode("200.5")',
     ].join("\n"));
     const runCommand: CommandRunner = async (command, args) => {
-      if (command === process.execPath || command === "corepack") return { exitCode: 0, stdout: "ok", stderr: "" };
+      if (command === "node" || command === "corepack") return { exitCode: 0, stdout: "ok", stderr: "" };
       if (command === "git" && args[0] === "status") return { exitCode: 0, stdout: "", stderr: "" };
       if (command === "git" && args[0] === "rev-list") return { exitCode: 0, stdout: "commit-one\ncommit-two\n", stderr: "" };
       if (command === "git" && args[0] === "diff" && args[1] === "--name-only") {

@@ -339,7 +339,9 @@ async function runHiddenStatusCheck(directory: string, runCommand: CommandRunner
     "  if (actual !== expected) { console.error(`${JSON.stringify(input)}: expected ${expected}, received ${actual}`); process.exitCode = 1; }",
     "}",
   ].join("\n");
-  return runCommand(process.execPath, ["--experimental-strip-types", "--input-type=module", "--eval", script], { cwd: directory });
+  // This runs inside the Eval Electron main process during local project cases.
+  // process.execPath is Electron there, so resolve Node through PATH instead.
+  return runCommand("node", ["--experimental-strip-types", "--input-type=module", "--eval", script], { cwd: directory });
 }
 
 async function required(
