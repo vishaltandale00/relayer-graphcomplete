@@ -7,7 +7,7 @@ import os
 import socket
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any, Literal, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -82,6 +82,7 @@ class LayerObject:
 NodeReference = int | GraphNode | NodeObject
 EdgeReference = int | GraphEdge | EdgeObject
 LayerReference = int | GraphLayer | LayerObject
+ActionVariant = Literal["chip", "pill", "wide", "card"]
 
 
 class RelayerGraphClient:
@@ -142,17 +143,23 @@ class RelayerGraphClient:
         return layer.ref
 
     async def add_navigate_action(self, source: NodeReference, label: str, target: LayerReference,
-                                  *, response: bool = False, client_key: str) -> Mapping[str, Any]:
+                                  *, response: bool = False, client_key: str,
+                                  variant: ActionVariant = "pill", icon: str | None = None,
+                                  description: str | None = None) -> Mapping[str, Any]:
         return await self._request("POST", "/api/graph/actions", {
             "clientKey": client_key, "sourceNodeId": _node_id(source),
             "kind": "navigate", "label": label, "targetLayerId": _layer_id(target), "response": response,
+            **_action_presentation(variant, icon, description),
         })
 
     async def add_invoke_action(self, source: NodeReference, label: str, interaction_text: str,
-                                *, client_key: str) -> Mapping[str, Any]:
+                                *, client_key: str, variant: ActionVariant = "pill",
+                                icon: str | None = None,
+                                description: str | None = None) -> Mapping[str, Any]:
         return await self._request("POST", "/api/graph/actions", {
             "clientKey": client_key, "sourceNodeId": _node_id(source),
             "kind": "invoke", "label": label, "interactionText": interaction_text,
+            **_action_presentation(variant, icon, description),
         })
 
     async def get_layer(self, layer: LayerReference) -> Mapping[str, Any]:
@@ -231,6 +238,11 @@ def _required(value: NodeReference | None) -> NodeReference:
     if value is None:
         raise ValueError("create_edge requires two node references")
     return value
+
+
+def _action_presentation(variant: ActionVariant, icon: str | None,
+                         description: str | None) -> dict[str, Any]:
+    return {"variant": variant, "icon": icon, "description": description}
 
 
 # Backwards-compatible name used by the first authoring-client prototype.

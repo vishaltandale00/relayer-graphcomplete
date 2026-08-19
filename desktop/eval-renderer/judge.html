@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>Relayer Eval · Judge review</title>
+  <link rel="stylesheet" href="./judge.css" />
+</head>
+<body>
+  <main id="app" aria-live="polite">
+    <section class="loading-state"><span class="eyebrow">Judge review</span><h1>Loading analysis…</h1></section>
+  </main>
+  <dialog id="evidenceDialog" aria-labelledby="evidenceDialogTitle">
+    <header><div><span class="eyebrow">Screenshot evidence</span><h2 id="evidenceDialogTitle"></h2></div><button id="closeEvidence" aria-label="Close screenshot">×</button></header>
+    <div id="evidenceDialogBody" class="dialog-images"></div>
+  </dialog>
+  <script type="module" src="./judge.js"></script>
+</body>
+</html>

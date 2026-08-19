@@ -45,6 +45,9 @@ async fn accept_single_node(writer: &GraphWriter, interaction: GraphNode, node: 
             source_node_id: interaction.id,
             kind: ActionKind::Navigate,
             label: "Response".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
             response: true,
@@ -88,6 +91,9 @@ async fn accepts_connected_layer_and_returns_exact_view() {
             source_node_id: interaction.id,
             kind: ActionKind::Navigate,
             label: "Response".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
             response: true,
@@ -134,6 +140,54 @@ async fn rejects_disconnected_layer_with_repair_message() {
 }
 
 #[tokio::test]
+async fn rejects_unsupported_node_icons_with_repair_guidance() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let error = writer
+        .submit_node(&NodeDraft {
+            client_key: "unsupported-icon".into(),
+            kind: "concept".into(),
+            icon: "🧭".into(),
+            title: "Direction".into(),
+            detail: "A useful explanation.".into(),
+        })
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        GraphError::Validation {
+            code: "unsupported_icon",
+            ref path,
+            ..
+        } if path == "icon"
+    ));
+    assert!(error.to_string().contains("compass"));
+}
+
+#[tokio::test]
+async fn normalizes_supported_icon_aliases_before_persistence() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let submitted = writer
+        .submit_node(&NodeDraft {
+            client_key: "alias-icon".into(),
+            kind: "concept".into(),
+            icon: " Circle Alert ".into(),
+            title: "Attention".into(),
+            detail: "A useful warning.".into(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(submitted.icon, "alert-circle");
+    assert_eq!(
+        writer.get_node(submitted.id).await.unwrap().icon,
+        "alert-circle"
+    );
+}
+
+#[tokio::test]
 async fn resubmitting_draft_node_updates_same_object_but_accepted_is_immutable() {
     let (database, interaction) = setup(Some(project(1)), thread(1)).await;
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
@@ -142,7 +196,7 @@ async fn resubmitting_draft_node_updates_same_object_but_accepted_is_immutable()
         .submit_node(&NodeDraft {
             client_key: "a".into(),
             kind: "concept".into(),
-            icon: "new".into(),
+            icon: "compass".into(),
             title: "changed".into(),
             detail: "changed detail".into(),
         })
@@ -155,7 +209,7 @@ async fn resubmitting_draft_node_updates_same_object_but_accepted_is_immutable()
             .submit_node(&NodeDraft {
                 client_key: "a".into(),
                 kind: "concept".into(),
-                icon: "x".into(),
+                icon: "search".into(),
                 title: "x".into(),
                 detail: "x".into(),
             })
@@ -187,6 +241,9 @@ async fn accepts_recursive_navigate_subgraph() {
             source_node_id: parent.id,
             kind: ActionKind::Navigate,
             label: "Details".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
             target_layer_id: Some(nested.id),
             interaction_text: None,
             response: false,
@@ -207,6 +264,9 @@ async fn accepts_recursive_navigate_subgraph() {
             source_node_id: interaction.id,
             kind: ActionKind::Navigate,
             label: "Response".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
             target_layer_id: Some(root.id),
             interaction_text: None,
             response: true,
@@ -304,6 +364,9 @@ async fn action_keys_are_scoped_to_their_source_nodes() {
             source_node_id: first.id,
             kind: ActionKind::Invoke,
             label: "Ask".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
             target_layer_id: None,
             interaction_text: Some("Ask about the first node".into()),
             response: false,
@@ -316,6 +379,9 @@ async fn action_keys_are_scoped_to_their_source_nodes() {
             source_node_id: second.id,
             kind: ActionKind::Invoke,
             label: "Ask".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
             target_layer_id: None,
             interaction_text: Some("Ask about the second node".into()),
             response: false,
@@ -339,6 +405,9 @@ async fn invoke_actions_reject_whitespace_only_interaction_text() {
             source_node_id: source.id,
             kind: ActionKind::Invoke,
             label: "Ask".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
             target_layer_id: None,
             interaction_text: Some("  \n\t".into()),
             response: false,
@@ -353,6 +422,149 @@ async fn invoke_actions_reject_whitespace_only_interaction_text() {
             ..
         }
     ));
+}
+
+#[tokio::test]
+async fn action_presentation_grammar_round_trips_in_authored_order() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let source = node(&writer, "source").await;
+    let presentations = [
+        ("chip", ActionVariant::Chip, None, Some("Circle Alert")),
+        ("pill", ActionVariant::Pill, None, None),
+        ("wide", ActionVariant::Wide, None, None),
+        (
+            "first-card",
+            ActionVariant::Card,
+            Some("Supporting detail for the first card"),
+            None,
+        ),
+        (
+            "second-card",
+            ActionVariant::Card,
+            Some("Supporting detail for the second card"),
+            None,
+        ),
+    ];
+
+    for (key, variant, description, icon) in presentations {
+        writer
+            .add_action(&ActionDraft {
+                client_key: key.into(),
+                source_node_id: source.id,
+                kind: ActionKind::Invoke,
+                label: format!("Action {key}"),
+                variant,
+                icon: icon.map(str::to_owned),
+                description: description.map(str::to_owned),
+                target_layer_id: None,
+                interaction_text: Some(format!("Run {key}")),
+                response: false,
+            })
+            .await
+            .unwrap();
+    }
+
+    accept_single_node(&writer, interaction, source).await;
+    let output = writer.completion_output().await.unwrap().unwrap();
+    assert_eq!(
+        output
+            .root_layer
+            .actions
+            .iter()
+            .map(|action| action.variant.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ActionVariant::Chip,
+            ActionVariant::Pill,
+            ActionVariant::Wide,
+            ActionVariant::Card,
+            ActionVariant::Card,
+        ]
+    );
+    assert_eq!(
+        output.root_layer.actions[0].icon.as_deref(),
+        Some("alert-circle")
+    );
+    assert_eq!(
+        output.root_layer.actions[3].description.as_deref(),
+        Some("Supporting detail for the first card")
+    );
+    assert_eq!(
+        output.root_layer.actions[4].description.as_deref(),
+        Some("Supporting detail for the second card")
+    );
+}
+
+#[tokio::test]
+async fn action_presentation_errors_are_repairable() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let source = node(&writer, "source").await;
+
+    let unsupported = writer
+        .add_action(&ActionDraft {
+            client_key: "unsupported".into(),
+            source_node_id: source.id,
+            kind: ActionKind::Invoke,
+            label: "Unsupported".into(),
+            variant: ActionVariant::Unsupported("banner".into()),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: Some("Try it".into()),
+            response: false,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        unsupported,
+        GraphError::Validation {
+            code: "unsupported_action_variant",
+            ref path,
+            ..
+        } if path == "variant"
+    ));
+
+    let missing_description = writer
+        .add_action(&ActionDraft {
+            client_key: "missing-description".into(),
+            source_node_id: source.id,
+            kind: ActionKind::Invoke,
+            label: "Card".into(),
+            variant: ActionVariant::Card,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: Some("Try it".into()),
+            response: false,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        missing_description,
+        GraphError::Validation {
+            code: "missing_action_description",
+            ref path,
+            ..
+        } if path == "description"
+    ));
+}
+
+#[test]
+fn older_authored_actions_default_to_the_pill_presentation() {
+    let draft: ActionDraft = serde_json::from_value(serde_json::json!({
+        "clientKey": "older-author",
+        "sourceNodeId": 1,
+        "kind": "invoke",
+        "label": "Continue",
+        "interactionText": "Continue from here"
+    }))
+    .unwrap();
+
+    assert_eq!(draft.variant, ActionVariant::Pill);
+    assert_eq!(draft.icon, None);
+    assert_eq!(draft.description, None);
 }
 
 #[tokio::test]
@@ -439,6 +651,9 @@ async fn completion_rejects_an_edge_accepted_by_a_concurrent_interaction() {
                 source_node_id: interaction.id,
                 kind: ActionKind::Navigate,
                 label: "Response".into(),
+                variant: ActionVariant::default(),
+                icon: None,
+                description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
                 response: true,
@@ -483,6 +698,9 @@ async fn accepted_layers_keep_their_original_action_snapshot() {
             source_node_id: viewer_interaction.id,
             kind: ActionKind::Navigate,
             label: "Response".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
             target_layer_id: Some(viewer_layer.id),
             interaction_text: None,
             response: true,
@@ -542,14 +760,14 @@ async fn different_threads_can_write_through_the_same_pool() {
     let first_draft = NodeDraft {
         client_key: "first".into(),
         kind: "concept".into(),
-        icon: "one".into(),
+        icon: "box".into(),
         title: "First".into(),
         detail: "First thread write".into(),
     };
     let second_draft = NodeDraft {
         client_key: "second".into(),
         kind: "concept".into(),
-        icon: "two".into(),
+        icon: "terminal".into(),
         title: "Second".into(),
         detail: "Second thread write".into(),
     };

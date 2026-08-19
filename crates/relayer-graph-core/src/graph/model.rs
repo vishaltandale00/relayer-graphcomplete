@@ -1,12 +1,17 @@
 mod action;
 mod edge;
+mod icon;
 mod ids;
 mod layer;
 mod node;
 mod record_state;
 
-pub use action::{ActionDraft, ActionKind, GraphAction};
+pub use action::{ActionDraft, ActionKind, ActionVariant, GraphAction};
 pub use edge::{EdgeDraft, GraphEdge};
+pub use icon::{
+    RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, is_supported_icon, normalize_icon_name,
+    resolve_icon_name,
+};
 pub use ids::{ActionId, EdgeId, LayerId, NodeId, ProjectId, ThreadId};
 pub use layer::{GraphLayer, LayerDraft, ResolvedLayer};
 pub use node::{GraphNode, NodeDraft};

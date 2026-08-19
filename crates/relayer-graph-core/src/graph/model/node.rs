@@ -25,12 +25,24 @@ pub struct NodeDraft {
 }
 
 impl NodeDraft {
-    pub(crate) fn validate(&self) -> Result<(), GraphError> {
+    pub(crate) fn validate(&self) -> Result<&'static str, GraphError> {
         super::require_nonempty(&self.client_key, "clientKey")?;
         super::require_nonempty(&self.kind, "kind")?;
         super::require_nonempty(&self.icon, "icon")?;
         super::require_nonempty(&self.title, "title")?;
-        super::require_nonempty(&self.detail, "detail")
+        super::require_nonempty(&self.detail, "detail")?;
+        super::resolve_icon_name(&self.icon)
+            .ok_or_else(|| {
+                GraphError::validation(
+                    "unsupported_icon",
+                    "icon",
+                    format!(
+                        "Unsupported icon {:?}. Choose a name from the curated Relayer icon vocabulary: {}.",
+                        self.icon,
+                        super::RELAYER_ICON_NAMES.join(", ")
+                    ),
+                )
+            })
     }
 }
 

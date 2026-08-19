@@ -37,6 +37,12 @@ const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("completion_output_json", "TEXT", false, 0),
     ("completion_error", "TEXT", false, 0),
 ];
+const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("source_interaction_id", "INTEGER", true, 1),
+    ("action_id", "INTEGER", true, 2),
+    ("result_interaction_id", "INTEGER", true, 0),
+    ("created_at", "TEXT", true, 0),
+];
 
 pub(super) async fn validate_existing_or_empty(pool: &SqlitePool) -> Result<(), StorageError> {
     let table_count: i64 = sqlx::query_scalar(
@@ -64,14 +70,41 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "projects", PROJECT_COLUMNS).await?;
     validate_columns(pool, "threads", THREAD_COLUMNS).await?;
     validate_columns(pool, "interactions", INTERACTION_COLUMNS).await?;
+    validate_columns(pool, "action_invocations", ACTION_INVOCATION_COLUMNS).await?;
     validate_index(pool, "projects", &["path"], true).await?;
     validate_index(pool, "interactions", &["thread_id", "sequence"], true).await?;
+    validate_index(
+        pool,
+        "action_invocations",
+        &["source_interaction_id", "action_id"],
+        true,
+    )
+    .await?;
+    validate_index(pool, "action_invocations", &["result_interaction_id"], true).await?;
     validate_foreign_key(pool, "threads", "project_id", "projects", "id", "SET NULL").await?;
     validate_foreign_key(
         pool,
         "interactions",
         "thread_id",
         "threads",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "action_invocations",
+        "source_interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "action_invocations",
+        "result_interaction_id",
+        "interactions",
         "id",
         "CASCADE",
     )
@@ -90,6 +123,16 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     if thread_without_interaction {
         return Err(incompatible(
             "every stored thread must have a root interaction",
+        ));
+    }
+    let cross_thread_invocation: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM action_invocations ai JOIN interactions source ON source.id=ai.source_interaction_id JOIN interactions result ON result.id=ai.result_interaction_id WHERE source.thread_id != result.thread_id)",
+    )
+    .fetch_one(pool)
+    .await?;
+    if cross_thread_invocation {
+        return Err(incompatible(
+            "action invocation source and result must belong to the same thread",
         ));
     }
     Ok(())

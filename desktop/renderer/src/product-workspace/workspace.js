@@ -1,9 +1,12 @@
 import { escapeHtml } from "../ui.js";
+import { actionWasInvoked } from "../action-invocation-state.js";
 import {
   interactionForThread,
   responseNodesForThread,
   workspaceModeCapabilities,
 } from "./model.js";
+import { createRelayerIcon } from "./icons.js";
+import { createGraphSimulationController } from "./graph-simulation.js";
 import { renderMarkdown } from "./markdown.js";
 import { productWorkspaceMarkup } from "./view.js";
 
@@ -16,9 +19,109 @@ function hash(value) {
 }
 
 export const GRAPH_NODE_ICON_RADIUS = 24;
+export const GRAPH_MIN_ZOOM = 0.4;
+export const GRAPH_MAX_ZOOM = 2;
+export const COMPOSER_MIN_HEIGHT = 42;
+export const COMPOSER_MAX_HEIGHT = 126;
+
+const GRAPH_NODE_HALF_WIDTH = 82;
+const GRAPH_NODE_TOP = 28;
+const GRAPH_NODE_BOTTOM = 72;
+const GRAPH_FIT_PADDING = 48;
+const PENDING_COMPLETION_STATUSES = new Set(["not_started", "running", "submitted"]);
+
+export function graphNodeLayoutBounds(width, height) {
+  return {
+    halfWidth: Math.max(GRAPH_NODE_HALF_WIDTH, width / 2),
+    top: GRAPH_NODE_TOP,
+    bottom: Math.max(GRAPH_NODE_BOTTOM, height - 23),
+  };
+}
+
+export function clampGraphZoom(zoom) {
+  return Math.min(GRAPH_MAX_ZOOM, Math.max(GRAPH_MIN_ZOOM, zoom));
+}
 
 export function graphScreenPoint(point, camera) {
-  return { x: point.x + camera.x, y: point.y + camera.y };
+  const zoom = camera.zoom ?? 1;
+  return { x: point.x * zoom + camera.x, y: point.y * zoom + camera.y };
+}
+
+export function graphWorldPoint(point, camera) {
+  const zoom = camera.zoom ?? 1;
+  return { x: (point.x - camera.x) / zoom, y: (point.y - camera.y) / zoom };
+}
+
+export function zoomGraphCameraAt(camera, zoom, anchor) {
+  const nextZoom = clampGraphZoom(zoom);
+  const worldAnchor = graphWorldPoint(anchor, camera);
+  return {
+    x: anchor.x - worldAnchor.x * nextZoom,
+    y: anchor.y - worldAnchor.y * nextZoom,
+    zoom: nextZoom,
+  };
+}
+
+function graphContentBounds(nodes) {
+  if (!nodes.length) return null;
+  return nodes.reduce((result, node) => {
+    const layoutBounds = node.layoutBounds ?? graphNodeLayoutBounds(0, 0);
+    return {
+      minX: Math.min(result.minX, node.x - layoutBounds.halfWidth),
+      maxX: Math.max(result.maxX, node.x + layoutBounds.halfWidth),
+      minY: Math.min(result.minY, node.y - layoutBounds.top),
+      maxY: Math.max(result.maxY, node.y + layoutBounds.bottom),
+    };
+  }, {
+    minX: Infinity,
+    maxX: -Infinity,
+    minY: Infinity,
+    maxY: -Infinity,
+  });
+}
+
+export function recenterGraphCamera(nodes, bounds, zoom = 1) {
+  const content = graphContentBounds(nodes);
+  const nextZoom = clampGraphZoom(zoom);
+  if (!content) return { x: bounds.width / 2, y: bounds.height / 2, zoom: nextZoom };
+  const centerX = (content.minX + content.maxX) / 2;
+  const centerY = (content.minY + content.maxY) / 2;
+  return {
+    x: bounds.width / 2 - centerX * nextZoom,
+    y: bounds.height / 2 - centerY * nextZoom,
+    zoom: nextZoom,
+  };
+}
+
+export function fitGraphCamera(nodes, bounds, padding = GRAPH_FIT_PADDING) {
+  const content = graphContentBounds(nodes);
+  if (!content) return { x: bounds.width / 2, y: bounds.height / 2, zoom: 1 };
+  const availableWidth = Math.max(1, bounds.width - padding * 2);
+  const availableHeight = Math.max(1, bounds.height - padding * 2);
+  const contentWidth = Math.max(1, content.maxX - content.minX);
+  const contentHeight = Math.max(1, content.maxY - content.minY);
+  const zoom = clampGraphZoom(Math.min(
+    availableWidth / contentWidth,
+    availableHeight / contentHeight,
+  ));
+  return recenterGraphCamera(nodes, bounds, zoom);
+}
+
+export function graphCameraViewKey(state, thread, responseNodes) {
+  const interaction = interactionForThread(state, thread);
+  const layerId = state.visibleLayer?.layer?.id
+    ?? interaction?.completionOutput?.rootLayer?.layer?.id
+    ?? responseNodes.map((node) => node.id).join(",");
+  return `${thread.id}:${interaction?.id ?? ""}:${layerId}`;
+}
+
+export function shouldAutoFitSettledGraph(
+  autoFitViewKey,
+  currentViewKey,
+  autoFitRevision,
+  currentRevision,
+) {
+  return autoFitViewKey === currentViewKey && autoFitRevision === currentRevision;
 }
 
 export function graphEdgeSegment(source, target, radius = GRAPH_NODE_ICON_RADIUS) {
@@ -38,6 +141,92 @@ export function graphEdgeSegment(source, target, radius = GRAPH_NODE_ICON_RADIUS
   };
 }
 
+export function graphEdgeStrokeWidth(zoom) {
+  return 1.5 * zoom;
+}
+
+export function graphTurnNavigationDelta(event, graphFocused) {
+  if (!graphFocused || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+  if (event.key === "ArrowLeft") return -1;
+  if (event.key === "ArrowRight") return 1;
+  return null;
+}
+
+export function composerKeydownIntent(event) {
+  if (event.key !== "Enter") return null;
+  if (event.isComposing || event.keyCode === 229) return "composing";
+  if (event.repeat) return "repeat";
+  if (event.metaKey || event.ctrlKey) return "submit";
+  if (event.shiftKey) return "newline";
+  if (event.altKey) return null;
+  return "submit";
+}
+
+export function handleComposerKeydown(event, submit) {
+  const intent = composerKeydownIntent(event);
+  if (intent === "repeat") {
+    event.preventDefault();
+    return intent;
+  }
+  if (intent === "submit") {
+    event.preventDefault();
+    submit();
+  }
+  return intent;
+}
+
+export function composerSubmissionReady(value, disabled = false) {
+  return !disabled && Boolean(value.trim());
+}
+
+export function composerDisabledForState(status, canCompose = true) {
+  return !canCompose || PENDING_COMPLETION_STATUSES.has(status);
+}
+
+const ACTION_VARIANTS = new Set(["chip", "pill", "wide", "card"]);
+
+export function actionPresentation(action) {
+  const variant = ACTION_VARIANTS.has(action?.variant) ? action.variant : "pill";
+  return {
+    variant,
+    label: String(action?.label || action?.title || "Action"),
+    icon: typeof action?.icon === "string" && action.icon.trim() ? action.icon : null,
+    description: variant === "card" && typeof action?.description === "string"
+      ? action.description
+      : null,
+  };
+}
+
+export function captureGraphViewState(
+  nodes,
+  camera,
+  signature,
+  settled,
+  cameraRevision,
+) {
+  return {
+    camera: { ...camera },
+    cameraRevision,
+    nodes: nodes.map((node) => ({
+      id: node.id,
+      x: node.x,
+      y: node.y,
+      vx: node.vx,
+      vy: node.vy,
+      pinned: node.pinned,
+    })),
+    settled,
+    signature,
+  };
+}
+
+export function resizeComposerTextarea(textarea) {
+  textarea.style.height = "auto";
+  const contentHeight = Math.max(COMPOSER_MIN_HEIGHT, textarea.scrollHeight);
+  textarea.style.height = `${Math.min(contentHeight, COMPOSER_MAX_HEIGHT)}px`;
+  textarea.style.overflowY = contentHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
+}
+
 export function createProductWorkspace({
   root = document,
   mode = "interactive",
@@ -52,14 +241,19 @@ export function createProductWorkspace({
   onInvokeAction = async () => {},
 }) {
   const capabilities = workspaceModeCapabilities(mode);
-  let physicsFrame;
+  const graphSimulation = createGraphSimulationController();
   let graphNodes = [];
   let graphEdges = [];
   let graphSignature = "";
-  let graphThreadId = "";
+  let graphViewKey = "";
+  let graphLayoutSettled = false;
   let dragging = null;
   let panning = null;
-  let camera = { x: 0, y: 0 };
+  let pinching = null;
+  let camera = { x: 0, y: 0, zoom: 1 };
+  let cameraRevision = 0;
+  const graphViewCache = new Map();
+  const activeTouchPointers = new Map();
 
   const $ = (selector) => root.querySelector(selector);
   const $$ = (selector) => [...root.querySelectorAll(selector)];
@@ -67,12 +261,77 @@ export function createProductWorkspace({
   const threadView = $("#threadView");
   if (!threadView) throw new Error("Product workspace requires a #threadView host.");
   threadView.innerHTML = productWorkspaceMarkup();
-  $("#closeInspector").onclick = () => $("#inspector").classList.add("hidden");
+  $("#closeInspector").onclick = () => {
+    selection.selectedNodeId = null;
+    $("#inspector").classList.add("hidden");
+    $$('[data-node]').forEach((element) => element.classList.remove("selected"));
+  };
   $("#previousTurn").onclick = () => onSelectTurn(-1);
   $("#nextTurn").onclick = () => onSelectTurn(1);
   const graphStage = $("#graphStage");
+  const graphDocument = graphStage.ownerDocument;
+  const focusGraph = () => graphStage.focus({ preventScroll: true });
+  const blurGraphFromOutsidePointer = (event) => {
+    if (!graphStage.contains(event.target) && graphDocument.activeElement === graphStage) {
+      graphStage.blur();
+    }
+  };
+  graphDocument.addEventListener("pointerdown", blurGraphFromOutsidePointer, true);
+  graphStage.onkeydown = (event) => {
+    if (!capabilities.canNavigate) return;
+    const delta = graphTurnNavigationDelta(event, graphDocument.activeElement === graphStage);
+    if (delta === null) return;
+    event.preventDefault();
+    const turnButton = delta < 0 ? $("#previousTurn") : $("#nextTurn");
+    if (!turnButton.disabled) onSelectTurn(delta);
+  };
+  const localStagePoint = (event) => {
+    const rect = graphStage.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  };
+  const midpoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const pointerDistance = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+
+  function updateCamera(nextCamera, manual = true) {
+    camera = nextCamera;
+    if (manual) cameraRevision += 1;
+    drawGraph();
+  }
+
+  function zoomAt(zoom, anchor = {
+    x: graphStage.getBoundingClientRect().width / 2,
+    y: graphStage.getBoundingClientRect().height / 2,
+  }) {
+    updateCamera(zoomGraphCameraAt(camera, zoom, anchor));
+  }
+
+  graphStage.onwheel = (event) => {
+    if (event.target.closest?.("button")) return;
+    event.preventDefault();
+    zoomAt(camera.zoom * Math.exp(-event.deltaY * 0.002), localStagePoint(event));
+  };
   graphStage.onpointerdown = (event) => {
+    if (event.button === 0 && !event.target.closest?.("button")) focusGraph();
     if (event.target.closest?.(".graph-node, button") || event.button !== 0) return;
+    if (event.pointerType === "touch") {
+      activeTouchPointers.set(event.pointerId, localStagePoint(event));
+    }
+    graphStage.setPointerCapture(event.pointerId);
+    if (activeTouchPointers.size >= 2) {
+      const [firstId, secondId] = [...activeTouchPointers.keys()].slice(0, 2);
+      const first = activeTouchPointers.get(firstId);
+      const second = activeTouchPointers.get(secondId);
+      const anchor = midpoint(first, second);
+      pinching = {
+        pointerIds: [firstId, secondId],
+        startDistance: Math.max(1, pointerDistance(first, second)),
+        startZoom: camera.zoom,
+        worldAnchor: graphWorldPoint(anchor, camera),
+      };
+      panning = null;
+      graphStage.classList.add("panning");
+      return;
+    }
     panning = {
       pointerId: event.pointerId,
       startClientX: event.clientX,
@@ -81,34 +340,63 @@ export function createProductWorkspace({
       startCameraY: camera.y,
     };
     graphStage.classList.add("panning");
-    graphStage.setPointerCapture(event.pointerId);
   };
   graphStage.onpointermove = (event) => {
+    if (activeTouchPointers.has(event.pointerId)) {
+      activeTouchPointers.set(event.pointerId, localStagePoint(event));
+    }
+    if (pinching && pinching.pointerIds.includes(event.pointerId)) {
+      const [first, second] = pinching.pointerIds.map((pointerId) => activeTouchPointers.get(pointerId));
+      if (!first || !second) return;
+      const anchor = midpoint(first, second);
+      const zoom = clampGraphZoom(
+        pinching.startZoom * pointerDistance(first, second) / pinching.startDistance,
+      );
+      updateCamera({
+        x: anchor.x - pinching.worldAnchor.x * zoom,
+        y: anchor.y - pinching.worldAnchor.y * zoom,
+        zoom,
+      });
+      return;
+    }
     if (!panning || panning.pointerId !== event.pointerId) return;
     camera.x = panning.startCameraX + event.clientX - panning.startClientX;
     camera.y = panning.startCameraY + event.clientY - panning.startClientY;
+    cameraRevision += 1;
     drawGraph();
   };
   const finishPan = (event) => {
-    if (!panning || panning.pointerId !== event.pointerId) return;
-    panning = null;
-    graphStage.classList.remove("panning");
+    activeTouchPointers.delete(event.pointerId);
+    if (pinching?.pointerIds.includes(event.pointerId)) {
+      pinching = null;
+      panning = null;
+    } else if (panning?.pointerId === event.pointerId) {
+      panning = null;
+    }
+    if (!panning && !pinching) graphStage.classList.remove("panning");
   };
   graphStage.onpointerup = finishPan;
   graphStage.onpointercancel = finishPan;
+  $("#zoomOutGraph").onclick = () => zoomAt(camera.zoom / 1.25);
+  $("#zoomInGraph").onclick = () => zoomAt(camera.zoom * 1.25);
+  $("#fitGraph").onclick = () => updateCamera(
+    fitGraphCamera(graphNodes, graphStage.getBoundingClientRect()),
+  );
   $("#recenterGraph").onclick = () => {
-    camera = { x: 0, y: 0 };
-    drawGraph();
+    updateCamera(recenterGraphCamera(
+      graphNodes,
+      graphStage.getBoundingClientRect(),
+      camera.zoom,
+    ));
   };
   const prompt = $("#threadPrompt");
   const send = $("#sendInteraction");
-  prompt.oninput = () => { send.disabled = !prompt.value.trim(); };
-  prompt.onkeydown = (event) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      send.click();
-    }
+  const syncComposer = () => {
+    resizeComposerTextarea(prompt);
+    send.disabled = !composerSubmissionReady(prompt.value, prompt.disabled);
   };
+  prompt.oninput = syncComposer;
+  prompt.onkeydown = (event) => handleComposerKeydown(event, () => send.click());
   send.onclick = async () => {
     const text = prompt.value.trim();
     if (!text || send.disabled) return;
@@ -118,10 +406,14 @@ export function createProductWorkspace({
       await onSubmitInteraction(text);
       prompt.value = "";
     } finally {
-      prompt.disabled = false;
-      send.disabled = !prompt.value.trim();
+      prompt.disabled = composerDisabledForState(
+        getState().status,
+        capabilities.canCompose,
+      );
+      syncComposer();
     }
   };
+  syncComposer();
 
   function applyMode() {
     threadView.dataset.workspaceMode = mode;
@@ -161,7 +453,7 @@ export function createProductWorkspace({
 
   function renderRunState(state) {
     const status = state.status || "idle";
-    const pending = ["not_started", "running", "submitted"].includes(status);
+    const pending = PENDING_COMPLETION_STATUSES.has(status);
     const display = status === "accepted" ? "Complete"
       : pending ? "…"
         : status === "idle" ? "Ready"
@@ -170,16 +462,29 @@ export function createProductWorkspace({
     runState.className = `run-state ${pending ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
     runState.setAttribute("aria-label", pending ? "Waiting for graph" : display);
     runState.querySelector("span").textContent = display;
-    prompt.disabled = !capabilities.canCompose || pending;
-    send.disabled = prompt.disabled || !prompt.value.trim();
+    prompt.disabled = composerDisabledForState(status, capabilities.canCompose);
+    syncComposer();
   }
 
   function renderGraph(state, thread) {
     const responseNodes = responseNodesForThread(state, thread);
+    const nextViewKey = graphCameraViewKey(state, thread, responseNodes);
+    const enteringView = nextViewKey !== graphViewKey;
+    if (enteringView) {
+      saveGraphView();
+      graphSimulation.cancel();
+    }
     $("#graphEmpty").classList.toggle("hidden", responseNodes.length > 0);
     $("#graphStage").classList.toggle("hidden", responseNodes.length === 0);
     if (!responseNodes.length) {
-      const pending = ["not_started", "running", "submitted"].includes(state.status);
+      graphViewKey = nextViewKey;
+      graphNodes = [];
+      graphEdges = [];
+      graphSignature = "";
+      graphLayoutSettled = false;
+      selection.selectedNodeId = null;
+      $("#inspector").classList.add("hidden");
+      const pending = PENDING_COMPLETION_STATUSES.has(state.status);
       $("#thinkingDots").classList.toggle("hidden", !pending);
       $("#graphEmptyMessage").classList.toggle("hidden", pending);
       $("#graphEmptyMessage").textContent = state.status === "failed"
@@ -189,12 +494,12 @@ export function createProductWorkspace({
     }
 
     const bounds = $("#graphStage").getBoundingClientRect();
-    const nextThreadId = String(thread.id);
-    const previous = nextThreadId === graphThreadId
-      ? new Map(graphNodes.map((node) => [node.id, node]))
-      : new Map();
-    if (nextThreadId !== graphThreadId) camera = { x: 0, y: 0 };
-    graphThreadId = nextThreadId;
+    const cachedView = enteringView ? graphViewCache.get(nextViewKey) : null;
+    const previous = new Map(
+      (cachedView?.nodes ?? (!enteringView ? graphNodes : []))
+        .map((node) => [node.id, node]),
+    );
+    graphViewKey = nextViewKey;
     graphNodes = responseNodes.map((node, index) => {
       const prior = previous.get(node.id);
       return prior ? {
@@ -221,18 +526,37 @@ export function createProductWorkspace({
       return ids.has(source) && ids.has(target);
     });
     const nextSignature = JSON.stringify({
-      threadId: graphThreadId,
+      viewKey: graphViewKey,
       nodes: graphNodes.map((node) => node.id),
       edges: graphEdges.map((edge) => edge.endpoints || [edge.source, edge.target]),
     });
-    const topologyChanged = nextSignature !== graphSignature;
+    const topologyChanged = cachedView
+      ? cachedView.signature !== nextSignature || !cachedView.settled
+      : nextSignature !== graphSignature;
     graphSignature = nextSignature;
-    $("#nodeLayer").innerHTML = graphNodes.map((node) => `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}"><div class="glyph">${escapeHtml(node.icon || node.metadata?.relayer?.icon || String(node.kind || "N")[0].toUpperCase())}</div><div class="copy"><b>${escapeHtml(node.title)}</b></div></div>`).join("");
+    $("#nodeLayer").innerHTML = graphNodes.map((node) => `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}" data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}"><div class="glyph"></div><div class="copy"><b>${escapeHtml(node.title)}</b></div></div>`).join("");
     $$('[data-node]').forEach((element) => {
+      const authoredNode = graphNodes.find((candidate) => String(candidate.id) === element.dataset.node);
+      element.querySelector(".glyph").replaceChildren(createRelayerIcon(
+        authoredNode?.icon || authoredNode?.metadata?.relayer?.icon,
+        { class: "relayer-node-icon" },
+      ));
+      if (authoredNode) {
+        authoredNode.layoutBounds = graphNodeLayoutBounds(
+          element.offsetWidth,
+          element.offsetHeight,
+        );
+      }
       element.onclick = () => selectNode(state, element.dataset.node);
+      element.onkeydown = (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        selectNode(state, element.dataset.node);
+      };
       element.onpointerdown = (event) => {
         event.preventDefault();
         event.stopPropagation();
+        focusGraph();
         const node = graphNodes.find((candidate) => String(candidate.id) === element.dataset.node);
         dragging = node ? {
           node,
@@ -250,8 +574,12 @@ export function createProductWorkspace({
           event.clientY - dragging.startClientY,
         );
         dragging.moved ||= distance >= 3;
-        dragging.node.x = event.clientX - rect.left - camera.x;
-        dragging.node.y = event.clientY - rect.top - camera.y;
+        const point = graphWorldPoint({
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        }, camera);
+        dragging.node.x = point.x;
+        dragging.node.y = point.y;
         dragging.node.vx = 0;
         dragging.node.vy = 0;
         if (dragging.moved) dragging.node.pinned = true;
@@ -261,18 +589,45 @@ export function createProductWorkspace({
       element.onpointerup = finishDrag;
       element.onpointercancel = finishDrag;
     });
-    cancelAnimationFrame(physicsFrame);
+    if (enteringView && !ids.has(selection.selectedNodeId)) {
+      selection.selectedNodeId = null;
+      $("#inspector").classList.add("hidden");
+    }
+    if (cachedView) {
+      camera = { ...cachedView.camera };
+      cameraRevision = cachedView.cameraRevision;
+      graphLayoutSettled = cachedView.settled;
+    } else if (enteringView) {
+      camera = { x: 0, y: 0, zoom: 1 };
+      graphLayoutSettled = false;
+    }
     if (!topologyChanged) {
       drawGraph();
       return;
     }
+    graphLayoutSettled = false;
+    const autoFitRevision = cameraRevision;
+    const autoFitViewKey = enteringView ? graphViewKey : null;
     let ticks = 0;
-    const simulate = () => {
+    graphSimulation.start(() => {
       physicsStep(bounds);
       drawGraph();
-      if (++ticks < 220) physicsFrame = requestAnimationFrame(simulate);
-    };
-    simulate();
+      if (++ticks < 220) {
+        return true;
+      }
+      graphLayoutSettled = true;
+      if (shouldAutoFitSettledGraph(
+        autoFitViewKey,
+        graphViewKey,
+        autoFitRevision,
+        cameraRevision,
+      )) {
+        updateCamera(fitGraphCamera(graphNodes, bounds), false);
+      } else {
+        saveGraphView();
+      }
+      return false;
+    });
   }
 
   function physicsStep(bounds) {
@@ -335,6 +690,7 @@ export function createProductWorkspace({
         const point = graphScreenPoint(node, camera);
         element.style.left = `${point.x}px`;
         element.style.top = `${point.y}px`;
+        element.style.setProperty("--graph-zoom", camera.zoom);
       }
     }
     $("#edgeCanvas").innerHTML = graphEdges.map((edge) => {
@@ -345,9 +701,27 @@ export function createProductWorkspace({
       const segment = graphEdgeSegment(
         graphScreenPoint(a, camera),
         graphScreenPoint(b, camera),
+        GRAPH_NODE_ICON_RADIUS * camera.zoom,
       );
-      return `<line class="graph-edge" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/>`;
+      return `<line class="graph-edge" style="stroke-width:${graphEdgeStrokeWidth(camera.zoom)}" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/>`;
     }).join("");
+    graphStage.style.backgroundSize = `${22 * camera.zoom}px ${22 * camera.zoom}px`;
+    graphStage.style.backgroundPosition = `${camera.x}px ${camera.y}px`;
+    $("#graphZoomLevel").textContent = `${Math.round(camera.zoom * 100)}%`;
+    $("#zoomOutGraph").disabled = camera.zoom <= GRAPH_MIN_ZOOM;
+    $("#zoomInGraph").disabled = camera.zoom >= GRAPH_MAX_ZOOM;
+    saveGraphView();
+  }
+
+  function saveGraphView() {
+    if (!graphViewKey || !graphNodes.length) return;
+    graphViewCache.set(graphViewKey, captureGraphViewState(
+      graphNodes,
+      camera,
+      graphSignature,
+      graphLayoutSettled,
+      cameraRevision,
+    ));
   }
 
   function selectNode(state, id) {
@@ -355,20 +729,61 @@ export function createProductWorkspace({
     const node = state.nodes.find((item) => String(item.id) === String(id));
     if (!node) return;
     $("#inspector").classList.remove("hidden");
-    $("#detailIcon").textContent = node.icon || node.metadata?.relayer?.icon || String(node.kind || "N")[0].toUpperCase();
+    $("#detailIcon").replaceChildren(createRelayerIcon(
+      node.icon || node.metadata?.relayer?.icon,
+      { class: "relayer-detail-icon" },
+    ));
     $("#detailKind").textContent = node.kind;
     $("#detailTitle").textContent = node.title;
     renderMarkdown($("#detailContent"), node.detail || node.summary || node.content || "No details supplied.");
     const actions = (state.actions || []).filter((action) => String(action.sourceNodeId) === String(node.id));
     $("#detailActions").classList.toggle("hidden", !actions.length);
-    $("#detailActions").innerHTML = actions.map((action) => `<button>${escapeHtml(action.label || action.title || "Action")}</button>`).join("");
+    $("#detailActions").replaceChildren(...actions.map((action) => {
+      const presentation = actionPresentation(action);
+      const button = graphDocument.createElement("button");
+      button.type = "button";
+      button.className = `action-control action-${presentation.variant}`;
+      button.dataset.actionId = String(action.id);
+      button.dataset.reviewRef = `action-${action.id}`;
+      button.dataset.reviewKind = action.kind === "navigate" ? "navigate-action" : "invoke-action";
+      button.dataset.reviewActionId = String(action.id);
+      if (presentation.icon) {
+        button.append(createRelayerIcon(presentation.icon, { class: "relayer-action-icon" }));
+      }
+      const copy = graphDocument.createElement("span");
+      copy.className = "action-copy";
+      const label = graphDocument.createElement(presentation.variant === "card" ? "strong" : "span");
+      label.className = "action-label";
+      label.textContent = presentation.label;
+      copy.append(label);
+      if (presentation.description) {
+        const description = graphDocument.createElement("small");
+        description.textContent = presentation.description;
+        copy.append(description);
+      }
+      button.append(copy);
+      return button;
+    }));
     [...$("#detailActions").querySelectorAll("button")].forEach((button, index) => {
       const action = actions[index];
       const navigational = action?.kind === "navigate" && action.targetLayerId;
-      button.disabled = !navigational && !capabilities.canInvokeMutatingActions;
-      button.onclick = () => navigational
-        ? onNavigateLayer(action.targetLayerId)
-        : onInvokeAction(action);
+      const invoked = actionWasInvoked(
+        state.actionInvocations,
+        state.pendingActionInvocations,
+        state.currentInteractionId,
+        action.id,
+      );
+      button.disabled = invoked || (!navigational && !capabilities.canInvokeMutatingActions);
+      button.classList.toggle("invoked", invoked);
+      button.onclick = async () => {
+        if (navigational) {
+          await onNavigateLayer(action.targetLayerId);
+          return;
+        }
+        button.disabled = true;
+        button.classList.add("invoked");
+        await onInvokeAction(action);
+      };
     });
     $$('[data-node]').forEach((element) => {
       element.classList.toggle("selected", element.dataset.node === String(id));
@@ -376,14 +791,18 @@ export function createProductWorkspace({
   }
 
   function dispose() {
-    cancelAnimationFrame(physicsFrame);
+    graphSimulation.cancel();
+    graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     dragging = null;
     panning = null;
-    camera = { x: 0, y: 0 };
+    pinching = null;
+    activeTouchPointers.clear();
+    camera = { x: 0, y: 0, zoom: 1 };
     graphNodes = [];
     graphEdges = [];
     graphSignature = "";
-    graphThreadId = "";
+    graphViewKey = "";
+    graphViewCache.clear();
   }
 
   return Object.freeze({

@@ -4,7 +4,8 @@ mod storage;
 
 pub use error::GraphError;
 pub use graph::{
-    ActionDraft, ActionId, ActionKind, CompletionOutput, EdgeDraft, EdgeId, GraphAction,
-    GraphDatabase, GraphEdge, GraphLayer, GraphNode, GraphWriter, LayerDraft, LayerId, NodeDraft,
-    NodeId, ProjectId, RecordState, ResolvedLayer, ThreadId,
+    ActionDraft, ActionId, ActionKind, ActionVariant, CompletionOutput, EdgeDraft, EdgeId,
+    GraphAction, GraphDatabase, GraphEdge, GraphLayer, GraphNode, GraphWriter, LayerDraft, LayerId,
+    NodeDraft, NodeId, ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState,
+    ResolvedLayer, ThreadId, is_supported_icon, normalize_icon_name, resolve_icon_name,
 };

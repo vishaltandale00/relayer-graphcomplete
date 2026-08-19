@@ -9,3 +9,7 @@ await copyFile(
   resolve(repositoryRoot, "node_modules/marked/lib/marked.umd.js"),
   resolve(vendorDirectory, "marked.umd.js"),
 );
+await copyFile(
+  resolve(repositoryRoot, "node_modules/lucide/dist/umd/lucide.min.js"),
+  resolve(vendorDirectory, "lucide.min.js"),
+);

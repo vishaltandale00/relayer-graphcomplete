@@ -6,13 +6,13 @@ use axum::{
     routing::{get, post},
 };
 use relayer_graph_core::{
-    ActionDraft, CompletionOutput, EdgeDraft, GraphDatabase, GraphError, GraphNode, LayerDraft,
-    LayerId, NodeDraft, NodeId, ProjectId, ThreadId,
+    ActionDraft, ActionId, ActionKind, CompletionOutput, EdgeDraft, GraphDatabase, GraphError,
+    GraphNode, LayerDraft, LayerId, NodeDraft, NodeId, ProjectId, RecordState, ThreadId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet, VecDeque},
     sync::{Arc, Mutex},
 };
 use uuid::Uuid;
@@ -46,6 +46,7 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/graph/layers", post(submit_layer))
         .route("/api/graph/layers/{id}", get(get_layer))
         .route("/api/graph/actions", post(add_action))
+        .route("/api/graph/actions/{id}", get(get_action))
         .route("/api/graph/submit", post(submit_completion))
         .route("/api/graph/nodes/{id}/output", get(completion_output))
         .with_state(state)
@@ -218,6 +219,43 @@ async fn add_action(
         .add_action(&input)
         .await?;
     Ok(Json(json!({"action":action})))
+}
+async fn get_action(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<ActionId>,
+) -> Result<Json<Value>, ApiError> {
+    let node_id = session(&state, &headers)?;
+    let writer = state.graph.writer_for_subgraph(node_id).await?;
+    let output = writer.completion_output().await?.ok_or_else(|| {
+        ApiError(
+            StatusCode::NOT_FOUND,
+            json!({"error":{"code":"completion_not_found","message":"This node has no accepted completion output yet."}}),
+        )
+    })?;
+    let mut layers = VecDeque::from([output.root_layer]);
+    let mut visited = HashSet::new();
+    while let Some(layer) = layers.pop_front() {
+        if !visited.insert(layer.layer.id) {
+            continue;
+        }
+        for action in layer.actions {
+            if action.id == id && action.state == RecordState::Accepted {
+                return Ok(Json(json!({"action": action})));
+            }
+            if action.kind == ActionKind::Navigate
+                && action.state == RecordState::Accepted
+                && let Some(target_layer_id) = action.target_layer_id
+                && !visited.contains(&target_layer_id)
+            {
+                layers.push_back(writer.get_layer(target_layer_id).await?);
+            }
+        }
+    }
+    Err(ApiError(
+        StatusCode::NOT_FOUND,
+        json!({"error":{"code":"action_not_found","message":"This accepted completion does not contain that action."}}),
+    ))
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -490,6 +528,156 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(retry.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn action_api_defaults_older_authors_and_returns_repairable_variant_errors() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "hello")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let graph_token = mint_capability(&state, interaction.id).ok().unwrap();
+        let app = router(state);
+
+        let older = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"older","sourceNodeId":{},"kind":"invoke","label":"Continue","interactionText":"Continue from here"}}"#,
+                        interaction.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(older.status(), StatusCode::OK);
+        let older: Value =
+            serde_json::from_slice(&to_bytes(older.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(older["action"]["variant"], "pill");
+        assert!(older["action"]["icon"].is_null());
+        assert!(older["action"]["description"].is_null());
+
+        let unsupported = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"unsupported","sourceNodeId":{},"kind":"invoke","label":"Continue","variant":"banner","interactionText":"Continue from here"}}"#,
+                        interaction.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unsupported.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let unsupported: Value =
+            serde_json::from_slice(&to_bytes(unsupported.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(unsupported["error"]["code"], "unsupported_action_variant");
+        assert_eq!(unsupported["error"]["path"], "variant");
+    }
+
+    #[tokio::test]
+    async fn action_read_is_scoped_to_the_source_interactions_accepted_closure() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "hello")
+            .await
+            .unwrap();
+        let writer = graph.writer_for_subgraph(interaction.id).await.unwrap();
+        let answer = writer
+            .submit_node(&NodeDraft {
+                client_key: "answer".into(),
+                kind: "concept".into(),
+                icon: "compass".into(),
+                title: "Answer".into(),
+                detail: "Accepted detail".into(),
+            })
+            .await
+            .unwrap();
+        let invoke = writer
+            .add_action(&ActionDraft {
+                client_key: "continue".into(),
+                source_node_id: answer.id,
+                kind: ActionKind::Invoke,
+                label: "Continue".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: None,
+                interaction_text: Some("Continue from here".into()),
+                response: false,
+            })
+            .await
+            .unwrap();
+        let layer = writer
+            .submit_layer(&LayerDraft {
+                client_key: "root".into(),
+                nodes: vec![answer.id],
+                edges: vec![],
+            })
+            .await
+            .unwrap();
+        writer
+            .add_action(&ActionDraft {
+                client_key: "response".into(),
+                source_node_id: interaction.id,
+                kind: ActionKind::Navigate,
+                label: "Response".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: Some(layer.id),
+                interaction_text: None,
+                response: true,
+            })
+            .await
+            .unwrap();
+        writer.complete(interaction.id).await.unwrap();
+
+        let state = ServerState::new(graph, "control");
+        let graph_token = mint_capability(&state, interaction.id).ok().unwrap();
+        let app = router(state);
+        let readable = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/graph/actions/{}", invoke.id.value()))
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(readable.status(), StatusCode::OK);
+        let readable: Value =
+            serde_json::from_slice(&to_bytes(readable.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(readable["action"]["id"], invoke.id.value());
+        assert_eq!(readable["action"]["kind"], "invoke");
+
+        let absent = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/graph/actions/99999")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(absent.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

@@ -1,5 +1,6 @@
 use crate::product::{
-    Interaction, ProductCapabilities, ProductState, Project, Thread, ThreadDetail, ThreadView,
+    ActionInvocation, Interaction, ProductCapabilities, ProductState, Project, Thread,
+    ThreadDetail, ThreadView,
 };
 use serde::Serialize;
 
@@ -87,6 +88,26 @@ impl From<Interaction> for InteractionResponse {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ActionInvocationResponse {
+    pub(super) source_interaction_id: i64,
+    pub(super) action_id: i64,
+    pub(super) result_interaction_id: i64,
+    pub(super) created_at: String,
+}
+
+impl From<ActionInvocation> for ActionInvocationResponse {
+    fn from(invocation: ActionInvocation) -> Self {
+        Self {
+            source_interaction_id: invocation.source_interaction_id.value(),
+            action_id: invocation.action_id,
+            result_interaction_id: invocation.result_interaction_id.value(),
+            created_at: invocation.created_at,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CapabilitiesResponse {
     projects: bool,
     threads: bool,
@@ -132,6 +153,7 @@ pub(crate) struct ProductStateResponse {
     projects: Vec<ProjectResponse>,
     threads: Vec<ThreadViewResponse>,
     interactions: Vec<InteractionResponse>,
+    action_invocations: Vec<ActionInvocationResponse>,
     capabilities: CapabilitiesResponse,
 }
 
@@ -141,6 +163,11 @@ impl From<ProductState> for ProductStateResponse {
             projects: state.projects.into_iter().map(Into::into).collect(),
             threads: state.threads.into_iter().map(Into::into).collect(),
             interactions: state.interactions.into_iter().map(Into::into).collect(),
+            action_invocations: state
+                .action_invocations
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             capabilities: state.capabilities.into(),
         }
     }
@@ -151,6 +178,7 @@ impl From<ProductState> for ProductStateResponse {
 pub(crate) struct ThreadDetailResponse {
     thread: ThreadResponse,
     interactions: Vec<InteractionResponse>,
+    action_invocations: Vec<ActionInvocationResponse>,
 }
 
 impl From<ThreadDetail> for ThreadDetailResponse {
@@ -158,6 +186,11 @@ impl From<ThreadDetail> for ThreadDetailResponse {
         Self {
             thread: detail.thread.into(),
             interactions: detail.interactions.into_iter().map(Into::into).collect(),
+            action_invocations: detail
+                .action_invocations
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         }
     }
 }

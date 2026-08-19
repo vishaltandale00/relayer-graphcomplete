@@ -1,3 +1,5 @@
+import type { RelayerIconName } from "./icons.js";
+
 export type GraphId = number;
 export type RecordState = "draft" | "accepted" | "stopped";
 
@@ -24,12 +26,16 @@ export interface GraphLayer {
 }
 
 export type ActionKind = "navigate" | "invoke";
+export type ActionVariant = "chip" | "pill" | "wide" | "card";
 
 export interface GraphAction {
   readonly id: GraphId;
   readonly sourceNodeId: GraphId;
   readonly kind: ActionKind;
   readonly label: string;
+  readonly variant: ActionVariant;
+  readonly icon?: RelayerIconName | null;
+  readonly description?: string | null;
   readonly targetLayerId?: GraphId | null;
   readonly interactionText?: string | null;
   readonly response: boolean;

@@ -74,6 +74,9 @@ export class RelayerGraphClient {
         sourceNodeId: nodeId(source),
         kind: action.kind,
         label: action.label,
+        variant: action.variant ?? "pill",
+        icon: action.icon ?? null,
+        description: action.description ?? null,
         targetLayerId: layerId(action.target),
         response: action.response ?? false,
       } : {
@@ -81,6 +84,9 @@ export class RelayerGraphClient {
         sourceNodeId: nodeId(source),
         kind: action.kind,
         label: action.label,
+        variant: action.variant ?? "pill",
+        icon: action.icon ?? null,
+        description: action.description ?? null,
         interactionText: action.interactionText,
       }),
     });

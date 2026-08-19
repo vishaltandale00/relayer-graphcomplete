@@ -32,11 +32,18 @@ impl ApiError {
         )
     }
 
-    fn internal(message: &str) -> Self {
+    pub(crate) fn internal(message: &str) -> Self {
         Self(
             StatusCode::INTERNAL_SERVER_ERROR,
             json!({ "error": message }),
         )
+    }
+
+    pub(crate) fn message(&self) -> &str {
+        self.1
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown API error")
     }
 }
 

@@ -16,8 +16,10 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@openai/codex-sdk": "^0.147.0",
     "@relayer/graph-client": "*",
-    "@relayer/harness-host": "*"
+    "@relayer/harness-host": "*",
+    "zod": "^4.4.3"
   }
 }
