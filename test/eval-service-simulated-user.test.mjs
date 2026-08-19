@@ -324,7 +324,7 @@ async function waitForCompletedRun(evalService, runId) {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const run = evalService.getRun(runId);
-    if (!["queued", "running"].includes(run.status)) return run;
+    if (!["queued", "running"].includes(run.status) && typeof run.bundleRef === "string") return run;
     await new Promise((resolveWait) => setTimeout(resolveWait, 10));
   }
   throw new Error("Eval run did not finish in time.");

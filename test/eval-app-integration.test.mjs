@@ -88,6 +88,7 @@ describe("Relayer Eval application service", () => {
             : []),
         ];
       },
+      platform: "darwin",
     }).open();
 
     const created = await evalService.createRun({
