@@ -321,6 +321,10 @@ describe("desktop skeleton", () => {
     expect(evalMain).toContain("productSession.readOnlyCookie");
     expect(evalMain).toContain("claimPrimaryDesktopInstance");
     expect(evalMain).toContain("createReviewWindow(executionId)");
+    expect(evalMain).toContain('join(harnessDirectory, "prime-agent-basic.yaml")');
+    expect(evalMain).toContain('join(harnessDirectory, "prime-agent-deep.yaml")');
+    expect(evalMain).toContain("...(!app.isPackaged ? [");
+    expect(evalMain).toContain("process.env.PYTHONPATH");
     expect(evalDashboard).toContain("Test cases");
     expect(evalDashboard).toContain("Harnesses under test");
     expect(evalDashboard).toContain("Open the judge review or the read-only production workspace");

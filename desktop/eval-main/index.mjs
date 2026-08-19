@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
@@ -38,7 +38,15 @@ const configurationPaths = [
   join(harnessDirectory, "fixture-task-system.yaml"),
   join(harnessDirectory, "codex-basic.yaml"),
   join(harnessDirectory, "codex-basic-high.yaml"),
+  ...(!app.isPackaged ? [
+    join(harnessDirectory, "prime-agent-basic.yaml"),
+    join(harnessDirectory, "prime-agent-deep.yaml"),
+  ] : []),
 ];
+if (!app.isPackaged) {
+  const pythonClientPath = join(repositoryRoot, "python", "relayer-graph", "src");
+  process.env.PYTHONPATH = [pythonClientPath, process.env.PYTHONPATH].filter(Boolean).join(delimiter);
+}
 const graphClientModuleUrl = app.isPackaged
   ? pathToFileURL(join(process.resourcesPath, "graph-client", "index.js")).href
   : undefined;

@@ -117,7 +117,7 @@ Relayer Eval is a separate internal application and profile. Its dashboard confi
 npm run eval-app:dev
 ```
 
-The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. Build the unsigned internal application with `npm run eval-app:pack`.
+The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. When the local Prime Agent package is linked as described above, the development picker also exposes `prime-agent-basic` and `prime-agent-deep` and supplies the Python graph client to their IPython kernels. Packaged Eval builds omit those unpublished development-only options. Build the unsigned internal application with `npm run eval-app:pack`.
 
 The public Relayer and internal Relayer Eval builds use distinct application identifiers, entry points, data profiles, and dashboard assets. They share the graph runtime, harness host, app server, product records, API contracts, and production workspace. See [ADR 0003](docs/decisions/0003-shared-product-eval-workspace.md).
 

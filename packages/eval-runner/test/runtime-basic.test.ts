@@ -63,7 +63,7 @@ describe("first runtime evaluation", () => {
     expect(visible.edges).toEqual([[2, 6]]);
     const judgePrompt = basicJudgePrompt({
       nodeId: 1,
-      rootAction: { id: 1, sourceNodeId: 1, kind: "navigate", label: "Response", targetLayerId: 3, response: true, state: "accepted" },
+      rootAction: { id: 1, sourceNodeId: 1, kind: "navigate", label: "Response", variant: "pill", targetLayerId: 3, response: true, state: "accepted" },
       rootLayer: {
         layer: { id: 3, nodes: [2, 6], edges: [4], state: "accepted" },
         nodes: visible.nodes.map((node) => ({ ...node, kind: "concept" as const, state: "accepted" as const })),
