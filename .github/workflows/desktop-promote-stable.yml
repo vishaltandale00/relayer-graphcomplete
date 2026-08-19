@@ -3,6 +3,14 @@ name: Promote Relayer Desktop to Stable
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: Preview target to promote
+        required: true
+        type: choice
+        options:
+          - windows-x64
+          - macos-x64
+          - macos-arm64
       version:
         description: Numeric Preview version to promote
         required: true
@@ -12,7 +20,7 @@ on:
         required: true
         type: string
       confirmation:
-        description: Enter promote-VERSION exactly
+        description: Enter promote-TARGET-VERSION exactly
         required: true
         type: string
 
@@ -49,7 +57,7 @@ jobs:
           [[ "$GITHUB_REF" == "refs/heads/main" ]]
           [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "$CONFIRMATION" == "promote-${VERSION}" ]]
+          [[ "$CONFIRMATION" == "promote-${{ inputs.target }}-${VERSION}" ]]
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -70,6 +78,7 @@ jobs:
         env:
           DESKTOP_UPDATE_BUCKET: ${{ vars.DESKTOP_UPDATE_BUCKET }}
           STABLE_PROMOTION_CONFIRMATION: ${{ inputs.confirmation }}
+          RELAYER_DESKTOP_TARGET: ${{ inputs.target }}
         run: >-
           npm run desktop:release:promote-stable --
           --bucket "$DESKTOP_UPDATE_BUCKET"
@@ -79,7 +88,7 @@ jobs:
       - name: Preserve Stable promotion receipt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: relayer-desktop-stable-${{ inputs.version }}-${{ github.run_id }}
+          name: relayer-desktop-stable-${{ inputs.target }}-${{ inputs.version }}-${{ github.run_id }}
           if-no-files-found: error
           retention-days: 90
-          path: desktop/dist/stable-promotion-${{ inputs.version }}.json
+          path: desktop/dist/stable-promotion-${{ inputs.target }}-${{ inputs.version }}.json

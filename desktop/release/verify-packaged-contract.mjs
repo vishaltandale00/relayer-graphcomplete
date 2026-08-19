@@ -8,7 +8,9 @@ export async function verifyPackagedDesktopContract({ appPath, contract } = {}) 
   if (!contract?.release) {
     throw new Error("Packaged desktop verification requires the signed release contract.");
   }
-  const resourcesPath = join(appPath, "Contents", "Resources");
+  const resourcesPath = contract.platform === "darwin"
+    ? join(appPath, "Contents", "Resources")
+    : join(appPath, "resources");
   const asarPath = join(resourcesPath, "app.asar");
   const packageMetadata = JSON.parse(extractFile(asarPath, "package.json").toString("utf8"));
   const expectedMetadata = {
@@ -17,6 +19,9 @@ export async function verifyPackagedDesktopContract({ appPath, contract } = {}) 
     relayerProductName: contract.productName,
     relayerUpdateChannel: contract.channelName,
     relayerUpdateBaseUrl: contract.updateBaseUrl,
+    relayerReleaseTarget: contract.targetKey,
+    relayerReleasePlatform: contract.distributionPlatform,
+    relayerReleaseArchitecture: contract.architecture,
     relayerReleaseSourceCommit: contract.sourceCommit,
     relayerAppleTeamId: contract.appleTeamId,
     relayerMinimumMacOSVersion: contract.minimumMacOSVersion,

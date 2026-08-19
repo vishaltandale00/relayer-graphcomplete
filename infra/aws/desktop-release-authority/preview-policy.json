@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublishTargetPreviewObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::relayer-desktop-updates-647746916062/desktop/macos/arm64/releases/*",
+        "arn:aws:s3:::relayer-desktop-updates-647746916062/desktop/macos/arm64/beta-mac.yml",
+        "arn:aws:s3:::relayer-desktop-updates-647746916062/desktop/macos/x64/releases/*",
+        "arn:aws:s3:::relayer-desktop-updates-647746916062/desktop/macos/x64/beta-mac.yml",
+        "arn:aws:s3:::relayer-desktop-updates-647746916062/desktop/windows/x64/releases/*",
+        "arn:aws:s3:::relayer-desktop-updates-647746916062/desktop/windows/x64/beta.yml",
+        "arn:aws:s3:::relayer-desktop-updates-647746916062/private/history/macos-arm64/beta/*",
+        "arn:aws:s3:::relayer-desktop-updates-647746916062/private/history/macos-x64/beta/*",
+        "arn:aws:s3:::relayer-desktop-updates-647746916062/private/history/windows-x64/beta/*",
+        "arn:aws:s3:::relayer-desktop-updates-647746916062/private/receipts/macos-arm64/preview/*",
+        "arn:aws:s3:::relayer-desktop-updates-647746916062/private/receipts/macos-x64/preview/*",
+        "arn:aws:s3:::relayer-desktop-updates-647746916062/private/receipts/windows-x64/preview/*"
+      ]
+    }
+  ]
+}

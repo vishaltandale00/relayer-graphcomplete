@@ -90,25 +90,27 @@ The default `fixture-task-system` harness is deterministic and does not call inf
 
 The public Relayer and internal Relayer Eval builds use distinct application identifiers, entry points, data profiles, and dashboard assets. They share the graph runtime, harness host, app server, product records, API contracts, and production workspace. See [ADR 0003](docs/decisions/0003-shared-product-eval-workspace.md).
 
-Build an unsigned Apple Silicon development application, including both Rust servers and the external graph client used by harness-authored scripts, with:
+Build an unsigned development application for the host platform (Apple Silicon or Intel macOS, or Windows x64), including both Rust servers and the external graph client used by harness-authored scripts, with:
 
 ```sh
 npm run desktop:pack
 ```
 
-Desktop packaging intentionally targets Apple Silicon only. The build packages Electron plus the Rust product and graph servers for `arm64`, then rejects the package if either bundled server has a different architecture or the external graph-client module is missing. Intel Mac support is deferred.
+Desktop packaging and release metadata are target-aware. On macOS it packages Electron plus the Rust product and graph servers for Apple Silicon or Intel; on Windows x64 it packages the corresponding `.exe` services and Codex binary. Each target has independent Preview and Stable artifacts and feed pointers under `desktop/macos/arm64`, `desktop/macos/x64`, or `desktop/windows/x64`.
 
-The accepted desktop release contract starts at version `0.2.0`, supports Apple Silicon on macOS 13 or newer, and uses the existing Relayer Developer ID identity. Signed candidates fail closed unless the worktree is clean and signing, notarization, provenance, and the sealed update URL are all present. Build a signed, notarized candidate without publishing it with:
+The accepted desktop release contract starts at version `0.2.0`, supports Apple Silicon and Intel on macOS 13 or newer plus Windows x64, and uses the existing Relayer Developer ID identity on macOS and Azure Artifact Signing on Windows. Signed candidates fail closed unless the worktree is clean and target-specific signing, provenance, and the sealed update URL are present. Build a signed candidate without publishing it with `RELAYER_DESKTOP_TARGET` set to `macos-arm64`, `macos-x64`, or `windows-x64`:
 
 ```sh
 npm run desktop:dist:preview
 ```
 
-Preview and Stable are channels for the same `ai.relayer.desktop` application. Preview uses `beta-mac.yml`; Stable uses `latest-mac.yml`. The exact Preview artifact is promoted to Stable after the real update canary rather than rebuilt. See [ADR 0002](docs/decisions/0002-desktop-release-contract.md).
+Preview and Stable are channels for the same `ai.relayer.desktop` application. macOS uses `beta-mac.yml` and `latest-mac.yml`; Windows uses `beta.yml` and `latest.yml`. The exact target-specific Preview artifact is promoted to Stable after its real update canary rather than rebuilt. See [ADR 0002](docs/decisions/0002-desktop-release-contract.md).
 
-The `Desktop Signed Preview Candidate` workflow always builds a sealed candidate, but publishes only for a matching protected `desktop-vX.Y.Z` tag whose commit is on `origin/main`. Publication uploads immutable versioned artifacts, verifies their public bytes, and conditionally moves `beta-mac.yml` last. A manual workflow run never changes the update feed.
+The `Desktop Signed Preview Candidates` workflow builds sealed Apple Silicon, Intel, and Windows candidates, but publishes only for a matching protected `desktop-vX.Y.Z` tag whose commit is on `origin/main`. Publication uploads immutable versioned artifacts, verifies their public bytes, and conditionally moves each target's Preview pointer last. A manual workflow run never changes an update feed.
 
-After that exact Preview version passes the committed previous-version updater canary, the protected `Promote Relayer Desktop to Stable` workflow can move `latest-mac.yml` to the same artifact bytes. Stable promotion does not rebuild or re-sign the application and rejects downgrades, replacement bytes, unverified canaries, and concurrent pointer changes.
+After that exact Preview version passes the committed previous-version updater canary, the protected `Promote Relayer Desktop to Stable` workflow can move that target's `latest-mac.yml` or `latest.yml` pointer to the same artifact bytes. Stable promotion does not rebuild or re-sign the application and rejects downgrades, replacement bytes, unverified canaries, and concurrent pointer changes.
+
+The [desktop release operations runbook](docs/desktop-release-operations.md) covers Azure Artifact Signing, GitHub OIDC, target-specific AWS authority, the native Intel canary, and the interactive Windows 11 canary. Its Windows environment has a reviewable, non-CI [Azure deployment definition](infra/azure/desktop-canary/README.md) that remains inert until an operator explicitly approves and runs it. Reviewable [GitHub release rulesets](infra/github/desktop-release-authority/README.md) and a read-only live authority audit keep branch, tag, environment, and OIDC policy aligned with the workflows.
 
 The living [Product Requirements](docs/prd/index.html) webpage records what is verified, partial, open, deferred, and planned for the updater slice. Run `npm run prd` to review it and save local comments to the ignored `docs/prd/comments.json` file. User-visible proof is stored with the PRD under `docs/prd/assets/evidence/`.
 

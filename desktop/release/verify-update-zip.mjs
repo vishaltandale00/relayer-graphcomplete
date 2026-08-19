@@ -34,7 +34,11 @@ export async function verifyDesktopUpdateZip({ contract, distRoot, execute = exe
       throw new Error("Desktop update ZIP must contain exactly one Relayer.app bundle.");
     }
     const appPath = join(extractedRoot, apps[0].name);
-    await verifyMacOSApplication(appPath, { assessNotarization: true, execute });
+    await verifyMacOSApplication(appPath, {
+      assessNotarization: true,
+      execute,
+      expectedArchitecture: contract.architecture === "x64" ? "x86_64" : contract.architecture,
+    });
     await verifyPackagedDesktopContract({ appPath, contract });
     return { zipPath, appPath: basename(appPath) };
   } finally {

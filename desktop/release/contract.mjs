@@ -5,6 +5,10 @@ import { promisify } from "node:util";
 
 import { compareNumericVersions, isNumericVersion } from "./numeric-version.mjs";
 import { DESKTOP_UPDATE_BASE_URL } from "../shared/release-metadata.mjs";
+import {
+  desktopTargetByKey,
+  desktopTargetFromEnvironment,
+} from "../shared/target.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -13,16 +17,45 @@ export const DESKTOP_RELEASE = Object.freeze({
   developmentAppId: "ai.relayer.desktop.development",
   productName: "Relayer",
   developmentProductName: "Relayer Dev",
-  architecture: "arm64",
   minimumMacOSVersion: "13.0.0",
   firstVersion: "0.2.0",
   updateBaseUrl: DESKTOP_UPDATE_BASE_URL,
   appleTeamId: "NZ253AL7U6",
+  artifactSigningAccountName: "relayercodesigning",
+  artifactSigningEndpoint: "https://eus.codesigning.azure.net/",
 });
 
-const CHANNELS = Object.freeze({
-  stable: Object.freeze({ providerChannel: "latest", manifestName: "latest-mac.yml" }),
-  preview: Object.freeze({ providerChannel: "beta", manifestName: "beta-mac.yml" }),
+export const DESKTOP_RELEASE_TARGETS = Object.freeze({
+  "macos-arm64": Object.freeze({
+    ...desktopTargetByKey("macos-arm64"),
+    updateBaseUrl: "https://updates.relayerlabs.ai/desktop/macos/arm64",
+    publicPrefix: "desktop/macos/arm64",
+    minimumMacOSVersion: DESKTOP_RELEASE.minimumMacOSVersion,
+    channels: Object.freeze({
+      stable: Object.freeze({ providerChannel: "latest", manifestName: "latest-mac.yml" }),
+      preview: Object.freeze({ providerChannel: "beta", manifestName: "beta-mac.yml" }),
+    }),
+  }),
+  "macos-x64": Object.freeze({
+    ...desktopTargetByKey("macos-x64"),
+    updateBaseUrl: "https://updates.relayerlabs.ai/desktop/macos/x64",
+    publicPrefix: "desktop/macos/x64",
+    minimumMacOSVersion: DESKTOP_RELEASE.minimumMacOSVersion,
+    channels: Object.freeze({
+      stable: Object.freeze({ providerChannel: "latest", manifestName: "latest-mac.yml" }),
+      preview: Object.freeze({ providerChannel: "beta", manifestName: "beta-mac.yml" }),
+    }),
+  }),
+  "windows-x64": Object.freeze({
+    ...desktopTargetByKey("windows-x64"),
+    updateBaseUrl: "https://updates.relayerlabs.ai/desktop/windows/x64",
+    publicPrefix: "desktop/windows/x64",
+    minimumMacOSVersion: null,
+    channels: Object.freeze({
+      stable: Object.freeze({ providerChannel: "latest", manifestName: "latest.yml" }),
+      preview: Object.freeze({ providerChannel: "beta", manifestName: "beta.yml" }),
+    }),
+  }),
 });
 
 const GIT_SHA_PATTERN = /^[a-f0-9]{40}$/;
@@ -33,6 +66,12 @@ function value(environment, name) {
 
 function hasAll(environment, names) {
   return names.every((name) => value(environment, name));
+}
+
+export function desktopReleaseTarget(key = "macos-arm64") {
+  const target = DESKTOP_RELEASE_TARGETS[String(key || "").trim()];
+  if (!target) throw new Error(`Unsupported Relayer Desktop release target: ${key || "(empty)"}.`);
+  return target;
 }
 
 export function resolveDesktopNotarizationCredentials(environment = process.env) {
@@ -76,8 +115,11 @@ export function resolveDesktopReleaseContract({
   sourceCommit,
 } = {}) {
   const release = value(environment, "RELAYER_DESKTOP_RELEASE") === "1";
+  const target = release
+    ? desktopReleaseTarget(value(environment, "RELAYER_DESKTOP_TARGET") || "macos-arm64")
+    : desktopReleaseTarget(desktopTargetFromEnvironment(environment).key);
   const channelName = value(environment, "RELAYER_DESKTOP_CHANNEL") || "stable";
-  const channel = CHANNELS[channelName];
+  const channel = target.channels[channelName];
   if (!channel) {
     throw new Error("RELAYER_DESKTOP_CHANNEL must be stable or preview.");
   }
@@ -92,8 +134,14 @@ export function resolveDesktopReleaseContract({
       appId: DESKTOP_RELEASE.developmentAppId,
       productName: DESKTOP_RELEASE.developmentProductName,
       version,
-      architecture: DESKTOP_RELEASE.architecture,
-      minimumMacOSVersion: DESKTOP_RELEASE.minimumMacOSVersion,
+      targetKey: target.key,
+      platform: target.platform,
+      distributionPlatform: target.distributionPlatform,
+      artifactPlatform: target.format,
+      architecture: target.architecture,
+      rustTarget: target.rustTarget,
+      publicPrefix: target.publicPrefix,
+      minimumMacOSVersion: target.minimumMacOSVersion,
       channelName: "development",
       providerChannel: null,
       manifestName: null,
@@ -103,6 +151,10 @@ export function resolveDesktopReleaseContract({
       signingMode: "unsigned",
       notarizationMode: "disabled",
       appleTeamId: null,
+      artifactSigningEndpoint: null,
+      artifactSigningAccountName: null,
+      artifactSigningCertificateProfileName: null,
+      publisherName: null,
     });
   }
 
@@ -115,24 +167,56 @@ export function resolveDesktopReleaseContract({
   }
 
   const updateBaseUrl = value(environment, "RELAYER_DESKTOP_UPDATE_BASE_URL");
-  if (updateBaseUrl !== DESKTOP_RELEASE.updateBaseUrl) {
-    throw new Error(`RELAYER_DESKTOP_UPDATE_BASE_URL must be exactly ${DESKTOP_RELEASE.updateBaseUrl}.`);
+  if (updateBaseUrl !== target.updateBaseUrl) {
+    throw new Error(`RELAYER_DESKTOP_UPDATE_BASE_URL must be exactly ${target.updateBaseUrl}.`);
   }
 
-  const signingIdentity = value(environment, "RELAYER_DESKTOP_SIGN_IDENTITY") || value(environment, "CSC_NAME");
-  if (!signingIdentity.startsWith("Developer ID Application:")) {
-    throw new Error("Desktop release requires a Developer ID Application signing identity.");
+  let signingIdentity = null;
+  let signingMode;
+  let notarizationMode = "disabled";
+  let appleTeamId = null;
+  let artifactSigningEndpoint = null;
+  let artifactSigningAccountName = null;
+  let artifactSigningCertificateProfileName = null;
+  let publisherName = null;
+  if (target.platform === "darwin") {
+    signingIdentity = value(environment, "RELAYER_DESKTOP_SIGN_IDENTITY") || value(environment, "CSC_NAME");
+    if (!signingIdentity.startsWith("Developer ID Application:")) {
+      throw new Error("macOS desktop release requires a Developer ID Application signing identity.");
+    }
+    appleTeamId = /\(([A-Z0-9]{6,})\)\s*$/.exec(signingIdentity)?.[1] || "";
+    if (appleTeamId !== DESKTOP_RELEASE.appleTeamId) {
+      throw new Error(`Desktop release signing identity must belong to Apple team ${DESKTOP_RELEASE.appleTeamId}.`);
+    }
+    const hasCertificateLink = Boolean(value(environment, "CSC_LINK"));
+    const hasCertificatePassword = Boolean(value(environment, "CSC_KEY_PASSWORD"));
+    if (hasCertificateLink !== hasCertificatePassword) {
+      throw new Error("CSC_LINK and CSC_KEY_PASSWORD must be provided together.");
+    }
+    const notarization = resolveDesktopNotarizationCredentials(environment);
+    signingMode = hasCertificateLink ? "certificate-file" : "keychain-identity";
+    notarizationMode = notarization.mode;
+  } else {
+    artifactSigningEndpoint = value(environment, "RELAYER_WINDOWS_SIGNING_ENDPOINT");
+    artifactSigningAccountName = value(environment, "RELAYER_WINDOWS_SIGNING_ACCOUNT");
+    artifactSigningCertificateProfileName = value(environment, "RELAYER_WINDOWS_CERTIFICATE_PROFILE");
+    publisherName = value(environment, "RELAYER_WINDOWS_PUBLISHER_NAME");
+    if (artifactSigningEndpoint !== DESKTOP_RELEASE.artifactSigningEndpoint) {
+      throw new Error(`RELAYER_WINDOWS_SIGNING_ENDPOINT must be exactly ${DESKTOP_RELEASE.artifactSigningEndpoint}.`);
+    }
+    if (artifactSigningAccountName !== DESKTOP_RELEASE.artifactSigningAccountName) {
+      throw new Error(`RELAYER_WINDOWS_SIGNING_ACCOUNT must be exactly ${DESKTOP_RELEASE.artifactSigningAccountName}.`);
+    }
+    if (!artifactSigningCertificateProfileName) {
+      throw new Error("Windows desktop release requires RELAYER_WINDOWS_CERTIFICATE_PROFILE.");
+    }
+    if (!publisherName.startsWith("CN=") || !publisherName.includes(", O=")) {
+      throw new Error(
+        "Windows desktop release requires RELAYER_WINDOWS_PUBLISHER_NAME to be the exact certificate distinguished name.",
+      );
+    }
+    signingMode = "azure-artifact-signing";
   }
-  const appleTeamId = /\(([A-Z0-9]{6,})\)\s*$/.exec(signingIdentity)?.[1] || "";
-  if (appleTeamId !== DESKTOP_RELEASE.appleTeamId) {
-    throw new Error(`Desktop release signing identity must belong to Apple team ${DESKTOP_RELEASE.appleTeamId}.`);
-  }
-  const hasCertificateLink = Boolean(value(environment, "CSC_LINK"));
-  const hasCertificatePassword = Boolean(value(environment, "CSC_KEY_PASSWORD"));
-  if (hasCertificateLink !== hasCertificatePassword) {
-    throw new Error("CSC_LINK and CSC_KEY_PASSWORD must be provided together.");
-  }
-  const notarization = resolveDesktopNotarizationCredentials(environment);
 
   return Object.freeze({
     release: true,
@@ -140,17 +224,27 @@ export function resolveDesktopReleaseContract({
     appId: DESKTOP_RELEASE.productionAppId,
     productName: DESKTOP_RELEASE.productName,
     version,
-    architecture: DESKTOP_RELEASE.architecture,
-    minimumMacOSVersion: DESKTOP_RELEASE.minimumMacOSVersion,
+    targetKey: target.key,
+    platform: target.platform,
+    distributionPlatform: target.distributionPlatform,
+    artifactPlatform: target.format,
+    architecture: target.architecture,
+    rustTarget: target.rustTarget,
+    publicPrefix: target.publicPrefix,
+    minimumMacOSVersion: target.minimumMacOSVersion,
     channelName,
     providerChannel: channel.providerChannel,
     manifestName: channel.manifestName,
     updateBaseUrl,
     sourceCommit: normalizedCommit,
     signingIdentity,
-    signingMode: hasCertificateLink ? "certificate-file" : "keychain-identity",
-    notarizationMode: notarization.mode,
+    signingMode,
+    notarizationMode,
     appleTeamId,
+    artifactSigningEndpoint,
+    artifactSigningAccountName,
+    artifactSigningCertificateProfileName,
+    publisherName,
   });
 }
 

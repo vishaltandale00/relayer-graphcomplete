@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
+import { codexBinaryPath, nativeBinaryName } from "../shared/target.mjs";
 
 import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 import { EvalService } from "./eval-service.mjs";
@@ -25,10 +26,10 @@ app.setName("Relayer Eval");
 
 const userDataDirectory = app.getPath("userData");
 const graphServerBinary = app.isPackaged
-  ? join(process.resourcesPath, "bin", "relayer-graph-server")
+  ? join(process.resourcesPath, "bin", nativeBinaryName("relayer-graph-server"))
   : resolve(process.env.RELAYER_GRAPH_SERVER_BIN || join(repositoryRoot, "target", "debug", "relayer-graph-server"));
 const appServerBinary = app.isPackaged
-  ? join(process.resourcesPath, "bin", "relayer-app-server")
+  ? join(process.resourcesPath, "bin", nativeBinaryName("relayer-app-server"))
   : resolve(process.env.RELAYER_APP_SERVER_BINARY || join(repositoryRoot, "target", "debug", "relayer-app-server"));
 const harnessDirectory = app.isPackaged ? join(process.resourcesPath, "harnesses") : join(repositoryRoot, "harnesses");
 const productRendererDirectory = app.isPackaged ? join(process.resourcesPath, "renderer") : join(desktopDirectory, "renderer");
@@ -41,9 +42,11 @@ const configurationPaths = [
 const graphClientModuleUrl = app.isPackaged
   ? pathToFileURL(join(process.resourcesPath, "graph-client", "index.js")).href
   : undefined;
-const bundledCodexBinary = app.isPackaged
-  ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex")
-  : join(repositoryRoot, "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex");
+const bundledCodexBinary = codexBinaryPath({
+  packaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  repositoryRoot,
+});
 
 let dashboardWindow;
 const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => dashboardWindow });
