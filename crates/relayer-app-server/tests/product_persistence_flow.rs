@@ -13,6 +13,10 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::Path,
     process::{Command, Stdio},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     thread,
     time::Duration,
     time::{SystemTime, UNIX_EPOCH},
@@ -58,6 +62,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     .unwrap();
     pool.close().await;
 
+    let graph_interactions = Arc::new(AtomicUsize::new(202));
+    let graph_interaction_counter = graph_interactions.clone();
     let graph = axum::Router::new()
         .route(
             "/api/control/capabilities",
@@ -78,10 +84,16 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         )
         .route(
             "/api/control/interactions",
-            axum::routing::post(|| async {
-                axum::Json(json!({ "node": { "id": 202 }, "graphToken": "next" }))
+            axum::routing::post(move || {
+                let graph_interaction_counter = graph_interaction_counter.clone();
+                async move {
+                    let node_id = graph_interaction_counter.fetch_add(1, Ordering::SeqCst);
+                    axum::Json(json!({ "node": { "id": node_id }, "graphToken": "next" }))
+                }
             }),
         );
+    let harness_completions = Arc::new(AtomicUsize::new(0));
+    let completion_counter = harness_completions.clone();
     let harness = axum::Router::new()
         .route(
             "/sessions",
@@ -89,13 +101,18 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         )
         .route(
             "/sessions/{id}/complete",
-            axum::routing::post(|| async {
-                axum::Json(json!({
-                    "output": {
-                        "nodeId": 202,
-                        "rootLayer": { "layer": { "id": 1 }, "nodes": [], "edges": [], "actions": [] }
-                    }
-                }))
+            axum::routing::post(move || {
+                let completion_counter = completion_counter.clone();
+                async move {
+                    let completion_number = completion_counter.fetch_add(1, Ordering::SeqCst);
+                    let node_id = 202 + completion_number;
+                    axum::Json(json!({
+                        "output": {
+                            "nodeId": node_id,
+                            "rootLayer": { "layer": { "id": 1 }, "nodes": [], "edges": [], "actions": [] }
+                        }
+                    }))
+                }
             }),
         );
     let (graph_url, graph_task) = serve_test_app(graph).await;
@@ -170,6 +187,76 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         assert!(std::time::Instant::now() < deadline);
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 1);
+
+    // Simulate a request disappearing after its durable one-shot record commits but before the
+    // old handler starts execution. Retrying the saved invocation must claim it exactly once and
+    // must not need the graph server to validate the already-authorized action again.
+    let pool = sqlite_pool(&database).await;
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let result = sqlx::query(
+        "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,3,'Recovered follow-up',?2,'not_started')",
+    )
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let result_interaction_id = result.last_insert_rowid();
+    sqlx::query(
+        "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,43,?2,?3)",
+    )
+    .bind(source_interaction_id)
+    .bind(result_interaction_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let recovery_uri =
+        format!("/api/threads/{thread_id}/interactions/{source_interaction_id}/actions/43/invoke");
+    let first_recovery = app
+        .clone()
+        .oneshot(api_request("POST", &recovery_uri, None, true));
+    let second_recovery = app
+        .clone()
+        .oneshot(api_request("POST", &recovery_uri, None, true));
+    let (first_recovery, second_recovery) = tokio::join!(first_recovery, second_recovery);
+    assert_eq!(first_recovery.unwrap().status(), StatusCode::OK);
+    assert_eq!(second_recovery.unwrap().status(), StatusCode::OK);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let state = response_json(
+            app.clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let recovered = state["interactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|interaction| interaction["id"] == result_interaction_id)
+            .unwrap();
+        if recovered["completionStatus"] == "accepted" {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 2);
     drop(app);
 
     let reopened =

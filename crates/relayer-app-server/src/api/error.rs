@@ -32,7 +32,7 @@ impl ApiError {
         )
     }
 
-    fn internal(message: &str) -> Self {
+    pub(crate) fn internal(message: &str) -> Self {
         Self(
             StatusCode::INTERNAL_SERVER_ERROR,
             json!({ "error": message }),

@@ -15,6 +15,7 @@ pub(crate) use models::Thread;
 pub(crate) use models::ThreadView;
 pub(crate) use service::CreateProjectCommand;
 pub(crate) use service::CreateThreadCommand;
+pub(crate) use service::InvokeActionOutcome;
 pub(crate) use service::ProductError;
 pub(crate) use service::ProductService;
 pub(crate) use service::ThreadDetail;

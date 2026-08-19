@@ -9,7 +9,8 @@ use super::{
 };
 use crate::{
     product::{
-        CreateThreadCommand, Interaction, InteractionId, ProjectId, Thread, ThreadId, ThreadView,
+        CreateThreadCommand, Interaction, InteractionId, InvokeActionOutcome, ProjectId, Thread,
+        ThreadId, ThreadView,
     },
     runtime::{CompleteInteraction, RuntimeError},
 };
@@ -216,14 +217,7 @@ async fn invoke_action_with_authority(
         .get_action_invocation(source_interaction_id, action_id)
         .await?
     {
-        return Ok((
-            StatusCode::OK,
-            Json(InvokeActionResponse {
-                invocation: outcome.invocation.into(),
-                interaction: outcome.interaction.into(),
-                created: false,
-            }),
-        ));
+        return spawn_action_handoff(state.clone(), thread, outcome).await;
     }
     let graph_node_id = source
         .graph_node_id
@@ -249,21 +243,54 @@ async fn invoke_action_with_authority(
     let interaction_text = action
         .interaction_text
         .as_deref()
-        .ok_or_else(|| ApiError::invalid("invoke action has no interaction text"))?;
+        .ok_or_else(|| ApiError::invalid("invoke action has no interaction text"))?
+        .to_owned();
 
     // One-shot invocation is a temporary UX simplification. The durable product record is
     // intentionally shaped so future retryable or repeatable action semantics can replace it.
-    let outcome = state
-        .product
-        .invoke_action(source_interaction_id, action_id, interaction_text)
-        .await?;
+    let owned_state = state.clone();
+    let handoff = tokio::spawn(async move {
+        let outcome = owned_state
+            .product
+            .invoke_action(source_interaction_id, action_id, &interaction_text)
+            .await?;
+        finish_action_handoff(&owned_state, &thread, outcome).await
+    });
+    await_action_handoff(handoff).await
+}
+
+async fn spawn_action_handoff(
+    state: ApiState,
+    thread: Thread,
+    outcome: InvokeActionOutcome,
+) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
+    let handoff =
+        tokio::spawn(async move { finish_action_handoff(&state, &thread, outcome).await });
+    await_action_handoff(handoff).await
+}
+
+async fn await_action_handoff(
+    handoff: tokio::task::JoinHandle<Result<(StatusCode, Json<InvokeActionResponse>), ApiError>>,
+) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
+    handoff.await.map_err(|error| {
+        ApiError::internal(&format!(
+            "action invocation backend handoff stopped unexpectedly: {error}"
+        ))
+    })?
+}
+
+async fn finish_action_handoff(
+    state: &ApiState,
+    thread: &Thread,
+    outcome: InvokeActionOutcome,
+) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
     let status = if outcome.created {
         StatusCode::CREATED
     } else {
         StatusCode::OK
     };
-    let interaction = if outcome.created {
-        start_interaction(state, &thread, outcome.interaction).await?
+    let interaction = if outcome.interaction.completion_status == "not_started" {
+        claim_and_start_action_interaction(state, thread, outcome.interaction).await?
     } else {
         outcome.interaction
     };
@@ -275,6 +302,45 @@ async fn invoke_action_with_authority(
             created: outcome.created,
         }),
     ))
+}
+
+async fn claim_and_start_action_interaction(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: Interaction,
+) -> Result<Interaction, ApiError> {
+    if state.runtime.is_none() {
+        let message = "GraphComplete runtime is unavailable";
+        record_background_failure(state, thread, &interaction, message.into()).await;
+        return Err(ApiError::invalid(message));
+    }
+    let claimed = state
+        .product
+        .claim_interaction_running(interaction.id, &thread.harness_configuration_name)
+        .await?;
+    if !claimed {
+        return state
+            .product
+            .get_interaction(interaction.id)
+            .await
+            .map_err(Into::into);
+    }
+
+    let mut running = interaction.clone();
+    running.completion_status = "running".into();
+    running.harness_configuration_name = Some(thread.harness_configuration_name.clone());
+    running.harness_configuration_digest = None;
+    running.completion_output = None;
+    running.completion_error = None;
+
+    // There is no await between the durable claim and spawning execution. Once this detached
+    // handoff owns the interaction, losing the HTTP request cannot strand it as not_started.
+    let state = state.clone();
+    let thread = thread.clone();
+    tokio::spawn(async move {
+        execute_interaction(state, thread, interaction).await;
+    });
+    Ok(running)
 }
 
 fn log_action_invocation_request_failure(

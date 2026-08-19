@@ -296,6 +296,17 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn claim_interaction_running(
+        &self,
+        interaction_id: super::InteractionId,
+        harness_configuration_name: &str,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .claim_interaction_running(interaction_id, harness_configuration_name)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn accept_interaction_completion(
         &self,
         interaction_id: super::InteractionId,
