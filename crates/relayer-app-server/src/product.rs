@@ -6,6 +6,7 @@ pub(crate) use ids::InteractionId;
 pub(crate) use ids::InvalidProductId;
 pub(crate) use ids::ProjectId;
 pub(crate) use ids::ThreadId;
+pub(crate) use models::ActionInvocation;
 pub(crate) use models::Interaction;
 pub(crate) use models::ProductCapabilities;
 pub(crate) use models::ProductState;

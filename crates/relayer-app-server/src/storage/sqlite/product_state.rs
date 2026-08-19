@@ -1,4 +1,4 @@
-use super::{SqliteProductStore, interactions, projects, threads};
+use super::{SqliteProductStore, action_invocations, interactions, projects, threads};
 use crate::product::ThreadId;
 use crate::storage::{ProductStateSnapshot, StorageError, ThreadSnapshot};
 
@@ -19,12 +19,19 @@ impl SqliteProductStore {
             }
             None => Vec::new(),
         };
+        let action_invocations = match selected_thread_id {
+            Some(thread_id) => {
+                action_invocations::fetch_action_invocations(&mut transaction, thread_id).await?
+            }
+            None => Vec::new(),
+        };
         transaction.commit().await?;
         Ok(ProductStateSnapshot {
             projects,
             threads,
             selected_thread_id,
             interactions,
+            action_invocations,
         })
     }
 
@@ -38,10 +45,17 @@ impl SqliteProductStore {
             Some(_) => interactions::fetch_interactions(&mut transaction, thread_id).await?,
             None => Vec::new(),
         };
+        let action_invocations = match thread {
+            Some(_) => {
+                action_invocations::fetch_action_invocations(&mut transaction, thread_id).await?
+            }
+            None => Vec::new(),
+        };
         transaction.commit().await?;
         Ok(ThreadSnapshot {
             thread,
             interactions,
+            action_invocations,
         })
     }
 }

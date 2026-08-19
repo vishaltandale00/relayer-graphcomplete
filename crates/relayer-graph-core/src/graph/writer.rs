@@ -26,7 +26,12 @@ impl GraphWriter {
     }
 
     pub async fn submit_node(&self, draft: &NodeDraft) -> Result<GraphNode, GraphError> {
-        draft.validate()?;
+        let canonical_icon = draft.validate()?;
+        let normalized_draft = NodeDraft {
+            icon: canonical_icon.into(),
+            ..draft.clone()
+        };
+        let draft = &normalized_draft;
         let mut transaction = self.database.storage.begin_write().await?;
         let existing = NodeTable::new(&mut transaction)
             .by_owner_and_key(self.scope.root_node_id, &draft.client_key)
@@ -135,7 +140,12 @@ impl GraphWriter {
     }
 
     pub async fn add_action(&self, draft: &ActionDraft) -> Result<GraphAction, GraphError> {
-        draft.validate_shape()?;
+        let canonical_icon = draft.validate_shape()?;
+        let normalized_draft = ActionDraft {
+            icon: canonical_icon.map(str::to_owned),
+            ..draft.clone()
+        };
+        let draft = &normalized_draft;
         let mut transaction = self.database.storage.begin_write().await?;
         self.ensure_writable(&mut transaction).await?;
         let source = NodeTable::new(&mut transaction)

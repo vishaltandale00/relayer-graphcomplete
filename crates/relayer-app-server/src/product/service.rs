@@ -1,8 +1,8 @@
 use super::{
-    Interaction, ProductCapabilities, ProductState, Project, ProjectId, Thread, ThreadId,
-    ThreadView,
+    ActionInvocation, Interaction, InteractionId, ProductCapabilities, ProductState, Project,
+    ProjectId, Thread, ThreadId, ThreadView,
 };
-use crate::storage::{SqliteProductStore, StorageError};
+use crate::storage::{ActionInvocationInsertOutcome, SqliteProductStore, StorageError};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
@@ -29,6 +29,13 @@ pub(crate) struct ProjectWriteOutcome {
 pub(crate) struct ThreadDetail {
     pub(crate) thread: Thread,
     pub(crate) interactions: Vec<Interaction>,
+    pub(crate) action_invocations: Vec<ActionInvocation>,
+}
+
+pub(crate) struct InvokeActionOutcome {
+    pub(crate) invocation: ActionInvocation,
+    pub(crate) interaction: Interaction,
+    pub(crate) created: bool,
 }
 
 #[derive(Debug, Error)]
@@ -84,6 +91,7 @@ impl ProductService {
             projects: snapshot.projects,
             threads,
             interactions: snapshot.interactions,
+            action_invocations: snapshot.action_invocations,
             capabilities: self.capabilities(),
         })
     }
@@ -183,6 +191,7 @@ impl ProductService {
         Ok(ThreadDetail {
             thread,
             interactions: snapshot.interactions,
+            action_invocations: snapshot.action_invocations,
         })
     }
 
@@ -212,6 +221,58 @@ impl ProductService {
             .insert_interaction(thread_id, text)
             .await
             .map_err(Into::into)
+    }
+
+    pub(crate) async fn invoke_action(
+        &self,
+        source_interaction_id: InteractionId,
+        action_id: i64,
+        text: &str,
+    ) -> Result<InvokeActionOutcome, ProductError> {
+        if action_id <= 0 {
+            return Err(ProductError::Invalid(
+                "action ID must be a positive integer".into(),
+            ));
+        }
+        let text = required(text, "interactionText")?;
+        let outcome = self
+            .storage
+            .insert_action_invocation(source_interaction_id, action_id, text)
+            .await?;
+        Ok(match outcome {
+            ActionInvocationInsertOutcome::Created {
+                invocation,
+                interaction,
+            } => InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: true,
+            },
+            ActionInvocationInsertOutcome::Existing {
+                invocation,
+                interaction,
+            } => InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: false,
+            },
+        })
+    }
+
+    pub(crate) async fn get_action_invocation(
+        &self,
+        source_interaction_id: InteractionId,
+        action_id: i64,
+    ) -> Result<Option<InvokeActionOutcome>, ProductError> {
+        Ok(self
+            .storage
+            .get_action_invocation(source_interaction_id, action_id)
+            .await?
+            .map(|(invocation, interaction)| InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: false,
+            }))
     }
 
     pub(crate) async fn get_interaction(

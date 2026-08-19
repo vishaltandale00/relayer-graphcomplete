@@ -1340,6 +1340,7 @@ name = "relayer-graph-core"
 version = "0.0.0"
 dependencies = [
  "serde",
+ "serde_json",
  "sqlx",
  "tempfile",
  "thiserror",

@@ -1,4 +1,9 @@
 import { request } from "./api.js";
+import {
+  actionWasInvoked,
+  reconcileActionTransitions,
+  visibleLayerAfterRefresh,
+} from "./action-invocation-state.js";
 import { renderThread } from "./graph.js";
 import { renderScopeMenu, renderSidebar, setMainView } from "./navigation.js";
 import { appState, productApiAvailable, viewState } from "./state.js";
@@ -8,6 +13,15 @@ import { addLocalThread } from "./thread-model.js";
 let creatingFirstThread = false;
 let pendingRefreshTimer;
 const PENDING_REFRESH_INTERVAL_MS = 500;
+const pendingActionTransitions = new Map();
+
+function abandonActionTransition(sourceInteractionId) {
+  for (const [resultInteractionId, sourceId] of pendingActionTransitions) {
+    if (String(sourceId) === String(sourceInteractionId)) {
+      pendingActionTransitions.delete(resultInteractionId);
+    }
+  }
+}
 
 function schedulePendingRefresh(threadId) {
   clearTimeout(pendingRefreshTimer);
@@ -32,10 +46,13 @@ export async function refreshState(threadId = viewState.currentThreadId) {
     else setMainView("new");
     return;
   }
+  const previousInteractionId = viewState.currentInteractionId;
+  const previousVisibleLayer = appState.visibleLayer;
   const state = await request(`/api/state${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ""}`);
   appState.projects = state.projects || [];
   appState.threads = state.threads || [];
   appState.interactions = state.interactions || [];
+  appState.actionInvocations = state.actionInvocations || [];
   appState.nodes = [];
   appState.edges = [];
   appState.actions = [];
@@ -47,10 +64,23 @@ export async function refreshState(threadId = viewState.currentThreadId) {
   const threadInteractions = appState.interactions.filter((interaction) => (
     String(interaction.threadId) === String(viewState.currentThreadId)
   ));
-  const selected = threadInteractions.find((interaction) => (
+  let selected = threadInteractions.find((interaction) => (
     String(interaction.id) === String(viewState.currentInteractionId)
   )) || threadInteractions.at(-1);
-  hydrateWorkspace(selected);
+  const reconciled = reconcileActionTransitions(
+    threadInteractions,
+    selected,
+    pendingActionTransitions,
+  );
+  selected = reconciled.selected;
+  pendingActionTransitions.clear();
+  for (const [resultInteractionId, sourceInteractionId] of reconciled.transitions) {
+    pendingActionTransitions.set(resultInteractionId, sourceInteractionId);
+  }
+  hydrateWorkspace(
+    selected,
+    visibleLayerAfterRefresh(previousInteractionId, previousVisibleLayer, selected),
+  );
   renderSidebar();
   renderScopeMenu();
   if (viewState.mainView === "settings") setMainView("settings");
@@ -60,6 +90,7 @@ export async function refreshState(threadId = viewState.currentThreadId) {
 }
 
 export async function loadThread(threadId) {
+  abandonActionTransition(viewState.currentInteractionId);
   viewState.currentThreadId = threadId;
   viewState.currentInteractionId = null;
   setMainView("thread");
@@ -92,12 +123,14 @@ export function selectTurn(offset) {
   ));
   const target = turns[current + offset];
   if (!target) return;
+  abandonActionTransition(viewState.currentInteractionId);
   hydrateWorkspace(target);
   renderThread();
 }
 
 export async function submitInteraction(text) {
   if (!viewState.currentThreadId) throw new Error("Select a thread before sending a follow-up.");
+  abandonActionTransition(viewState.currentInteractionId);
   await request(`/api/threads/${encodeURIComponent(viewState.currentThreadId)}/interactions`, {
     method: "POST",
     body: JSON.stringify({ text }),
@@ -115,8 +148,62 @@ export async function navigateLayer(layerId) {
 }
 
 export async function invokeAction(action) {
-  if (action?.kind !== "invoke" || !action.interactionText) return;
-  await submitInteraction(action.interactionText);
+  const threadId = viewState.currentThreadId;
+  const sourceInteractionId = viewState.currentInteractionId;
+  if (!threadId || !sourceInteractionId || action?.kind !== "invoke" || !action.id) return;
+  if (actionWasInvoked(
+    appState.actionInvocations,
+    appState.pendingActionInvocations,
+    sourceInteractionId,
+    action.id,
+  )) return;
+  appState.pendingActionInvocations.push({
+    sourceInteractionId,
+    actionId: action.id,
+  });
+  let response;
+  try {
+    response = await request(
+      `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(sourceInteractionId)}/actions/${encodeURIComponent(action.id)}/invoke`,
+      { method: "POST" },
+    );
+  } catch {
+    if (String(viewState.currentThreadId) !== String(threadId)) return;
+    await refreshState(threadId).catch(() => {});
+    const durable = appState.actionInvocations.find((invocation) => (
+      String(invocation.sourceInteractionId) === String(sourceInteractionId)
+      && String(invocation.actionId) === String(action.id)
+    ));
+    const sourceIsStillSelected = (
+      String(viewState.currentInteractionId) === String(sourceInteractionId)
+    );
+    if (durable?.resultInteractionId && sourceIsStillSelected) {
+      pendingActionTransitions.set(durable.resultInteractionId, sourceInteractionId);
+      await refreshState(threadId).catch(() => {});
+    }
+    return;
+  }
+  if (response.invocation) {
+    appState.actionInvocations = appState.actionInvocations.filter((invocation) => !(
+      String(invocation.sourceInteractionId) === String(sourceInteractionId)
+      && String(invocation.actionId) === String(action.id)
+    ));
+    appState.actionInvocations.push(response.invocation);
+    appState.pendingActionInvocations = appState.pendingActionInvocations.filter((invocation) => !(
+      String(invocation.sourceInteractionId) === String(sourceInteractionId)
+      && String(invocation.actionId) === String(action.id)
+    ));
+  }
+  const sourceIsStillSelected = (
+    String(viewState.currentThreadId) === String(threadId)
+    && String(viewState.currentInteractionId) === String(sourceInteractionId)
+  );
+  if (response.created && response.interaction?.id && sourceIsStillSelected) {
+    pendingActionTransitions.set(response.interaction.id, sourceInteractionId);
+  }
+  if (String(viewState.currentThreadId) === String(threadId)) {
+    await refreshState(threadId);
+  }
 }
 
 async function createOrReuseProject(selectedScope) {

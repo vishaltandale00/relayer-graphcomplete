@@ -6,7 +6,9 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from relayer_graph import APIError, EdgeObject, LayerObject, NodeObject, RelayerGraphClient, ValidationError
+from relayer_graph import (APIError, EdgeObject, LayerObject, NodeObject,
+                           RELAYER_ICON_NAMES, RelayerGraphClient, ValidationError,
+                           is_supported_relayer_icon, resolve_relayer_icon_name)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -92,6 +94,33 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
             [request[2]["clientKey"] for request in Handler.requests[-2:]],
             ["ask-again", "ask-again"],
         )
+        self.assertEqual(
+            {key: Handler.requests[-1][2][key] for key in ("variant", "icon", "description")},
+            {"variant": "pill", "icon": None, "description": None},
+        )
+
+    async def test_card_action_presentation_is_canonical_request_data(self):
+        await self.client.add_navigate_action(
+            7,
+            "Compare approaches",
+            9,
+            client_key="compare",
+            variant="card",
+            icon="git-compare",
+            description="Lay out the tradeoffs before choosing.",
+        )
+        self.assertEqual(
+            {
+                key: Handler.requests[-1][2][key]
+                for key in ("variant", "icon", "description", "targetLayerId")
+            },
+            {
+                "variant": "card",
+                "icon": "git-compare",
+                "description": "Lay out the tradeoffs before choosing.",
+                "targetLayerId": 9,
+            },
+        )
 
     async def test_validation_errors_preserve_server_guidance(self):
         with self.assertRaisesRegex(ValidationError, "title is required"):
@@ -120,6 +149,18 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         orphan = NodeObject("box", "Orphan", "Not submitted")
         with self.assertRaisesRegex(ValueError, "must be submitted"):
             await self.client.create_edge(orphan, 7)
+
+
+class IconVocabularyTests(unittest.TestCase):
+    def test_exports_curated_names_without_duplicates(self):
+        self.assertIn("compass", RELAYER_ICON_NAMES)
+        self.assertEqual(len(RELAYER_ICON_NAMES), len(set(RELAYER_ICON_NAMES)))
+
+    def test_resolves_aliases_without_accepting_arbitrary_lucide_names(self):
+        self.assertEqual(resolve_relayer_icon_name("CIRCLE_ALERT"), "alert-circle")
+        self.assertEqual(resolve_relayer_icon_name("file pen"), "file-edit")
+        self.assertFalse(is_supported_relayer_icon("alarm-clock"))
+        self.assertFalse(is_supported_relayer_icon("🧭"))
 
 
 if __name__ == "__main__":

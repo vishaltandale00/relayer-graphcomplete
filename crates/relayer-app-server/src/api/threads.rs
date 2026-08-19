@@ -2,13 +2,16 @@ use super::{
     ApiState,
     auth::{authorize_read, authorize_write},
     error::ApiError,
-    types::{InteractionResponse, ThreadDetailResponse, ThreadResponse, ThreadViewResponse},
+    types::{
+        ActionInvocationResponse, InteractionResponse, ThreadDetailResponse, ThreadResponse,
+        ThreadViewResponse,
+    },
 };
 use crate::{
     product::{
         CreateThreadCommand, Interaction, InteractionId, ProjectId, Thread, ThreadId, ThreadView,
     },
-    runtime::CompleteInteraction,
+    runtime::{CompleteInteraction, RuntimeError},
 };
 use axum::{
     Json,
@@ -40,6 +43,14 @@ pub(super) struct ThreadsResponse {
 #[derive(Serialize)]
 pub(super) struct InteractionsResponse {
     interactions: Vec<InteractionResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct InvokeActionResponse {
+    invocation: ActionInvocationResponse,
+    interaction: InteractionResponse,
+    created: bool,
 }
 
 pub(super) async fn list(
@@ -164,6 +175,95 @@ pub(super) async fn get_layer(
     Ok(Json(runtime.get_layer(graph_node_id, layer_id).await?))
 }
 
+pub(super) async fn invoke_action(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, interaction_id, action_id)): Path<(i64, i64, i64)>,
+) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
+    authorize_write(&state, &headers)?;
+    let thread_id = ThreadId::try_from(thread_id)?;
+    let source_interaction_id = InteractionId::try_from(interaction_id)?;
+    if action_id <= 0 {
+        return Err(ApiError::invalid("action ID must be a positive integer"));
+    }
+    let thread = state.product.get_thread(thread_id).await?.thread;
+    let source = state.product.get_interaction(source_interaction_id).await?;
+    if source.thread_id != thread_id {
+        return Err(ApiError::invalid(
+            "interaction does not belong to this thread",
+        ));
+    }
+    if source.completion_status != "accepted" {
+        return Err(ApiError::invalid(
+            "actions can only be invoked from an accepted interaction",
+        ));
+    }
+    if let Some(outcome) = state
+        .product
+        .get_action_invocation(source_interaction_id, action_id)
+        .await?
+    {
+        return Ok((
+            StatusCode::OK,
+            Json(InvokeActionResponse {
+                invocation: outcome.invocation.into(),
+                interaction: outcome.interaction.into(),
+                created: false,
+            }),
+        ));
+    }
+    let graph_node_id = source
+        .graph_node_id
+        .ok_or_else(|| ApiError::invalid("interaction has no accepted graph"))?;
+    let runtime = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
+    let action = match runtime.get_action(graph_node_id, action_id).await {
+        Ok(action) => action,
+        Err(RuntimeError::Remote { status: 404, .. }) => {
+            return Err(ApiError::invalid(
+                "action is not part of this interaction's accepted graph",
+            ));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if action.id != action_id || action.kind != "invoke" || action.state != "accepted" {
+        return Err(ApiError::invalid(
+            "action is not an accepted invoke action for this interaction",
+        ));
+    }
+    let interaction_text = action
+        .interaction_text
+        .as_deref()
+        .ok_or_else(|| ApiError::invalid("invoke action has no interaction text"))?;
+
+    // One-shot invocation is a temporary UX simplification. The durable product record is
+    // intentionally shaped so future retryable or repeatable action semantics can replace it.
+    let outcome = state
+        .product
+        .invoke_action(source_interaction_id, action_id, interaction_text)
+        .await?;
+    let status = if outcome.created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    let interaction = if outcome.created {
+        start_interaction(&state, &thread, outcome.interaction).await?
+    } else {
+        outcome.interaction
+    };
+    Ok((
+        status,
+        Json(InvokeActionResponse {
+            invocation: outcome.invocation.into(),
+            interaction: interaction.into(),
+            created: outcome.created,
+        }),
+    ))
+}
+
 fn selected_harness_configuration(
     state: &ApiState,
     requested: Option<&str>,
@@ -278,6 +378,10 @@ async fn record_background_failure(
     interaction: &Interaction,
     error: String,
 ) {
+    eprintln!(
+        "interaction {} completion failed in the backend: {error}",
+        interaction.id
+    );
     if let Err(persistence_error) = state
         .product
         .fail_interaction_completion(interaction.id, &thread.harness_configuration_name, &error)

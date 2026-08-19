@@ -139,7 +139,7 @@ pub(super) async fn fetch_interactions(
     rows.iter().map(interaction_from_row).collect()
 }
 
-fn monotonic_timestamp(previous: &str) -> String {
+pub(super) fn monotonic_timestamp(previous: &str) -> String {
     let current = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time is before unix epoch")
@@ -150,7 +150,7 @@ fn monotonic_timestamp(previous: &str) -> String {
         .to_string()
 }
 
-fn interaction_from_row(row: &SqliteRow) -> Result<Interaction, StorageError> {
+pub(super) fn interaction_from_row(row: &SqliteRow) -> Result<Interaction, StorageError> {
     Ok(Interaction {
         id: InteractionId::from_database(row.try_get(0)?),
         thread_id: ThreadId::from_database(row.try_get(1)?),

@@ -7,6 +7,8 @@ export const appState = {
   projects: [],
   threads: [],
   interactions: [],
+  actionInvocations: [],
+  pendingActionInvocations: [],
   nodes: [],
   edges: [],
   actions: [],
