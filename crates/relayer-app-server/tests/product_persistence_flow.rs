@@ -67,7 +67,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     let graph = axum::Router::new()
         .route(
             "/api/control/capabilities",
-            axum::routing::post(|| async { axum::Json(json!({ "graphToken": "graph" })) }),
+            axum::routing::post(|| async { axum::Json(json!({ "graphToken": "graph" })) })
+                .delete(|| async { axum::Json(json!({ "revoked": true })) }),
         )
         .route(
             "/api/graph/actions/41",

@@ -87,6 +87,30 @@ describe("PrimeAgentHarness", () => {
     expect(session.abort).toHaveBeenCalledTimes(1);
   });
 
+  it("does not start a prompt when the run was already cancelled", async () => {
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7,
+      workingDirectory: "/tmp/project",
+      configuration,
+    }, { loadModule: async () => ({
+      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionFromServices: vi.fn(async () => ({ session })),
+    }) as never });
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled before admission"));
+
+    await expect(harness.complete(runContext(11, "token"), controller.signal)).rejects.toThrow("cancelled before admission");
+    expect(session.promptAndWait).not.toHaveBeenCalled();
+    expect(session.abort).not.toHaveBeenCalled();
+  });
+
   it("rejects unsupported implementation settings before loading Prime Agent", async () => {
     const loadModule = vi.fn();
     await expect(PrimeAgentHarness.create({

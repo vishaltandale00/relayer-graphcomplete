@@ -126,28 +126,42 @@ impl RuntimeClient {
             .await?;
         let graph = serde_json::json!({
             "url": self.graph_url.as_str().trim_end_matches('/'),
-            "token": interaction.graph_token,
+            "token": &interaction.graph_token,
             "nodeId": interaction.node.id,
         });
-        let _: Value = self
-            .post(
-                self.harness_url.join("sessions")?,
-                &serde_json::json!({
-                    "threadId": command.thread_id,
-                    "configuration": selected.configuration,
-                    "workingDirectory": command.working_directory,
-                }),
-                StatusCode::CREATED,
-            )
-            .await?;
-        let completed: CompleteResponse = self
-            .post(
+        let completion = async {
+            let _: Value = self
+                .post(
+                    self.harness_url.join("sessions")?,
+                    &serde_json::json!({
+                        "threadId": command.thread_id,
+                        "configuration": selected.configuration,
+                        "workingDirectory": command.working_directory,
+                    }),
+                    StatusCode::CREATED,
+                )
+                .await?;
+            self.post(
                 self.harness_url
                     .join(&format!("sessions/{}/complete", command.thread_id))?,
                 &serde_json::json!({"graph": graph}),
                 StatusCode::OK,
             )
-            .await?;
+            .await
+        }
+        .await;
+        let revocation = self.revoke_capability(&interaction.graph_token).await;
+        let completed: CompleteResponse = match (completion, revocation) {
+            (Ok(completed), Ok(())) => completed,
+            (Err(operation), Ok(())) => return Err(operation),
+            (Ok(_), Err(cleanup)) => return Err(cleanup),
+            (Err(operation), Err(cleanup)) => {
+                return Err(RuntimeError::Cleanup {
+                    operation: Box::new(operation),
+                    cleanup: Box::new(cleanup),
+                });
+            }
+        };
         Ok(RuntimeCompletion {
             graph_node_id: interaction.node.id,
             harness_configuration_name: selected.configuration.name.clone(),
@@ -203,6 +217,18 @@ impl RuntimeClient {
             StatusCode::OK,
         )
         .await
+    }
+
+    async fn revoke_capability(&self, graph_token: &str) -> Result<(), RuntimeError> {
+        let response = self
+            .client
+            .delete(self.graph_url.join("api/control/capabilities")?)
+            .bearer_auth(&self.control_token)
+            .json(&serde_json::json!({"graphToken": graph_token}))
+            .send()
+            .await?;
+        response_json(response, StatusCode::OK).await?;
+        Ok(())
     }
 
     async fn post<T: for<'de> Deserialize<'de>>(
@@ -294,6 +320,13 @@ pub(crate) enum RuntimeError {
     Configuration(String),
     #[error("runtime request failed with HTTP {status}: {body}")]
     Remote { status: u16, body: Value },
+    #[error(
+        "runtime completion failed: {operation}; graph capability revocation also failed: {cleanup}"
+    )]
+    Cleanup {
+        operation: Box<RuntimeError>,
+        cleanup: Box<RuntimeError>,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -302,4 +335,109 @@ pub(crate) enum RuntimeError {
     Http(#[from] reqwest::Error),
     #[error(transparent)]
     Url(#[from] url::ParseError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CompleteInteraction, RuntimeClient};
+    use axum::{Json, Router, http::StatusCode, routing};
+    use serde_json::json;
+    use std::{
+        fs,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[tokio::test]
+    async fn revokes_the_interaction_capability_when_session_registration_fails() {
+        let revocations = Arc::new(AtomicUsize::new(0));
+        let observed_revocations = revocations.clone();
+        let graph = Router::new()
+            .route(
+                "/api/control/interactions",
+                routing::post(|| async {
+                    Json(json!({ "node": { "id": 41 }, "graphToken": "turn-token" }))
+                }),
+            )
+            .route(
+                "/api/control/capabilities",
+                routing::delete(move || {
+                    let observed_revocations = observed_revocations.clone();
+                    async move {
+                        observed_revocations.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({ "revoked": true }))
+                    }
+                }),
+            );
+        let harness = Router::new().route(
+            "/sessions",
+            routing::post(|| async {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "registration failed" })),
+                )
+            }),
+        );
+        let (graph_url, graph_task) = serve(graph).await;
+        let (harness_url, harness_task) = serve(harness).await;
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "relayer-runtime-capability-cleanup-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog = root.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({
+                "schemaVersion": 1,
+                "configurations": [{
+                    "configuration": {
+                        "schemaVersion": 1,
+                        "name": "test",
+                        "implementation": "test",
+                        "implementationVersion": 1,
+                        "settings": {}
+                    },
+                    "digest": "sha256:test"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(&graph_url, &harness_url, "control".to_owned(), &catalog)
+            .await
+            .unwrap();
+
+        let result = runtime
+            .complete(CompleteInteraction {
+                project_id: None,
+                thread_id: 1,
+                text: "question",
+                working_directory: root.to_str().unwrap(),
+                harness_configuration_name: "test",
+            })
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(revocations.load(Ordering::SeqCst), 1);
+        graph_task.abort();
+        harness_task.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{address}/"), task)
+    }
 }

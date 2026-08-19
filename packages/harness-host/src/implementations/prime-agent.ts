@@ -78,9 +78,9 @@ export class PrimeAgentHarness implements Harness {
   }
 
   async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     const abort = () => { void this.session.abort(); };
-    if (signal?.aborted) abort();
-    else signal?.addEventListener("abort", abort, { once: true });
+    signal?.addEventListener("abort", abort, { once: true });
     try {
       await this.session.promptAndWait(this.prompt(context.inputGraph), { runContext: context });
     } finally {

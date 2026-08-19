@@ -123,7 +123,7 @@ export class HarnessHost {
   async complete(threadId: number, capability: GraphCapability, signal?: AbortSignal): Promise<HarnessCompleteResult> {
     if (this.closed) throw new Error("Harness host is closed");
     validateGraphCapability(capability);
-    const session = await this.liveSession(threadId);
+    const session = this.liveSession(threadId);
     return this.withSessionLock(session, async () => {
       const controller = new AbortController();
       const detachSignal = forwardAbort(signal, controller);
@@ -131,6 +131,8 @@ export class HarnessHost {
       let result: HarnessCompleteResult | undefined;
       let operationError: unknown;
       try {
+        if (this.closed) throw new Error("Harness host is closed");
+        controller.signal.throwIfAborted();
         result = await this.executeCompletion(threadId, session, capability, controller.signal);
       } catch (error) {
         operationError = error;
@@ -220,7 +222,7 @@ export class HarnessHost {
 
   sessionCount(): number { return this.sessions.size; }
 
-  private async liveSession(threadId: number): Promise<LiveSession> {
+  private liveSession(threadId: number): LiveSession {
     const live = this.sessions.get(threadId);
     if (live !== undefined) return live;
     const saved = this.saved.get(threadId);

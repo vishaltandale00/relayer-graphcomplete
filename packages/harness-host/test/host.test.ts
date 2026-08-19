@@ -278,6 +278,58 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("rejects admitted queued completions before disposing during shutdown", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-close-queue-"));
+    let completionStarted!: () => void;
+    const started = new Promise<void>((resolveStarted) => { completionStarted = resolveStarted; });
+    const calls: number[] = [];
+    const revoked: string[] = [];
+    const dispose = vi.fn(async () => undefined);
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/control/capabilities")) {
+        revoked.push(JSON.parse(String(init?.body)).graphToken);
+        return new Response(JSON.stringify({ revoked: true }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.endsWith("/output")) {
+        return new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ node: { id: Number(/nodes\/(\d+)/.exec(url)?.[1]), kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          complete(context, signal) {
+            calls.push(context.inputGraph.id);
+            if (calls.length > 1) return Promise.resolve();
+            completionStarted();
+            return new Promise<never>((_resolve, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
+          },
+          state: emptyState,
+          dispose,
+        }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
+
+      const active = host.complete(1, graph(1, "active-token"));
+      await started;
+      const queued = host.complete(1, graph(2, "queued-token"));
+      const closing = host.close();
+
+      await expect(active).rejects.toThrow("closed");
+      await expect(queued).rejects.toThrow("closed");
+      await closing;
+      expect(calls).toEqual([1]);
+      expect(revoked).toEqual(["active-token", "queued-token"]);
+      expect(dispose).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("returns an accepted completion without rerunning the harness", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-idempotent-"));
     let calls = 0;
