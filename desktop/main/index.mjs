@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { CodexCredentialAdapter } from "./credentials/codex-credential-adapter.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
+import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
 import { GraphCompleteRuntimeService } from "./services/graphcomplete-runtime.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
@@ -18,6 +19,7 @@ import {
   DESKTOP_UPDATE_BASE_URL,
   packagedDesktopReleaseMetadata,
 } from "../shared/release-metadata.mjs";
+import { codexBinaryPath, nativeBinaryName } from "../shared/target.mjs";
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(desktopDirectory, "..");
@@ -36,14 +38,16 @@ const codexHome = process.env.RELAYER_CODEX_HOME || join(userDataPath, "codex-ho
 const updateBaseUrl = packagedRelease?.updateBaseUrl || (
   app.isPackaged ? null : process.env.RELAYER_DESKTOP_UPDATE_BASE_URL || DESKTOP_UPDATE_BASE_URL
 );
-const bundledCodexBinary = app.isPackaged
-  ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex")
-  : join(repositoryRoot, "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex");
+const bundledCodexBinary = codexBinaryPath({
+  packaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  repositoryRoot,
+});
 const relayerAppServerBinary = app.isPackaged
-  ? join(process.resourcesPath, "bin", "relayer-app-server")
+  ? join(process.resourcesPath, "bin", nativeBinaryName("relayer-app-server"))
   : resolve(process.env.RELAYER_APP_SERVER_BINARY || join(repositoryRoot, "target", "debug", "relayer-app-server"));
 const relayerGraphServerBinary = app.isPackaged
-  ? join(process.resourcesPath, "bin", "relayer-graph-server")
+  ? join(process.resourcesPath, "bin", nativeBinaryName("relayer-graph-server"))
   : resolve(process.env.RELAYER_GRAPH_SERVER_BIN || join(repositoryRoot, "target", "debug", "relayer-graph-server"));
 const harnessDirectory = app.isPackaged
   ? join(process.resourcesPath, "harnesses")
@@ -89,6 +93,11 @@ if (primaryInstance) {
     },
   });
 
+  const canaryEvidenceLog = createCanaryEvidenceLog({
+    appIsPackaged: app.isPackaged,
+    releaseMetadata: packagedRelease,
+  });
+
   const updater = createDesktopUpdater({
     autoUpdater: electronUpdater.autoUpdater,
     app: {
@@ -96,8 +105,12 @@ if (primaryInstance) {
       getVersion: () => app.getVersion(),
     },
     updateBaseUrl,
-    emit: (state) => mainWindow?.webContents.send("relayer:update-changed", state),
+    emit: (state) => {
+      void canaryEvidenceLog.write(state).catch((error) => console.error("Canary evidence log failed:", error));
+      mainWindow?.webContents.send("relayer:update-changed", state);
+    },
   });
+  void canaryEvidenceLog.write(updater.status()).catch((error) => console.error("Canary evidence log failed:", error));
 
   const createWindow = createWindowFactory({
     BrowserWindow,

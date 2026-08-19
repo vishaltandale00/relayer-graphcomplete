@@ -30,7 +30,7 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3" width="15" height="14" rx="3"></rect><path d="M7.5 3v14"></path></svg>
       </button>
       <div class="sidebar-title"><div class="logo" role="img" aria-label="Relayer"></div><strong>Relayer</strong></div>
-      <button class="new-thread-button" id="newThread"><span>＋</span> New thread <kbd>⌘N</kbd></button>
+      <button class="new-thread-button" id="newThread"><span>＋</span> New thread <kbd id="newThreadShortcut">Ctrl/⌘N</kbd></button>
       <div class="side-section"><div class="section-label">Chats</div><div id="chatList" class="entry-list"></div></div>
       <div class="side-section"><div class="section-label">Projects</div><div id="projectList" class="project-list"></div></div>
       <div class="sidebar-footer">
@@ -68,7 +68,7 @@
         <div class="settings-content">
           <section class="settings-section">
             <h2>Appearance</h2>
-            <label class="setting-row"><div><b>Theme</b><small>Choose how Relayer looks on this Mac.</small></div><select id="appearanceSelect"><option value="dark">Dark</option><option value="light">Light</option></select></label>
+            <label class="setting-row"><div><b>Theme</b><small id="appearanceDescription">Choose how Relayer looks on this computer.</small></div><select id="appearanceSelect"><option value="dark">Dark</option><option value="light">Light</option></select></label>
           </section>
           <section class="settings-section">
             <h2>Codex</h2>

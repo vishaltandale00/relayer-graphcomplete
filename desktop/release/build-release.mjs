@@ -10,6 +10,7 @@ import { notarizeAndStapleDesktopDMGs } from "./notarize-and-staple.mjs";
 import { verifyMacOSApplication } from "./verify-macos-app.mjs";
 import { verifyPackagedDesktopContract } from "./verify-packaged-contract.mjs";
 import { verifyDesktopUpdateZip } from "./verify-update-zip.mjs";
+import { verifyWindowsRelease } from "./verify-windows-app.mjs";
 
 function run(command, args, options) {
   return new Promise((resolvePromise, reject) => {
@@ -36,20 +37,35 @@ export async function buildDesktopRelease({ channelName = process.argv[2], envir
   };
   const contract = await loadDesktopReleaseContract({ environment: releaseEnvironment, desktopRoot });
 
+  await run("cargo", [
+    "build", "--release",
+    "-p", "relayer-app-server",
+    "-p", "relayer-graph-server",
+    "--target", contract.rustTarget,
+  ], { cwd: repositoryRoot, env: releaseEnvironment });
   await rm(distRoot, { recursive: true, force: true });
-  await run(
-    resolve(repositoryRoot, "node_modules", ".bin", "electron-builder"),
-    ["--config", "desktop/packaging/electron-builder.mjs", "--mac", "dmg", "zip", "--arm64", "--publish", "never"],
-    { cwd: repositoryRoot, env: releaseEnvironment },
-  );
-  await notarizeAndStapleDesktopDMGs({ distRoot, environment: releaseEnvironment });
-  const appPath = resolve(distRoot, "mac-arm64", "Relayer.app");
-  await finalizeDesktopUpdateArtifact({ appPath, contract, distRoot });
-  await verifyMacOSApplication(appPath, {
-    assessNotarization: true,
+  const builderArguments = contract.platform === "darwin"
+    ? ["--config", "desktop/packaging/electron-builder.mjs", "--mac", "dmg", "zip", `--${contract.architecture}`, "--publish", "never"]
+    : ["--config", "desktop/packaging/electron-builder.mjs", "--win", "nsis", "--x64", "--publish", "never"];
+  await run(resolve(repositoryRoot, "node_modules", ".bin", "electron-builder"), builderArguments, {
+    cwd: repositoryRoot,
+    env: releaseEnvironment,
   });
+  const appPath = contract.platform === "darwin"
+    ? resolve(distRoot, `mac-${contract.architecture}`, "Relayer.app")
+    : resolve(distRoot, "win-unpacked");
+  if (contract.platform === "darwin") {
+    await notarizeAndStapleDesktopDMGs({ distRoot, environment: releaseEnvironment });
+    await finalizeDesktopUpdateArtifact({ appPath, contract, distRoot });
+    await verifyMacOSApplication(appPath, {
+      assessNotarization: true,
+      expectedArchitecture: contract.architecture === "x64" ? "x86_64" : contract.architecture,
+    });
+    await verifyDesktopUpdateZip({ contract, distRoot });
+  } else {
+    await verifyWindowsRelease({ appOutDir: appPath, distRoot, contract });
+  }
   await verifyPackagedDesktopContract({ appPath, contract });
-  await verifyDesktopUpdateZip({ contract, distRoot });
   await writeDesktopReleaseEvidence({ distRoot, contract });
   return verifyDesktopReleaseEvidence({ distRoot, contract });
 }

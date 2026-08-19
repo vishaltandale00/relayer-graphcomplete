@@ -7,6 +7,7 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld("relayerDesktop", {
+  platform: process.platform,
   account: {
     read: () => ipcRenderer.invoke("relayer:account-read"),
     login: () => ipcRenderer.invoke("relayer:account-login"),

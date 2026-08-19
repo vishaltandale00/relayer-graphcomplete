@@ -5,8 +5,35 @@ import { promisify } from "node:util";
 
 import { verifyBundledAppServer } from "../packaging/verify-bundled-app-server.mjs";
 import { DESKTOP_RELEASE } from "./contract.mjs";
+import { desktopTargetFromEnvironment } from "../shared/target.mjs";
 
 const execFileAsync = promisify(execFile);
+
+export function macOSNativeRuntimeExecutables(appPath, expectedArchitecture) {
+  const target = expectedArchitecture === "x86_64"
+    ? { packageName: "codex-darwin-x64", vendor: "x86_64-apple-darwin" }
+    : expectedArchitecture === "arm64"
+      ? { packageName: "codex-darwin-arm64", vendor: "aarch64-apple-darwin" }
+      : null;
+  if (!target) throw new Error(`Unsupported macOS release architecture: ${expectedArchitecture}.`);
+  const vendorRoot = join(
+    appPath,
+    "Contents",
+    "Resources",
+    "app.asar.unpacked",
+    "node_modules",
+    "@openai",
+    target.packageName,
+    "vendor",
+    target.vendor,
+  );
+  return [
+    join(vendorRoot, "bin", "codex"),
+    join(vendorRoot, "bin", "codex-code-mode-host"),
+    join(vendorRoot, "codex-path", "rg"),
+    join(vendorRoot, "codex-resources", "zsh", "bin", "zsh"),
+  ];
+}
 
 export async function verifyMacOSApplication(
   appPath,
@@ -14,6 +41,7 @@ export async function verifyMacOSApplication(
     assessNotarization = false,
     execute = execFileAsync,
     expectedTeamId = DESKTOP_RELEASE.appleTeamId,
+    expectedArchitecture = process.arch === "x64" ? "x86_64" : process.arch,
   } = {},
 ) {
   await access(appPath);
@@ -46,12 +74,21 @@ export async function verifyMacOSApplication(
 
   const executable = join(appPath, "Contents", "MacOS", DESKTOP_RELEASE.productName);
   const architectures = await execute("/usr/bin/lipo", ["-archs", executable]);
-  if (String(architectures.stdout || "").trim() !== DESKTOP_RELEASE.architecture) {
-    throw new Error(`Signed Relayer.app must contain only ${DESKTOP_RELEASE.architecture} executable code.`);
+  if (String(architectures.stdout || "").trim() !== expectedArchitecture) {
+    throw new Error(`Signed Relayer.app must contain only ${expectedArchitecture} executable code.`);
+  }
+  for (const nativeRuntimeExecutable of macOSNativeRuntimeExecutables(appPath, expectedArchitecture)) {
+    await access(nativeRuntimeExecutable);
+    const nativeArchitectures = await execute("/usr/bin/lipo", ["-archs", nativeRuntimeExecutable]);
+    if (String(nativeArchitectures.stdout || "").trim() !== expectedArchitecture) {
+      throw new Error(
+        `Bundled native runtime ${nativeRuntimeExecutable} must contain only ${expectedArchitecture} executable code.`,
+      );
+    }
   }
   await verifyBundledAppServer(appPath, {
     execute,
-    expectedArchitecture: DESKTOP_RELEASE.architecture,
+    expectedArchitecture,
   });
 
   if (assessNotarization) {
@@ -70,5 +107,7 @@ export default async function verifyElectronBuilderMacOSApplication(context) {
   if (!productFilename || !appOutDir) {
     throw new Error("electron-builder afterSign context is missing the signed app path.");
   }
-  return verifyMacOSApplication(join(appOutDir, `${productFilename}.app`));
+  const target = desktopTargetFromEnvironment(process.env);
+  const expectedArchitecture = target.architecture === "x64" ? "x86_64" : target.architecture;
+  return verifyMacOSApplication(join(appOutDir, `${productFilename}.app`), { expectedArchitecture });
 }

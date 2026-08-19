@@ -5,6 +5,13 @@ import { connectEvents, createFirstThread, loadThread, refreshState } from "./th
 import { $, applyAppearance, toast } from "./ui.js";
 import { renderUpdate, updateAction } from "./updates.js";
 
+function applyPlatformCopy() {
+  const isMac = desktop?.platform === "darwin";
+  $("#newThreadShortcut").textContent = isMac ? "⌘N" : "Ctrl+N";
+  const device = isMac ? "Mac" : desktop?.platform === "win32" ? "Windows PC" : "computer";
+  $("#appearanceDescription").textContent = `Choose how Relayer looks on this ${device}.`;
+}
+
 function bindEvents() {
   $("#connectCodex").onclick = connectCodex;
   $("#newThread").onclick = () => {
@@ -78,6 +85,7 @@ function bindEvents() {
 
 async function boot() {
   if (evalReview) viewState.evalContext = await evalReview.context();
+  applyPlatformCopy();
   bindEvents();
   desktop?.account.onChanged((event) => {
     if (event?.status === "unavailable") showAuth(event.error || "Codex is unavailable.");

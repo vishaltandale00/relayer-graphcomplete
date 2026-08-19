@@ -11,16 +11,20 @@ import { CredentialAdapter } from "../desktop/main/credentials/credential-adapte
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
+import { createCanaryEvidenceLog } from "../desktop/main/services/canary-evidence-log.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "../desktop/main/services/updater.mjs";
 import { claimPrimaryDesktopInstance } from "../desktop/main/single-instance.mjs";
 import {
   DESKTOP_UPDATE_BASE_URL,
+  DESKTOP_UPDATE_BASE_URLS,
   packagedDesktopReleaseMetadata,
 } from "../desktop/shared/release-metadata.mjs";
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
 import { verifyBundledAppServer } from "../desktop/packaging/verify-bundled-app-server.mjs";
+import { codexBinaryPath, desktopTarget } from "../desktop/shared/target.mjs";
 import {
   DESKTOP_RELEASE,
+  DESKTOP_RELEASE_TARGETS,
   resolveDesktopReleaseContract,
 } from "../desktop/release/contract.mjs";
 import {
@@ -29,6 +33,9 @@ import {
   writeDesktopReleaseEvidence,
 } from "../desktop/release/artifacts.mjs";
 import { finalizeDesktopUpdateArtifact } from "../desktop/release/finalize-update-artifact.mjs";
+import { createDesktopCanaryEvidence } from "../desktop/release/canary-evidence.mjs";
+import { macOSNativeRuntimeExecutables } from "../desktop/release/verify-macos-app.mjs";
+import { verifyWindowsSignatures, windowsApplicationExecutables } from "../desktop/release/verify-windows-app.mjs";
 import {
   buildPutObjectArgs,
   classifyPreviewPointer,
@@ -49,6 +56,9 @@ import { workspaceModeCapabilities } from "../desktop/renderer/src/product-works
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
 import { graphEdgeSegment, graphScreenPoint } from "../desktop/renderer/src/product-workspace/workspace.js";
 import { isSafeMarkdownLink } from "../desktop/renderer/src/product-workspace/markdown.js";
+import { evaluateDesktopReleaseAuthority } from "../scripts/audit-desktop-release-authority.mjs";
+
+const WINDOWS_PUBLISHER_DN = "CN=Relayer Labs LLC, O=Relayer Labs LLC";
 
 describe("desktop skeleton", () => {
   it("moves graph world coordinates through a shared camera offset", () => {
@@ -98,6 +108,7 @@ describe("desktop skeleton", () => {
     const packaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
     const desktopWindow = await readFile(new URL("../desktop/main/window.mjs", import.meta.url), "utf8");
     const desktopIpc = await readFile(new URL("../desktop/main/ipc/register-ipc.mjs", import.meta.url), "utf8");
+    const desktopPreload = await readFile(new URL("../desktop/preload/index.cjs", import.meta.url), "utf8");
     const rendererMain = await readFile(new URL("../desktop/renderer/src/main.js", import.meta.url), "utf8");
     const threads = await readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8");
     const prd = await readFile(new URL("../docs/prd/index.html", import.meta.url), "utf8");
@@ -113,6 +124,8 @@ describe("desktop skeleton", () => {
     expect(html).toContain('id="createThread" title="Create thread and send" disabled');
     expect(html).toContain('id="disconnectCodex"');
     expect(html).toContain('id="updateChannel"');
+    expect(html).toContain('id="newThreadShortcut"');
+    expect(html).toContain('id="appearanceDescription"');
     expect(html).toContain("relayer-logo");
     expect(html).toContain('class="settings-view hidden"');
     expect(html).toContain('type="module" src="./src/main.js"');
@@ -141,16 +154,21 @@ describe("desktop skeleton", () => {
     expect(JSON.parse(packageManifest).workspaces).toEqual(["desktop", "packages/*"]);
     expect(JSON.parse(packageManifest).devDependencies).not.toHaveProperty("@openai/codex");
     expect(JSON.parse(packageManifest).devDependencies).not.toHaveProperty("electron-updater");
-    expect(packageManifest).toContain("desktop/packaging/electron-builder.mjs");
     expect(JSON.parse(packageManifest).scripts).toMatchObject({
       "predesktop:pack": "npm run prepare:desktop-runtime",
       "predesktop:dist": "npm run prepare:desktop-runtime",
       "predesktop:dist:preview": "npm run prepare:desktop-runtime",
+      "desktop:pack": "node desktop/packaging/build-development.mjs",
+      "desktop:dist": "node desktop/release/build-release.mjs stable",
+      "desktop:dist:preview": "node desktop/release/build-release.mjs preview",
     });
     expect(packaging).toContain('"macos/entitlements.mac.plist"');
     expect(packaging).toContain('"!packaging/**/*"');
-    expect(packaging).toContain('"target/aarch64-apple-darwin/release/relayer-app-server"');
-    expect(packaging).toContain('afterPack: "desktop/packaging/verify-bundled-app-server.mjs"');
+    expect(packaging).toContain('target/${serverTarget}/release/relayer-app-server');
+    expect(packaging).toContain('afterPack: target.platform === "darwin" ? "desktop/packaging/verify-bundled-app-server.mjs" : undefined');
+    expect(packaging).toContain('win: {\n      icon: resolve(desktopRoot, "renderer/assets/relayer-logo.svg")');
+    expect(desktopPreload).toContain("platform: process.platform");
+    expect(rendererMain).toContain('desktop?.platform === "win32"');
     expect(packaging).toContain('"packages/graph-client/dist"');
     expect(desktopMain).toContain('"graph-client", "index.js"');
     expect(desktopMain).toContain("codexBasicClientModuleUrl: graphClientModuleUrl");
@@ -176,6 +194,59 @@ describe("desktop skeleton", () => {
     expect(packageManifest).not.toContain('"marked"');
   });
 
+  it("resolves native Codex bundles for supported desktop targets", () => {
+    expect(desktopTarget({ platform: "darwin", architecture: "x64" }).codexVendor).toBe("x86_64-apple-darwin");
+    expect(codexBinaryPath({ platform: "win32", architecture: "x64", packaged: true, resourcesPath: "C:/resources" }))
+      .toMatch(/codex-win32-x64[\\/]vendor[\\/]x86_64-pc-windows-msvc[\\/]bin[\\/]codex\.exe$/);
+    expect(macOSNativeRuntimeExecutables("/Applications/Relayer.app", "x86_64")).toEqual([
+      expect.stringMatching(/codex-darwin-x64[\\/]vendor[\\/]x86_64-apple-darwin[\\/]bin[\\/]codex$/),
+      expect.stringMatching(/codex-darwin-x64[\\/]vendor[\\/]x86_64-apple-darwin[\\/]bin[\\/]codex-code-mode-host$/),
+      expect.stringMatching(/codex-darwin-x64[\\/]vendor[\\/]x86_64-apple-darwin[\\/]codex-path[\\/]rg$/),
+      expect.stringMatching(/codex-darwin-x64[\\/]vendor[\\/]x86_64-apple-darwin[\\/]codex-resources[\\/]zsh[\\/]bin[\\/]zsh$/),
+    ]);
+    expect(windowsApplicationExecutables("C:/Relayer")).toEqual(expect.arrayContaining([
+      expect.stringMatching(/codex-win32-x64[\\/]vendor[\\/]x86_64-pc-windows-msvc[\\/]bin[\\/]codex\.exe$/),
+      expect.stringMatching(/codex-win32-x64[\\/]vendor[\\/]x86_64-pc-windows-msvc[\\/]bin[\\/]codex-code-mode-host\.exe$/),
+      expect.stringMatching(/codex-win32-x64[\\/]vendor[\\/]x86_64-pc-windows-msvc[\\/]codex-path[\\/]rg\.exe$/),
+      expect.stringMatching(/codex-resources[\\/]codex-command-runner\.exe$/),
+      expect.stringMatching(/codex-resources[\\/]codex-windows-sandbox-setup\.exe$/),
+    ]));
+  });
+
+  it("requires the exact timestamped Windows certificate subject", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-windows-signature-"));
+    const paths = [join(directory, "Relayer.exe"), join(directory, "relayer-app-server.exe")];
+    try {
+      await Promise.all(paths.map((path) => writeFile(path, "signed-executable-fixture")));
+      const result = (subject) => paths.map((path) => ({
+        Path: path,
+        Status: "Valid",
+        StatusMessage: "Signature verified.",
+        Subject: subject,
+        Thumbprint: "A".repeat(40),
+        TimestampSubject: "CN=Microsoft Public RSA Timestamping CA 2020",
+      }));
+      await expect(verifyWindowsSignatures({
+        paths,
+        publisherName: WINDOWS_PUBLISHER_DN,
+        execute: async (command) => {
+          expect(command).toBe("powershell.exe");
+          return { stdout: JSON.stringify(result(WINDOWS_PUBLISHER_DN)), stderr: "" };
+        },
+      })).resolves.toHaveLength(2);
+      await expect(verifyWindowsSignatures({
+        paths,
+        publisherName: WINDOWS_PUBLISHER_DN,
+        execute: async () => ({
+          stdout: JSON.stringify(result(`${WINDOWS_PUBLISHER_DN}, OU=Unsealed`)),
+          stderr: "",
+        }),
+      })).rejects.toThrow("Authenticode verification failed");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the Eval shell separate while reusing the production product workspace", async () => {
     const productPackaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
     const evalPackaging = await readFile(new URL("../desktop/packaging/eval-electron-builder.mjs", import.meta.url), "utf8");
@@ -189,6 +260,7 @@ describe("desktop skeleton", () => {
     expect(productPackaging).toContain('"!preload/eval-*.cjs"');
     expect(evalPackaging).toContain('appId: "ai.relayer.eval"');
     expect(evalPackaging).toContain('main: "eval-main/index.mjs"');
+    expect(evalPackaging).toContain('target: [{ target: "dir", arch: [target.architecture] }]');
     expect(evalPackaging).toContain('"main/single-instance.mjs"');
     expect(evalPackaging).toContain('{ from: resolve(desktopRoot, "renderer"), to: "renderer" }');
     expect(evalPackaging).toContain('"packages/graph-client/dist"');
@@ -695,19 +767,58 @@ describe("desktop skeleton", () => {
       relayerArtifactMode: "release",
       relayerUpdateChannel: "preview",
       relayerUpdateBaseUrl: DESKTOP_UPDATE_BASE_URL,
-    })).toEqual({ channel: "preview", updateBaseUrl: DESKTOP_UPDATE_BASE_URL });
+      relayerReleaseTarget: "macos-arm64",
+      relayerReleasePlatform: "macos",
+      relayerReleaseArchitecture: "arm64",
+    }, { platform: "darwin", architecture: "arm64" })).toEqual({ channel: "preview", updateBaseUrl: DESKTOP_UPDATE_BASE_URL, targetKey: "macos-arm64" });
     expect(packagedDesktopReleaseMetadata({
       relayerArtifactMode: "release",
       relayerUpdateChannel: "stable",
       relayerUpdateBaseUrl: DESKTOP_UPDATE_BASE_URL,
-    })).toEqual({ channel: "stable", updateBaseUrl: DESKTOP_UPDATE_BASE_URL });
+      relayerReleaseTarget: "macos-arm64",
+      relayerReleasePlatform: "macos",
+      relayerReleaseArchitecture: "arm64",
+    }, { platform: "darwin", architecture: "arm64" })).toEqual({ channel: "stable", updateBaseUrl: DESKTOP_UPDATE_BASE_URL, targetKey: "macos-arm64" });
+    expect(packagedDesktopReleaseMetadata({
+      relayerArtifactMode: "release",
+      relayerUpdateChannel: "preview",
+      relayerUpdateBaseUrl: DESKTOP_UPDATE_BASE_URLS["windows-x64"],
+      relayerReleaseTarget: "windows-x64",
+      relayerReleasePlatform: "windows",
+      relayerReleaseArchitecture: "x64",
+    }, { platform: "win32", architecture: "x64" })).toEqual({
+      channel: "preview",
+      updateBaseUrl: DESKTOP_UPDATE_BASE_URLS["windows-x64"],
+      targetKey: "windows-x64",
+    });
     for (const metadata of [
       { relayerArtifactMode: "development", relayerUpdateChannel: "preview", relayerUpdateBaseUrl: DESKTOP_UPDATE_BASE_URL },
       { relayerArtifactMode: "release", relayerUpdateChannel: "beta", relayerUpdateBaseUrl: DESKTOP_UPDATE_BASE_URL },
       { relayerArtifactMode: "release", relayerUpdateChannel: "preview", relayerUpdateBaseUrl: "https://example.test" },
+      { relayerArtifactMode: "release", relayerUpdateChannel: "preview", relayerUpdateBaseUrl: DESKTOP_UPDATE_BASE_URL },
     ]) {
       expect(packagedDesktopReleaseMetadata(metadata)).toBeNull();
     }
+    const armReleaseMetadata = {
+      relayerArtifactMode: "release",
+      relayerUpdateChannel: "preview",
+      relayerUpdateBaseUrl: DESKTOP_UPDATE_BASE_URL,
+      relayerReleaseTarget: "macos-arm64",
+      relayerReleasePlatform: "macos",
+      relayerReleaseArchitecture: "arm64",
+    };
+    expect(packagedDesktopReleaseMetadata(
+      { ...armReleaseMetadata, relayerReleasePlatform: "windows" },
+      { platform: "darwin", architecture: "arm64" },
+    )).toBeNull();
+    expect(packagedDesktopReleaseMetadata(
+      { ...armReleaseMetadata, relayerReleaseArchitecture: "x64" },
+      { platform: "darwin", architecture: "arm64" },
+    )).toBeNull();
+    expect(packagedDesktopReleaseMetadata(
+      armReleaseMetadata,
+      { platform: "darwin", architecture: "x64" },
+    )).toBeNull();
 
     const autoUpdater = Object.assign(new EventEmitter(), {
       checkForUpdates: vi.fn(async () => undefined),
@@ -759,18 +870,286 @@ describe("desktop skeleton", () => {
     expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
   });
 
+  it("records packaged canary updater states as restart-safe JSON lines", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-canary-log-"));
+    const outputPath = join(directory, "update.jsonl");
+    try {
+      const log = createCanaryEvidenceLog({
+        environment: { RELAYER_DESKTOP_CANARY_LOG: outputPath },
+        appIsPackaged: true,
+        releaseMetadata: { targetKey: "windows-x64" },
+        platform: "win32",
+        architecture: "x64",
+        processId: 42,
+        now: () => new Date("2026-08-18T20:00:00.000Z"),
+      });
+      expect(log).toMatchObject({ enabled: true, path: outputPath });
+      await log.write({ phase: "available", version: "0.2.4", availableVersion: "0.2.5", channel: "preview" });
+      await log.write({ phase: "ready", version: "0.2.4", availableVersion: "0.2.5", channel: "preview" });
+      await log.flush();
+      const records = (await readFile(outputPath, "utf8")).trim().split("\n").map(JSON.parse);
+      expect(records).toEqual([
+        expect.objectContaining({
+          schemaVersion: 1,
+          capturedAt: "2026-08-18T20:00:00.000Z",
+          processId: 42,
+          target: "windows-x64",
+          platform: "win32",
+          architecture: "x64",
+          state: expect.objectContaining({ phase: "available", availableVersion: "0.2.5" }),
+        }),
+        expect.objectContaining({ state: expect.objectContaining({ phase: "ready", availableVersion: "0.2.5" }) }),
+      ]);
+
+      expect(createCanaryEvidenceLog({
+        environment: { RELAYER_DESKTOP_CANARY_LOG: outputPath },
+        appIsPackaged: false,
+        releaseMetadata: { targetKey: "windows-x64" },
+      }).enabled).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("quiesces any installer-launched seed before starting the evidence-bearing Windows process", async () => {
+    const script = await readFile(new URL("../desktop/release/run-windows-canary.ps1", import.meta.url), "utf8");
+    const silentSeedInstall = script.indexOf('Start-Process -FilePath $SeedInstaller -ArgumentList "/S" -Wait');
+    const stopAfterInstall = script.indexOf("Stop-Relayer", silentSeedInstall);
+    const evidenceEnvironment = script.indexOf("$env:RELAYER_DESKTOP_CANARY_LOG", stopAfterInstall);
+    const canaryLaunch = script.indexOf("$seedProcess = Start-Process", evidenceEnvironment);
+
+    expect(silentSeedInstall).toBeGreaterThan(-1);
+    expect(stopAfterInstall).toBeGreaterThan(silentSeedInstall);
+    expect(evidenceEnvironment).toBeGreaterThan(stopAfterInstall);
+    expect(canaryLaunch).toBeGreaterThan(evidenceEnvironment);
+  });
+
+  it("audits live desktop release authority without reading secret values", async () => {
+    const [mainRuleset, tagRuleset] = await Promise.all([
+      readFile(new URL("../infra/github/desktop-release-authority/main-ruleset.json", import.meta.url), "utf8").then(JSON.parse),
+      readFile(new URL("../infra/github/desktop-release-authority/desktop-tags-ruleset.json", import.meta.url), "utf8").then(JSON.parse),
+    ]);
+    const environment = ({ branches, secrets = [], variables = [] }) => ({
+      protection_rules: [{ type: "branch_policy" }],
+      branches,
+      secrets,
+      variables,
+    });
+    const snapshot = {
+      repository: { default_branch: "main", permissions: { admin: true } },
+      repositoryVariables: [
+        "DESKTOP_UPDATE_BUCKET",
+        "DESKTOP_UPDATE_PREVIEW_ROLE_ARN",
+        "DESKTOP_UPDATE_STABLE_ROLE_ARN",
+      ],
+      oidc: {
+        use_default: true,
+        sub_claim_prefix: "repo:vishaltandale00@9222298/relayer-graphcomplete@1327816644",
+      },
+      environments: {
+        "desktop-production": environment({
+          branches: ["main", "desktop-v*"],
+          secrets: [
+            "RELAYER_DESKTOP_APPLE_API_ISSUER",
+            "RELAYER_DESKTOP_APPLE_API_KEY",
+            "RELAYER_DESKTOP_APPLE_API_KEY_ID",
+            "RELAYER_DESKTOP_CSC_KEY_PASSWORD",
+            "RELAYER_DESKTOP_CSC_LINK",
+            "RELAYER_DESKTOP_SIGN_IDENTITY",
+          ],
+        }),
+        "desktop-production-windows": environment({
+          branches: ["main", "desktop-v*"],
+          variables: [
+            "AZURE_CLIENT_ID",
+            "AZURE_SUBSCRIPTION_ID",
+            "AZURE_TENANT_ID",
+            "RELAYER_WINDOWS_CERTIFICATE_PROFILE",
+            "RELAYER_WINDOWS_PUBLISHER_NAME",
+          ],
+        }),
+        "desktop-update-preview": environment({ branches: ["desktop-v*"] }),
+        "desktop-update-stable-promotion": environment({ branches: ["main"] }),
+      },
+      rulesets: [mainRuleset, tagRuleset],
+    };
+
+    expect(evaluateDesktopReleaseAuthority(snapshot).every((result) => result.passed)).toBe(true);
+    snapshot.environments["desktop-production-windows"].variables.pop();
+    mainRuleset.enforcement = "disabled";
+    const failures = evaluateDesktopReleaseAuthority(snapshot).filter((result) => !result.passed);
+    expect(failures.map((failure) => failure.label)).toEqual(expect.arrayContaining([
+      "environment desktop-production-windows has required variable names",
+      "an active ruleset targets main",
+      "main requires the current GitHub Actions check job",
+    ]));
+  });
+
+  it("seals Windows canary evidence to the published candidate and a real updater relaunch", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-canary-evidence-"));
+    try {
+      const version = "0.2.5";
+      const seedVersion = "0.2.4";
+      const sourceCommit = "d".repeat(40);
+      const name = `Relayer-${version}-win-x64.exe`;
+      const artifact = {
+        name,
+        size: 123,
+        sha256: "e".repeat(64),
+        sha512: "signed-installer-sha512",
+      };
+      const targetReceiptPath = join(directory, "target-release.json");
+      const publicationReceiptPath = join(directory, "preview-publication.json");
+      const seedReceiptPath = join(directory, "seed-release.json");
+      const stateLogPath = join(directory, "update.jsonl");
+      const outputPath = join(directory, "windows-preview-canary.json");
+      const screenshots = {
+        firstInstall: join(directory, "first-install.png"),
+        available: join(directory, "available.png"),
+        ready: join(directory, "ready.png"),
+        installed: join(directory, "installed.png"),
+      };
+      await Promise.all([
+        writeFile(targetReceiptPath, JSON.stringify({
+          schemaVersion: 2,
+          product: "Relayer",
+          appId: DESKTOP_RELEASE.productionAppId,
+          version,
+          target: "windows-x64",
+          platform: "windows",
+          architecture: "x64",
+          minimumMacOSVersion: null,
+          channel: "preview",
+          manifest: "beta.yml",
+          updateBaseUrl: DESKTOP_RELEASE_TARGETS["windows-x64"].updateBaseUrl,
+          sourceCommit,
+          signing: {
+            mode: "azure-artifact-signing",
+            endpoint: DESKTOP_RELEASE.artifactSigningEndpoint,
+            accountName: DESKTOP_RELEASE.artifactSigningAccountName,
+            certificateProfileName: "relayer-public-trust",
+            publisherName: WINDOWS_PUBLISHER_DN,
+          },
+          artifacts: [artifact],
+        })),
+        writeFile(publicationReceiptPath, JSON.stringify({
+          schemaVersion: 2,
+          channel: "preview",
+          target: "windows-x64",
+          version,
+          sourceCommit,
+          workflowRunId: "12345",
+          artifacts: [artifact],
+        })),
+        writeFile(seedReceiptPath, JSON.stringify({
+          schemaVersion: 2,
+          product: DESKTOP_RELEASE.productName,
+          appId: DESKTOP_RELEASE.productionAppId,
+          version: seedVersion,
+          target: "windows-x64",
+          platform: "windows",
+          architecture: "x64",
+          minimumMacOSVersion: null,
+          channel: "preview",
+          manifest: "beta.yml",
+          updateBaseUrl: DESKTOP_RELEASE_TARGETS["windows-x64"].updateBaseUrl,
+          sourceCommit: "c".repeat(40),
+          signing: {
+            mode: "azure-artifact-signing",
+            endpoint: DESKTOP_RELEASE.artifactSigningEndpoint,
+            accountName: DESKTOP_RELEASE.artifactSigningAccountName,
+            certificateProfileName: "relayer-public-trust",
+            publisherName: WINDOWS_PUBLISHER_DN,
+          },
+          artifacts: [{
+            name: `Relayer-${seedVersion}-win-x64.exe`,
+            size: 122,
+            sha256: "f".repeat(64),
+            sha512: "signed-seed-installer-sha512",
+          }],
+        })),
+        writeFile(stateLogPath, [
+          { schemaVersion: 1, capturedAt: "2026-08-18T20:00:00.000Z", target: "windows-x64", platform: "win32", architecture: "x64", processId: 100, state: { phase: "idle", version: seedVersion, channel: "preview", error: null } },
+          { schemaVersion: 1, capturedAt: "2026-08-18T20:00:01.000Z", target: "windows-x64", platform: "win32", architecture: "x64", processId: 100, state: { phase: "available", version: seedVersion, availableVersion: version, channel: "preview", error: null } },
+          { schemaVersion: 1, capturedAt: "2026-08-18T20:00:02.000Z", target: "windows-x64", platform: "win32", architecture: "x64", processId: 100, state: { phase: "downloading", version: seedVersion, availableVersion: version, channel: "preview", percent: 22, error: null } },
+          { schemaVersion: 1, capturedAt: "2026-08-18T20:00:03.000Z", target: "windows-x64", platform: "win32", architecture: "x64", processId: 100, state: { phase: "downloading", version: seedVersion, availableVersion: version, channel: "preview", percent: 99, error: null } },
+          { schemaVersion: 1, capturedAt: "2026-08-18T20:00:04.000Z", target: "windows-x64", platform: "win32", architecture: "x64", processId: 100, state: { phase: "ready", version: seedVersion, availableVersion: version, channel: "preview", error: null } },
+          { schemaVersion: 1, capturedAt: "2026-08-18T20:00:05.000Z", target: "windows-x64", platform: "win32", architecture: "x64", processId: 200, state: { phase: "idle", version, channel: "preview", error: null } },
+        ].map(JSON.stringify).join("\n")),
+        ...Object.entries(screenshots).map(([name, path]) => writeFile(path, `${name}-image`)),
+      ]);
+
+      await expect(createDesktopCanaryEvidence({
+        targetReleaseReceiptPath: targetReceiptPath,
+        previewPublicationReceiptPath: publicationReceiptPath,
+        seedReleaseReceiptPath: seedReceiptPath,
+        stateLogPath,
+        screenshotPaths: screenshots,
+        outputPath,
+        environment: { host: "avd-relayer-win11", os: "Windows 11 24H2", architecture: "x64" },
+        running: true,
+        codeSignatureVerified: true,
+        platformAcceptanceVerified: true,
+      })).resolves.toMatchObject({
+        schemaVersion: 2,
+        environment: { target: "windows-x64", architecture: "x64" },
+        seed: { version: seedVersion },
+        target: {
+          version,
+          sourceCommit,
+          workflowRunId: "12345",
+          artifactSha256: { [name]: artifact.sha256 },
+        },
+        postUpdate: {
+          installedVersion: version,
+          running: true,
+          codeSignatureVerified: true,
+          channel: "preview",
+          updateStatus: "idle",
+        },
+      });
+      expect(JSON.parse(await readFile(outputPath, "utf8"))).toMatchObject({
+        screenshots: {
+          firstInstall: { file: "first-install.png", sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+          available: { file: "available.png", sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+          ready: { file: "ready.png", sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+          installed: { file: "installed.png", sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+        },
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("enforces one signed desktop release contract and seals its candidate artifacts", async () => {
     const releaseWorkflow = await readFile(new URL("../.github/workflows/desktop-signed-preview.yml", import.meta.url), "utf8");
     const stableWorkflow = await readFile(new URL("../.github/workflows/desktop-promote-stable.yml", import.meta.url), "utf8");
+    const intelCanaryWorkflow = await readFile(new URL("../.github/workflows/desktop-intel-canary.yml", import.meta.url), "utf8");
+    const intelCanaryScript = await readFile(new URL("../desktop/release/run-macos-intel-canary.sh", import.meta.url), "utf8");
     expect(releaseWorkflow).toContain('if: startsWith(github.ref, \'refs/tags/desktop-v\')');
     expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main');
+    expect(releaseWorkflow).toContain("uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca");
+    expect(releaseWorkflow).toContain("subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}");
+    expect(releaseWorkflow).toContain("AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}");
+    expect(releaseWorkflow).toContain("RELAYER_WINDOWS_PUBLISHER_NAME: ${{ vars.RELAYER_WINDOWS_PUBLISHER_NAME }}");
+    expect(releaseWorkflow).toContain("Missing required Windows signing variable");
+    expect(releaseWorkflow).not.toContain("AZURE_FEDERATED_TOKEN_FILE");
     expect(releaseWorkflow).toContain("environment:\n      name: desktop-update-preview");
     expect(stableWorkflow).toContain("workflow_dispatch:");
     expect(stableWorkflow).toContain("name: desktop-update-stable-promotion");
     expect(stableWorkflow).toContain("DESKTOP_UPDATE_STABLE_ROLE_ARN");
     expect(stableWorkflow).toContain("--canary-evidence");
+    expect(intelCanaryWorkflow).toContain("runs-on: macos-15-intel");
+    expect(intelCanaryWorkflow).toContain("run-macos-intel-canary.sh");
+    expect(intelCanaryWorkflow).toContain("preview-publication-macos-x64");
+    expect(intelCanaryScript).toContain('launchctl setenv RELAYER_DESKTOP_USER_DATA_DIR "$update_user_data"');
+    expect(intelCanaryScript).toContain("trap restore_launch_environment EXIT");
+    const releaseRunbook = await readFile(new URL("../docs/desktop-release-operations.md", import.meta.url), "utf8");
+    expect(releaseRunbook).toContain("repo:vishaltandale00@9222298/relayer-graphcomplete@1327816644:environment:desktop-production-windows");
+    expect(releaseRunbook).not.toContain("subject: repo:vishaltandale00/relayer-graphcomplete:environment:desktop-production-windows");
     const releaseEnvironment = {
       RELAYER_DESKTOP_RELEASE: "1",
+      RELAYER_DESKTOP_TARGET: "macos-arm64",
       RELAYER_DESKTOP_CHANNEL: "preview",
       RELAYER_DESKTOP_UPDATE_BASE_URL: DESKTOP_RELEASE.updateBaseUrl,
       RELAYER_DESKTOP_SIGN_IDENTITY: "Developer ID Application: VISHAL TANDALE (NZ253AL7U6)",
@@ -782,6 +1161,7 @@ describe("desktop skeleton", () => {
     const contract = resolveDesktopReleaseContract({
       environment: releaseEnvironment,
       version: "0.2.0",
+      targetKey: "macos-arm64",
       sourceCommit,
     });
     expect(contract).toMatchObject({
@@ -816,7 +1196,10 @@ describe("desktop skeleton", () => {
     // application updater above and by Preview publication.
     expect(builder.mac.extendInfo).toBeUndefined();
 
-    const development = resolveDesktopReleaseContract({ environment: {}, version: "0.2.0" });
+    const development = resolveDesktopReleaseContract({
+      environment: { RELAYER_DESKTOP_TARGET: "macos-arm64" },
+      version: "0.2.0",
+    });
     expect(development).toMatchObject({
       release: false,
       appId: "ai.relayer.desktop.development",
@@ -824,6 +1207,54 @@ describe("desktop skeleton", () => {
       channelName: "development",
       signingMode: "unsigned",
     });
+
+    const windowsEnvironment = {
+      RELAYER_DESKTOP_RELEASE: "1",
+      RELAYER_DESKTOP_TARGET: "windows-x64",
+      RELAYER_DESKTOP_CHANNEL: "preview",
+      RELAYER_DESKTOP_UPDATE_BASE_URL: DESKTOP_RELEASE_TARGETS["windows-x64"].updateBaseUrl,
+      RELAYER_WINDOWS_SIGNING_ENDPOINT: DESKTOP_RELEASE.artifactSigningEndpoint,
+      RELAYER_WINDOWS_SIGNING_ACCOUNT: DESKTOP_RELEASE.artifactSigningAccountName,
+      RELAYER_WINDOWS_CERTIFICATE_PROFILE: "relayer-public-trust",
+      RELAYER_WINDOWS_PUBLISHER_NAME: WINDOWS_PUBLISHER_DN,
+    };
+    const windowsContract = resolveDesktopReleaseContract({
+      environment: windowsEnvironment,
+      version: "0.2.0",
+      sourceCommit,
+    });
+    expect(windowsContract).toMatchObject({
+      targetKey: "windows-x64",
+      platform: "win32",
+      architecture: "x64",
+      manifestName: "beta.yml",
+      signingMode: "azure-artifact-signing",
+      publisherName: WINDOWS_PUBLISHER_DN,
+    });
+    const windowsBuilder = createDesktopBuilderConfig(windowsContract);
+    expect(windowsBuilder).toMatchObject({
+      forceCodeSigning: true,
+      afterSign: "desktop/release/verify-windows-app.mjs",
+      win: {
+        verifyUpdateCodeSignature: true,
+        azureSignOptions: {
+          endpoint: DESKTOP_RELEASE.artifactSigningEndpoint,
+          codeSigningAccountName: DESKTOP_RELEASE.artifactSigningAccountName,
+          certificateProfileName: "relayer-public-trust",
+          publisherName: WINDOWS_PUBLISHER_DN,
+        },
+      },
+      publish: [{
+        provider: "generic",
+        url: DESKTOP_RELEASE_TARGETS["windows-x64"].updateBaseUrl,
+        channel: "beta",
+      }],
+    });
+    expect(() => resolveDesktopReleaseContract({
+      environment: { ...windowsEnvironment, RELAYER_WINDOWS_PUBLISHER_NAME: "Relayer Labs LLC" },
+      version: "0.2.0",
+      sourceCommit,
+    })).toThrow("exact certificate distinguished name");
 
     const invalidCases = [
       [{ ...releaseEnvironment, RELAYER_DESKTOP_CHANNEL: "nightly" }, "0.2.0", sourceCommit, "stable or preview"],
@@ -911,7 +1342,8 @@ describe("desktop skeleton", () => {
         version: "0.2.0",
         channel: "preview",
         sourceCommit,
-        appleTeamId: "NZ253AL7U6",
+        target: "macos-arm64",
+        signing: { appleTeamId: "NZ253AL7U6" },
       });
       expect(written.zip.sha512).toBe(createHash("sha512").update(finalZip).digest("base64"));
       await expect(verifyDesktopReleaseEvidence({ distRoot: directory, contract })).resolves.toMatchObject({
@@ -939,17 +1371,23 @@ describe("desktop skeleton", () => {
     const dmgBlockmap = evidenceFor(`${dmg.name}.blockmap`, "dmg-blockmap");
     const zipBlockmap = evidenceFor(`${zip.name}.blockmap`, "zip-blockmap");
     const releaseReceipt = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       product: "Relayer",
       appId: DESKTOP_RELEASE.productionAppId,
       version,
-      architecture: DESKTOP_RELEASE.architecture,
-      minimumMacOSVersion: DESKTOP_RELEASE.minimumMacOSVersion,
+      target: "macos-arm64",
+      platform: "macos",
+      architecture: "arm64",
+      minimumMacOSVersion: DESKTOP_RELEASE_TARGETS["macos-arm64"].minimumMacOSVersion,
       channel: "preview",
       manifest: "beta-mac.yml",
-      updateBaseUrl: DESKTOP_RELEASE.updateBaseUrl,
+      updateBaseUrl: DESKTOP_RELEASE_TARGETS["macos-arm64"].updateBaseUrl,
       sourceCommit,
-      appleTeamId: DESKTOP_RELEASE.appleTeamId,
+      signing: {
+        mode: "certificate-file",
+        appleTeamId: DESKTOP_RELEASE.appleTeamId,
+        notarizationMode: "app-store-connect-api-key",
+      },
       artifacts: [dmg, zip],
     };
     const checksumText = `${dmg.sha256}  ${dmg.name}\n${zip.sha256}  ${zip.name}\n`;
@@ -1047,8 +1485,8 @@ describe("desktop skeleton", () => {
       GITHUB_RUN_ID: "456",
       GITHUB_RUN_ATTEMPT: "1",
       GITHUB_ACTOR: "release-operator",
-      STABLE_PROMOTION_CONFIRMATION: `promote-${version}`,
-    }, version)).toEqual({
+      STABLE_PROMOTION_CONFIRMATION: `promote-macos-arm64-${version}`,
+    }, version, "macos-arm64")).toEqual({
       workflowCommit: sourceCommit,
       workflowRunId: "456",
       workflowRunAttempt: "1",
@@ -1061,7 +1499,7 @@ describe("desktop skeleton", () => {
       GITHUB_RUN_ATTEMPT: "1",
       GITHUB_ACTOR: "release-operator",
       STABLE_PROMOTION_CONFIRMATION: "promote-wrong-version",
-    }, version)).toThrow(`promote-${version}`);
+    }, version, "macos-arm64")).toThrow(`promote-macos-arm64-${version}`);
     expect(classifyStablePointer({ version, manifestText: preparedManifest })).toEqual({ recovery: false });
     expect(classifyStablePointer({
       currentVersion: version,
@@ -1075,6 +1513,105 @@ describe("desktop skeleton", () => {
       version,
       manifestText: preparedManifest,
     })).toThrow("cannot be replaced");
+  });
+
+  it("seals and publishes the exact Windows x64 NSIS candidate", async () => {
+    const version = "0.2.0";
+    const sourceCommit = "c".repeat(40);
+    const target = DESKTOP_RELEASE_TARGETS["windows-x64"];
+    const contract = resolveDesktopReleaseContract({
+      version,
+      sourceCommit,
+      environment: {
+        RELAYER_DESKTOP_RELEASE: "1",
+        RELAYER_DESKTOP_TARGET: target.key,
+        RELAYER_DESKTOP_CHANNEL: "preview",
+        RELAYER_DESKTOP_UPDATE_BASE_URL: target.updateBaseUrl,
+        RELAYER_WINDOWS_SIGNING_ENDPOINT: DESKTOP_RELEASE.artifactSigningEndpoint,
+        RELAYER_WINDOWS_SIGNING_ACCOUNT: DESKTOP_RELEASE.artifactSigningAccountName,
+        RELAYER_WINDOWS_CERTIFICATE_PROFILE: "relayer-public-trust",
+        RELAYER_WINDOWS_PUBLISHER_NAME: WINDOWS_PUBLISHER_DN,
+      },
+    });
+    const directory = await mkdtemp(join(tmpdir(), "relayer-windows-release-"));
+    try {
+      const names = desktopReleaseArtifactNames(contract);
+      const installer = Buffer.from("artifact-signing-nsis-fixture");
+      const blockmap = Buffer.from("nsis-blockmap-fixture");
+      const sha512 = createHash("sha512").update(installer).digest("base64");
+      await Promise.all([
+        writeFile(join(directory, names.installer), installer),
+        writeFile(join(directory, `${names.installer}.blockmap`), blockmap),
+        writeFile(join(directory, names.manifest), [
+          `version: ${version}`,
+          "files:",
+          `  - url: ${names.installer}`,
+          `    sha512: ${sha512}`,
+          `    size: ${installer.length}`,
+          `    blockMapSize: ${blockmap.length}`,
+          `path: ${names.installer}`,
+          `sha512: ${sha512}`,
+          "",
+        ].join("\n")),
+      ]);
+
+      const written = await writeDesktopReleaseEvidence({ distRoot: directory, contract });
+      expect(written.receipt).toMatchObject({
+        schemaVersion: 2,
+        target: target.key,
+        platform: "windows",
+        architecture: "x64",
+        manifest: "beta.yml",
+        signing: {
+          mode: "azure-artifact-signing",
+          accountName: "relayercodesigning",
+          certificateProfileName: "relayer-public-trust",
+          publisherName: WINDOWS_PUBLISHER_DN,
+        },
+      });
+      await expect(verifyDesktopReleaseEvidence({ distRoot: directory, contract })).resolves.toMatchObject({
+        installer: expect.objectContaining({ name: names.installer, size: installer.length }),
+      });
+
+      const evidenceFor = async (name) => {
+        const content = await readFile(join(directory, name));
+        return {
+          name,
+          size: content.length,
+          sha256: createHash("sha256").update(content).digest("hex"),
+          sha512: createHash("sha512").update(content).digest("base64"),
+        };
+      };
+      const evidence = await Promise.all([
+        names.installer,
+        `${names.installer}.blockmap`,
+        names.checksums,
+        names.receipt,
+      ].map(evidenceFor));
+      expect(() => validatePreviewCandidate({
+        releaseReceipt: written.receipt,
+        checksumText: `${written.installer.sha256}  ${names.installer}\n`,
+        version,
+        sourceCommit,
+        artifactEvidence: evidence,
+        target,
+      })).not.toThrow();
+      const prepared = preparePreviewManifest({
+        manifestText: await readFile(join(directory, names.manifest), "utf8"),
+        version,
+        artifactEvidence: evidence,
+        target,
+      });
+      expect(prepared).toContain(`path: releases/${version}/${names.installer}`);
+      expect(createPreviewPublicationPlan({ version, evidence, target })).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          name: names.installer,
+          key: `desktop/windows/x64/releases/${version}/${names.installer}`,
+        }),
+      ]));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("publishes one Preview candidate atomically and recovers without mutating live bytes", async () => {
@@ -1104,17 +1641,23 @@ describe("desktop skeleton", () => {
       const zipBlockmap = evidenceFor(`${prefix}.zip.blockmap`);
       const checksumText = `${dmg.sha256}  ${dmg.name}\n${zip.sha256}  ${zip.name}\n`;
       const releaseReceipt = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         product: DESKTOP_RELEASE.productName,
         appId: DESKTOP_RELEASE.productionAppId,
         version,
-        architecture: DESKTOP_RELEASE.architecture,
-        minimumMacOSVersion: DESKTOP_RELEASE.minimumMacOSVersion,
+        target: "macos-arm64",
+        platform: "macos",
+        architecture: "arm64",
+        minimumMacOSVersion: DESKTOP_RELEASE_TARGETS["macos-arm64"].minimumMacOSVersion,
         channel: "preview",
         manifest: "beta-mac.yml",
-        updateBaseUrl: DESKTOP_RELEASE.updateBaseUrl,
+        updateBaseUrl: DESKTOP_RELEASE_TARGETS["macos-arm64"].updateBaseUrl,
         sourceCommit,
-        appleTeamId: DESKTOP_RELEASE.appleTeamId,
+        signing: {
+          mode: "certificate-file",
+          appleTeamId: DESKTOP_RELEASE.appleTeamId,
+          notarizationMode: "app-store-connect-api-key",
+        },
         artifacts: [dmg, zip],
       };
       contents.set(`${prefix}-SHA256SUMS.txt`, Buffer.from(checksumText));
@@ -1198,8 +1741,8 @@ describe("desktop skeleton", () => {
         GITHUB_RUN_ATTEMPT: "1",
       };
       const pointerKey = "desktop/macos/arm64/beta-mac.yml";
-      const historyKey = `private/history/beta/${version}/beta-mac.yml`;
-      const receiptKey = `private/receipts/preview/${version}.json`;
+      const historyKey = `private/history/macos-arm64/beta/${version}/beta-mac.yml`;
+      const receiptKey = `private/receipts/macos-arm64/preview/${version}.json`;
 
       await expect(publishDesktopPreview({
         bucket: "updates",
@@ -1236,39 +1779,62 @@ describe("desktop skeleton", () => {
       })).resolves.toMatchObject({ receipt: { workflowRunAttempt: "1" } });
       expect(writes).toEqual(writesAfterSuccess);
 
-      const installedScreenshot = Buffer.from("signed-app-installed-screenshot");
-      const installedScreenshotName = "installed.png";
-      await writeFile(join(directory, installedScreenshotName), installedScreenshot);
+      const screenshotFixtures = Object.fromEntries(["first-install", "available", "ready", "installed"].map((name) => [
+        name,
+        { file: `${name}.png`, content: Buffer.from(`signed-app-${name}-screenshot`) },
+      ]));
+      const canaryTraceName = "signed-preview-canary.jsonl";
+      const canaryTrace = [
+        { schemaVersion: 1, capturedAt: "2026-08-18T20:00:00.000Z", target: "macos-arm64", platform: "darwin", architecture: "arm64", processId: 100, state: { phase: "idle", version: "0.2.2", channel: "preview", error: null } },
+        { schemaVersion: 1, capturedAt: "2026-08-18T20:00:01.000Z", target: "macos-arm64", platform: "darwin", architecture: "arm64", processId: 100, state: { phase: "available", version: "0.2.2", availableVersion: version, channel: "preview", error: null } },
+        { schemaVersion: 1, capturedAt: "2026-08-18T20:00:02.000Z", target: "macos-arm64", platform: "darwin", architecture: "arm64", processId: 100, state: { phase: "downloading", version: "0.2.2", availableVersion: version, channel: "preview", percent: 35, error: null } },
+        { schemaVersion: 1, capturedAt: "2026-08-18T20:00:03.000Z", target: "macos-arm64", platform: "darwin", architecture: "arm64", processId: 100, state: { phase: "ready", version: "0.2.2", availableVersion: version, channel: "preview", error: null } },
+        { schemaVersion: 1, capturedAt: "2026-08-18T20:00:04.000Z", target: "macos-arm64", platform: "darwin", architecture: "arm64", processId: 200, state: { phase: "idle", version, channel: "preview", error: null } },
+      ].map(JSON.stringify).join("\n");
+      await Promise.all([
+        ...Object.values(screenshotFixtures).map(({ file, content }) => writeFile(join(directory, file), content)),
+        writeFile(join(directory, canaryTraceName), canaryTrace),
+      ]);
       const canaryEvidenceName = "signed-preview-canary.json";
       await writeFile(join(directory, canaryEvidenceName), JSON.stringify({
-        schemaVersion: 1,
-        capturedAt: "2026-08-18",
-        environment: { host: "test-mac", architecture: "arm64", macOS: "15.6" },
-        seed: { version: "0.2.2" },
+        schemaVersion: 2,
+        capturedAt: "2026-08-18T20:00:05.000Z",
+        environment: { host: "test-mac", target: "macos-arm64", architecture: "arm64", os: "macOS 15.6" },
+        seed: { version: "0.2.2", sourceCommit: "e".repeat(40), processId: 100 },
         target: {
           version,
           sourceCommit,
           workflowRunId: "123",
-          dmgSha256: dmg.sha256,
-          zipSha256: zip.sha256,
+          artifactSha256: {
+            [dmg.name]: dmg.sha256,
+            [zip.name]: zip.sha256,
+          },
         },
         productFlow: [
+          { phase: "idle", version: "0.2.2", channel: "preview", error: null },
           { phase: "available", version: "0.2.2", availableVersion: version, channel: "preview", error: null },
+          { phase: "downloading", version: "0.2.2", availableVersion: version, channel: "preview", displayedPercentages: [35], error: null },
+          { phase: "ready", version: "0.2.2", availableVersion: version, channel: "preview", error: null },
           { phase: "installed-and-relaunched", version, channel: "preview", error: null },
         ],
+        trace: {
+          file: canaryTraceName,
+          sha256: createHash("sha256").update(canaryTrace).digest("hex"),
+          records: 5,
+        },
         postUpdate: {
           installedVersion: version,
           running: true,
           codeSignatureVerified: true,
+          platformAcceptanceVerified: true,
+          processId: 200,
           channel: "preview",
           updateStatus: "idle",
         },
-        screenshots: {
-          installed: {
-            file: installedScreenshotName,
-            sha256: createHash("sha256").update(installedScreenshot).digest("hex"),
-          },
-        },
+        screenshots: Object.fromEntries(Object.entries(screenshotFixtures).map(([name, { file, content }]) => [
+          name === "first-install" ? "firstInstall" : name,
+          { file, sha256: createHash("sha256").update(content).digest("hex") },
+        ])),
       }));
       const stableEnvironment = {
         GITHUB_REF: "refs/heads/main",
@@ -1276,7 +1842,7 @@ describe("desktop skeleton", () => {
         GITHUB_RUN_ID: "456",
         GITHUB_RUN_ATTEMPT: "1",
         GITHUB_ACTOR: "release-operator",
-        STABLE_PROMOTION_CONFIRMATION: `promote-${version}`,
+        STABLE_PROMOTION_CONFIRMATION: `promote-macos-arm64-${version}`,
       };
       await expect(promoteDesktopStable({
         bucket: "updates",
@@ -1296,11 +1862,23 @@ describe("desktop skeleton", () => {
         },
       });
       const stablePointerKey = "desktop/macos/arm64/latest-mac.yml";
-      const stableHistoryKey = `private/history/latest/${version}/latest-mac.yml`;
-      const stableReceiptKey = `private/receipts/stable/${version}.json`;
+      const stableHistoryKey = `private/history/macos-arm64/latest/${version}/latest-mac.yml`;
+      const stableReceiptKey = `private/receipts/macos-arm64/stable/${version}.json`;
       expect(objects.get(stablePointerKey).body).toEqual(objects.get(pointerKey).body);
       expect(writes.indexOf(stablePointerKey)).toBeGreaterThan(writes.indexOf(stableHistoryKey));
       expect(writes.indexOf(stableReceiptKey)).toBeGreaterThan(writes.indexOf(stablePointerKey));
+
+      await writeFile(join(directory, canaryTraceName), `${canaryTrace}\n{}`);
+      await expect(promoteDesktopStable({
+        bucket: "updates",
+        version,
+        canaryEvidencePath: canaryEvidenceName,
+        repositoryRoot: directory,
+        environment: { ...stableEnvironment, GITHUB_RUN_ID: "457", GITHUB_RUN_ATTEMPT: "2" },
+        execute,
+        fetchImpl,
+      })).rejects.toThrow("trace bytes do not match");
+      await writeFile(join(directory, canaryTraceName), canaryTrace);
 
       const writesAfterPromotion = [...writes];
       await expect(promoteDesktopStable({

@@ -4,13 +4,15 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import { desktopTargetFromEnvironment } from "../shared/target.mjs";
+
 const execFileAsync = promisify(execFile);
 
 export async function verifyBundledAppServer(
   appPath,
   {
     execute = execFileAsync,
-    expectedArchitecture = "arm64",
+    expectedArchitecture = process.arch === "x64" ? "x86_64" : process.arch,
     listPackageEntries = listPackage,
   } = {},
 ) {
@@ -48,5 +50,7 @@ export default async function verifyElectronBuilderBundledAppServer(context) {
   if (!productFilename || !appOutDir) {
     throw new Error("electron-builder afterPack context is missing the packaged app path.");
   }
-  return verifyBundledAppServer(join(appOutDir, `${productFilename}.app`));
+  const target = desktopTargetFromEnvironment(process.env);
+  const expectedArchitecture = target.architecture === "x64" ? "x86_64" : target.architecture;
+  return verifyBundledAppServer(join(appOutDir, `${productFilename}.app`), { expectedArchitecture });
 }

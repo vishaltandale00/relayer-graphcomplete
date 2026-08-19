@@ -9,17 +9,17 @@ import { promisify } from "node:util";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
-import { DESKTOP_RELEASE } from "./contract.mjs";
+import { DESKTOP_RELEASE, desktopReleaseTarget } from "./contract.mjs";
 import { compareNumericVersions, isNumericVersion } from "./numeric-version.mjs";
 
 const execFileAsync = promisify(execFile);
-const PUBLIC_PREFIX = "desktop/macos/arm64";
 const IMMUTABLE_CACHE_CONTROL = "public,max-age=31536000,immutable";
 const POINTER_CACHE_CONTROL = "no-store,no-cache,must-revalidate,max-age=0";
 
 function contentType(name) {
   if (name.endsWith(".zip")) return "application/zip";
   if (name.endsWith(".dmg")) return "application/x-apple-diskimage";
+  if (name.endsWith(".exe")) return "application/vnd.microsoft.portable-executable";
   if (name.endsWith(".yml")) return "text/yaml; charset=utf-8";
   if (name.endsWith(".json")) return "application/json";
   if (name.endsWith(".txt")) return "text/plain; charset=utf-8";
@@ -48,9 +48,17 @@ function sha256Base64(hexDigest) {
   return Buffer.from(hexDigest, "hex").toString("base64");
 }
 
-function expectedChecksumText(evidenceByName, version) {
-  const prefix = `Relayer-${version}-mac-arm64`;
-  return [`${prefix}.dmg`, `${prefix}.zip`]
+function releaseArtifactNames(target, version) {
+  const prefix = `Relayer-${version}-${target.format}-${target.architecture}`;
+  return {
+    prefix,
+    primary: target.platform === "darwin" ? [`${prefix}.dmg`, `${prefix}.zip`] : [`${prefix}.exe`],
+  };
+}
+
+function expectedChecksumText(evidenceByName, target, version) {
+  const { primary } = releaseArtifactNames(target, version);
+  return primary
     .map((name) => `${evidenceByName.get(name)?.sha256 || ""}  ${name}`)
     .join("\n");
 }
@@ -72,18 +80,15 @@ export function validatePreviewPublicationProvenance(environment, version) {
   return { sourceCommit, workflowRunId, workflowRunAttempt };
 }
 
-export function preparePreviewManifest({ manifestText, version, artifactEvidence } = {}) {
+export function preparePreviewManifest({ manifestText, version, artifactEvidence, target = desktopReleaseTarget() } = {}) {
   const manifest = parseYaml(manifestText);
   if (!manifest || !isNumericVersion(manifest.version) || String(manifest.version) !== version) {
     throw new Error("Preview manifest version does not match the desktop version.");
   }
-  const expectedNames = [
-    `Relayer-${version}-mac-arm64.zip`,
-    `Relayer-${version}-mac-arm64.dmg`,
-  ];
+  const expectedNames = releaseArtifactNames(target, version).primary;
   const evidenceByName = new Map(artifactEvidence.map((item) => [item.name, item]));
   if (!Array.isArray(manifest.files) || manifest.files.length !== expectedNames.length) {
-    throw new Error("Preview manifest must contain exactly the update ZIP and DMG.");
+    throw new Error(`Preview manifest must contain exactly ${expectedNames.length} release artifact(s).`);
   }
   for (const expectedName of expectedNames) {
     const file = manifest.files.find((candidate) => candidate?.url === expectedName);
@@ -101,17 +106,19 @@ export function preparePreviewManifest({ manifestText, version, artifactEvidence
     }
     file.url = `releases/${version}/${expectedName}`;
   }
-  const zipName = expectedNames[0];
-  const zip = evidenceByName.get(zipName);
-  if (manifest.path !== zipName || manifest.sha512 !== zip.sha512) {
-    throw new Error("Preview manifest legacy ZIP identity is invalid.");
+  const updateName = target.platform === "darwin"
+    ? expectedNames.find((name) => name.endsWith(".zip"))
+    : expectedNames.find((name) => name.endsWith(".exe"));
+  const updateArtifact = evidenceByName.get(updateName);
+  if (manifest.path !== updateName || manifest.sha512 !== updateArtifact.sha512) {
+    throw new Error("Preview manifest legacy update identity is invalid.");
   }
-  manifest.path = `releases/${version}/${zipName}`;
+  manifest.path = `releases/${version}/${updateName}`;
   return stringifyYaml(manifest);
 }
 
-export function createPreviewPublicationPlan({ version, evidence } = {}) {
-  const releasePrefix = `${PUBLIC_PREFIX}/releases/${version}`;
+export function createPreviewPublicationPlan({ version, evidence, target = desktopReleaseTarget() } = {}) {
+  const releasePrefix = `${target.publicPrefix}/releases/${version}`;
   return evidence.map((artifact) => ({
     ...artifact,
     key: `${releasePrefix}/${artifact.name}`,
@@ -136,31 +143,42 @@ export function validatePreviewCandidate({
   version,
   sourceCommit,
   artifactEvidence,
+  target = desktopReleaseTarget(),
 } = {}) {
   const evidenceByName = new Map(artifactEvidence.map((item) => [item.name, item]));
-  const prefix = `Relayer-${version}-mac-arm64`;
-  const signedArtifacts = [`${prefix}.dmg`, `${prefix}.zip`].map((name) => evidenceByName.get(name));
+  const signedArtifacts = releaseArtifactNames(target, version).primary.map((name) => evidenceByName.get(name));
   if (signedArtifacts.some((item) => !item)) {
-    throw new Error("Preview candidate is missing its signed DMG or update ZIP.");
+    throw new Error("Preview candidate is missing one or more signed release artifacts.");
   }
+  const signingMatches = target.platform === "darwin"
+    ? releaseReceipt?.signing?.mode &&
+      releaseReceipt.signing.appleTeamId === DESKTOP_RELEASE.appleTeamId &&
+      releaseReceipt.signing.notarizationMode !== "disabled"
+    : releaseReceipt?.signing?.mode === "azure-artifact-signing" &&
+      releaseReceipt.signing.endpoint === DESKTOP_RELEASE.artifactSigningEndpoint &&
+      releaseReceipt.signing.accountName === DESKTOP_RELEASE.artifactSigningAccountName &&
+      Boolean(releaseReceipt.signing.certificateProfileName) &&
+      Boolean(releaseReceipt.signing.publisherName);
   if (
-    releaseReceipt?.schemaVersion !== 1 ||
+    releaseReceipt?.schemaVersion !== 2 ||
     releaseReceipt.product !== DESKTOP_RELEASE.productName ||
     releaseReceipt.version !== version ||
+    releaseReceipt.target !== target.key ||
+    releaseReceipt.platform !== target.distributionPlatform ||
     releaseReceipt.channel !== "preview" ||
-    releaseReceipt.manifest !== "beta-mac.yml" ||
+    releaseReceipt.manifest !== target.channels.preview.manifestName ||
     releaseReceipt.sourceCommit !== sourceCommit ||
     releaseReceipt.appId !== DESKTOP_RELEASE.productionAppId ||
-    releaseReceipt.architecture !== DESKTOP_RELEASE.architecture ||
-    releaseReceipt.minimumMacOSVersion !== DESKTOP_RELEASE.minimumMacOSVersion ||
-    releaseReceipt.updateBaseUrl !== DESKTOP_RELEASE.updateBaseUrl ||
-    releaseReceipt.appleTeamId !== DESKTOP_RELEASE.appleTeamId ||
+    releaseReceipt.architecture !== target.architecture ||
+    releaseReceipt.minimumMacOSVersion !== target.minimumMacOSVersion ||
+    releaseReceipt.updateBaseUrl !== target.updateBaseUrl ||
+    !signingMatches ||
     JSON.stringify(releaseReceipt.artifacts) !== JSON.stringify(signedArtifacts)
   ) {
     throw new Error("Signed release receipt does not match Preview publication provenance and bytes.");
   }
-  if (checksumText.trim() !== expectedChecksumText(evidenceByName, version)) {
-    throw new Error("Preview checksum manifest does not match the signed DMG and update ZIP.");
+  if (checksumText.trim() !== expectedChecksumText(evidenceByName, target, version)) {
+    throw new Error("Preview checksum manifest does not match the signed release artifacts.");
   }
 }
 
@@ -253,10 +271,10 @@ async function readPointer({ bucket, key, execute = execFileAsync } = {}) {
   return { etag: String(object.head.ETag || ""), version: String(parsed.version), content: object.content };
 }
 
-async function movePreviewPointer({ bucket, filePath, evidence, sourceCommit, current, execute } = {}) {
+async function movePreviewPointer({ bucket, filePath, evidence, sourceCommit, current, execute, target } = {}) {
   await runAws(buildPutObjectArgs({
     bucket,
-    key: `${PUBLIC_PREFIX}/beta-mac.yml`,
+    key: `${target.publicPrefix}/${target.channels.preview.manifestName}`,
     filePath,
     evidence,
     ifNoneMatch: !current.etag,
@@ -291,25 +309,24 @@ async function verifyPublicObject({ url, evidence, fetchImpl = fetch } = {}) {
 
 export async function publishDesktopPreview({
   bucket,
-  baseUrl = DESKTOP_RELEASE.updateBaseUrl,
+  target = desktopReleaseTarget(String(process.env.RELAYER_DESKTOP_TARGET || "macos-arm64")),
+  baseUrl = target.updateBaseUrl,
   distRoot = resolve(import.meta.dirname, "../dist"),
   environment = process.env,
   execute = execFileAsync,
   fetchImpl = fetch,
 } = {}) {
   if (!bucket) throw new Error("Preview publication requires an S3 bucket.");
-  if (baseUrl !== DESKTOP_RELEASE.updateBaseUrl) throw new Error("Preview publication base URL is not sealed.");
+  if (baseUrl !== target.updateBaseUrl) throw new Error("Preview publication base URL is not sealed.");
   const packageMetadata = JSON.parse(await readFile(resolve(import.meta.dirname, "../package.json"), "utf8"));
   const version = String(packageMetadata.version || "").trim();
   if (!isNumericVersion(version)) throw new Error("Desktop version must be numeric major.minor.patch.");
   const provenance = validatePreviewPublicationProvenance(environment, version);
 
-  const prefix = `Relayer-${version}-mac-arm64`;
+  const { prefix, primary } = releaseArtifactNames(target, version);
   const artifactNames = [
-    `${prefix}.dmg`,
-    `${prefix}.dmg.blockmap`,
-    `${prefix}.zip`,
-    `${prefix}.zip.blockmap`,
+    ...primary,
+    ...primary.map((name) => `${name}.blockmap`),
     `${prefix}-SHA256SUMS.txt`,
     `${prefix}-RELEASE.json`,
   ];
@@ -327,19 +344,23 @@ export async function publishDesktopPreview({
     version,
     sourceCommit: provenance.sourceCommit,
     artifactEvidence: evidence,
+    target,
   });
 
+  const manifestName = target.channels.preview.manifestName;
   const manifestText = preparePreviewManifest({
-    manifestText: await readFile(join(distRoot, "beta-mac.yml"), "utf8"),
+    manifestText: await readFile(join(distRoot, manifestName), "utf8"),
     version,
     artifactEvidence: evidence,
+    target,
   });
-  const preparedManifestPath = join(distRoot, `publish-beta-${randomUUID()}.yml`);
+  const preparedManifestPath = join(distRoot, `publish-${target.key}-beta-${randomUUID()}.yml`);
   await writeFile(preparedManifestPath, manifestText, { encoding: "utf8", mode: 0o600, flag: "wx" });
   try {
     const manifestEvidence = await fileEvidence(preparedManifestPath);
-    const plan = createPreviewPublicationPlan({ version, evidence });
-    const current = await readPointer({ bucket, key: `${PUBLIC_PREFIX}/beta-mac.yml`, execute });
+    const plan = createPreviewPublicationPlan({ version, evidence, target });
+    const pointerKey = `${target.publicPrefix}/${manifestName}`;
+    const current = await readPointer({ bucket, key: pointerKey, execute });
     const { recovery } = classifyPreviewPointer({
       currentVersion: current.version,
       currentContent: current.content,
@@ -357,12 +378,12 @@ export async function publishDesktopPreview({
         execute,
       });
     }
-    const historyKey = `private/history/beta/${version}/beta-mac.yml`;
+    const historyKey = `private/history/${target.key}/beta/${version}/${manifestName}`;
     await ensureImmutableObject({
       bucket,
       key: historyKey,
       filePath: preparedManifestPath,
-      evidence: { ...manifestEvidence, name: "beta-mac.yml" },
+      evidence: { ...manifestEvidence, name: manifestName },
       sourceCommit: provenance.sourceCommit,
       execute,
     });
@@ -382,31 +403,34 @@ export async function publishDesktopPreview({
         sourceCommit: provenance.sourceCommit,
         current,
         execute,
+        target,
       });
     }
     await verifyPublicObject({
-      url: `${baseUrl}/beta-mac.yml?noCache=${Date.now().toString(32)}`,
+      url: `${baseUrl}/${manifestName}?noCache=${Date.now().toString(32)}`,
       evidence: manifestEvidence,
       fetchImpl,
     });
 
-    const receiptKey = `private/receipts/preview/${version}.json`;
+    const receiptKey = `private/receipts/${target.key}/preview/${version}.json`;
     const existingReceiptObject = await readObject({ bucket, key: receiptKey, execute });
     let receipt = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       channel: "preview",
+      target: target.key,
       version,
       sourceCommit: provenance.sourceCommit,
       workflowRunId: provenance.workflowRunId,
       workflowRunAttempt: provenance.workflowRunAttempt,
       publishedAt: new Date().toISOString(),
       artifacts: plan.map(({ name, size, sha256, sha512, key }) => ({ name, size, sha256, sha512, key })),
-      manifest: { key: `${PUBLIC_PREFIX}/beta-mac.yml`, size: manifestEvidence.size, sha256: manifestEvidence.sha256 },
+      manifest: { key: pointerKey, size: manifestEvidence.size, sha256: manifestEvidence.sha256 },
     };
     if (existingReceiptObject) {
       const existingReceipt = JSON.parse(existingReceiptObject.content);
       const expectedIdentity = {
         channel: receipt.channel,
+        target: receipt.target,
         version: receipt.version,
         sourceCommit: receipt.sourceCommit,
         artifacts: receipt.artifacts,
@@ -414,6 +438,7 @@ export async function publishDesktopPreview({
       };
       const existingIdentity = {
         channel: existingReceipt.channel,
+        target: existingReceipt.target,
         version: existingReceipt.version,
         sourceCommit: existingReceipt.sourceCommit,
         artifacts: existingReceipt.artifacts,
@@ -424,7 +449,7 @@ export async function publishDesktopPreview({
       }
       receipt = existingReceipt;
     }
-    const receiptPath = join(distRoot, `preview-publication-${version}.json`);
+    const receiptPath = join(distRoot, `preview-publication-${target.key}-${version}.json`);
     await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     if (!existingReceiptObject) {
       const receiptEvidence = await fileEvidence(receiptPath);
