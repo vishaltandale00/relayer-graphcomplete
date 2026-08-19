@@ -181,6 +181,19 @@ pub(super) async fn invoke_action(
     Path((thread_id, interaction_id, action_id)): Path<(i64, i64, i64)>,
 ) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
     authorize_write(&state, &headers)?;
+    let result = invoke_action_with_authority(&state, thread_id, interaction_id, action_id).await;
+    if let Err(error) = &result {
+        log_action_invocation_request_failure(thread_id, interaction_id, action_id, error);
+    }
+    result
+}
+
+async fn invoke_action_with_authority(
+    state: &ApiState,
+    thread_id: i64,
+    interaction_id: i64,
+    action_id: i64,
+) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
     let thread_id = ThreadId::try_from(thread_id)?;
     let source_interaction_id = InteractionId::try_from(interaction_id)?;
     if action_id <= 0 {
@@ -250,7 +263,7 @@ pub(super) async fn invoke_action(
         StatusCode::OK
     };
     let interaction = if outcome.created {
-        start_interaction(&state, &thread, outcome.interaction).await?
+        start_interaction(state, &thread, outcome.interaction).await?
     } else {
         outcome.interaction
     };
@@ -262,6 +275,35 @@ pub(super) async fn invoke_action(
             created: outcome.created,
         }),
     ))
+}
+
+fn log_action_invocation_request_failure(
+    thread_id: i64,
+    source_interaction_id: i64,
+    action_id: i64,
+    error: &ApiError,
+) {
+    eprintln!(
+        "{}",
+        action_invocation_request_failure_message(
+            thread_id,
+            source_interaction_id,
+            action_id,
+            error,
+        )
+    );
+}
+
+fn action_invocation_request_failure_message(
+    thread_id: i64,
+    source_interaction_id: i64,
+    action_id: i64,
+    error: &ApiError,
+) -> String {
+    format!(
+        "action invocation request failed before background completion: thread={thread_id} source_interaction={source_interaction_id} action={action_id}: {}",
+        error.message()
+    )
 }
 
 fn selected_harness_configuration(
@@ -390,6 +432,21 @@ async fn record_background_failure(
         eprintln!(
             "could not persist failed interaction {}: {persistence_error}; original failure: {error}",
             interaction.id
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_invocation_request_errors_include_identifiers_in_the_backend_log() {
+        let error = ApiError::invalid("GraphComplete runtime is unavailable");
+
+        assert_eq!(
+            action_invocation_request_failure_message(4, 8, 15, &error),
+            "action invocation request failed before background completion: thread=4 source_interaction=8 action=15: GraphComplete runtime is unavailable"
         );
     }
 }

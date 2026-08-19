@@ -38,6 +38,13 @@ impl ApiError {
             json!({ "error": message }),
         )
     }
+
+    pub(crate) fn message(&self) -> &str {
+        self.1
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown API error")
+    }
 }
 
 impl From<RuntimeError> for ApiError {

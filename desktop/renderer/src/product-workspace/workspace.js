@@ -30,6 +30,14 @@ const GRAPH_NODE_BOTTOM = 72;
 const GRAPH_FIT_PADDING = 48;
 const PENDING_COMPLETION_STATUSES = new Set(["not_started", "running", "submitted"]);
 
+export function graphNodeLayoutBounds(width, height) {
+  return {
+    halfWidth: Math.max(GRAPH_NODE_HALF_WIDTH, width / 2),
+    top: GRAPH_NODE_TOP,
+    bottom: Math.max(GRAPH_NODE_BOTTOM, height - 23),
+  };
+}
+
 export function clampGraphZoom(zoom) {
   return Math.min(GRAPH_MAX_ZOOM, Math.max(GRAPH_MIN_ZOOM, zoom));
 }
@@ -56,12 +64,15 @@ export function zoomGraphCameraAt(camera, zoom, anchor) {
 
 function graphContentBounds(nodes) {
   if (!nodes.length) return null;
-  return nodes.reduce((result, node) => ({
-    minX: Math.min(result.minX, node.x - GRAPH_NODE_HALF_WIDTH),
-    maxX: Math.max(result.maxX, node.x + GRAPH_NODE_HALF_WIDTH),
-    minY: Math.min(result.minY, node.y - GRAPH_NODE_TOP),
-    maxY: Math.max(result.maxY, node.y + GRAPH_NODE_BOTTOM),
-  }), {
+  return nodes.reduce((result, node) => {
+    const layoutBounds = node.layoutBounds ?? graphNodeLayoutBounds(0, 0);
+    return {
+      minX: Math.min(result.minX, node.x - layoutBounds.halfWidth),
+      maxX: Math.max(result.maxX, node.x + layoutBounds.halfWidth),
+      minY: Math.min(result.minY, node.y - layoutBounds.top),
+      maxY: Math.max(result.maxY, node.y + layoutBounds.bottom),
+    };
+  }, {
     minX: Infinity,
     maxX: -Infinity,
     minY: Infinity,
@@ -526,6 +537,12 @@ export function createProductWorkspace({
         authoredNode?.icon || authoredNode?.metadata?.relayer?.icon,
         { class: "relayer-node-icon" },
       ));
+      if (authoredNode) {
+        authoredNode.layoutBounds = graphNodeLayoutBounds(
+          element.offsetWidth,
+          element.offsetHeight,
+        );
+      }
       element.onclick = () => selectNode(state, element.dataset.node);
       element.onpointerdown = (event) => {
         event.preventDefault();
