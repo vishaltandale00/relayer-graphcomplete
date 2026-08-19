@@ -6,6 +6,7 @@ import {
   workspaceModeCapabilities,
 } from "./model.js";
 import { createRelayerIcon } from "./icons.js";
+import { createGraphSimulationController } from "./graph-simulation.js";
 import { renderMarkdown } from "./markdown.js";
 import { productWorkspaceMarkup } from "./view.js";
 
@@ -229,7 +230,7 @@ export function createProductWorkspace({
   onInvokeAction = async () => {},
 }) {
   const capabilities = workspaceModeCapabilities(mode);
-  let physicsFrame;
+  const graphSimulation = createGraphSimulationController();
   let graphNodes = [];
   let graphEdges = [];
   let graphSignature = "";
@@ -452,10 +453,20 @@ export function createProductWorkspace({
 
   function renderGraph(state, thread) {
     const responseNodes = responseNodesForThread(state, thread);
+    const nextViewKey = graphCameraViewKey(state, thread, responseNodes);
+    const enteringView = nextViewKey !== graphViewKey;
+    if (enteringView) {
+      saveGraphView();
+      graphSimulation.cancel();
+    }
     $("#graphEmpty").classList.toggle("hidden", responseNodes.length > 0);
     $("#graphStage").classList.toggle("hidden", responseNodes.length === 0);
     if (!responseNodes.length) {
-      graphViewKey = graphCameraViewKey(state, thread, responseNodes);
+      graphViewKey = nextViewKey;
+      graphNodes = [];
+      graphEdges = [];
+      graphSignature = "";
+      graphLayoutSettled = false;
       selection.selectedNodeId = null;
       $("#inspector").classList.add("hidden");
       const pending = PENDING_COMPLETION_STATUSES.has(state.status);
@@ -468,9 +479,6 @@ export function createProductWorkspace({
     }
 
     const bounds = $("#graphStage").getBoundingClientRect();
-    const nextViewKey = graphCameraViewKey(state, thread, responseNodes);
-    const enteringView = nextViewKey !== graphViewKey;
-    if (enteringView) saveGraphView();
     const cachedView = enteringView ? graphViewCache.get(nextViewKey) : null;
     const previous = new Map(
       (cachedView?.nodes ?? (!enteringView ? graphNodes : []))
@@ -571,31 +579,29 @@ export function createProductWorkspace({
       drawGraph();
       return;
     }
-    cancelAnimationFrame(physicsFrame);
     graphLayoutSettled = false;
     const autoFitRevision = cameraRevision;
     const autoFitViewKey = enteringView ? graphViewKey : null;
     let ticks = 0;
-    const simulate = () => {
+    graphSimulation.start(() => {
       physicsStep(bounds);
       drawGraph();
       if (++ticks < 220) {
-        physicsFrame = requestAnimationFrame(simulate);
-      } else {
-        graphLayoutSettled = true;
-        if (shouldAutoFitSettledGraph(
-          autoFitViewKey,
-          graphViewKey,
-          autoFitRevision,
-          cameraRevision,
-        )) {
-          updateCamera(fitGraphCamera(graphNodes, bounds), false);
-        } else {
-          saveGraphView();
-        }
+        return true;
       }
-    };
-    simulate();
+      graphLayoutSettled = true;
+      if (shouldAutoFitSettledGraph(
+        autoFitViewKey,
+        graphViewKey,
+        autoFitRevision,
+        cameraRevision,
+      )) {
+        updateCamera(fitGraphCamera(graphNodes, bounds), false);
+      } else {
+        saveGraphView();
+      }
+      return false;
+    });
   }
 
   function physicsStep(bounds) {
@@ -756,7 +762,7 @@ export function createProductWorkspace({
   }
 
   function dispose() {
-    cancelAnimationFrame(physicsFrame);
+    graphSimulation.cancel();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     dragging = null;
     panning = null;

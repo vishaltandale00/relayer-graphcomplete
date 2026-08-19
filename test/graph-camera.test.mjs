@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
+import { createGraphSimulationController } from "../desktop/renderer/src/product-workspace/graph-simulation.js";
 import {
   GRAPH_MAX_ZOOM,
   GRAPH_MIN_ZOOM,
@@ -17,6 +18,29 @@ import {
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace graph camera", () => {
+  it("invalidates a previous view's queued physics frame before it can mutate a restored view", () => {
+    const queuedFrames = new Map();
+    let nextFrame = 0;
+    const requestFrame = vi.fn((callback) => {
+      const frame = ++nextFrame;
+      queuedFrames.set(frame, callback);
+      return frame;
+    });
+    const cancelFrame = vi.fn((frame) => queuedFrames.delete(frame));
+    const controller = createGraphSimulationController({ requestFrame, cancelFrame });
+    const step = vi.fn(() => true);
+
+    controller.start(step);
+    const staleFrame = requestFrame.mock.results[0].value;
+    const staleCallback = queuedFrames.get(staleFrame);
+    controller.cancel();
+    staleCallback();
+
+    expect(step).toHaveBeenCalledTimes(1);
+    expect(cancelFrame).toHaveBeenCalledWith(staleFrame);
+    expect(queuedFrames.has(staleFrame)).toBe(false);
+  });
+
   it("scales edge thickness with the camera zoom", () => {
     expect(graphEdgeStrokeWidth(0.4)).toBeCloseTo(0.6);
     expect(graphEdgeStrokeWidth(2)).toBe(3);
