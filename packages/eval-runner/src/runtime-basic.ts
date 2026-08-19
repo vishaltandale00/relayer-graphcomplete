@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CompletionOutput, GraphCapability, GraphNode } from "@relayer/graph-client";
 import { digestHarnessConfiguration, startHarnessHost, type HarnessFactory, type HarnessImplementationMap } from "@relayer/harness-host";
@@ -13,6 +13,10 @@ export const basicEvalCaseId = "empty-project.task-system.two-turn";
 export const basicEvalPrompt = "A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.";
 export const basicEvalFollowUpPrompt = "Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.";
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
+
+export function basicEvalPythonPath(existingPythonPath?: string): string {
+  return [join(repositoryRoot, "python/relayer-graph/src"), existingPythonPath].filter(Boolean).join(delimiter);
+}
 
 export const basicEvalFacts = [
   { id: "enters-queue", description: "Tasks enter the incoming queue.", patterns: [/task.{0,30}(enter|arriv).{0,30}queue/i, /incoming queue/i] },
@@ -195,13 +199,16 @@ function arraysEqual(left: readonly number[], right: readonly number[]): boolean
 const judgeSchema = { type: "object", properties: { factIds: { type: "array", items: { type: "string" } }, graphUseful: { type: "boolean" }, detailsUseful: { type: "boolean" }, problems: { type: "array", items: { type: "string" } }, verdict: { type: "string", enum: ["pass", "fail"] } }, required: ["factIds", "graphUseful", "detailsUseful", "problems", "verdict"], additionalProperties: false } as const;
 async function judgeOutput(output: CompletionOutput, promptText: string, workingDirectory: string): Promise<BasicJudge> {
   const codex = new Codex(); const thread = codex.startThread({ workingDirectory, skipGitRepoCheck: true, sandboxMode: "read-only", approvalPolicy: "never", networkAccessEnabled: false });
-  const visible = judgeVisibleGraph(output);
-  const prompt = `Grade this visible graph answer to: ${promptText}\nExpected facts:\n${basicEvalFacts.map((fact)=>`${fact.id}: ${fact.description}`).join("\n")}\nGraph: ${JSON.stringify(visible)}\nList only fact IDs clearly present. Pass only when all six facts are present, graph connections are useful, details are useful, and there are no problems.`;
-  const turn = await thread.run(prompt, { outputSchema: judgeSchema });
+  const turn = await thread.run(basicJudgePrompt(output, promptText), { outputSchema: judgeSchema });
   const value = JSON.parse(turn.finalResponse) as BasicJudge;
   const expected = new Set(basicEvalFacts.map((fact) => fact.id)); const actual = new Set(value.factIds);
   const valid = expected.size === actual.size && [...expected].every((id) => actual.has(id)) && value.graphUseful && value.detailsUseful && value.problems.length === 0;
   return { ...value, verdict: valid ? "pass" : "fail" };
+}
+
+export function basicJudgePrompt(output: CompletionOutput, promptText: string): string {
+  const visible = judgeVisibleGraph(output);
+  return `Grade this visible graph answer to: ${promptText}\nExpected facts:\n${basicEvalFacts.map((fact)=>`${fact.id}: ${fact.description}`).join("\n")}\nGraph: ${JSON.stringify(visible)}\nEdges are undirected. Each endpoint pair is an association, [a,b] means the same thing as [b,a], and endpoint order does not encode flow direction. Judge whether the connections usefully relate the concepts; do not infer sequencing from tuple order. Assess facts from node text and graph topology together. For this task, exactly two worker nodes shown busy while additional work remains queued clearly establishes the two-active-task limit unless the graph indicates another executor.\nList only fact IDs clearly present. Pass only when all six facts are present, graph connections are useful, details are useful, and there are no problems.`;
 }
 
 export function judgeVisibleGraph(output: CompletionOutput): { nodes: readonly { id: number; icon: string; title: string; detail: string }[]; edges: readonly (readonly [number, number])[] } {
