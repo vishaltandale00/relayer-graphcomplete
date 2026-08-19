@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 
 import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 import { EvalService } from "./eval-service.mjs";
+import { loadJudgeScreenshotArtifact } from "./judge-screenshot-loader.mjs";
 import { ReviewSession } from "./review-session.mjs";
 import {
   createLocalSimulatedUserJudgeRunner,
@@ -51,6 +52,8 @@ const reviewWindows = new Set();
 const reviewSessions = new Map();
 const manualReviewWindows = new Map();
 const automatedReviewWindows = new Map();
+const judgeWindows = new Map();
+const evalStateFile = join(userDataDirectory, "eval-data", "test-runs.json");
 const graphRuntime = new GraphCompleteRuntimeService({
   userDataDirectory,
   graphServerBinary,
@@ -128,6 +131,44 @@ async function createReviewWindow(executionId) {
   });
   await reviewSession.open();
   reviewSessions.set(executionId, reviewSession);
+  return window;
+}
+
+async function createJudgeWindow(executionId) {
+  const existing = judgeWindows.get(executionId);
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
+    return existing;
+  }
+  const context = evalService.reviewContext(executionId);
+  const window = new BrowserWindow({
+    width: 1520,
+    height: 940,
+    minWidth: 1040,
+    minHeight: 680,
+    titleBarStyle: "hiddenInset",
+    backgroundColor: "#0b0c0d",
+    webPreferences: {
+      preload: join(desktopDirectory, "preload", "eval-dashboard.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  judgeWindows.set(executionId, window);
+  window.on("closed", () => {
+    if (judgeWindows.get(executionId) === window) judgeWindows.delete(executionId);
+  });
+  windowSecurity(window);
+  try {
+    await window.loadFile(join(evalRendererDirectory, "judge.html"), {
+      query: { runId: String(context.runId), executionId: String(executionId) },
+    });
+  } catch (error) {
+    if (!window.isDestroyed()) window.close();
+    throw error;
+  }
   return window;
 }
 
@@ -222,6 +263,13 @@ function registerEvalIpc() {
     await createReviewWindow(executionId);
     return true;
   });
+  ipcMain.handle("relayer-eval:open-judge-review", async (_event, executionId) => {
+    await createJudgeWindow(executionId);
+    return true;
+  });
+  ipcMain.handle("relayer-eval:load-judge-screenshot", (_event, input) => (
+    loadJudgeScreenshotArtifact({ ...input, stateFile: evalStateFile })
+  ));
   ipcMain.handle("relayer-eval:review-context", (_event, executionId) => evalService.reviewContext(executionId));
 }
 
@@ -247,7 +295,7 @@ async function start() {
     openReviewSession: openAutomatedReviewSession,
   });
   evalService = await new EvalService({
-    stateFile: join(userDataDirectory, "eval-data", "test-runs.json"),
+    stateFile: evalStateFile,
     productSession,
     configurationPaths,
     simulatedUserJudgeRunner,
@@ -286,6 +334,10 @@ function stop() {
     reviewSessions.clear();
     manualReviewWindows.clear();
     automatedReviewWindows.clear();
+    for (const window of judgeWindows.values()) {
+      try { if (!window.isDestroyed()) window.close(); } catch (error) { errors.push(error); }
+    }
+    judgeWindows.clear();
     if (productServer) {
       try { await productServer.close(); } catch (error) { errors.push(error); }
     }

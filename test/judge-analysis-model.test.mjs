@@ -1,0 +1,114 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildJudgeAnalysis,
+  evidenceIdsForReview,
+  scoreForRatings,
+  subjectForSelection,
+} from "../desktop/eval-renderer/judge-model.js";
+
+function fixture() {
+  return {
+    id: "run-1",
+    status: "failed",
+    judgeConfigurationName: "simulated-user",
+    executions: [{
+      id: "execution-1",
+      testCaseId: "project-case",
+      harnessConfigurationName: "codex-high",
+      status: "failed",
+      turns: [{
+        interactionId: 11,
+        threadId: 4,
+        threadDefinitionId: "architecture",
+        turnIndex: 1,
+        threadTurnIndex: 1,
+        prompt: "Think deeper.",
+        deterministicPassed: true,
+        judgeResults: [{
+          id: "judge-1",
+          status: "partial",
+          error: "Review ended before final submission.",
+          coverage: {
+            complete: false,
+            missingSubjects: [
+              { kind: "node", layerId: "layer-a", subjectId: "node-2" },
+              { kind: "navigate_action", layerId: "layer-a", nodeId: "node-2", subjectId: "action-2" },
+              { kind: "turn", subjectId: "11" },
+            ],
+          },
+          references: {
+            screenshots: [
+              "screenshots/shot-layer/metadata.json",
+              "screenshots/shot-node/metadata.json",
+              "screenshots/shot-unused/metadata.json",
+            ],
+          },
+          review: {
+            inventory: {
+              turn: { turnId: "11" },
+              layers: [{ layerId: "layer-a", depth: 0 }, { layerId: "layer-b", depth: 1 }],
+              nodes: [
+                { layerId: "layer-a", nodeId: "node-1", actionIds: [] },
+                { layerId: "layer-a", nodeId: "node-2", actionIds: ["action-2"] },
+              ],
+              actions: [{ layerId: "layer-a", nodeId: "node-2", actionId: "action-2", actionKind: "navigate", targetLayerId: "layer-b" }],
+            },
+            layers: [{ subject: { layerId: "layer-a" }, history: { current: {
+              layerId: "layer-a",
+              ratings: { cohesion: 4, coverage: null },
+              evidence: { viewport: ["shot-layer"] },
+              summary: "Clear layer.", findings: [],
+            } } }],
+            nodes: [
+              { subject: { layerId: "layer-a", nodeId: "node-1" }, history: { current: {
+                layerId: "layer-a", nodeId: "node-1", ratings: { substance: 3, presentation: 4 },
+                evidence: { context: ["shot-layer"], detail: ["shot-node"] },
+                summary: "Useful node.", findings: [{ type: "strength", text: "Grounded.", evidence: ["shot-node"] }], actions: [],
+              } } },
+            ],
+            coverage: { complete: false },
+          },
+        }],
+      }, {
+        interactionId: 12,
+        threadId: 5,
+        threadDefinitionId: "implementation",
+        turnIndex: 2,
+        threadTurnIndex: 0,
+        prompt: "Implement it.",
+        deterministicPassed: false,
+        deterministicChecks: [{ name: "clean", passed: false, detail: "Workspace was dirty." }],
+        judgeResults: [],
+      }].reverse(),
+    }],
+  };
+}
+
+describe("judge analysis view model", () => {
+  it("keeps chronological turns and represents partial, missing, and skipped subjects literally", () => {
+    const analysis = buildJudgeAnalysis(fixture(), "execution-1");
+    expect(analysis.turns.map((turn) => turn.interactionId)).toEqual(["11", "12"]);
+    expect(analysis.turns.map((turn) => turn.position)).toEqual([0, 1]);
+    expect(analysis.turns[0].state).toBe("partial");
+    expect(analysis.turns[0].reviewed).toBe(false);
+    expect(analysis.turns[0].layers.map((layer) => layer.layerId)).toEqual(["layer-a", "layer-b"]);
+    expect(analysis.turns[0].layers[0].nodes[0].reviewed).toBe(true);
+    expect(analysis.turns[0].layers[0].nodes[1].reviewed).toBe(false);
+    expect(analysis.turns[0].layers[0].nodes[1].actions[0].reviewed).toBe(false);
+    expect(analysis.turns[1]).toMatchObject({ state: "skipped", stateReason: "Workspace was dirty." });
+  });
+
+  it("filters evidence to the selected subject while retaining a lazy all-turn inventory", () => {
+    const turn = buildJudgeAnalysis(fixture(), "execution-1").turns[0];
+    const node = subjectForSelection(turn, { kind: "node", layerId: "layer-a", nodeId: "node-1" });
+    expect(node.evidenceIds).toEqual(["shot-layer", "shot-node"]);
+    expect(turn.allEvidenceIds).toEqual(["shot-layer", "shot-node", "shot-unused"]);
+    expect(evidenceIdsForReview(node.review)).toEqual(["shot-layer", "shot-node"]);
+  });
+
+  it("does not turn null or missing criterion scores into zero", () => {
+    expect(scoreForRatings({ cohesion: 4, presentation: null })).toBe(4);
+    expect(scoreForRatings({ cohesion: null })).toBeNull();
+    expect(scoreForRatings(null)).toBeNull();
+  });
+});

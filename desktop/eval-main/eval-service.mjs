@@ -228,12 +228,17 @@ export class EvalService {
           candidate.testCaseId === caseId
           && candidate.harnessConfigurationName === selected.harnessConfigurationName
         ));
+        const threadIds = execution?.threadIds || [];
         return {
           id: caseId,
           name: definition?.name || caseId,
           executionId: execution?.id || null,
           status: execution?.status || "missing",
-          threadIds: execution?.threadIds || [],
+          threadIds,
+          threads: threadIds.map((threadId, index) => ({
+            id: threadId,
+            name: definition?.threads?.[index]?.name || definition?.name || caseId,
+          })),
         };
       });
       return copy({

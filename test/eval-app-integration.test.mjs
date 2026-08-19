@@ -113,6 +113,11 @@ describe("Relayer Eval application service", () => {
     });
     expect(context.cases).toHaveLength(3);
     expect(context.cases.every((testCase) => testCase.threadIds.length === 1)).toBe(true);
+    expect(context.cases.map((testCase) => testCase.threads)).toEqual([
+      [{ id: completed.executions[0].threadIds[0], name: "Task system · two turns" }],
+      [{ id: completed.executions[1].threadIds[0], name: "Task system · one turn" }],
+      [{ id: completed.executions[2].threadIds[0], name: "Hierarchical overview · one turn" }],
+    ]);
 
     const detail = await productRequest(productSession, `/api/threads/${selected.threadIds[0]}`);
     expect(detail.interactions[0].completionStatus).toBe("accepted");
@@ -160,6 +165,13 @@ describe("Relayer Eval application service", () => {
       ["implementation", 1],
     ]);
     expect(h3Execution.turns).toHaveLength(6);
+    expect(evalService.reviewContext(h3Execution.id).cases.find((testCase) => (
+      testCase.id === H3_PROJECT_CASE_ID
+    )).threads).toEqual([
+      { id: h3Execution.threadIds[0], name: "Architecture question" },
+      { id: h3Execution.threadIds[1], name: "Read-only bug diagnosis" },
+      { id: h3Execution.threadIds[2], name: "Implement and commit the repair" },
+    ]);
     expect(workspaceGrades).toEqual(["question", "question", "diagnosis", "diagnosis", "implementation"]);
     expect(acceptedTopologyGrades).toHaveLength(6);
     expect(acceptedTopologyGrades.filter((grade) => grade.requireGrandchild)).toHaveLength(2);
