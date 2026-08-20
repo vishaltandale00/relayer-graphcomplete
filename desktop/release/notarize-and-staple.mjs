@@ -49,6 +49,15 @@ export async function notarizeAndStapleDesktopDMGs({
     }
     await execute("/usr/bin/xcrun", ["stapler", "staple", dmgPath]);
     await execute("/usr/bin/xcrun", ["stapler", "validate", dmgPath]);
+    await execute("/usr/sbin/spctl", [
+      "--assess",
+      "--type",
+      "open",
+      "--context",
+      "context:primary-signature",
+      "--verbose=4",
+      dmgPath,
+    ]);
   }
   return { dmgPaths, notarizationMode: notarization.mode };
 }

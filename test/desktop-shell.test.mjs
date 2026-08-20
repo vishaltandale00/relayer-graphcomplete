@@ -1166,6 +1166,7 @@ describe("desktop skeleton", () => {
     const stableWorkflow = await readFile(new URL("../.github/workflows/desktop-promote-stable.yml", import.meta.url), "utf8");
     const intelCanaryWorkflow = await readFile(new URL("../.github/workflows/desktop-intel-canary.yml", import.meta.url), "utf8");
     const intelCanaryScript = await readFile(new URL("../desktop/release/run-macos-intel-canary.sh", import.meta.url), "utf8");
+    const notarizationScript = await readFile(new URL("../desktop/release/notarize-and-staple.mjs", import.meta.url), "utf8");
     expect(releaseWorkflow).toContain("if: ${{ always() && startsWith(github.ref, 'refs/tags/desktop-v') }}");
     expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main');
     expect(releaseWorkflow).toContain("uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca");
@@ -1186,6 +1187,8 @@ describe("desktop skeleton", () => {
     expect(intelCanaryWorkflow).toContain("runs-on: macos-15-intel");
     expect(intelCanaryWorkflow).toContain("run-macos-intel-canary.sh");
     expect(intelCanaryWorkflow).toContain("preview-publication-macos-x64");
+    expect(intelCanaryScript).toContain("spctl --assess --type open");
+    expect(notarizationScript.indexOf('["stapler", "validate", dmgPath]')).toBeLessThan(notarizationScript.indexOf('"/usr/sbin/spctl"'));
     expect(intelCanaryScript).toContain('launchctl setenv RELAYER_DESKTOP_USER_DATA_DIR "$update_user_data"');
     expect(intelCanaryScript).toContain("trap restore_launch_environment EXIT");
     const releaseRunbook = await readFile(new URL("../docs/desktop-release-operations.md", import.meta.url), "utf8");
@@ -1221,6 +1224,7 @@ describe("desktop skeleton", () => {
       appleTeamId: "NZ253AL7U6",
     });
     const builder = createDesktopBuilderConfig(contract);
+    expect(builder.dmg).toEqual({ sign: true });
     expect(builder).toMatchObject({
       appId: "ai.relayer.desktop",
       productName: "Relayer",
