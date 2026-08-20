@@ -514,43 +514,16 @@ impl ProductService {
         allow_unselected_model: bool,
     ) -> Result<Interaction, ProductError> {
         let text = required(text, "text")?;
-        let thread = self
-            .storage
-            .get_thread(thread_id)
-            .await?
-            .ok_or_else(|| ProductError::NotFound(format!("thread {thread_id}")))?;
-        let inherited;
-        let model_selection = match model_selection {
-            Some(selection) => Some(selection),
-            None => {
-                inherited = self
-                    .storage
-                    .list_interactions(thread_id)
-                    .await?
-                    .last()
-                    .and_then(|interaction| interaction.model_selection.clone());
-                inherited.as_ref()
-            }
-        };
-        match model_selection {
-            Some(selection) => {
-                self.validate_interaction_model_selection(
-                    &thread.harness_configuration_name,
-                    selection,
-                )
-                .await?;
-            }
-            None if self.runtime_available && !allow_unselected_model => {
-                return Err(CatalogError::invalid(
-                    "model_selection_required",
-                    "The previous interaction has no model selection to inherit.",
-                )
-                .into());
-            }
-            None => {}
+        if self.storage.get_thread(thread_id).await?.is_none() {
+            return Err(ProductError::NotFound(format!("thread {thread_id}")));
         }
         self.storage
-            .insert_interaction(thread_id, text, model_selection)
+            .insert_interaction(
+                thread_id,
+                text,
+                model_selection,
+                self.runtime_available && !allow_unselected_model,
+            )
             .await
             .map_err(Into::into)
     }

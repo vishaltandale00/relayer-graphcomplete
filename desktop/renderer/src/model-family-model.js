@@ -26,27 +26,40 @@ export function copySystemFamily(family, sequence = Date.now()) {
   };
 }
 
-export function preserveFamilyEditAfterRefresh(families, activeFamily) {
+export function preserveFamilyEditAfterRefresh(families, activeFamilyOrFamilies) {
   const next = [...families];
-  if (!activeFamily?.draft && !activeFamily?.editing) {
-    return { families: next, selectedIndex: -1, editSnapshot: null };
+  const activeFamilies = Array.isArray(activeFamilyOrFamilies)
+    ? activeFamilyOrFamilies
+    : [activeFamilyOrFamilies].filter(Boolean);
+  const preservedIndexes = [];
+  let editSnapshot = null;
+  for (const activeFamily of activeFamilies) {
+    if (!activeFamily?.draft && !activeFamily?.editing) continue;
+    if (activeFamily.draft) {
+      if (next.some((family) => String(family.id) === String(activeFamily.id))) continue;
+      next.push(structuredClone(activeFamily));
+      preservedIndexes.push(next.length - 1);
+      continue;
+    }
+    const index = next.findIndex((family) => String(family.id) === String(activeFamily.id));
+    if (index < 0) continue;
+    editSnapshot ??= structuredClone(next[index]);
+    next[index] = {
+      ...next[index],
+      ...structuredClone(activeFamily),
+      id: next[index].id,
+      kind: next[index].kind,
+      position: next[index].position,
+      editing: true,
+    };
+    preservedIndexes.push(index);
   }
-  if (activeFamily.draft) {
-    next.push(structuredClone(activeFamily));
-    return { families: next, selectedIndex: next.length - 1, editSnapshot: null };
-  }
-  const selectedIndex = next.findIndex((family) => String(family.id) === String(activeFamily.id));
-  if (selectedIndex < 0) return { families: next, selectedIndex: -1, editSnapshot: null };
-  const editSnapshot = structuredClone(next[selectedIndex]);
-  next[selectedIndex] = {
-    ...next[selectedIndex],
-    ...structuredClone(activeFamily),
-    id: next[selectedIndex].id,
-    kind: next[selectedIndex].kind,
-    position: next[selectedIndex].position,
-    editing: true,
+  return {
+    families: next,
+    selectedIndex: preservedIndexes[0] ?? -1,
+    preservedIndexes,
+    editSnapshot,
   };
-  return { families: next, selectedIndex, editSnapshot };
 }
 
 export function modelMember(provider, model) {

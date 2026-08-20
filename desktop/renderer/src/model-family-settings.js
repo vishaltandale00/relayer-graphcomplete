@@ -115,19 +115,29 @@ function setStatus(message = "", kind = "") {
 
 async function refresh({ preserveIndex = true, preserveEdit = false } = {}) {
   const previousIndex = selectedFamilyIndex;
-  const activeFamily = preserveEdit ? structuredClone(settings?.families?.[previousIndex]) : null;
+  const previousFamilyId = settings?.families?.[previousIndex]?.id;
+  const activeFamilies = preserveEdit
+    ? settings?.families?.filter((family) => family.draft || family.editing).map((family) => structuredClone(family))
+    : [];
+  const previousEditSnapshot = editSnapshot;
   normalizeSettings(await loadModelSettings());
-  const preserved = preserveFamilyEditAfterRefresh(settings.families, activeFamily);
-  if (preserved.selectedIndex >= 0) {
-    settings.families = preserved.families;
-    settings.families[preserved.selectedIndex].models = settings.families[preserved.selectedIndex].models
+  const preserved = preserveFamilyEditAfterRefresh(settings.families, activeFamilies);
+  settings.families = preserved.families;
+  for (const index of preserved.preservedIndexes) {
+    settings.families[index].models = settings.families[index].models
       .map((member) => hydrateMember({ providerId: member.providerId, modelId: member.modelId }));
-    selectedFamilyIndex = preserved.selectedIndex;
-    editSnapshot = preserved.editSnapshot;
-  } else {
-    if (preserveIndex) selectedFamilyIndex = Math.min(previousIndex, settings.families.length - 1);
-    editSnapshot = null;
   }
+  const preservedVisibleIndex = settings.families.findIndex((family) => (
+    String(family.id) === String(previousFamilyId)
+  ));
+  if (preserveIndex) {
+    selectedFamilyIndex = preservedVisibleIndex >= 0
+      ? preservedVisibleIndex
+      : Math.min(previousIndex, settings.families.length - 1);
+  }
+  editSnapshot = activeFamilies.some((family) => family.editing)
+    ? previousEditSnapshot ?? preserved.editSnapshot
+    : null;
   render();
 }
 
@@ -306,7 +316,7 @@ async function persistEnabled(index, enabled) {
   family.enabled = enabled;
   try {
     await updateModelFamily(family.id, family.kind === "system" ? { enabled } : familyPayload(family));
-    await refresh();
+    await refresh({ preserveEdit: true });
   } catch (error) {
     family.enabled = !enabled;
     render();
@@ -366,7 +376,7 @@ async function deleteFamily(index) {
   try {
     await deleteModelFamily(family.id);
     selectedFamilyIndex = Math.min(index, Math.max(0, settings.families.length - 2));
-    await refresh();
+    await refresh({ preserveEdit: true });
     setStatus("Deleted", "success");
   } catch (error) {
     setStatus(error.message, "error");

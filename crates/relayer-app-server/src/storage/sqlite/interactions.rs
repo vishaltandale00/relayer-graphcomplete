@@ -37,6 +37,7 @@ impl SqliteProductStore {
         thread_id: ThreadId,
         text: &str,
         model_selection: Option<&InteractionModelSelection>,
+        require_model_selection: bool,
     ) -> Result<Interaction, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let (previous_timestamp, permission_profile_id, harness_id): (String, String, String) =
@@ -44,17 +45,37 @@ impl SqliteProductStore {
                 .bind(thread_id.value())
                 .fetch_one(&mut *transaction)
                 .await?;
-        if let Some(selection) = model_selection {
+        let model_selection = match model_selection {
+            Some(selection) => Some(selection.clone()),
+            None => sqlx::query(
+                "SELECT model_provider_id,provider_model_id,model_family_id FROM interactions WHERE thread_id=?1 ORDER BY sequence DESC LIMIT 1",
+            )
+            .bind(thread_id.value())
+            .fetch_optional(&mut *transaction)
+            .await?
+            .as_ref()
+            .map(|row| interaction_model_selection_from_row(row, 0, 1, 2))
+            .transpose()?
+            .flatten(),
+        };
+        if let Some(selection) = model_selection.as_ref() {
             catalog::validate_model_selection_on(
                 &mut transaction,
                 &ValidateModelSelectionCommand {
-                    harness_id,
+                    harness_id: harness_id.clone(),
                     family_id: selection.family_id,
                     provider_id: selection.provider_id.clone(),
                     model_id: selection.model_id.clone(),
                 },
             )
             .await?;
+        } else if require_model_selection {
+            return Err(StorageError::Catalog(
+                crate::product::CatalogError::invalid(
+                    "model_selection_required",
+                    "The previous interaction has no model selection to inherit.",
+                ),
+            ));
         }
         let timestamp = monotonic_timestamp(&previous_timestamp);
         let sequence: i64 = sqlx::query_scalar(
@@ -71,9 +92,9 @@ impl SqliteProductStore {
         .bind(text)
         .bind(&timestamp)
         .bind(&permission_profile_id)
-        .bind(model_selection.map(|selection| selection.provider_id.as_str()))
-        .bind(model_selection.map(|selection| selection.model_id.as_str()))
-        .bind(model_selection.map(|selection| selection.family_id.value()))
+        .bind(model_selection.as_ref().map(|selection| selection.provider_id.as_str()))
+        .bind(model_selection.as_ref().map(|selection| selection.model_id.as_str()))
+        .bind(model_selection.as_ref().map(|selection| selection.family_id.value()))
         .execute(&mut *transaction)
         .await?;
         sqlx::query("UPDATE threads SET updated_at=?1 WHERE id=?2")
@@ -92,7 +113,7 @@ impl SqliteProductStore {
             harness_configuration_name: None,
             harness_configuration_digest: None,
             permission_profile_id,
-            model_selection: model_selection.cloned(),
+            model_selection,
             effective_execution_digest: None,
             effective_permission_receipt: None,
             completion_output: None,
@@ -234,5 +255,93 @@ fn interaction_model_selection_from_row(
         _ => Err(StorageError::IncompatibleSchema(
             "interaction model selection is partially populated or invalid".into(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::NewThreadRecord;
+
+    #[tokio::test]
+    async fn omitted_model_is_inherited_inside_the_sequence_allocation_transaction() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-interaction-inheritance-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_models(&store).await;
+        let first_model = selection("first-model");
+        let second_model = selection("second-model");
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Atomic inheritance",
+                project_id: None,
+                initial_message: "First",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&first_model),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+
+        let explicit = store
+            .insert_interaction(thread.id, "Explicit", Some(&second_model), true)
+            .await
+            .unwrap();
+        let inherited = store
+            .insert_interaction(thread.id, "Inherited", None, true)
+            .await
+            .unwrap();
+
+        assert_eq!(explicit.sequence, 2);
+        assert_eq!(inherited.sequence, 3);
+        assert_eq!(inherited.model_selection, Some(second_model));
+        store.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    fn selection(model_id: &str) -> InteractionModelSelection {
+        InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(1),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: model_id.into(),
+        }
+    }
+
+    async fn seed_test_models(store: &SqliteProductStore) {
+        sqlx::query("UPDATE model_providers SET connected=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE id='codex'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        for (order, model_id) in ["first-model", "second-model"].iter().enumerate() {
+            sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('codex',?1,?1,?2,1,1,0,'{}')")
+                .bind(model_id)
+                .bind(order as i64)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query("UPDATE product_harnesses SET available=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO model_families(id,name,kind,system_key,enabled,position) VALUES (1,'Codex','system','codex',1,0)")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        for (position, model_id) in ["first-model", "second-model"].iter().enumerate() {
+            sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (1,?1,'codex',?2)")
+                .bind(position as i64)
+                .bind(model_id)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+        }
     }
 }

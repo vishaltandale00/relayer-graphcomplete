@@ -132,6 +132,29 @@ describe("model family settings model", () => {
     });
     expect(draft.selectedIndex).toBe(1);
     expect(draft.families[1]).toMatchObject({ name: "Draft", draft: true });
+
+    const offScreen = preserveFamilyEditAfterRefresh(serverFamilies, [
+      {
+        id: 1,
+        name: "Edited off screen",
+        kind: "custom",
+        position: 0,
+        editing: true,
+        models: [{ providerId: "codex", modelId: "gpt-5.6-sol" }],
+      },
+      {
+        id: "draft-2",
+        name: "Draft off screen",
+        kind: "custom",
+        draft: true,
+        models: [],
+      },
+    ]);
+    expect(offScreen.preservedIndexes).toEqual([0, 1]);
+    expect(offScreen.families).toEqual([
+      expect.objectContaining({ id: 1, name: "Edited off screen", editing: true }),
+      expect.objectContaining({ id: "draft-2", name: "Draft off screen", draft: true }),
+    ]);
   });
 
   it("surfaces an unavailable saved harness instead of selecting another", () => {
