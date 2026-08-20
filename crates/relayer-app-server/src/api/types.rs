@@ -34,6 +34,7 @@ pub(crate) struct ThreadResponse {
     project_id: Option<i64>,
     root_interaction_id: i64,
     harness_configuration_name: String,
+    permission_profile_id: String,
     created_at: String,
     updated_at: String,
 }
@@ -46,6 +47,7 @@ impl From<Thread> for ThreadResponse {
             project_id: thread.project_id.map(|id| id.value()),
             root_interaction_id: thread.root_interaction_id.value(),
             harness_configuration_name: thread.harness_configuration_name,
+            permission_profile_id: thread.permission_profile_id,
             created_at: thread.created_at,
             updated_at: thread.updated_at,
         }
@@ -64,6 +66,9 @@ pub(crate) struct InteractionResponse {
     completion_status: String,
     harness_configuration_name: Option<String>,
     harness_configuration_digest: Option<String>,
+    permission_profile_id: String,
+    effective_execution_digest: Option<String>,
+    effective_permission_receipt: Option<serde_json::Value>,
     completion_output: Option<serde_json::Value>,
     completion_error: Option<String>,
 }
@@ -80,6 +85,9 @@ impl From<Interaction> for InteractionResponse {
             completion_status: interaction.completion_status,
             harness_configuration_name: interaction.harness_configuration_name,
             harness_configuration_digest: interaction.harness_configuration_digest,
+            permission_profile_id: interaction.permission_profile_id,
+            effective_execution_digest: interaction.effective_execution_digest,
+            effective_permission_receipt: interaction.effective_permission_receipt,
             completion_output: interaction.completion_output,
             completion_error: interaction.completion_error,
         }

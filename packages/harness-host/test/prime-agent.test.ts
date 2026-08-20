@@ -7,8 +7,10 @@ const configuration: HarnessConfiguration = {
   name: "prime-agent-basic",
   implementation: "prime.agent",
   implementationVersion: 1,
+  permissionBindings: { full: {} },
   settings: { thinkingLevel: "medium", rlmMaxDepth: 1, prewarmIpythonKernel: true },
 };
+const fullPermission = { permissionProfileId: "full", permissionBinding: {} } as const;
 
 describe("PrimeAgentHarness", () => {
   it("keeps one Prime Agent session while passing a distinct context to each run", async () => {
@@ -26,6 +28,7 @@ describe("PrimeAgentHarness", () => {
     const harness = await PrimeAgentHarness.create({
       threadId: 7,
       workingDirectory: "/tmp/project",
+      ...fullPermission,
       configuration: { ...configuration, settings: { ...configuration.settings, model: selectedModel } },
     }, { loadModule: async () => ({
       SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
@@ -68,6 +71,7 @@ describe("PrimeAgentHarness", () => {
     const harness = await PrimeAgentHarness.create({
       threadId: 7,
       workingDirectory: "/tmp/project",
+      ...fullPermission,
       configuration,
       savedState: { primeAgentSessionFile: "/tmp/saved.jsonl" },
     }, { loadModule: async () => ({
@@ -96,6 +100,7 @@ describe("PrimeAgentHarness", () => {
     const harness = await PrimeAgentHarness.create({
       threadId: 7,
       workingDirectory: "/tmp/project",
+      ...fullPermission,
       configuration,
     }, { loadModule: async () => ({
       SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
@@ -164,8 +169,21 @@ describe("PrimeAgentHarness", () => {
     await expect(PrimeAgentHarness.create({
       threadId: 7,
       workingDirectory: "/tmp/project",
+      ...fullPermission,
       configuration: { ...configuration, settings: { model: "invalid" } },
     }, { loadModule })).rejects.toThrow("model must contain provider and id");
+    expect(loadModule).not.toHaveBeenCalled();
+  });
+
+  it("rejects bounded permission profiles until Prime Agent exposes bounded controls", async () => {
+    const loadModule = vi.fn();
+    await expect(PrimeAgentHarness.create({
+      threadId: 7,
+      workingDirectory: "/tmp/project",
+      permissionProfileId: "auto",
+      permissionBinding: {},
+      configuration,
+    }, { loadModule })).rejects.toThrow("supports only the Full access permission profile");
     expect(loadModule).not.toHaveBeenCalled();
   });
 });
@@ -184,6 +202,7 @@ async function createHarness(session: PrimeAgentSessionFixture): Promise<PrimeAg
   return PrimeAgentHarness.create({
     threadId: 7,
     workingDirectory: "/tmp/project",
+    ...fullPermission,
     configuration,
   }, { loadModule: async () => ({
     SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },

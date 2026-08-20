@@ -9,8 +9,8 @@ use super::{
 };
 use crate::{
     product::{
-        CreateThreadCommand, Interaction, InteractionId, InvokeActionOutcome, ProjectId, Thread,
-        ThreadId, ThreadView,
+        AcceptedInteractionCompletion, CreateThreadCommand, Interaction, InteractionId,
+        InvokeActionOutcome, ProjectId, Thread, ThreadId, ThreadView,
     },
     runtime::{CompleteInteraction, RuntimeError},
 };
@@ -29,6 +29,7 @@ pub(super) struct CreateThreadRequest {
     project_id: Option<i64>,
     initial_message: String,
     harness_configuration_name: Option<String>,
+    permission_profile_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -78,6 +79,11 @@ pub(super) async fn create(
     let project_id = request.project_id.map(ProjectId::try_from).transpose()?;
     let harness_configuration_name =
         selected_harness_configuration(&state, request.harness_configuration_name.as_deref())?;
+    let permission_profile_id = selected_permission_profile(
+        &state,
+        &harness_configuration_name,
+        request.permission_profile_id.as_deref(),
+    )?;
     let thread = state
         .product
         .create_thread(CreateThreadCommand {
@@ -85,6 +91,7 @@ pub(super) async fn create(
             project_id,
             initial_message: request.initial_message,
             harness_configuration_name,
+            permission_profile_id,
         })
         .await?;
     let interaction = state
@@ -330,6 +337,8 @@ async fn claim_and_start_action_interaction(
     running.completion_status = "running".into();
     running.harness_configuration_name = Some(thread.harness_configuration_name.clone());
     running.harness_configuration_digest = None;
+    running.effective_execution_digest = None;
+    running.effective_permission_receipt = None;
     running.completion_output = None;
     running.completion_error = None;
 
@@ -397,6 +406,30 @@ fn selected_harness_configuration(
     Ok(selected.to_owned())
 }
 
+fn selected_permission_profile(
+    state: &ApiState,
+    harness_configuration_name: &str,
+    requested: Option<&str>,
+) -> Result<String, ApiError> {
+    let selected = requested.unwrap_or_else(|| state.permission_catalog.default_profile());
+    if selected.trim().is_empty() {
+        return Err(ApiError::invalid("permissionProfileId must be non-empty"));
+    }
+    let resolved_id = match &state.runtime {
+        Some(runtime) => state
+            .permission_catalog
+            .resolve(
+                runtime.permission_bindings(harness_configuration_name)?,
+                selected,
+            )?
+            .profile
+            .id
+            .as_str(),
+        None => state.permission_catalog.profile(selected)?.id.as_str(),
+    };
+    Ok(resolved_id.to_owned())
+}
+
 async fn start_interaction(
     state: &ApiState,
     thread: &Thread,
@@ -453,19 +486,45 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
             text: &interaction.text,
             working_directory: &working_directory,
             harness_configuration_name: &thread.harness_configuration_name,
+            permission_profile: match state
+                .permission_catalog
+                .profile(&thread.permission_profile_id)
+            {
+                Ok(profile) => profile,
+                Err(error) => {
+                    record_background_failure(&state, &thread, &interaction, error.to_string())
+                        .await;
+                    return;
+                }
+            },
         })
         .await
     {
         Ok(completion) => {
+            if completion.permission_profile_id != thread.permission_profile_id {
+                record_background_failure(
+                    &state,
+                    &thread,
+                    &interaction,
+                    format!(
+                        "runtime returned permission profile {} for thread pinned to {}",
+                        completion.permission_profile_id, thread.permission_profile_id
+                    ),
+                )
+                .await;
+                return;
+            }
             if let Err(error) = state
                 .product
-                .accept_interaction_completion(
-                    interaction.id,
-                    completion.graph_node_id,
-                    &completion.harness_configuration_name,
-                    &completion.harness_configuration_digest,
-                    &completion.output,
-                )
+                .accept_interaction_completion(AcceptedInteractionCompletion {
+                    interaction_id: interaction.id,
+                    graph_node_id: completion.graph_node_id,
+                    harness_configuration_name: &completion.harness_configuration_name,
+                    harness_configuration_digest: &completion.harness_configuration_digest,
+                    effective_execution_digest: &completion.effective_execution_digest,
+                    effective_permission_receipt: &completion.effective_permission_receipt,
+                    output: &completion.output,
+                })
                 .await
             {
                 eprintln!(

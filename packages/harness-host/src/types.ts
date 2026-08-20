@@ -8,6 +8,7 @@ export interface HarnessConfiguration {
   readonly name: string;
   readonly implementation: string;
   readonly implementationVersion: number;
+  readonly permissionBindings: Readonly<Record<string, JsonObject>>;
   readonly settings: JsonObject;
 }
 
@@ -33,6 +34,8 @@ export interface HarnessFactoryContext {
   readonly threadId: number;
   readonly workingDirectory: string;
   readonly configuration: HarnessConfiguration;
+  readonly permissionProfileId: string;
+  readonly permissionBinding: JsonObject;
   readonly savedState?: HarnessSessionState;
 }
 
@@ -42,6 +45,7 @@ export type HarnessImplementationMap = Readonly<Record<string, HarnessFactory>>;
 export interface HarnessSessionDescriptor {
   readonly threadId: number;
   readonly configuration: HarnessConfiguration;
+  readonly permissionProfileId: string;
   readonly workingDirectory: string;
   readonly state?: HarnessSessionState;
 }

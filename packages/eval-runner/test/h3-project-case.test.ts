@@ -41,10 +41,10 @@ describe("pinned h3 project case", () => {
         license: "MIT",
       },
     });
-    expect(h3ProjectEvalCase.threads.map((thread) => [thread.id, thread.mutationPolicy, thread.prompts.length])).toEqual([
-      ["architecture", "read-only", 2],
-      ["diagnosis", "read-only", 2],
-      ["implementation", "writable", 2],
+    expect(h3ProjectEvalCase.threads.map((thread) => [thread.id, thread.permissionProfileId, thread.mutationPolicy, thread.prompts.length])).toEqual([
+      ["architecture", "ask", "read-only", 2],
+      ["diagnosis", "auto", "read-only", 2],
+      ["implementation", "full", "writable", 2],
     ]);
     expect(h3ProjectEvalCase.threads.flatMap((thread) => thread.prompts)).toHaveLength(6);
     expect(h3ProjectEvalCase.threads[0]!.prompts[1]).toContain("Think deeper");

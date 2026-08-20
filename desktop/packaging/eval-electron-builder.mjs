@@ -27,6 +27,7 @@ export default {
     { from: resolve(repositoryRoot, `target/${rustTarget}/release/relayer-app-server${binarySuffix}`), to: `bin/relayer-app-server${binarySuffix}` },
     { from: resolve(repositoryRoot, `target/${rustTarget}/release/relayer-graph-server${binarySuffix}`), to: `bin/relayer-graph-server${binarySuffix}` },
     { from: resolve(repositoryRoot, "harnesses"), to: "harnesses", filter: ["*.yaml"] },
+    { from: resolve(repositoryRoot, "permissions/desktop.json"), to: "permissions/desktop.json" },
     { from: resolve(repositoryRoot, "packages/graph-client/dist"), to: "graph-client" },
     { from: resolve(desktopRoot, "renderer"), to: "renderer" },
     { from: resolve(desktopRoot, "eval-renderer"), to: "eval-renderer" },

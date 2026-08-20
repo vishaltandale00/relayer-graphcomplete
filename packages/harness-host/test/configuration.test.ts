@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { digestHarnessConfiguration, loadHarnessConfiguration, loadHarnessConfigurations, parseHarnessConfiguration } from "../src/configuration.js";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
+const permissionBindings = { ask: {}, auto: {}, full: {} };
 
 describe("harness configuration", () => {
   it("loads the production codex.basic configuration", async () => {
@@ -14,11 +15,13 @@ describe("harness configuration", () => {
       name: "codex-basic",
       implementation: "codex.basic",
       implementationVersion: 1,
+      permissionBindings: {
+        ask: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user", networkAccessEnabled: true },
+        auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
+        full: { sandboxMode: "danger-full-access", approvalPolicy: "never" },
+      },
       settings: {
         modelReasoningEffort: "medium",
-        sandboxMode: "workspace-write",
-        approvalPolicy: "never",
-        networkAccessEnabled: true,
         skipGitRepoCheck: true,
       },
     });
@@ -30,6 +33,7 @@ describe("harness configuration", () => {
       name: "prime-production",
       implementation: "prime.agent",
       implementationVersion: 7,
+      permissionBindings,
       settings: { root: { model: "luna" }, reviewers: [{ model: "sol", effort: "high" }] },
     }).settings).toEqual({ root: { model: "luna" }, reviewers: [{ model: "sol", effort: "high" }] });
   });
@@ -40,6 +44,7 @@ describe("harness configuration", () => {
       name: "prime-production",
       implementation: "prime.agent",
       implementationVersion: 1,
+      permissionBindings,
       settings: { reviewers: [{ effort: "high", model: "sol" }], root: { model: "luna" } },
     });
     const reordered = parseHarnessConfiguration({
@@ -47,6 +52,7 @@ describe("harness configuration", () => {
       implementationVersion: 1,
       implementation: "prime.agent",
       name: "prime-production",
+      permissionBindings,
       schemaVersion: 1,
     });
     const changed = { ...left, settings: { ...left.settings, root: { model: "terra" } } };
@@ -61,8 +67,8 @@ describe("harness configuration", () => {
     const fast = join(directory, "fast.yaml");
     const deep = join(directory, "deep.yaml");
     try {
-      await writeFile(fast, "schemaVersion: 1\nname: codex-fast\nimplementation: codex.basic\nimplementationVersion: 1\nsettings:\n  modelReasoningEffort: low\n", "utf8");
-      await writeFile(deep, "schemaVersion: 1\nname: codex-deep\nimplementation: codex.basic\nimplementationVersion: 1\nsettings:\n  modelReasoningEffort: high\n", "utf8");
+      await writeFile(fast, "schemaVersion: 1\nname: codex-fast\nimplementation: codex.basic\nimplementationVersion: 1\npermissionBindings:\n  auto: {}\nsettings:\n  modelReasoningEffort: low\n", "utf8");
+      await writeFile(deep, "schemaVersion: 1\nname: codex-deep\nimplementation: codex.basic\nimplementationVersion: 1\npermissionBindings:\n  auto: {}\nsettings:\n  modelReasoningEffort: high\n", "utf8");
 
       const catalog = await loadHarnessConfigurations([fast, deep]);
 
@@ -88,7 +94,7 @@ describe("harness configuration", () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-config-"));
     const first = join(directory, "first.yaml");
     const second = join(directory, "second.yaml");
-    const source = "schemaVersion: 1\nname: duplicate\nimplementation: test\nimplementationVersion: 1\nsettings: {}\n";
+    const source = "schemaVersion: 1\nname: duplicate\nimplementation: test\nimplementationVersion: 1\npermissionBindings:\n  auto: {}\nsettings: {}\n";
     try {
       await writeFile(first, source, "utf8");
       await writeFile(second, source, "utf8");

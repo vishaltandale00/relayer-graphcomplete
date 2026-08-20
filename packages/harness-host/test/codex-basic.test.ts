@@ -8,12 +8,14 @@ const codexBasicConfiguration: HarnessConfiguration = {
   name: "codex-basic",
   implementation: "codex.basic",
   implementationVersion: 1,
+  permissionBindings: {
+    ask: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user", networkAccessEnabled: true },
+    auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
+    full: { sandboxMode: "danger-full-access", approvalPolicy: "never" },
+  },
   settings: {
     model: "gpt-test",
     modelReasoningEffort: "medium",
-    sandboxMode: "workspace-write",
-    approvalPolicy: "never",
-    networkAccessEnabled: true,
     webSearchMode: "disabled",
     skipGitRepoCheck: true,
   },
@@ -23,6 +25,8 @@ describe("CodexBasicHarness", () => {
   it("rejects an unsupported implementation version", () => {
     expect(() => new CodexBasicHarness({
       threadId: 1,
+      permissionProfileId: "auto",
+      permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
       workingDirectory: process.cwd(),
       configuration: { ...codexBasicConfiguration, implementationVersion: 2 },
       savedState: { codexThreadId: "codex-thread" },
@@ -46,6 +50,8 @@ describe("CodexBasicHarness", () => {
     const harness = new CodexBasicHarness(
       {
         threadId: 1,
+        permissionProfileId: "auto",
+        permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
         workingDirectory: process.cwd(),
         configuration: codexBasicConfiguration,
       },
@@ -70,7 +76,7 @@ describe("CodexBasicHarness", () => {
       model: "gpt-test",
       modelReasoningEffort: "medium",
       sandboxMode: "workspace-write",
-      approvalPolicy: "never",
+      approvalPolicy: "on-request",
       networkAccessEnabled: true,
       webSearchMode: "disabled",
       skipGitRepoCheck: true,
@@ -82,6 +88,8 @@ describe("CodexBasicHarness", () => {
     const createCodex = vi.fn(() => ({ startThread: () => thread }) as unknown as Codex);
     const harness = new CodexBasicHarness({
       threadId: 1,
+      permissionProfileId: "auto",
+      permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
       workingDirectory: process.cwd(),
       configuration: codexBasicConfiguration,
     }, {
@@ -93,7 +101,32 @@ describe("CodexBasicHarness", () => {
     expect(createCodex).toHaveBeenCalledWith(
       expect.objectContaining({ RELAYER_GRAPH_TOKEN: "token", RELAYER_NODE_ID: "1" }),
       "/Applications/Relayer.app/Contents/Resources/codex",
+      { approvals_reviewer: "auto_review" },
     );
+  });
+
+  it("translates the three product profiles without adding a fixture-only profile", async () => {
+    const cases = [
+      ["ask", { sandboxMode: "workspace-write", approvalPolicy: "on-request", networkAccessEnabled: true }, { approvals_reviewer: "user" }],
+      ["auto", { sandboxMode: "workspace-write", approvalPolicy: "on-request", networkAccessEnabled: true }, { approvals_reviewer: "auto_review" }],
+      ["full", { sandboxMode: "danger-full-access", approvalPolicy: "never" }, {}],
+    ] as const;
+    expect(Object.keys(codexBasicConfiguration.permissionBindings)).toEqual(["ask", "auto", "full"]);
+    for (const [permissionProfileId, expectedThreadOptions, expectedCodexConfig] of cases) {
+      const thread = { id: null, run: vi.fn(async () => { throw new Error("stop after options"); }) };
+      const codex = { startThread: vi.fn(() => thread), resumeThread: vi.fn() };
+      const createCodex = vi.fn(() => codex as unknown as Codex);
+      const harness = new CodexBasicHarness({
+        threadId: 1,
+        permissionProfileId,
+        permissionBinding: codexBasicConfiguration.permissionBindings[permissionProfileId]!,
+        workingDirectory: process.cwd(),
+        configuration: codexBasicConfiguration,
+      }, { createCodex });
+      await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("stop after options");
+      expect(createCodex).toHaveBeenCalledWith(expect.any(Object), undefined, expectedCodexConfig);
+      expect(codex.startThread).toHaveBeenCalledWith(expect.objectContaining(expectedThreadOptions));
+    }
   });
 
   it("rotates graph credentials while resuming the same provider thread", async () => {
@@ -108,6 +141,8 @@ describe("CodexBasicHarness", () => {
     });
     const harness = new CodexBasicHarness({
         threadId: 1,
+        permissionProfileId: "auto",
+        permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
         workingDirectory: process.cwd(),
         configuration: codexBasicConfiguration,
       }, { createCodex });

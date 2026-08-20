@@ -6,6 +6,7 @@ export const taskSystemFixtureConfiguration: HarnessConfiguration = {
   name: "fixture-task-system",
   implementation: "fixture.task-system",
   implementationVersion: 1,
+  permissionBindings: { ask: {}, auto: {}, full: {} },
   settings: {},
 };
 

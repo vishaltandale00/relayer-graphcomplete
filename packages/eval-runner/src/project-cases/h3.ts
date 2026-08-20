@@ -28,6 +28,7 @@ const FIXTURE_IDENTITY = Object.freeze({
 export interface ProjectEvalThreadDefinition {
   readonly id: string;
   readonly name: string;
+  readonly permissionProfileId: "ask" | "auto" | "full";
   readonly mutationPolicy: "read-only" | "writable";
   readonly prompts: readonly string[];
   readonly workspaceGrade: "question" | "diagnosis" | "implementation";
@@ -74,6 +75,7 @@ export const h3ProjectEvalCase: ProjectEvalCaseDefinition = Object.freeze({
     Object.freeze({
       id: "architecture",
       name: "Architecture question",
+      permissionProfileId: "ask",
       mutationPolicy: "read-only",
       workspaceGrade: "question",
       prompts: Object.freeze([
@@ -84,6 +86,7 @@ export const h3ProjectEvalCase: ProjectEvalCaseDefinition = Object.freeze({
     Object.freeze({
       id: "diagnosis",
       name: "Read-only bug diagnosis",
+      permissionProfileId: "auto",
       mutationPolicy: "read-only",
       workspaceGrade: "diagnosis",
       prompts: Object.freeze([
@@ -94,6 +97,7 @@ export const h3ProjectEvalCase: ProjectEvalCaseDefinition = Object.freeze({
     Object.freeze({
       id: "implementation",
       name: "Implement and commit the repair",
+      permissionProfileId: "full",
       mutationPolicy: "writable",
       workspaceGrade: "implementation",
       prompts: Object.freeze([

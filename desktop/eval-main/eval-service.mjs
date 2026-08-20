@@ -294,6 +294,9 @@ export class EvalService {
         interactionId: interaction.id,
         graphNodeId: interaction.graphNodeId,
         rootLayerId: interaction.completionOutput?.rootLayer?.layer?.id ?? null,
+        permissionProfileId: interaction.permissionProfileId,
+        effectiveExecutionDigest: interaction.effectiveExecutionDigest,
+        effectivePermissionReceipt: copy(interaction.effectivePermissionReceipt),
         status: interaction.completionStatus,
         prompt: interaction.text,
         turnIndex,
@@ -358,6 +361,31 @@ export class EvalService {
                 });
               }
             }
+          }
+        }
+        if (definition.id === H3_PROJECT_CASE_ID) {
+          const expectedProfileId = threadDefinition.permissionProfileId;
+          turnChecks.push({
+            name: `${checkPrefix}:permission-profile`,
+            passed: interaction.permissionProfileId === expectedProfileId,
+            detail: `Expected ${expectedProfileId}; product recorded ${interaction.permissionProfileId || "none"}.`,
+          });
+          turnChecks.push({
+            name: `${checkPrefix}:effective-execution-receipt`,
+            passed: typeof interaction.effectiveExecutionDigest === "string"
+              && interaction.effectiveExecutionDigest.startsWith("sha256:")
+              && interaction.effectivePermissionReceipt?.permissionProfileId === expectedProfileId,
+            detail: interaction.effectiveExecutionDigest
+              ? "The accepted turn records its effective execution identity and normalized permission receipt."
+              : "The accepted turn is missing its effective execution identity.",
+          });
+          if (expectedProfileId === "full") {
+            turnChecks.push({
+              name: `${checkPrefix}:full-access-disclosure`,
+              passed: interaction.effectivePermissionReceipt?.unconfinedHostAccess === true
+                && typeof interaction.effectivePermissionReceipt?.disclosure === "string",
+              detail: interaction.effectivePermissionReceipt?.disclosure || "Full access lacks the required host-confinement disclosure.",
+            });
           }
         }
         turnChecks.push(...workspaceChecks.map((check) => ({
@@ -441,6 +469,7 @@ export class EvalService {
         title: `${definition.name} · ${threadDefinition.name}`,
         prompts: threadDefinition.prompts,
         projectId: project.id,
+        permissionProfileId: threadDefinition.permissionProfileId,
         afterTurn: async (interactionId, promptIndex) => {
           if (threadDefinition.mutationPolicy === "read-only" || promptIndex === threadDefinition.prompts.length - 1) {
             workspaceChecks.set(String(interactionId), await this.workspaceGrader({
@@ -456,7 +485,7 @@ export class EvalService {
     return executedThreads;
   }
 
-  async #createAndRunThread({ execution, title, prompts, projectId = null, afterTurn = async () => {} }) {
+  async #createAndRunThread({ execution, title, prompts, projectId = null, permissionProfileId = "auto", afterTurn = async () => {} }) {
     if (!Array.isArray(prompts) || prompts.length === 0) throw new Error(`Eval thread ${title} has no prompts.`);
     const thread = await this.#productRequest("/api/threads", {
       method: "POST",
@@ -464,6 +493,7 @@ export class EvalService {
         title,
         initialMessage: prompts[0],
         harnessConfigurationName: execution.harnessConfigurationName,
+        permissionProfileId,
         ...(projectId === null ? {} : { projectId }),
       },
     });

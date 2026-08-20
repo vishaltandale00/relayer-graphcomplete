@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "ask",
+      "label": "Ask for approval",
+      "authority": "bounded",
+      "reviewer": "user"
+    },
+    {
+      "id": "auto",
+      "label": "Approve for me",
+      "authority": "bounded",
+      "reviewer": "automatic"
+    },
+    {
+      "id": "full",
+      "label": "Full access",
+      "authority": "unrestricted",
+      "reviewer": "none"
+    }
+  ],
+  "enabledProfiles": ["ask", "auto", "full"],
+  "defaultProfile": "auto"
+}

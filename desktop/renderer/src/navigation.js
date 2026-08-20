@@ -79,6 +79,7 @@ export function renderScopeMenu() {
       }
       if (button.dataset.scope === "folder") await chooseFolder();
       $("#scopeMenu").classList.add("hidden");
+      $("#scopeButton").setAttribute("aria-expanded", "false");
     };
   });
 }

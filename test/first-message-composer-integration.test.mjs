@@ -35,6 +35,7 @@ describe("first-message composer integration", () => {
       userDataDirectory: dataDirectory,
       binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
       webDirectory: join(repositoryRoot, "desktop", "renderer"),
+      permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
       runtimeSession,
       defaultHarnessConfiguration: "fixture-task-system",
     });

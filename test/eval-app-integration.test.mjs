@@ -44,6 +44,7 @@ describe("Relayer Eval application service", () => {
       userDataDirectory: dataDirectory,
       binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
       webDirectory: join(repositoryRoot, "desktop", "renderer"),
+      permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
       runtimeSession,
       defaultHarnessConfiguration: "fixture-task-system",
       allowHarnessOverride: true,
@@ -166,6 +167,14 @@ describe("Relayer Eval application service", () => {
       ["implementation", 1],
     ]);
     expect(h3Execution.turns).toHaveLength(6);
+    expect(h3Execution.turns.map((turn) => turn.permissionProfileId)).toEqual([
+      "ask", "ask", "auto", "auto", "full", "full",
+    ]);
+    expect(h3Execution.turns.every((turn) => turn.effectiveExecutionDigest.startsWith("sha256:"))).toBe(true);
+    expect(h3Execution.turns.slice(4).every((turn) => (
+      turn.effectivePermissionReceipt.unconfinedHostAccess === true
+      && turn.effectivePermissionReceipt.disclosure.includes("not hard-confined")
+    ))).toBe(true);
     expect(evalService.reviewContext(h3Execution.id).cases.find((testCase) => (
       testCase.id === H3_PROJECT_CASE_ID
     )).threads).toEqual([
@@ -182,6 +191,7 @@ describe("Relayer Eval application service", () => {
     )));
     expect(new Set(h3Threads.map((threadDetail) => threadDetail.thread.projectId)).size).toBe(1);
     expect(h3Threads.every((threadDetail) => threadDetail.interactions.length === 2)).toBe(true);
+    expect(h3Threads.map((threadDetail) => threadDetail.thread.permissionProfileId)).toEqual(["ask", "auto", "full"]);
   }, 20_000);
 });
 

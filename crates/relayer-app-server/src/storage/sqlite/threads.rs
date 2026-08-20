@@ -6,6 +6,7 @@ use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 const THREAD_COLUMNS: &str = r#"
     SELECT t.id,t.title,t.project_id,t.created_at,t.updated_at,
            t.harness_configuration_name,
+           t.permission_profile_id,
            (SELECT id FROM interactions WHERE thread_id=t.id ORDER BY sequence ASC LIMIT 1)
     FROM threads t
 "#;
@@ -27,25 +28,28 @@ impl SqliteProductStore {
         project_id: Option<ProjectId>,
         initial_message: &str,
         harness_configuration_name: &str,
+        permission_profile_id: &str,
         timestamp: &str,
     ) -> Result<Thread, StorageError> {
         let mut transaction = self.pool.begin().await?;
         let thread = sqlx::query(
-            "INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name) VALUES (?1,?2,?3,?3,?4)",
+            "INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (?1,?2,?3,?3,?4,?5)",
         )
         .bind(title)
         .bind(project_id.map(ProjectId::value))
         .bind(timestamp)
         .bind(harness_configuration_name)
+        .bind(permission_profile_id)
         .execute(&mut *transaction)
         .await?;
         let thread_id = ThreadId::from_database(thread.last_insert_rowid());
         sqlx::query(
-            "INSERT INTO interactions(thread_id,sequence,text,created_at) VALUES (?1,1,?2,?3)",
+            "INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id) VALUES (?1,1,?2,?3,?4)",
         )
         .bind(thread_id.value())
         .bind(initial_message)
         .bind(timestamp)
+        .bind(permission_profile_id)
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
@@ -89,6 +93,7 @@ fn thread_from_row(row: &SqliteRow) -> Result<Thread, StorageError> {
         created_at: row.try_get(3)?,
         updated_at: row.try_get(4)?,
         harness_configuration_name: row.try_get(5)?,
-        root_interaction_id: InteractionId::from_database(row.try_get(6)?),
+        permission_profile_id: row.try_get(6)?,
+        root_interaction_id: InteractionId::from_database(row.try_get(7)?),
     })
 }

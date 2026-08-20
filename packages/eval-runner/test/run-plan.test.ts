@@ -7,6 +7,7 @@ const medium: HarnessConfiguration = {
   name: "codex-basic",
   implementation: "codex.basic",
   implementationVersion: 1,
+  permissionBindings: { ask: {}, auto: {}, full: {} },
   settings: { modelReasoningEffort: "medium" },
 };
 const high: HarnessConfiguration = {

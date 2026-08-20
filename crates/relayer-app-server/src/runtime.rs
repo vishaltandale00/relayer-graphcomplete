@@ -1,6 +1,8 @@
+use crate::permissions::PermissionProfile;
 use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use std::{collections::HashMap, path::Path};
 use thiserror::Error;
 
@@ -11,6 +13,7 @@ pub(crate) struct HarnessConfiguration {
     pub(crate) name: String,
     implementation: String,
     implementation_version: u32,
+    permission_bindings: Map<String, Value>,
     settings: Value,
 }
 
@@ -44,6 +47,7 @@ pub(crate) struct CompleteInteraction<'a> {
     pub(crate) text: &'a str,
     pub(crate) working_directory: &'a str,
     pub(crate) harness_configuration_name: &'a str,
+    pub(crate) permission_profile: &'a PermissionProfile,
 }
 
 #[derive(Debug)]
@@ -51,6 +55,9 @@ pub(crate) struct RuntimeCompletion {
     pub(crate) graph_node_id: i64,
     pub(crate) harness_configuration_name: String,
     pub(crate) harness_configuration_digest: String,
+    pub(crate) permission_profile_id: String,
+    pub(crate) effective_execution_digest: String,
+    pub(crate) effective_permission_receipt: Value,
     pub(crate) output: Value,
 }
 
@@ -108,6 +115,20 @@ impl RuntimeClient {
         self.configurations.contains_key(name)
     }
 
+    pub(crate) fn permission_bindings(
+        &self,
+        configuration_name: &str,
+    ) -> Result<&Map<String, Value>, RuntimeError> {
+        self.configurations
+            .get(configuration_name)
+            .map(|entry| &entry.configuration.permission_bindings)
+            .ok_or_else(|| {
+                RuntimeError::Configuration(format!(
+                    "unknown harness configuration {configuration_name}"
+                ))
+            })
+    }
+
     pub(crate) async fn complete(
         &self,
         command: CompleteInteraction<'_>,
@@ -120,6 +141,15 @@ impl RuntimeClient {
                     "unknown harness configuration {}",
                     command.harness_configuration_name
                 ))
+            })?;
+        selected
+            .configuration
+            .permission_bindings
+            .get(&command.permission_profile.id)
+            .and_then(Value::as_object)
+            .ok_or_else(|| RuntimeError::PermissionUnsupported {
+                profile_id: command.permission_profile.id.clone(),
+                configuration_name: selected.configuration.name.clone(),
             })?;
         let interaction: CreateInteractionResponse = self
             .post(
@@ -145,6 +175,7 @@ impl RuntimeClient {
                     &serde_json::json!({
                         "threadId": command.thread_id,
                         "configuration": selected.configuration,
+                        "permissionProfileId": command.permission_profile.id,
                         "workingDirectory": command.working_directory,
                     }),
                     &self.harness_control_token,
@@ -173,10 +204,25 @@ impl RuntimeClient {
                 });
             }
         };
+        let effective_execution_digest =
+            effective_execution_digest(&selected.digest, &command.permission_profile.id);
+        let unrestricted = command.permission_profile.authority == "unrestricted";
         Ok(RuntimeCompletion {
             graph_node_id: interaction.node.id,
             harness_configuration_name: selected.configuration.name.clone(),
             harness_configuration_digest: selected.digest.clone(),
+            permission_profile_id: command.permission_profile.id.clone(),
+            effective_execution_digest,
+            effective_permission_receipt: serde_json::json!({
+                "schemaVersion": 1,
+                "permissionProfileId": &command.permission_profile.id,
+                "label": &command.permission_profile.label,
+                "authority": &command.permission_profile.authority,
+                "reviewer": &command.permission_profile.reviewer,
+                "bindingPresent": true,
+                "unconfinedHostAccess": unrestricted,
+                "disclosure": unrestricted.then_some("Filesystem and network access were not hard-confined."),
+            }),
             output: completed.output,
         })
     }
@@ -317,6 +363,11 @@ fn validate_configuration(entry: &CatalogEntry) -> Result<(), RuntimeError> {
         || configuration.implementation_version < 1
         || configuration.name.trim().is_empty()
         || configuration.implementation.trim().is_empty()
+        || configuration.permission_bindings.is_empty()
+        || configuration
+            .permission_bindings
+            .values()
+            .any(|binding| !binding.is_object())
         || !configuration.settings.is_object()
         || !entry.digest.starts_with("sha256:")
     {
@@ -325,6 +376,14 @@ fn validate_configuration(entry: &CatalogEntry) -> Result<(), RuntimeError> {
         ));
     }
     Ok(())
+}
+
+fn effective_execution_digest(configuration_digest: &str, permission_profile_id: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(configuration_digest.as_bytes());
+    digest.update([0]);
+    digest.update(permission_profile_id.as_bytes());
+    format!("sha256:{:x}", digest.finalize())
 }
 
 #[derive(Debug, Error)]
@@ -340,6 +399,13 @@ pub(crate) enum RuntimeError {
         operation: Box<RuntimeError>,
         cleanup: Box<RuntimeError>,
     },
+    #[error(
+        "harness configuration {configuration_name} does not support permission profile {profile_id}"
+    )]
+    PermissionUnsupported {
+        profile_id: String,
+        configuration_name: String,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -353,6 +419,7 @@ pub(crate) enum RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::{CompleteInteraction, RuntimeClient};
+    use crate::permissions::PermissionProfile;
     use axum::{
         Json, Router,
         http::{HeaderMap, StatusCode},
@@ -440,6 +507,7 @@ mod tests {
                         "name": "test",
                         "implementation": "test",
                         "implementationVersion": 1,
+                        "permissionBindings": { "auto": {} },
                         "settings": {}
                     },
                     "digest": "sha256:test"
@@ -457,6 +525,12 @@ mod tests {
         )
         .await
         .unwrap();
+        let permission_profile = PermissionProfile {
+            id: "auto".into(),
+            label: "Approve for me".into(),
+            authority: "bounded".into(),
+            reviewer: "automatic".into(),
+        };
 
         let result = runtime
             .complete(CompleteInteraction {
@@ -465,6 +539,7 @@ mod tests {
                 text: "question",
                 working_directory: root.to_str().unwrap(),
                 harness_configuration_name: "test",
+                permission_profile: &permission_profile,
             })
             .await;
 
@@ -535,6 +610,7 @@ mod tests {
                         "name": "test",
                         "implementation": "test",
                         "implementationVersion": 1,
+                        "permissionBindings": { "auto": {} },
                         "settings": {}
                     },
                     "digest": "sha256:test"
@@ -552,6 +628,12 @@ mod tests {
         )
         .await
         .unwrap();
+        let permission_profile = PermissionProfile {
+            id: "auto".into(),
+            label: "Approve for me".into(),
+            authority: "bounded".into(),
+            reviewer: "automatic".into(),
+        };
 
         let completed = runtime
             .complete(CompleteInteraction {
@@ -560,6 +642,7 @@ mod tests {
                 text: "question",
                 working_directory: root.to_str().unwrap(),
                 harness_configuration_name: "test",
+                permission_profile: &permission_profile,
             })
             .await
             .unwrap();

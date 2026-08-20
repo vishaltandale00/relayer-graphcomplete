@@ -38,6 +38,7 @@ export class RelayerAppServerService {
     userDataDirectory,
     binaryPath,
     webDirectory,
+    permissionCatalogPath,
     runtimeSession = null,
     defaultHarnessConfiguration = "codex-basic",
     allowHarnessOverride = false,
@@ -50,6 +51,7 @@ export class RelayerAppServerService {
     this.userDataDirectory = userDataDirectory;
     this.binaryPath = binaryPath;
     this.webDirectory = webDirectory;
+    this.permissionCatalogPath = permissionCatalogPath;
     this.runtimeSession = runtimeSession;
     this.defaultHarnessConfiguration = defaultHarnessConfiguration;
     this.allowHarnessOverride = allowHarnessOverride;
@@ -89,6 +91,7 @@ export class RelayerAppServerService {
     const serverArguments = [
       "--data-dir", dataDirectory,
       "--web-dir", this.webDirectory,
+      "--permission-catalog", this.permissionCatalogPath,
       "--port", "0",
     ];
     if (this.runtimeSession) {

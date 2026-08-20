@@ -2,9 +2,20 @@ schemaVersion: 1
 name: codex-basic
 implementation: codex.basic
 implementationVersion: 1
+permissionBindings:
+  ask:
+    sandboxMode: workspace-write
+    approvalPolicy: on-request
+    approvalsReviewer: user
+    networkAccessEnabled: true
+  auto:
+    sandboxMode: workspace-write
+    approvalPolicy: on-request
+    approvalsReviewer: auto_review
+    networkAccessEnabled: true
+  full:
+    sandboxMode: danger-full-access
+    approvalPolicy: never
 settings:
   modelReasoningEffort: medium
-  sandboxMode: workspace-write
-  approvalPolicy: never
-  networkAccessEnabled: true
   skipGitRepoCheck: true

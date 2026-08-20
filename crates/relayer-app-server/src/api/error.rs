@@ -1,4 +1,5 @@
 use super::types::ProjectResponse;
+use crate::permissions::PermissionError;
 use crate::product::{InvalidProductId, ProductError};
 use crate::runtime::RuntimeError;
 use axum::{
@@ -50,6 +51,22 @@ impl ApiError {
 impl From<RuntimeError> for ApiError {
     fn from(error: RuntimeError) -> Self {
         Self::internal(&error.to_string())
+    }
+}
+
+impl From<PermissionError> for ApiError {
+    fn from(error: PermissionError) -> Self {
+        match error {
+            PermissionError::Selection {
+                code,
+                profile_id,
+                message,
+            } => Self(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "code": code, "permissionProfileId": profile_id, "error": message }),
+            ),
+            other => Self::internal(&other.to_string()),
+        }
     }
 }
 

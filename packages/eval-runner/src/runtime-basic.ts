@@ -93,7 +93,7 @@ export async function runBasicRuntimeEval(options: {
       const capability = { url: graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
       const complete = await completeWithCapabilityCleanup(async () => {
-        await requestJson(`${runningHarnessHost.url}/sessions`, harnessControlToken, { threadId, configuration, workingDirectory }, 201);
+        await requestJson(`${runningHarnessHost.url}/sessions`, harnessControlToken, { threadId, configuration, permissionProfileId: "auto", workingDirectory }, 201);
         return requestJson<{ output: CompletionOutput }>(`${runningHarnessHost.url}/sessions/${threadId}/complete`, harnessControlToken, { graph: capability });
       }, capability, graphControlToken);
       const checks = checkBasicOutput(complete.output, interaction.node.id);

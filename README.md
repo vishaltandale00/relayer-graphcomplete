@@ -23,6 +23,7 @@ Pre-alpha executable runtime slice. The repository now includes:
 - a `prime.agent` harness that passes the current graph scope through Prime Agent's run-scoped IPython host context;
 - an inference-free evaluation that starts the real Rust server and Node host and checks two interactions in one empty-project thread;
 - a separate internal Relayer Eval desktop application that runs test-case × harness matrices through the product app server and opens their threads in the production graph/chat workspace;
+- one Rust-owned product permission contract with Ask for approval (`ask`), Approve for me (`auto`), and Full access (`full`), translated by each harness configuration;
 - Rust, TypeScript, Python, and process-level integration tests.
 
 The Node runtime is split into explicit workspace packages: `@relayer/graph-client`, `@relayer/harness-host`, and `@relayer/eval-runner`. The Rust graph core is the only graph implementation; Node and Python code access it through typed clients rather than maintaining another graph store.
@@ -108,6 +109,8 @@ reads its normal local provider credentials. Use
 `npm run desktop:dev:prime -- --configuration prime-agent-deep` to try the deeper
 configuration. The packaged Relayer application remains pinned to its production
 harness configuration.
+
+Every thread pins a product permission profile before execution. New Thread loads the available Ask for approval, Approve for me, and Full access choices from Rust product policy, selects the product default, and sends that choice through ordinary thread creation. The saved thread shows its pinned profile. The public contract is `ask`, `auto`, or `full`; raw provider sandbox and approval flags remain harness implementation details. Full access is intentionally unrestricted and is not a hard filesystem or network boundary. See [ADR 0004](docs/decisions/0004-product-permission-profiles.md).
 
 ## Relayer Eval
 

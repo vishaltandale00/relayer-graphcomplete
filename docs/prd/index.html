@@ -223,7 +223,7 @@
 <thead><tr><th>Capability</th><th>Status</th><th>Proven now</th><th>Next proof</th></tr></thead>
 <tbody>
 <tr class="requirement-row status-partial"><td><a href="#2-connect-an-agent">Connect an agent</a></td><td><span class="delivery-status partial">Partial</span></td><td><a href="#15a-agent-connection-evidence">Provider setup and restart screenshots</a></td><td>Rejection, expiration, revocation, and a signed authentication smoke</td></tr>
-<tr class="requirement-row status-partial"><td><a href="#3-choose-a-work-context">Choose a work context</a></td><td><span class="delivery-status partial">Partial</span></td><td><a href="#15b-work-context-evidence">No-folder creation and saved scope</a></td><td>Complete folder, project, Git, and worktree flows</td></tr>
+<tr class="requirement-row status-partial"><td><a href="#3-choose-work-context-and-permissions">Choose work context and permissions</a></td><td><span class="delivery-status partial">Partial</span></td><td><a href="#15b-work-context-evidence">No-folder creation, saved scope, and product permission profiles</a></td><td>Complete folder, project, Git, and worktree flows</td></tr>
 <tr class="requirement-row status-partial"><td><a href="#4-run-a-task">Run a task</a></td><td><span class="delivery-status partial">Partial</span></td><td><a href="#15e-graphcomplete-runtime-evidence">Two-turn Complete runtime evaluation</a></td><td>Desktop harness invocation and accepted-result rendering</td></tr>
 <tr class="requirement-row status-open"><td><a href="#5-control-a-run">Control a run</a></td><td><span class="delivery-status open">Open</span></td><td>Requirements and state contract only</td><td>Stop and retry proof in Relayer Desktop</td></tr>
 <tr class="requirement-row status-partial"><td><a href="#6-inspect-the-result">Inspect the result</a></td><td><span class="delivery-status partial">Partial</span></td><td><a href="#15d-basic-complete-evaluation-evidence">Exact accepted layers in the local viewer</a></td><td>Desktop canvas, inspector, navigation, and saved replay</td></tr>
@@ -849,12 +849,12 @@ type InteractionModelBinding = {
 </figure>
 
 <p>Screenshots are implementation evidence, not design mocks and not proof of unrelated features visible in the frame.</p>
-<h2 data-prd-layer="Product" data-prd-order="3">3. Choose a work context</h2>
-<section class="capability-summary" aria-label="Choose a work context summary">
-<p><strong>User goal:</strong> Work without a folder or inside an authorized project.</p>
-<p><strong>Product rule:</strong> Git projects offer the local checkout or a Relayer worktree.</p>
-<p><strong>Observable result:</strong> New Thread shows the selected scope before send.</p>
-<p><strong>Acceptance:</strong> The interaction records the exact scope selected at send time.</p>
+<h2 data-prd-layer="Product" data-prd-order="3">3. Choose work context and permissions</h2>
+<section class="capability-summary" aria-label="Choose work context and permissions summary">
+<p><strong>User goal:</strong> Work without a folder or inside an authorized project, with understandable control over the agent's authority.</p>
+<p><strong>Product rule:</strong> Git projects offer the local checkout or a Relayer worktree. Every new thread also pins one Rust-owned product permission profile.</p>
+<p><strong>Observable result:</strong> New Thread shows the selected scope and permission profile before send.</p>
+<p><strong>Acceptance:</strong> The thread records the exact scope and permission profile selected at send time; later turns inherit both pinned choices.</p>
 <p class="capability-evidence"><strong>Status and evidence:</strong> Partial. <a href="#15b-work-context-evidence">Review work-context evidence.</a></p>
 </section>
 <h3>3.1 New Thread is the context entry point</h3>
@@ -906,7 +906,18 @@ type InteractionModelBinding = {
 V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong>, matching the compact Codex-style decision. Base-branch, custom-location, and existing-worktree controls are deferred until a demonstrated product need. Non-Git folders do not show Git controls or empty Git status.</li>
 </ul>
 <p>Forking a thread can keep its current execution location or create a new worktree. The new interaction inherits the conversation graph and project ontology while retaining its own thread-specific history.</p>
-<h3>3.4 Requirements</h3>
+<h3>3.4 Permission profiles</h3>
+<p>The New Thread composer places a permission picker beside the folder control. It uses the product labels and availability returned by <code>GET /api/permission-profiles</code>; the renderer does not expose raw provider sandbox or approval flags. The initial selection is the Rust catalog's default profile.</p>
+<table>
+<thead><tr><th>Profile</th><th>User-facing behavior</th><th>Authority boundary</th></tr></thead>
+<tbody>
+<tr><td><strong>Ask for approval</strong> (<code>ask</code>)</td><td>Ask the user before actions that require approval.</td><td>Bounded workspace authority with user review.</td></tr>
+<tr><td><strong>Approve for me</strong> (<code>auto</code>)</td><td>Relayer reviews approval requests automatically. This is the default desktop profile.</td><td>Bounded workspace authority with automatic review.</td></tr>
+<tr><td><strong>Full access</strong> (<code>full</code>)</td><td>Run without approval prompts.</td><td>Unrestricted authority. The picker must disclose that filesystem and network access are not hard-confined.</td></tr>
+</tbody>
+</table>
+<p>Unavailable profiles remain visible but disabled with a product-readable reason. If no profile is available, New Thread cannot send. The selected profile is written during thread creation, shown with the saved thread, and cannot be changed for later turns in that thread.</p>
+<h3>3.5 Requirements</h3>
 <ul>
 <li><strong>SCP-001:</strong> Send is disabled until the composer has text and a valid No folder or project scope.</li>
 <li><strong>SCP-002:</strong> No folder never receives a user folder path by implication; the stored internal scope remains <code>standalone</code>.</li>
@@ -917,9 +928,15 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <li><strong>SCP-007:</strong> New thread, fork, rename, archive, pin, delete-entry, and reopen actions are available from expected sidebar or thread menus.</li>
 <li><strong>SCP-008:</strong> Deleting a thread entry never deletes graph nodes referenced by another thread or turn.</li>
 <li><strong>SCP-009:</strong> A move from a no-folder chat must preserve the thread and graph identity. It must record the scope change. It must use the selected project only for later interactions.</li>
+<li><strong>PERM-001:</strong> New Thread exposes exactly Ask for approval, Approve for me, and Full access using the stable product IDs <code>ask</code>, <code>auto</code>, and <code>full</code>.</li>
+<li><strong>PERM-002:</strong> The picker selects the Rust catalog default on load and permits selection only when desktop policy and the selected harness both support the profile.</li>
+<li><strong>PERM-003:</strong> First send records <code>permissionProfileId</code> on the ordinary product thread before inference. Every later interaction inherits that pinned profile.</li>
+<li><strong>PERM-004:</strong> A saved thread visibly identifies its pinned profile. Changing authority requires a new thread; follow-up composition cannot silently change it.</li>
+<li><strong>PERM-005:</strong> Full access visibly states that filesystem and network access are not hard-confined.</li>
+<li><strong>PERM-006:</strong> Product UI and API contracts use stable profile IDs and product semantics, never raw provider sandbox or approval flags.</li>
 </ul>
-<h3>3.5 Verification</h3>
-<p>Choice-driven tests cover each scope and Git option. They also cover creation failure, revoked permission, duplicate projects, project moves, and both fork options. Filesystem and Git tests use temporary repositories. They must not change a user checkout.</p>
+<h3>3.6 Verification</h3>
+<p>Choice-driven tests cover each scope, Git option, and permission profile. Permission tests cover catalog defaulting, unavailable-profile fallback, no-profile failure, the exact thread-create request, pinned persistence, and the Full access disclosure. They also cover creation failure, revoked permission, duplicate projects, project moves, and both fork options. Filesystem and Git tests use temporary repositories. They must not change a user checkout.</p>
 <h2 data-prd-layer="Evidence" data-prd-order="15.2">15B. Work-context evidence</h2>
 <table>
 <thead>
@@ -937,6 +954,13 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <td>The structural desktop scenario asserts New Thread, <code>scopeButton</code>, <code>scopeMenu</code>, and disabled empty send. The Rust integration scenario proves atomic thread/interaction creation and database reopen.</td>
 <td><code>SCP-001-E1</code>, <code>SCP-001-E2</code>, <code>APP-001-E1</code>, and <code>APP-001-E2</code></td>
 <td>No folder create/reopen is verified. Existing-project population, folder-dialog completion, Git detection, and local/new-worktree choice remain unverified, so the overall requirement group stays partial.</td>
+</tr>
+<tr class="requirement-row status-verified">
+<td>New Thread permission profile selection</td>
+<td><span class="delivery-status verified">Verified</span></td>
+<td>The desktop test covers product-default selection, preferred-profile selection, unavailable-profile fallback, no-profile failure, Full access disclosure, and the exact <code>permissionProfileId</code> sent during thread creation. Rust integration tests prove the selected profile is validated before inference and pinned to the persisted thread and interactions.</td>
+<td><code>PERM-001-E1</code></td>
+<td>Broader keyboard-navigation and small-window coverage remain shared desktop accessibility requirements.</td>
 </tr>
 </tbody></table>
 <h4><code>SCP-001-E1</code> — connected New Thread</h4>
@@ -960,6 +984,18 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
     <span class="evidence-callout" style="--x:39%;--y:61%">3</span>
   </div>
   <ol class="evidence-legend"><li><b>1</b><span>No folder keeps work in an app-owned local directory.</span></li><li><b>2</b><span>Open another folder begins local project creation.</span></li><li><b>3</b><span>Scope choice stays inside New Thread rather than onboarding.</span></li></ol>
+</figure>
+
+<h4><code>PERM-001-E1</code> — product permission picker</h4>
+<p>Captured from the ordinary Relayer desktop renderer backed by the Rust product permission catalog. It proves the visible product choices and disclosure, not the provider-specific translation.</p>
+<figure class="evidence-figure">
+  <div class="evidence-image">
+    <img src="assets/evidence/desktop/permission-picker.png" alt="PERM-001-E1: New Thread permission picker with Ask for approval, Approve for me, and Full access">
+    <span class="evidence-callout" style="--x:51%;--y:62%">1</span>
+    <span class="evidence-callout" style="--x:53%;--y:47%">2</span>
+    <span class="evidence-callout" style="--x:53%;--y:54%">3</span>
+  </div>
+  <ol class="evidence-legend"><li><b>1</b><span>The composer shows the selected profile before send.</span></li><li><b>2</b><span>The picker presents exactly the three product permission profiles.</span></li><li><b>3</b><span>Full access discloses that filesystem and network access are not hard-confined.</span></li></ol>
 </figure>
 
 <h2 data-prd-layer="Product" data-prd-order="8">8. Return to saved work</h2>

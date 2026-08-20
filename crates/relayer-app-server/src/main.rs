@@ -22,6 +22,8 @@ struct Arguments {
     #[arg(long)]
     web_dir: PathBuf,
     #[arg(long)]
+    permission_catalog: PathBuf,
+    #[arg(long)]
     graph_url: Option<String>,
     #[arg(long)]
     harness_url: Option<String>,
@@ -85,6 +87,7 @@ async fn main() -> anyhow::Result<()> {
     let app_server = RelayerAppServer::open(RelayerAppServerConfig {
         database_path: database,
         web_directory: arguments.web_dir,
+        permission_catalog: arguments.permission_catalog,
         control_token,
         read_only_control_token,
         runtime,

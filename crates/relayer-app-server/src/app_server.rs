@@ -1,4 +1,7 @@
-use crate::{api, product::ProductService, runtime::RuntimeClient, storage::SqliteProductStore};
+use crate::{
+    api, permissions::PermissionCatalog, product::ProductService, runtime::RuntimeClient,
+    storage::SqliteProductStore,
+};
 use axum::Router;
 use std::path::PathBuf;
 
@@ -16,6 +19,7 @@ pub struct RelayerRuntimeConfig {
 pub struct RelayerAppServerConfig {
     pub database_path: PathBuf,
     pub web_directory: PathBuf,
+    pub permission_catalog: PathBuf,
     pub control_token: String,
     pub read_only_control_token: Option<String>,
     pub runtime: Option<RelayerRuntimeConfig>,
@@ -27,6 +31,7 @@ pub struct RelayerAppServer {
     control_token: String,
     read_only_control_token: Option<String>,
     runtime: Option<RuntimeClient>,
+    permission_catalog: PermissionCatalog,
     default_harness_configuration: String,
     allow_harness_override: bool,
     standalone_workspaces_directory: PathBuf,
@@ -37,6 +42,7 @@ impl RelayerAppServer {
         if config.read_only_control_token.as_deref() == Some(config.control_token.as_str()) {
             anyhow::bail!("read-only control token must be distinct from write authority");
         }
+        let permission_catalog = PermissionCatalog::load(&config.permission_catalog).await?;
         let storage = SqliteProductStore::open(&config.database_path).await?;
         let interrupted = storage
             .recover_interrupted_action_invocations(
@@ -82,12 +88,25 @@ impl RelayerAppServer {
                 "default harness configuration is unavailable: {default_harness_configuration}"
             );
         }
+        if let Some(runtime) = &runtime {
+            let bindings = runtime.permission_bindings(&default_harness_configuration)?;
+            if !permission_catalog
+                .availability(Some(bindings))
+                .iter()
+                .any(|profile| profile.available)
+            {
+                anyhow::bail!(
+                    "default harness configuration has no enabled permission profile: {default_harness_configuration}"
+                );
+            }
+        }
         Ok(Self {
             product: ProductService::new(storage, runtime.is_some()),
             web_directory: config.web_directory,
             control_token: config.control_token,
             read_only_control_token: config.read_only_control_token,
             runtime,
+            permission_catalog,
             default_harness_configuration,
             allow_harness_override,
             standalone_workspaces_directory,
@@ -102,10 +121,13 @@ impl RelayerAppServer {
                 self.read_only_control_token.clone(),
             ),
             self.web_directory.clone(),
-            self.runtime.clone(),
-            self.default_harness_configuration.clone(),
-            self.allow_harness_override,
-            self.standalone_workspaces_directory.clone(),
+            api::ApiRuntime {
+                runtime: self.runtime.clone(),
+                permission_catalog: self.permission_catalog.clone(),
+                default_harness_configuration: self.default_harness_configuration.clone(),
+                allow_harness_override: self.allow_harness_override,
+                standalone_workspaces_directory: self.standalone_workspaces_directory.clone(),
+            },
         )
     }
 }

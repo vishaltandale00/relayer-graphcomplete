@@ -23,6 +23,7 @@ const THREAD_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("created_at", "TEXT", true, 0),
     ("updated_at", "TEXT", true, 0),
     ("harness_configuration_name", "TEXT", true, 0),
+    ("permission_profile_id", "TEXT", true, 0),
 ];
 const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "INTEGER", false, 1),
@@ -36,6 +37,9 @@ const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("harness_configuration_digest", "TEXT", false, 0),
     ("completion_output_json", "TEXT", false, 0),
     ("completion_error", "TEXT", false, 0),
+    ("permission_profile_id", "TEXT", true, 0),
+    ("effective_execution_digest", "TEXT", false, 0),
+    ("effective_permission_receipt_json", "TEXT", false, 0),
 ];
 const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("source_interaction_id", "INTEGER", true, 1),

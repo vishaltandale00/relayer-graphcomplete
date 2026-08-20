@@ -19,6 +19,17 @@ pub(crate) struct CreateThreadCommand {
     pub(crate) project_id: Option<ProjectId>,
     pub(crate) initial_message: String,
     pub(crate) harness_configuration_name: String,
+    pub(crate) permission_profile_id: String,
+}
+
+pub(crate) struct AcceptedInteractionCompletion<'a> {
+    pub(crate) interaction_id: InteractionId,
+    pub(crate) graph_node_id: i64,
+    pub(crate) harness_configuration_name: &'a str,
+    pub(crate) harness_configuration_digest: &'a str,
+    pub(crate) effective_execution_digest: &'a str,
+    pub(crate) effective_permission_receipt: &'a serde_json::Value,
+    pub(crate) output: &'a serde_json::Value,
 }
 
 pub(crate) struct ProjectWriteOutcome {
@@ -177,6 +188,7 @@ impl ProductService {
                 command.project_id,
                 message,
                 &command.harness_configuration_name,
+                &command.permission_profile_id,
                 &now(),
             )
             .await
@@ -309,20 +321,10 @@ impl ProductService {
 
     pub(crate) async fn accept_interaction_completion(
         &self,
-        interaction_id: super::InteractionId,
-        graph_node_id: i64,
-        harness_configuration_name: &str,
-        harness_configuration_digest: &str,
-        output: &serde_json::Value,
+        completion: AcceptedInteractionCompletion<'_>,
     ) -> Result<(), ProductError> {
         self.storage
-            .accept_interaction_completion(
-                interaction_id,
-                graph_node_id,
-                harness_configuration_name,
-                harness_configuration_digest,
-                output,
-            )
+            .accept_interaction_completion(completion)
             .await
             .map_err(Into::into)
     }

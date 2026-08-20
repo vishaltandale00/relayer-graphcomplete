@@ -1,5 +1,10 @@
 import { connectCodex, refreshAccount, showApplication, showAuth } from "./auth.js";
 import { selectScope, setMainView } from "./navigation.js";
+import {
+  closePermissionMenu,
+  loadPermissionProfiles,
+  togglePermissionMenu,
+} from "./permission-profiles.js";
 import { appState, desktop, evalReview, viewState } from "./state.js";
 import {
   connectEvents,
@@ -7,6 +12,7 @@ import {
   loadThread,
   refreshState,
   restoreReviewPresentation,
+  updateCreateThreadAvailability,
 } from "./threads.js";
 import { bindComposerKeydown } from "./product-workspace/workspace.js";
 import { createReviewPresentationAdapter } from "./review-tools.js";
@@ -28,10 +34,21 @@ function bindEvents() {
     setMainView("new");
     $("#newThreadPrompt").focus();
   };
-  $("#scopeButton").onclick = () => $("#scopeMenu").classList.toggle("hidden");
+  $("#scopeButton").onclick = () => {
+    closePermissionMenu();
+    const menu = $("#scopeMenu");
+    const opening = menu.classList.contains("hidden");
+    menu.classList.toggle("hidden", !opening);
+    $("#scopeButton").setAttribute("aria-expanded", String(opening));
+  };
+  $("#permissionButton").onclick = () => {
+    $("#scopeMenu").classList.add("hidden");
+    $("#scopeButton").setAttribute("aria-expanded", "false");
+    togglePermissionMenu();
+  };
   $("#createThread").onclick = createFirstThread;
   $("#newThreadPrompt").oninput = () => {
-    $("#createThread").disabled = !$("#newThreadPrompt").value.trim();
+    updateCreateThreadAvailability();
   };
   bindComposerKeydown($("#newThreadPrompt"), () => $("#createThread").click());
   $("#collapseSidebar").onclick = () => {
@@ -76,13 +93,22 @@ function bindEvents() {
   document.addEventListener("click", (event) => {
     const threadButton = event.target.closest("[data-thread]");
     if (threadButton) void loadThread(threadButton.dataset.thread);
+    if (!event.target.closest(".scope-control")) {
+      $("#scopeMenu").classList.add("hidden");
+      $("#scopeButton").setAttribute("aria-expanded", "false");
+    }
+    if (!event.target.closest(".permission-control")) closePermissionMenu();
   });
   document.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
       event.preventDefault();
       $("#newThread").click();
     }
-    if (event.key === "Escape") $("#scopeMenu").classList.add("hidden");
+    if (event.key === "Escape") {
+      $("#scopeMenu").classList.add("hidden");
+      $("#scopeButton").setAttribute("aria-expanded", "false");
+      closePermissionMenu();
+    }
   });
 }
 
@@ -99,6 +125,8 @@ async function boot() {
   else applyAppearance(document.documentElement.dataset.theme);
   if (desktop) renderUpdate(await desktop.updater.status());
   await refreshAccount();
+  await loadPermissionProfiles();
+  updateCreateThreadAvailability();
   await refreshState(viewState.currentThreadId);
   if (evalReview) {
     evalReview.registerPresentationAdapter(createReviewPresentationAdapter({
