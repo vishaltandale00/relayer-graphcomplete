@@ -313,26 +313,35 @@ function argument(name, { optional = false } = {}) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const capture = await createDesktopCanaryEvidence({
-    targetReleaseReceiptPath: argument("target-release-receipt"),
-    previewPublicationReceiptPath: argument("preview-publication-receipt"),
-    seedReleaseReceiptPath: argument("seed-release-receipt", { optional: true }),
-    stateLogPath: argument("state-log"),
-    screenshotPaths: {
-      firstInstall: argument("screenshot-first-install", { optional: true }),
-      available: argument("screenshot-available"),
-      ready: argument("screenshot-ready"),
-      installed: argument("screenshot-installed"),
-    },
-    outputPath: argument("output"),
-    environment: {
-      host: argument("host"),
-      os: argument("os"),
-      architecture: argument("architecture"),
-    },
-    running: argument("running") === "true",
-    codeSignatureVerified: argument("signature-verified") === "true",
-    platformAcceptanceVerified: argument("platform-acceptance-verified", { optional: true }) === "true",
-  });
-  console.log(JSON.stringify({ ok: true, target: capture.environment.target, version: capture.target.version }, null, 2));
+  if (process.argv.includes("--print-target-process-id")) {
+    const flow = deriveDesktopCanaryTrace({
+      text: await readFile(argument("state-log"), "utf8"),
+      target: desktopReleaseTarget(argument("target")),
+      version: argument("target-version"),
+    });
+    process.stdout.write(String(flow.targetProcessId));
+  } else {
+    const capture = await createDesktopCanaryEvidence({
+      targetReleaseReceiptPath: argument("target-release-receipt"),
+      previewPublicationReceiptPath: argument("preview-publication-receipt"),
+      seedReleaseReceiptPath: argument("seed-release-receipt", { optional: true }),
+      stateLogPath: argument("state-log"),
+      screenshotPaths: {
+        firstInstall: argument("screenshot-first-install", { optional: true }),
+        available: argument("screenshot-available"),
+        ready: argument("screenshot-ready"),
+        installed: argument("screenshot-installed"),
+      },
+      outputPath: argument("output"),
+      environment: {
+        host: argument("host"),
+        os: argument("os"),
+        architecture: argument("architecture"),
+      },
+      running: argument("running") === "true",
+      codeSignatureVerified: argument("signature-verified") === "true",
+      platformAcceptanceVerified: argument("platform-acceptance-verified", { optional: true }) === "true",
+    });
+    console.log(JSON.stringify({ ok: true, target: capture.environment.target, version: capture.target.version }, null, 2));
+  }
 }

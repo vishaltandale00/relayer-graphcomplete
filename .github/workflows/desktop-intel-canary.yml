@@ -120,6 +120,7 @@ jobs:
             --evidence-directory "$evidence_root"
 
       - name: Preserve Intel install and updater evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: relayer-desktop-canary-macos-x64-${{ inputs.target_version }}-${{ github.run_id }}

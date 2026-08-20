@@ -102,6 +102,30 @@ wait_for_target_trace() {
   return 1
 }
 
+target_process_id_from_trace() {
+  local log="$1" target_version="$2"
+  node "$script_directory/canary-evidence.mjs" \
+    --print-target-process-id \
+    --state-log "$log" \
+    --target-version "$target_version" \
+    --target macos-x64
+}
+
+terminate_process() {
+  local process_id="$1" label="$2" deadline=$((SECONDS + 30))
+  if ! kill "$process_id"; then
+    echo "Failed to terminate $label process $process_id." >&2
+    return 1
+  fi
+  while kill -0 "$process_id" >/dev/null 2>&1 && ((SECONDS < deadline)); do
+    sleep 1
+  done
+  if kill -0 "$process_id" >/dev/null 2>&1; then
+    echo "$label process $process_id did not exit after SIGTERM." >&2
+    return 1
+  fi
+}
+
 seed_version="$(json_value "$seed_receipt" version)"
 target_version="$(json_value "$target_receipt" version)"
 [[ "$(json_value "$seed_receipt" target)" == "macos-x64" && "$(json_value "$target_receipt" target)" == "macos-x64" ]] || {
@@ -157,7 +181,16 @@ restore_launch_environment() {
     launchctl unsetenv RELAYER_DESKTOP_CANARY_LOG >/dev/null 2>&1 || true
   fi
 }
-trap restore_launch_environment EXIT
+preserve_failed_canary_diagnostics() {
+  local exit_status=$?
+  set +e
+  if ((exit_status != 0)) && [[ -s "$live_state_log" ]]; then
+    install -m 600 "$live_state_log" "$evidence_directory/macos-intel-preview-update.partial.jsonl" >/dev/null 2>&1 || true
+  fi
+  restore_launch_environment
+  exit "$exit_status"
+}
+trap preserve_failed_canary_diagnostics EXIT
 launchctl setenv RELAYER_DESKTOP_USER_DATA_DIR "$update_user_data"
 launchctl setenv RELAYER_DESKTOP_CANARY_LOG "$live_state_log"
 RELAYER_DESKTOP_USER_DATA_DIR="$update_user_data" \
@@ -172,10 +205,10 @@ node "$script_directory/electron-cdp-canary.mjs" \
   --screenshot-ready "$ready_screenshot" \
   --timeout-seconds "$timeout_seconds"
 wait_for_target_trace "$live_state_log" "$target_version" "$seed_pid"
+updated_pid="$(target_process_id_from_trace "$live_state_log" "$target_version")"
 verify_app "$application" "$target_version"
 
-pkill -f "$application/Contents/MacOS/Relayer" >/dev/null 2>&1 || true
-sleep 2
+terminate_process "$updated_pid" "Updater-relaunched Relayer"
 RELAYER_DESKTOP_USER_DATA_DIR="$update_user_data" \
 RELAYER_DESKTOP_CANARY_LOG="$live_state_log" \
   "$application/Contents/MacOS/Relayer" --remote-debugging-port=9230 >"$evidence_directory/target-relaunch.log" 2>&1 &
