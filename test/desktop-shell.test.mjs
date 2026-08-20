@@ -1187,6 +1187,7 @@ describe("desktop skeleton", () => {
     const stableWorkflow = await readFile(new URL("../.github/workflows/desktop-promote-stable.yml", import.meta.url), "utf8");
     const intelCanaryWorkflow = await readFile(new URL("../.github/workflows/desktop-intel-canary.yml", import.meta.url), "utf8");
     const intelCanaryScript = await readFile(new URL("../desktop/release/run-macos-intel-canary.sh", import.meta.url), "utf8");
+    const electronCanaryScript = await readFile(new URL("../desktop/release/electron-cdp-canary.mjs", import.meta.url), "utf8");
     const notarizationScript = await readFile(new URL("../desktop/release/notarize-and-staple.mjs", import.meta.url), "utf8");
     expect(releaseWorkflow).toContain("if: ${{ always() && startsWith(github.ref, 'refs/tags/desktop-v') }}");
     expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main');
@@ -1220,6 +1221,13 @@ describe("desktop skeleton", () => {
     expect(intelCanaryScript).not.toContain('pkill -f "$application/Contents/MacOS/Relayer"');
     expect(intelCanaryScript).toContain("macos-intel-preview-update.partial.jsonl");
     expect(intelCanaryScript).toContain('install -m 600 "$live_state_log" "$state_log"');
+    expect(electronCanaryScript).toContain('popover?.style.setProperty("display", "block", "important")');
+    expect(electronCanaryScript).toContain('popover?.style.setProperty("z-index", "1000", "important")');
+    expect(electronCanaryScript).toContain('shell?.style.setProperty("display", "flex", "important")');
+    expect(electronCanaryScript).toContain('settings?.style.setProperty("display", "block", "important")');
+    expect(electronCanaryScript).toContain('section.querySelector("h2")?.textContent === "Application updates"');
+    expect(electronCanaryScript).toContain("document.elementFromPoint(");
+    expect(electronCanaryScript).toContain("getBoundingClientRect()");
     const updatedPidIndex = intelCanaryScript.indexOf('updated_pid="$(target_process_id_from_trace');
     const updatedTerminateIndex = intelCanaryScript.indexOf('terminate_process "$updated_pid" "Updater-relaunched Relayer"');
     const targetRelaunchIndex = intelCanaryScript.indexOf("--remote-debugging-port=9230");

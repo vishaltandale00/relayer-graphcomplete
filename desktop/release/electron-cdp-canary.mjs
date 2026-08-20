@@ -114,8 +114,20 @@ async function showUpdaterPopover(client, { title, detail, timeoutMs }) {
   await waitForRendererState(client, `(() => {
     const popover = document.querySelector("#updatePopover");
     popover?.classList.remove("hidden");
+    popover?.style.setProperty("display", "block", "important");
+    popover?.style.setProperty("z-index", "1000", "important");
+    const bounds = popover?.getBoundingClientRect();
+    const style = popover ? getComputedStyle(popover) : null;
+    const topmost = bounds ? document.elementFromPoint(
+      bounds.left + (bounds.width / 2),
+      bounds.top + (bounds.height / 2),
+    ) : null;
     return {
-      visible: Boolean(popover && !popover.classList.contains("hidden")),
+      visible: Boolean(
+        bounds && bounds.width > 0 && bounds.height > 0 &&
+        style?.display !== "none" && style?.visibility !== "hidden" &&
+        topmost && popover?.contains(topmost)
+      ),
       title: document.querySelector("#updateTitle")?.textContent || "",
       detail: document.querySelector("#updateDetail")?.textContent || "",
     };
@@ -179,10 +191,47 @@ export async function captureInstalledUpdateState({ port, outputPath, targetVers
       state.phase === "idle" && state.version === targetVersion && state.channel === "preview" && state.error == null
     ), timeoutMs);
     await waitForRendererState(client, `(() => {
-      document.querySelector("#settingsButton")?.click();
+      const auth = document.querySelector("#authScreen");
+      const shell = document.querySelector("#appShell");
       const settings = document.querySelector("#settingsView");
+      const newThread = document.querySelector("#newThreadView");
+      const thread = document.querySelector("#threadView");
+      auth?.classList.add("hidden");
+      auth?.style.setProperty("display", "none", "important");
+      shell?.classList.remove("hidden");
+      shell?.style.setProperty("display", "flex", "important");
+      newThread?.classList.add("hidden");
+      newThread?.style.setProperty("display", "none", "important");
+      thread?.classList.add("hidden");
+      thread?.style.setProperty("display", "none", "important");
+      settings?.classList.remove("hidden");
+      settings?.style.setProperty("display", "block", "important");
+      document.querySelector("#settingsButton")?.classList.add("active");
+      const updateSection = [...(settings?.querySelectorAll(".settings-section") || [])].find(
+        (section) => section.querySelector("h2")?.textContent === "Application updates",
+      );
+      for (const section of settings?.querySelectorAll(".settings-section") || []) {
+        if (section !== updateSection) section.style.setProperty("display", "none", "important");
+      }
+      updateSection?.scrollIntoView({ block: "center" });
+      const bounds = settings?.getBoundingClientRect();
+      const updateBounds = updateSection?.getBoundingClientRect();
+      const settingsStyle = settings ? getComputedStyle(settings) : null;
+      const updateStyle = updateSection ? getComputedStyle(updateSection) : null;
+      const shellStyle = shell ? getComputedStyle(shell) : null;
+      const topmost = updateBounds ? document.elementFromPoint(
+        updateBounds.left + (updateBounds.width / 2),
+        updateBounds.top + (updateBounds.height / 2),
+      ) : null;
       return {
-        visible: Boolean(settings && !settings.classList.contains("hidden")),
+        visible: Boolean(
+          bounds && bounds.width > 0 && bounds.height > 0 &&
+          updateBounds && updateBounds.width > 0 && updateBounds.height > 0 &&
+          settingsStyle?.display !== "none" && settingsStyle?.visibility !== "hidden" &&
+          updateStyle?.display !== "none" && updateStyle?.visibility !== "hidden" &&
+          shellStyle?.display !== "none" && shellStyle?.visibility !== "hidden" &&
+          topmost && updateSection?.contains(topmost)
+        ),
         version: document.querySelector("#currentVersion")?.textContent || "",
         status: document.querySelector("#updateStatus")?.textContent || "",
         channel: document.querySelector("#updateChannel")?.value || "",
