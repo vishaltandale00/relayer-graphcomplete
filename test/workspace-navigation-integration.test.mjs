@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let requestImplementation;
 let rendered;
+let renderObserver;
 let throwOnRender;
 
 function rootLayer(id, nodeId) {
@@ -47,6 +48,7 @@ function deferred() {
 async function loadModules(url = "http://127.0.0.1:43123/") {
   vi.resetModules();
   rendered = 0;
+  renderObserver = null;
   throwOnRender = null;
   Object.assign(globalThis, {
     document: { querySelector: () => null },
@@ -64,6 +66,7 @@ async function loadModules(url = "http://127.0.0.1:43123/") {
   vi.doMock("../desktop/renderer/src/graph.js", () => ({
     renderThread: () => {
       rendered += 1;
+      renderObserver?.();
       if (rendered === throwOnRender) throw new Error("injected render failure");
     },
   }));
@@ -331,6 +334,116 @@ describe("workspace navigation integration", () => {
     expect(controller.viewState.currentInteractionId).toBe(1);
     expect(controller.appState.visibleLayer.layer.id).toBe(101);
     expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([101]);
+  });
+
+  it("keeps an explicit turn choice when an earlier scheduled poll resolves later", async () => {
+    vi.useFakeTimers();
+    try {
+      const acceptedTurn = interaction(1, 10, rootLayer(101, 11), 1);
+      const runningTurn = {
+        id: 2,
+        threadId: 10,
+        sequence: 2,
+        text: "Running turn",
+        completionStatus: "running",
+        completionOutput: null,
+      };
+      const threads = [{ id: 10, title: "First" }];
+      const initialState = productState(threads, [acceptedTurn, runningTurn]);
+      const staleState = productState(threads, [acceptedTurn]);
+      const stalePoll = deferred();
+      let stateReads = 0;
+      requestImplementation = vi.fn(async (path) => {
+        if (path.startsWith("/api/state?threadId=10")) {
+          stateReads += 1;
+          if (stateReads === 1) return initialState;
+          if (stateReads === 2) return stalePoll.promise;
+          return initialState;
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const controller = await loadModules();
+      await controller.loadThread(10);
+      let timersDuringExplicitRender;
+      renderObserver = () => {
+        timersDuringExplicitRender = vi.getTimerCount();
+      };
+      controller.selectTurnById(1);
+      renderObserver = null;
+      expect(timersDuringExplicitRender).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(stateReads).toBe(2);
+
+      controller.selectTurnById(2);
+      stalePoll.resolve(staleState);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(controller.viewState).toMatchObject({
+        currentThreadId: 10,
+        currentInteractionId: 2,
+      });
+      await vi.advanceTimersByTimeAsync(499);
+      expect(stateReads).toBe(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stateReads).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resumes pending polling after descendant navigation supersedes an in-flight poll", async () => {
+    vi.useFakeTimers();
+    try {
+      const root = rootLayer(101, 11);
+      root.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
+      const child = rootLayer(102, 12);
+      const runningTurn = {
+        id: 1,
+        threadId: 10,
+        sequence: 1,
+        text: "Running turn",
+        completionStatus: "running",
+        completionOutput: null,
+      };
+      const acceptedTurn = interaction(2, 10, root, 2);
+      const threads = [{ id: 10, title: "First" }];
+      const state = productState(threads, [runningTurn, acceptedTurn]);
+      const stalePoll = deferred();
+      const layerRequest = deferred();
+      let stateReads = 0;
+      requestImplementation = vi.fn(async (path) => {
+        if (path.startsWith("/api/state?threadId=10")) {
+          stateReads += 1;
+          if (stateReads === 2) return stalePoll.promise;
+          return state;
+        }
+        if (path.endsWith("/layers/102")) return layerRequest.promise;
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const controller = await loadModules();
+      await controller.loadThread(10);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(stateReads).toBe(2);
+
+      const pendingLayer = controller.navigateLayer(102, {
+        action: root.actions[0],
+        sourceNode: root.nodes[0],
+      });
+      layerRequest.resolve(child);
+      await pendingLayer;
+      stalePoll.resolve(state);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(controller.appState.visibleLayer.layer.id).toBe(102);
+      expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([101, 102]);
+      await vi.advanceTimersByTimeAsync(499);
+      expect(stateReads).toBe(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stateReads).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not restart source polling from a stale overlapping history transition", async () => {

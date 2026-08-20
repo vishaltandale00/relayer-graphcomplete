@@ -1,5 +1,6 @@
 import { escapeHtml } from "../ui.js";
 import { actionWasInvoked } from "../action-invocation-state.js";
+import { setControlActivationCompletion } from "../control-activation.js";
 import {
   interactionForThread,
   responseNodesForThread,
@@ -213,6 +214,16 @@ export function historyNavigationPresentation(history = {}) {
   };
 }
 
+export function activateHistoryControl(button, direction, navigateHistory) {
+  if (!button || typeof navigateHistory !== "function") {
+    throw new TypeError("History control activation requires a button and navigator.");
+  }
+  const completion = navigateHistory(direction);
+  setControlActivationCompletion(button, completion);
+  void completion.catch(() => {});
+  return completion;
+}
+
 export function composerKeydownIntent(event) {
   if (event.key !== "Enter") return null;
   if (event.isComposing || event.keyCode === 229) return "composing";
@@ -347,8 +358,12 @@ export function createProductWorkspace({
     if (presentation[direction].disabled) return;
     await onNavigateHistory(direction);
   };
-  $("#historyBack").onclick = () => void navigateHistory("back");
-  $("#historyForward").onclick = () => void navigateHistory("forward");
+  $("#historyBack").onclick = (event) => (
+    activateHistoryControl(event.currentTarget, "back", navigateHistory)
+  );
+  $("#historyForward").onclick = (event) => (
+    activateHistoryControl(event.currentTarget, "forward", navigateHistory)
+  );
   $("#previousTurn").onclick = () => {
     closeTurnPopover();
     onSelectTurn(-1);

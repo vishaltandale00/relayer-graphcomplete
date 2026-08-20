@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReviewSession } from "../desktop/eval-main/review-session.mjs";
+import { setControlActivationCompletion } from "../desktop/renderer/src/control-activation.js";
 import {
   accessibleControlName,
   createReviewPresentationAdapter,
@@ -408,15 +409,19 @@ describe("review presentation history", () => {
       matches: () => true,
       getAttribute: (key) => attributes.get(key) ?? null,
       getBoundingClientRect: () => ({ left: 10, top: 10, right: 40, bottom: 40, width: 30, height: 30 }),
-      click: () => setTimeout(() => {
-        presentation = {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          layerId: null,
-          selectedNodeId: null,
-          navigationPath: [],
-        };
-      }, 5),
+      click: () => {
+        const completion = new Promise((resolve) => setTimeout(() => {
+          presentation = {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            layerId: null,
+            selectedNodeId: null,
+            navigationPath: [],
+          };
+          resolve();
+        }, 5));
+        setControlActivationCompletion(button, completion);
+      },
     };
     const adapter = createReviewPresentationAdapter({
       executionId: "execution-1",
@@ -441,6 +446,69 @@ describe("review presentation history", () => {
       layerId: null,
       navigationPath: [],
     });
+  });
+
+  it("uses definitive visible-history completion beyond the old animation-frame budget", async () => {
+    let presentation = {
+      threadId: "thread-2",
+      turnId: "turn-2",
+      layerId: "layer-2",
+      selectedNodeId: null,
+      navigationPath: [{ layerId: "layer-2", viaActionId: null }],
+    };
+    let transitionFrames = 0;
+    const attributes = new Map([["aria-label", "Back to Thread 1"], ["role", "button"]]);
+    const button = {
+      dataset: { reviewRef: "history-back", reviewKind: "history" },
+      isConnected: true,
+      hidden: false,
+      disabled: false,
+      textContent: "Back",
+      matches: () => true,
+      getAttribute: (key) => attributes.get(key) ?? null,
+      getBoundingClientRect: () => ({ left: 10, top: 10, right: 40, bottom: 40, width: 30, height: 30 }),
+      click: () => {
+        const completion = new Promise((resolve) => {
+          const advance = () => {
+            transitionFrames += 1;
+            if (transitionFrames <= 140) return queueMicrotask(advance);
+            presentation = {
+              threadId: "thread-1",
+              turnId: "turn-1",
+              layerId: null,
+              selectedNodeId: null,
+              navigationPath: [],
+            };
+            resolve();
+          };
+          queueMicrotask(advance);
+        });
+        setControlActivationCompletion(button, completion);
+      },
+    };
+    const adapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => presentation,
+      navigateHistory: async () => {},
+      root: { querySelectorAll: () => [button] },
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 800,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => queueMicrotask(callback),
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
+    });
+
+    await expect(adapter.activate({
+      elementRef: "history-back",
+      operation: "activate",
+    })).resolves.toMatchObject({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      layerId: null,
+    });
+    expect(transitionFrames).toBe(141);
   });
 
   it("waits for an async thread switch to expose one complete layerless presentation", async () => {
@@ -538,7 +606,10 @@ describe("review presentation history", () => {
       matches: () => true,
       getAttribute: (key) => attributes.get(key) ?? null,
       getBoundingClientRect: () => ({ left: 10, top: 10, right: 40, bottom: 40, width: 30, height: 30 }),
-      click: () => { presentation = deepPresentation(); },
+      click: () => {
+        presentation = deepPresentation();
+        setControlActivationCompletion(button, Promise.resolve());
+      },
     };
     const adapter = createReviewPresentationAdapter({
       executionId: "execution-1",

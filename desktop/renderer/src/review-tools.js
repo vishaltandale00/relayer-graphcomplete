@@ -1,3 +1,5 @@
+import { controlActivationCompletionFor } from "./control-activation.js";
+
 const CONTROL_SELECTOR = [
   "button",
   "a[href]",
@@ -272,8 +274,16 @@ export function createReviewPresentationAdapter({
     const actionId = element.dataset.reviewActionId || null;
     const breadcrumbPathIndex = Number(element.dataset.reviewPathIndex);
     element.click();
+    if (kind === "history") {
+      const completion = controlActivationCompletionFor(element);
+      if (!completion) {
+        throw new Error(`Review history control did not expose navigation completion: ${elementRef}`);
+      }
+      await completion;
+    }
     let settled = false;
-    for (let frame = 0; frame < 120; frame++) {
+    const frameLimit = kind === "history" ? 1 : 120;
+    for (let frame = 0; frame < frameLimit; frame++) {
       await nextFrame(windowObject);
       const current = getPresentationState();
       settled = kind === "navigate-action" ? current.layerId !== before.layerId

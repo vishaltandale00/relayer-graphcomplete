@@ -1,9 +1,11 @@
 import { readFile } from "node:fs/promises";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
+import { controlActivationCompletionFor } from "../desktop/renderer/src/control-activation.js";
 import {
+  activateHistoryControl,
   graphNodeIdentitySet,
   focusedTurnIdForRerender,
   historyNavigationPresentation,
@@ -14,6 +16,17 @@ import {
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace navigation controls", () => {
+  it("exposes the exact Product history completion promise on the clicked control", async () => {
+    const button = {};
+    const completion = Promise.resolve("committed");
+    const navigateHistory = vi.fn(() => completion);
+
+    expect(activateHistoryControl(button, "back", navigateHistory)).toBe(completion);
+    expect(controlActivationCompletionFor(button)).toBe(completion);
+    await expect(controlActivationCompletionFor(button)).resolves.toBe("committed");
+    expect(navigateHistory).toHaveBeenCalledWith("back");
+  });
+
   it("uses the header arrows for generic history and keeps turn navigation in the banner", () => {
     const markup = productWorkspaceMarkup();
     const headerEnd = markup.indexOf("</header>");

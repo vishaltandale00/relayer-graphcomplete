@@ -104,6 +104,12 @@ function recordCurrentNavigation(mode = "replace") {
   return changed;
 }
 
+function cancelPendingRefresh() {
+  clearTimeout(pendingRefreshTimer);
+  pendingRefreshTimer = undefined;
+  refreshGate.invalidate();
+}
+
 function supersedePendingHistory({
   presentationChanged = false,
   renderAfterCancel = true,
@@ -112,7 +118,7 @@ function supersedePendingHistory({
   const wasPending = pendingHistoryTransition !== null;
   navigationHistory.cancelPending();
   pendingHistoryTransition = null;
-  if (presentationChanged) refreshGate.invalidate();
+  if (presentationChanged) cancelPendingRefresh();
   if (cancelLayerNavigation) layerNavigationCoordinator.cancel();
   if (wasPending && renderAfterCancel) renderThread();
 }
@@ -297,24 +303,37 @@ export async function navigateLayer(layerId, navigation = {}) {
     turnId: pendingNavigation.interactionId,
     layerId,
   };
-  const layer = String(rootLayer?.layer?.id) === String(layerId)
-    ? rootLayer
-    : await acceptedLayerCache.getOrLoad(identity, async () => validateResolvedLayer(
-      identity,
-      await request(`/api/threads/${encodeURIComponent(pendingNavigation.threadId)}/interactions/${encodeURIComponent(pendingNavigation.interactionId)}/layers/${encodeURIComponent(layerId)}`),
-    ));
-  if (!layerNavigationCoordinator.isCurrent(pendingNavigation, {
-    threadId: viewState.currentThreadId,
-    interactionId: viewState.currentInteractionId,
-    layerId: appState.visibleLayer?.layer?.id,
-  })) return;
-  const layerPath = navigation.restore
-    ? pendingNavigation.layerPath.slice(0, navigation.pathIndex + 1)
-    : appendLayerPath(pendingNavigation.layerPath, navigation.action, navigation.sourceNode);
-  viewState.selectedNodeId = null;
-  hydrateWorkspace(interaction, layer, { layerPath });
-  recordCurrentNavigation("push");
-  renderThread();
+  let ownedNavigation = false;
+  try {
+    const layer = String(rootLayer?.layer?.id) === String(layerId)
+      ? rootLayer
+      : await acceptedLayerCache.getOrLoad(identity, async () => validateResolvedLayer(
+        identity,
+        await request(`/api/threads/${encodeURIComponent(pendingNavigation.threadId)}/interactions/${encodeURIComponent(pendingNavigation.interactionId)}/layers/${encodeURIComponent(layerId)}`),
+      ));
+    ownedNavigation = layerNavigationCoordinator.isCurrent(pendingNavigation, {
+      threadId: viewState.currentThreadId,
+      interactionId: viewState.currentInteractionId,
+      layerId: appState.visibleLayer?.layer?.id,
+    });
+    if (!ownedNavigation) return;
+    const layerPath = navigation.restore
+      ? pendingNavigation.layerPath.slice(0, navigation.pathIndex + 1)
+      : appendLayerPath(pendingNavigation.layerPath, navigation.action, navigation.sourceNode);
+    viewState.selectedNodeId = null;
+    hydrateWorkspace(interaction, layer, { layerPath });
+    recordCurrentNavigation("push");
+    renderThread();
+  } finally {
+    const stillOwnsSource = layerNavigationCoordinator.isCurrent(pendingNavigation, {
+      threadId: viewState.currentThreadId,
+      interactionId: viewState.currentInteractionId,
+      layerId: appState.visibleLayer?.layer?.id,
+    });
+    if ((ownedNavigation || stillOwnsSource) && pendingHistoryTransition === null) {
+      schedulePendingRefresh(viewState.currentThreadId);
+    }
+  }
 }
 
 export function getNavigationHistory() {
@@ -428,9 +447,7 @@ export async function navigateHistory(deltaOrDirection) {
   recordCurrentNavigation();
   const transition = navigationHistory.go(delta);
   if (!transition) throw new Error(`History delta ${delta} is outside the workspace history.`);
-  clearTimeout(pendingRefreshTimer);
-  pendingRefreshTimer = undefined;
-  refreshGate.invalidate();
+  cancelPendingRefresh();
   layerNavigationCoordinator.cancel();
   pendingHistoryTransition = transition;
   let sourceSnapshot;
