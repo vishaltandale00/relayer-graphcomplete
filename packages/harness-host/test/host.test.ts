@@ -22,7 +22,12 @@ const testConfiguration: HarnessConfiguration = {
   name: "test-default",
   implementation: "test",
   implementationVersion: 1,
+  permissionBindings: { ask: {}, auto: {}, full: {} },
   settings: {},
+};
+const legacyConfiguration = (configuration: HarnessConfiguration) => {
+  const { permissionBindings: _permissionBindings, ...legacy } = configuration;
+  return legacy;
 };
 
 describe("HarnessHost", () => {
@@ -30,7 +35,7 @@ describe("HarnessHost", () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-host-"));
     const stateFile = join(directory, "sessions.json");
     const capability = graph(1, "graph-token");
-    const descriptor = { threadId: 1, configuration: testConfiguration, workingDirectory: directory };
+    const descriptor = { threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory };
     let restoredState: HarnessSessionState | undefined;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
       ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
@@ -91,7 +96,7 @@ describe("HarnessHost", () => {
       });
       await host.initialize();
       const creating = host.createSession({
-        threadId: 1,
+        threadId: 1, permissionProfileId: "auto",
         configuration: testConfiguration,
         workingDirectory: directory,
       });
@@ -120,7 +125,7 @@ describe("HarnessHost", () => {
         } },
       });
       await host.initialize();
-      const descriptor = { threadId: 1, configuration: testConfiguration, workingDirectory: directory };
+      const descriptor = { threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory };
 
       await Promise.all([host.createSession(descriptor), host.createSession(descriptor)]);
 
@@ -146,7 +151,7 @@ describe("HarnessHost", () => {
         } },
       });
       await host.initialize();
-      const creating = host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
+      const creating = host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
       await new Promise((resolveTurn) => setTimeout(resolveTurn, 0));
 
       await host.close();
@@ -176,7 +181,7 @@ describe("HarnessHost", () => {
       await host.initialize();
 
       await expect(host.createSession({
-        threadId: 1,
+        threadId: 1, permissionProfileId: "auto",
         configuration: testConfiguration,
         workingDirectory: directory,
       })).rejects.toThrow("invalid implementation state");
@@ -191,7 +196,7 @@ describe("HarnessHost", () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-fresh-capability-"));
     const stateFile = join(directory, "sessions.json");
     const descriptor = {
-      threadId: 1,
+      threadId: 1, permissionProfileId: "auto",
       configuration: testConfiguration,
       workingDirectory: directory,
     };
@@ -242,7 +247,7 @@ describe("HarnessHost", () => {
         }) },
       });
       await host.initialize();
-      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
       const completing = host.complete(1, graph());
       await started;
@@ -265,7 +270,7 @@ describe("HarnessHost", () => {
         implementations: { test: () => ({ async complete() {}, state: emptyState, dispose }) },
       });
       await host.initialize();
-      const descriptor = { threadId: 1, configuration: testConfiguration, workingDirectory: directory };
+      const descriptor = { threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory };
       await host.createSession(descriptor);
 
       await host.close();
@@ -306,7 +311,7 @@ describe("HarnessHost", () => {
         }) },
       });
       await host.initialize();
-      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
       const active = host.complete(1, graph(1, "active-token"));
       await started;
@@ -335,7 +340,7 @@ describe("HarnessHost", () => {
         implementations: { test: () => ({ async complete() { calls += 1; }, state: emptyState }) },
       });
       await host.initialize();
-      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
       await expect(host.complete(1, graph())).resolves.toMatchObject({ output: completion });
       expect(calls).toBe(0);
@@ -383,7 +388,7 @@ describe("HarnessHost", () => {
         } },
       });
       await host.initialize();
-      const base = { threadId: 1, configuration: testConfiguration, workingDirectory: directory };
+      const base = { threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory };
       await host.createSession(base);
 
       await host.complete(1, graph(1, "first-token"));
@@ -425,7 +430,7 @@ describe("HarnessHost", () => {
         }) },
       });
       await host.initialize();
-      const first = { threadId: 1, configuration: testConfiguration, workingDirectory: directory };
+      const first = { threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory };
       await host.createSession(first);
 
       const completing = host.complete(1, graph(1, "first-token"));
@@ -463,7 +468,7 @@ describe("HarnessHost", () => {
         }) },
       });
       await host.initialize();
-      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
       await expect(host.complete(1, graph())).rejects.toThrow("state failed");
       await expect(host.complete(1, graph())).resolves.toMatchObject({ output: completion });
@@ -482,7 +487,7 @@ describe("HarnessHost", () => {
       controlToken: "control",
       implementations: { test: () => ({ async complete() {}, state: emptyState }) },
     });
-    const descriptor = { threadId: 1, configuration: testConfiguration, workingDirectory: directory };
+    const descriptor = { threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory };
     try {
       await host.initialize();
       await writeFile(blocker, "not a directory", "utf8");
@@ -508,15 +513,15 @@ describe("HarnessHost", () => {
         implementations: { test: () => ({ async complete() {}, state: () => ({ providerSessionId: "session" }) }) },
       });
       await host.initialize();
-      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
       expect((await stat(stateFile)).mode & 0o777).toBe(0o600);
       const persisted = await readFile(stateFile, "utf8");
       expect(persisted).not.toContain("secret");
       expect(JSON.parse(persisted)).toEqual({
-        schemaVersion: 3,
+        schemaVersion: 4,
         sessions: [{
-          threadId: 1,
+          threadId: 1, permissionProfileId: "auto",
           configuration: testConfiguration,
           workingDirectory: directory,
           state: { providerSessionId: "session" },
@@ -527,14 +532,249 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("rejects legacy host state instead of guessing how to migrate it", async () => {
+  it("migrates schema-v3 state on startup and safely resumes matching Auto sessions", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v3-"));
+    const stateFile = join(directory, "sessions.json");
+    const serialized = JSON.stringify({
+      schemaVersion: 3,
+      sessions: [{
+        threadId: 1,
+        configuration: {
+          schemaVersion: 1,
+          name: testConfiguration.name,
+          implementation: testConfiguration.implementation,
+          implementationVersion: 1,
+          settings: {},
+        },
+        workingDirectory: directory,
+        state: { providerSessionId: "legacy-session" },
+      }],
+    });
+    let restoredState: HarnessSessionState | undefined;
+    const host = new HarnessHost({
+      stateFile,
+      controlToken: "control",
+      implementations: { test: (context) => {
+        restoredState = context.savedState;
+        return { async complete() {}, state: () => context.savedState ?? emptyState() };
+      } },
+    });
+    try {
+      await writeFile(stateFile, serialized, { mode: 0o600 });
+
+      await host.initialize();
+
+      expect(await readFile(`${stateFile}.v3.backup`, "utf8")).toBe(serialized);
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).toEqual({
+        schemaVersion: 4,
+        sessions: [],
+        legacySessions: [{
+          threadId: 1,
+          configuration: legacyConfiguration(testConfiguration),
+          workingDirectory: directory,
+          state: { providerSessionId: "legacy-session" },
+        }],
+      });
+
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+
+      expect(restoredState).toEqual({ providerSessionId: "legacy-session" });
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).toEqual({
+        schemaVersion: 4,
+        sessions: [{
+          threadId: 1,
+          configuration: testConfiguration,
+          permissionProfileId: "auto",
+          workingDirectory: directory,
+          state: { providerSessionId: "legacy-session" },
+        }],
+      });
+    } finally {
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not carry schema-v3 provider state into a different permission profile", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v3-profile-"));
+    const stateFile = join(directory, "sessions.json");
+    let restoredState: HarnessSessionState | undefined;
+    const host = new HarnessHost({
+      stateFile,
+      controlToken: "control",
+      implementations: { test: (context) => {
+        restoredState = context.savedState;
+        return { async complete() {}, state: emptyState };
+      } },
+    });
+    try {
+      await writeFile(stateFile, JSON.stringify({
+        schemaVersion: 3,
+        sessions: [{
+          threadId: 1,
+          configuration: legacyConfiguration(testConfiguration),
+          workingDirectory: directory,
+          state: { providerSessionId: "legacy-session" },
+        }],
+      }), { mode: 0o600 });
+      await host.initialize();
+
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "full",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+
+      expect(restoredState).toBeUndefined();
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).toMatchObject({
+        schemaVersion: 4,
+        sessions: [{ threadId: 1, permissionProfileId: "full", state: {} }],
+      });
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).not.toHaveProperty("legacySessions");
+    } finally {
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("resumes schema-v3 provider state with the sole bound Full profile", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v3-full-"));
+    const stateFile = join(directory, "sessions.json");
+    const configuration = {
+      ...testConfiguration,
+      name: "prime-agent-basic",
+      permissionBindings: { full: {} },
+    };
+    let restoredState: HarnessSessionState | undefined;
+    const host = new HarnessHost({
+      stateFile,
+      controlToken: "control",
+      implementations: { test: (context) => {
+        restoredState = context.savedState;
+        return { async complete() {}, state: () => context.savedState ?? emptyState() };
+      } },
+    });
+    try {
+      await writeFile(stateFile, JSON.stringify({
+        schemaVersion: 3,
+        sessions: [{
+          threadId: 1,
+          configuration: legacyConfiguration(configuration),
+          workingDirectory: directory,
+          state: { providerSessionId: "legacy-prime-session" },
+        }],
+      }), { mode: 0o600 });
+      await host.initialize();
+
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "full",
+        configuration,
+        workingDirectory: directory,
+      });
+
+      expect(restoredState).toEqual({ providerSessionId: "legacy-prime-session" });
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).toMatchObject({
+        schemaVersion: 4,
+        sessions: [{ threadId: 1, permissionProfileId: "full" }],
+      });
+    } finally {
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not resume schema-v3 provider state after configuration settings change", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v3-settings-"));
+    const stateFile = join(directory, "sessions.json");
+    const currentConfiguration = { ...testConfiguration, settings: { model: "new" } };
+    let restoredState: HarnessSessionState | undefined;
+    const host = new HarnessHost({
+      stateFile,
+      controlToken: "control",
+      implementations: { test: (context) => {
+        restoredState = context.savedState;
+        return { async complete() {}, state: emptyState };
+      } },
+    });
+    try {
+      await writeFile(stateFile, JSON.stringify({
+        schemaVersion: 3,
+        sessions: [{
+          threadId: 1,
+          configuration: { ...legacyConfiguration(testConfiguration), settings: { model: "old" } },
+          workingDirectory: directory,
+          state: { providerSessionId: "legacy-session" },
+        }],
+      }), { mode: 0o600 });
+      await host.initialize();
+
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: currentConfiguration,
+        workingDirectory: directory,
+      });
+
+      expect(restoredState).toBeUndefined();
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).toMatchObject({
+        schemaVersion: 4,
+        sessions: [{
+          threadId: 1,
+          configuration: currentConfiguration,
+          permissionProfileId: "auto",
+          state: {},
+        }],
+      });
+    } finally {
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("skips an invalid schema-v3 entry without blocking valid session migration", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v3-invalid-"));
+    const stateFile = join(directory, "sessions.json");
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const host = new HarnessHost({ stateFile, controlToken: "control", implementations: {} });
+    try {
+      await writeFile(stateFile, JSON.stringify({
+        schemaVersion: 3,
+        sessions: [
+          { threadId: "invalid", configuration: {}, workingDirectory: directory },
+          { threadId: 2, configuration: legacyConfiguration(testConfiguration), workingDirectory: directory },
+        ],
+      }), { mode: 0o600 });
+
+      await host.initialize();
+
+      expect(warning).toHaveBeenCalledOnce();
+      expect(JSON.parse(await readFile(stateFile, "utf8")).legacySessions).toEqual([{
+        threadId: 2,
+        configuration: legacyConfiguration(testConfiguration),
+        workingDirectory: directory,
+      }]);
+    } finally {
+      warning.mockRestore();
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unsupported pre-v3 host state instead of guessing how to migrate it", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-migration-"));
     const stateFile = join(directory, "sessions.json");
     try {
       await writeFile(stateFile, JSON.stringify({
         schemaVersion: 1,
         sessions: [{
-          threadId: 1,
+          threadId: 1, permissionProfileId: "auto",
           harnessKey: "codex.basic",
           workingDirectory: directory,
           graph: { url: "http://127.0.0.1:1", token: "legacy-secret", nodeId: 1 },
@@ -543,7 +783,7 @@ describe("HarnessHost", () => {
       }), { mode: 0o600 });
       const host = new HarnessHost({ stateFile, controlToken: "control", implementations: {} });
 
-      await expect(host.initialize()).rejects.toThrow("expected schema version 3");
+      await expect(host.initialize()).rejects.toThrow("expected schema version 3 or 4");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

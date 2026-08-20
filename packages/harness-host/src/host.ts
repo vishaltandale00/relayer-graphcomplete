@@ -26,6 +26,14 @@ interface LiveSession {
 interface PersistedHarnessSessionDescriptor {
   readonly threadId: number;
   readonly configuration: HarnessConfiguration;
+  readonly permissionProfileId: string;
+  readonly workingDirectory: string;
+  readonly state?: HarnessSessionState;
+}
+
+interface LegacyPersistedHarnessSessionDescriptor {
+  readonly threadId: number;
+  readonly configuration: Omit<HarnessConfiguration, "permissionBindings">;
   readonly workingDirectory: string;
   readonly state?: HarnessSessionState;
 }
@@ -48,6 +56,7 @@ export class HarnessHost {
   private readonly sessions = new Map<number, LiveSession>();
   private readonly registrationTails = new Map<number, Promise<void>>();
   private saved = new Map<number, PersistedHarnessSessionDescriptor>();
+  private legacySaved = new Map<number, LegacyPersistedHarnessSessionDescriptor>();
   private persistTail: Promise<void> = Promise.resolve();
   private closed = false;
 
@@ -55,12 +64,26 @@ export class HarnessHost {
 
   async initialize(): Promise<void> {
     try {
-      const parsed = JSON.parse(await readFile(this.options.stateFile, "utf8")) as unknown;
-      if (!isRecord(parsed) || parsed.schemaVersion !== 3 || !Array.isArray(parsed.sessions)) {
-        throw new Error("Unsupported harness host state; expected schema version 3");
+      const serialized = await readFile(this.options.stateFile, "utf8");
+      const parsed = JSON.parse(serialized) as unknown;
+      if (!isRecord(parsed) || !Array.isArray(parsed.sessions)) {
+        throw new Error("Unsupported harness host state; expected schema version 3 or 4");
       }
-      const sessions = parsed.sessions.map(readPersistedSession);
+      if (parsed.schemaVersion === 3) {
+        await this.backupLegacyState(serialized);
+        this.legacySaved = readLegacySessions(parsed.sessions);
+        await this.persist();
+        return;
+      }
+      if (parsed.schemaVersion !== 4) {
+        throw new Error("Unsupported harness host state; expected schema version 3 or 4");
+      }
+      const sessions = uniqueSessions(parsed.sessions.map(readPersistedSession));
       this.saved = new Map(sessions.map((session) => [session.threadId, session]));
+      if (parsed.legacySessions !== undefined && !Array.isArray(parsed.legacySessions)) {
+        throw new Error("Harness state contains invalid legacy sessions");
+      }
+      this.legacySaved = readLegacySessions(parsed.legacySessions ?? []);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -69,6 +92,7 @@ export class HarnessHost {
   async createSession(descriptor: HarnessSessionRegistration): Promise<void> {
     if (this.closed) throw new Error("Harness host is closed");
     const normalized = { ...descriptor, configuration: parseHarnessConfiguration(descriptor.configuration) };
+    permissionBinding(normalized.configuration, normalized.permissionProfileId);
     return this.withRegistrationLock(normalized.threadId, () => this.registerSession(normalized));
   }
 
@@ -77,7 +101,9 @@ export class HarnessHost {
     const live = this.sessions.get(descriptor.threadId);
     if (live !== undefined) {
       await this.withSessionLock(live, async () => {
-        if (!sameHarnessConfiguration(live.descriptor.configuration, descriptor.configuration) || live.descriptor.workingDirectory !== descriptor.workingDirectory) {
+        if (!sameHarnessConfiguration(live.descriptor.configuration, descriptor.configuration)
+          || live.descriptor.permissionProfileId !== descriptor.permissionProfileId
+          || live.descriptor.workingDirectory !== descriptor.workingDirectory) {
           throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${live.descriptor.configuration.name}`);
         }
         live.descriptor = {
@@ -90,14 +116,26 @@ export class HarnessHost {
       return;
     }
     const prior = this.saved.get(descriptor.threadId);
-    if (prior !== undefined && (!sameHarnessConfiguration(prior.configuration, descriptor.configuration) || prior.workingDirectory !== descriptor.workingDirectory)) {
+    if (prior !== undefined && (!sameHarnessConfiguration(prior.configuration, descriptor.configuration)
+      || prior.permissionProfileId !== descriptor.permissionProfileId
+      || prior.workingDirectory !== descriptor.workingDirectory)) {
       throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${prior.configuration.name}`);
     }
+    const legacy = this.legacySaved.get(descriptor.threadId);
+    const legacyState = legacy !== undefined
+      && descriptor.permissionProfileId === legacyPermissionProfileId(descriptor.configuration)
+      && sameLegacyHarnessConfiguration(legacy.configuration, descriptor.configuration)
+      && legacy.workingDirectory === descriptor.workingDirectory
+      ? legacy.state
+      : undefined;
+    const savedState = prior?.state ?? legacyState;
     const harness = await resolveHarnessFactory(this.options.implementations, descriptor.configuration.implementation)({
       threadId: descriptor.threadId,
       workingDirectory: descriptor.workingDirectory,
       configuration: descriptor.configuration,
-      ...(prior?.state === undefined ? {} : { savedState: prior.state }),
+      permissionProfileId: descriptor.permissionProfileId,
+      permissionBinding: permissionBinding(descriptor.configuration, descriptor.permissionProfileId),
+      ...(savedState === undefined ? {} : { savedState }),
     });
     if (this.closed) {
       await harness.dispose?.();
@@ -117,6 +155,7 @@ export class HarnessHost {
     const persisted: HarnessSessionDescriptor = { ...descriptor, state };
     this.sessions.set(descriptor.threadId, { descriptor: persisted, harness, tail: Promise.resolve() });
     this.saved.set(descriptor.threadId, persistedDescriptor(persisted));
+    this.legacySaved.delete(descriptor.threadId);
     await this.persist();
   }
 
@@ -252,7 +291,12 @@ export class HarnessHost {
   }
 
   private persist(): Promise<void> {
-    const serialized = `${JSON.stringify({ schemaVersion: 3, sessions: [...this.saved.values()] }, null, 2)}\n`;
+    const legacySessions = [...this.legacySaved.values()];
+    const serialized = `${JSON.stringify({
+      schemaVersion: 4,
+      sessions: [...this.saved.values()],
+      ...(legacySessions.length === 0 ? {} : { legacySessions }),
+    }, null, 2)}\n`;
     const operation = this.persistTail.then(() => this.writeState(serialized));
     this.persistTail = operation.catch(() => undefined);
     return operation;
@@ -267,6 +311,16 @@ export class HarnessHost {
       await rename(temporaryFile, stateFile);
     } finally {
       await rm(temporaryFile, { force: true });
+    }
+  }
+
+  private async backupLegacyState(serialized: string): Promise<void> {
+    const stateFile = resolve(this.options.stateFile);
+    await mkdir(dirname(stateFile), { recursive: true });
+    try {
+      await writeFile(`${stateFile}.v3.backup`, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
   }
 }
@@ -342,25 +396,94 @@ function persistedDescriptor(descriptor: HarnessSessionDescriptor): PersistedHar
   return {
     threadId: descriptor.threadId,
     configuration: descriptor.configuration,
+    permissionProfileId: descriptor.permissionProfileId,
     workingDirectory: descriptor.workingDirectory,
     ...(descriptor.state === undefined ? {} : { state: descriptor.state }),
   };
 }
 
+function legacyPermissionProfileId(configuration: HarnessConfiguration): string | undefined {
+  const profiles = Object.keys(configuration.permissionBindings);
+  if (profiles.includes("auto")) return "auto";
+  return profiles.length === 1 ? profiles[0] : undefined;
+}
+
+function sameLegacyHarnessConfiguration(
+  legacy: Omit<HarnessConfiguration, "permissionBindings">,
+  current: HarnessConfiguration,
+): boolean {
+  return sameHarnessConfiguration({ ...legacy, permissionBindings: current.permissionBindings }, current);
+}
+
 function readPersistedSession(value: unknown): PersistedHarnessSessionDescriptor {
   if (!isRecord(value)) throw new Error("Harness state contains an invalid session descriptor");
-  const { threadId, workingDirectory } = value;
-  if (typeof threadId !== "number" || !Number.isSafeInteger(threadId) || threadId < 1 || typeof workingDirectory !== "string") {
+  const { threadId, permissionProfileId, workingDirectory } = value;
+  if (typeof threadId !== "number" || !Number.isSafeInteger(threadId) || threadId < 1
+    || typeof permissionProfileId !== "string" || !/^[a-z0-9][a-z0-9._-]*$/i.test(permissionProfileId)
+    || typeof workingDirectory !== "string") {
     throw new Error("Harness state contains an invalid session descriptor");
   }
   const configuration = parseHarnessConfiguration(value.configuration);
+  permissionBinding(configuration, permissionProfileId);
   const state = readHarnessState(value.state);
   return {
     threadId,
     configuration,
+    permissionProfileId,
     workingDirectory,
     ...(state === undefined ? {} : { state }),
   };
+}
+
+function readLegacyPersistedSession(value: unknown): LegacyPersistedHarnessSessionDescriptor {
+  if (!isRecord(value) || !isRecord(value.configuration)) {
+    throw new Error("Harness state contains an invalid legacy session descriptor");
+  }
+  const { threadId, workingDirectory } = value;
+  const { schemaVersion, name, implementation, implementationVersion, settings } = value.configuration;
+  if (typeof threadId !== "number" || !Number.isSafeInteger(threadId) || threadId < 1
+    || schemaVersion !== 1
+    || typeof name !== "string" || !/^[a-z0-9][a-z0-9._-]*$/i.test(name)
+    || typeof implementation !== "string" || !/^[a-z0-9][a-z0-9._-]*$/i.test(implementation)
+    || typeof implementationVersion !== "number" || !Number.isSafeInteger(implementationVersion) || implementationVersion < 1
+    || !isJsonObject(settings)
+    || typeof workingDirectory !== "string") {
+    throw new Error("Harness state contains an invalid legacy session descriptor");
+  }
+  const state = readHarnessState(value.state);
+  return {
+    threadId,
+    configuration: { schemaVersion, name, implementation, implementationVersion, settings },
+    workingDirectory,
+    ...(state === undefined ? {} : { state }),
+  };
+}
+
+function uniqueSessions<T extends { readonly threadId: number }>(sessions: readonly T[]): readonly T[] {
+  if (new Set(sessions.map((session) => session.threadId)).size !== sessions.length) {
+    throw new Error("Harness state contains duplicate thread sessions");
+  }
+  return sessions;
+}
+
+function readLegacySessions(values: readonly unknown[]): Map<number, LegacyPersistedHarnessSessionDescriptor> {
+  const sessions = new Map<number, LegacyPersistedHarnessSessionDescriptor>();
+  for (const value of values) {
+    try {
+      const session = readLegacyPersistedSession(value);
+      if (sessions.has(session.threadId)) throw new Error(`duplicate thread ${session.threadId}`);
+      sessions.set(session.threadId, session);
+    } catch (error) {
+      console.warn("Skipping invalid legacy harness session during schema v3 migration", error);
+    }
+  }
+  return sessions;
+}
+
+function permissionBinding(configuration: HarnessConfiguration, profileId: string) {
+  const binding = configuration.permissionBindings[profileId];
+  if (binding === undefined) throw new Error(`Harness configuration ${configuration.name} does not bind permission profile ${profileId}`);
+  return binding;
 }
 
 function readHarnessState(value: unknown): HarnessSessionState | undefined {

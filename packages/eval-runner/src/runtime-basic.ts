@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CompletionOutput, GraphCapability, GraphNode } from "@relayer/graph-client";
-import { digestHarnessConfiguration, startHarnessHost, type HarnessFactory, type HarnessImplementationMap } from "@relayer/harness-host";
+import { digestHarnessConfiguration, startHarnessHost, type HarnessConfiguration, type HarnessFactory, type HarnessImplementationMap } from "@relayer/harness-host";
 import type { TestExecutionPlan } from "./run-plan.js";
 
 export const basicEvalCaseId = "empty-project.task-system.two-turn";
@@ -16,6 +16,13 @@ const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.ur
 
 export function basicEvalPythonPath(existingPythonPath?: string): string {
   return [join(repositoryRoot, "python/relayer-graph/src"), existingPythonPath].filter(Boolean).join(delimiter);
+}
+
+export function selectStandalonePermissionProfile(configuration: HarnessConfiguration): string {
+  const profiles = Object.keys(configuration.permissionBindings);
+  if (profiles.includes("auto")) return "auto";
+  if (profiles.length === 1) return profiles[0]!;
+  throw new Error(`Standalone Eval cases need Auto or one unambiguous permission profile in ${configuration.name}.`);
 }
 
 export const basicEvalFacts = [
@@ -74,6 +81,7 @@ export async function runBasicRuntimeEval(options: {
     const threadId = 1;
     let harnessFactoryCalls = 0;
     const configuration = options.execution.harnessConfiguration;
+    const permissionProfileId = selectStandalonePermissionProfile(configuration);
     const selectedFactory = options.implementations[configuration.implementation];
     if (selectedFactory === undefined) throw new Error(`Unknown eval harness implementation: ${configuration.implementation}`);
     const implementations = {
@@ -93,7 +101,7 @@ export async function runBasicRuntimeEval(options: {
       const capability = { url: graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
       const complete = await completeWithCapabilityCleanup(async () => {
-        await requestJson(`${runningHarnessHost.url}/sessions`, harnessControlToken, { threadId, configuration, workingDirectory }, 201);
+        await requestJson(`${runningHarnessHost.url}/sessions`, harnessControlToken, { threadId, configuration, permissionProfileId, workingDirectory }, 201);
         return requestJson<{ output: CompletionOutput }>(`${runningHarnessHost.url}/sessions/${threadId}/complete`, harnessControlToken, { graph: capability });
       }, capability, graphControlToken);
       const checks = checkBasicOutput(complete.output, interaction.node.id);

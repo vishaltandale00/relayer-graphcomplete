@@ -1,5 +1,5 @@
 use super::SqliteProductStore;
-use crate::product::{Interaction, InteractionId, ThreadId};
+use crate::product::{AcceptedInteractionCompletion, Interaction, InteractionId, ThreadId};
 use crate::storage::StorageError;
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,7 +11,7 @@ impl SqliteProductStore {
     ) -> Result<Option<Interaction>, StorageError> {
         let mut connection = self.pool.acquire().await?;
         sqlx::query(
-            "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error FROM interactions WHERE id=?1",
+            "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json FROM interactions WHERE id=?1",
         )
         .bind(interaction_id.value())
         .fetch_optional(&mut *connection)
@@ -35,8 +35,8 @@ impl SqliteProductStore {
         text: &str,
     ) -> Result<Interaction, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let previous_timestamp: String =
-            sqlx::query_scalar("SELECT updated_at FROM threads WHERE id=?1")
+        let (previous_timestamp, permission_profile_id): (String, String) =
+            sqlx::query_as("SELECT updated_at,permission_profile_id FROM threads WHERE id=?1")
                 .bind(thread_id.value())
                 .fetch_one(&mut *transaction)
                 .await?;
@@ -48,12 +48,13 @@ impl SqliteProductStore {
         .fetch_one(&mut *transaction)
         .await?;
         let result = sqlx::query(
-            "INSERT INTO interactions(thread_id,sequence,text,created_at) VALUES (?1,?2,?3,?4)",
+            "INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id) VALUES (?1,?2,?3,?4,?5)",
         )
         .bind(thread_id.value())
         .bind(sequence)
         .bind(text)
         .bind(&timestamp)
+        .bind(&permission_profile_id)
         .execute(&mut *transaction)
         .await?;
         sqlx::query("UPDATE threads SET updated_at=?1 WHERE id=?2")
@@ -71,6 +72,9 @@ impl SqliteProductStore {
             completion_status: "not_started".into(),
             harness_configuration_name: None,
             harness_configuration_digest: None,
+            permission_profile_id,
+            effective_execution_digest: None,
+            effective_permission_receipt: None,
             completion_output: None,
             completion_error: None,
         };
@@ -83,7 +87,7 @@ impl SqliteProductStore {
         interaction_id: InteractionId,
         harness_configuration_name: &str,
     ) -> Result<(), StorageError> {
-        sqlx::query("UPDATE interactions SET completion_status='running',harness_configuration_name=?1,harness_configuration_digest=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2")
+        sqlx::query("UPDATE interactions SET completion_status='running',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2")
             .bind(harness_configuration_name)
             .bind(interaction_id.value())
             .execute(&self.pool)
@@ -96,7 +100,7 @@ impl SqliteProductStore {
         interaction_id: InteractionId,
         harness_configuration_name: &str,
     ) -> Result<bool, StorageError> {
-        let result = sqlx::query("UPDATE interactions SET completion_status='running',harness_configuration_name=?1,harness_configuration_digest=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='not_started'")
+        let result = sqlx::query("UPDATE interactions SET completion_status='running',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='not_started'")
             .bind(harness_configuration_name)
             .bind(interaction_id.value())
             .execute(&self.pool)
@@ -106,18 +110,16 @@ impl SqliteProductStore {
 
     pub(crate) async fn accept_interaction_completion(
         &self,
-        interaction_id: InteractionId,
-        graph_node_id: i64,
-        harness_configuration_name: &str,
-        harness_configuration_digest: &str,
-        output: &serde_json::Value,
+        completion: AcceptedInteractionCompletion<'_>,
     ) -> Result<(), StorageError> {
-        sqlx::query("UPDATE interactions SET graph_node_id=?1,completion_status='accepted',harness_configuration_name=?2,harness_configuration_digest=?3,completion_output_json=?4,completion_error=NULL WHERE id=?5")
-            .bind(graph_node_id)
-            .bind(harness_configuration_name)
-            .bind(harness_configuration_digest)
-            .bind(serde_json::to_string(output).map_err(|error| StorageError::Serialization(error.to_string()))?)
-            .bind(interaction_id.value())
+        sqlx::query("UPDATE interactions SET graph_node_id=?1,completion_status='accepted',harness_configuration_name=?2,harness_configuration_digest=?3,effective_execution_digest=?4,effective_permission_receipt_json=?5,completion_output_json=?6,completion_error=NULL WHERE id=?7")
+            .bind(completion.graph_node_id)
+            .bind(completion.harness_configuration_name)
+            .bind(completion.harness_configuration_digest)
+            .bind(completion.effective_execution_digest)
+            .bind(serde_json::to_string(completion.effective_permission_receipt).map_err(|error| StorageError::Serialization(error.to_string()))?)
+            .bind(serde_json::to_string(completion.output).map_err(|error| StorageError::Serialization(error.to_string()))?)
+            .bind(completion.interaction_id.value())
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -144,7 +146,7 @@ pub(super) async fn fetch_interactions(
     thread_id: ThreadId,
 ) -> Result<Vec<Interaction>, StorageError> {
     let rows = sqlx::query(
-        "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error FROM interactions WHERE thread_id=?1 ORDER BY sequence ASC",
+        "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json FROM interactions WHERE thread_id=?1 ORDER BY sequence ASC",
     )
     .bind(thread_id.value())
     .fetch_all(connection)
@@ -180,5 +182,12 @@ pub(super) fn interaction_from_row(row: &SqliteRow) -> Result<Interaction, Stora
             .transpose()
             .map_err(|error| StorageError::Serialization(error.to_string()))?,
         completion_error: row.try_get(10)?,
+        permission_profile_id: row.try_get(11)?,
+        effective_execution_digest: row.try_get(12)?,
+        effective_permission_receipt: row
+            .try_get::<Option<String>, _>(13)?
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(|error| StorageError::Serialization(error.to_string()))?,
     })
 }

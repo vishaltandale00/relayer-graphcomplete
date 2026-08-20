@@ -146,6 +146,9 @@ function parsePrimeAgentConfiguration(context: HarnessFactoryContext): PrimeAgen
   const selected = context.configuration;
   if (selected.implementation !== PRIME_AGENT_KEY) throw new Error(`prime.agent cannot run implementation ${selected.implementation}`);
   if (selected.implementationVersion !== 1) throw new Error(`Unsupported prime.agent implementation version: ${selected.implementationVersion}`);
+  if (context.permissionProfileId !== "full" || Object.keys(context.permissionBinding).length !== 0) {
+    throw new Error("prime.agent currently supports only the Full access permission profile");
+  }
   const settings = selected.settings;
   const allowed = new Set(["model", "thinkingLevel", "rlmMaxDepth", "prewarmIpythonKernel"]);
   const unknown = Object.keys(settings).filter((key) => !allowed.has(key));

@@ -102,7 +102,7 @@ describe("EvalService simulated-user result persistence", () => {
     ]);
     expect(turn.judgeResults[0].artifactDirectory).toBe(calls[0].artifactDirectory);
 
-    const persisted = JSON.parse(await readFile(stateFile, "utf8"));
+    const persisted = await waitForPersistedRun(stateFile, completed.id);
     expect(persisted.schemaVersion).toBe(1);
     expect(persisted.runs[0].executions[0].turns[0].judgeResults[0].references.coverage).toBe("coverage.json");
     expect(persisted.runs[0].bundleRef).toMatch(/^runs\/.*\/bundle\.json$/);
@@ -246,6 +246,35 @@ describe("EvalService simulated-user result persistence", () => {
       run: { status: "interrupted" },
     });
   });
+
+  it("uses a harness's sole bound profile and rejects incompatible H3 runs before execution", async () => {
+    const { stateFile } = await testPaths();
+    const product = fakeAcceptedProduct();
+    globalThis.fetch = product;
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [join(repositoryRoot, "harnesses", "prime-agent-basic.yaml")],
+      platform: "darwin",
+    }).open();
+
+    await expect(service.createRun({
+      testCaseIds: ["project.h3.sanitize-status-code"],
+      harnessConfigurationNames: ["prime-agent-basic"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow("requires permission profiles not supported by prime-agent-basic: ask, auto");
+
+    const created = await service.createRun({
+      testCaseIds: ["empty-project.task-system.single-turn"],
+      harnessConfigurationNames: ["prime-agent-basic"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    await waitForCompletedRun(service, created.id);
+    const createRequest = product.mock.calls.find(([url, options]) => (
+      new URL(url).pathname === "/api/threads" && options?.method === "POST"
+    ));
+    expect(JSON.parse(createRequest[1].body).permissionProfileId).toBe("full");
+  });
 });
 
 async function testPaths() {
@@ -328,4 +357,15 @@ async function waitForCompletedRun(evalService, runId) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 10));
   }
   throw new Error("Eval run did not finish in time.");
+}
+
+async function waitForPersistedRun(stateFile, runId) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const persisted = JSON.parse(await readFile(stateFile, "utf8"));
+    const run = persisted.runs.find((candidate) => candidate.id === runId);
+    if (typeof run?.bundleRef === "string") return persisted;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+  }
+  throw new Error("Completed Eval run was not persisted in time.");
 }

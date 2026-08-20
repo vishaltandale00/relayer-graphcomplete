@@ -13,6 +13,7 @@ pub(crate) use models::ProductState;
 pub(crate) use models::Project;
 pub(crate) use models::Thread;
 pub(crate) use models::ThreadView;
+pub(crate) use service::AcceptedInteractionCompletion;
 pub(crate) use service::CreateProjectCommand;
 pub(crate) use service::CreateThreadCommand;
 pub(crate) use service::InvokeActionOutcome;

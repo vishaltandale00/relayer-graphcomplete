@@ -19,15 +19,23 @@ export async function loadHarnessConfigurations(paths: readonly string[]): Promi
 
 export function parseHarnessConfiguration(value: unknown): HarnessConfiguration {
   if (!isRecord(value)) throw new Error("Harness configuration must be an object");
-  const { schemaVersion, name, implementation, implementationVersion, settings } = value;
+  const { schemaVersion, name, implementation, implementationVersion, permissionBindings, settings } = value;
   if (schemaVersion !== 1) throw new Error(`Unsupported harness configuration schema version: ${String(schemaVersion)}`);
   if (!isIdentifier(name)) throw new Error("Harness configuration name must be a non-empty machine identifier");
   if (!isIdentifier(implementation)) throw new Error("Harness implementation must be a non-empty machine identifier");
   if (typeof implementationVersion !== "number" || !Number.isSafeInteger(implementationVersion) || implementationVersion < 1) {
     throw new Error("Harness implementation version must be a positive integer");
   }
+  if (!isRecord(permissionBindings) || Object.keys(permissionBindings).length === 0) {
+    throw new Error("Harness permissionBindings must be a non-empty object");
+  }
+  const parsedBindings = Object.fromEntries(Object.entries(permissionBindings).map(([profileId, binding]) => {
+    if (!isIdentifier(profileId)) throw new Error(`Invalid harness permission profile ID: ${profileId}`);
+    if (!isJsonObject(binding)) throw new Error(`Harness permission binding ${profileId} must be a JSON object`);
+    return [profileId, binding];
+  }));
   if (!isJsonObject(settings)) throw new Error("Harness implementation settings must be a JSON object");
-  return { schemaVersion, name, implementation, implementationVersion, settings };
+  return { schemaVersion, name, implementation, implementationVersion, permissionBindings: parsedBindings, settings };
 }
 
 export function sameHarnessConfiguration(left: HarnessConfiguration, right: HarnessConfiguration): boolean {

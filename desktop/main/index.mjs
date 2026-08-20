@@ -53,6 +53,9 @@ const relayerGraphServerBinary = app.isPackaged
 const harnessDirectory = app.isPackaged
   ? join(process.resourcesPath, "harnesses")
   : join(repositoryRoot, "harnesses");
+const permissionCatalogPath = app.isPackaged
+  ? join(process.resourcesPath, "permissions", "desktop.json")
+  : join(repositoryRoot, "permissions", "desktop.json");
 const graphClientModuleUrl = app.isPackaged
   ? pathToFileURL(join(process.resourcesPath, "graph-client", "index.js")).href
   : undefined;
@@ -158,6 +161,7 @@ if (primaryInstance) {
       userDataDirectory: userDataPath,
       binaryPath: relayerAppServerBinary,
       webDirectory: rendererDirectory,
+      permissionCatalogPath,
       runtimeSession,
       defaultHarnessConfiguration,
       onUnexpectedStop: () => {

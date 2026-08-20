@@ -1,13 +1,13 @@
-import { Codex, type ApprovalMode, type ModelReasoningEffort, type SandboxMode, type ThreadOptions, type WebSearchMode } from "@openai/codex-sdk";
+import { Codex, type ApprovalMode, type CodexOptions, type ModelReasoningEffort, type SandboxMode, type ThreadOptions, type WebSearchMode } from "@openai/codex-sdk";
 import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relayer/graph-client";
-import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState } from "../types.js";
+import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState, JsonObject } from "../types.js";
 
 export const CODEX_BASIC_KEY = "codex.basic";
 
 type CodexThread = ReturnType<Codex["startThread"]>;
 
 export interface CodexBasicDependencies {
-  readonly createCodex?: (environment: Record<string, string>, codexPathOverride?: string) => Codex;
+  readonly createCodex?: (environment: Record<string, string>, codexPathOverride: string | undefined, config: CodexConfiguration) => Codex;
   readonly clientModuleUrl?: string;
   readonly codexPathOverride?: string;
 }
@@ -23,14 +23,24 @@ interface CodexBasicConfiguration {
   readonly additionalDirectories?: readonly string[];
 }
 
+type CodexConfiguration = NonNullable<CodexOptions["config"]>;
+
+interface ResolvedCodexConfiguration {
+  readonly threadOptions: CodexBasicConfiguration;
+  readonly codexConfig: CodexConfiguration;
+}
+
 export class CodexBasicHarness implements Harness {
   private readonly clientModuleUrl: string;
   private readonly threadOptions: CodexBasicConfiguration;
+  private readonly codexConfig: CodexConfiguration;
   private codexThreadId: string | undefined;
 
   constructor(private readonly context: HarnessFactoryContext, private readonly dependencies: CodexBasicDependencies = {}) {
+    const resolved = parseCodexBasicConfiguration(context);
+    this.threadOptions = resolved.threadOptions;
+    this.codexConfig = resolved.codexConfig;
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
-    this.threadOptions = parseCodexBasicConfiguration(context);
     const codexThreadId = context.savedState?.codexThreadId;
     this.codexThreadId = typeof codexThreadId === "string" ? codexThreadId : undefined;
   }
@@ -54,8 +64,9 @@ export class CodexBasicHarness implements Harness {
     environment.RELAYER_GRAPH_URL = graph.url;
     environment.RELAYER_GRAPH_TOKEN = graph.token;
     environment.RELAYER_NODE_ID = String(graph.nodeId);
-    return this.dependencies.createCodex?.(environment, this.dependencies.codexPathOverride) ?? new Codex({
+    return this.dependencies.createCodex?.(environment, this.dependencies.codexPathOverride, this.codexConfig) ?? new Codex({
       env: environment,
+      config: this.codexConfig,
       ...(this.dependencies.codexPathOverride === undefined ? {} : {
         codexPathOverride: this.dependencies.codexPathOverride,
       }),
@@ -113,7 +124,7 @@ If a graph call rejects an object, read its error message, repair only that obje
   }
 }
 
-function parseCodexBasicConfiguration(context: HarnessFactoryContext): CodexBasicConfiguration {
+function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedCodexConfiguration {
   const selected = context.configuration;
   if (selected.implementation !== CODEX_BASIC_KEY) {
     throw new Error(`codex.basic cannot run implementation ${selected.implementation}`);
@@ -122,29 +133,66 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): CodexBasi
     throw new Error(`Unsupported codex.basic implementation version: ${selected.implementationVersion}`);
   }
   const configuration = selected.settings;
-  const allowed = new Set(["model", "modelReasoningEffort", "sandboxMode", "approvalPolicy", "networkAccessEnabled", "webSearchMode", "skipGitRepoCheck", "additionalDirectories"]);
+  const allowed = new Set(["model", "modelReasoningEffort", "webSearchMode", "skipGitRepoCheck", "additionalDirectories"]);
   const unknown = Object.keys(configuration).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new Error(`Unknown codex.basic configuration field: ${unknown.join(", ")}`);
 
   const model = optionalString(configuration.model, "model");
   const modelReasoningEffort = optionalEnum(configuration.modelReasoningEffort, ["minimal", "low", "medium", "high", "xhigh"] as const, "modelReasoningEffort");
-  const sandboxMode = optionalEnum(configuration.sandboxMode, ["read-only", "workspace-write", "danger-full-access"] as const, "sandboxMode");
-  const approvalPolicy = optionalEnum(configuration.approvalPolicy, ["never", "on-request", "on-failure", "untrusted"] as const, "approvalPolicy");
   const webSearchMode = optionalEnum(configuration.webSearchMode, ["disabled", "cached", "live"] as const, "webSearchMode");
-  const networkAccessEnabled = optionalBoolean(configuration.networkAccessEnabled, "networkAccessEnabled");
   const skipGitRepoCheck = optionalBoolean(configuration.skipGitRepoCheck, "skipGitRepoCheck");
   const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
+  const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);
 
   return {
-    ...(model === undefined ? {} : { model }),
-    ...(modelReasoningEffort === undefined ? {} : { modelReasoningEffort }),
-    ...(sandboxMode === undefined ? {} : { sandboxMode }),
-    ...(approvalPolicy === undefined ? {} : { approvalPolicy }),
-    ...(networkAccessEnabled === undefined ? {} : { networkAccessEnabled }),
-    ...(webSearchMode === undefined ? {} : { webSearchMode }),
-    ...(skipGitRepoCheck === undefined ? {} : { skipGitRepoCheck }),
-    ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
+    threadOptions: {
+      ...(model === undefined ? {} : { model }),
+      ...(modelReasoningEffort === undefined ? {} : { modelReasoningEffort }),
+      sandboxMode: permission.sandboxMode,
+      approvalPolicy: permission.approvalPolicy,
+      ...(permission.networkAccessEnabled === undefined ? {} : { networkAccessEnabled: permission.networkAccessEnabled }),
+      ...(webSearchMode === undefined ? {} : { webSearchMode }),
+      ...(skipGitRepoCheck === undefined ? {} : { skipGitRepoCheck }),
+      ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
+    },
+    codexConfig: permission.approvalsReviewer === undefined ? {} : { approvals_reviewer: permission.approvalsReviewer },
   };
+}
+
+function parseCodexPermissionBinding(profileId: string, binding: JsonObject): {
+  readonly sandboxMode: SandboxMode;
+  readonly approvalPolicy: ApprovalMode;
+  readonly approvalsReviewer?: "user" | "auto_review";
+  readonly networkAccessEnabled?: boolean;
+} {
+  const allowed = new Set(["sandboxMode", "approvalPolicy", "approvalsReviewer", "networkAccessEnabled"]);
+  const unknown = Object.keys(binding).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) throw new Error(`Unknown codex.basic permission binding field: ${unknown.join(", ")}`);
+  const sandboxMode = optionalEnum(binding.sandboxMode, ["read-only", "workspace-write", "danger-full-access"] as const, "permission sandboxMode");
+  const approvalPolicy = optionalEnum(binding.approvalPolicy, ["never", "on-request", "on-failure", "untrusted"] as const, "permission approvalPolicy");
+  const approvalsReviewer = optionalEnum(binding.approvalsReviewer, ["user", "auto_review"] as const, "permission approvalsReviewer");
+  const networkAccessEnabled = optionalBoolean(binding.networkAccessEnabled, "permission networkAccessEnabled");
+  const expected = profileId === "ask"
+    ? { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user" } as const
+    : profileId === "auto"
+      ? { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review" } as const
+      : profileId === "full"
+        ? { sandboxMode: "danger-full-access", approvalPolicy: "never" } as const
+        : undefined;
+  if (expected === undefined) throw new Error(`codex.basic does not support permission profile ${profileId}`);
+  if (sandboxMode !== expected.sandboxMode || approvalPolicy !== expected.approvalPolicy) {
+    throw new Error(`codex.basic permission binding ${profileId} does not match the product profile contract`);
+  }
+  if (profileId === "full") {
+    if (approvalsReviewer !== undefined) throw new Error("codex.basic full permission binding must not configure an approvals reviewer");
+    if (networkAccessEnabled !== undefined) throw new Error("codex.basic full permission binding must not claim sandbox network control");
+    return { sandboxMode, approvalPolicy };
+  }
+  const expectedReviewer = profileId === "ask" ? "user" : "auto_review";
+  if (approvalsReviewer !== expectedReviewer || networkAccessEnabled === undefined) {
+    throw new Error(`codex.basic permission binding ${profileId} does not match the product profile contract`);
+  }
+  return { sandboxMode, approvalPolicy, approvalsReviewer, networkAccessEnabled };
 }
 
 function optionalString(value: unknown, field: string): string | undefined {

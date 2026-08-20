@@ -15,12 +15,19 @@ import {
 import { appState, productApiAvailable, viewState } from "./state.js";
 import { $, threadTitle, toast } from "./ui.js";
 import { addLocalThread } from "./thread-model.js";
+import { closePermissionMenu } from "./permission-profiles.js";
 
 let creatingFirstThread = false;
 let pendingRefreshTimer;
 const PENDING_REFRESH_INTERVAL_MS = 500;
 const pendingActionTransitions = new Map();
 const layerNavigationCoordinator = createLayerNavigationCoordinator();
+
+export function updateCreateThreadAvailability() {
+  $("#createThread").disabled = creatingFirstThread
+    || !$("#newThreadPrompt").value.trim()
+    || !viewState.selectedPermissionProfileId;
+}
 
 function abandonActionTransition(sourceInteractionId) {
   for (const [resultInteractionId, sourceId] of pendingActionTransitions) {
@@ -306,10 +313,13 @@ async function createOrReuseProject(selectedScope) {
 export async function createFirstThread() {
   const input = $("#newThreadPrompt");
   const promptText = input.value.trim();
-  if (!promptText || creatingFirstThread) return;
+  const permissionProfileId = viewState.selectedPermissionProfileId;
+  if (!promptText || !permissionProfileId || creatingFirstThread) return;
   creatingFirstThread = true;
   input.disabled = true;
   $("#createThread").disabled = true;
+  $("#permissionButton").disabled = true;
+  closePermissionMenu();
   try {
     const selectedScope = viewState.selectedScope;
     if (!productApiAvailable) {
@@ -335,6 +345,7 @@ export async function createFirstThread() {
       body: JSON.stringify({
         title: threadTitle(promptText),
         initialMessage: promptText,
+        permissionProfileId,
         ...(projectId ? { projectId } : {}),
       }),
     });
@@ -346,7 +357,8 @@ export async function createFirstThread() {
   } finally {
     creatingFirstThread = false;
     input.disabled = false;
-    $("#createThread").disabled = !input.value.trim();
+    $("#permissionButton").disabled = !viewState.selectedPermissionProfileId;
+    updateCreateThreadAvailability();
   }
 }
 

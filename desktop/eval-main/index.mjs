@@ -33,6 +33,9 @@ const appServerBinary = app.isPackaged
   ? join(process.resourcesPath, "bin", nativeBinaryName("relayer-app-server"))
   : resolve(process.env.RELAYER_APP_SERVER_BINARY || join(repositoryRoot, "target", "debug", "relayer-app-server"));
 const harnessDirectory = app.isPackaged ? join(process.resourcesPath, "harnesses") : join(repositoryRoot, "harnesses");
+const permissionCatalogPath = app.isPackaged
+  ? join(process.resourcesPath, "permissions", "desktop.json")
+  : join(repositoryRoot, "permissions", "desktop.json");
 const productRendererDirectory = app.isPackaged ? join(process.resourcesPath, "renderer") : join(desktopDirectory, "renderer");
 const evalRendererDirectory = app.isPackaged ? join(process.resourcesPath, "eval-renderer") : join(desktopDirectory, "eval-renderer");
 const configurationPaths = evalHarnessConfigurationPaths({ harnessDirectory, isPackaged: app.isPackaged });
@@ -283,6 +286,7 @@ async function start() {
     userDataDirectory,
     binaryPath: appServerBinary,
     webDirectory: productRendererDirectory,
+    permissionCatalogPath,
     runtimeSession,
     defaultHarnessConfiguration: "fixture-task-system",
     allowHarnessOverride: true,

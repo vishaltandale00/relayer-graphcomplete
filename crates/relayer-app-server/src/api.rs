@@ -5,8 +5,8 @@ mod state;
 mod threads;
 mod types;
 
-use crate::product::ProductService;
 use crate::runtime::RuntimeClient;
+use crate::{permissions::PermissionCatalog, product::ProductService};
 use auth::DesktopSessionAuthenticator;
 use axum::{Router, routing::get};
 use std::path::PathBuf;
@@ -19,6 +19,15 @@ pub(crate) struct ApiState {
     pub(crate) product: ProductService,
     pub(crate) authenticator: DesktopSessionAuthenticator,
     pub(crate) runtime: Option<RuntimeClient>,
+    pub(crate) permission_catalog: PermissionCatalog,
+    pub(crate) default_harness_configuration: String,
+    pub(crate) allow_harness_override: bool,
+    pub(crate) standalone_workspaces_directory: PathBuf,
+}
+
+pub(crate) struct ApiRuntime {
+    pub(crate) runtime: Option<RuntimeClient>,
+    pub(crate) permission_catalog: PermissionCatalog,
     pub(crate) default_harness_configuration: String,
     pub(crate) allow_harness_override: bool,
     pub(crate) standalone_workspaces_directory: PathBuf,
@@ -28,23 +37,22 @@ pub(crate) fn router(
     product: ProductService,
     control_tokens: (String, Option<String>),
     web_directory: PathBuf,
-    runtime: Option<RuntimeClient>,
-    default_harness_configuration: String,
-    allow_harness_override: bool,
-    standalone_workspaces_directory: PathBuf,
+    runtime: ApiRuntime,
 ) -> Router {
     let (control_token, read_only_control_token) = control_tokens;
     let state = ApiState {
         product,
         authenticator: DesktopSessionAuthenticator::new(control_token, read_only_control_token),
-        runtime,
-        default_harness_configuration,
-        allow_harness_override,
-        standalone_workspaces_directory,
+        runtime: runtime.runtime,
+        permission_catalog: runtime.permission_catalog,
+        default_harness_configuration: runtime.default_harness_configuration,
+        allow_harness_override: runtime.allow_harness_override,
+        standalone_workspaces_directory: runtime.standalone_workspaces_directory,
     };
     Router::new()
         .route("/health", get(state::health))
         .route("/api/capabilities", get(state::capabilities))
+        .route("/api/permission-profiles", get(state::permission_profiles))
         .route("/api/state", get(state::product_state))
         .route("/api/projects", get(projects::list).post(projects::create))
         .route("/api/threads", get(threads::list).post(threads::create))

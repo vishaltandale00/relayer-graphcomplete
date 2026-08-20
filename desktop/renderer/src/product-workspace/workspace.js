@@ -443,7 +443,9 @@ export function createProductWorkspace({
     showThread();
     $("#threadTitle").textContent = thread.title;
     const project = state.projects.find((item) => String(item.id) === String(thread.projectId));
-    $("#threadScope").textContent = project?.name || "No folder";
+    const permissionProfile = state.permissionProfiles?.find((item) => item.id === thread.permissionProfileId);
+    const permissionLabel = permissionProfile?.label || thread.permissionProfileId;
+    $("#threadScope").textContent = `${project?.name || "No folder"} · ${permissionLabel}`;
     const interaction = interactionForThread(state, thread);
     $("#interactionText").textContent = interaction?.text
       || interaction?.summary

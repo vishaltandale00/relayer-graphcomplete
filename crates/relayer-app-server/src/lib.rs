@@ -1,5 +1,6 @@
 mod api;
 mod app_server;
+mod permissions;
 mod product;
 mod storage;
 

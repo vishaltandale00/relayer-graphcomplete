@@ -17,6 +17,7 @@ pub(crate) struct Thread {
     pub(crate) project_id: Option<ProjectId>,
     pub(crate) root_interaction_id: InteractionId,
     pub(crate) harness_configuration_name: String,
+    pub(crate) permission_profile_id: String,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
 }
@@ -31,6 +32,9 @@ pub(crate) struct Interaction {
     pub(crate) completion_status: String,
     pub(crate) harness_configuration_name: Option<String>,
     pub(crate) harness_configuration_digest: Option<String>,
+    pub(crate) permission_profile_id: String,
+    pub(crate) effective_execution_digest: Option<String>,
+    pub(crate) effective_permission_receipt: Option<Value>,
     pub(crate) completion_output: Option<Value>,
     pub(crate) completion_error: Option<String>,
     pub(crate) created_at: String,

@@ -2,6 +2,8 @@ schemaVersion: 1
 name: prime-agent-deep
 implementation: prime.agent
 implementationVersion: 1
+permissionBindings:
+  full: {}
 settings:
   thinkingLevel: high
   rlmMaxDepth: 4

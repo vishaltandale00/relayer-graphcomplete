@@ -45,11 +45,12 @@ impl SqliteProductStore {
             });
         }
 
-        let source = sqlx::query("SELECT thread_id FROM interactions WHERE id=?1")
+        let source = sqlx::query("SELECT i.thread_id,t.permission_profile_id FROM interactions i JOIN threads t ON t.id=i.thread_id WHERE i.id=?1")
             .bind(source_interaction_id.value())
             .fetch_one(&mut *transaction)
             .await?;
         let thread_id = ThreadId::from_database(source.try_get("thread_id")?);
+        let permission_profile_id: String = source.try_get("permission_profile_id")?;
         let previous_timestamp: String =
             sqlx::query_scalar("SELECT updated_at FROM threads WHERE id=?1")
                 .bind(thread_id.value())
@@ -63,12 +64,13 @@ impl SqliteProductStore {
         .fetch_one(&mut *transaction)
         .await?;
         let result = sqlx::query(
-            "INSERT INTO interactions(thread_id,sequence,text,created_at) VALUES (?1,?2,?3,?4)",
+            "INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id) VALUES (?1,?2,?3,?4,?5)",
         )
         .bind(thread_id.value())
         .bind(sequence)
         .bind(text)
         .bind(&timestamp)
+        .bind(&permission_profile_id)
         .execute(&mut *transaction)
         .await?;
         let interaction = Interaction {
@@ -80,6 +82,9 @@ impl SqliteProductStore {
             completion_status: "not_started".into(),
             harness_configuration_name: None,
             harness_configuration_digest: None,
+            permission_profile_id,
+            effective_execution_digest: None,
+            effective_permission_receipt: None,
             completion_output: None,
             completion_error: None,
             created_at: timestamp.clone(),
@@ -142,7 +147,7 @@ async fn existing(
     };
     let invocation = invocation_from_row(&row)?;
     let interaction = sqlx::query(
-        "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error FROM interactions WHERE id=?1",
+        "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json FROM interactions WHERE id=?1",
     )
     .bind(invocation.result_interaction_id.value())
     .fetch_one(&mut *connection)
@@ -184,6 +189,7 @@ mod tests {
                 None,
                 "Original prompt",
                 "codex-basic",
+                "auto",
                 "1",
             )
             .await

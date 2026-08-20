@@ -57,6 +57,11 @@ import {
   validateStablePromotionProvenance,
 } from "../desktop/release/promote-stable.mjs";
 import { apiUrl } from "../desktop/renderer/src/api.js";
+import {
+  permissionPickerDisabled,
+  permissionProfileDescription,
+  resolvePermissionSelection,
+} from "../desktop/renderer/src/permission-profile-model.js";
 import { addLocalThread, interactionForThread, responseNodesForThread } from "../desktop/renderer/src/thread-model.js";
 import { workspaceModeCapabilities } from "../desktop/renderer/src/product-workspace/model.js";
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
@@ -148,11 +153,12 @@ describe("desktop skeleton", () => {
     expect(secondaryApp.on).not.toHaveBeenCalled();
   });
 
-  it("exposes Codex setup, New thread, and updates without a harness selector", async () => {
+  it("exposes Codex setup, New thread permissions, and updates without a harness selector", async () => {
     const html = await readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8");
     const desktopMain = await readFile(new URL("../desktop/main/index.mjs", import.meta.url), "utf8");
     const packageManifest = await readFile(new URL("../package.json", import.meta.url), "utf8");
     const desktopManifest = await readFile(new URL("../desktop/package.json", import.meta.url), "utf8");
+    const vitestConfiguration = await readFile(new URL("../vitest.config.js", import.meta.url), "utf8");
     const packaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
     const desktopWindow = await readFile(new URL("../desktop/main/window.mjs", import.meta.url), "utf8");
     const desktopIpc = await readFile(new URL("../desktop/main/ipc/register-ipc.mjs", import.meta.url), "utf8");
@@ -169,6 +175,8 @@ describe("desktop skeleton", () => {
     expect(html).toContain('id="collapseSidebar"');
     expect(html).toContain('id="scopeButton"');
     expect(html).toContain('id="scopeMenu"');
+    expect(html).toContain('id="permissionButton"');
+    expect(html).toContain('id="permissionMenu"');
     expect(html).toContain('id="createThread" title="Create thread and send" disabled');
     expect(html).toContain('id="disconnectCodex"');
     expect(html).toContain('id="updateChannel"');
@@ -212,6 +220,7 @@ describe("desktop skeleton", () => {
       "desktop:dist": "node desktop/release/build-release.mjs stable",
       "desktop:dist:preview": "node desktop/release/build-release.mjs preview",
     });
+    expect(vitestConfiguration).toContain('"**/.relayer/**"');
     expect(packaging).toContain('"macos/entitlements.mac.plist"');
     expect(packaging).toContain('"!packaging/**/*"');
     expect(packaging).toContain('target/${serverTarget}/release/relayer-app-server');
@@ -226,6 +235,7 @@ describe("desktop skeleton", () => {
     expect(packaging).toContain('to: "renderer"');
     expect(threads).not.toContain("/messages");
     expect(threads).not.toContain("EventSource");
+    expect(threads).toContain("permissionProfileId");
     expect(threads).toMatch(/function loadThread[\s\S]*setMainView\("thread"\);[\s\S]*refreshState\(threadId\)/);
     expect(rendererMain).not.toContain("/messages");
     expect(rendererMain).not.toContain("/interrupt");
@@ -242,6 +252,27 @@ describe("desktop skeleton", () => {
     expect(prd).toContain('document: \'docs/prd/index.html\'');
     expect(prdServer).toContain('join(prdDirectory, "comments.json")');
     expect(packageManifest).not.toContain('"marked"');
+  });
+
+  it("selects only available product permission profiles and discloses full access", () => {
+    const profiles = [
+      { id: "ask", label: "Ask for approval", available: true },
+      { id: "auto", label: "Approve for me", available: true },
+      { id: "full", label: "Full access", available: true },
+    ];
+    expect(resolvePermissionSelection({ defaultProfile: "auto", profiles })).toBe("auto");
+    expect(resolvePermissionSelection({ defaultProfile: "auto", profiles }, "ask")).toBe("ask");
+    expect(resolvePermissionSelection({
+      defaultProfile: "auto",
+      profiles: profiles.map((profile) => ({ ...profile, available: profile.id === "ask" })),
+    }, "full")).toBe("ask");
+    expect(() => resolvePermissionSelection({
+      defaultProfile: "auto",
+      profiles: profiles.map((profile) => ({ ...profile, available: false })),
+    })).toThrow("No permission profile is available");
+    expect(permissionPickerDisabled(profiles.map((profile) => ({ ...profile, available: false })))).toBe(false);
+    expect(permissionPickerDisabled([])).toBe(true);
+    expect(permissionProfileDescription(profiles[2])).toContain("not hard-confined");
   });
 
   it("resolves native Codex bundles for supported desktop targets", () => {
@@ -351,6 +382,8 @@ describe("desktop skeleton", () => {
     );
     const input = { value: "Build the first thread", disabled: false };
     const button = { disabled: false };
+    const permissionButton = { disabled: false, setAttribute: vi.fn() };
+    const permissionMenu = { classList: { add: vi.fn() } };
     const toastElement = {
       textContent: "",
       classList: { add: vi.fn(), remove: vi.fn() },
@@ -360,6 +393,8 @@ describe("desktop skeleton", () => {
     const elements = new Map([
       ["#newThreadPrompt", input],
       ["#createThread", button],
+      ["#permissionButton", permissionButton],
+      ["#permissionMenu", permissionMenu],
       ["#toast", toastElement],
     ]);
     Object.assign(globalThis, {
@@ -372,10 +407,13 @@ describe("desktop skeleton", () => {
     });
     vi.useFakeTimers();
     try {
+      const { viewState } = await import("../desktop/renderer/src/state.js");
+      viewState.selectedPermissionProfileId = "auto";
       const { createFirstThread } = await import("../desktop/renderer/src/threads.js?submission-guard");
       const first = createFirstThread();
       const repeated = createFirstThread();
       expect(fetch).toHaveBeenCalledOnce();
+      expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({ permissionProfileId: "auto" });
       expect(input.disabled).toBe(true);
       expect(button.disabled).toBe(true);
 
@@ -417,6 +455,7 @@ describe("desktop skeleton", () => {
       userDataDirectory: directory,
       binaryPath: "/test/bin/relayer-app-server",
       webDirectory: "/test/renderer",
+      permissionCatalogPath: "/test/permissions/desktop.json",
       enableReadOnlySession: true,
       spawnProcess: (binary, args, options) => {
         invocations.push({ binary, args, options });
@@ -447,6 +486,7 @@ describe("desktop skeleton", () => {
       expect(invocations[0].args).toEqual([
         "--data-dir", join(directory, "product-data"),
         "--web-dir", "/test/renderer",
+        "--permission-catalog", "/test/permissions/desktop.json",
         "--port", "0",
         "--read-only-control-token-stdin",
       ]);
@@ -464,6 +504,7 @@ describe("desktop skeleton", () => {
         userDataDirectory: join(directory, "closed-while-preparing"),
         binaryPath: "/test/bin/should-not-start",
         webDirectory: "/test/renderer",
+        permissionCatalogPath: "/test/permissions/desktop.json",
         spawnProcess: neverSpawned,
       });
       const pendingStart = closedWhilePreparing.start();
@@ -488,6 +529,7 @@ describe("desktop skeleton", () => {
         userDataDirectory: directory,
         binaryPath: "/missing/relayer-app-server",
         webDirectory: "/test/renderer",
+        permissionCatalogPath: "/test/permissions/desktop.json",
         spawnProcess: () => {
           queueMicrotask(() => failedChild.emit("error", new Error("spawn ENOENT")));
           return failedChild;
@@ -517,6 +559,7 @@ describe("desktop skeleton", () => {
         userDataDirectory: directory,
         binaryPath: "/test/bin/rejected-handshake",
         webDirectory: "/test/renderer",
+        permissionCatalogPath: "/test/permissions/desktop.json",
         spawnProcess: () => rejectedHandshakeChild,
       });
       await expect(rejectedHandshake.start()).rejects.toThrow("control pipe closed");
@@ -539,6 +582,7 @@ describe("desktop skeleton", () => {
         userDataDirectory: directory,
         binaryPath: "/test/bin/untrusted-server",
         webDirectory: "/test/renderer",
+        permissionCatalogPath: "/test/permissions/desktop.json",
         spawnProcess: () => {
           queueMicrotask(() => remoteChild.stdout.write(`${JSON.stringify({
             ready: true,
@@ -569,6 +613,7 @@ describe("desktop skeleton", () => {
         userDataDirectory: directory,
         binaryPath: "/test/bin/stubborn-server",
         webDirectory: "/test/renderer",
+        permissionCatalogPath: "/test/permissions/desktop.json",
         startupTimeoutMs: 5,
         shutdownTimeoutMs: 5,
         spawnProcess: () => stubbornChild,
@@ -590,6 +635,7 @@ describe("desktop skeleton", () => {
         userDataDirectory: directory,
         binaryPath: "/test/bin/crashing-server",
         webDirectory: "/test/renderer",
+        permissionCatalogPath: "/test/permissions/desktop.json",
         onUnexpectedStop: (event) => unexpectedStops.push(event),
         spawnProcess: () => {
           queueMicrotask(() => crashingChild.stdout.write(`${JSON.stringify({

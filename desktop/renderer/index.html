@@ -49,8 +49,12 @@
             <textarea id="newThreadPrompt" rows="4" placeholder="Ask Relayer to investigate, design, or build something…"></textarea>
             <div class="composer-row">
               <div class="scope-control">
-                <button class="scope-button" id="scopeButton"><span>⌁</span><span id="scopeLabel">No folder</span><span>⌄</span></button>
+                <button class="scope-button" id="scopeButton" type="button" aria-haspopup="menu" aria-expanded="false"><span>⌁</span><span id="scopeLabel">No folder</span><span>⌄</span></button>
                 <div class="scope-menu hidden" id="scopeMenu"></div>
+              </div>
+              <div class="permission-control">
+                <button class="permission-button" id="permissionButton" type="button" aria-haspopup="menu" aria-expanded="false" disabled><span>◇</span><span id="permissionLabel">Permissions</span><span>⌄</span></button>
+                <div class="permission-menu hidden" id="permissionMenu" role="menu" aria-label="Permission profile"></div>
               </div>
               <button class="send-button" id="createThread" title="Create thread and send" disabled>↑</button>
             </div>

@@ -9,6 +9,8 @@ export const appState = {
   interactions: [],
   actionInvocations: [],
   pendingActionInvocations: [],
+  permissionProfiles: [],
+  defaultPermissionProfileId: null,
   nodes: [],
   edges: [],
   actions: [],
@@ -18,6 +20,7 @@ export const appState = {
 
 export const viewState = {
   selectedScope: { kind: "standalone", label: "No folder" },
+  selectedPermissionProfileId: null,
   currentThreadId: query.get("threadId"),
   currentInteractionId: query.get("interactionId"),
   mainView: query.get("threadId") ? "thread" : "new",

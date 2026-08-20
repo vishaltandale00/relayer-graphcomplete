@@ -49,6 +49,12 @@ SQLite migrations are storage implementation details. `SqliteProductStore::open`
 
 For every product interaction, the app server durably creates the product interaction and marks it running before acknowledging the write. It then creates the canonical user-interaction graph node with product project/thread provenance, supplies that graph capability only to the matching `complete()` call, awaits explicit graph submission in background work owned by the app-server process, and persists the accepted output or explicit failure on the product interaction. This lets every product host display the thread and waiting state immediately while polling the same product record to terminal state. Product and graph writes remain separate SQLite transactions; the stored graph node ID is the durable join between them.
 
+## Product permission profiles
+
+Rust product policy defines exactly `ask`, `auto`, and `full`, including their labels, enabled state, default, and authority semantics. A thread pins one profile and one named harness configuration before inference. Each harness configuration carries implementation-specific bindings for the supported profile IDs, while product APIs and Eval cases exchange only the stable IDs. Accepted interactions persist a combined effective-execution digest and normalized permission receipt alongside the harness digest. Full-access receipts disclose that the process was not hard-confined from the host filesystem or network. See [ADR 0004](decisions/0004-product-permission-profiles.md).
+
+The desktop New Thread composer loads profile labels, availability, and the default from the Rust product API. It sends only the selected stable ID during ordinary thread creation and displays the pinned profile on saved threads. Unavailable profiles remain visible but disabled; provider-specific bindings never enter the renderer contract.
+
 ## Shared product and Eval workspace
 
 Relayer and Relayer Eval are separate Electron build targets. Relayer exposes the ordinary product window and a fixed production harness configuration. Relayer Eval exposes a test-run dashboard and enables named harness overrides, but executes each case through the same product app server. A case may create one or more ordinary product threads and interactions.
@@ -94,7 +100,7 @@ Model and thinking level are separate choices. The runtime must fail clearly whe
 
 ## Basic Codex reference harness and eval
 
-`codex.basic` proves the harness boundary before the production Prime Agent policy is implemented. A named YAML configuration selects the `codex.basic` implementation and contains only that implementation's settings. The host treats those settings as opaque; the selected implementation validates and interprets them. A code-owned implementation map still connects implementation types to executable factories, so adding a Prime Agent configuration does not require adding Prime Agent-specific fields to the host.
+`codex.basic` proves the harness boundary before the production Prime Agent policy is implemented. A named YAML configuration selects the `codex.basic` implementation, contains that implementation's settings, and supplies its bindings for the three product permission profiles. The host treats settings and bindings as opaque; the selected implementation validates and interprets them. A code-owned implementation map still connects implementation types to executable factories, so adding a Prime Agent configuration does not require adding Prime Agent-specific fields to the host.
 
 Configuration, implementation code, session state, and live authority are deliberately separate:
 

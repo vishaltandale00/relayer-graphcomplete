@@ -129,6 +129,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
                     "name": "codex-basic",
                     "implementation": "test",
                     "implementationVersion": 1,
+                    "permissionBindings": { "ask": {}, "auto": {}, "full": {} },
                     "settings": {}
                 },
                 "digest": "sha256:test"
@@ -373,6 +374,7 @@ fn exits_when_desktop_control_pipe_closes() {
         std::process::id()
     ));
     fs::create_dir_all(&root).unwrap();
+    let permissions = permission_catalog();
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_relayer-app-server"))
         .args([
@@ -380,6 +382,8 @@ fn exits_when_desktop_control_pipe_closes() {
             root.join("data").to_str().unwrap(),
             "--web-dir",
             root.to_str().unwrap(),
+            "--permission-catalog",
+            permissions.to_str().unwrap(),
             "--port",
             "0",
         ])
@@ -447,6 +451,31 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .await
             .unwrap();
         assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+        let permission_profiles = app
+            .clone()
+            .oneshot(api_request("GET", "/api/permission-profiles", None, true))
+            .await
+            .unwrap();
+        assert_eq!(permission_profiles.status(), StatusCode::OK);
+        let permission_profiles = response_json(permission_profiles).await;
+        assert_eq!(permission_profiles["defaultProfile"], "auto");
+        assert_eq!(
+            permission_profiles["profiles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|profile| profile["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["ask", "auto", "full"]
+        );
+        assert!(
+            permission_profiles["profiles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|profile| profile["unavailableReason"] == "runtime_unavailable")
+        );
 
         let review_state = app
             .clone()
@@ -550,6 +579,24 @@ async fn persists_project_thread_and_interaction_across_restart() {
             [StatusCode::CREATED, StatusCode::CONFLICT]
         );
 
+        let unknown_profile = app
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({
+                    "initialMessage": "Do not run",
+                    "permissionProfileId": "fixture"
+                })),
+                true,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(unknown_profile.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let unknown_profile = response_json(unknown_profile).await;
+        assert_eq!(unknown_profile["code"], "permission_profile_unknown");
+        assert_eq!(unknown_profile["permissionProfileId"], "fixture");
+
         let thread = app
             .clone()
             .oneshot(api_request(
@@ -558,13 +605,15 @@ async fn persists_project_thread_and_interaction_across_restart() {
                 Some(json!({
                     "title": "Persist me",
                     "projectId": project["id"],
-                    "initialMessage": "Map the project"
+                    "initialMessage": "Map the project",
+                    "permissionProfileId": "ask"
                 })),
                 true,
             ))
             .await
             .unwrap();
         assert_eq!(thread.status(), StatusCode::CREATED);
+        assert_eq!(response_json(thread).await["permissionProfileId"], "ask");
 
         let standalone = app
             .clone()
@@ -617,9 +666,9 @@ async fn persists_project_thread_and_interaction_across_restart() {
             thread["title"] == "Standalone thread" && thread["projectId"].is_null()
         })
     );
-    for (title, expected_message) in [
-        ("Persist me", "Map the project"),
-        ("Standalone thread", "Keep this local"),
+    for (title, expected_message, expected_profile) in [
+        ("Persist me", "Map the project", "ask"),
+        ("Standalone thread", "Keep this local", "auto"),
     ] {
         let persisted_thread = state["threads"]
             .as_array()
@@ -629,6 +678,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .unwrap();
         let thread_id = persisted_thread["id"].as_i64().unwrap();
         assert!(thread_id > 0);
+        assert_eq!(persisted_thread["permissionProfileId"], expected_profile);
         let interactions = app
             .clone()
             .oneshot(api_request(
@@ -646,6 +696,10 @@ async fn persists_project_thread_and_interaction_across_restart() {
         )
         .unwrap();
         assert_eq!(interactions["interactions"][0]["text"], expected_message);
+        assert_eq!(
+            interactions["interactions"][0]["permissionProfileId"],
+            expected_profile
+        );
         assert_eq!(
             persisted_thread["rootInteractionId"],
             interactions["interactions"][0]["id"]
@@ -703,6 +757,13 @@ async fn persists_project_thread_and_interaction_across_restart() {
         .map(|interaction| interaction["sequence"].as_i64().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(sequences, (1..=13).collect::<Vec<_>>());
+    assert!(
+        interactions["interactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|interaction| interaction["permissionProfileId"] == "ask")
+    );
     let timestamps = interactions["interactions"]
         .as_array()
         .unwrap()
@@ -724,7 +785,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 3);
+    assert_eq!(applied_migrations, 4);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -737,6 +798,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
     let incompatible = RelayerAppServer::open(RelayerAppServerConfig {
         database_path: incompatible_database,
         web_directory: root.clone(),
+        permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: None,
         runtime: None,
@@ -761,6 +823,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
     let rootless = RelayerAppServer::open(RelayerAppServerConfig {
         database_path: rootless_database,
         web_directory: root.clone(),
+        permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: None,
         runtime: None,
@@ -784,8 +847,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         "DROP TABLE threads",
         "DROP TABLE projects",
         "CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,path TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
-        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic')",
-        "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL,graph_node_id INTEGER,completion_status TEXT NOT NULL DEFAULT 'not_started',harness_configuration_name TEXT,harness_configuration_digest TEXT,completion_output_json TEXT,completion_error TEXT)",
+        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto')",
+        "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL,graph_node_id INTEGER,completion_status TEXT NOT NULL DEFAULT 'not_started',harness_configuration_name TEXT,harness_configuration_digest TEXT,completion_output_json TEXT,completion_error TEXT,permission_profile_id TEXT NOT NULL DEFAULT 'auto',effective_execution_digest TEXT,effective_permission_receipt_json TEXT)",
         "CREATE UNIQUE INDEX projects_path_partial ON projects(path) WHERE id > 0",
         "CREATE UNIQUE INDEX interactions_sequence_partial ON interactions(thread_id,sequence) WHERE id > 0",
     ] {
@@ -798,6 +861,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
     let partial_index = RelayerAppServer::open(RelayerAppServerConfig {
         database_path: partial_index_database,
         web_directory: root.clone(),
+        permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: None,
         runtime: None,
@@ -835,6 +899,7 @@ async fn open_app(database: &Path, web_directory: &Path) -> Router {
     RelayerAppServer::open(RelayerAppServerConfig {
         database_path: database.to_owned(),
         web_directory: web_directory.to_owned(),
+        permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: Some("review".to_owned()),
         runtime: None,
@@ -854,6 +919,7 @@ async fn open_app_with_runtime(
     RelayerAppServer::open(RelayerAppServerConfig {
         database_path: database.to_owned(),
         web_directory: web_directory.to_owned(),
+        permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: Some("review".to_owned()),
         runtime: Some(RelayerRuntimeConfig {
@@ -870,6 +936,10 @@ async fn open_app_with_runtime(
     .await
     .unwrap()
     .router()
+}
+
+fn permission_catalog() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../permissions/desktop.json")
 }
 
 async fn serve_test_app(
