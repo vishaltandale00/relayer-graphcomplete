@@ -486,24 +486,60 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         &catalog,
         json!({
             "schemaVersion": 1,
-            "configurations": [{
-                "configuration": {
-                    "schemaVersion": 1,
-                    "name": "codex-basic",
-                    "implementation": "test",
-                    "implementationVersion": 1,
-                    "permissionBindings": { "ask": {}, "auto": {}, "full": {} },
-                    "modelCompatibility": [{ "providerId": "codex" }],
-                    "settings": {}
+            "configurations": [
+                {
+                    "configuration": {
+                        "schemaVersion": 1,
+                        "name": "codex-basic",
+                        "implementation": "test",
+                        "implementationVersion": 1,
+                        "permissionBindings": { "ask": {}, "auto": {}, "full": {} },
+                        "modelCompatibility": [{ "providerId": "codex" }],
+                        "settings": {}
+                    },
+                    "digest": "sha256:model-test"
                 },
-                "digest": "sha256:model-test"
-            }]
+                {
+                    "configuration": {
+                        "schemaVersion": 1,
+                        "name": "full-only",
+                        "implementation": "test",
+                        "implementationVersion": 1,
+                        "permissionBindings": { "full": {} },
+                        "modelCompatibility": [{ "providerId": "codex" }],
+                        "settings": {}
+                    },
+                    "digest": "sha256:full-only"
+                }
+            ]
         })
         .to_string(),
     )
     .unwrap();
     let (app, provider_refreshes) =
         open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let full_only_permissions = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "GET",
+                "/api/permission-profiles?harnessId=full-only",
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        full_only_permissions["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|profile| profile["available"] == true)
+            .map(|profile| profile["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["full"]
+    );
     assert_eq!(
         app.clone()
             .oneshot(provider_publish_request(test_provider_snapshot()))

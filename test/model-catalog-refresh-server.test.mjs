@@ -77,8 +77,14 @@ describe("trusted pre-inference model catalog refresh server", () => {
       await failed.close();
     }
 
+    let discoveryAborted = false;
     const stalled = await startModelCatalogRefreshServer({
-      refresh: () => new Promise(() => {}),
+      refresh: ({ signal }) => new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          discoveryAborted = true;
+          reject(signal.reason);
+        }, { once: true });
+      }),
       requestTimeoutMs: 25,
       shutdownTimeoutMs: 25,
     });
@@ -86,6 +92,7 @@ describe("trusted pre-inference model catalog refresh server", () => {
       const response = await request(stalled);
       expect(response.status).toBe(504);
       expect(await response.json()).toEqual({ error: "Model catalog refresh timed out." });
+      expect(discoveryAborted).toBe(true);
     } finally {
       await stalled.close();
     }

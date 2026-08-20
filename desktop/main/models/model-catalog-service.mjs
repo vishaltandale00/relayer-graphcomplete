@@ -6,6 +6,13 @@ import {
 
 const REFRESH_REASONS = new Set(["startup", "provider-change", "settings-open", "explicit", "pre-inference"]);
 
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException("The operation was aborted.", "AbortError");
+}
+
 export class ModelCatalogService {
   constructor({ adapters, publishSnapshot }) {
     if (!Array.isArray(adapters) || adapters.length === 0) throw new Error("ModelCatalogService requires at least one adapter.");
@@ -20,7 +27,7 @@ export class ModelCatalogService {
     this.refreshQueues = new Map();
   }
 
-  async refresh(providerId, reason = "explicit") {
+  async refresh(providerId, reason = "explicit", { signal } = {}) {
     const adapter = this.adapters.get(providerId);
     if (!adapter) throw new Error(`Unknown model provider: ${providerId}`);
     if (!REFRESH_REASONS.has(reason)) throw new Error(`Unknown model-catalog refresh reason: ${reason}`);
@@ -29,13 +36,20 @@ export class ModelCatalogService {
     if (reason === "pre-inference" && inFlight) return inFlight;
     const previous = inFlight ?? Promise.resolve();
     const operation = previous.catch(() => undefined).then(async () => {
+      throwIfAborted(signal);
       let snapshot;
       try {
-        snapshot = sanitizeModelCatalogSnapshot(await adapter.discover());
+        snapshot = sanitizeModelCatalogSnapshot(await adapter.discover({ signal }));
       } catch (error) {
+        throwIfAborted(signal);
         snapshot = unavailableModelCatalogSnapshot(adapter, error);
       }
-      await this.publishSnapshot(toProductCatalogSnapshot(snapshot), Object.freeze({ reason }));
+      throwIfAborted(signal);
+      await this.publishSnapshot(
+        toProductCatalogSnapshot(snapshot),
+        Object.freeze({ reason, signal }),
+      );
+      throwIfAborted(signal);
       return snapshot;
     });
     this.refreshQueues.set(providerId, operation);
@@ -46,12 +60,14 @@ export class ModelCatalogService {
     }
   }
 
-  refreshAll(reason) {
-    return Promise.all([...this.adapters.keys()].map((providerId) => this.refresh(providerId, reason)));
+  refreshAll(reason, options) {
+    return Promise.all([...this.adapters.keys()].map((providerId) => (
+      this.refresh(providerId, reason, options)
+    )));
   }
 
   startup() { return this.refreshAll("startup"); }
-  beforeInference() { return this.refreshAll("pre-inference"); }
+  beforeInference(options) { return this.refreshAll("pre-inference", options); }
   providerChanged(providerId) { return this.refresh(providerId, "provider-change"); }
   settingsOpened() { return this.refreshAll("settings-open"); }
   explicitRefresh(providerId) {

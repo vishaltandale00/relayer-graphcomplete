@@ -8,6 +8,32 @@ import { terminateChildProcess } from "../services/child-process.mjs";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 
+function abortReason(signal) {
+  return signal?.reason instanceof Error
+    ? signal.reason
+    : new DOMException("The operation was aborted.", "AbortError");
+}
+
+function waitWithSignal(operation, signal) {
+  if (!signal) return operation;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      callback(value);
+    };
+    const onAbort = () => finish(reject, abortReason(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve(operation).then(
+      (value) => finish(resolve, value),
+      (error) => finish(reject, error),
+    );
+  });
+}
+
 async function executableExists(path) {
   if (!path) return false;
   try {
@@ -116,11 +142,9 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     child.once("exit", (code, signal) => {
       if (this.process !== child) return;
       const error = new Error(`Codex app-server stopped (${signal || code || "unknown"}).`);
-      for (const { reject, timer } of this.pending.values()) {
-        clearTimeout(timer);
-        reject(error);
+      for (const id of [...this.pending.keys()]) {
+        this.#takePending(id)?.reject(error);
       }
-      this.pending.clear();
       this.process = null;
       this.startPromise = null;
       this.activeLoginId = null;
@@ -145,10 +169,8 @@ export class CodexCredentialAdapter extends CredentialAdapter {
       return;
     }
     if (message.id !== undefined && ("result" in message || "error" in message)) {
-      const pending = this.pending.get(message.id);
+      const pending = this.#takePending(message.id);
       if (!pending) return;
-      clearTimeout(pending.timer);
-      this.pending.delete(message.id);
       if (message.error) pending.reject(new Error(message.error.message || "Codex request failed."));
       else pending.resolve(message.result);
       return;
@@ -162,15 +184,31 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     }
   }
 
-  request(method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  #takePending(id) {
+    const pending = this.pending.get(id);
+    if (!pending) return null;
+    this.pending.delete(id);
+    clearTimeout(pending.timer);
+    pending.signal?.removeEventListener("abort", pending.onAbort);
+    return pending;
+  }
+
+  request(method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS, signal = null) {
     if (!this.process?.stdin.writable) return Promise.reject(new Error("Codex app-server is not running."));
+    if (signal?.aborted) return Promise.reject(abortReason(signal));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
+      const rejectPending = (error) => this.#takePending(id)?.reject(error);
+      const onAbort = () => rejectPending(abortReason(signal));
       const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`Codex request timed out: ${method}`));
+        rejectPending(new Error(`Codex request timed out: ${method}`));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, signal, onAbort });
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
       this.process.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
     });
   }
@@ -179,12 +217,19 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     if (this.process?.stdin.writable) this.process.stdin.write(`${JSON.stringify({ method, params })}\n`);
   }
 
-  async account() {
+  async account({ signal } = {}) {
     try {
-      await this.start();
-      const result = await this.request("account/read", { refreshToken: false });
+      await waitWithSignal(this.start(), signal);
+      signal?.throwIfAborted();
+      const result = await this.request(
+        "account/read",
+        { refreshToken: false },
+        DEFAULT_TIMEOUT_MS,
+        signal,
+      );
       return { status: result.account ? "connected" : "disconnected", account: result.account ?? null };
     } catch (error) {
+      if (signal?.aborted) throw abortReason(signal);
       return { status: "unavailable", account: null, error: error.message };
     }
   }

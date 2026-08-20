@@ -177,13 +177,13 @@ if (primaryInstance) {
     const runtimeSession = await graphRuntime.start();
     modelCatalog = new ModelCatalogService({
       adapters: [new CodexModelCatalogAdapter({ credentials })],
-      publishSnapshot: (snapshot) => {
+      publishSnapshot: (snapshot, { signal } = {}) => {
         if (!productServer) throw new Error("Relayer app server is not ready to accept a provider catalog.");
-        return productServer.publishProviderCatalog(snapshot);
+        return productServer.publishProviderCatalog(snapshot, { signal });
       },
     });
     modelCatalogRefreshServer = await startModelCatalogRefreshServer({
-      refresh: () => modelCatalog.beforeInference(),
+      refresh: ({ signal }) => modelCatalog.beforeInference({ signal }),
     });
     productServer = new RelayerAppServerService({
       userDataDirectory: userDataPath,

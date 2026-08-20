@@ -3,6 +3,7 @@ import { returnFromSettings, selectScope, setMainView, setSettingsTab } from "./
 import {
   closePermissionMenu,
   loadPermissionProfiles,
+  preparePermissionProfiles,
   togglePermissionMenu,
 } from "./permission-profiles.js";
 import { appState, desktop, evalReview, viewState } from "./state.js";
@@ -48,13 +49,21 @@ async function refreshProviderModelUi() {
 
 function bindEvents() {
   $("#connectCodex").onclick = connectCodex;
-  $("#newThread").onclick = () => {
-    cancelNavigationHistory();
-    viewState.currentThreadId = null;
-    selectScope({ kind: "standalone", label: "No folder" });
-    resetNewThreadModelPicker();
-    setMainView("new");
-    $("#newThreadPrompt").focus();
+  $("#newThread").onclick = async () => {
+    try {
+      const applyPermissionProfiles = await preparePermissionProfiles(
+        appState.modelSettings?.defaults?.harnessId,
+      );
+      applyPermissionProfiles?.();
+      cancelNavigationHistory();
+      viewState.currentThreadId = null;
+      selectScope({ kind: "standalone", label: "No folder" });
+      resetNewThreadModelPicker();
+      setMainView("new");
+      $("#newThreadPrompt").focus();
+    } catch (error) {
+      toast(error.message);
+    }
   };
   $("#scopeButton").onclick = () => {
     closePermissionMenu();

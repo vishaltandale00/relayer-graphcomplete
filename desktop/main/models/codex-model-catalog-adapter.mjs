@@ -87,8 +87,10 @@ export class CodexModelCatalogAdapter extends ModelCatalogAdapter {
     this.pageSize = pageSize;
   }
 
-  async discover() {
-    const account = await this.credentials.account();
+  async discover({ signal } = {}) {
+    signal?.throwIfAborted();
+    const account = await this.credentials.account({ signal });
+    signal?.throwIfAborted();
     if (account?.status === "unavailable") {
       return sanitizeModelCatalogSnapshot({
         provider: {
@@ -122,7 +124,8 @@ export class CodexModelCatalogAdapter extends ModelCatalogAdapter {
         cursor,
         limit: this.pageSize,
         includeHidden: true,
-      });
+      }, undefined, signal);
+      signal?.throwIfAborted();
       if (!Array.isArray(result?.data)) throw new Error("Codex model/list returned an invalid data page.");
       rawModels.push(...result.data);
       const nextCursor = optionalString(result.nextCursor);

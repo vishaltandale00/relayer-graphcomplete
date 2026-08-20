@@ -5,9 +5,8 @@ export const MODEL_CATALOG_REFRESH_PATH = "/v1/provider-catalog/refresh";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_MAX_BODY_BYTES = 1_024;
-// Codex discovery performs account/read and at least one model/list request,
-// each with a 20-second provider deadline. Bound the combined operation while
-// leaving enough time for both requests to use their own budgets.
+// Codex discovery performs account/read and model/list requests. Bound the
+// combined operation and abort provider work if the deadline expires.
 export const MODEL_CATALOG_REFRESH_TIMEOUT_MS = 45_000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 
@@ -61,12 +60,21 @@ function send(response, status, message = null) {
   response.end(body);
 }
 
-function withTimeout(operation, timeoutMs) {
+function withTimeout(operation, timeoutMs, activeControllers) {
+  const controller = new AbortController();
+  activeControllers.add(controller);
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new RequestError(504, "Model catalog refresh timed out.")), timeoutMs);
+    const timeout = setTimeout(() => {
+      const error = new RequestError(504, "Model catalog refresh timed out.");
+      controller.abort(error);
+      reject(error);
+    }, timeoutMs);
     timeout.unref?.();
-    Promise.resolve(operation).then(resolve, reject).finally(() => clearTimeout(timeout));
-  });
+    Promise.resolve()
+      .then(() => operation(controller.signal))
+      .then(resolve, reject)
+      .finally(() => clearTimeout(timeout));
+  }).finally(() => activeControllers.delete(controller));
 }
 
 export async function startModelCatalogRefreshServer({
@@ -84,6 +92,7 @@ export async function startModelCatalogRefreshServer({
 
   let closing = false;
   let expectedHost = null;
+  const activeControllers = new Set();
   const server = createServer((request, response) => {
     void (async () => {
       if (closing) throw new RequestError(503, "Model catalog refresh server is shutting down.");
@@ -100,7 +109,7 @@ export async function startModelCatalogRefreshServer({
       if (!bearerMatches(request.headers.authorization, token)) throw new RequestError(401, "Unauthorized.");
       const body = await readBoundedBody(request, maxBodyBytes);
       if (body.trim()) throw new RequestError(400, "Request body must be empty.");
-      await withTimeout(refresh(), requestTimeoutMs);
+      await withTimeout((signal) => refresh({ signal }), requestTimeoutMs, activeControllers);
       send(response, 204);
     })().catch((error) => {
       const status = error instanceof RequestError ? error.status : 503;
@@ -138,6 +147,9 @@ export async function startModelCatalogRefreshServer({
     close() {
       closePromise ??= new Promise((resolve) => {
         closing = true;
+        for (const controller of activeControllers) {
+          controller.abort(new Error("Model catalog refresh server is shutting down."));
+        }
         let finished = false;
         const finish = () => {
           if (finished) return;

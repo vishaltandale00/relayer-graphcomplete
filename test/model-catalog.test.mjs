@@ -44,7 +44,7 @@ class FakeModelCatalogAdapter extends ModelCatalogAdapter {
     this.discoverSnapshot = discover;
   }
 
-  discover() { return this.discoverSnapshot(); }
+  discover(options) { return this.discoverSnapshot(options); }
 }
 
 describe("provider-neutral model catalog", () => {
@@ -150,6 +150,27 @@ describe("provider-neutral model catalog", () => {
     expect(maximumActive).toBe(1);
     expect(published).toHaveLength(1);
     expect(published[0].context.reason).toBe("settings-open");
+  });
+
+  it("does not publish a pre-inference snapshot after its trusted request is aborted", async () => {
+    let discoveryStarted;
+    const started = new Promise((resolve) => { discoveryStarted = resolve; });
+    const publishSnapshot = vi.fn();
+    const service = new ModelCatalogService({
+      adapters: [new FakeModelCatalogAdapter(({ signal }) => new Promise((_resolve, reject) => {
+        discoveryStarted();
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }))],
+      publishSnapshot,
+    });
+    const controller = new AbortController();
+    const refresh = service.beforeInference({ signal: controller.signal });
+    await started;
+
+    controller.abort(new Error("trusted refresh deadline exceeded"));
+
+    await expect(refresh).rejects.toThrow("trusted refresh deadline exceeded");
+    expect(publishSnapshot).not.toHaveBeenCalled();
   });
 });
 

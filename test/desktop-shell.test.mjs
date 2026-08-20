@@ -803,6 +803,10 @@ describe("desktop skeleton", () => {
     expect(await client.account()).toEqual({ status: "connected", account });
 
     await expect(client.request("never-respond", {}, 5)).rejects.toThrow("Codex request timed out");
+    const abortController = new AbortController();
+    const canceled = client.request("never-respond", {}, 1_000, abortController.signal);
+    abortController.abort(new Error("catalog refresh canceled"));
+    await expect(canceled).rejects.toThrow("catalog refresh canceled");
     const interrupted = client.request("never-respond", {}, 1_000);
     child.emit("exit", 1, null);
     await expect(interrupted).rejects.toThrow("Codex app-server stopped");

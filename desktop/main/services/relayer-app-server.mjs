@@ -220,8 +220,9 @@ export class RelayerAppServerService {
     this.listening = null;
   }
 
-  async publishProviderCatalog(snapshot) {
+  async publishProviderCatalog(snapshot, { signal } = {}) {
     const session = await this.start();
+    signal?.throwIfAborted();
     const response = await fetch(new URL("/api/internal/provider-catalog", session.origin), {
       method: "PUT",
       headers: {
@@ -229,6 +230,7 @@ export class RelayerAppServerService {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(snapshot),
+      signal,
     });
     if (response.ok) return;
     let detail;

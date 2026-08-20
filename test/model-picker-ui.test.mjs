@@ -179,6 +179,10 @@ describe("composer model picker UI contract", () => {
     expect(main).toContain("async function refreshProviderModelUi()");
     expect(main).toContain("await refreshModelFamilySettings();");
     expect(main).toContain("refreshNewThreadModelPicker();");
+    expect(main).toContain("await preparePermissionProfiles(");
+    expect(main.indexOf("await preparePermissionProfiles(")).toBeLessThan(
+      main.indexOf("resetNewThreadModelPicker();"),
+    );
   });
 
   it("routes every model setup failure to Models and harnesses", async () => {
