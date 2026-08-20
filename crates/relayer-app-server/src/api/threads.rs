@@ -257,16 +257,6 @@ async fn invoke_action_with_authority(
     {
         return spawn_action_handoff(state.clone(), thread, outcome).await;
     }
-    let source_selection = source.model_selection.as_ref().ok_or_else(|| {
-        crate::product::CatalogError::invalid(
-            "source_model_selection_missing",
-            "The source interaction has no model selection to inherit.",
-        )
-    })?;
-    state
-        .product
-        .validate_interaction_model_selection(&thread.harness_configuration_name, source_selection)
-        .await?;
     let graph_node_id = source
         .graph_node_id
         .ok_or_else(|| ApiError::invalid("interaction has no accepted graph"))?;
@@ -300,7 +290,12 @@ async fn invoke_action_with_authority(
     let handoff = tokio::spawn(async move {
         let outcome = owned_state
             .product
-            .invoke_action(source_interaction_id, action_id, &interaction_text)
+            .invoke_action(
+                source_interaction_id,
+                action_id,
+                &interaction_text,
+                owned_state.allow_harness_override,
+            )
             .await?;
         finish_action_handoff(&owned_state, &thread, outcome).await
     });
@@ -519,10 +514,7 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
     if let Some(model_selection) = interaction.model_selection.as_ref()
         && let Err(error) = state
             .product
-            .validate_interaction_model_selection(
-                &thread.harness_configuration_name,
-                model_selection,
-            )
+            .validate_execution_model_selection(&thread.harness_configuration_name, model_selection)
             .await
     {
         record_background_failure(&state, &thread, &interaction, error.to_string()).await;

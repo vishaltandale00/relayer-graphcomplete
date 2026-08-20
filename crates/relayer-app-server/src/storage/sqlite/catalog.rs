@@ -327,6 +327,15 @@ impl SqliteProductStore {
         let mut connection = self.pool.acquire().await?;
         validate_model_selection_on(&mut connection, command).await
     }
+
+    pub(crate) async fn validate_execution_model_selection(
+        &self,
+        harness_id: &str,
+        selection: &crate::product::InteractionModelSelection,
+    ) -> Result<(), StorageError> {
+        let mut connection = self.pool.acquire().await?;
+        validate_execution_model_selection_on(&mut connection, harness_id, selection).await
+    }
 }
 
 pub(super) async fn validate_model_selection_on(
@@ -395,6 +404,74 @@ pub(super) async fn validate_model_selection_on(
         if !valid {
             return Err(StorageError::Catalog(CatalogError::selection(
                 code, message, command,
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub(super) async fn validate_execution_model_selection_on(
+    connection: &mut SqliteConnection,
+    harness_id: &str,
+    selection: &crate::product::InteractionModelSelection,
+) -> Result<(), StorageError> {
+    let command = ValidateModelSelectionCommand {
+        harness_id: harness_id.to_owned(),
+        family_id: selection.family_id,
+        provider_id: selection.provider_id.clone(),
+        model_id: selection.model_id.clone(),
+    };
+    let row = sqlx::query(
+        "SELECT h.product_visible AS harness_visible,h.available AS harness_available,p.connected AS provider_connected,m.visible AS model_visible,m.available AS model_available,EXISTS(SELECT 1 FROM harness_provider_compatibility c WHERE c.harness_configuration_name=h.configuration_name AND c.provider_id=p.id AND (c.all_models=1 OR EXISTS(SELECT 1 FROM harness_model_compatibility cm WHERE cm.harness_configuration_name=c.harness_configuration_name AND cm.provider_id=c.provider_id AND cm.model_id=m.model_id))) AS compatible FROM product_harnesses h JOIN model_providers p ON p.id=?2 JOIN provider_models m ON m.provider_id=p.id AND m.model_id=?3 WHERE h.configuration_name=?1",
+    )
+    .bind(harness_id)
+    .bind(selection.provider_id.as_str())
+    .bind(&selection.model_id)
+    .fetch_optional(connection)
+    .await?;
+    let Some(row) = row else {
+        return Err(StorageError::Catalog(CatalogError::selection(
+            "model_selection_unknown",
+            "The selected harness, provider, or model is unknown.",
+            &command,
+        )));
+    };
+    let checks = [
+        (
+            row.get::<bool, _>("harness_visible"),
+            "harness_not_product_visible",
+            "The selected harness is not available to product callers.",
+        ),
+        (
+            row.get::<bool, _>("harness_available"),
+            "harness_unavailable",
+            "No available models for this harness",
+        ),
+        (
+            row.get::<bool, _>("provider_connected"),
+            "provider_disconnected",
+            "The selected provider is not connected.",
+        ),
+        (
+            row.get::<bool, _>("model_visible"),
+            "model_hidden",
+            "The selected model is hidden.",
+        ),
+        (
+            row.get::<bool, _>("model_available"),
+            "model_unavailable",
+            "The selected model is unavailable.",
+        ),
+        (
+            row.get::<bool, _>("compatible"),
+            "harness_model_incompatible",
+            "No available models for this harness",
+        ),
+    ];
+    for (valid, code, message) in checks {
+        if !valid {
+            return Err(StorageError::Catalog(CatalogError::selection(
+                code, message, &command,
             )));
         }
     }

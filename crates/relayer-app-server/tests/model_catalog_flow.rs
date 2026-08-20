@@ -80,6 +80,25 @@ async fn model_catalog_families_defaults_and_selection_are_typed_and_durable() {
     );
     let system_family_id = settings["families"][0]["id"].as_i64().unwrap();
 
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE harness_provider_compatibility SET preferred_model_id='gpt-5.6-terra' WHERE harness_configuration_name='codex-basic' AND provider_id='codex'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let preferred_default = response_json(
+        app.clone()
+            .oneshot(cookie_request(
+                "GET",
+                "/api/model-selection/default?harnessId=codex-basic",
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(preferred_default["modelId"], "gpt-5.6-terra");
+
     let custom = app
         .clone()
         .oneshot(cookie_request(
@@ -236,7 +255,7 @@ async fn model_catalog_families_defaults_and_selection_are_typed_and_durable() {
     assert_eq!(response_json(valid).await["modelId"], "gpt-5.6-sol");
 
     let pool = sqlite_pool(&database).await;
-    sqlx::query("UPDATE harness_provider_compatibility SET all_models=0 WHERE harness_configuration_name='codex-basic' AND provider_id='codex'")
+    sqlx::query("UPDATE harness_provider_compatibility SET all_models=0,preferred_model_id='gpt-5.6-sol' WHERE harness_configuration_name='codex-basic' AND provider_id='codex'")
         .execute(&pool)
         .await
         .unwrap();

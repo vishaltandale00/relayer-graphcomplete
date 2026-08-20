@@ -1,7 +1,7 @@
 use super::{SqliteProductStore, catalog, interactions};
 use crate::product::{
     ActionInvocation, CatalogError, Interaction, InteractionId, InteractionModelSelection,
-    ModelFamilyId, ProviderId, ThreadId, ValidateModelSelectionCommand,
+    ModelFamilyId, ProviderId, ThreadId,
 };
 use crate::storage::{ActionInvocationInsertOutcome, StorageError};
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
@@ -36,6 +36,7 @@ impl SqliteProductStore {
         source_interaction_id: InteractionId,
         action_id: i64,
         text: &str,
+        allow_unselected_model: bool,
     ) -> Result<ActionInvocationInsertOutcome, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some((invocation, interaction)) =
@@ -60,12 +61,13 @@ impl SqliteProductStore {
         let model_family_id: Option<i64> = source.try_get("model_family_id")?;
         let model_selection = match (model_provider_id, provider_model_id, model_family_id) {
             (Some(provider_id), Some(model_id), Some(family_id)) if family_id > 0 => {
-                InteractionModelSelection {
+                Some(InteractionModelSelection {
                     family_id: ModelFamilyId::from_database(family_id),
                     provider_id: ProviderId::from_database(provider_id),
                     model_id,
-                }
+                })
             }
+            (None, None, None) if allow_unselected_model => None,
             _ => {
                 return Err(StorageError::Catalog(CatalogError::invalid(
                     "source_model_selection_missing",
@@ -73,16 +75,14 @@ impl SqliteProductStore {
                 )));
             }
         };
-        catalog::validate_model_selection_on(
-            &mut transaction,
-            &ValidateModelSelectionCommand {
-                harness_id,
-                family_id: model_selection.family_id,
-                provider_id: model_selection.provider_id.clone(),
-                model_id: model_selection.model_id.clone(),
-            },
-        )
-        .await?;
+        if let Some(selection) = model_selection.as_ref() {
+            catalog::validate_execution_model_selection_on(
+                &mut transaction,
+                &harness_id,
+                selection,
+            )
+            .await?;
+        }
         let previous_timestamp: String =
             sqlx::query_scalar("SELECT updated_at FROM threads WHERE id=?1")
                 .bind(thread_id.value())
@@ -103,9 +103,9 @@ impl SqliteProductStore {
         .bind(text)
         .bind(&timestamp)
         .bind(&permission_profile_id)
-        .bind(model_selection.provider_id.as_str())
-        .bind(&model_selection.model_id)
-        .bind(model_selection.family_id.value())
+        .bind(model_selection.as_ref().map(|selection| selection.provider_id.as_str()))
+        .bind(model_selection.as_ref().map(|selection| selection.model_id.as_str()))
+        .bind(model_selection.as_ref().map(|selection| selection.family_id.value()))
         .execute(&mut *transaction)
         .await?;
         let interaction = Interaction {
@@ -118,7 +118,7 @@ impl SqliteProductStore {
             harness_configuration_name: None,
             harness_configuration_digest: None,
             permission_profile_id,
-            model_selection: Some(model_selection),
+            model_selection,
             effective_execution_digest: None,
             effective_permission_receipt: None,
             completion_output: None,
@@ -244,7 +244,12 @@ mod tests {
             let store = store.clone();
             attempts.spawn(async move {
                 store
-                    .insert_action_invocation(thread.root_interaction_id, 41, "Authored follow-up")
+                    .insert_action_invocation(
+                        thread.root_interaction_id,
+                        41,
+                        "Authored follow-up",
+                        false,
+                    )
                     .await
                     .unwrap()
             });
@@ -269,7 +274,12 @@ mod tests {
         drop(store);
         let reopened = SqliteProductStore::open(&path).await.unwrap();
         let replay = reopened
-            .insert_action_invocation(thread.root_interaction_id, 41, "Different text is ignored")
+            .insert_action_invocation(
+                thread.root_interaction_id,
+                41,
+                "Different text is ignored",
+                false,
+            )
             .await
             .unwrap();
         let replay_interaction = match replay {
@@ -316,7 +326,7 @@ mod tests {
             .unwrap();
 
         let error = store
-            .insert_action_invocation(thread.root_interaction_id, 41, "Must not persist")
+            .insert_action_invocation(thread.root_interaction_id, 41, "Must not persist", false)
             .await
             .err()
             .unwrap();
@@ -327,6 +337,112 @@ mod tests {
             other => panic!("unexpected error: {other}"),
         }
         assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 1);
+
+        store.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn configuration_owned_source_can_invoke_without_a_model_selection() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-configuration-action-invocation-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Configuration-owned source",
+                project_id: None,
+                initial_message: "Original prompt",
+                harness_configuration_name: "prime-agent-basic",
+                permission_profile_id: "auto",
+                model_selection: None,
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+
+        let outcome = store
+            .insert_action_invocation(
+                thread.root_interaction_id,
+                41,
+                "Configuration-owned follow-up",
+                true,
+            )
+            .await
+            .unwrap();
+        let interaction = match outcome {
+            ActionInvocationInsertOutcome::Created { interaction, .. } => interaction,
+            ActionInvocationInsertOutcome::Existing { .. } => panic!("first invocation existed"),
+        };
+        assert_eq!(interaction.model_selection, None);
+
+        store.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn historical_action_survives_family_deletion() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-deleted-family-action-invocation-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_model_selection(&store).await;
+        sqlx::query("INSERT INTO model_families(id,name,kind,enabled,position) VALUES (2,'Historical','custom',1,1)")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (2,0,'codex','test-model')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let model_selection = InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(2),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: "test-model".into(),
+        };
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Historical source",
+                project_id: None,
+                initial_message: "Original prompt",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&model_selection),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        assert!(
+            store
+                .delete_model_family(ModelFamilyId::from_database(2))
+                .await
+                .unwrap()
+        );
+
+        let outcome = store
+            .insert_action_invocation(
+                thread.root_interaction_id,
+                41,
+                "Historical follow-up",
+                false,
+            )
+            .await
+            .unwrap();
+        let interaction = match outcome {
+            ActionInvocationInsertOutcome::Created { interaction, .. } => interaction,
+            ActionInvocationInsertOutcome::Existing { .. } => panic!("first invocation existed"),
+        };
+        assert_eq!(interaction.model_selection, Some(model_selection));
 
         store.pool.close().await;
         std::fs::remove_file(path).unwrap();

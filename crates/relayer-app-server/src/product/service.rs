@@ -271,11 +271,60 @@ impl ProductService {
         .map(|_| ())
     }
 
+    pub(crate) async fn validate_execution_model_selection(
+        &self,
+        harness_id: &str,
+        selection: &InteractionModelSelection,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .validate_execution_model_selection(harness_id, selection)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn first_available_model(
         &self,
         harness_id: &str,
     ) -> Result<Option<ModelSelection>, ProductError> {
         let settings = self.storage.load_model_settings().await?;
+        if let Some(harness) = settings
+            .harnesses
+            .iter()
+            .find(|harness| harness.id == harness_id)
+        {
+            for compatibility in &harness.model_compatibility {
+                let Some(preferred_model_id) = compatibility.preferred_model_id.as_ref() else {
+                    continue;
+                };
+                for family in settings.families.iter().filter(|family| family.enabled) {
+                    let Some(member) = family.members.iter().find(|member| {
+                        member.provider_id == compatibility.provider_id
+                            && member.model_id == *preferred_model_id
+                    }) else {
+                        continue;
+                    };
+                    let command = ValidateModelSelectionCommand {
+                        harness_id: harness_id.to_owned(),
+                        family_id: family.id,
+                        provider_id: member.provider_id.clone(),
+                        model_id: member.model_id.clone(),
+                    };
+                    if self
+                        .storage
+                        .validate_model_selection(&command)
+                        .await
+                        .is_ok()
+                    {
+                        return Ok(Some(ModelSelection {
+                            harness_id: command.harness_id,
+                            family_id: command.family_id,
+                            provider_id: command.provider_id,
+                            model_id: command.model_id,
+                        }));
+                    }
+                }
+            }
+        }
         for family in settings.families.iter().filter(|family| family.enabled) {
             for member in &family.members {
                 let command = ValidateModelSelectionCommand {
@@ -533,6 +582,7 @@ impl ProductService {
         source_interaction_id: InteractionId,
         action_id: i64,
         text: &str,
+        allow_unselected_model: bool,
     ) -> Result<InvokeActionOutcome, ProductError> {
         if action_id <= 0 {
             return Err(ProductError::Invalid(
@@ -546,26 +596,14 @@ impl ProductService {
             return Ok(existing);
         }
         let text = required(text, "interactionText")?;
-        let source = self.get_interaction(source_interaction_id).await?;
-        let source_selection = source.model_selection.as_ref().ok_or_else(|| {
-            CatalogError::invalid(
-                "source_model_selection_missing",
-                "The source interaction has no model selection to inherit.",
-            )
-        })?;
-        let thread = self
-            .storage
-            .get_thread(source.thread_id)
-            .await?
-            .ok_or_else(|| ProductError::NotFound(format!("thread {}", source.thread_id)))?;
-        self.validate_interaction_model_selection(
-            &thread.harness_configuration_name,
-            source_selection,
-        )
-        .await?;
         let outcome = self
             .storage
-            .insert_action_invocation(source_interaction_id, action_id, text)
+            .insert_action_invocation(
+                source_interaction_id,
+                action_id,
+                text,
+                allow_unselected_model,
+            )
             .await?;
         Ok(match outcome {
             ActionInvocationInsertOutcome::Created {
