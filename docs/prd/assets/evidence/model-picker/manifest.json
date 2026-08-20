@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-20T19:30:49.768Z",
+  "source": {
+    "product": "The real Electron product renderer and Rust app server",
+    "discovery": "Live Codex account/read and paginated model/list through CodexCredentialAdapter",
+    "completion": "Deterministic taskSystemFixtureFactory registered under the codex.basic implementation key",
+    "paidInferenceCalls": 0
+  },
+  "provider": {
+    "id": "codex",
+    "status": "available",
+    "discoveredModelCount": 10,
+    "visibleModelCount": 8,
+    "systemFamilyModelIds": [
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-daybreak-blue-latest",
+      "gpt-5.5"
+    ]
+  },
+  "thread": {
+    "id": 1,
+    "harnessId": "codex-basic",
+    "interactionCount": 2,
+    "interactionModels": [
+      {
+        "familyId": 1,
+        "providerId": "codex",
+        "modelId": "gpt-5.6-sol"
+      },
+      {
+        "familyId": 1,
+        "providerId": "codex",
+        "modelId": "gpt-5.6-terra"
+      }
+    ],
+    "firstInteractionId": 1
+  },
+  "relatedScope": {
+    "issue54": "Intra-conversation approval prompt lifecycle is related work, not an Issue #34 dependency.",
+    "issue58": "An ongoing per-interaction approval-profile selector is related work, not an Issue #34 dependency."
+  },
+  "settingsScreenshots": {
+    "dark-defaults-and-system-family": {
+      "file": "../model-settings/dark-defaults-and-system-family.jpg",
+      "requirements": [
+        "Defaults contains only Harness and Provider",
+        "One complete system family is visible in dark mode"
+      ]
+    },
+    "light-defaults-and-system-family": {
+      "file": "../model-settings/light-defaults-and-system-family.jpg",
+      "requirements": [
+        "Defaults and model families remain legible in light mode"
+      ]
+    },
+    "narrow-new-family-editor": {
+      "file": "../model-settings/narrow-new-family-editor.jpg",
+      "requirements": [
+        "New family appends an inline editable slide at the end of the horizontal carousel"
+      ]
+    }
+  },
+  "automatedEvidence": {
+    "discovery": "test/model-catalog.test.mjs",
+    "familySettings": "test/model-family-settings.test.mjs",
+    "pickerLogic": "test/model-picker-model.test.mjs",
+    "pickerUx": "test/model-picker-ui.test.mjs",
+    "rustCatalog": "crates/relayer-app-server/tests/model_catalog_flow.rs",
+    "rustRuntimePersistence": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+    "zeroInferenceFirstMessage": "test/first-message-composer-integration.test.mjs"
+  },
+  "screenshots": {
+    "dark-new-thread-model": {
+      "file": "dark-new-thread-model.png",
+      "requirements": [
+        "Model control is immediately left of Submit",
+        "Folder and Permissions remain separate controls on the left",
+        "Model tab selects family and then model"
+      ]
+    },
+    "dark-new-thread-advanced": {
+      "file": "dark-new-thread-advanced.png",
+      "requirements": [
+        "Advanced is a tab inside the Model picker",
+        "Advanced selects the harness before thread creation"
+      ]
+    },
+    "dark-nth-turn-model": {
+      "file": "dark-nth-turn-model.png",
+      "requirements": [
+        "Follow-ups inherit and may change model selection",
+        "The accepted interaction shows its recorded model identity",
+        "The ongoing composer keeps Model immediately left of Submit"
+      ]
+    },
+    "dark-nth-turn-advanced": {
+      "file": "dark-nth-turn-advanced.png",
+      "requirements": [
+        "Advanced remains inside the Model picker on ongoing turns",
+        "The thread harness is pinned and read-only after creation"
+      ]
+    },
+    "light-new-thread-model": {
+      "file": "light-new-thread-model.png",
+      "requirements": [
+        "The Model picker and composer controls remain legible in light mode"
+      ]
+    }
+  }
+}

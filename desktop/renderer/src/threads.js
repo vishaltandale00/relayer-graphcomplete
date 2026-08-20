@@ -26,10 +26,18 @@ import {
   validateResolvedLayer,
   workspaceUrlForPresentation,
 } from "./workspace-navigation.js";
-import { appState, productApiAvailable, viewState } from "./state.js";
+import { appState, desktop, productApiAvailable, viewState } from "./state.js";
 import { $, threadTitle, toast } from "./ui.js";
 import { addLocalThread } from "./thread-model.js";
 import { closePermissionMenu } from "./permission-profiles.js";
+import { followupRequestBody, newThreadRequestBody } from "./interaction-request-model.js";
+import {
+  closeNewThreadModelPicker,
+  newThreadModelSelectionPayload,
+  newThreadModelSelectionReady,
+  setNewThreadModelPickerDisabled,
+} from "./composer-model-picker.js";
+import { refreshModelFamilySettings } from "./model-family-settings.js";
 
 let creatingFirstThread = false;
 let pendingRefreshTimer;
@@ -49,7 +57,8 @@ const refreshGate = createLatestRequestGate();
 export function updateCreateThreadAvailability() {
   $("#createThread").disabled = creatingFirstThread
     || !$("#newThreadPrompt").value.trim()
-    || !viewState.selectedPermissionProfileId;
+    || !viewState.selectedPermissionProfileId
+    || !newThreadModelSelectionReady();
 }
 
 function currentNavigationEntry() {
@@ -267,21 +276,32 @@ export function selectTurnById(interactionId) {
   schedulePendingRefresh(viewState.currentThreadId);
 }
 
-export async function submitInteraction(text) {
+export async function submitInteraction(text, modelSelection) {
   if (!viewState.currentThreadId) throw new Error("Select a thread before sending a follow-up.");
   const threadId = viewState.currentThreadId;
   recordCurrentNavigation();
   const sourceLocationKey = navigationEntryKey(navigationHistory.current);
   supersedePendingHistory({ cancelLayerNavigation: true });
+  if (!modelSelection) {
+    setMainView("settings");
+    throw new Error("Choose an available model in Settings before sending.");
+  }
+  if (desktop?.models?.refresh) await refreshModelCatalogBeforeSend();
   await request(`/api/threads/${encodeURIComponent(threadId)}/interactions`, {
     method: "POST",
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(followupRequestBody(text, modelSelection)),
   });
   const current = currentNavigationEntry();
   if (!current || navigationEntryKey(current) !== sourceLocationKey) return;
   supersedePendingHistory({ presentationChanged: true });
   viewState.currentInteractionId = null;
   await refreshState(threadId, { historyMode: "push" });
+}
+
+async function refreshModelCatalogBeforeSend() {
+  if (!desktop?.models?.refresh) return;
+  await desktop.models.refresh();
+  await refreshModelFamilySettings();
 }
 
 export async function navigateLayer(layerId, navigation = {}) {
@@ -575,17 +595,26 @@ async function createOrReuseProject(selectedScope) {
   }
 }
 
-export async function createFirstThread() {
+export async function createFirstThread(pickerPayloadOverride = null) {
   const input = $("#newThreadPrompt");
   const promptText = input.value.trim();
   const permissionProfileId = viewState.selectedPermissionProfileId;
+  let pickerPayload = pickerPayloadOverride ?? newThreadModelSelectionPayload();
+  if (!pickerPayload) {
+    setMainView("settings");
+    toast("Choose an available model in Settings before sending.");
+    return;
+  }
   if (!promptText || !permissionProfileId || creatingFirstThread) return;
   creatingFirstThread = true;
   input.disabled = true;
   $("#createThread").disabled = true;
   $("#permissionButton").disabled = true;
+  setNewThreadModelPickerDisabled(true);
   closePermissionMenu();
+  closeNewThreadModelPicker();
   try {
+    if (desktop?.models?.refresh) await refreshModelCatalogBeforeSend();
     const selectedScope = viewState.selectedScope;
     if (!productApiAvailable) {
       const thread = addLocalThread(appState, {
@@ -607,12 +636,13 @@ export async function createFirstThread() {
     }
     const thread = await request("/api/threads", {
       method: "POST",
-      body: JSON.stringify({
+      body: JSON.stringify(newThreadRequestBody({
         title: threadTitle(promptText),
         initialMessage: promptText,
         permissionProfileId,
-        ...(projectId ? { projectId } : {}),
-      }),
+        projectId,
+        pickerPayload,
+      })),
     });
     viewState.currentThreadId = thread.id;
     input.value = "";
@@ -623,6 +653,7 @@ export async function createFirstThread() {
     creatingFirstThread = false;
     input.disabled = false;
     $("#permissionButton").disabled = !viewState.selectedPermissionProfileId;
+    setNewThreadModelPickerDisabled(false);
     updateCreateThreadAvailability();
   }
 }

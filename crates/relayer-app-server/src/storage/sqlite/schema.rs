@@ -40,12 +40,75 @@ const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("permission_profile_id", "TEXT", true, 0),
     ("effective_execution_digest", "TEXT", false, 0),
     ("effective_permission_receipt_json", "TEXT", false, 0),
+    ("model_provider_id", "TEXT", false, 0),
+    ("provider_model_id", "TEXT", false, 0),
+    ("model_family_id", "INTEGER", false, 0),
 ];
 const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("source_interaction_id", "INTEGER", true, 1),
     ("action_id", "INTEGER", true, 2),
     ("result_interaction_id", "INTEGER", true, 0),
     ("created_at", "TEXT", true, 0),
+];
+const MODEL_PROVIDER_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("id", "TEXT", true, 1),
+    ("label", "TEXT", true, 0),
+    ("connected", "INTEGER", true, 0),
+    ("unavailable_reason_code", "TEXT", false, 0),
+    ("unavailable_reason_message", "TEXT", false, 0),
+    ("refreshed_at", "TEXT", true, 0),
+];
+const PROVIDER_MODEL_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("provider_id", "TEXT", true, 1),
+    ("model_id", "TEXT", true, 2),
+    ("label", "TEXT", true, 0),
+    ("provider_order", "INTEGER", true, 0),
+    ("visible", "INTEGER", true, 0),
+    ("available", "INTEGER", true, 0),
+    ("unavailable_reason_code", "TEXT", false, 0),
+    ("unavailable_reason_message", "TEXT", false, 0),
+    ("provider_default", "INTEGER", true, 0),
+    ("replacement_model_id", "TEXT", false, 0),
+    ("metadata_json", "TEXT", true, 0),
+];
+const PRODUCT_HARNESS_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("configuration_name", "TEXT", true, 1),
+    ("label", "TEXT", true, 0),
+    ("product_visible", "INTEGER", true, 0),
+    ("available", "INTEGER", true, 0),
+    ("unavailable_reason_code", "TEXT", false, 0),
+    ("unavailable_reason_message", "TEXT", false, 0),
+];
+const HARNESS_PROVIDER_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("harness_configuration_name", "TEXT", true, 1),
+    ("provider_id", "TEXT", true, 2),
+    ("all_models", "INTEGER", true, 0),
+    ("preferred_model_id", "TEXT", false, 0),
+];
+const HARNESS_MODEL_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("harness_configuration_name", "TEXT", true, 1),
+    ("provider_id", "TEXT", true, 2),
+    ("model_id", "TEXT", true, 3),
+];
+const MODEL_FAMILY_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("id", "INTEGER", false, 1),
+    ("name", "TEXT", true, 0),
+    ("kind", "TEXT", true, 0),
+    ("system_key", "TEXT", false, 0),
+    ("enabled", "INTEGER", true, 0),
+    ("position", "INTEGER", true, 0),
+];
+const MODEL_FAMILY_MEMBER_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("family_id", "INTEGER", true, 1),
+    ("position", "INTEGER", true, 2),
+    ("provider_id", "TEXT", true, 0),
+    ("model_id", "TEXT", true, 0),
+];
+const PRODUCT_MODEL_PREFERENCE_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("singleton", "INTEGER", true, 1),
+    ("default_harness_configuration_name", "TEXT", true, 0),
+    ("default_provider_id", "TEXT", true, 0),
+    ("defaults_modified", "INTEGER", true, 0),
 ];
 
 pub(super) async fn validate_existing_or_empty(pool: &SqlitePool) -> Result<(), StorageError> {
@@ -75,6 +138,24 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "threads", THREAD_COLUMNS).await?;
     validate_columns(pool, "interactions", INTERACTION_COLUMNS).await?;
     validate_columns(pool, "action_invocations", ACTION_INVOCATION_COLUMNS).await?;
+    validate_columns(pool, "model_providers", MODEL_PROVIDER_COLUMNS).await?;
+    validate_columns(pool, "provider_models", PROVIDER_MODEL_COLUMNS).await?;
+    validate_columns(pool, "product_harnesses", PRODUCT_HARNESS_COLUMNS).await?;
+    validate_columns(
+        pool,
+        "harness_provider_compatibility",
+        HARNESS_PROVIDER_COLUMNS,
+    )
+    .await?;
+    validate_columns(pool, "harness_model_compatibility", HARNESS_MODEL_COLUMNS).await?;
+    validate_columns(pool, "model_families", MODEL_FAMILY_COLUMNS).await?;
+    validate_columns(pool, "model_family_members", MODEL_FAMILY_MEMBER_COLUMNS).await?;
+    validate_columns(
+        pool,
+        "product_model_preferences",
+        PRODUCT_MODEL_PREFERENCE_COLUMNS,
+    )
+    .await?;
     validate_index(pool, "projects", &["path"], true).await?;
     validate_index(pool, "interactions", &["thread_id", "sequence"], true).await?;
     validate_index(
@@ -85,6 +166,38 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     )
     .await?;
     validate_index(pool, "action_invocations", &["result_interaction_id"], true).await?;
+    validate_index(pool, "provider_models", &["provider_id", "model_id"], true).await?;
+    validate_index(
+        pool,
+        "harness_provider_compatibility",
+        &["harness_configuration_name", "provider_id"],
+        true,
+    )
+    .await?;
+    validate_index(
+        pool,
+        "harness_model_compatibility",
+        &["harness_configuration_name", "provider_id", "model_id"],
+        true,
+    )
+    .await?;
+    validate_index(pool, "model_families", &["system_key"], true).await?;
+    validate_index(pool, "model_families", &["position"], true).await?;
+    validate_index(pool, "model_families", &["name"], true).await?;
+    validate_index(
+        pool,
+        "model_family_members",
+        &["family_id", "position"],
+        true,
+    )
+    .await?;
+    validate_index(
+        pool,
+        "model_family_members",
+        &["family_id", "provider_id", "model_id"],
+        true,
+    )
+    .await?;
     validate_foreign_key(pool, "threads", "project_id", "projects", "id", "SET NULL").await?;
     validate_foreign_key(
         pool,
@@ -93,6 +206,96 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         "threads",
         "id",
         "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "provider_models",
+        "provider_id",
+        "model_providers",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "harness_provider_compatibility",
+        "harness_configuration_name",
+        "product_harnesses",
+        "configuration_name",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "harness_model_compatibility",
+        "harness_configuration_name",
+        "harness_provider_compatibility",
+        "harness_configuration_name",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "harness_model_compatibility",
+        "provider_id",
+        "harness_provider_compatibility",
+        "provider_id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "harness_provider_compatibility",
+        "provider_id",
+        "model_providers",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "model_family_members",
+        "family_id",
+        "model_families",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "model_family_members",
+        "provider_id",
+        "provider_models",
+        "provider_id",
+        "RESTRICT",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "model_family_members",
+        "model_id",
+        "provider_models",
+        "model_id",
+        "RESTRICT",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "product_model_preferences",
+        "default_harness_configuration_name",
+        "product_harnesses",
+        "configuration_name",
+        "RESTRICT",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "product_model_preferences",
+        "default_provider_id",
+        "model_providers",
+        "id",
+        "RESTRICT",
     )
     .await?;
     validate_foreign_key(
@@ -139,6 +342,7 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
             "action invocation source and result must belong to the same thread",
         ));
     }
+    super::catalog::validate_catalog_rows(pool).await?;
     Ok(())
 }
 

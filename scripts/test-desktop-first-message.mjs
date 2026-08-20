@@ -113,6 +113,21 @@ async function run() {
   });
   services.push(product);
   const productSession = await product.start();
+  await product.publishProviderCatalog({
+    providerId: "codex",
+    label: "Codex",
+    connected: true,
+    models: [{
+      id: "fixture-model",
+      label: "Fixture model",
+      order: 0,
+      visible: true,
+      available: true,
+      providerDefault: true,
+      metadata: {},
+    }],
+    systemFamily: { key: "codex", name: "Codex", modelIds: ["fixture-model"] },
+  });
   const createWindow = createWindowFactory({
     BrowserWindow,
     desktopDirectory: join(repositoryRoot, "desktop"),

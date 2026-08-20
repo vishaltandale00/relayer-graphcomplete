@@ -46,8 +46,9 @@ export class CodexBasicHarness implements Harness {
   }
 
   async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+    const model = this.selectedModel(context);
     const capability = context.graph.acquireCapability();
-    const thread = this.openThread(this.createCodex(capability));
+    const thread = this.openThread(this.createCodex(capability), model);
     try {
       await thread.run(this.prompt(context.inputGraph), signal === undefined ? {} : { signal });
     } finally {
@@ -73,11 +74,20 @@ export class CodexBasicHarness implements Harness {
     });
   }
 
-  private openThread(codex: Codex): CodexThread {
+  private selectedModel(context: HarnessRunContext): string | undefined {
+    if (context.model === undefined) return this.threadOptions.model;
+    if (context.model.providerId !== "codex") {
+      throw new Error(`codex.basic cannot run provider ${context.model.providerId}`);
+    }
+    return context.model.modelId;
+  }
+
+  private openThread(codex: Codex, model: string | undefined): CodexThread {
     const { additionalDirectories, ...configuredOptions } = this.threadOptions;
     const options: ThreadOptions = {
       workingDirectory: this.context.workingDirectory,
       ...configuredOptions,
+      ...(model === undefined ? {} : { model }),
       ...(additionalDirectories === undefined ? {} : { additionalDirectories: [...additionalDirectories] }),
     };
     return this.codexThreadId === undefined ? codex.startThread(options) : codex.resumeThread(this.codexThreadId, options);

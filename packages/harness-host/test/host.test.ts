@@ -260,6 +260,26 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("preserves the legacy third-argument AbortSignal completion API", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-legacy-signal-"));
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => ({ async complete() {}, state: emptyState }) },
+    });
+    try {
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+      const controller = new AbortController();
+      controller.abort(new Error("legacy caller cancelled"));
+
+      await expect(host.complete(1, graph(), controller.signal)).rejects.toThrow("legacy caller cancelled");
+    } finally {
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("disposes live harnesses when the host closes", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-dispose-"));
     const dispose = vi.fn(async () => undefined);
@@ -355,6 +375,7 @@ describe("HarnessHost", () => {
     const adopted: { url: string; token: string; nodeId: number }[] = [];
     const accepted = new Set<number>();
     const scopes: { acquireCapability(): unknown }[] = [];
+    const models: unknown[] = [];
     let revocationRequests = 0;
     let factoryCalls = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -380,6 +401,7 @@ describe("HarnessHost", () => {
           return {
             async complete(context) {
               scopes.push(context.graph);
+              models.push(context.model);
               adopted.push(context.graph.acquireCapability());
               accepted.add(context.inputGraph.id);
             },
@@ -391,12 +413,48 @@ describe("HarnessHost", () => {
       const base = { threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory };
       await host.createSession(base);
 
-      await host.complete(1, graph(1, "first-token"));
-      await expect(host.complete(1, graph(2, "second-token"))).resolves.toMatchObject({ output: { nodeId: 2 } });
+      await host.complete(1, graph(1, "first-token"), { providerId: "codex", modelId: "gpt-first" });
+      await expect(host.complete(1, graph(2, "second-token"), { providerId: "codex", modelId: "gpt-second" })).resolves.toMatchObject({
+        output: { nodeId: 2 },
+      });
       expect(factoryCalls).toBe(1);
       expect(adopted.map(({ token, nodeId }) => [token, nodeId])).toEqual([["first-token", 1], ["second-token", 2]]);
+      expect(models).toEqual([
+        { providerId: "codex", modelId: "gpt-first" },
+        { providerId: "codex", modelId: "gpt-second" },
+      ]);
       expect(revocationRequests).toBe(0);
       expect(() => scopes[0]!.acquireCapability()).toThrow("no longer active");
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a model outside the pinned harness compatibility before graph access", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-model-compatibility-"));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({ async complete() {}, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: {
+          ...testConfiguration,
+          modelCompatibility: [{ providerId: "codex", modelIds: ["allowed"] }],
+        },
+        workingDirectory: directory,
+      });
+
+      await expect(host.complete(1, graph(), { providerId: "codex", modelId: "blocked" }))
+        .rejects.toThrow("not compatible with this configuration");
+      expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
@@ -814,6 +872,17 @@ describe("HarnessHost", () => {
   it("rejects graph capabilities outside the authenticated loopback server", async () => {
     const host = new HarnessHost({ stateFile: "/tmp/unused-harness-state.json", controlToken: "control", implementations: {} });
     await expect(host.complete(1, { url: "https://example.com", token: "secret", nodeId: 1 })).rejects.toThrow("127.0.0.1 HTTP");
+  });
+
+  it("uses the product stable-ID rules for interaction model identities", async () => {
+    const host = new HarnessHost({ stateFile: "/tmp/unused-harness-state.json", controlToken: "control", implementations: {} });
+    const capability = graph();
+    await expect(host.complete(1, capability, { providerId: " codex", modelId: "model" }))
+      .rejects.toThrow("invalid model selection");
+    await expect(host.complete(1, capability, { providerId: "codex", modelId: "model\n" }))
+      .rejects.toThrow("invalid model selection");
+    await expect(host.complete(1, capability, { providerId: "codex", modelId: "m".repeat(201) }))
+      .rejects.toThrow("invalid model selection");
   });
 
   it("reports an IPv6 URL when bound to an IPv6 host", async () => {

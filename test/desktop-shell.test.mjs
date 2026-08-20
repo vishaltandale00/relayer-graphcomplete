@@ -154,7 +154,7 @@ describe("desktop skeleton", () => {
     expect(secondaryApp.on).not.toHaveBeenCalled();
   });
 
-  it("exposes Codex setup, New thread permissions, and updates without a harness selector", async () => {
+  it("exposes Codex setup, separate permissions, and the advanced composer picker", async () => {
     const html = await readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8");
     const desktopMain = await readFile(new URL("../desktop/main/index.mjs", import.meta.url), "utf8");
     const packageManifest = await readFile(new URL("../package.json", import.meta.url), "utf8");
@@ -178,6 +178,8 @@ describe("desktop skeleton", () => {
     expect(html).toContain('id="scopeMenu"');
     expect(html).toContain('id="permissionButton"');
     expect(html).toContain('id="permissionMenu"');
+    expect(html).toContain('id="newModelControl"');
+    expect(html).toContain('data-model-picker-tab="advanced"');
     expect(html).toContain('id="createThread" title="Create thread and send" disabled');
     expect(html).toContain('id="disconnectCodex"');
     expect(html).toContain('id="updateChannel"');
@@ -197,7 +199,8 @@ describe("desktop skeleton", () => {
     expect(html.toLowerCase()).not.toContain("harness selector");
     expect(desktopMain).not.toContain("PrimeAgentThreadRunner");
     expect(rendererMain).toContain('import { bindComposerKeydown } from "./product-workspace/workspace.js";');
-    expect(rendererMain).toContain('bindComposerKeydown($("#newThreadPrompt"), () => $("#createThread").click());');
+    expect(rendererMain).toContain('bindComposerKeydown($("#newThreadPrompt"), () => {');
+    expect(rendererMain).toContain('openNewThreadModelPicker("model")');
     expect(desktopMain).toContain("RelayerAppServerService");
     expect(desktopMain).toContain("productServer.start()");
     expect(desktopMain).toContain("productServer.close()");
@@ -413,10 +416,17 @@ describe("desktop skeleton", () => {
       const { viewState } = await import("../desktop/renderer/src/state.js");
       viewState.selectedPermissionProfileId = "auto";
       const { createFirstThread } = await import("../desktop/renderer/src/threads.js?submission-guard");
-      const first = createFirstThread();
-      const repeated = createFirstThread();
+      const pickerPayload = {
+        harnessId: "codex-basic",
+        modelSelection: { familyId: 1, providerId: "codex", modelId: "gpt-5" },
+      };
+      const first = createFirstThread(pickerPayload);
+      const repeated = createFirstThread(pickerPayload);
       expect(fetch).toHaveBeenCalledOnce();
-      expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({ permissionProfileId: "auto" });
+      expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({
+        permissionProfileId: "auto",
+        ...pickerPayload,
+      });
       expect(input.disabled).toBe(true);
       expect(button.disabled).toBe(true);
 
@@ -424,7 +434,7 @@ describe("desktop skeleton", () => {
       await Promise.all([first, repeated]);
       expect(fetch).toHaveBeenCalledOnce();
       expect(input.disabled).toBe(false);
-      expect(button.disabled).toBe(false);
+      expect(button.disabled).toBe(true);
       expect(toastElement.textContent).toBe("test request stopped");
     } finally {
       vi.clearAllTimers();
@@ -499,6 +509,21 @@ describe("desktop skeleton", () => {
       expect(invocations[0].args).not.toContain(session.readOnlyCookie.value);
       expect((await stat(join(directory, "product-data"))).mode & 0o777).toBe(0o700);
       expect(await service.start()).toBe(session);
+      const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(null, { status: 204 }));
+      await service.publishProviderCatalog({ providerId: "codex", models: [] });
+      expect(fetch).toHaveBeenCalledWith(
+        new URL("http://127.0.0.1:43123/api/internal/provider-catalog"),
+        expect.objectContaining({
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${session.cookie.value}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ providerId: "codex", models: [] }),
+        }),
+      );
+      expect(fetch.mock.calls[0][1].headers).not.toHaveProperty("Cookie");
+      fetch.mockRestore();
       await service.close();
       expect(child.kill).toHaveBeenCalledWith("SIGTERM");
 

@@ -1,4 +1,5 @@
 mod action_invocations;
+mod catalog;
 mod interactions;
 mod migrations;
 mod product_state;

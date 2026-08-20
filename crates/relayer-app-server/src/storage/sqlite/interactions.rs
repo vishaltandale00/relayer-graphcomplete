@@ -1,5 +1,8 @@
-use super::SqliteProductStore;
-use crate::product::{AcceptedInteractionCompletion, Interaction, InteractionId, ThreadId};
+use super::{SqliteProductStore, catalog};
+use crate::product::{
+    AcceptedInteractionCompletion, Interaction, InteractionId, InteractionModelSelection,
+    ModelFamilyId, ProviderId, ThreadId, ValidateModelSelectionCommand,
+};
 use crate::storage::StorageError;
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,7 +14,7 @@ impl SqliteProductStore {
     ) -> Result<Option<Interaction>, StorageError> {
         let mut connection = self.pool.acquire().await?;
         sqlx::query(
-            "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json FROM interactions WHERE id=?1",
+            "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json,model_provider_id,provider_model_id,model_family_id FROM interactions WHERE id=?1",
         )
         .bind(interaction_id.value())
         .fetch_optional(&mut *connection)
@@ -33,13 +36,26 @@ impl SqliteProductStore {
         &self,
         thread_id: ThreadId,
         text: &str,
+        model_selection: Option<&InteractionModelSelection>,
     ) -> Result<Interaction, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let (previous_timestamp, permission_profile_id): (String, String) =
-            sqlx::query_as("SELECT updated_at,permission_profile_id FROM threads WHERE id=?1")
+        let (previous_timestamp, permission_profile_id, harness_id): (String, String, String) =
+            sqlx::query_as("SELECT updated_at,permission_profile_id,harness_configuration_name FROM threads WHERE id=?1")
                 .bind(thread_id.value())
                 .fetch_one(&mut *transaction)
                 .await?;
+        if let Some(selection) = model_selection {
+            catalog::validate_model_selection_on(
+                &mut transaction,
+                &ValidateModelSelectionCommand {
+                    harness_id,
+                    family_id: selection.family_id,
+                    provider_id: selection.provider_id.clone(),
+                    model_id: selection.model_id.clone(),
+                },
+            )
+            .await?;
+        }
         let timestamp = monotonic_timestamp(&previous_timestamp);
         let sequence: i64 = sqlx::query_scalar(
             "SELECT COALESCE(MAX(sequence),0)+1 FROM interactions WHERE thread_id=?1",
@@ -48,13 +64,16 @@ impl SqliteProductStore {
         .fetch_one(&mut *transaction)
         .await?;
         let result = sqlx::query(
-            "INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id) VALUES (?1,?2,?3,?4,?5)",
+            "INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id,model_provider_id,provider_model_id,model_family_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
         )
         .bind(thread_id.value())
         .bind(sequence)
         .bind(text)
         .bind(&timestamp)
         .bind(&permission_profile_id)
+        .bind(model_selection.map(|selection| selection.provider_id.as_str()))
+        .bind(model_selection.map(|selection| selection.model_id.as_str()))
+        .bind(model_selection.map(|selection| selection.family_id.value()))
         .execute(&mut *transaction)
         .await?;
         sqlx::query("UPDATE threads SET updated_at=?1 WHERE id=?2")
@@ -73,6 +92,7 @@ impl SqliteProductStore {
             harness_configuration_name: None,
             harness_configuration_digest: None,
             permission_profile_id,
+            model_selection: model_selection.cloned(),
             effective_execution_digest: None,
             effective_permission_receipt: None,
             completion_output: None,
@@ -146,7 +166,7 @@ pub(super) async fn fetch_interactions(
     thread_id: ThreadId,
 ) -> Result<Vec<Interaction>, StorageError> {
     let rows = sqlx::query(
-        "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json FROM interactions WHERE thread_id=?1 ORDER BY sequence ASC",
+        "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json,model_provider_id,provider_model_id,model_family_id FROM interactions WHERE thread_id=?1 ORDER BY sequence ASC",
     )
     .bind(thread_id.value())
     .fetch_all(connection)
@@ -189,5 +209,30 @@ pub(super) fn interaction_from_row(row: &SqliteRow) -> Result<Interaction, Stora
             .map(|value| serde_json::from_str(&value))
             .transpose()
             .map_err(|error| StorageError::Serialization(error.to_string()))?,
+        model_selection: interaction_model_selection_from_row(row, 14, 15, 16)?,
     })
+}
+
+fn interaction_model_selection_from_row(
+    row: &SqliteRow,
+    provider_index: usize,
+    model_index: usize,
+    family_index: usize,
+) -> Result<Option<InteractionModelSelection>, StorageError> {
+    let provider_id = row.try_get::<Option<String>, _>(provider_index)?;
+    let model_id = row.try_get::<Option<String>, _>(model_index)?;
+    let family_id = row.try_get::<Option<i64>, _>(family_index)?;
+    match (provider_id, model_id, family_id) {
+        (None, None, None) => Ok(None),
+        (Some(provider_id), Some(model_id), Some(family_id)) if family_id > 0 => {
+            Ok(Some(InteractionModelSelection {
+                family_id: ModelFamilyId::from_database(family_id),
+                provider_id: ProviderId::from_database(provider_id),
+                model_id,
+            }))
+        }
+        _ => Err(StorageError::IncompatibleSchema(
+            "interaction model selection is partially populated or invalid".into(),
+        )),
+    }
 }

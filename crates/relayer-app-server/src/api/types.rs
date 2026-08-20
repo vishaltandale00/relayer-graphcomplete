@@ -1,6 +1,6 @@
 use crate::product::{
-    ActionInvocation, Interaction, ProductCapabilities, ProductState, Project, Thread,
-    ThreadDetail, ThreadView,
+    ActionInvocation, Interaction, InteractionModelSelection, ProductCapabilities, ProductState,
+    Project, Thread, ThreadDetail, ThreadView,
 };
 use serde::Serialize;
 
@@ -34,6 +34,7 @@ pub(crate) struct ThreadResponse {
     project_id: Option<i64>,
     root_interaction_id: i64,
     harness_configuration_name: String,
+    harness_id: String,
     permission_profile_id: String,
     created_at: String,
     updated_at: String,
@@ -46,6 +47,7 @@ impl From<Thread> for ThreadResponse {
             title: thread.title,
             project_id: thread.project_id.map(|id| id.value()),
             root_interaction_id: thread.root_interaction_id.value(),
+            harness_id: thread.harness_configuration_name.clone(),
             harness_configuration_name: thread.harness_configuration_name,
             permission_profile_id: thread.permission_profile_id,
             created_at: thread.created_at,
@@ -67,6 +69,7 @@ pub(crate) struct InteractionResponse {
     harness_configuration_name: Option<String>,
     harness_configuration_digest: Option<String>,
     permission_profile_id: String,
+    model_selection: Option<InteractionModelSelection>,
     effective_execution_digest: Option<String>,
     effective_permission_receipt: Option<serde_json::Value>,
     completion_output: Option<serde_json::Value>,
@@ -86,6 +89,7 @@ impl From<Interaction> for InteractionResponse {
             harness_configuration_name: interaction.harness_configuration_name,
             harness_configuration_digest: interaction.harness_configuration_digest,
             permission_profile_id: interaction.permission_profile_id,
+            model_selection: interaction.model_selection,
             effective_execution_digest: interaction.effective_execution_digest,
             effective_permission_receipt: interaction.effective_permission_receipt,
             completion_output: interaction.completion_output,

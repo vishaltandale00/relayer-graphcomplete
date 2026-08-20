@@ -1,6 +1,6 @@
-use super::SqliteProductStore;
-use crate::product::{InteractionId, ProjectId, Thread, ThreadId};
-use crate::storage::StorageError;
+use super::{SqliteProductStore, catalog};
+use crate::product::{InteractionId, ProjectId, Thread, ThreadId, ValidateModelSelectionCommand};
+use crate::storage::{NewThreadRecord, StorageError};
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 
 const THREAD_COLUMNS: &str = r#"
@@ -24,32 +24,42 @@ impl SqliteProductStore {
 
     pub(crate) async fn insert_thread_with_initial_interaction(
         &self,
-        title: &str,
-        project_id: Option<ProjectId>,
-        initial_message: &str,
-        harness_configuration_name: &str,
-        permission_profile_id: &str,
-        timestamp: &str,
+        record: NewThreadRecord<'_>,
     ) -> Result<Thread, StorageError> {
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if let Some(selection) = record.model_selection {
+            catalog::validate_model_selection_on(
+                &mut transaction,
+                &ValidateModelSelectionCommand {
+                    harness_id: record.harness_configuration_name.to_owned(),
+                    family_id: selection.family_id,
+                    provider_id: selection.provider_id.clone(),
+                    model_id: selection.model_id.clone(),
+                },
+            )
+            .await?;
+        }
         let thread = sqlx::query(
             "INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (?1,?2,?3,?3,?4,?5)",
         )
-        .bind(title)
-        .bind(project_id.map(ProjectId::value))
-        .bind(timestamp)
-        .bind(harness_configuration_name)
-        .bind(permission_profile_id)
+        .bind(record.title)
+        .bind(record.project_id.map(ProjectId::value))
+        .bind(record.timestamp)
+        .bind(record.harness_configuration_name)
+        .bind(record.permission_profile_id)
         .execute(&mut *transaction)
         .await?;
         let thread_id = ThreadId::from_database(thread.last_insert_rowid());
         sqlx::query(
-            "INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id) VALUES (?1,1,?2,?3,?4)",
+            "INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id,model_provider_id,provider_model_id,model_family_id) VALUES (?1,1,?2,?3,?4,?5,?6,?7)",
         )
         .bind(thread_id.value())
-        .bind(initial_message)
-        .bind(timestamp)
-        .bind(permission_profile_id)
+        .bind(record.initial_message)
+        .bind(record.timestamp)
+        .bind(record.permission_profile_id)
+        .bind(record.model_selection.map(|selection| selection.provider_id.as_str()))
+        .bind(record.model_selection.map(|selection| selection.model_id.as_str()))
+        .bind(record.model_selection.map(|selection| selection.family_id.value()))
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;

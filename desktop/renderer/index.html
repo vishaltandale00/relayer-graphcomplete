@@ -40,6 +40,7 @@
         <div class="side-section settings-navigation">
           <div class="section-label">Settings</div>
           <div class="entry-list" id="settingsTabs" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
+            <button class="entry settings-tab" type="button" role="tab" data-settings-tab="models" aria-controls="modelSettingsPanel"><span class="entry-icon" aria-hidden="true">✦</span><span>Models and harnesses</span></button>
             <button class="entry settings-tab" type="button" role="tab" data-settings-tab="appearance" aria-controls="appearanceSettingsPanel"><span class="entry-icon" aria-hidden="true">◐</span><span>Appearance</span></button>
             <button class="entry settings-tab" type="button" role="tab" data-settings-tab="codex" aria-controls="codexSettingsPanel"><span class="entry-icon" aria-hidden="true">›_</span><span>Codex</span></button>
             <button class="entry settings-tab" type="button" role="tab" data-settings-tab="updates" aria-controls="updatesSettingsPanel"><span class="entry-icon" aria-hidden="true">↓</span><span>Application updates</span></button>
@@ -61,15 +62,31 @@
           <div class="new-composer">
             <textarea id="newThreadPrompt" rows="4" placeholder="Ask Relayer to investigate, design, or build something…"></textarea>
             <div class="composer-row">
-              <div class="scope-control">
-                <button class="scope-button" id="scopeButton" type="button" aria-haspopup="menu" aria-expanded="false"><span>⌁</span><span id="scopeLabel">No folder</span><span>⌄</span></button>
-                <div class="scope-menu hidden" id="scopeMenu"></div>
+              <div class="composer-context-controls">
+                <div class="scope-control">
+                  <button class="scope-button" id="scopeButton" type="button" aria-haspopup="menu" aria-expanded="false"><span>⌁</span><span id="scopeLabel">No folder</span><span>⌄</span></button>
+                  <div class="scope-menu hidden" id="scopeMenu"></div>
+                </div>
+                <div class="permission-control">
+                  <button class="permission-button" id="permissionButton" type="button" aria-haspopup="menu" aria-expanded="false" disabled><span>◇</span><span id="permissionLabel">Permissions</span><span>⌄</span></button>
+                  <div class="permission-menu hidden" id="permissionMenu" role="menu" aria-label="Permission profile"></div>
+                </div>
               </div>
-              <div class="permission-control">
-                <button class="permission-button" id="permissionButton" type="button" aria-haspopup="menu" aria-expanded="false" disabled><span>◇</span><span id="permissionLabel">Permissions</span><span>⌄</span></button>
-                <div class="permission-menu hidden" id="permissionMenu" role="menu" aria-label="Permission profile"></div>
+              <div class="composer-submit-controls">
+                <div class="model-control model-control-new" id="newModelControl" data-model-picker="new">
+                  <button type="button" class="model-button" data-model-picker-trigger aria-haspopup="dialog" aria-expanded="false" title="Choose model"><span aria-hidden="true">✦</span><span data-model-picker-label>Model</span><span aria-hidden="true">⌄</span></button>
+                  <div class="model-picker-popover hidden" data-model-picker-popover role="dialog" aria-label="Model and harness picker">
+                    <div class="model-picker-tabs" role="tablist" aria-label="Model picker sections">
+                      <button type="button" role="tab" data-model-picker-tab="model" aria-selected="true">Model</button>
+                      <button type="button" role="tab" data-model-picker-tab="advanced" aria-selected="false">Advanced</button>
+                    </div>
+                    <section class="model-picker-panel" data-model-picker-panel="model" role="tabpanel"></section>
+                    <section class="model-picker-panel hidden" data-model-picker-panel="advanced" role="tabpanel"></section>
+                    <p class="model-picker-error hidden" data-model-picker-error role="alert"></p>
+                  </div>
+                </div>
+                <button class="send-button" id="createThread" title="Create thread and send" disabled>↑</button>
               </div>
-              <button class="send-button" id="createThread" title="Create thread and send" disabled>↑</button>
             </div>
             <div class="folder-summary hidden" id="folderSummary"></div>
           </div>
@@ -83,6 +100,36 @@
           <div><small>Settings</small><h1 id="settingsTitle">Appearance</h1></div>
         </header>
         <div class="settings-content">
+          <section class="settings-section model-settings-section hidden" id="modelSettingsPanel" role="tabpanel" data-settings-panel="models" aria-labelledby="modelSettingsHeading">
+            <h2 id="modelSettingsHeading">Models and harnesses</h2>
+            <div class="model-defaults">
+              <h3>Defaults</h3>
+              <label class="setting-row"><b>Harness</b><select id="defaultHarnessSelect" aria-describedby="defaultHarnessError"></select></label>
+              <div class="setting-error hidden" id="defaultHarnessError" role="alert"></div>
+              <label class="setting-row"><b>Provider</b><select id="defaultProviderSelect"></select></label>
+            </div>
+            <div class="model-settings-divider" role="separator"></div>
+            <div class="model-families-heading">
+              <h3>Model families</h3>
+              <div class="family-carousel-controls">
+                <button type="button" class="icon-button family-arrow" id="previousFamily" aria-label="Previous model family">←</button>
+                <div class="current-family-control">
+                  <button type="button" class="current-family-button" aria-haspopup="listbox" aria-expanded="false">
+                    <strong id="currentFamilyName">Model families</strong>
+                    <span id="familyPosition">0 / 0</span>
+                    <span aria-hidden="true">⌄</span>
+                  </button>
+                  <div class="family-jump-list" id="familyJumpList" role="listbox" aria-label="Model families"></div>
+                </div>
+                <button type="button" class="icon-button family-arrow" id="nextFamily" aria-label="Next model family">→</button>
+              </div>
+              <button type="button" class="secondary" id="newModelFamily">＋ New family</button>
+            </div>
+            <div class="family-carousel" id="familyCarousel" aria-live="polite">
+              <div class="family-slide"><div class="family-empty" id="modelFamilyLoading">Loading…</div></div>
+            </div>
+            <div class="model-settings-status" id="modelSettingsStatus" role="status"></div>
+          </section>
           <section class="settings-section" id="appearanceSettingsPanel" role="tabpanel" data-settings-panel="appearance">
             <h2>Appearance</h2>
             <label class="setting-row"><div><b>Theme</b><small id="appearanceDescription">Choose how Relayer looks on this computer.</small></div><select id="appearanceSelect"><option value="dark">Dark</option><option value="light">Light</option></select></label>

@@ -6,6 +6,7 @@ export function registerDesktopIpc({
   shell,
   nativeTheme,
   credentials,
+  modelCatalog,
   settings,
   updater,
   getWindow,
@@ -23,6 +24,8 @@ export function registerDesktopIpc({
     return { status: "pending", loginId: result?.loginId ?? null };
   });
   ipcMain.handle("relayer:account-logout", () => credentials.logout());
+  ipcMain.handle("relayer:model-catalog-settings-open", () => modelCatalog.settingsOpened());
+  ipcMain.handle("relayer:model-catalog-refresh", (_event, providerId) => modelCatalog.explicitRefresh(providerId));
   ipcMain.handle("relayer:folder-choose", async () => {
     const selection = await dialog.showOpenDialog(getWindow(), {
       properties: ["openDirectory", "createDirectory"],

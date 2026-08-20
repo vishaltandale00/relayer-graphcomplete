@@ -1,8 +1,14 @@
 use super::{
-    ActionInvocation, Interaction, InteractionId, ProductCapabilities, ProductState, Project,
-    ProjectId, Thread, ThreadId, ThreadView,
+    ActionInvocation, CatalogError, CreateModelFamilyCommand, Interaction, InteractionId,
+    InteractionModelSelection, ModelFamily, ModelFamilyId, ModelFamilyKind, ModelSelection,
+    ModelSettings, ModelSettingsDefaults, ProductCapabilities, ProductState, Project, ProjectId,
+    ProviderCatalogSnapshot, ReorderModelFamiliesCommand, Thread, ThreadId, ThreadView,
+    UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand, ValidateModelSelectionCommand,
+    validate_family,
 };
-use crate::storage::{ActionInvocationInsertOutcome, SqliteProductStore, StorageError};
+use crate::storage::{
+    ActionInvocationInsertOutcome, NewThreadRecord, SqliteProductStore, StorageError,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
@@ -20,6 +26,8 @@ pub(crate) struct CreateThreadCommand {
     pub(crate) initial_message: String,
     pub(crate) harness_configuration_name: String,
     pub(crate) permission_profile_id: String,
+    pub(crate) model_selection: Option<InteractionModelSelection>,
+    pub(crate) allow_unselected_model: bool,
 }
 
 pub(crate) struct AcceptedInteractionCompletion<'a> {
@@ -60,6 +68,8 @@ pub(crate) enum ProductError {
     #[error("folder unavailable at {path}: {reason}")]
     FolderUnavailable { path: String, reason: String },
     #[error(transparent)]
+    Catalog(#[from] CatalogError),
+    #[error(transparent)]
     Storage(#[from] StorageError),
 }
 
@@ -83,6 +93,281 @@ impl ProductService {
             harness: self.runtime_available,
             ..ProductCapabilities::default()
         }
+    }
+
+    pub(crate) async fn model_settings(&self) -> Result<ModelSettings, ProductError> {
+        self.storage.load_model_settings().await.map_err(Into::into)
+    }
+
+    pub(crate) async fn update_model_settings_defaults(
+        &self,
+        command: UpdateModelSettingsDefaultsCommand,
+    ) -> Result<ModelSettingsDefaults, ProductError> {
+        let settings = self.storage.load_model_settings().await?;
+        if let Some(harness_id) = command.harness_id.as_ref() {
+            let harness = settings
+                .harnesses
+                .iter()
+                .find(|harness| &harness.id == harness_id)
+                .ok_or_else(|| {
+                    CatalogError::invalid("harness_unknown", "Unknown product harness.")
+                })?;
+            if !harness.available {
+                return Err(CatalogError::invalid(
+                    "harness_unavailable",
+                    "The selected harness is unavailable.",
+                )
+                .into());
+            }
+        }
+        if let Some(provider_id) = command.provider_id.as_ref() {
+            let provider = settings
+                .providers
+                .iter()
+                .find(|provider| &provider.id == provider_id)
+                .ok_or_else(|| CatalogError::invalid("provider_unknown", "Unknown provider."))?;
+            if !provider.connected {
+                return Err(CatalogError::invalid(
+                    "provider_disconnected",
+                    "The selected provider is not connected.",
+                )
+                .into());
+            }
+        }
+        self.storage
+            .update_model_settings_defaults(&command)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn publish_provider_catalog(
+        &self,
+        mut snapshot: ProviderCatalogSnapshot,
+    ) -> Result<(), ProductError> {
+        if !snapshot.connected && snapshot.unavailable_reason.is_none() {
+            snapshot.unavailable_reason = Some(super::UnavailableReason {
+                code: "provider_disconnected".into(),
+                message: "The provider is not connected.".into(),
+            });
+        }
+        validate_provider_snapshot(&snapshot)?;
+        self.storage
+            .publish_provider_catalog(&snapshot, &now())
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn create_model_family(
+        &self,
+        mut command: CreateModelFamilyCommand,
+    ) -> Result<ModelFamily, ProductError> {
+        command.name = validate_family(&command.name, &command.members)?;
+        self.ensure_unique_family_name(&command.name, None).await?;
+        normalize_member_positions(&mut command.members);
+        self.ensure_known_models(&command.members).await?;
+        self.storage
+            .create_model_family(&command)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn update_model_family(
+        &self,
+        mut command: UpdateModelFamilyCommand,
+    ) -> Result<ModelFamily, ProductError> {
+        let current = self
+            .storage
+            .get_model_family(command.id)
+            .await?
+            .ok_or_else(|| {
+                ProductError::NotFound(format!("model family {}", command.id.value()))
+            })?;
+        match current.kind {
+            ModelFamilyKind::System => {
+                if command.name.is_some() || command.members.is_some() {
+                    return Err(CatalogError::invalid(
+                        "system_family_read_only",
+                        "System model-family names and membership are read-only.",
+                    )
+                    .into());
+                }
+            }
+            ModelFamilyKind::Custom => {
+                let name = command.name.as_deref().unwrap_or(&current.name);
+                let members = command.members.as_deref().unwrap_or(&current.members);
+                command.name = Some(validate_family(name, members)?);
+                self.ensure_unique_family_name(
+                    command.name.as_deref().expect("validated family name"),
+                    Some(command.id),
+                )
+                .await?;
+                if let Some(members) = &mut command.members {
+                    normalize_member_positions(members);
+                    self.ensure_known_models(members).await?;
+                }
+            }
+        }
+        self.storage
+            .update_model_family(&command)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn delete_model_family(&self, id: ModelFamilyId) -> Result<(), ProductError> {
+        let current = self
+            .storage
+            .get_model_family(id)
+            .await?
+            .ok_or_else(|| ProductError::NotFound(format!("model family {}", id.value())))?;
+        if current.kind == ModelFamilyKind::System {
+            return Err(CatalogError::invalid(
+                "system_family_read_only",
+                "System model families cannot be deleted.",
+            )
+            .into());
+        }
+        if !self.storage.delete_model_family(id).await? {
+            return Err(ProductError::NotFound(format!(
+                "model family {}",
+                id.value()
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn reorder_model_families(
+        &self,
+        command: ReorderModelFamiliesCommand,
+    ) -> Result<(), ProductError> {
+        let settings = self.storage.load_model_settings().await?;
+        let expected = settings
+            .families
+            .iter()
+            .map(|family| family.id)
+            .collect::<std::collections::HashSet<_>>();
+        let supplied = command
+            .family_ids
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        if supplied.len() != command.family_ids.len() || supplied != expected {
+            return Err(CatalogError::invalid(
+                "model_family_order_invalid",
+                "familyIds must contain every model family exactly once.",
+            )
+            .into());
+        }
+        self.storage.reorder_model_families(&command).await?;
+        Ok(())
+    }
+
+    pub(crate) async fn resolve_model_selection(
+        &self,
+        command: ValidateModelSelectionCommand,
+    ) -> Result<ModelSelection, ProductError> {
+        self.storage.validate_model_selection(&command).await?;
+        Ok(ModelSelection {
+            harness_id: command.harness_id,
+            family_id: command.family_id,
+            provider_id: command.provider_id,
+            model_id: command.model_id,
+        })
+    }
+
+    pub(crate) async fn validate_interaction_model_selection(
+        &self,
+        harness_id: &str,
+        selection: &InteractionModelSelection,
+    ) -> Result<(), ProductError> {
+        self.resolve_model_selection(ValidateModelSelectionCommand {
+            harness_id: harness_id.to_owned(),
+            family_id: selection.family_id,
+            provider_id: selection.provider_id.clone(),
+            model_id: selection.model_id.clone(),
+        })
+        .await
+        .map(|_| ())
+    }
+
+    pub(crate) async fn first_available_model(
+        &self,
+        harness_id: &str,
+    ) -> Result<Option<ModelSelection>, ProductError> {
+        let settings = self.storage.load_model_settings().await?;
+        for family in settings.families.iter().filter(|family| family.enabled) {
+            for member in &family.members {
+                let command = ValidateModelSelectionCommand {
+                    harness_id: harness_id.to_owned(),
+                    family_id: family.id,
+                    provider_id: member.provider_id.clone(),
+                    model_id: member.model_id.clone(),
+                };
+                if self
+                    .storage
+                    .validate_model_selection(&command)
+                    .await
+                    .is_ok()
+                {
+                    return Ok(Some(ModelSelection {
+                        harness_id: command.harness_id,
+                        family_id: command.family_id,
+                        provider_id: command.provider_id,
+                        model_id: command.model_id,
+                    }));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn ensure_known_models(
+        &self,
+        members: &[super::ModelFamilyMember],
+    ) -> Result<(), ProductError> {
+        let settings = self.storage.load_model_settings().await?;
+        for member in members {
+            let known = settings.providers.iter().any(|provider| {
+                provider.id == member.provider_id
+                    && provider
+                        .models
+                        .iter()
+                        .any(|model| model.id == member.model_id)
+            });
+            if !known {
+                return Err(CatalogError::invalid(
+                    "provider_model_unknown",
+                    format!(
+                        "Unknown provider model {}/{}.",
+                        member.provider_id.as_str(),
+                        member.model_id
+                    ),
+                )
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    async fn ensure_unique_family_name(
+        &self,
+        name: &str,
+        except_id: Option<ModelFamilyId>,
+    ) -> Result<(), ProductError> {
+        let duplicate = self
+            .storage
+            .load_model_settings()
+            .await?
+            .families
+            .into_iter()
+            .any(|family| Some(family.id) != except_id && family.name.eq_ignore_ascii_case(name));
+        if duplicate {
+            return Err(CatalogError::invalid(
+                "model_family_name_duplicate",
+                "A model family with this name already exists.",
+            )
+            .into());
+        }
+        Ok(())
     }
 
     pub(crate) async fn load_state(
@@ -167,6 +452,23 @@ impl ProductService {
         command: CreateThreadCommand,
     ) -> Result<Thread, ProductError> {
         let message = required(&command.initial_message, "initialMessage")?;
+        match command.model_selection.as_ref() {
+            Some(selection) => {
+                self.validate_interaction_model_selection(
+                    &command.harness_configuration_name,
+                    selection,
+                )
+                .await?;
+            }
+            None if self.runtime_available && !command.allow_unselected_model => {
+                return Err(CatalogError::invalid(
+                    "model_selection_required",
+                    "A model selection is required before creating a thread.",
+                )
+                .into());
+            }
+            None => {}
+        }
         if let Some(project_id) = command.project_id {
             self.storage
                 .get_project(project_id)
@@ -182,15 +484,17 @@ impl ProductService {
             .chars()
             .take(120)
             .collect::<String>();
+        let timestamp = now();
         self.storage
-            .insert_thread_with_initial_interaction(
-                &title,
-                command.project_id,
-                message,
-                &command.harness_configuration_name,
-                &command.permission_profile_id,
-                &now(),
-            )
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: &title,
+                project_id: command.project_id,
+                initial_message: message,
+                harness_configuration_name: &command.harness_configuration_name,
+                permission_profile_id: &command.permission_profile_id,
+                model_selection: command.model_selection.as_ref(),
+                timestamp: &timestamp,
+            })
             .await
             .map_err(Into::into)
     }
@@ -224,13 +528,47 @@ impl ProductService {
         &self,
         thread_id: ThreadId,
         text: &str,
+        model_selection: Option<&InteractionModelSelection>,
+        allow_unselected_model: bool,
     ) -> Result<Interaction, ProductError> {
         let text = required(text, "text")?;
-        if self.storage.get_thread(thread_id).await?.is_none() {
-            return Err(ProductError::NotFound(format!("thread {thread_id}")));
+        let thread = self
+            .storage
+            .get_thread(thread_id)
+            .await?
+            .ok_or_else(|| ProductError::NotFound(format!("thread {thread_id}")))?;
+        let inherited;
+        let model_selection = match model_selection {
+            Some(selection) => Some(selection),
+            None => {
+                inherited = self
+                    .storage
+                    .list_interactions(thread_id)
+                    .await?
+                    .last()
+                    .and_then(|interaction| interaction.model_selection.clone());
+                inherited.as_ref()
+            }
+        };
+        match model_selection {
+            Some(selection) => {
+                self.validate_interaction_model_selection(
+                    &thread.harness_configuration_name,
+                    selection,
+                )
+                .await?;
+            }
+            None if self.runtime_available && !allow_unselected_model => {
+                return Err(CatalogError::invalid(
+                    "model_selection_required",
+                    "The previous interaction has no model selection to inherit.",
+                )
+                .into());
+            }
+            None => {}
         }
         self.storage
-            .insert_interaction(thread_id, text)
+            .insert_interaction(thread_id, text, model_selection)
             .await
             .map_err(Into::into)
     }
@@ -246,7 +584,30 @@ impl ProductService {
                 "action ID must be a positive integer".into(),
             ));
         }
+        if let Some(existing) = self
+            .get_action_invocation(source_interaction_id, action_id)
+            .await?
+        {
+            return Ok(existing);
+        }
         let text = required(text, "interactionText")?;
+        let source = self.get_interaction(source_interaction_id).await?;
+        let source_selection = source.model_selection.as_ref().ok_or_else(|| {
+            CatalogError::invalid(
+                "source_model_selection_missing",
+                "The source interaction has no model selection to inherit.",
+            )
+        })?;
+        let thread = self
+            .storage
+            .get_thread(source.thread_id)
+            .await?
+            .ok_or_else(|| ProductError::NotFound(format!("thread {}", source.thread_id)))?;
+        self.validate_interaction_model_selection(
+            &thread.harness_configuration_name,
+            source_selection,
+        )
+        .await?;
         let outcome = self
             .storage
             .insert_action_invocation(source_interaction_id, action_id, text)
@@ -367,4 +728,100 @@ fn now() -> String {
         .expect("system time is before unix epoch")
         .as_millis()
         .to_string()
+}
+
+fn normalize_member_positions(members: &mut [super::ModelFamilyMember]) {
+    for (position, member) in members.iter_mut().enumerate() {
+        member.position = position;
+    }
+}
+
+fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), CatalogError> {
+    super::catalog::validate_stable_id(snapshot.provider_id.as_str(), "providerId")?;
+    if snapshot.label.trim().is_empty() {
+        return Err(CatalogError::invalid(
+            "provider_label_required",
+            "provider label must be non-empty",
+        ));
+    }
+    let mut ids = std::collections::HashSet::new();
+    let mut orders = std::collections::HashSet::new();
+    let mut provider_defaults = 0;
+    for model in &snapshot.models {
+        super::catalog::validate_stable_id(&model.id, "modelId")?;
+        if !ids.insert(model.id.as_str()) {
+            return Err(CatalogError::invalid(
+                "provider_model_duplicate",
+                "provider snapshot contains a duplicate model ID",
+            ));
+        }
+        if !orders.insert(model.order) {
+            return Err(CatalogError::invalid(
+                "provider_model_order_duplicate",
+                "provider snapshot contains duplicate model ordering",
+            ));
+        }
+        if model.label.trim().is_empty() {
+            return Err(CatalogError::invalid(
+                "model_label_required",
+                "model label must be non-empty",
+            ));
+        }
+        if model.available && model.unavailable_reason.is_some() {
+            return Err(CatalogError::invalid(
+                "model_availability_invalid",
+                "available models cannot carry an unavailable reason",
+            ));
+        }
+        if !model.available && model.unavailable_reason.is_none() {
+            return Err(CatalogError::invalid(
+                "model_availability_invalid",
+                "an unavailable model must include an unavailable reason",
+            ));
+        }
+        provider_defaults += usize::from(model.provider_default);
+    }
+    if provider_defaults > 1 {
+        return Err(CatalogError::invalid(
+            "provider_default_duplicate",
+            "provider snapshot cannot declare more than one default model",
+        ));
+    }
+    if let Some(family) = &snapshot.system_family {
+        if family.model_ids.len() > 5 {
+            return Err(CatalogError::invalid(
+                "system_family_size_invalid",
+                "system family cannot contain more than five models",
+            ));
+        }
+        if family.model_ids.is_empty() {
+            if snapshot.connected && snapshot.models.iter().any(|model| model.visible) {
+                return Err(CatalogError::invalid(
+                    "system_family_size_invalid",
+                    "a connected provider with visible models must publish its system family",
+                ));
+            }
+            return Ok(());
+        }
+        if family.key.trim().is_empty() || family.name.trim().is_empty() {
+            return Err(CatalogError::invalid(
+                "system_family_identity_invalid",
+                "system family key and name must be non-empty",
+            ));
+        }
+        let mut visible = snapshot
+            .models
+            .iter()
+            .filter(|model| model.visible)
+            .collect::<Vec<_>>();
+        visible.sort_by_key(|model| model.order);
+        let expected = visible.into_iter().take(5).map(|model| model.id.as_str());
+        if !family.model_ids.iter().map(String::as_str).eq(expected) {
+            return Err(CatalogError::invalid(
+                "system_family_members_invalid",
+                "system family must contain the first five visible provider models in provider order",
+            ));
+        }
+    }
+    Ok(())
 }

@@ -20,11 +20,37 @@ describe("harness configuration", () => {
         auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
         full: { sandboxMode: "danger-full-access", approvalPolicy: "never" },
       },
+      modelCompatibility: [{ providerId: "codex" }],
       settings: {
         modelReasoningEffort: "medium",
         skipGitRepoCheck: true,
       },
     });
+  });
+
+  it("validates provider-neutral all-model and subset compatibility", () => {
+    const parsed = parseHarnessConfiguration({
+      schemaVersion: 1,
+      name: "subset",
+      implementation: "codex.basic",
+      implementationVersion: 1,
+      permissionBindings,
+      modelCompatibility: [{
+        providerId: "codex",
+        modelIds: ["model-a", "model-b"],
+        preferredModelId: "model-b",
+      }],
+      settings: {},
+    });
+    expect(parsed.modelCompatibility).toEqual([{
+      providerId: "codex",
+      modelIds: ["model-a", "model-b"],
+      preferredModelId: "model-b",
+    }]);
+    expect(() => parseHarnessConfiguration({
+      ...parsed,
+      modelCompatibility: [{ providerId: "codex", modelIds: ["model-a"], preferredModelId: "model-b" }],
+    })).toThrow("preferredModelId must be allowed");
   });
 
   it("keeps implementation-specific configuration opaque to the host", () => {

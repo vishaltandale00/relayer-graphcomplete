@@ -100,6 +100,13 @@ impl RelayerAppServer {
                 );
             }
         }
+        let runtime_harnesses = runtime
+            .as_ref()
+            .map(RuntimeClient::product_harnesses)
+            .unwrap_or_default();
+        storage
+            .initialize_model_catalog(&default_harness_configuration, &runtime_harnesses)
+            .await?;
         Ok(Self {
             product: ProductService::new(storage, runtime.is_some()),
             web_directory: config.web_directory,

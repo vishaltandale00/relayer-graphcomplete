@@ -1,4 +1,10 @@
-use crate::permissions::PermissionProfile;
+use crate::{
+    permissions::PermissionProfile,
+    product::{
+        HarnessModelCompatibility, InteractionModelSelection, RuntimeProductHarness,
+        validate_stable_id,
+    },
+};
 use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -14,6 +20,8 @@ pub(crate) struct HarnessConfiguration {
     implementation: String,
     implementation_version: u32,
     permission_bindings: Map<String, Value>,
+    #[serde(default)]
+    model_compatibility: Vec<HarnessModelCompatibility>,
     settings: Value,
 }
 
@@ -48,6 +56,7 @@ pub(crate) struct CompleteInteraction<'a> {
     pub(crate) working_directory: &'a str,
     pub(crate) harness_configuration_name: &'a str,
     pub(crate) permission_profile: &'a PermissionProfile,
+    pub(crate) model_selection: Option<&'a InteractionModelSelection>,
 }
 
 #[derive(Debug)]
@@ -113,6 +122,19 @@ impl RuntimeClient {
 
     pub(crate) fn has_configuration(&self, name: &str) -> bool {
         self.configurations.contains_key(name)
+    }
+
+    pub(crate) fn product_harnesses(&self) -> Vec<RuntimeProductHarness> {
+        let mut harnesses = self
+            .configurations
+            .values()
+            .map(|entry| RuntimeProductHarness {
+                id: entry.configuration.name.clone(),
+                model_compatibility: entry.configuration.model_compatibility.clone(),
+            })
+            .collect::<Vec<_>>();
+        harnesses.sort_by(|left, right| left.id.cmp(&right.id));
+        harnesses
     }
 
     pub(crate) fn permission_bindings(
@@ -182,10 +204,17 @@ impl RuntimeClient {
                     StatusCode::CREATED,
                 )
                 .await?;
+            let mut complete_body = serde_json::json!({"graph": graph});
+            if let Some(model_selection) = command.model_selection {
+                complete_body["model"] = serde_json::json!({
+                    "providerId": model_selection.provider_id.as_str(),
+                    "modelId": &model_selection.model_id,
+                });
+            }
             self.post(
                 self.harness_url
                     .join(&format!("sessions/{}/complete", command.thread_id))?,
-                &serde_json::json!({"graph": graph}),
+                &complete_body,
                 &self.harness_control_token,
                 StatusCode::OK,
             )
@@ -204,8 +233,11 @@ impl RuntimeClient {
                 });
             }
         };
-        let effective_execution_digest =
-            effective_execution_digest(&selected.digest, &command.permission_profile.id);
+        let effective_execution_digest = effective_execution_digest(
+            &selected.digest,
+            &command.permission_profile.id,
+            command.model_selection,
+        );
         let unrestricted = command.permission_profile.authority == "unrestricted";
         Ok(RuntimeCompletion {
             graph_node_id: interaction.node.id,
@@ -375,14 +407,74 @@ fn validate_configuration(entry: &CatalogEntry) -> Result<(), RuntimeError> {
             "invalid harness configuration catalog entry".into(),
         ));
     }
+    let mut providers = std::collections::HashSet::new();
+    for compatibility in &configuration.model_compatibility {
+        validate_stable_id(compatibility.provider_id.as_str(), "providerId")
+            .map_err(|error| RuntimeError::Configuration(error.to_string()))?;
+        if !providers.insert(compatibility.provider_id.as_str()) {
+            return Err(RuntimeError::Configuration(
+                "duplicate harness model compatibility provider".into(),
+            ));
+        }
+        if let Some(model_ids) = &compatibility.model_ids {
+            if model_ids.is_empty() {
+                return Err(RuntimeError::Configuration(
+                    "harness model compatibility subset cannot be empty".into(),
+                ));
+            }
+            let mut models = std::collections::HashSet::new();
+            for model_id in model_ids {
+                validate_stable_id(model_id, "modelId")
+                    .map_err(|error| RuntimeError::Configuration(error.to_string()))?;
+                if !models.insert(model_id) {
+                    return Err(RuntimeError::Configuration(
+                        "duplicate harness compatible model ID".into(),
+                    ));
+                }
+            }
+            if compatibility
+                .preferred_model_id
+                .as_ref()
+                .is_some_and(|preferred| !models.contains(preferred))
+            {
+                return Err(RuntimeError::Configuration(
+                    "harness preferred model must be included in its model subset".into(),
+                ));
+            }
+        }
+        if let Some(preferred) = &compatibility.preferred_model_id {
+            validate_stable_id(preferred, "preferredModelId")
+                .map_err(|error| RuntimeError::Configuration(error.to_string()))?;
+        }
+    }
     Ok(())
 }
 
-fn effective_execution_digest(configuration_digest: &str, permission_profile_id: &str) -> String {
+fn effective_execution_digest(
+    configuration_digest: &str,
+    permission_profile_id: &str,
+    model_selection: Option<&InteractionModelSelection>,
+) -> String {
     let mut digest = Sha256::new();
+    digest.update(b"relayer.effective-execution.v2");
+    digest.update([0]);
+    digest.update(b"harness");
+    digest.update([0]);
     digest.update(configuration_digest.as_bytes());
     digest.update([0]);
+    digest.update(b"permission");
+    digest.update([0]);
     digest.update(permission_profile_id.as_bytes());
+    if let Some(model_selection) = model_selection {
+        digest.update([0]);
+        digest.update(b"model-provider");
+        digest.update([0]);
+        digest.update(model_selection.provider_id.as_str().as_bytes());
+        digest.update([0]);
+        digest.update(b"provider-model");
+        digest.update([0]);
+        digest.update(model_selection.model_id.as_bytes());
+    }
     format!("sha256:{:x}", digest.finalize())
 }
 
@@ -540,6 +632,7 @@ mod tests {
                 working_directory: root.to_str().unwrap(),
                 harness_configuration_name: "test",
                 permission_profile: &permission_profile,
+                model_selection: None,
             })
             .await;
 
@@ -643,6 +736,7 @@ mod tests {
                 working_directory: root.to_str().unwrap(),
                 harness_configuration_name: "test",
                 permission_profile: &permission_profile,
+                model_selection: None,
             })
             .await
             .unwrap();

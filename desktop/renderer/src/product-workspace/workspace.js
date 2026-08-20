@@ -1,6 +1,13 @@
-import { escapeHtml } from "../ui.js";
+import { escapeHtml, toast } from "../ui.js";
 import { actionWasInvoked } from "../action-invocation-state.js";
 import { setControlActivationCompletion } from "../control-activation.js";
+import {
+  createModelPicker,
+  interactionModelSelection,
+  modelSelectionLabels,
+  selectionForNextInteraction,
+} from "../model-picker.js";
+import { pickerSelectionPayload } from "../model-picker-model.js";
 import {
   interactionForThread,
   responseNodesForThread,
@@ -251,8 +258,8 @@ export function bindComposerKeydown(textarea, submit) {
   textarea.onkeydown = (event) => handleComposerKeydown(event, submit);
 }
 
-export function composerSubmissionReady(value, disabled = false) {
-  return !disabled && Boolean(value.trim());
+export function composerSubmissionReady(value, disabled = false, modelReady = true) {
+  return !disabled && modelReady && Boolean(value.trim());
 }
 
 export function composerDisabledForState(status, canCompose = true) {
@@ -320,6 +327,7 @@ export function createProductWorkspace({
   onSelectTurnById,
   onSelectionChange = () => {},
   onSubmitInteraction = async () => {},
+  onOpenSettings = () => {},
   onNavigateLayer = async () => {},
   onInvokeAction = async () => {},
 }) {
@@ -523,20 +531,44 @@ export function createProductWorkspace({
   };
   const prompt = $("#threadPrompt");
   const send = $("#sendInteraction");
+  let pickerInheritanceKey = null;
+  let modelPicker;
   const syncComposer = () => {
     resizeComposerTextarea(prompt);
-    send.disabled = !composerSubmissionReady(prompt.value, prompt.disabled);
+    send.disabled = !composerSubmissionReady(
+      prompt.value,
+      prompt.disabled,
+      modelPicker?.isReady() ?? false,
+    );
+    send.title = modelPicker?.isReady()
+      ? "Send"
+      : "Choose an available model in Settings before sending";
   };
+  if (capabilities.canCompose) {
+    modelPicker = createModelPicker({
+      root: root.querySelector('[data-model-picker="ongoing"]'),
+      mode: "ongoing",
+      settings: getState().modelSettings,
+      onSelectionChange: syncComposer,
+      onOpenSettings,
+    });
+  }
   prompt.oninput = syncComposer;
-  bindComposerKeydown(prompt, () => send.click());
+  bindComposerKeydown(prompt, () => {
+    if (!modelPicker?.isReady()) modelPicker?.open("model");
+    else send.click();
+  });
   send.onclick = async () => {
     const text = prompt.value.trim();
     if (!text || send.disabled) return;
     prompt.disabled = true;
     send.disabled = true;
     try {
-      await onSubmitInteraction(text);
+      const modelSelection = pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection;
+      await onSubmitInteraction(text, modelSelection);
       prompt.value = "";
+    } catch (error) {
+      toast(error.message);
     } finally {
       prompt.disabled = composerDisabledForState(
         getState().status,
@@ -646,13 +678,40 @@ export function createProductWorkspace({
     const project = state.projects.find((item) => String(item.id) === String(thread.projectId));
     const permissionProfile = state.permissionProfiles?.find((item) => item.id === thread.permissionProfileId);
     const permissionLabel = permissionProfile?.label || thread.permissionProfileId;
-    $("#threadScope").textContent = `${project?.name || "No folder"} · ${permissionLabel}`;
+    const harnessId = thread.harnessId ?? thread.harnessConfigurationName;
+    const harness = state.modelSettings?.harnesses?.find((item) => item.id === harnessId);
+    $("#threadScope").textContent = `${project?.name || "No folder"} · ${permissionLabel} · ${harness?.label ?? harnessId}`;
     const interaction = interactionForThread(state, thread);
     $("#interactionText").textContent = interaction?.text
       || interaction?.summary
       || interaction?.content
       || thread.title;
     renderTurnNavigation(state, thread, interaction);
+    const turns = (state.interactions || []).filter((item) => String(item.threadId) === String(thread.id));
+    const latestInteraction = turns.at(-1);
+    const inheritanceKey = `${thread.id}:${latestInteraction?.id ?? "none"}`;
+    if (modelPicker) {
+      const replaceSelection = inheritanceKey !== pickerInheritanceKey;
+      modelPicker.setContext({
+        settings: state.modelSettings,
+        pinnedHarnessId: harnessId,
+        selection: replaceSelection
+          ? selectionForNextInteraction(state.modelSettings, harnessId, latestInteraction)
+          : undefined,
+        replaceSelection,
+      });
+      pickerInheritanceKey = inheritanceKey;
+    }
+    const interactionSelection = interactionModelSelection(interaction);
+    const identityLabels = interactionSelection
+      ? modelSelectionLabels(state.modelSettings, { harnessId, ...interactionSelection })
+      : null;
+    const identity = $("#interactionModelIdentity");
+    identity.textContent = identityLabels ? ` · ${identityLabels.compact}` : "";
+    identity.title = identityLabels
+      ? `${identityLabels.provider}: ${identityLabels.model}`
+      : "";
+    identity.classList.toggle("hidden", !identityLabels);
     renderRunState(state);
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
@@ -713,6 +772,7 @@ export function createProductWorkspace({
     runState.setAttribute("aria-label", pending ? "Waiting for graph" : display);
     runState.querySelector("span").textContent = display;
     prompt.disabled = composerDisabledForState(status, capabilities.canCompose);
+    modelPicker?.setDisabled(prompt.disabled);
     syncComposer();
   }
 

@@ -10,7 +10,8 @@ use super::{
 use crate::{
     product::{
         AcceptedInteractionCompletion, CreateThreadCommand, Interaction, InteractionId,
-        InvokeActionOutcome, ProjectId, Thread, ThreadId, ThreadView,
+        InteractionModelSelection, InvokeActionOutcome, ModelFamilyId, ProjectId, ProviderId,
+        Thread, ThreadId, ThreadView,
     },
     runtime::{CompleteInteraction, RuntimeError},
 };
@@ -28,13 +29,25 @@ pub(super) struct CreateThreadRequest {
     title: Option<String>,
     project_id: Option<i64>,
     initial_message: String,
+    harness_id: Option<String>,
     harness_configuration_name: Option<String>,
     permission_profile_id: Option<String>,
+    model_selection: Option<ModelSelectionRequest>,
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct CreateInteractionRequest {
     text: String,
+    model_selection: Option<ModelSelectionRequest>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelSelectionRequest {
+    family_id: i64,
+    provider_id: String,
+    model_id: String,
 }
 
 #[derive(Serialize)]
@@ -77,8 +90,15 @@ pub(super) async fn create(
 ) -> Result<(StatusCode, Json<ThreadViewResponse>), ApiError> {
     authorize_write(&state, &headers)?;
     let project_id = request.project_id.map(ProjectId::try_from).transpose()?;
-    let harness_configuration_name =
-        selected_harness_configuration(&state, request.harness_configuration_name.as_deref())?;
+    let harness_configuration_name = selected_harness_configuration(
+        &state,
+        request.harness_id.as_deref(),
+        request.harness_configuration_name.as_deref(),
+    )?;
+    let model_selection = request
+        .model_selection
+        .map(InteractionModelSelection::try_from)
+        .transpose()?;
     let permission_profile_id = selected_permission_profile(
         &state,
         &harness_configuration_name,
@@ -92,6 +112,8 @@ pub(super) async fn create(
             initial_message: request.initial_message,
             harness_configuration_name,
             permission_profile_id,
+            model_selection,
+            allow_unselected_model: state.allow_harness_override,
         })
         .await?;
     let interaction = state
@@ -151,9 +173,18 @@ pub(super) async fn create_interaction(
     authorize_write(&state, &headers)?;
     let thread_id = ThreadId::try_from(id)?;
     let thread = state.product.get_thread(thread_id).await?.thread;
+    let model_selection = request
+        .model_selection
+        .map(InteractionModelSelection::try_from)
+        .transpose()?;
     let interaction = state
         .product
-        .create_interaction(thread_id, &request.text)
+        .create_interaction(
+            thread_id,
+            &request.text,
+            model_selection.as_ref(),
+            state.allow_harness_override,
+        )
         .await?;
     let interaction = start_interaction(&state, &thread, interaction).await?;
     Ok((StatusCode::CREATED, Json(interaction.into())))
@@ -226,6 +257,16 @@ async fn invoke_action_with_authority(
     {
         return spawn_action_handoff(state.clone(), thread, outcome).await;
     }
+    let source_selection = source.model_selection.as_ref().ok_or_else(|| {
+        crate::product::CatalogError::invalid(
+            "source_model_selection_missing",
+            "The source interaction has no model selection to inherit.",
+        )
+    })?;
+    state
+        .product
+        .validate_interaction_model_selection(&thread.harness_configuration_name, source_selection)
+        .await?;
     let graph_node_id = source
         .graph_node_id
         .ok_or_else(|| ApiError::invalid("interaction has no accepted graph"))?;
@@ -383,14 +424,24 @@ fn action_invocation_request_failure_message(
 
 fn selected_harness_configuration(
     state: &ApiState,
-    requested: Option<&str>,
+    harness_id: Option<&str>,
+    raw_configuration_name: Option<&str>,
 ) -> Result<String, ApiError> {
-    if requested.is_some() && !state.allow_harness_override {
+    if raw_configuration_name.is_some() && !state.allow_harness_override {
         return Err(ApiError::invalid(
             "harness configuration overrides are unavailable in Relayer",
         ));
     }
-    let selected = requested.unwrap_or(&state.default_harness_configuration);
+    if let (Some(harness_id), Some(raw_configuration_name)) = (harness_id, raw_configuration_name)
+        && harness_id != raw_configuration_name
+    {
+        return Err(ApiError::invalid(
+            "harnessId and harnessConfigurationName must identify the same harness",
+        ));
+    }
+    let selected = raw_configuration_name
+        .or(harness_id)
+        .unwrap_or(&state.default_harness_configuration);
     if selected.trim().is_empty() {
         return Err(ApiError::invalid(
             "harnessConfigurationName must be non-empty",
@@ -455,6 +506,28 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
     let Some(runtime) = &state.runtime else {
         return;
     };
+    if interaction.model_selection.is_none() && !state.allow_harness_override {
+        record_background_failure(
+            &state,
+            &thread,
+            &interaction,
+            "The interaction has no model selection.".into(),
+        )
+        .await;
+        return;
+    }
+    if let Some(model_selection) = interaction.model_selection.as_ref()
+        && let Err(error) = state
+            .product
+            .validate_interaction_model_selection(
+                &thread.harness_configuration_name,
+                model_selection,
+            )
+            .await
+    {
+        record_background_failure(&state, &thread, &interaction, error.to_string()).await;
+        return;
+    }
     let working_directory = match thread.project_id {
         Some(project_id) => match state.product.project_path(project_id).await {
             Ok(path) => path,
@@ -497,6 +570,7 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
                     return;
                 }
             },
+            model_selection: interaction.model_selection.as_ref(),
         })
         .await
     {
@@ -536,6 +610,18 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
         Err(error) => {
             record_background_failure(&state, &thread, &interaction, error.to_string()).await;
         }
+    }
+}
+
+impl TryFrom<ModelSelectionRequest> for InteractionModelSelection {
+    type Error = ApiError;
+
+    fn try_from(request: ModelSelectionRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
+            family_id: ModelFamilyId::try_from_value(request.family_id)?,
+            provider_id: ProviderId::parse(request.provider_id)?,
+            model_id: request.model_id,
+        })
     }
 }
 

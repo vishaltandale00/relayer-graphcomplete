@@ -6,4 +6,6 @@ permissionBindings:
   ask: {}
   auto: {}
   full: {}
+modelCompatibility:
+  - providerId: codex
 settings: {}

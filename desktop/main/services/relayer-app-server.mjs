@@ -174,6 +174,26 @@ export class RelayerAppServerService {
     this.listening = null;
   }
 
+  async publishProviderCatalog(snapshot) {
+    const session = await this.start();
+    const response = await fetch(new URL("/api/internal/provider-catalog", session.origin), {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${session.cookie.value}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(snapshot),
+    });
+    if (response.ok) return;
+    let detail;
+    try {
+      detail = await response.json();
+    } catch {
+      detail = null;
+    }
+    throw new Error(detail?.error?.message || detail?.error || `Provider catalog publish failed (${response.status}).`);
+  }
+
   #waitForReady(child, stderr) {
     return new Promise((resolve, reject) => {
       const lines = createInterface({ input: child.stdout });

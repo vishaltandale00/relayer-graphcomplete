@@ -3,12 +3,20 @@ import type { CompletionOutput, GraphCapability, GraphId, GraphNode } from "@rel
 export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export type JsonObject = Readonly<Record<string, JsonValue>>;
 
+export interface HarnessModelCompatibility {
+  readonly providerId: string;
+  /** Omitted means every model reported by this provider. */
+  readonly modelIds?: readonly string[];
+  readonly preferredModelId?: string;
+}
+
 export interface HarnessConfiguration {
   readonly schemaVersion: 1;
   readonly name: string;
   readonly implementation: string;
   readonly implementationVersion: number;
   readonly permissionBindings: Readonly<Record<string, JsonObject>>;
+  readonly modelCompatibility?: readonly HarnessModelCompatibility[];
   readonly settings: JsonObject;
 }
 
@@ -22,6 +30,12 @@ export interface HarnessGraphScope {
 export interface HarnessRunContext {
   readonly inputGraph: GraphNode;
   readonly graph: HarnessGraphScope;
+  readonly model?: InteractionModelSelection;
+}
+
+export interface InteractionModelSelection {
+  readonly providerId: string;
+  readonly modelId: string;
 }
 
 export interface Harness {
