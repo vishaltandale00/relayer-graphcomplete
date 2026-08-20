@@ -133,6 +133,8 @@ The runner temporarily places the isolated canary profile and evidence-log paths
 
 The hosted runner proves native packaging and updater behavior for its target. It does not replace a physical-device check for release-critical hardware or user-specific security software.
 
+Apple Silicon workflow `32399053432` completed the exact `0.2.10` to `0.2.11` Preview update on native arm64 macOS. Its committed evidence is under `docs/prd/assets/evidence/desktop/macos-arm64-0.2.10-to-0.2.11/`. Stable remained at `0.2.4` when this canary evidence was recorded.
+
 ## Windows 11 interactive canary
 
 Use a personal Windows 11 Azure Virtual Desktop rather than a headless CI runner. Assign an eligible Microsoft 365 or Windows license to the test identity, use a small x64 session host, enable automatic shutdown/deallocation, and keep the desktop unavailable from the public internet except through Azure Virtual Desktop.
