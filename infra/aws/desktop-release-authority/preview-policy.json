@@ -2,6 +2,30 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "IdentifyMissingPreviewObjects",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::relayer-desktop-updates-647746916062",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "desktop/macos/arm64/releases/*",
+            "desktop/macos/arm64/beta-mac.yml",
+            "desktop/macos/x64/releases/*",
+            "desktop/macos/x64/beta-mac.yml",
+            "desktop/windows/x64/releases/*",
+            "desktop/windows/x64/beta.yml",
+            "private/history/macos-arm64/beta/*",
+            "private/history/macos-x64/beta/*",
+            "private/history/windows-x64/beta/*",
+            "private/receipts/macos-arm64/preview/*",
+            "private/receipts/macos-x64/preview/*",
+            "private/receipts/windows-x64/preview/*"
+          ]
+        }
+      }
+    },
+    {
       "Sid": "PublishTargetPreviewObjects",
       "Effect": "Allow",
       "Action": [

@@ -213,7 +213,15 @@ async function runAws(args, execute = execFileAsync) {
   return String(result.stdout || "");
 }
 
+async function objectExists({ bucket, key, execute = execFileAsync } = {}) {
+  const result = JSON.parse(await runAws([
+    "s3api", "list-objects-v2", "--bucket", bucket, "--prefix", key, "--max-keys", "1", "--output", "json",
+  ], execute));
+  return Array.isArray(result.Contents) && result.Contents.some((object) => object?.Key === key);
+}
+
 async function headObject({ bucket, key, execute = execFileAsync } = {}) {
+  if (!await objectExists({ bucket, key, execute })) return null;
   try {
     return JSON.parse(await runAws([
       "s3api", "head-object", "--bucket", bucket, "--key", key, "--checksum-mode", "ENABLED", "--output", "json",
