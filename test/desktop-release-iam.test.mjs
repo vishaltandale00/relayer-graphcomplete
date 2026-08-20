@@ -31,13 +31,16 @@ describe("desktop release AWS authority", () => {
   it("limits Preview to target release objects and Preview control objects", async () => {
     const policy = await readPolicy("preview-policy.json");
     expect(policy.Statement).toHaveLength(1);
-    expect(policy.Statement[0].Action).toEqual(["s3:GetObject", "s3:PutObject"]);
+    const objects = policy.Statement.find((statement) => Array.isArray(statement.Action));
+    expect(objects.Action).toEqual(["s3:GetObject", "s3:PutObject"]);
+    expect(policy.Statement.some((statement) => statement.Action === "s3:ListBucket")).toBe(false);
+    expect(policy.Statement.flatMap(resourcesFor)).not.toContain(bucketArn);
 
     const expected = Object.values(DESKTOP_RELEASE_TARGETS).flatMap((target) => {
       const resources = targetResources(target);
       return [resources.release, resources.previewPointer, resources.previewHistory, resources.previewReceipt];
     });
-    expect(resourcesFor(policy.Statement[0]).sort()).toEqual(expected.sort());
+    expect(resourcesFor(objects).sort()).toEqual(expected.sort());
   });
 
   it("lets Stable read Preview evidence but write only Stable control objects", async () => {
@@ -45,6 +48,8 @@ describe("desktop release AWS authority", () => {
     expect(policy.Statement).toHaveLength(2);
     const read = policy.Statement.find((statement) => statement.Action === "s3:GetObject");
     const write = policy.Statement.find((statement) => statement.Action === "s3:PutObject");
+    expect(policy.Statement.some((statement) => statement.Action === "s3:ListBucket")).toBe(false);
+    expect(policy.Statement.flatMap(resourcesFor)).not.toContain(bucketArn);
 
     const expectedRead = Object.values(DESKTOP_RELEASE_TARGETS).flatMap((target) => {
       const resources = targetResources(target);

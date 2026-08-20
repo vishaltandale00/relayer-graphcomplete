@@ -2,7 +2,7 @@
 
 These inert policies define the exact S3 and GitHub OIDC authority needed by the Preview publisher and Stable promoter. They cover Apple Silicon, Intel macOS, and Windows independently without granting bucket listing, deletion, ACL, bucket-policy, or role-management access.
 
-The Preview role can read and conditionally write immutable release objects, target-specific `beta*` pointers, Preview history, and Preview receipts. The Stable role can read exact Preview evidence and release objects but can write only target-specific `latest*` pointers, Stable history, and Stable receipts. Stable cannot replace release artifacts or Preview control objects.
+The Preview role can read and conditionally write immutable release objects, target-specific `beta*` pointers, Preview history, and Preview receipts. The Stable role can read exact Preview evidence and release objects but can write only target-specific `latest*` pointers, Stable history, and Stable receipts. Stable cannot replace release artifacts or Preview control objects. Neither role can list the bucket. A missing-object `HeadObject` can therefore return `403`; the publishers resolve that ambiguity only through a conditional write and never treat every `403` as absence.
 
 The trust policies require the immutable GitHub owner and repository IDs, the exact protected environment, and the `sts.amazonaws.com` audience. They do not accept branch, pull-request, or unscoped repository subjects.
 
