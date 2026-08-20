@@ -137,6 +137,17 @@
     pre code { padding: 0; background: transparent; }
     .mermaid { display: flex; min-height: 260px; align-items: center; justify-content: center; overflow-x: auto; margin: 22px 0 34px; padding: 24px; border: 1px solid light-dark(#dfe3ea, #303746); border-radius: 10px; background: light-dark(#fbfbfd, #11151d); }
     .mermaid svg { display: block; max-width: 100%; height: auto; }
+    .kanban-board { display: grid; grid-template-columns: repeat(4, minmax(190px, 1fr)); gap: 12px; overflow-x: auto; margin: 22px 0 34px; padding-bottom: 6px; }
+    .kanban-column { min-width: 190px; padding: 13px; border: 1px solid light-dark(#dce1e9, #343c4d); border-radius: 10px; background: light-dark(#f8f9fb, #121720); }
+    .kanban-column h4 { margin: 0 0 12px; font-size: 13px; }
+    .kanban-card { display: grid; gap: 7px; margin-top: 9px; padding: 12px; border: 1px solid light-dark(#d8ddea, #373f50); border-left: 4px solid var(--card-accent); border-radius: 8px; background: light-dark(#fff, #181d26); }
+    .kanban-card:first-of-type { margin-top: 0; }
+    .kanban-card.done { --card-accent: #49a267; }
+    .kanban-card.ready { --card-accent: #7557e8; }
+    .kanban-card.parallel { --card-accent: #3478bd; }
+    .kanban-card.blocked { --card-accent: #d4a62c; }
+    .kanban-card a { font-size: 12px; font-weight: 800; text-decoration: none; }
+    .kanban-card small { color: light-dark(#687387, #9ca6b8); font-size: 10px; line-height: 1.45; }
     .annotation-trigger { position: fixed; z-index: 60; display: none; padding: 7px 10px; border: 1px solid light-dark(#b9c1cf, #4c566b); border-radius: 7px; background: light-dark(#fff, #252c39); box-shadow: 0 8px 24px rgba(10, 16, 28, .18); color: inherit; font: inherit; font-size: 11px; cursor: pointer; }
     .annotation-trigger.visible { display: block; }
     .media-annotation-button { display: block; margin: -24px auto 30px; padding: 6px 10px; border: 1px solid light-dark(#cdd3df, #3a4254); border-radius: 6px; background: light-dark(#fff, #202631); color: light-dark(#667185, #a5afc0); font: inherit; font-size: 10px; cursor: pointer; }
@@ -176,13 +187,14 @@
       .status-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .capability-summary { grid-template-columns: 1fr; }
       .capability-summary .capability-evidence { grid-column: auto; }
+      .kanban-board { grid-template-columns: repeat(4, minmax(210px, 78vw)); }
     }
   </style>
 </head>
 <body>
   <main><h1>Relayer Desktop and Relayer Harness: Product Requirements</h1>
 <p><strong>Document status:</strong> Draft for product review.<br>
-<strong>Last updated:</strong> 2026-08-18.</p>
+<strong>Last updated:</strong> 2026-08-20.</p>
 <section class="reading-map" aria-labelledby="reading-map-title">
 <span class="reading-map-eyebrow">Start here</span>
 <h3 class="reading-map-title" id="reading-map-title">Choose the detail that you need</h3>
@@ -1516,11 +1528,14 @@ type GraphLayer = {
   edges: EdgeReference[]; // exact visible connections, never inferred
 };
 
+type NavigateRelation = &quot;expand&quot; | &quot;reference&quot;;
+
 type NodeAction =
-  | { ref: ActionReference; source: NodeReference; kind: &quot;navigate&quot;; label: string; targetLayer: LayerReference }
-  | { ref: ActionReference; source: NodeReference; kind: &quot;invoke&quot;; label: string; interactionText?: string };
+  | { ref: ActionReference; source: NodeReference; sourceLayer?: LayerReference; kind: &quot;navigate&quot;; relation: NavigateRelation; label: string; targetLayer: LayerReference }
+  | { ref: ActionReference; source: NodeReference; sourceLayer?: LayerReference; kind: &quot;invoke&quot;; label: string; interactionText?: string };
 </code></pre>
-<p>A layer packages the exact node references and exact edge references rendered together. A navigate action always opens a layer, even when that layer contains only one node. Actions are separate graph records associated with a source node; adding an action does not require resubmitting the node.</p>
+<p>A layer packages exact node and edge references. A navigate action opens a layer, including a layer that contains one node.</p>
+<p>Actions remain node-owned. Node-level actions also record their authoring layer. The product does not expose this provenance or the navigate relation.</p>
 <h3>11.3 Agent-facing TypeScript and Python client</h3>
 <pre><code class="language-ts">interface GraphClient {
   getNode(ref: NodeReference): Promise&lt;GraphNode&gt;;
@@ -1529,7 +1544,7 @@ type NodeAction =
   submitNode(node: GraphNode): Promise&lt;NodeReference&gt;;
   createEdge(left: GraphNode | NodeReference, right: GraphNode | NodeReference): Promise&lt;EdgeReference&gt;;
   createEdges(pairs: ReadonlyArray&lt;readonly [GraphNode | NodeReference, GraphNode | NodeReference]&gt;): Promise&lt;EdgeReference[]&gt;;
-  submitLayer(layer: GraphLayer): Promise&lt;LayerReference&gt;;
+  submitLayer(layer: GraphLayer, options?: { sizeJustification?: string }): Promise&lt;LayerReference&gt;;
   addAction(source: GraphNode | NodeReference, action: NodeAction): Promise&lt;ActionReference&gt;;
 
   submit(interactionNode: NodeReference): Promise&lt;ResolvedGraphLayer&gt;;
@@ -1543,13 +1558,16 @@ type NodeAction =
 <tbody>
 <tr><td><code>submitNode</code></td><td>Required icon/title/detail, supported markup, field and payload limits</td><td>Return exact invalid field and keep the last valid draft</td></tr>
 <tr><td><code>createEdge</code></td><td>Both endpoints submitted, no self-edge, no duplicate undirected edge</td><td>Return the offending endpoint or existing edge</td></tr>
-<tr><td><code>submitLayer</code></td><td>Every node/edge exists, every edge endpoint is in the layer, no duplicate references, required connectivity and node-count rules</td><td>Return the precise missing/disconnected object and suggested next operation</td></tr>
-<tr><td><code>addAction</code></td><td>Source exists; navigate target is a submitted layer; label and action kind valid</td><td>Return the invalid source, target, or field</td></tr>
-<tr><td><code>submit(interaction)</code></td><td>Interaction is active; exactly one new response navigate action targets a valid root layer; every recursively reachable navigate target is valid</td><td>Leave drafts hidden and return the unresolved path</td></tr>
+<tr><td><code>submitLayer</code></td><td>Validate members, edges, uniqueness, connectivity, and size. Layers with 6–8 nodes require a hidden justification. Reject larger layers.</td><td>Return the precise object or size failure. Discard a valid size justification.</td></tr>
+<tr><td><code>addAction</code></td><td>Validate source, authoring layer, kind, relation, target, ownership, visibility, and context-specific authoring permission.</td><td>Return the invalid source, target, provenance, or field.</td></tr>
+<tr><td><code>submit(interaction)</code></td><td>Require one root expand action. Validate the current-authored closure, expand acyclicity, references, authority, and orphan drafts.</td><td>Keep all drafts hidden. Return the exact repairable path.</td></tr>
 </tbody></table>
 <p>Error responses contain a stable code, an object path, and a repair message. The message is part of the agent contract. It must identify the failure and the corrective operation. The engine does not make a semantic judgment.</p>
 <h3>11.5 Recursive completion submission</h3>
-<p><code>graph.submit(interactionNode)</code> is the deterministic completion boundary. The engine starts at the new response navigation action. It traverses the target layer and its exact nodes and edges. It also traverses navigation actions on those nodes. A visited set prevents repeated traversal. One atomic operation accepts the reachable new drafts. Unrelated drafts stay unaccepted.</p>
+<p><code>graph.submit(interactionNode)</code> is the deterministic completion boundary. It derives exactly one interaction-authored root expand action.</p>
+<p>The engine traverses only current-interaction actions. Expand paths must be acyclic. Reference paths can branch, share destinations, or cycle.</p>
+<p>A visited set terminates reference traversal. Accepted reference targets are immutable boundaries. The engine validates visibility and authority without reaccepting their history.</p>
+<p>The engine rejects unreachable current-interaction layers. One atomic operation accepts the valid reachable drafts. A focused flat root remains valid.</p>
 <p>The accepted return value is a <code>ResolvedGraphLayer</code> containing full node objects, exact visible edges, and node actions for the root layer. This is the immediate display payload returned by Complete. The persisted layer reference remains the source for later navigation and reload.</p>
 <h3>11.6 Local server and token contract</h3>
 <p>The Rust graph router is exposed on loopback HTTP; a Unix-domain-socket transport may replace loopback only if the Codex sandbox cannot reach it. Harnesses do not use MCP, do not open SQLite directly, and do not treat a CLI as the primary API. Prime Agent calls the Python client from its IPython kernel; Node/Codex harnesses call the TypeScript client or execute a small TypeScript program.</p>
@@ -1575,6 +1593,80 @@ GET  /api/graph/nodes/:id/output
 <li>Token tests prove wrong-project, wrong-thread, inactive-interaction, missing-token, and expired-session requests cannot write.</li>
 <li>Layer-view tests prove the renderer receives only the edges explicitly declared by the layer.</li>
 <li>Crash/transaction tests prove partial submission never becomes visible as an accepted response.</li>
+</ul>
+<h3>11.8 Recursive graph navigation delivery PRD</h3>
+<p><strong>Goal:</strong> Make useful graph expansion and evidence references reliable across task types and both production harnesses.</p>
+<p><strong>Primary issue:</strong> <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/36">#36 Enable recursive graph navigation generally</a>.</p>
+<p><strong>Current status:</strong> Ready. PR #32 merged on 2026-08-20 and supplied the second required harness.</p>
+<h4>Product requirements</h4>
+<ul>
+<li>An expand action develops the current answer. Expand paths define recursive depth and must be acyclic.</li>
+<li>A reference action supplies evidence or context. References can branch, share layers, and form cycles.</li>
+<li>A reference layer can author references. It cannot author new expand or invoke actions.</li>
+<li>Reused nodes keep earlier actions. Those actions remain usable but do not enter the current completion closure.</li>
+<li>Root-only answers remain valid. The judge can penalize missed structure, but deterministic submission cannot require recursion.</li>
+<li>Layers contain 1–8 nodes. Layers with 6–8 nodes require a private authoring justification.</li>
+<li>The justification is never persisted or shown. No hard total-layer or expansion-depth limit exists.</li>
+<li>Product and Eval use the same ProductWorkspace behavior. Navigate relation metadata remains invisible to users.</li>
+</ul>
+<h4>Issue dependency DAG</h4>
+<pre><code class="language-mermaid">flowchart LR
+  I19[&quot;#19 Judge foundation — Done&quot;] --&gt; I36[&quot;#36 Expand and reference semantics — Ready&quot;]
+  PR32[&quot;PR #32 Prime Agent harness — Merged&quot;] --&gt; I36
+  I23[&quot;#23 Durable invoke foundation — Done&quot;] --&gt; I55[&quot;#55 Resolve invoke into navigation — Blocked&quot;]
+  I36 --&gt; I55
+  I28[&quot;#28 Breadcrumb foundation — Done&quot;] --&gt; I56[&quot;#56 Generic navigation history — Blocked&quot;]
+  I36 --&gt; I56
+  I55 --&gt; I56
+  I52[&quot;#52 Graph search — Parallel&quot;] -. &quot;Improves reference discovery; does not block&quot; .-&gt; I36
+
+  classDef done fill:#eaf7ee,stroke:#49a267,color:#173120
+  classDef ready fill:#ece8ff,stroke:#7557e8,color:#302751
+  classDef parallel fill:#edf5ff,stroke:#3478bd,color:#172c46
+  classDef blocked fill:#fff7df,stroke:#d4a62c,color:#352b13
+  class I19,PR32,I23,I28 done
+  class I36 ready
+  class I52 parallel
+  class I55,I56 blocked
+</code></pre>
+<p>Solid arrows are delivery dependencies. The dashed arrow is non-blocking enablement. No issue in this DAG expands #36 scope.</p>
+<h4>Kanban board</h4>
+<div class="kanban-board" aria-label="Recursive graph navigation issue Kanban">
+<section class="kanban-column">
+<h4>Done</h4>
+<article class="kanban-card done"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/19">#19 Screenshot-grounded judge</a><small>Supplies the production-workspace review foundation.</small></article>
+<article class="kanban-card done"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/23">#23 Durable invoke</a><small>Supplies one-shot invocation provenance and persistence.</small></article>
+<article class="kanban-card done"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/28">#28 Navigation breadcrumbs</a><small>Supplies current-path presentation in ProductWorkspace.</small></article>
+<article class="kanban-card done"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/pull/32">PR #32 Prime Agent harness</a><small>Supplies the second harness required by #36.</small></article>
+</section>
+<section class="kanban-column">
+<h4>Ready</h4>
+<article class="kanban-card ready"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/36">#36 Recursive graph navigation</a><small>Owns expand, reference, provenance, closure, prompts, migration, and Eval coverage.</small></article>
+</section>
+<section class="kanban-column">
+<h4>Parallel</h4>
+<article class="kanban-card parallel"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/52">#52 Graph search functionality</a><small>Improves prior accepted-layer discovery. It does not block #36.</small></article>
+</section>
+<section class="kanban-column">
+<h4>Blocked</h4>
+<article class="kanban-card blocked"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/55">#55 Resolve invoke navigation</a><small>Uses #36 root and action-provenance semantics.</small></article>
+<article class="kanban-card blocked"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/56">#56 Generic navigation history</a><small>Needs #36 navigation semantics and #55 resolved-invoke behavior for full coverage.</small></article>
+</section>
+</div>
+<h4>Exit evidence for #36</h4>
+<ul>
+<li>Inference-free tests cover flat output, deep expansion, references, cycles, shared targets, reused actions, orphan drafts, authority, size, and migration.</li>
+<li>Natural diagnosis or implementation prompts produce useful recursive output without explicit depth instructions.</li>
+<li>Both <code>codex.basic</code> and <code>prime.agent</code> pass through the production workspace.</li>
+<li>The judge reviews expansion recursively. It edge-grades references without regrading referenced nodes.</li>
+<li>Saved product screenshots prove source actions, destination layers, navigation paths, and representative flat output.</li>
+</ul>
+<h4>Scope boundaries</h4>
+<ul>
+<li>#52 owns prior completion discovery. #36 can reference known visible layers without search.</li>
+<li>#55 owns invoke resolution. #36 only defines which layer contexts can author invoke actions.</li>
+<li>#56 owns chronological Back and Forward behavior. #36 does not define navigation history.</li>
+<li>Prime Agent owns recursive agent execution. GraphComplete owns graph semantics and acceptance.</li>
 </ul>
 <h2 data-prd-layer="Contracts" data-prd-order="12">12. Complete and harness-host contract</h2>
 <h3>12.1 Canonical input and accepted output</h3>
@@ -1720,8 +1812,10 @@ settings:
   id: string;
   actionKey: string;
   sourceNodeId: string;
+  sourceLayerId?: string; // required for node-level authoring; hidden from users
   label: string;
-  mode: &quot;navigate&quot; | &quot;invoke&quot;;
+  kind: &quot;navigate&quot; | &quot;invoke&quot;;
+  relation?: &quot;expand&quot; | &quot;reference&quot;; // required for navigate
   targetLayerId?: string; // required for navigate; a layer may contain one node
   interactionTemplate?: {
     kind: &quot;message&quot; | &quot;node-action&quot;;
@@ -1730,25 +1824,25 @@ settings:
 };
 </code></pre>
 <ul>
-<li><code>navigate</code> opens an already submitted layer without Complete. A one-node destination is still represented as a layer.</li>
+<li><code>navigate</code> opens an accepted layer without Complete. An expand relation develops the answer. A reference relation supplies context.</li>
 <li><code>invoke</code> creates one user-interaction node referring to the selected node and action, then calls Complete once.</li>
-<li>The accepted response becomes a child subgraph/subthread and is enterable from the parent through a navigate action and from its durable sidebar entry.</li>
-<li>Subthreads are recursive without a fixed depth.</li>
+<li>The product does not expose navigate relations or authoring provenance. These fields enforce graph semantics.</li>
+<li>Expand paths are recursive without a fixed depth. Reference paths do not increase expansion depth.</li>
 </ul>
-<p>There is no universal <code>Go deeper</code> button. Deeper work exists only when the harness authors an appropriate invoking action.</p>
+<p>There is no universal <code>Go deeper</code> button. Deeper detail exists only when the harness authors an appropriate expand action.</p>
 <h4>Authored-action lifecycle</h4>
 <ol>
 <li>During a Complete run, the harness authors an action in draft state on a draft or reused node.</li>
-<li>The engine validates each action. The source must exist. The <code>actionKey</code> must be unique in that node revision. The mode must be supported. A navigation target must exist in the submitted graph version.</li>
+<li>The engine validates the source, authoring layer, key, kind, relation, target, ownership, visibility, and context-specific permission.</li>
 <li>The action becomes visible only when its graph version is submitted and accepted.</li>
 <li>A <code>navigate</code> selection reads its target locally and does not change graph state.</li>
 <li>An <code>invoke</code> selection creates a new <code>node-action</code> interaction containing the source node ID, action ID/key, optional user text, and inherited workspace binding. That new interaction is the root of the next Complete input graph.</li>
 <li>The original action remains part of its accepted snapshot. It is not consumed or converted into the new turn.</li>
-<li>Stop or failure leaves the invoked interaction retryable and does not create an accepted child layer.</li>
-<li>Retry uses the same interaction node. Only one accepted response navigate action may become the canonical output for that interaction.</li>
-<li>An old accepted snapshot must retain its old action. A later revision can remove or replace the action. The current snapshot can mark the action as unavailable. It must not silently redirect the action.</li>
+<li>Stop or failure leaves the invoked action terminal and unresolved. It does not create an accepted result layer.</li>
+<li>Retry uses the same interaction node. Only one accepted root expand action can become that interaction's canonical output.</li>
+<li>An accepted action remains immutable. A successful invoke can gain an append-only resolution that projects navigation to its accepted result.</li>
 </ol>
-<p>The output navigate action created for a successful Complete run follows the same persisted action schema. It is automatically followed once by the desktop after acceptance; later selections are ordinary local navigation.</p>
+<p>The root output is exactly one interaction-authored expand action. The desktop follows it after acceptance. Later selections use ordinary local navigation.</p>
 <h2 data-prd-layer="Product" data-prd-order="6">6. Inspect the result</h2>
 <section class="capability-summary" aria-label="Inspect the result summary">
 <p><strong>User goal:</strong> Understand the result and its supporting nodes.</p>
@@ -2003,11 +2097,17 @@ submitReview({ turnId, evidence, ratings, summary, findings });
   ]
 }
 </code></pre>
-<p>Ratings do not require repetitive prose. One summary explains the subject-level judgment; specific strengths and problems appear as findings with screenshot references. A navigate action cannot be graded without source and destination screenshots, and the destination screenshot's recorded navigation path must contain that action. An invoke action stays inside its source node review and uses only its visible source evidence.</p>
+<p>Ratings do not require repetitive prose. One summary explains the subject judgment. Specific strengths and problems appear as screenshot-backed findings.</p>
+<p>An expand action requires source and destination screenshots. The destination screenshot path must contain that action.</p>
+<p>A reference review covers the source node, action, and destination-layer inclusion. It does not regrade destination nodes individually.</p>
+<p>An invoke action stays inside its source-node review and uses only visible source evidence.</p>
 <p><code>submitReview</code> does not accept new layer or node assessments. It receives the overall turn ratings, representative screenshot references, summary, and findings. It finalizes the already persisted review set as one immutable judge result.</p>
 <h4>13.4.4 Coverage and completion</h4>
 <p>The review-writing tools reject unrelated evidence, unknown rubric keys, mismatched screenshot state, and an unjustified <code>null</code> rating immediately.</p>
-<p><code>submitReview</code> fails with a list of missing subjects when coverage is incomplete. Required coverage includes every reachable layer, visible node, navigate action, visible invoke action, and the overall turn. The final artifact preserves the interaction trace, screenshot files and tiles, screenshot metadata, incremental reviews, rubric version, judge configuration, and completion coverage.</p>
+<p><code>submitReview</code> lists missing subjects when coverage is incomplete. Expansion coverage includes every layer, node, visible action, and the overall turn.</p>
+<p>Reference traversal processes each unique layer once and follows reference actions transitively. It does not activate inherited expand, invoke, or resolved-invoke actions.</p>
+<p>The judge still grades those visible inherited actions in their reference context.</p>
+<p>The final artifact preserves traces, screenshots, metadata, incremental reviews, rubric version, judge configuration, and completion coverage.</p>
 <p>The simulated-user judge grades only what the product made visible. Separate deterministic graders remain authoritative for graph integrity, mutation policy, repository diff, protected-file hashes, public and hidden tests, build results, and commit history. A visually strong graph cannot compensate for broken code, and correct hidden work cannot compensate for an unusable visible response.</p>
 <h3>13.5 Evaluation ladder</h3>
 <table>
@@ -2396,7 +2496,6 @@ submitReview({ turnId, evidence, ratings, summary, findings });
 <li>engine indexing and compaction implementation behind the stable read/write contract;</li>
 <li>whether loopback HTTP is reachable from every supported Codex sandbox or the packaged product needs HTTP over a Unix-domain socket;</li>
 <li>graph search/retrieval policy and when embeddings are worth adding;</li>
-<li>graph topology limits and semantic-grouping rules used by GraphComplete;</li>
 <li>thresholds and calibration examples beyond the fixed first six-fact LLM-judge rubric;</li>
 <li>when multiple real harness ablations justify a generalized signed configuration manifest;</li>
 <li>exact supported macOS floor and release artifact hosting;</li>
