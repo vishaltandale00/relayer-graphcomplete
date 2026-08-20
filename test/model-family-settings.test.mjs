@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   copySystemFamily,
+  createFamilyVisibilityGate,
   createModelFamilyDraft,
   defaultHarnessError,
   MAX_MODELS_PER_FAMILY,
@@ -33,6 +34,15 @@ const codexProvider = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("model family settings model", () => {
+  it("serializes visibility updates for each family", () => {
+    const gate = createFamilyVisibilityGate();
+    expect(gate.begin(7)).toBe(true);
+    expect(gate.begin("7")).toBe(false);
+    expect(gate.isPending(7)).toBe(true);
+    gate.end("7");
+    expect(gate.begin(7)).toBe(true);
+  });
+
   it("starts a custom family with the first available model from a connected provider", () => {
     const draft = createModelFamilyDraft([codexProvider], 7);
     expect(draft).toMatchObject({ id: "draft-7", kind: "custom", enabled: true, draft: true });
@@ -237,6 +247,7 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("await deleteModelFamily(family.id);");
     expect(settingsSource).toContain("if (settings.families.some((family) => family.draft || family.editing)) return;");
     expect(settingsSource).toContain("if (savingFamily) return;");
+    expect(settingsSource).toContain("familyVisibilityGate.isPending(family.id)");
     expect(settingsSource).toContain("await preparePermissionProfiles(settings.defaults.harnessId)");
     expect(settingsSource).toContain("resetNewThreadModelPicker();");
     expect(settingsSource).toContain("refreshNewThreadModelPicker();");

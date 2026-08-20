@@ -1,6 +1,7 @@
 import {
   availableModels,
   copySystemFamily,
+  createFamilyVisibilityGate,
   createModelFamilyDraft,
   defaultHarnessError,
   MAX_MODELS_PER_FAMILY,
@@ -33,6 +34,7 @@ let draftSequence = 0;
 let loading = false;
 let savingFamily = false;
 let savingOrder = false;
+const familyVisibilityGate = createFamilyVisibilityGate();
 
 function provider(providerId) {
   return settings.providers.find((candidate) => candidate.id === providerId);
@@ -245,7 +247,7 @@ function familySlide(family, index) {
     <article class="family-card">
       <div class="family-card-heading">
         <div><h3>${escapeHtml(family.name)}</h3><span class="family-kind">${system ? "System" : "Custom"}</span></div>
-        <label class="family-enabled"><input type="checkbox" data-family-enabled="${index}" ${family.enabled ? "checked" : ""} /><span>Enabled</span></label>
+        <label class="family-enabled"><input type="checkbox" data-family-enabled="${index}" ${family.enabled ? "checked" : ""} ${familyVisibilityGate.isPending(family.id) ? "disabled" : ""} /><span>Enabled</span></label>
       </div>
       <ol class="family-members">${family.models.map(memberReadOnly).join("")}</ol>
       <div class="family-card-actions">
@@ -326,14 +328,23 @@ async function persistFamilyOrder(fromIndex, toIndex) {
 
 async function persistEnabled(index, enabled) {
   const family = settings.families[index];
+  if (!family || !familyVisibilityGate.begin(family.id)) {
+    render();
+    return;
+  }
+  const previousEnabled = family.enabled;
   family.enabled = enabled;
+  render();
   try {
     await updateModelFamily(family.id, family.kind === "system" ? { enabled } : familyPayload(family));
     await refresh({ preserveEdit: true });
   } catch (error) {
-    family.enabled = !enabled;
-    render();
+    const currentFamily = settings.families.find((candidate) => candidate.id === family.id);
+    if (currentFamily) currentFamily.enabled = previousEnabled;
     toast(error.message);
+  } finally {
+    familyVisibilityGate.end(family.id);
+    render();
   }
 }
 

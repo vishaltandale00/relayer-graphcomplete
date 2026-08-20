@@ -1,5 +1,24 @@
 export const MAX_MODELS_PER_FAMILY = 5;
 
+export function createFamilyVisibilityGate() {
+  const pending = new Set();
+  const key = (familyId) => String(familyId);
+  return Object.freeze({
+    begin(familyId) {
+      const familyKey = key(familyId);
+      if (pending.has(familyKey)) return false;
+      pending.add(familyKey);
+      return true;
+    },
+    end(familyId) {
+      pending.delete(key(familyId));
+    },
+    isPending(familyId) {
+      return pending.has(key(familyId));
+    },
+  });
+}
+
 export function createModelFamilyDraft(providerCatalog, sequence = Date.now(), defaultProviderId = null) {
   const provider = providerCatalog.find((item) => (
     item.id === defaultProviderId && item.connected !== false
