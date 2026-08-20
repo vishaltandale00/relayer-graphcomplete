@@ -200,6 +200,8 @@ export async function captureInstalledUpdateState({ port, outputPath, targetVers
       auth?.style.setProperty("display", "none", "important");
       shell?.classList.remove("hidden");
       shell?.style.setProperty("display", "flex", "important");
+      document.querySelector("#settingsButton")?.click();
+      document.querySelector('[data-settings-tab="updates"]')?.click();
       newThread?.classList.add("hidden");
       newThread?.style.setProperty("display", "none", "important");
       thread?.classList.add("hidden");
@@ -210,6 +212,8 @@ export async function captureInstalledUpdateState({ port, outputPath, targetVers
       const updateSection = [...(settings?.querySelectorAll(".settings-section") || [])].find(
         (section) => section.querySelector("h2")?.textContent === "Application updates",
       );
+      updateSection?.classList.remove("hidden");
+      updateSection?.style.setProperty("display", "block", "important");
       for (const section of settings?.querySelectorAll(".settings-section") || []) {
         if (section !== updateSection) section.style.setProperty("display", "none", "important");
       }

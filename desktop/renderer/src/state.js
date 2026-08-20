@@ -24,6 +24,8 @@ export const viewState = {
   currentThreadId: query.get("threadId"),
   currentInteractionId: query.get("interactionId"),
   mainView: query.get("threadId") ? "thread" : "new",
+  previousMainView: query.get("threadId") ? "thread" : "new",
+  settingsTab: "appearance",
   selectedNodeId: null,
   layerPath: [],
   evalContext: null,

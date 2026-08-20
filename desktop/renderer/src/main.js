@@ -1,5 +1,5 @@
 import { connectCodex, refreshAccount, showApplication, showAuth } from "./auth.js";
-import { selectScope, setMainView } from "./navigation.js";
+import { returnFromSettings, selectScope, setMainView, setSettingsTab } from "./navigation.js";
 import {
   closePermissionMenu,
   loadPermissionProfiles,
@@ -61,7 +61,32 @@ function bindEvents() {
   };
   $("#settingsButton").onclick = () => {
     cancelNavigationHistory();
-    setMainView("settings");
+    setMainView("settings", { moveFocus: true });
+  };
+  $("#settingsBackButton").onclick = async () => {
+    try {
+      await returnFromSettings(refreshState);
+    } catch (error) {
+      toast(error.message);
+    }
+  };
+  $("#settingsTabs").onclick = (event) => {
+    const tab = event.target.closest("[data-settings-tab]");
+    if (tab) setSettingsTab(tab.dataset.settingsTab);
+  };
+  $("#settingsTabs").onkeydown = (event) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const tabs = [...$("#settingsTabs").querySelectorAll("[data-settings-tab]")];
+    const currentIndex = tabs.indexOf(event.target.closest("[data-settings-tab]"));
+    if (currentIndex < 0) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? tabs.length - 1
+        : (currentIndex + (event.key === "ArrowDown" ? 1 : -1) + tabs.length) % tabs.length;
+    setSettingsTab(tabs[nextIndex].dataset.settingsTab);
+    tabs[nextIndex].focus();
   };
   $("#disconnectCodex").onclick = async () => {
     await desktop?.account.logout();
