@@ -183,6 +183,8 @@ describe("desktop skeleton", () => {
     expect(html).toContain('id="updateChannel"');
     expect(html).toContain('id="newThreadShortcut"');
     expect(html).toContain('id="appearanceDescription"');
+    expect(html).toContain('id="settingsTabs" role="tablist" aria-label="Settings sections" aria-orientation="vertical"');
+    expect(html.indexOf('id="settingsSidebarContent"')).toBeLessThan(html.indexOf('id="updateButton"'));
     expect(html).toContain("relayer-logo");
     expect(html).toContain('class="settings-view hidden"');
     expect(html).toContain('type="module" src="./src/main.js"');
@@ -1326,6 +1328,9 @@ describe("desktop skeleton", () => {
     expect(electronCanaryScript).toContain('popover?.style.setProperty("z-index", "1000", "important")');
     expect(electronCanaryScript).toContain('shell?.style.setProperty("display", "flex", "important")');
     expect(electronCanaryScript).toContain('settings?.style.setProperty("display", "block", "important")');
+    expect(electronCanaryScript).toContain('document.querySelector("#settingsButton")?.click()');
+    expect(electronCanaryScript).toContain('document.querySelector(\'[data-settings-tab="updates"]\')?.click()');
+    expect(electronCanaryScript).toContain('updateSection?.classList.remove("hidden")');
     expect(electronCanaryScript).toContain('section.querySelector("h2")?.textContent === "Application updates"');
     expect(electronCanaryScript).toContain("document.elementFromPoint(");
     expect(electronCanaryScript).toContain("getBoundingClientRect()");

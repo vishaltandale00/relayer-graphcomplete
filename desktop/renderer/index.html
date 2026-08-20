@@ -30,9 +30,22 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3" width="15" height="14" rx="3"></rect><path d="M7.5 3v14"></path></svg>
       </button>
       <div class="sidebar-title"><div class="logo" role="img" aria-label="Relayer"></div><strong>Relayer</strong></div>
-      <button class="new-thread-button" id="newThread"><span>＋</span> New thread <kbd id="newThreadShortcut">Ctrl/⌘N</kbd></button>
-      <div class="side-section"><div class="section-label">Chats</div><div id="chatList" class="entry-list"></div></div>
-      <div class="side-section"><div class="section-label">Projects</div><div id="projectList" class="project-list"></div></div>
+      <div class="sidebar-content" id="appSidebarContent">
+        <button class="new-thread-button" id="newThread"><span>＋</span> New thread <kbd id="newThreadShortcut">Ctrl/⌘N</kbd></button>
+        <div class="side-section"><div class="section-label">Chats</div><div id="chatList" class="entry-list"></div></div>
+        <div class="side-section"><div class="section-label">Projects</div><div id="projectList" class="project-list"></div></div>
+      </div>
+      <div class="sidebar-content settings-sidebar-content hidden" id="settingsSidebarContent">
+        <button class="settings-back-button" id="settingsBackButton" type="button" title="Back to Relayer"><span aria-hidden="true">←</span><span>Back to Relayer</span></button>
+        <div class="side-section settings-navigation">
+          <div class="section-label">Settings</div>
+          <div class="entry-list" id="settingsTabs" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
+            <button class="entry settings-tab" type="button" role="tab" data-settings-tab="appearance" aria-controls="appearanceSettingsPanel"><span class="entry-icon" aria-hidden="true">◐</span><span>Appearance</span></button>
+            <button class="entry settings-tab" type="button" role="tab" data-settings-tab="codex" aria-controls="codexSettingsPanel"><span class="entry-icon" aria-hidden="true">›_</span><span>Codex</span></button>
+            <button class="entry settings-tab" type="button" role="tab" data-settings-tab="updates" aria-controls="updatesSettingsPanel"><span class="entry-icon" aria-hidden="true">↓</span><span>Application updates</span></button>
+          </div>
+        </div>
+      </div>
       <div class="sidebar-footer">
         <button class="footer-button" id="settingsButton" title="Settings">⚙<span>Settings</span></button>
         <button class="update-button hidden" id="updateButton" title="Application update available">↓</button>
@@ -67,18 +80,18 @@
 
       <section class="settings-view hidden" id="settingsView" aria-labelledby="settingsTitle">
         <header class="settings-header">
-          <div><small>Relayer</small><h1 id="settingsTitle">Settings</h1></div>
+          <div><small>Settings</small><h1 id="settingsTitle">Appearance</h1></div>
         </header>
         <div class="settings-content">
-          <section class="settings-section">
+          <section class="settings-section" id="appearanceSettingsPanel" role="tabpanel" data-settings-panel="appearance">
             <h2>Appearance</h2>
             <label class="setting-row"><div><b>Theme</b><small id="appearanceDescription">Choose how Relayer looks on this computer.</small></div><select id="appearanceSelect"><option value="dark">Dark</option><option value="light">Light</option></select></label>
           </section>
-          <section class="settings-section">
+          <section class="settings-section hidden" id="codexSettingsPanel" role="tabpanel" data-settings-panel="codex">
             <h2>Codex</h2>
             <div class="setting-row"><div><b id="settingsAccount">Connected</b><small>Managed by Codex</small></div><button type="button" class="secondary" id="disconnectCodex">Disconnect</button></div>
           </section>
-          <section class="settings-section">
+          <section class="settings-section hidden" id="updatesSettingsPanel" role="tabpanel" data-settings-panel="updates">
             <h2>Application updates</h2>
             <label class="setting-row"><div><b>Update channel</b><small>Preview receives beta builds before Stable.</small></div><select id="updateChannel"><option value="stable">Stable</option><option value="preview">Preview</option></select></label>
             <div class="setting-row"><div><b id="updateStatus">Up to date</b><small id="currentVersion"></small></div><button type="button" class="secondary" id="checkUpdates">Check for updates</button></div>

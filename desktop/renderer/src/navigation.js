@@ -1,12 +1,52 @@
 import { appState, desktop, viewState } from "./state.js";
 import { $, $$, escapeHtml } from "./ui.js";
 
-export function setMainView(view) {
+const settingsTabs = {
+  appearance: "Appearance",
+  codex: "Codex",
+  updates: "Application updates",
+};
+
+export function setMainView(view, { moveFocus = false } = {}) {
+  if (view === "settings" && viewState.mainView !== "settings") {
+    viewState.previousMainView = viewState.mainView;
+  }
   viewState.mainView = view;
   $("#newThreadView").classList.toggle("hidden", view !== "new");
   $("#threadView").classList.toggle("hidden", view !== "thread");
   $("#settingsView").classList.toggle("hidden", view !== "settings");
   $("#settingsButton").classList.toggle("active", view === "settings");
+  $("#settingsButton").classList.toggle("hidden", view === "settings" || Boolean(viewState.evalContext));
+  $("#appSidebarContent").classList.toggle("hidden", view === "settings");
+  $("#settingsSidebarContent").classList.toggle("hidden", view !== "settings");
+  if (view === "settings") setSettingsTab(viewState.settingsTab);
+  if (moveFocus) {
+    if (view === "settings") $(`[data-settings-tab="${viewState.settingsTab}"]`)?.focus();
+    else $("#settingsButton").focus();
+  }
+}
+
+export function setSettingsTab(tab) {
+  const selectedTab = Object.hasOwn(settingsTabs, tab) ? tab : "appearance";
+  viewState.settingsTab = selectedTab;
+  $("#settingsTitle").textContent = settingsTabs[selectedTab];
+  $$('[data-settings-tab]').forEach((button) => {
+    const active = button.dataset.settingsTab === selectedTab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
+  });
+  $$('[data-settings-panel]').forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.settingsPanel !== selectedTab);
+  });
+}
+
+export async function returnFromSettings(refreshThread) {
+  const previousView = viewState.previousMainView;
+  const destination = previousView === "thread" && viewState.currentThreadId ? "thread" : "new";
+  setMainView(destination, { moveFocus: true });
+  if (destination === "thread" && refreshThread) await refreshThread(viewState.currentThreadId);
+  return destination;
 }
 
 function threadEntry(thread) {
