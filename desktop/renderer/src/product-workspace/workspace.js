@@ -176,6 +176,10 @@ export function handleComposerKeydown(event, submit) {
   return intent;
 }
 
+export function bindComposerKeydown(textarea, submit) {
+  textarea.onkeydown = (event) => handleComposerKeydown(event, submit);
+}
+
 export function composerSubmissionReady(value, disabled = false) {
   return !disabled && Boolean(value.trim());
 }
@@ -398,7 +402,7 @@ export function createProductWorkspace({
     send.disabled = !composerSubmissionReady(prompt.value, prompt.disabled);
   };
   prompt.oninput = syncComposer;
-  prompt.onkeydown = (event) => handleComposerKeydown(event, () => send.click());
+  bindComposerKeydown(prompt, () => send.click());
   send.onclick = async () => {
     const text = prompt.value.trim();
     if (!text || send.disabled) return;

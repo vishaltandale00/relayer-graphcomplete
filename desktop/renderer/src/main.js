@@ -8,6 +8,7 @@ import {
   refreshState,
   restoreReviewPresentation,
 } from "./threads.js";
+import { bindComposerKeydown } from "./product-workspace/workspace.js";
 import { createReviewPresentationAdapter } from "./review-tools.js";
 import { $, applyAppearance, toast } from "./ui.js";
 import { renderUpdate, updateAction } from "./updates.js";
@@ -32,12 +33,7 @@ function bindEvents() {
   $("#newThreadPrompt").oninput = () => {
     $("#createThread").disabled = !$("#newThreadPrompt").value.trim();
   };
-  $("#newThreadPrompt").onkeydown = (event) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      void createFirstThread();
-    }
-  };
+  bindComposerKeydown($("#newThreadPrompt"), () => $("#createThread").click());
   $("#collapseSidebar").onclick = () => {
     const collapsed = document.body.classList.toggle("sidebar-collapsed");
     const label = collapsed ? "Expand sidebar" : "Collapse sidebar";

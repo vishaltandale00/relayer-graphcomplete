@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
 import {
   COMPOSER_MAX_HEIGHT,
   COMPOSER_MIN_HEIGHT,
+  bindComposerKeydown,
   composerDisabledForState,
   composerKeydownIntent,
   composerSubmissionReady,
@@ -51,6 +52,22 @@ describe("product workspace keyboard behavior", () => {
     const shiftedEnter = { key: "Enter", shiftKey: true, preventDefault: () => {} };
     expect(handleComposerKeydown(shiftedEnter, () => { submitted += 1; })).toBe("newline");
     expect(submitted).toBe(1);
+  });
+
+  it("binds plain Enter to send while leaving Shift+Enter as a newline", () => {
+    const textarea = {};
+    const send = { click: vi.fn() };
+    bindComposerKeydown(textarea, () => send.click());
+
+    const shiftedEnter = { key: "Enter", shiftKey: true, preventDefault: vi.fn() };
+    textarea.onkeydown(shiftedEnter);
+    expect(shiftedEnter.preventDefault).not.toHaveBeenCalled();
+    expect(send.click).not.toHaveBeenCalled();
+
+    const plainEnter = { key: "Enter", preventDefault: vi.fn() };
+    textarea.onkeydown(plainEnter);
+    expect(plainEnter.preventDefault).toHaveBeenCalledOnce();
+    expect(send.click).toHaveBeenCalledOnce();
   });
 
   it("rejects empty and disabled submissions", () => {

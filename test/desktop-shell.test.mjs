@@ -185,6 +185,8 @@ describe("desktop skeleton", () => {
     expect(html).not.toContain("<dialog");
     expect(html.toLowerCase()).not.toContain("harness selector");
     expect(desktopMain).not.toContain("PrimeAgentThreadRunner");
+    expect(rendererMain).toContain('import { bindComposerKeydown } from "./product-workspace/workspace.js";');
+    expect(rendererMain).toContain('bindComposerKeydown($("#newThreadPrompt"), () => $("#createThread").click());');
     expect(desktopMain).toContain("RelayerAppServerService");
     expect(desktopMain).toContain("productServer.start()");
     expect(desktopMain).toContain("productServer.close()");
