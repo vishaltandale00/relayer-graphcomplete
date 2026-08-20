@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadDesktopReleaseContract } from "./contract.mjs";
+import { desktopReleaseAppPath } from "./app-path.mjs";
 import { verifyDesktopReleaseEvidence } from "./artifacts.mjs";
 import { verifyMacOSApplication } from "./verify-macos-app.mjs";
 import { verifyPackagedDesktopContract } from "./verify-packaged-contract.mjs";
@@ -13,9 +14,7 @@ export async function verifyBuiltDesktopRelease({ environment = process.env } = 
   const distRoot = resolve(desktopRoot, "dist");
   const contract = await loadDesktopReleaseContract({ environment, desktopRoot });
   if (!contract.release) throw new Error("Artifact verification requires explicit desktop release mode.");
-  const appPath = contract.platform === "darwin"
-    ? resolve(distRoot, `mac-${contract.architecture}`, "Relayer.app")
-    : resolve(distRoot, "win-unpacked");
+  const appPath = desktopReleaseAppPath({ distRoot, contract });
   if (contract.platform === "darwin") {
     await verifyMacOSApplication(appPath, {
       assessNotarization: true,

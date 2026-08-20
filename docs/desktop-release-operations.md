@@ -88,14 +88,15 @@ The audit checks environment branch policies, target-required secret and variabl
 
 ### First Intel rollout
 
-Intel macOS does not yet have an older published Preview that can seed an updater canary. Its initial rollout needs two reviewed versions:
+Intel macOS does not yet have an older published Preview that can seed an updater canary. Workflow `32334546660` published Apple Silicon `0.2.7`, but Intel packaging failed after successful signing and notarization. Electron-builder used `desktop/dist/mac/Relayer.app`; the release finalizer expected `desktop/dist/mac-x64/Relayer.app`. Intel `0.2.7` therefore has no sealed artifact or Preview receipt.
 
-1. Publish the next reviewed version as the Intel bootstrap Preview after signing and artifact review.
-2. Bump the desktop version again, rerun the signed-candidate workflow, and publish it as the Intel target Preview.
-3. Exercise the bootstrap-to-target update on native Intel macOS.
-4. Commit the sealed canary evidence and promote the target version for Intel.
+1. Fix and verify the Intel application output path.
+2. Publish `0.2.8` as the Intel bootstrap Preview after signing and artifact review.
+3. Publish `0.2.9` as the Intel target Preview.
+4. Exercise the `0.2.8` to `0.2.9` update on native Intel macOS.
+5. Commit the sealed canary evidence and promote `0.2.9` for Intel.
 
-Do not promote the bootstrap version to Stable. Existing Apple Silicon Preview `0.2.5` and Stable `0.2.4` remain valid independent feed history. The immutable `desktop-v0.2.6` tag predates the target-aware publisher and is not an Intel or Windows bootstrap candidate.
+Do not promote the bootstrap version to Stable. Existing Apple Silicon Preview `0.2.7` and Stable `0.2.4` remain valid independent feed history. The immutable `desktop-v0.2.6` tag predates the target-aware publisher and is not an Intel or Windows bootstrap candidate.
 
 ### Windows rollout blocker
 
