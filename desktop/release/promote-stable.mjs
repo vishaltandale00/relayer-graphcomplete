@@ -17,6 +17,8 @@ import { buildPutObjectArgs } from "./publish-preview.mjs";
 const execFileAsync = promisify(execFile);
 const POINTER_CACHE_CONTROL = "no-store,no-cache,must-revalidate,max-age=0";
 const IMMUTABLE_CACHE_CONTROL = "private,max-age=31536000,immutable";
+const AMBIGUOUS_HEAD = Symbol("ambiguous-head");
+const CONDITIONAL_WRITE_ATTEMPTS = 3;
 
 function sha256(content) {
   return createHash("sha256").update(content).digest("hex");
@@ -42,21 +44,43 @@ async function runAws(args, execute = execFileAsync) {
   return String(result.stdout || "");
 }
 
+function awsErrorDetails(error) {
+  return `${error?.message || ""}\n${error?.stdout || ""}\n${error?.stderr || ""}`;
+}
+
+function isMissingObjectError(error) {
+  return /Not Found|\b404\b|NoSuchKey/i.test(awsErrorDetails(error));
+}
+
+function isAmbiguousHeadError(error) {
+  return /Forbidden|AccessDenied|\b403\b/i.test(awsErrorDetails(error));
+}
+
+function isPreconditionError(error) {
+  return /PreconditionFailed|\b412\b/i.test(awsErrorDetails(error));
+}
+
+function isConditionalConflict(error) {
+  return /ConditionalRequestConflict|\b409\b/i.test(awsErrorDetails(error));
+}
+
 async function headObject({ bucket, key, execute = execFileAsync } = {}) {
   try {
     return JSON.parse(await runAws([
       "s3api", "head-object", "--bucket", bucket, "--key", key, "--checksum-mode", "ENABLED", "--output", "json",
     ], execute));
   } catch (error) {
-    const details = `${error?.stdout || ""}\n${error?.stderr || ""}`;
-    if (/Not Found|404|NoSuchKey/i.test(details)) return null;
+    if (isMissingObjectError(error)) return null;
+    // Least-privilege roles without ListBucket receive 403 for an absent key.
+    // Keep that state ambiguous until a conditional write resolves it safely.
+    if (isAmbiguousHeadError(error)) return AMBIGUOUS_HEAD;
     throw error;
   }
 }
 
 async function readObject({ bucket, key, execute = execFileAsync, required = true } = {}) {
   const head = await headObject({ bucket, key, execute });
-  if (!head) {
+  if (!head || head === AMBIGUOUS_HEAD) {
     if (required) throw new Error(`Required release object is missing: ${key}`);
     return null;
   }
@@ -68,6 +92,17 @@ async function readObject({ bucket, key, execute = execFileAsync, required = tru
     return { head, content, text: content.toString("utf8"), sha256: sha256(content) };
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+}
+
+function validateImmutableObject({ existing, key, evidence, sourceCommit } = {}) {
+  if (
+    Number(existing.ContentLength) !== evidence.size ||
+    existing.Metadata?.sha256 !== evidence.sha256 ||
+    existing.Metadata?.sourcecommit !== sourceCommit ||
+    (existing.ChecksumSHA256 && existing.ChecksumSHA256 !== sha256Base64(evidence.sha256))
+  ) {
+    throw new Error(`Immutable Stable object ${key} already exists with different evidence.`);
   }
 }
 
@@ -101,27 +136,39 @@ async function readPointer({ bucket, target, execute = execFileAsync } = {}) {
 
 async function ensureImmutableObject({ bucket, key, filePath, evidence, sourceCommit, execute } = {}) {
   const existing = await headObject({ bucket, key, execute });
-  if (existing) {
-    if (
-      Number(existing.ContentLength) !== evidence.size ||
-      existing.Metadata?.sha256 !== evidence.sha256 ||
-      existing.Metadata?.sourcecommit !== sourceCommit ||
-      (existing.ChecksumSHA256 && existing.ChecksumSHA256 !== sha256Base64(evidence.sha256))
-    ) {
-      throw new Error(`Immutable Stable object ${key} already exists with different evidence.`);
-    }
+  if (existing && existing !== AMBIGUOUS_HEAD) {
+    validateImmutableObject({ existing, key, evidence, sourceCommit });
     return { reused: true };
   }
-  await runAws(buildPutObjectArgs({
-    bucket,
-    key,
-    filePath,
-    evidence,
-    ifNoneMatch: true,
-    cacheControl: IMMUTABLE_CACHE_CONTROL,
-    sourceCommit,
-  }), execute);
-  return { reused: false };
+  for (let attempt = 1; attempt <= CONDITIONAL_WRITE_ATTEMPTS; attempt += 1) {
+    try {
+      await runAws(buildPutObjectArgs({
+        bucket,
+        key,
+        filePath,
+        evidence,
+        ifNoneMatch: true,
+        cacheControl: IMMUTABLE_CACHE_CONTROL,
+        sourceCommit,
+      }), execute);
+      return { reused: false };
+    } catch (error) {
+      if (isPreconditionError(error)) {
+        const racedObject = await headObject({ bucket, key, execute });
+        if (racedObject && racedObject !== AMBIGUOUS_HEAD) {
+          validateImmutableObject({ existing: racedObject, key, evidence, sourceCommit });
+          return { reused: true };
+        }
+        if (racedObject === AMBIGUOUS_HEAD) {
+          throw new Error(`Immutable Stable object ${key} exists but cannot be read for validation.`, { cause: error });
+        }
+      } else if (!isConditionalConflict(error)) {
+        throw error;
+      }
+      if (attempt === CONDITIONAL_WRITE_ATTEMPTS) throw error;
+    }
+  }
+  throw new Error(`Immutable Stable object ${key} could not be written conditionally.`);
 }
 
 async function moveStablePointer({ bucket, filePath, evidence, sourceCommit, current, execute, target } = {}) {

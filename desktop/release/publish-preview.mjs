@@ -15,6 +15,8 @@ import { compareNumericVersions, isNumericVersion } from "./numeric-version.mjs"
 const execFileAsync = promisify(execFile);
 const IMMUTABLE_CACHE_CONTROL = "public,max-age=31536000,immutable";
 const POINTER_CACHE_CONTROL = "no-store,no-cache,must-revalidate,max-age=0";
+const AMBIGUOUS_HEAD = Symbol("ambiguous-head");
+const CONDITIONAL_WRITE_ATTEMPTS = 3;
 
 function contentType(name) {
   if (name.endsWith(".zip")) return "application/zip";
@@ -213,46 +215,91 @@ async function runAws(args, execute = execFileAsync) {
   return String(result.stdout || "");
 }
 
+function awsErrorDetails(error) {
+  return `${error?.message || ""}\n${error?.stdout || ""}\n${error?.stderr || ""}`;
+}
+
+function isMissingObjectError(error) {
+  return /Not Found|\b404\b|NoSuchKey/i.test(awsErrorDetails(error));
+}
+
+function isAmbiguousHeadError(error) {
+  return /Forbidden|AccessDenied|\b403\b/i.test(awsErrorDetails(error));
+}
+
+function isPreconditionError(error) {
+  return /PreconditionFailed|\b412\b/i.test(awsErrorDetails(error));
+}
+
+function isConditionalConflict(error) {
+  return /ConditionalRequestConflict|\b409\b/i.test(awsErrorDetails(error));
+}
+
 async function headObject({ bucket, key, execute = execFileAsync } = {}) {
   try {
     return JSON.parse(await runAws([
       "s3api", "head-object", "--bucket", bucket, "--key", key, "--checksum-mode", "ENABLED", "--output", "json",
     ], execute));
   } catch (error) {
-    const details = `${error?.stdout || ""}\n${error?.stderr || ""}`;
-    if (/Not Found|404|NoSuchKey/i.test(details)) return null;
+    if (isMissingObjectError(error)) return null;
+    // S3 returns 403 for an absent object when the role intentionally lacks
+    // ListBucket. A conditional write, not this HEAD result, decides absence.
+    if (isAmbiguousHeadError(error)) return AMBIGUOUS_HEAD;
     throw error;
+  }
+}
+
+function validateImmutableObject({ existing, key, evidence, sourceCommit } = {}) {
+  if (
+    Number(existing.ContentLength) !== evidence.size ||
+    existing.Metadata?.sha256 !== evidence.sha256 ||
+    existing.Metadata?.sourcecommit !== sourceCommit ||
+    (existing.ChecksumSHA256 && existing.ChecksumSHA256 !== sha256Base64(evidence.sha256))
+  ) {
+    throw new Error(`Immutable update object ${key} already exists with different evidence.`);
   }
 }
 
 async function ensureImmutableObject({ bucket, key, filePath, evidence, sourceCommit, execute } = {}) {
   const existing = await headObject({ bucket, key, execute });
-  if (existing) {
-    if (
-      Number(existing.ContentLength) !== evidence.size ||
-      existing.Metadata?.sha256 !== evidence.sha256 ||
-      existing.Metadata?.sourcecommit !== sourceCommit ||
-      (existing.ChecksumSHA256 && existing.ChecksumSHA256 !== sha256Base64(evidence.sha256))
-    ) {
-      throw new Error(`Immutable update object ${key} already exists with different evidence.`);
-    }
+  if (existing && existing !== AMBIGUOUS_HEAD) {
+    validateImmutableObject({ existing, key, evidence, sourceCommit });
     return { key, reused: true };
   }
-  await runAws(buildPutObjectArgs({
-    bucket,
-    key,
-    filePath,
-    evidence,
-    ifNoneMatch: true,
-    cacheControl: IMMUTABLE_CACHE_CONTROL,
-    sourceCommit,
-  }), execute);
-  return { key, reused: false };
+  for (let attempt = 1; attempt <= CONDITIONAL_WRITE_ATTEMPTS; attempt += 1) {
+    try {
+      await runAws(buildPutObjectArgs({
+        bucket,
+        key,
+        filePath,
+        evidence,
+        ifNoneMatch: true,
+        cacheControl: IMMUTABLE_CACHE_CONTROL,
+        sourceCommit,
+      }), execute);
+      return { key, reused: false };
+    } catch (error) {
+      if (isPreconditionError(error)) {
+        const racedObject = await headObject({ bucket, key, execute });
+        if (racedObject && racedObject !== AMBIGUOUS_HEAD) {
+          validateImmutableObject({ existing: racedObject, key, evidence, sourceCommit });
+          return { key, reused: true };
+        }
+        if (racedObject === AMBIGUOUS_HEAD) {
+          throw new Error(`Immutable update object ${key} exists but cannot be read for validation.`, { cause: error });
+        }
+      } else if (!isConditionalConflict(error)) {
+        throw error;
+      }
+      if (attempt === CONDITIONAL_WRITE_ATTEMPTS) throw error;
+    }
+  }
+  throw new Error(`Immutable update object ${key} could not be written conditionally.`);
 }
 
 async function readObject({ bucket, key, execute = execFileAsync } = {}) {
   const head = await headObject({ bucket, key, execute });
-  if (!head) return null;
+  if (!head || head === AMBIGUOUS_HEAD) return null;
   const directory = await mkdtemp(join(tmpdir(), "relayer-release-object-"));
   const target = join(directory, "object");
   try {

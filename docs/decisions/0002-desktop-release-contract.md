@@ -28,6 +28,7 @@ The signed-candidate workflow may be run manually from `main` without changing t
 - macOS 12-or-older and Windows Arm support require separate release decisions and validation.
 - Intel macOS is built and canaried on GitHub's `macos-15-intel` runner while that hosted x64 environment remains available; a physical Intel Mac remains the strongest final hardware check.
 - Windows Stable promotion requires an interactive-session canary proving installer signature, installation, visible application launch, Preview discovery, installation, and signed relaunch into the exact candidate.
+- A target with incomplete signing authority remains disabled. It does not block another target. Preview needs proven signing; Stable additionally needs target canary evidence.
 - A bad release is withdrawn before further installation or repaired by publishing a newer version. Relayer does not automatically downgrade application code because a future older binary may not understand newer local data.
 - Recovery from a failed local-data schema migration belongs to the future persistence contract, where the schema and transaction boundary can be tested. It is not an updater acceptance criterion before that persistence layer exists.
 - The updater UI and publication pipeline consume this contract; they do not redefine release identity or channel semantics.

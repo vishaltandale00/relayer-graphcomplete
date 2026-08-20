@@ -1211,7 +1211,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </tr>
 <tr>
 <td>Hosted update artifact and channel manifest</td>
-<td>Universal/Intel macOS support</td>
+<td>Windows x64 release; its pipeline is blocked and disabled</td>
 </tr>
 <tr>
 <td>In-app check, available, download progress, ready, restart, success, and retryable failure states</td>
@@ -1229,6 +1229,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <li><strong>Signing automation:</strong> Release builds use the existing Developer ID Application identity for Apple team <code>NZ253AL7U6</code>. Notarization credentials come from the local environment or a protected GitHub environment. The repository must not contain these secrets.</li>
 <li><strong>Update prompt timing:</strong> use the existing compact sidebar indicator; downloading is user-triggered, and restart remains explicitly deferrable.</li>
 <li><strong>Minimum supported macOS:</strong> V1 supports Apple Silicon on macOS 13 or newer. Release evidence records the floor and validates both identity and architecture.</li>
+<li><strong>Windows status:</strong> <span class="delivery-status deferred">Blocked</span> The Windows pipeline is disabled. The exact publisher variable is missing. Azure signing and the interactive AVD canary are not verified. Windows does not block macOS publication.</li>
 <li><strong>Release recovery:</strong> Remove a bad channel pointer before more installations. Alternatively, publish a newer correction. Do not downgrade application code automatically. An older binary can be incompatible with newer data. SQLite migration recovery is a separate app-server contract. Recognized migrations run in a transaction. Relayer validates the new schema before startup. A future N→N+1 test must prove that the prior database stays recoverable after a forced failure.</li>
 </ol>
 <h4>Minimal validation plan</h4>
@@ -2036,6 +2037,7 @@ submitReview({ turnId, evidence, ratings, summary, findings });
 <p>The repository has an Electron shell and an unsigned Apple Silicon development package. It also has a fail-closed release contract. CI produces signed and notarized Preview artifacts. A protected workflow promotes the exact Preview artifact to Stable.</p>
 <p>Protected tag workflows published immutable versions <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code>. Narrow AWS OIDC roles controlled publication. Checks verified the public artifacts, metadata, hashes, source commits, Gatekeeper acceptance, and notarization tickets.</p>
 <p>A remote Mac completed the in-app update through <code>0.2.4</code>. The update kept its Codex connection, Preview choice, and Light appearance. Protected workflow <code>32105585844</code> promoted the exact <code>0.2.4</code> Preview bytes to Stable. The installed app then used the live Stable feed.</p>
+<p><span class="delivery-status deferred">Windows blocked</span> The Windows candidate job is disabled. The required <code>RELAYER_WINDOWS_PUBLISHER_NAME</code> variable is missing. Azure Artifact Signing and the interactive Windows 11 AVD canary are not verified. The disabled Windows job does not block macOS Preview publication.</p>
 <p>Three release checks remain open. They are the macOS support matrix, corrupt hosted artifacts, and restart deferral during an active Complete call. The app server has an initial SQLite schema and fail-closed validation. A later-version migration and forced-failure recovery test remain open.</p>
 <p>The graph engine, Complete, Prime Agent, graph tools, and evaluations remain behind the Relayer Harness package boundary. Slice 2 packages the desktop. It does not claim that these experimental functions work in the product.</p>
 <h3>14.2 Required developer and release modes</h3>
