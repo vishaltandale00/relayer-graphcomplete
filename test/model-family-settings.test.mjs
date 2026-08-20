@@ -9,6 +9,7 @@ import {
   modelMember,
   moveItem,
   preserveFamilyEditAfterRefresh,
+  reconcileSavedFamily,
   validateCustomFamily,
 } from "../desktop/renderer/src/model-family-model.js";
 import {
@@ -34,6 +35,28 @@ const codexProvider = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("model family settings model", () => {
+  it("reconciles a persisted create before a follow-up refresh", () => {
+    const draft = createModelFamilyDraft([codexProvider], 7);
+    draft.name = "Coding";
+    const saved = reconcileSavedFamily(draft, {
+      id: 42,
+      name: "Coding",
+      kind: "custom",
+      enabled: true,
+      position: 3,
+    });
+    expect(saved).toMatchObject({
+      id: 42,
+      name: "Coding",
+      kind: "custom",
+      enabled: true,
+      position: 3,
+      draft: false,
+      editing: false,
+    });
+    expect(saved.models).toEqual(draft.models);
+  });
+
   it("serializes visibility updates for each family", () => {
     const gate = createFamilyVisibilityGate();
     expect(gate.begin(7)).toBe(true);
@@ -247,6 +270,8 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("await deleteModelFamily(family.id);");
     expect(settingsSource).toContain("if (settings.families.some((family) => family.draft || family.editing)) return;");
     expect(settingsSource).toContain("if (savingFamily) return;");
+    expect(settingsSource).toContain("reconcileSavedFamily(family, saved)");
+    expect(settingsSource).toContain("Saved, but could not refresh:");
     expect(settingsSource).toContain("familyVisibilityGate.isPending(family.id)");
     expect(settingsSource).toContain('$("#defaultHarnessSelect").disabled = savingDefaults');
     expect(settingsSource).toContain("await preparePermissionProfiles(candidate)");

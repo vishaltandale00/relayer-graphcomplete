@@ -19,6 +19,20 @@ export function createFamilyVisibilityGate() {
   });
 }
 
+export function reconcileSavedFamily(family, saved) {
+  return {
+    ...family,
+    id: saved.id,
+    name: saved.name,
+    kind: saved.kind,
+    enabled: saved.enabled,
+    position: saved.position,
+    draft: false,
+    editing: false,
+    validationErrors: {},
+  };
+}
+
 export function createModelFamilyDraft(providerCatalog, sequence = Date.now(), defaultProviderId = null) {
   const provider = providerCatalog.find((item) => (
     item.id === defaultProviderId && item.connected !== false

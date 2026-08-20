@@ -9,7 +9,7 @@ import {
   createLatestRequestGate,
   createNavigationHistory,
 } from "./navigation-history.js";
-import { currentThreadModelSelectionPayload, renderThread } from "./graph.js";
+import { renderThread } from "./graph.js";
 import {
   renderScopeMenu,
   renderSidebar,
@@ -32,7 +32,7 @@ import {
   validateResolvedLayer,
   workspaceUrlForPresentation,
 } from "./workspace-navigation.js";
-import { appState, desktop, productApiAvailable, viewState } from "./state.js";
+import { appState, productApiAvailable, viewState } from "./state.js";
 import { $, threadTitle, toast } from "./ui.js";
 import { addLocalThread } from "./thread-model.js";
 import { closePermissionMenu } from "./permission-profiles.js";
@@ -41,11 +41,8 @@ import {
   closeNewThreadModelPicker,
   newThreadModelSelectionPayload,
   newThreadModelSelectionReady,
-  refreshNewThreadModelPicker,
   setNewThreadModelPickerDisabled,
 } from "./composer-model-picker.js";
-import { refreshModelFamilySettings } from "./model-family-settings.js";
-import { validateModelSelection } from "./model-settings-api.js";
 import { harnessUsesConfigurationModel } from "./model-picker-model.js";
 
 let creatingFirstThread = false;
@@ -298,16 +295,6 @@ export async function submitInteraction(text, modelSelection) {
     setMainView("settings");
     throw new Error("Choose an available model in Settings before sending.");
   }
-  if (desktop?.models?.refresh) {
-    await refreshModelCatalogBeforeSend();
-    renderThread();
-    const refreshedPayload = currentThreadModelSelectionPayload();
-    if (!refreshedPayload) {
-      if (modelSelection) await validateModelSelection({ harnessId, ...modelSelection });
-      throw new Error("Choose an available model in Settings before sending.");
-    }
-    modelSelection = refreshedPayload.modelSelection;
-  }
   await request(`/api/threads/${encodeURIComponent(threadId)}/interactions`, {
     method: "POST",
     body: JSON.stringify(followupRequestBody(text, modelSelection)),
@@ -317,12 +304,6 @@ export async function submitInteraction(text, modelSelection) {
   supersedePendingHistory({ presentationChanged: true });
   viewState.currentInteractionId = null;
   await refreshState(threadId, { historyMode: "push" });
-}
-
-async function refreshModelCatalogBeforeSend() {
-  if (!desktop?.models?.refresh) return;
-  await desktop.models.refresh();
-  await refreshModelFamilySettings();
 }
 
 export async function navigateLayer(layerId, navigation = {}) {
@@ -538,17 +519,6 @@ export async function invokeAction(action) {
     sourceInteractionId,
     action.id,
   )) return;
-  const sourceInteraction = appState.interactions.find((interaction) => (
-    String(interaction.id) === String(sourceInteractionId)
-  ));
-  if (sourceInteraction?.modelSelection || sourceInteraction?.modelProviderId) {
-    try {
-      await refreshModelCatalogBeforeSend();
-    } catch (error) {
-      toast(error.message);
-      return;
-    }
-  }
   appState.pendingActionInvocations.push({
     sourceInteractionId,
     actionId: action.id,
@@ -681,19 +651,6 @@ export async function createFirstThread(pickerPayloadOverride = null) {
     if (selectedScope.kind === "folder") {
       const project = await createOrReuseProject(selectedScope);
       projectId = project.id;
-    }
-    if (desktop?.models?.refresh) {
-      await refreshModelCatalogBeforeSend();
-      refreshNewThreadModelPicker();
-      const refreshedPayload = newThreadModelSelectionPayload();
-      if (!refreshedPayload) {
-        await validateModelSelection({
-          harnessId: pickerPayload.harnessId,
-          ...pickerPayload.modelSelection,
-        });
-        throw new Error("Choose an available model in Settings before sending.");
-      }
-      pickerPayload = refreshedPayload;
     }
     const thread = await request("/api/threads", {
       method: "POST",

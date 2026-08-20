@@ -8,6 +8,7 @@ import {
   modelMember,
   moveItem,
   preserveFamilyEditAfterRefresh,
+  reconcileSavedFamily,
   replaceMemberProvider,
   validateCustomFamily,
 } from "./model-family-model.js";
@@ -390,13 +391,18 @@ async function saveEdit() {
   if (Object.keys(family.validationErrors).length) return render();
   savingFamily = true;
   render();
+  let persisted = false;
   try {
-    if (family.draft) await createModelFamily(familyPayload(family));
-    else await updateModelFamily(family.id, familyPayload(family));
+    const saved = family.draft
+      ? await createModelFamily(familyPayload(family))
+      : await updateModelFamily(family.id, familyPayload(family));
+    settings.families[selectedFamilyIndex] = reconcileSavedFamily(family, saved);
+    editSnapshot = null;
+    persisted = true;
     await refresh();
     setStatus("Saved", "success");
   } catch (error) {
-    setStatus(error.message, "error");
+    setStatus(persisted ? `Saved, but could not refresh: ${error.message}` : error.message, "error");
   } finally {
     savingFamily = false;
     render();
