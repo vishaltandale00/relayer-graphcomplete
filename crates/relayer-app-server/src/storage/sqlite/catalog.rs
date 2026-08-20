@@ -427,7 +427,7 @@ pub(super) async fn validate_execution_model_selection_on(
         model_id: selection.model_id.clone(),
     };
     let row = sqlx::query(
-        "SELECT h.product_visible AS harness_visible,h.available AS harness_available,p.connected AS provider_connected,m.visible AS model_visible,m.available AS model_available,EXISTS(SELECT 1 FROM harness_provider_compatibility c WHERE c.harness_configuration_name=h.configuration_name AND c.provider_id=p.id AND (c.all_models=1 OR EXISTS(SELECT 1 FROM harness_model_compatibility cm WHERE cm.harness_configuration_name=c.harness_configuration_name AND cm.provider_id=c.provider_id AND cm.model_id=m.model_id))) AS compatible FROM product_harnesses h JOIN model_providers p ON p.id=?2 JOIN provider_models m ON m.provider_id=p.id AND m.model_id=?3 WHERE h.configuration_name=?1",
+        "SELECT h.product_visible AS harness_visible,h.available AS harness_available,p.connected AS provider_connected,p.refreshed_at AS provider_refreshed_at,m.visible AS model_visible,m.available AS model_available,EXISTS(SELECT 1 FROM harness_provider_compatibility c WHERE c.harness_configuration_name=h.configuration_name AND c.provider_id=p.id AND (c.all_models=1 OR EXISTS(SELECT 1 FROM harness_model_compatibility cm WHERE cm.harness_configuration_name=c.harness_configuration_name AND cm.provider_id=c.provider_id AND cm.model_id=m.model_id))) AS compatible FROM product_harnesses h JOIN model_providers p ON p.id=?2 JOIN provider_models m ON m.provider_id=p.id AND m.model_id=?3 WHERE h.configuration_name=?1",
     )
     .bind(harness_id)
     .bind(selection.provider_id.as_str())
@@ -475,7 +475,7 @@ pub(super) async fn validate_execution_model_selection_on(
             )));
         }
     }
-    validate_provider_catalog_freshness_on(connection, &command).await
+    validate_provider_catalog_timestamp(row.get("provider_refreshed_at"), &command)
 }
 
 pub(super) async fn validate_provider_catalog_freshness_on(
@@ -494,6 +494,13 @@ pub(super) async fn validate_provider_catalog_freshness_on(
                     command,
                 ))
             })?;
+    validate_provider_catalog_timestamp(&refreshed_at, command)
+}
+
+fn validate_provider_catalog_timestamp(
+    refreshed_at: &str,
+    command: &ValidateModelSelectionCommand,
+) -> Result<(), StorageError> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time is before unix epoch")
