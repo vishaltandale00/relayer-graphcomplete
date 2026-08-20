@@ -537,6 +537,17 @@ export async function invokeAction(action) {
     sourceInteractionId,
     action.id,
   )) return;
+  const sourceInteraction = appState.interactions.find((interaction) => (
+    String(interaction.id) === String(sourceInteractionId)
+  ));
+  if (sourceInteraction?.modelSelection || sourceInteraction?.modelProviderId) {
+    try {
+      await refreshModelCatalogBeforeSend();
+    } catch (error) {
+      toast(error.message);
+      return;
+    }
+  }
   appState.pendingActionInvocations.push({
     sourceInteractionId,
     actionId: action.id,

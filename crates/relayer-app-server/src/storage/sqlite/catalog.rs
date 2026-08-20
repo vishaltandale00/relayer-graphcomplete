@@ -8,7 +8,12 @@ use crate::product::{
 };
 use crate::storage::StorageError;
 use sqlx::{Row, SqliteConnection, SqlitePool, sqlite::SqliteRow};
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+const MAX_PROVIDER_CATALOG_AGE_MS: u128 = 10_000;
 
 impl SqliteProductStore {
     pub(crate) async fn initialize_model_catalog(
@@ -427,7 +432,7 @@ pub(super) async fn validate_execution_model_selection_on(
     .bind(harness_id)
     .bind(selection.provider_id.as_str())
     .bind(&selection.model_id)
-    .fetch_optional(connection)
+    .fetch_optional(&mut *connection)
     .await?;
     let Some(row) = row else {
         return Err(StorageError::Catalog(CatalogError::selection(
@@ -475,7 +480,42 @@ pub(super) async fn validate_execution_model_selection_on(
             )));
         }
     }
-    Ok(())
+    validate_provider_catalog_freshness_on(connection, &command).await
+}
+
+pub(super) async fn validate_provider_catalog_freshness_on(
+    connection: &mut SqliteConnection,
+    command: &ValidateModelSelectionCommand,
+) -> Result<(), StorageError> {
+    let refreshed_at: String =
+        sqlx::query_scalar("SELECT refreshed_at FROM model_providers WHERE id=?1")
+            .bind(command.provider_id.as_str())
+            .fetch_optional(&mut *connection)
+            .await?
+            .ok_or_else(|| {
+                StorageError::Catalog(CatalogError::selection(
+                    "model_selection_unknown",
+                    "The selected provider is unknown.",
+                    command,
+                ))
+            })?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time is before unix epoch")
+        .as_millis();
+    let fresh = refreshed_at
+        .parse::<u128>()
+        .ok()
+        .is_some_and(|timestamp| now.saturating_sub(timestamp) <= MAX_PROVIDER_CATALOG_AGE_MS);
+    if fresh {
+        Ok(())
+    } else {
+        Err(StorageError::Catalog(CatalogError::selection(
+            "provider_catalog_stale",
+            "Refresh models before continuing.",
+            command,
+        )))
+    }
 }
 
 async fn load_defaults(

@@ -137,7 +137,7 @@ describe("composer model picker UI contract", () => {
     const threads = await readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8");
     expect(threads).toContain("await desktop.models.refresh();");
     expect(threads).toContain("await refreshModelFamilySettings();");
-    expect(threads.match(/await refreshModelCatalogBeforeSend\(\);/g)).toHaveLength(2);
+    expect(threads.match(/await refreshModelCatalogBeforeSend\(\);/g)).toHaveLength(3);
     expect(threads).toContain("refreshNewThreadModelPicker();");
     expect(threads).toContain("const refreshedPayload = currentThreadModelSelectionPayload();");
     expect(threads).toContain("pickerPayload = refreshedPayload;");

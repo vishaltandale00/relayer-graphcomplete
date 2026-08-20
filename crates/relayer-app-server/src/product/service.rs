@@ -287,44 +287,6 @@ impl ProductService {
         harness_id: &str,
     ) -> Result<Option<ModelSelection>, ProductError> {
         let settings = self.storage.load_model_settings().await?;
-        if let Some(harness) = settings
-            .harnesses
-            .iter()
-            .find(|harness| harness.id == harness_id)
-        {
-            for compatibility in &harness.model_compatibility {
-                let Some(preferred_model_id) = compatibility.preferred_model_id.as_ref() else {
-                    continue;
-                };
-                for family in settings.families.iter().filter(|family| family.enabled) {
-                    let Some(member) = family.members.iter().find(|member| {
-                        member.provider_id == compatibility.provider_id
-                            && member.model_id == *preferred_model_id
-                    }) else {
-                        continue;
-                    };
-                    let command = ValidateModelSelectionCommand {
-                        harness_id: harness_id.to_owned(),
-                        family_id: family.id,
-                        provider_id: member.provider_id.clone(),
-                        model_id: member.model_id.clone(),
-                    };
-                    if self
-                        .storage
-                        .validate_model_selection(&command)
-                        .await
-                        .is_ok()
-                    {
-                        return Ok(Some(ModelSelection {
-                            harness_id: command.harness_id,
-                            family_id: command.family_id,
-                            provider_id: command.provider_id,
-                            model_id: command.model_id,
-                        }));
-                    }
-                }
-            }
-        }
         for family in settings.families.iter().filter(|family| family.enabled) {
             for member in &family.members {
                 let command = ValidateModelSelectionCommand {

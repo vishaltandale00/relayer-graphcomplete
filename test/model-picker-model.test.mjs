@@ -124,7 +124,7 @@ describe("composer model picker selection", () => {
     ]);
   });
 
-  it("uses a harness preferred model when it is available in an enabled family", () => {
+  it("keeps user family order authoritative over harness preference metadata", () => {
     const catalog = settings();
     catalog.providers[0].models[1].available = true;
     catalog.harnesses[0].modelCompatibility = [{
@@ -132,30 +132,9 @@ describe("composer model picker selection", () => {
       modelIds: ["one", "two"],
       preferredModelId: "two",
     }];
-    expect(firstAvailableSelection(catalog, "codex-basic")).toMatchObject({
-      familyId: 1,
-      providerId: "codex",
-      modelId: "two",
-    });
-    expect(normalizePickerSelection(catalog, { harnessId: "codex-basic" })).toMatchObject({
-      modelId: "two",
-    });
-    expect(normalizePickerSelection(catalog, {
-      harnessId: "codex-basic",
-      familyId: 1,
-      providerId: "codex",
-      modelId: "one",
-    })).toMatchObject({ modelId: "one" });
-  });
-
-  it("falls back to family order when the harness preferred model is unavailable", () => {
-    const catalog = settings();
-    catalog.harnesses[0].modelCompatibility = [{
-      providerId: "codex",
-      modelIds: ["one", "two"],
-      preferredModelId: "two",
-    }];
     expect(firstAvailableSelection(catalog, "codex-basic")).toMatchObject({ modelId: "one" });
+    expect(normalizePickerSelection(catalog, { harnessId: "codex-basic" }))
+      .toMatchObject({ modelId: "one" });
   });
 
   it("inherits an available prior interaction model without replacing a stale selection", () => {

@@ -28,16 +28,14 @@ impl SqliteProductStore {
     ) -> Result<Thread, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some(selection) = record.model_selection {
-            catalog::validate_model_selection_on(
-                &mut transaction,
-                &ValidateModelSelectionCommand {
-                    harness_id: record.harness_configuration_name.to_owned(),
-                    family_id: selection.family_id,
-                    provider_id: selection.provider_id.clone(),
-                    model_id: selection.model_id.clone(),
-                },
-            )
-            .await?;
+            let command = ValidateModelSelectionCommand {
+                harness_id: record.harness_configuration_name.to_owned(),
+                family_id: selection.family_id,
+                provider_id: selection.provider_id.clone(),
+                model_id: selection.model_id.clone(),
+            };
+            catalog::validate_model_selection_on(&mut transaction, &command).await?;
+            catalog::validate_provider_catalog_freshness_on(&mut transaction, &command).await?;
         }
         let thread = sqlx::query(
             "INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (?1,?2,?3,?3,?4,?5)",

@@ -448,8 +448,63 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 
+    #[tokio::test]
+    async fn stale_provider_catalog_blocks_action_before_insertion() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-stale-catalog-action-invocation-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_model_selection(&store).await;
+        let model_selection = InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(1),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: "test-model".into(),
+        };
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Stale source",
+                project_id: None,
+                initial_message: "Original prompt",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&model_selection),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        sqlx::query("UPDATE model_providers SET refreshed_at='0' WHERE id='codex'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let error = store
+            .insert_action_invocation(thread.root_interaction_id, 41, "Must not persist", false)
+            .await
+            .err()
+            .unwrap();
+        match error {
+            StorageError::Catalog(error) => assert_eq!(error.code(), "provider_catalog_stale"),
+            other => panic!("unexpected error: {other}"),
+        }
+        assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 1);
+
+        store.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
     async fn seed_test_model_selection(store: &SqliteProductStore) {
-        sqlx::query("UPDATE model_providers SET connected=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE id='codex'")
+        let refreshed_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            .to_string();
+        sqlx::query("UPDATE model_providers SET connected=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL,refreshed_at=?1 WHERE id='codex'")
+            .bind(refreshed_at)
             .execute(&store.pool)
             .await
             .unwrap();

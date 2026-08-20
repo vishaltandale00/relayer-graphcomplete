@@ -56,22 +56,8 @@ export function availablePickerFamilies(settings, harnessId) {
 }
 
 export function firstAvailableSelection(settings, harnessId) {
-  const families = availablePickerFamilies(settings, harnessId);
-  const harness = harnessFor(settings, harnessId);
-  const preferred = harness?.modelCompatibility
-    ?.map(({ providerId, preferredModelId }) => ({ providerId, modelId: preferredModelId }))
-    .find(({ providerId, modelId }) => (
-      typeof modelId === "string"
-      && families.some((family) => family.availableMembers.some((member) => (
-        member.providerId === providerId && member.modelId === modelId
-      )))
-    ));
-  const family = preferred
-    ? families.find((item) => item.availableMembers.some((member) => (
-      member.providerId === preferred.providerId && member.modelId === preferred.modelId
-    )))
-    : families[0];
-  const member = preferred ?? family?.availableMembers[0];
+  const family = availablePickerFamilies(settings, harnessId)[0];
+  const member = family?.availableMembers[0];
   if (!family || !member) return null;
   return {
     harnessId,
@@ -94,9 +80,6 @@ export function normalizePickerSelection(settings, candidate) {
     && typeof candidate?.providerId === "string"
     && typeof candidate?.modelId === "string";
   if (hasExplicitModel && !requestedFamily) return null;
-  if (candidate?.familyId == null && candidate?.providerId == null && candidate?.modelId == null) {
-    return firstAvailableSelection(settings, harnessId);
-  }
   const family = requestedFamily ?? families[0];
   const requestedMember = family.availableMembers.find((item) => (
     item.providerId === candidate?.providerId && item.modelId === candidate?.modelId
