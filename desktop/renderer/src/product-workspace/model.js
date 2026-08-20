@@ -14,11 +14,33 @@ function sameId(left, right) {
   return left != null && right != null && String(left) === String(right);
 }
 
+export function createLayerNavigationCoordinator() {
+  let latestRequestId = 0;
+  return Object.freeze({
+    begin({ threadId, interactionId, layerId, layerPath }) {
+      return Object.freeze({
+        requestId: ++latestRequestId,
+        threadId,
+        interactionId,
+        layerId,
+        layerPath: (layerPath || []).map((entry) => ({ ...entry })),
+      });
+    },
+    isCurrent(request, current) {
+      return request?.requestId === latestRequestId
+        && sameId(request.threadId, current?.threadId)
+        && sameId(request.interactionId, current?.interactionId)
+        && sameId(request.layerId, current?.layerId);
+    },
+  });
+}
+
 export function rootLayerPath(interaction) {
   const layerId = interaction?.completionOutput?.rootLayer?.layer?.id;
   return layerId == null ? [] : [{
     layerId,
     label: "Response",
+    icon: interaction?.completionOutput?.rootAction?.icon || "messages-square",
     actionId: null,
     sourceNodeId: interaction?.graphNodeId ?? interaction?.id ?? null,
   }];
@@ -29,6 +51,7 @@ export function appendLayerPath(path, action, sourceNode) {
   return [...(path || []), {
     layerId: action.targetLayerId,
     label: sourceNode?.title || action.label || "Layer",
+    icon: sourceNode?.icon || sourceNode?.metadata?.relayer?.icon || null,
     actionId: action.id ?? null,
     sourceNodeId: action.sourceNodeId ?? sourceNode?.id ?? null,
   }];
@@ -61,6 +84,7 @@ export function layerPathForVisibleLayer(path, interaction, layer) {
   return [{
     layerId,
     label: "Layer",
+    icon: null,
     actionId: null,
     sourceNodeId: null,
   }];
@@ -74,6 +98,7 @@ export function workspaceBreadcrumbItems(state, thread, selection) {
     key: `layer:${pathIndex}:${entry.layerId}`,
     kind: "layer",
     label: entry.label,
+    icon: entry.icon,
     interactive: pathIndex < path.length - 1,
     pathIndex,
     layerId: entry.layerId,

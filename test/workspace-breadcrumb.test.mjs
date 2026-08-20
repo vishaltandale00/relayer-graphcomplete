@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   appendLayerPath,
+  createLayerNavigationCoordinator,
   layerPathForVisibleLayer,
   restoreLayerPath,
   rootLayerPath,
@@ -12,7 +13,7 @@ import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspac
 function fixture() {
   const rootLayer = {
     layer: { id: 100 },
-    nodes: [{ id: 10, title: "Architecture" }],
+    nodes: [{ id: 10, title: "Architecture", icon: "network" }],
     edges: [],
     actions: [],
   };
@@ -48,14 +49,14 @@ describe("product workspace breadcrumb", () => {
       sourceNodeId: 10,
       targetLayerId: 101,
       label: "Inspect architecture",
-    }, { id: 10, title: "Architecture" });
+    }, { id: 10, title: "Architecture", icon: "network" });
     layerPath = appendLayerPath(layerPath, {
       id: 502,
       kind: "navigate",
       sourceNodeId: 11,
       targetLayerId: 102,
       label: "Inspect API",
-    }, { id: 11, title: "API" });
+    }, { id: 11, title: "API", icon: "code" });
     state.visibleLayer = {
       layer: { id: 102 },
       nodes: [{ id: 12, title: "Storage" }],
@@ -80,6 +81,28 @@ describe("product workspace breadcrumb", () => {
       "Architecture",
     ]);
     expect(items.at(-1)).toMatchObject({ kind: "layer", current: true, layerId: 102 });
+    expect(items.map((item) => item.icon)).toEqual([
+      "messages-square",
+      "network",
+      "code",
+    ]);
+  });
+
+  it("accepts only the latest navigation request from the unchanged source layer", () => {
+    const coordinator = createLayerNavigationCoordinator();
+    const context = {
+      threadId: 7,
+      interactionId: 2,
+      layerId: 100,
+      layerPath: [{ layerId: 100, label: "Response" }],
+    };
+    const first = coordinator.begin(context);
+    const second = coordinator.begin(context);
+
+    expect(coordinator.isCurrent(first, context)).toBe(false);
+    expect(coordinator.isCurrent(second, context)).toBe(true);
+    expect(coordinator.isCurrent(second, { ...context, layerId: 101 })).toBe(false);
+    expect(second.layerPath).not.toBe(context.layerPath);
   });
 
   it("does not mix product scope, turn history, or node selection into graph ancestry", () => {
@@ -127,7 +150,7 @@ describe("product workspace breadcrumb", () => {
     }];
     const childLayer = {
       layer: { id: 101 },
-      nodes: [{ id: 11, title: "API" }],
+      nodes: [{ id: 11, title: "API", icon: "code" }],
       actions: [{
         id: 502,
         kind: "navigate",
@@ -156,5 +179,7 @@ describe("product workspace breadcrumb", () => {
     const markup = productWorkspaceMarkup();
     expect(markup).toContain('id="workspaceBreadcrumb"');
     expect(markup).toContain('aria-label="Graph layer path"');
+    expect(markup.indexOf('class="graph-column"')).toBeLessThan(markup.indexOf('id="workspaceBreadcrumb"'));
+    expect(markup.indexOf('id="workspaceBreadcrumb"')).toBeLessThan(markup.indexOf('id="graphStage"'));
   });
 });

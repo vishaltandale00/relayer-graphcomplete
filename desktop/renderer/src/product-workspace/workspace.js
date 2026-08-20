@@ -468,7 +468,11 @@ export function createProductWorkspace({
       }
       const segment = graphDocument.createElement(item.interactive ? "button" : "span");
       segment.className = `breadcrumb-segment breadcrumb-${item.kind}`;
-      segment.textContent = item.label;
+      segment.append(createRelayerIcon(item.icon, { class: "breadcrumb-icon" }));
+      const label = graphDocument.createElement("span");
+      label.className = "breadcrumb-label";
+      label.textContent = item.label;
+      segment.append(label);
       segment.title = item.description
         ? `${item.label}: ${item.description}`
         : item.label;
@@ -816,7 +820,12 @@ export function createProductWorkspace({
       button.classList.toggle("invoked", invoked);
       button.onclick = async () => {
         if (navigational) {
-          await onNavigateLayer(action.targetLayerId, { action, sourceNode: node });
+          button.disabled = true;
+          try {
+            await onNavigateLayer(action.targetLayerId, { action, sourceNode: node });
+          } finally {
+            if (button.isConnected) button.disabled = false;
+          }
           return;
         }
         button.disabled = true;

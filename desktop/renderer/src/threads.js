@@ -8,6 +8,7 @@ import { renderThread } from "./graph.js";
 import { renderScopeMenu, renderSidebar, setMainView } from "./navigation.js";
 import {
   appendLayerPath,
+  createLayerNavigationCoordinator,
   layerPathForVisibleLayer,
   restoreLayerPath,
 } from "./product-workspace/model.js";
@@ -19,6 +20,7 @@ let creatingFirstThread = false;
 let pendingRefreshTimer;
 const PENDING_REFRESH_INTERVAL_MS = 500;
 const pendingActionTransitions = new Map();
+const layerNavigationCoordinator = createLayerNavigationCoordinator();
 
 function abandonActionTransition(sourceInteractionId) {
   for (const [resultInteractionId, sourceId] of pendingActionTransitions) {
@@ -167,11 +169,22 @@ export async function submitInteraction(text) {
 
 export async function navigateLayer(layerId, navigation = {}) {
   if (!viewState.currentThreadId || !viewState.currentInteractionId) return;
-  const layer = await request(`/api/threads/${encodeURIComponent(viewState.currentThreadId)}/interactions/${encodeURIComponent(viewState.currentInteractionId)}/layers/${encodeURIComponent(layerId)}`);
-  const interaction = appState.interactions.find((item) => String(item.id) === String(viewState.currentInteractionId));
+  const pendingNavigation = layerNavigationCoordinator.begin({
+    threadId: viewState.currentThreadId,
+    interactionId: viewState.currentInteractionId,
+    layerId: appState.visibleLayer?.layer?.id,
+    layerPath: viewState.layerPath,
+  });
+  const layer = await request(`/api/threads/${encodeURIComponent(pendingNavigation.threadId)}/interactions/${encodeURIComponent(pendingNavigation.interactionId)}/layers/${encodeURIComponent(layerId)}`);
+  if (!layerNavigationCoordinator.isCurrent(pendingNavigation, {
+    threadId: viewState.currentThreadId,
+    interactionId: viewState.currentInteractionId,
+    layerId: appState.visibleLayer?.layer?.id,
+  })) return;
+  const interaction = appState.interactions.find((item) => String(item.id) === String(pendingNavigation.interactionId));
   const layerPath = navigation.restore
-    ? viewState.layerPath.slice(0, navigation.pathIndex + 1)
-    : appendLayerPath(viewState.layerPath, navigation.action, navigation.sourceNode);
+    ? pendingNavigation.layerPath.slice(0, navigation.pathIndex + 1)
+    : appendLayerPath(pendingNavigation.layerPath, navigation.action, navigation.sourceNode);
   viewState.selectedNodeId = null;
   hydrateWorkspace(interaction, layer, { layerPath });
   renderThread();

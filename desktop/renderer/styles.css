@@ -37,8 +37,9 @@ html[data-theme="light"] .provider-icon{background:#1c1917;color:#fff}html[data-
 .graph-controls button:first-child{border-left:0}.graph-controls button:hover:not(:disabled){color:var(--text);background:var(--hover)}.graph-controls button:disabled{cursor:not-allowed;opacity:.35}
 .graph-controls output{min-width:40px;text-align:center;color:var(--faint);font-size:9px;font-variant-numeric:tabular-nums}.graph-controls .graph-fit{min-width:38px}
 html[data-theme="light"] .graph-controls{background:rgba(255,255,255,.9)}
-.workspace-breadcrumb{min-height:40px;flex:none;display:flex;align-items:center;gap:5px;overflow-x:auto;padding:6px 17px;border-bottom:1px solid var(--line);background:#0d0f10;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
-.breadcrumb-segment{flex:none;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:10px;line-height:26px}
+.workspace-breadcrumb{min-height:40px;flex:none;display:flex;align-items:center;justify-content:safe center;gap:5px;overflow-x:auto;padding:6px 17px;border-bottom:1px solid var(--line);background:#0d0f10;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
+.breadcrumb-segment{flex:none;max-width:260px;min-width:0;display:inline-flex;align-items:center;gap:6px;overflow:hidden;white-space:nowrap;color:var(--muted);font-size:10px;line-height:26px}
+.breadcrumb-icon{width:13px;height:13px;flex:none;stroke-width:1.8}.breadcrumb-label{overflow:hidden;text-overflow:ellipsis}
 button.breadcrumb-segment{height:26px;padding:0 7px;border:0;border-radius:6px;background:transparent;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:3px}
 button.breadcrumb-segment:hover{color:var(--text);background:var(--hover);text-decoration-color:currentColor}
 button.breadcrumb-segment:focus-visible{outline:2px solid var(--blue);outline-offset:-2px;color:var(--text)}
