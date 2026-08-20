@@ -88,14 +88,16 @@ The audit checks environment branch policies, target-required secret and variabl
 
 ### First Intel rollout
 
-Intel macOS does not yet have an older compliant signed-DMG Preview that can seed an updater canary. Workflow `32334546660` published Apple Silicon `0.2.7`, but Intel packaging failed after successful signing and notarization. Electron-builder used `desktop/dist/mac/Relayer.app`; the release finalizer expected `desktop/dist/mac-x64/Relayer.app`. Intel `0.2.7` therefore has no sealed artifact or Preview receipt.
+Intel macOS initially lacked an older compliant signed-DMG Preview that could seed an updater canary. Workflow `32334546660` published Apple Silicon `0.2.7`, but Intel packaging failed after successful signing and notarization. Electron-builder used `desktop/dist/mac/Relayer.app`; the release finalizer expected `desktop/dist/mac-x64/Relayer.app`. Intel `0.2.7` therefore has no sealed artifact or Preview receipt.
 
 1. Fix and verify the Intel application output path.
 2. Treat `0.2.8` and `0.2.9` as non-promotable because their DMG containers lack Developer ID signatures.
 3. Publish `0.2.10` as the signed-DMG Intel bootstrap Preview.
 4. Publish `0.2.11` as the signed-DMG Intel target Preview.
 5. Exercise the `0.2.10` to `0.2.11` update on native Intel macOS.
-6. Commit the sealed canary evidence. After separate action-time approval, promote `0.2.11` for Intel.
+6. Commit the sealed canary evidence. Obtain separate action-time approval before promoting the Intel target.
+
+This rollout completed with native canary workflow `32350071508` and Stable promotion workflow `32372106406`. The protected promotion reused the exact `0.2.11` Preview bytes.
 
 Do not promote the bootstrap version to Stable. Apple Silicon Preview `0.2.9` and Stable `0.2.4` remain valid independent feed history; `0.2.7` is the historical first target-aware Apple Silicon candidate. The immutable `desktop-v0.2.6` tag predates the target-aware publisher and is not an Intel or Windows bootstrap candidate.
 
