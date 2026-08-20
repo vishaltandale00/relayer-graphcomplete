@@ -8,6 +8,21 @@ use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 impl SqliteProductStore {
+    pub(crate) async fn recover_interrupted_interactions(
+        &self,
+        error: &str,
+    ) -> Result<u64, StorageError> {
+        // Ordinary completions cannot resume across a backend restart. Make every remaining
+        // nonterminal row explicit and terminal so thread-level exclusivity does not deadlock.
+        let result = sqlx::query(
+            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('not_started','running','submitted')",
+        )
+        .bind(error)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     pub(crate) async fn get_interaction(
         &self,
         interaction_id: InteractionId,

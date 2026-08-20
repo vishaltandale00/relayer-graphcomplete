@@ -70,6 +70,16 @@ impl RelayerAppServer {
                 "marked {interrupted} interrupted action invocation result(s) failed during backend startup"
             );
         }
+        let interrupted = storage
+            .recover_interrupted_interactions(
+                "Interaction was interrupted when Relayer stopped. Send a follow-up to continue.",
+            )
+            .await?;
+        if interrupted > 0 {
+            eprintln!(
+                "marked {interrupted} interrupted ordinary interaction(s) failed during backend startup"
+            );
+        }
         let runtime = match &config.runtime {
             Some(runtime) => Some(
                 RuntimeClient::open(

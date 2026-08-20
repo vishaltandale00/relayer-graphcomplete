@@ -34,6 +34,7 @@ let draftSequence = 0;
 let loading = false;
 let savingFamily = false;
 let savingOrder = false;
+let savingDefaults = false;
 const familyVisibilityGate = createFamilyVisibilityGate();
 
 function provider(providerId) {
@@ -267,6 +268,8 @@ function render() {
   if (!settings) return;
   $("#defaultHarnessSelect").innerHTML = harnessOptions();
   $("#defaultProviderSelect").innerHTML = defaultProviderOptions();
+  $("#defaultHarnessSelect").disabled = savingDefaults;
+  $("#defaultProviderSelect").disabled = savingDefaults;
   const harnessError = defaultHarnessError(settings);
   $("#defaultHarnessError").textContent = harnessError ?? "";
   $("#defaultHarnessError").classList.toggle("hidden", !harnessError);
@@ -487,16 +490,22 @@ function bindRenderedEvents() {
 }
 
 async function persistDefault(field) {
+  if (savingDefaults) {
+    render();
+    return;
+  }
+  savingDefaults = true;
   const previous = { ...settings.defaults };
-  settings.defaults[field] = field === "harnessId"
+  const candidate = field === "harnessId"
     ? $("#defaultHarnessSelect").value
     : $("#defaultProviderSelect").value;
+  settings.defaults[field] = candidate;
   render();
   try {
     const applyPermissionProfiles = field === "harnessId"
-      ? await preparePermissionProfiles(settings.defaults.harnessId)
+      ? await preparePermissionProfiles(candidate)
       : null;
-    await saveModelDefaults({ [field]: settings.defaults[field] });
+    await saveModelDefaults({ [field]: candidate });
     await refresh({ preserveEdit: true });
     if (field === "harnessId") {
       applyPermissionProfiles?.();
@@ -505,8 +514,10 @@ async function persistDefault(field) {
     setStatus("Saved", "success");
   } catch (error) {
     settings.defaults = previous;
-    render();
     setStatus(error.message, "error");
+  } finally {
+    savingDefaults = false;
+    render();
   }
 }
 

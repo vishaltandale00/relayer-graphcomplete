@@ -789,6 +789,103 @@ async fn interrupted_action_invocation_becomes_failed_on_restart() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[tokio::test]
+async fn interrupted_ordinary_interaction_becomes_failed_and_releases_the_thread_on_restart() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-interrupted-interaction-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({
+                    "title": "Interrupted interaction",
+                    "initialMessage": "Start here"
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let root_interaction_id = thread["rootInteractionId"].as_i64().unwrap();
+
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE interactions SET completion_status='failed',completion_error='fixture terminal state' WHERE id=?1")
+        .bind(root_interaction_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let interrupted = sqlx::query(
+        "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,2,'Interrupted follow-up',?2,'running')",
+    )
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let interrupted_id = interrupted.last_insert_rowid();
+    pool.close().await;
+    drop(app);
+
+    let reopened = open_app(&database, &root).await;
+    let state = response_json(
+        reopened
+            .clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let recovered = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == interrupted_id)
+        .unwrap();
+    assert_eq!(recovered["completionStatus"], "failed");
+    assert!(
+        recovered["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("Send a follow-up to continue")
+    );
+
+    let follow_up = reopened
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({ "text": "Continue after restart" })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(follow_up.status(), StatusCode::CREATED);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn exits_when_desktop_control_pipe_closes() {
     let unique = SystemTime::now()

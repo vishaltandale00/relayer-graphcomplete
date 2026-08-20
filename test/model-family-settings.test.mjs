@@ -248,7 +248,9 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("if (settings.families.some((family) => family.draft || family.editing)) return;");
     expect(settingsSource).toContain("if (savingFamily) return;");
     expect(settingsSource).toContain("familyVisibilityGate.isPending(family.id)");
-    expect(settingsSource).toContain("await preparePermissionProfiles(settings.defaults.harnessId)");
+    expect(settingsSource).toContain('$("#defaultHarnessSelect").disabled = savingDefaults');
+    expect(settingsSource).toContain("await preparePermissionProfiles(candidate)");
+    expect(settingsSource).toContain("await saveModelDefaults({ [field]: candidate })");
     expect(settingsSource).toContain("resetNewThreadModelPicker();");
     expect(settingsSource).toContain("refreshNewThreadModelPicker();");
     expect(settingsSource).toContain('$("#familyNameInput").value = current.name;');
