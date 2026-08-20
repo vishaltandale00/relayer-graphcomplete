@@ -1,13 +1,27 @@
 export function productWorkspaceMarkup() {
   return `
     <header class="thread-header">
-      <div class="turn-navigation"><button id="previousTurn" data-review-ref="previous-turn" data-review-kind="turn" disabled title="Previous turn">←</button><button id="nextTurn" data-review-ref="next-turn" data-review-kind="turn" disabled title="Next turn">→</button></div>
+      <nav class="history-navigation" aria-label="Workspace history">
+        <button id="historyBack" data-review-ref="history-back" data-review-kind="history" disabled title="Back" aria-label="Back"><span aria-hidden="true">←</span><i class="history-spinner hidden" aria-hidden="true"></i></button>
+        <button id="historyForward" data-review-ref="history-forward" data-review-kind="history" disabled title="Forward" aria-label="Forward"><span aria-hidden="true">→</span><i class="history-spinner hidden" aria-hidden="true"></i></button>
+      </nav>
       <div><h2 id="threadTitle">New thread</h2><p id="threadScope">No folder</p></div>
       <div class="run-state" id="runState"><i></i><span>Ready</span></div>
     </header>
     <div class="thread-workspace" data-review-capture="workspace" role="region" aria-label="Thread workspace">
       <div class="graph-column">
-        <div class="interaction-banner" id="interactionBanner"><span class="interaction-icon">›_</span><div><small>Your interaction</small><p id="interactionText"></p></div></div>
+        <div class="interaction-banner" id="interactionBanner">
+          <span class="interaction-icon">›_</span>
+          <div class="interaction-copy"><small>Your interaction</small><p id="interactionText"></p></div>
+          <div class="turn-picker" id="turnPicker">
+            <div class="turn-stepper" role="group" aria-label="Turn navigation">
+              <button id="previousTurn" data-review-ref="previous-turn" data-review-kind="turn" disabled title="Previous turn" aria-label="Previous turn">←</button>
+              <button id="turnPickerButton" class="turn-picker-button" type="button" aria-expanded="false" aria-controls="turnPopover" disabled>Turn 0 of 0</button>
+              <button id="nextTurn" data-review-ref="next-turn" data-review-kind="turn" disabled title="Next turn" aria-label="Next turn">→</button>
+            </div>
+            <div class="turn-popover hidden" id="turnPopover" role="group" aria-label="Choose a turn"></div>
+          </div>
+        </div>
         <nav class="workspace-breadcrumb" id="workspaceBreadcrumb" data-review-capture="breadcrumb" aria-label="Graph layer path"></nav>
         <div class="graph-empty" id="graphEmpty"><div class="thinking-dots" id="thinkingDots" role="status" aria-label="Waiting for graph"><i></i><i></i><i></i></div><p id="graphEmptyMessage">This interaction has no accepted graph yet.</p></div>
         <div class="graph-stage hidden" id="graphStage" tabindex="-1" data-review-capture="layer-viewport" role="region" aria-label="Visible graph layer">

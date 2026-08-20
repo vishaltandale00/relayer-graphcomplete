@@ -10,6 +10,21 @@ export function interactionForThread(state, thread) {
     || state.nodes.find((node) => String(node.id) === String(interactionId));
 }
 
+export function workspaceTurns(state, thread) {
+  return (state.interactions || [])
+    .filter((interaction) => String(interaction.threadId) === String(thread?.id))
+    .map((interaction, sourceIndex) => ({ interaction, sourceIndex }))
+    .sort((left, right) => {
+      const leftSequence = Number(left.interaction.sequence);
+      const rightSequence = Number(right.interaction.sequence);
+      if (Number.isFinite(leftSequence) && Number.isFinite(rightSequence)) {
+        return leftSequence - rightSequence || left.sourceIndex - right.sourceIndex;
+      }
+      return left.sourceIndex - right.sourceIndex;
+    })
+    .map(({ interaction }) => interaction);
+}
+
 function sameId(left, right) {
   return left != null && right != null && String(left) === String(right);
 }
@@ -17,6 +32,9 @@ function sameId(left, right) {
 export function createLayerNavigationCoordinator() {
   let latestRequestId = 0;
   return Object.freeze({
+    cancel() {
+      latestRequestId += 1;
+    },
     begin({ threadId, interactionId, layerId, layerPath }) {
       return Object.freeze({
         requestId: ++latestRequestId,

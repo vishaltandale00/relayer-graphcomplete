@@ -4,4 +4,5 @@ export {
   interactionForThread,
   responseNodesForThread,
   workspaceModeCapabilities,
+  workspaceTurns,
 } from "./model.js";

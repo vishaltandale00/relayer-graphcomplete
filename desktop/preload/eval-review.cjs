@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld("relayerEvalReview", {
       "prepareCaptureTile",
       "restoreCapture",
       "activate",
-      "restore",
+      "history",
     ];
     if (!adapter || required.some((name) => typeof adapter[name] !== "function")) {
       throw new Error("The review presentation adapter is incomplete.");

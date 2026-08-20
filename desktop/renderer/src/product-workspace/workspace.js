@@ -1,10 +1,12 @@
 import { escapeHtml } from "../ui.js";
 import { actionWasInvoked } from "../action-invocation-state.js";
+import { setControlActivationCompletion } from "../control-activation.js";
 import {
   interactionForThread,
   responseNodesForThread,
   workspaceBreadcrumbItems,
   workspaceModeCapabilities,
+  workspaceTurns,
 } from "./model.js";
 import { createRelayerIcon } from "./icons.js";
 import { createGraphSimulationController } from "./graph-simulation.js";
@@ -30,6 +32,19 @@ const GRAPH_NODE_TOP = 28;
 const GRAPH_NODE_BOTTOM = 72;
 const GRAPH_FIT_PADDING = 48;
 const PENDING_COMPLETION_STATUSES = new Set(["not_started", "running", "submitted"]);
+
+export function graphNodeIdentitySet(nodes) {
+  return new Set((nodes || []).map((node) => String(node.id)));
+}
+
+export function turnReviewKind(current) {
+  return current ? "control" : "turn";
+}
+
+export function focusedTurnIdForRerender(popoverOpen, activeElement) {
+  if (!popoverOpen) return null;
+  return activeElement?.closest?.("[data-turn-id]")?.dataset?.turnId ?? null;
+}
 
 export function graphNodeLayoutBounds(width, height) {
   return {
@@ -153,6 +168,62 @@ export function graphTurnNavigationDelta(event, graphFocused) {
   return null;
 }
 
+export { workspaceTurns } from "./model.js";
+
+export function turnStatusPresentation(status) {
+  if (["not_started", "running", "submitted"].includes(status)) {
+    return { kind: "running", label: status === "not_started" ? "Waiting" : "Running" };
+  }
+  if (status === "accepted") return { kind: "accepted", label: "Complete" };
+  if (status === "failed") return { kind: "failed", label: "Failed" };
+  if (status === "cancelled") return { kind: "cancelled", label: "Cancelled" };
+  if (status === "stopped") return { kind: "stopped", label: "Stopped" };
+  return { kind: "unknown", label: status ? String(status).replaceAll("_", " ") : "Unknown" };
+}
+
+export function turnSelectionIntent(turns, currentInteractionId, targetInteractionId) {
+  const currentIndex = turns.findIndex((turn) => (
+    String(turn.id) === String(currentInteractionId)
+  ));
+  const targetIndex = turns.findIndex((turn) => (
+    String(turn.id) === String(targetInteractionId)
+  ));
+  if (targetIndex < 0 || targetIndex === currentIndex) return null;
+  return {
+    interactionId: turns[targetIndex].id,
+    offset: targetIndex - currentIndex,
+  };
+}
+
+export function historyNavigationPresentation(history = {}) {
+  const pendingDirection = ["back", "forward"].includes(history.pendingDirection)
+    ? history.pendingDirection
+    : null;
+  return {
+    pendingDirection,
+    back: {
+      disabled: pendingDirection !== null || !history.canGoBack,
+      label: history.backLabel || "Back",
+      loading: pendingDirection === "back",
+    },
+    forward: {
+      disabled: pendingDirection !== null || !history.canGoForward,
+      label: history.forwardLabel || "Forward",
+      loading: pendingDirection === "forward",
+    },
+  };
+}
+
+export function activateHistoryControl(button, direction, navigateHistory) {
+  if (!button || typeof navigateHistory !== "function") {
+    throw new TypeError("History control activation requires a button and navigator.");
+  }
+  const completion = navigateHistory(direction);
+  setControlActivationCompletion(button, completion);
+  void completion.catch(() => {});
+  return completion;
+}
+
 export function composerKeydownIntent(event) {
   if (event.key !== "Enter") return null;
   if (event.isComposing || event.keyCode === 229) return "composing";
@@ -232,6 +303,9 @@ export function resizeComposerTextarea(textarea) {
   textarea.style.overflowY = contentHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
 }
 
+// History state is supplied by the renderer integration so Product and Eval use the same
+// controls. `onSelectTurn(delta)` remains the keyboard/stepper contract; callers can add
+// `onSelectTurnById(id)` for direct popover jumps without changing existing integrations.
 export function createProductWorkspace({
   root = document,
   mode = "interactive",
@@ -240,7 +314,11 @@ export function createProductWorkspace({
   selection,
   showThread,
   showEmpty,
+  getNavigationHistory = () => ({}),
+  onNavigateHistory = async () => {},
   onSelectTurn = () => {},
+  onSelectTurnById,
+  onSelectionChange = () => {},
   onSubmitInteraction = async () => {},
   onNavigateLayer = async () => {},
   onInvokeAction = async () => {},
@@ -257,6 +335,7 @@ export function createProductWorkspace({
   let pinching = null;
   let camera = { x: 0, y: 0, zoom: 1 };
   let cameraRevision = 0;
+  let turnPopoverOpen = false;
   const graphViewCache = new Map();
   const activeTouchPointers = new Map();
 
@@ -268,14 +347,61 @@ export function createProductWorkspace({
   threadView.innerHTML = productWorkspaceMarkup();
   $("#closeInspector").onclick = () => {
     selection.selectedNodeId = null;
+    onSelectionChange(null);
     $("#inspector").classList.add("hidden");
     $$('[data-node]').forEach((element) => element.classList.remove("selected"));
     renderBreadcrumb();
   };
-  $("#previousTurn").onclick = () => onSelectTurn(-1);
-  $("#nextTurn").onclick = () => onSelectTurn(1);
+  const navigateHistory = async (direction) => {
+    const history = getNavigationHistory() || {};
+    const presentation = historyNavigationPresentation(history);
+    if (presentation[direction].disabled) return;
+    await onNavigateHistory(direction);
+  };
+  $("#historyBack").onclick = (event) => (
+    activateHistoryControl(event.currentTarget, "back", navigateHistory)
+  );
+  $("#historyForward").onclick = (event) => (
+    activateHistoryControl(event.currentTarget, "forward", navigateHistory)
+  );
+  $("#previousTurn").onclick = () => {
+    closeTurnPopover();
+    onSelectTurn(-1);
+  };
+  $("#nextTurn").onclick = () => {
+    closeTurnPopover();
+    onSelectTurn(1);
+  };
   const graphStage = $("#graphStage");
   const graphDocument = graphStage.ownerDocument;
+  const closeTurnPopover = () => {
+    turnPopoverOpen = false;
+    $("#turnPopover").classList.add("hidden");
+    $("#turnPickerButton").setAttribute("aria-expanded", "false");
+  };
+  const openTurnPopover = () => {
+    if ($("#turnPickerButton").disabled) return;
+    turnPopoverOpen = true;
+    $("#turnPopover").classList.remove("hidden");
+    $("#turnPickerButton").setAttribute("aria-expanded", "true");
+    const current = $("#turnPopover [aria-current='true']");
+    current?.scrollIntoView?.({ block: "nearest" });
+    current?.focus?.({ preventScroll: true });
+  };
+  $("#turnPickerButton").onclick = () => {
+    if (turnPopoverOpen) closeTurnPopover();
+    else openTurnPopover();
+  };
+  const closeTurnPopoverFromOutside = (event) => {
+    if (turnPopoverOpen && !$("#turnPicker").contains(event.target)) closeTurnPopover();
+  };
+  const closeTurnPopoverOnEscape = (event) => {
+    if (event.key !== "Escape" || !turnPopoverOpen) return;
+    closeTurnPopover();
+    $("#turnPickerButton").focus();
+  };
+  graphDocument.addEventListener("pointerdown", closeTurnPopoverFromOutside, true);
+  graphDocument.addEventListener("keydown", closeTurnPopoverOnEscape, true);
   const focusGraph = () => graphStage.focus({ preventScroll: true });
   const blurGraphFromOutsidePointer = (event) => {
     if (!graphStage.contains(event.target) && graphDocument.activeElement === graphStage) {
@@ -432,6 +558,80 @@ export function createProductWorkspace({
     if (!capabilities.canCompose) $("#threadComposer").textContent = "Read-only evaluation result";
   }
 
+  function renderHistoryNavigation() {
+    const history = getNavigationHistory() || {};
+    const presentation = historyNavigationPresentation(history);
+    for (const [direction, selector] of [["back", "#historyBack"], ["forward", "#historyForward"]]) {
+      const button = $(selector);
+      const state = presentation[direction];
+      button.disabled = state.disabled;
+      button.title = state.label;
+      button.setAttribute("aria-label", state.loading ? `${state.label} (loading)` : state.label);
+      button.setAttribute("aria-busy", String(state.loading));
+      button.classList.toggle("loading", state.loading);
+      button.querySelector("span").classList.toggle("hidden", state.loading);
+      button.querySelector(".history-spinner").classList.toggle("hidden", !state.loading);
+    }
+  }
+
+  function renderTurnNavigation(state, thread, interaction) {
+    const focusedTurnId = focusedTurnIdForRerender(
+      turnPopoverOpen,
+      graphDocument.activeElement,
+    );
+    const turns = workspaceTurns(state, thread);
+    const turnIndex = turns.findIndex((item) => String(item.id) === String(interaction?.id));
+    $("#previousTurn").disabled = turnIndex <= 0;
+    $("#nextTurn").disabled = turnIndex < 0 || turnIndex >= turns.length - 1;
+    const pickerButton = $("#turnPickerButton");
+    pickerButton.disabled = turnIndex < 0 || !turns.length;
+    pickerButton.textContent = `Turn ${turnIndex < 0 ? 0 : turnIndex + 1} of ${turns.length}`;
+    pickerButton.setAttribute(
+      "aria-label",
+      turnIndex < 0 ? "Choose a turn" : `Turn ${turnIndex + 1} of ${turns.length}. Choose a turn`,
+    );
+
+    const rows = turns.map((turn, index) => {
+      const current = index === turnIndex;
+      const status = turnStatusPresentation(turn.completionStatus);
+      const row = graphDocument.createElement("button");
+      row.type = "button";
+      row.className = `turn-option turn-status-${status.kind}`;
+      row.dataset.turnId = String(turn.id);
+      row.dataset.reviewRef = `turn-${turn.id}`;
+      row.dataset.reviewKind = turnReviewKind(current);
+      if (current) row.setAttribute("aria-current", "true");
+
+      const sequence = graphDocument.createElement("span");
+      sequence.className = "turn-option-number";
+      sequence.textContent = `Turn ${index + 1}`;
+      const promptText = graphDocument.createElement("span");
+      promptText.className = "turn-option-prompt";
+      promptText.textContent = turn.text || turn.summary || turn.content || "Untitled interaction";
+      const statusText = graphDocument.createElement("span");
+      statusText.className = "turn-option-status";
+      statusText.textContent = status.label;
+      row.append(sequence, promptText, statusText);
+      row.onclick = () => {
+        closeTurnPopover();
+        const intent = turnSelectionIntent(turns, interaction?.id, turn.id);
+        if (!intent) return;
+        if (onSelectTurnById) onSelectTurnById(intent.interactionId);
+        else onSelectTurn(intent.offset);
+      };
+      return row;
+    });
+    $("#turnPopover").replaceChildren(...rows);
+    if (focusedTurnId !== null) {
+      [...$("#turnPopover").querySelectorAll("[data-turn-id]")]
+        .find((row) => row.dataset.turnId === focusedTurnId)
+        ?.focus({ preventScroll: true });
+    }
+    $("#turnPopover").classList.toggle("hidden", !turnPopoverOpen || !turns.length);
+    pickerButton.setAttribute("aria-expanded", String(turnPopoverOpen && turns.length > 0));
+    if (!turns.length) turnPopoverOpen = false;
+  }
+
   function render() {
     const state = getState();
     const thread = getThread();
@@ -441,6 +641,7 @@ export function createProductWorkspace({
     }
     applyMode();
     showThread();
+    renderHistoryNavigation();
     $("#threadTitle").textContent = thread.title;
     const project = state.projects.find((item) => String(item.id) === String(thread.projectId));
     const permissionProfile = state.permissionProfiles?.find((item) => item.id === thread.permissionProfileId);
@@ -451,12 +652,12 @@ export function createProductWorkspace({
       || interaction?.summary
       || interaction?.content
       || thread.title;
-    const turns = (state.interactions || []).filter((item) => String(item.threadId) === String(thread.id));
-    const turnIndex = turns.findIndex((item) => String(item.id) === String(interaction?.id));
-    $("#previousTurn").disabled = turnIndex <= 0;
-    $("#nextTurn").disabled = turnIndex < 0 || turnIndex >= turns.length - 1;
+    renderTurnNavigation(state, thread, interaction);
     renderRunState(state);
     renderGraph(state, thread);
+    if (selection.selectedNodeId != null) {
+      selectNode(state, selection.selectedNodeId, { notify: false });
+    }
     renderBreadcrumb(state, thread);
   }
 
@@ -569,10 +770,10 @@ export function createProductWorkspace({
         index,
       };
     });
-    const ids = new Set(graphNodes.map((node) => node.id));
+    const ids = graphNodeIdentitySet(graphNodes);
     graphEdges = (state.edges || []).filter((edge) => {
       const [source, target] = edge.endpoints || [edge.source, edge.target];
-      return ids.has(source) && ids.has(target);
+      return ids.has(String(source)) && ids.has(String(target));
     });
     const nextSignature = JSON.stringify({
       viewKey: graphViewKey,
@@ -638,7 +839,7 @@ export function createProductWorkspace({
       element.onpointerup = finishDrag;
       element.onpointercancel = finishDrag;
     });
-    if (enteringView && !ids.has(selection.selectedNodeId)) {
+    if (enteringView && !ids.has(String(selection.selectedNodeId))) {
       selection.selectedNodeId = null;
       $("#inspector").classList.add("hidden");
     }
@@ -773,10 +974,11 @@ export function createProductWorkspace({
     ));
   }
 
-  function selectNode(state, id) {
+  function selectNode(state, id, { notify = true } = {}) {
     selection.selectedNodeId = id;
     const node = state.nodes.find((item) => String(item.id) === String(id));
     if (!node) return;
+    if (notify) onSelectionChange(node.id);
     $("#inspector").classList.remove("hidden");
     $("#detailIcon").replaceChildren(createRelayerIcon(
       node.icon || node.metadata?.relayer?.icon,
@@ -848,6 +1050,8 @@ export function createProductWorkspace({
   function dispose() {
     graphSimulation.cancel();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
+    graphDocument.removeEventListener("pointerdown", closeTurnPopoverFromOutside, true);
+    graphDocument.removeEventListener("keydown", closeTurnPopoverOnEscape, true);
     dragging = null;
     panning = null;
     pinching = null;

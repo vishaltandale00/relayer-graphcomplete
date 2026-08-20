@@ -1698,7 +1698,12 @@ settings:
 <li>Clicking a breadcrumb segment navigates to that node&#39;s layer locally.</li>
 <li>Nodes are movable icon-title objects with force/gravity behavior.</li>
 <li>Clicking a node opens its authored details and actions in the right inspector.</li>
-<li>Previous and next arrows move across accepted turn snapshots without Complete.</li>
+<li>Back and Forward are one session-local navigation history across thread, turn, and authored layer-path changes. They are separate from the hierarchy breadcrumb and retain at most 20 entries including the current entry.</li>
+<li>Selecting or closing a node updates the current history entry in place. It does not add another Back step.</li>
+<li>Back and Forward show destination hover labels and disable at the ends of retained history. The activated control shows a pending state during uncached restoration.</li>
+<li>Turn controls remain separate. Plain Left and Right move one turn. Clicking the turn count opens a chronological list with three complete rows visible before scrolling.</li>
+<li>Direct navigation after Back truncates Forward. A failed or superseded asynchronous restoration leaves the visible presentation and history cursor unchanged.</li>
+<li>Product and Eval use the same renderer-owned history controller and controls. Eval remains read-only and does not maintain a second history stack.</li>
 <li>The renderer shows the immutable accepted snapshot for that turn even if later turns update shared nodes.</li>
 </ul>
 <h2 data-prd-layer="Evidence" data-prd-order="15.4">15D. Basic Complete evaluation evidence</h2>

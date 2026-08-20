@@ -7,11 +7,12 @@ import {
 } from "./permission-profiles.js";
 import { appState, desktop, evalReview, viewState } from "./state.js";
 import {
+  cancelNavigationHistory,
   connectEvents,
   createFirstThread,
   loadThread,
+  navigateHistory,
   refreshState,
-  restoreReviewPresentation,
   updateCreateThreadAvailability,
 } from "./threads.js";
 import { bindComposerKeydown } from "./product-workspace/workspace.js";
@@ -29,6 +30,7 @@ function applyPlatformCopy() {
 function bindEvents() {
   $("#connectCodex").onclick = connectCodex;
   $("#newThread").onclick = () => {
+    cancelNavigationHistory();
     viewState.currentThreadId = null;
     selectScope({ kind: "standalone", label: "No folder" });
     setMainView("new");
@@ -57,7 +59,10 @@ function bindEvents() {
     $("#collapseSidebar").title = label;
     $("#collapseSidebar").setAttribute("aria-label", label);
   };
-  $("#settingsButton").onclick = () => setMainView("settings");
+  $("#settingsButton").onclick = () => {
+    cancelNavigationHistory();
+    setMainView("settings");
+  };
   $("#disconnectCodex").onclick = async () => {
     await desktop?.account.logout();
     await refreshAccount();
@@ -136,8 +141,12 @@ async function boot() {
         turnId: viewState.currentInteractionId,
         layerId: appState.visibleLayer?.layer?.id ?? null,
         selectedNodeId: viewState.selectedNodeId,
+        navigationPath: viewState.layerPath.map((entry) => ({
+          layerId: entry.layerId,
+          viaActionId: entry.actionId ?? entry.viaActionId ?? null,
+        })),
       }),
-      restorePresentationState: restoreReviewPresentation,
+      navigateHistory,
     }));
   }
   connectEvents();

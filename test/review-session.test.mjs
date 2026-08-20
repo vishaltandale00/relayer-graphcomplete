@@ -3,11 +3,13 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReviewSession } from "../desktop/eval-main/review-session.mjs";
+import { setControlActivationCompletion } from "../desktop/renderer/src/control-activation.js";
 import {
   accessibleControlName,
+  createReviewPresentationAdapter,
   isAccessibleControl,
   isVisibleElement,
   visibleCaptureRegions,
@@ -174,7 +176,7 @@ describe("ReviewSession", () => {
       .toMatchObject({ contentDigest: full.contentDigest, tileCount: 3 });
   });
 
-  it("activates only current controls and moves through local history with a signed delta", async () => {
+  it("activates only current controls and delegates arbitrary signed history deltas to the workspace", async () => {
     let state = reviewState({
       controls: [{
         elementRef: "node-node-7",
@@ -185,6 +187,7 @@ describe("ReviewSession", () => {
         actionId: null,
       }],
     });
+    const historyDeltas = [];
     const electron = fakeElectron({
       snapshot: async () => state,
       activate: async ({ elementRef }) => {
@@ -212,7 +215,24 @@ describe("ReviewSession", () => {
         }
         return state;
       },
-      restore: async (expected) => { state = structuredClone(expected); return state; },
+      history: async ({ delta }) => {
+        historyDeltas.push(delta);
+        if (delta === -2) {
+          state = reviewState();
+        } else if (delta === 2) {
+          state = reviewState({
+            layerId: "layer-2",
+            activatedActionId: "action-4",
+            navigationPath: [
+              { layerId: "layer-1", viaActionId: null },
+              { layerId: "layer-2", viaActionId: "action-4" },
+            ],
+          });
+        } else {
+          throw new Error(`History delta ${delta} is outside the workspace history.`);
+        }
+        return state;
+      },
     });
     const session = new ReviewSession({
       executionId: "execution-1",
@@ -237,7 +257,8 @@ describe("ReviewSession", () => {
       ],
     });
     await expect(session.history({ delta: 0 })).rejects.toThrow("non-zero signed integer");
-    await expect(session.history({ delta: 1 })).rejects.toThrow("outside the review session history");
+    await expect(session.history({ delta: 1 })).rejects.toThrow("outside the workspace history");
+    expect(historyDeltas).toEqual([-2, 2, 1]);
     expect(session.trace().map((entry) => entry.type)).toEqual([
       "session-opened",
       "interact",
@@ -245,6 +266,383 @@ describe("ReviewSession", () => {
       "history",
       "history",
     ]);
+  });
+
+  it("rejects a history command whose returned state is not the committed visible state", async () => {
+    const state = reviewState();
+    const electron = fakeElectron({
+      snapshot: async () => state,
+      history: async () => reviewState({
+        layerId: "layer-2",
+        navigationPath: [{ layerId: "layer-2", viaActionId: null }],
+      }),
+    });
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: "/unused",
+      ipc: electron.ipc,
+      commandTimeoutMs: 100,
+    });
+    await session.open();
+
+    await expect(session.history({ delta: -1 })).rejects.toThrow(
+      "did not restore the requested review history state",
+    );
+    expect(session.trace().map((entry) => entry.type)).toEqual(["session-opened"]);
+  });
+
+  it("accepts direct and history navigation to durable turns without an accepted layer", async () => {
+    let state = reviewState({
+      controls: [{
+        elementRef: "turn-running",
+        name: "Turn 2",
+        role: "button",
+        disabled: false,
+        kind: "turn",
+        actionId: null,
+      }],
+    });
+    const layerless = () => reviewState({
+      turnId: "turn-running",
+      layerId: null,
+      navigationPath: [],
+      selectedNodeId: null,
+      controls: [],
+    });
+    const electron = fakeElectron({
+      snapshot: async () => state,
+      activate: async () => { state = layerless(); return state; },
+      history: async () => { state = layerless(); return state; },
+    });
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: "/unused",
+      ipc: electron.ipc,
+      commandTimeoutMs: 100,
+    });
+    await session.open();
+
+    await expect(session.interact({
+      elementRef: "turn-running",
+      activate: true,
+    })).resolves.toMatchObject({ state: { turnId: "turn-running", layerId: null } });
+    state = reviewState();
+    await expect(session.history({ delta: -1 })).resolves.toMatchObject({
+      state: { turnId: "turn-running", layerId: null, navigationPath: [] },
+    });
+  });
+});
+
+describe("review presentation history", () => {
+  it("waits for workspace navigation and snapshots the committed presentation", async () => {
+    let presentation = {
+      threadId: "thread-1",
+      turnId: "turn-2",
+      layerId: "layer-2",
+      selectedNodeId: null,
+      navigationPath: [
+        { layerId: "layer-1", viaActionId: null },
+        { layerId: "layer-2", viaActionId: "action-2" },
+      ],
+    };
+    const navigateHistory = vi.fn(async (delta) => {
+      expect(delta).toBe(-3);
+      presentation = {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        layerId: "layer-1",
+        selectedNodeId: "node-1",
+        navigationPath: [{ layerId: "layer-1", viaActionId: null }],
+      };
+      return presentation;
+    });
+    const root = { querySelectorAll: () => [] };
+    const windowObject = {
+      innerWidth: 1200,
+      innerHeight: 800,
+      devicePixelRatio: 2,
+      requestAnimationFrame: (callback) => callback(),
+      getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+    };
+    const adapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => presentation,
+      navigateHistory,
+      root,
+      windowObject,
+    });
+
+    await expect(adapter.history({ delta: 0 })).rejects.toThrow("non-zero signed integer");
+    await expect(adapter.history({ delta: -3 })).resolves.toMatchObject({
+      executionId: "execution-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      layerId: "layer-1",
+      selectedNodeId: "node-1",
+      navigationPath: [{ layerId: "layer-1", viaActionId: null }],
+    });
+    expect(navigateHistory).toHaveBeenCalledOnce();
+  });
+
+  it("waits for a visible history button to finish async restoration", async () => {
+    let presentation = {
+      threadId: "thread-2",
+      turnId: "turn-2",
+      layerId: "layer-2",
+      selectedNodeId: null,
+      navigationPath: [{ layerId: "layer-2", viaActionId: null }],
+    };
+    const attributes = new Map([
+      ["aria-label", "Back to Thread 1"],
+      ["role", "button"],
+    ]);
+    const button = {
+      dataset: { reviewRef: "history-back", reviewKind: "history" },
+      isConnected: true,
+      hidden: false,
+      disabled: false,
+      textContent: "Back",
+      matches: () => true,
+      getAttribute: (key) => attributes.get(key) ?? null,
+      getBoundingClientRect: () => ({ left: 10, top: 10, right: 40, bottom: 40, width: 30, height: 30 }),
+      click: () => {
+        const completion = new Promise((resolve) => setTimeout(() => {
+          presentation = {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            layerId: null,
+            selectedNodeId: null,
+            navigationPath: [],
+          };
+          resolve();
+        }, 5));
+        setControlActivationCompletion(button, completion);
+      },
+    };
+    const adapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => presentation,
+      navigateHistory: async () => {},
+      root: { querySelectorAll: () => [button] },
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 800,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => setTimeout(callback, 1),
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
+    });
+
+    await expect(adapter.activate({
+      elementRef: "history-back",
+      operation: "activate",
+    })).resolves.toMatchObject({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      layerId: null,
+      navigationPath: [],
+    });
+  });
+
+  it("uses definitive visible-history completion beyond the old animation-frame budget", async () => {
+    let presentation = {
+      threadId: "thread-2",
+      turnId: "turn-2",
+      layerId: "layer-2",
+      selectedNodeId: null,
+      navigationPath: [{ layerId: "layer-2", viaActionId: null }],
+    };
+    let transitionFrames = 0;
+    const attributes = new Map([["aria-label", "Back to Thread 1"], ["role", "button"]]);
+    const button = {
+      dataset: { reviewRef: "history-back", reviewKind: "history" },
+      isConnected: true,
+      hidden: false,
+      disabled: false,
+      textContent: "Back",
+      matches: () => true,
+      getAttribute: (key) => attributes.get(key) ?? null,
+      getBoundingClientRect: () => ({ left: 10, top: 10, right: 40, bottom: 40, width: 30, height: 30 }),
+      click: () => {
+        const completion = new Promise((resolve) => {
+          const advance = () => {
+            transitionFrames += 1;
+            if (transitionFrames <= 140) return queueMicrotask(advance);
+            presentation = {
+              threadId: "thread-1",
+              turnId: "turn-1",
+              layerId: null,
+              selectedNodeId: null,
+              navigationPath: [],
+            };
+            resolve();
+          };
+          queueMicrotask(advance);
+        });
+        setControlActivationCompletion(button, completion);
+      },
+    };
+    const adapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => presentation,
+      navigateHistory: async () => {},
+      root: { querySelectorAll: () => [button] },
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 800,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => queueMicrotask(callback),
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
+    });
+
+    await expect(adapter.activate({
+      elementRef: "history-back",
+      operation: "activate",
+    })).resolves.toMatchObject({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      layerId: null,
+    });
+    expect(transitionFrames).toBe(141);
+  });
+
+  it("waits for an async thread switch to expose one complete layerless presentation", async () => {
+    let presentation = {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      layerId: "layer-1",
+      selectedNodeId: null,
+      navigationPath: [{ layerId: "layer-1", viaActionId: null }],
+    };
+    const attributes = new Map([
+      ["aria-label", "Open Thread 2"],
+      ["role", "button"],
+    ]);
+    const button = {
+      dataset: { reviewRef: "thread-2", reviewKind: "thread" },
+      isConnected: true,
+      hidden: false,
+      disabled: false,
+      textContent: "Thread 2",
+      matches: () => true,
+      getAttribute: (key) => attributes.get(key) ?? null,
+      getBoundingClientRect: () => ({ left: 10, top: 10, right: 100, bottom: 40, width: 90, height: 30 }),
+      click: () => {
+        presentation = {
+          threadId: "thread-2",
+          turnId: null,
+          layerId: "layer-1",
+          selectedNodeId: null,
+          navigationPath: [{ layerId: "layer-1", viaActionId: null }],
+        };
+        setTimeout(() => {
+          presentation = {
+            threadId: "thread-2",
+            turnId: "turn-running",
+            layerId: null,
+            selectedNodeId: null,
+            navigationPath: [],
+          };
+        }, 5);
+      },
+    };
+    const adapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => presentation,
+      navigateHistory: async () => {},
+      root: { querySelectorAll: () => [button] },
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 800,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => setTimeout(callback, 1),
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
+    });
+
+    await expect(adapter.activate({
+      elementRef: "thread-2",
+      operation: "activate",
+    })).resolves.toMatchObject({
+      threadId: "thread-2",
+      turnId: "turn-running",
+      layerId: null,
+      selectedNodeId: null,
+      navigationPath: [],
+    });
+  });
+
+  it("canonicalizes numeric paths and keeps visible and tool history action metadata identical", async () => {
+    const rootPresentation = () => ({
+      threadId: 10,
+      turnId: 1,
+      layerId: 100,
+      selectedNodeId: null,
+      navigationPath: [{ layerId: 100, viaActionId: null }],
+    });
+    const deepPresentation = () => ({
+      threadId: 10,
+      turnId: 1,
+      layerId: 101,
+      selectedNodeId: 11,
+      navigationPath: [
+        { layerId: 100, viaActionId: null },
+        { layerId: 101, viaActionId: 501 },
+      ],
+    });
+    let presentation = rootPresentation();
+    const attributes = new Map([["aria-label", "Forward to child"], ["role", "button"]]);
+    const button = {
+      dataset: { reviewRef: "history-forward", reviewKind: "history" },
+      isConnected: true,
+      hidden: false,
+      disabled: false,
+      textContent: "Forward",
+      matches: () => true,
+      getAttribute: (key) => attributes.get(key) ?? null,
+      getBoundingClientRect: () => ({ left: 10, top: 10, right: 40, bottom: 40, width: 30, height: 30 }),
+      click: () => {
+        presentation = deepPresentation();
+        setControlActivationCompletion(button, Promise.resolve());
+      },
+    };
+    const adapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => presentation,
+      navigateHistory: async () => {
+        presentation = deepPresentation();
+        return presentation;
+      },
+      root: { querySelectorAll: () => [button] },
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 800,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => callback(),
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
+    });
+
+    const visible = await adapter.activate({
+      elementRef: "history-forward",
+      operation: "activate",
+    });
+    presentation = rootPresentation();
+    adapter.snapshot();
+    const tool = await adapter.history({ delta: 1 });
+
+    expect(visible.navigationPath).toEqual([
+      { layerId: "100", viaActionId: null },
+      { layerId: "101", viaActionId: "501" },
+    ]);
+    expect(visible.activatedActionId).toBe("501");
+    expect(tool.activatedActionId).toBe("501");
+    expect(tool.navigationPath).toEqual(visible.navigationPath);
   });
 });
 
