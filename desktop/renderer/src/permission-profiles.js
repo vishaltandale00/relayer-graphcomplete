@@ -1,5 +1,6 @@
 import { request } from "./api.js";
 import {
+  permissionPickerDisabled,
   permissionProfileDescription,
   resolvePermissionSelection,
 } from "./permission-profile-model.js";
@@ -16,7 +17,7 @@ export function renderPermissionPicker() {
   const selected = profiles.find((profile) => profile.id === viewState.selectedPermissionProfileId);
   const button = $("#permissionButton");
   $("#permissionLabel").textContent = selected?.label || "Permissions";
-  button.disabled = !selected;
+  button.disabled = permissionPickerDisabled(profiles);
   button.title = selected ? `Permission profile: ${selected.label}` : "No permission profile is available";
   $("#permissionMenu").innerHTML = profiles.map((profile) => `
     <button type="button" role="menuitemradio" data-permission-profile="${escapeHtml(profile.id)}" aria-checked="${profile.id === selected?.id}" ${profile.available ? "" : "disabled"} class="${profile.id === "full" ? "full-access" : ""}">
@@ -46,11 +47,17 @@ export function togglePermissionMenu() {
 export async function loadPermissionProfiles() {
   if (!productApiAvailable) return;
   const response = await request("/api/permission-profiles");
-  viewState.selectedPermissionProfileId = resolvePermissionSelection(
-    response,
-    viewState.selectedPermissionProfileId,
-  );
   appState.permissionProfiles = response.profiles;
   appState.defaultPermissionProfileId = response.defaultProfile;
+  try {
+    viewState.selectedPermissionProfileId = resolvePermissionSelection(
+      response,
+      viewState.selectedPermissionProfileId,
+    );
+  } catch (error) {
+    viewState.selectedPermissionProfileId = null;
+    renderPermissionPicker();
+    throw error;
+  }
   renderPermissionPicker();
 }

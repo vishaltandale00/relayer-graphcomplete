@@ -102,7 +102,7 @@ describe("EvalService simulated-user result persistence", () => {
     ]);
     expect(turn.judgeResults[0].artifactDirectory).toBe(calls[0].artifactDirectory);
 
-    const persisted = JSON.parse(await readFile(stateFile, "utf8"));
+    const persisted = await waitForPersistedRun(stateFile, completed.id);
     expect(persisted.schemaVersion).toBe(1);
     expect(persisted.runs[0].executions[0].turns[0].judgeResults[0].references.coverage).toBe("coverage.json");
     expect(persisted.runs[0].bundleRef).toMatch(/^runs\/.*\/bundle\.json$/);
@@ -328,4 +328,15 @@ async function waitForCompletedRun(evalService, runId) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 10));
   }
   throw new Error("Eval run did not finish in time.");
+}
+
+async function waitForPersistedRun(stateFile, runId) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const persisted = JSON.parse(await readFile(stateFile, "utf8"));
+    const run = persisted.runs.find((candidate) => candidate.id === runId);
+    if (typeof run?.bundleRef === "string") return persisted;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+  }
+  throw new Error("Completed Eval run was not persisted in time.");
 }

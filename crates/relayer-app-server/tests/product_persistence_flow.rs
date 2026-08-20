@@ -666,9 +666,9 @@ async fn persists_project_thread_and_interaction_across_restart() {
             thread["title"] == "Standalone thread" && thread["projectId"].is_null()
         })
     );
-    for (title, expected_message) in [
-        ("Persist me", "Map the project"),
-        ("Standalone thread", "Keep this local"),
+    for (title, expected_message, expected_profile) in [
+        ("Persist me", "Map the project", "ask"),
+        ("Standalone thread", "Keep this local", "auto"),
     ] {
         let persisted_thread = state["threads"]
             .as_array()
@@ -678,6 +678,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .unwrap();
         let thread_id = persisted_thread["id"].as_i64().unwrap();
         assert!(thread_id > 0);
+        assert_eq!(persisted_thread["permissionProfileId"], expected_profile);
         let interactions = app
             .clone()
             .oneshot(api_request(
@@ -695,6 +696,10 @@ async fn persists_project_thread_and_interaction_across_restart() {
         )
         .unwrap();
         assert_eq!(interactions["interactions"][0]["text"], expected_message);
+        assert_eq!(
+            interactions["interactions"][0]["permissionProfileId"],
+            expected_profile
+        );
         assert_eq!(
             persisted_thread["rootInteractionId"],
             interactions["interactions"][0]["id"]
@@ -752,6 +757,13 @@ async fn persists_project_thread_and_interaction_across_restart() {
         .map(|interaction| interaction["sequence"].as_i64().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(sequences, (1..=13).collect::<Vec<_>>());
+    assert!(
+        interactions["interactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|interaction| interaction["permissionProfileId"] == "ask")
+    );
     let timestamps = interactions["interactions"]
         .as_array()
         .unwrap()

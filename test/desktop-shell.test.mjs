@@ -58,6 +58,7 @@ import {
 } from "../desktop/release/promote-stable.mjs";
 import { apiUrl } from "../desktop/renderer/src/api.js";
 import {
+  permissionPickerDisabled,
   permissionProfileDescription,
   resolvePermissionSelection,
 } from "../desktop/renderer/src/permission-profile-model.js";
@@ -269,6 +270,8 @@ describe("desktop skeleton", () => {
       defaultProfile: "auto",
       profiles: profiles.map((profile) => ({ ...profile, available: false })),
     })).toThrow("No permission profile is available");
+    expect(permissionPickerDisabled(profiles.map((profile) => ({ ...profile, available: false })))).toBe(false);
+    expect(permissionPickerDisabled([])).toBe(true);
     expect(permissionProfileDescription(profiles[2])).toContain("not hard-confined");
   });
 

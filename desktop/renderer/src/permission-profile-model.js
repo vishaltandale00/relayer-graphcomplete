@@ -20,6 +20,11 @@ export function resolvePermissionSelection({ defaultProfile, profiles }, preferr
   return selected.id;
 }
 
+export function permissionPickerDisabled(profiles) {
+  if (!Array.isArray(profiles)) throw new Error("Permission profile response is invalid.");
+  return profiles.length === 0;
+}
+
 export function permissionProfileDescription(profile) {
   if (!profile.available) {
     return UNAVAILABLE_REASONS[profile.unavailableReason] || "Unavailable";
