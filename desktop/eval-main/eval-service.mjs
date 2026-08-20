@@ -335,22 +335,27 @@ export class EvalService {
         ? await this.#executeH3ProjectCase(execution, definition)
         : [await this.#executeStandaloneCase(execution, definition)];
       execution.threadIds = executedThreads.map(({ thread }) => thread.id);
-      const interactions = executedThreads.flatMap(({ thread, threadDefinition, detail, workspaceChecks }) => (
+      const interactions = executedThreads.flatMap(({ thread, threadDefinition, permissionResolution, detail, workspaceChecks }) => (
         detail.interactions.map((interaction, threadTurnIndex) => ({
           thread,
           threadDefinition,
+          permissionResolution,
           interaction,
           threadTurnIndex,
           workspaceChecks: workspaceChecks.get(String(interaction.id)) || [],
         }))
       ));
-      execution.turns = interactions.map(({ thread, threadDefinition, interaction, threadTurnIndex }, turnIndex) => ({
+      execution.turns = interactions.map(({ thread, threadDefinition, permissionResolution, interaction, threadTurnIndex }, turnIndex) => ({
         threadId: thread.id,
         threadDefinitionId: threadDefinition?.id || null,
         interactionId: interaction.id,
         graphNodeId: interaction.graphNodeId,
         rootLayerId: interaction.completionOutput?.rootLayer?.layer?.id ?? null,
         permissionProfileId: interaction.permissionProfileId,
+        requestedPermissionProfileId: permissionResolution?.requestedProfileId ?? interaction.permissionProfileId,
+        permissionProfileOverride: permissionResolution?.overridden
+          ? copy(permissionResolution)
+          : null,
         effectiveExecutionDigest: interaction.effectiveExecutionDigest,
         effectivePermissionReceipt: copy(interaction.effectivePermissionReceipt),
         status: interaction.completionStatus,
@@ -415,11 +420,14 @@ export class EvalService {
           }
         }
         if (definition.id === H3_PROJECT_CASE_ID) {
-          const expectedProfileId = threadDefinition.permissionProfileId;
+          const permissionResolution = executedTurn.permissionResolution;
+          const expectedProfileId = permissionResolution.effectiveProfileId;
           turnChecks.push({
             name: `${checkPrefix}:permission-profile`,
             passed: interaction.permissionProfileId === expectedProfileId,
-            detail: `Expected ${expectedProfileId}; product recorded ${interaction.permissionProfileId || "none"}.`,
+            detail: permissionResolution.overridden
+              ? `The case requested ${permissionResolution.requestedProfileId}; ${execution.harnessConfigurationName} explicitly used ${expectedProfileId}. Product recorded ${interaction.permissionProfileId || "none"}.`
+              : `Expected ${expectedProfileId}; product recorded ${interaction.permissionProfileId || "none"}.`,
           });
           turnChecks.push({
             name: `${checkPrefix}:effective-execution-receipt`,
@@ -513,15 +521,20 @@ export class EvalService {
     });
     execution.projectId = project.id;
     execution.fixture = copy(fixture);
+    execution.permissionProfileResolutions = definition.threads.map((threadDefinition) => ({
+      threadDefinitionId: threadDefinition.id,
+      ...resolveH3PermissionProfile(execution.harnessConfiguration, threadDefinition.permissionProfileId),
+    }));
     const executedThreads = [];
-    for (const threadDefinition of definition.threads) {
+    for (const [threadIndex, threadDefinition] of definition.threads.entries()) {
       const workspaceChecks = new Map();
+      const permissionResolution = execution.permissionProfileResolutions[threadIndex];
       const thread = await this.#createAndRunThread({
         execution,
         title: `${definition.name} · ${threadDefinition.name}`,
         prompts: threadDefinition.prompts,
         projectId: project.id,
-        permissionProfileId: threadDefinition.permissionProfileId,
+        permissionProfileId: permissionResolution.effectiveProfileId,
         afterTurn: async (interactionId, promptIndex) => {
           if (threadDefinition.mutationPolicy === "read-only" || promptIndex === threadDefinition.prompts.length - 1) {
             workspaceChecks.set(String(interactionId), await this.workspaceGrader({
@@ -532,7 +545,7 @@ export class EvalService {
         },
       });
       const detail = await this.#productRequest(`/api/threads/${thread.id}`);
-      executedThreads.push({ thread, threadDefinition, detail, workspaceChecks });
+      executedThreads.push({ thread, threadDefinition, permissionResolution, detail, workspaceChecks });
     }
     return executedThreads;
   }
@@ -812,11 +825,32 @@ function validateEvalPermissionProfiles(execution) {
     selectStandalonePermissionProfile(execution.harnessConfiguration);
     return;
   }
-  const missing = [...new Set(h3ProjectEvalCase.threads.map((thread) => thread.permissionProfileId))]
-    .filter((profileId) => !(profileId in execution.harnessConfiguration.permissionBindings));
-  if (missing.length > 0) {
-    throw new Error(`Eval case ${execution.testCaseId} requires permission profiles not supported by ${execution.harnessConfigurationName}: ${missing.join(", ")}.`);
+  for (const thread of h3ProjectEvalCase.threads) {
+    resolveH3PermissionProfile(execution.harnessConfiguration, thread.permissionProfileId);
   }
+}
+
+export function resolveH3PermissionProfile(configuration, requestedProfileId) {
+  const profiles = Object.keys(configuration.permissionBindings);
+  if (profiles.includes(requestedProfileId)) {
+    return {
+      requestedProfileId,
+      effectiveProfileId: requestedProfileId,
+      overridden: false,
+      reason: null,
+    };
+  }
+  if (profiles.length === 1 && profiles[0] === "full") {
+    return {
+      requestedProfileId,
+      effectiveProfileId: "full",
+      overridden: true,
+      reason: "Harness supports only Full access; the local Eval fixture is disposable and the unrestricted authority is recorded.",
+    };
+  }
+  throw new Error(
+    `Eval case ${H3_PROJECT_CASE_ID} requests permission profile ${requestedProfileId}, which is not supported by ${configuration.name}. Only an explicit sole Full access binding may override an H3 case profile.`,
+  );
 }
 
 async function invokeSimulatedUserJudge(runner, context) {

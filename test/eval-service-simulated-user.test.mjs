@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { EvalService } from "../desktop/eval-main/eval-service.mjs";
+import { EvalService, resolveH3PermissionProfile } from "../desktop/eval-main/eval-service.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const directories = [];
@@ -248,7 +248,7 @@ describe("EvalService simulated-user result persistence", () => {
     });
   });
 
-  it("uses a harness's sole bound profile and rejects incompatible H3 runs before execution", async () => {
+  it("uses a harness's sole Full access profile explicitly for H3 and standalone runs", async () => {
     const { stateFile } = await testPaths();
     const product = fakeAcceptedProduct();
     globalThis.fetch = product;
@@ -259,11 +259,13 @@ describe("EvalService simulated-user result persistence", () => {
       platform: "darwin",
     }).open();
 
-    await expect(service.createRun({
-      testCaseIds: ["project.h3.sanitize-status-code"],
-      harnessConfigurationNames: ["prime-agent-basic"],
-      judgeConfigurationName: "deterministic-graph-contract",
-    })).rejects.toThrow("requires permission profiles not supported by prime-agent-basic: ask, auto");
+    const configuration = { name: "prime-agent-basic", permissionBindings: { full: {} } };
+    expect(resolveH3PermissionProfile(configuration, "ask")).toEqual({
+      requestedProfileId: "ask",
+      effectiveProfileId: "full",
+      overridden: true,
+      reason: "Harness supports only Full access; the local Eval fixture is disposable and the unrestricted authority is recorded.",
+    });
 
     const created = await service.createRun({
       testCaseIds: ["empty-project.task-system.single-turn"],
@@ -275,6 +277,13 @@ describe("EvalService simulated-user result persistence", () => {
       new URL(url).pathname === "/api/threads" && options?.method === "POST"
     ));
     expect(JSON.parse(createRequest[1].body).permissionProfileId).toBe("full");
+  });
+
+  it("does not override an unavailable H3 profile for an ambiguous harness", () => {
+    expect(() => resolveH3PermissionProfile({
+      name: "ambiguous",
+      permissionBindings: { ask: {}, full: {} },
+    }, "auto")).toThrow("Only an explicit sole Full access binding may override");
   });
 });
 
