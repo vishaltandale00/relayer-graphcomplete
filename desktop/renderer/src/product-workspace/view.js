@@ -8,6 +8,7 @@ export function productWorkspaceMarkup() {
     <div class="thread-workspace" data-review-capture="workspace" role="region" aria-label="Thread workspace">
       <div class="graph-column">
         <div class="interaction-banner" id="interactionBanner"><span class="interaction-icon">›_</span><div><small>Your interaction</small><p id="interactionText"></p></div></div>
+        <nav class="workspace-breadcrumb" id="workspaceBreadcrumb" data-review-capture="breadcrumb" aria-label="Graph layer path"></nav>
         <div class="graph-empty" id="graphEmpty"><div class="thinking-dots" id="thinkingDots" role="status" aria-label="Waiting for graph"><i></i><i></i><i></i></div><p id="graphEmptyMessage">This interaction has no accepted graph yet.</p></div>
         <div class="graph-stage hidden" id="graphStage" tabindex="-1" data-review-capture="layer-viewport" role="region" aria-label="Visible graph layer">
           <svg id="edgeCanvas" aria-hidden="true"></svg>

@@ -226,11 +226,16 @@ export function createReviewPresentationAdapter({
     const kind = element.dataset.reviewKind || "control";
     const before = getPresentationState();
     const actionId = element.dataset.reviewActionId || null;
+    const breadcrumbPathIndex = Number(element.dataset.reviewPathIndex);
     element.click();
     for (let frame = 0; frame < 120; frame++) {
       await nextFrame(windowObject);
       const current = getPresentationState();
       const settled = kind === "navigate-action" ? current.layerId !== before.layerId
+        : kind === "layer-navigation" ? (
+          current.layerId !== before.layerId
+          || current.selectedNodeId !== before.selectedNodeId
+        )
         : kind === "turn" ? current.turnId !== before.turnId
           : kind === "thread" ? current.threadId !== before.threadId
             : true;
@@ -240,6 +245,10 @@ export function createReviewPresentationAdapter({
     activatedActionId = actionId;
     if (actionId && kind === "navigate-action" && after.layerId !== before.layerId) {
       navigationPath.push({ layerId: after.layerId, viaActionId: actionId });
+    } else if (kind === "layer-navigation") {
+      navigationPath = Number.isInteger(breadcrumbPathIndex)
+        ? navigationPath.slice(0, breadcrumbPathIndex + 1)
+        : after.layerId ? [{ layerId: after.layerId, viaActionId: null }] : [];
     } else if (["turn", "thread"].includes(kind)) {
       navigationPath = after.layerId ? [{ layerId: after.layerId, viaActionId: null }] : [];
     }

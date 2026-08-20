@@ -14,7 +14,7 @@ function workspace() {
     showEmpty: () => setMainView("new"),
     onSelectTurn: (offset) => import("./threads.js").then(({ selectTurn }) => selectTurn(offset)),
     onSubmitInteraction: (text) => import("./threads.js").then(({ submitInteraction }) => submitInteraction(text)),
-    onNavigateLayer: (layerId) => import("./threads.js").then(({ navigateLayer }) => navigateLayer(layerId)),
+    onNavigateLayer: (layerId, navigation) => import("./threads.js").then(({ navigateLayer }) => navigateLayer(layerId, navigation)),
     onInvokeAction: (action) => import("./threads.js").then(({ invokeAction }) => invokeAction(action)),
   });
   return productWorkspace;
