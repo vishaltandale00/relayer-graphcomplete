@@ -34,7 +34,7 @@ import {
 } from "../desktop/release/artifacts.mjs";
 import { desktopReleaseAppPath } from "../desktop/release/app-path.mjs";
 import { finalizeDesktopUpdateArtifact } from "../desktop/release/finalize-update-artifact.mjs";
-import { createDesktopCanaryEvidence } from "../desktop/release/canary-evidence.mjs";
+import { createDesktopCanaryEvidence, deriveDesktopCanaryTrace } from "../desktop/release/canary-evidence.mjs";
 import { macOSNativeRuntimeExecutables } from "../desktop/release/verify-macos-app.mjs";
 import { verifyWindowsSignatures, windowsApplicationExecutables } from "../desktop/release/verify-windows-app.mjs";
 import {
@@ -1120,6 +1120,13 @@ describe("desktop skeleton", () => {
         ...Object.entries(screenshots).map(([name, path]) => writeFile(path, `${name}-image`)),
       ]);
 
+      const derivedTrace = deriveDesktopCanaryTrace({
+        text: await readFile(stateLogPath, "utf8"),
+        target: DESKTOP_RELEASE_TARGETS["windows-x64"],
+        version,
+      });
+      expect(derivedTrace).toMatchObject({ seedProcessId: 100, targetProcessId: 200 });
+
       await expect(createDesktopCanaryEvidence({
         targetReleaseReceiptPath: targetReceiptPath,
         previewPublicationReceiptPath: publicationReceiptPath,
@@ -1201,18 +1208,29 @@ describe("desktop skeleton", () => {
     expect(intelCanaryWorkflow).toContain("runs-on: macos-15-intel");
     expect(intelCanaryWorkflow).toContain("run-macos-intel-canary.sh");
     expect(intelCanaryWorkflow).toContain("preview-publication-macos-x64");
+    expect(intelCanaryWorkflow).toContain("- name: Preserve Intel install and updater evidence\n        if: ${{ always() }}");
     expect(intelCanaryScript).toContain("spctl --assess --type open");
     expect(notarizationScript.indexOf('["stapler", "validate", dmgPath]')).toBeLessThan(notarizationScript.indexOf('"/usr/sbin/spctl"'));
     expect(intelCanaryScript).toContain('launchctl setenv RELAYER_DESKTOP_USER_DATA_DIR "$update_user_data"');
-    expect(intelCanaryScript).toContain("trap restore_launch_environment EXIT");
+    expect(intelCanaryScript).toContain("trap preserve_failed_canary_diagnostics EXIT");
     expect(intelCanaryScript).toContain('runtime_directory="$(mktemp -d');
     expect(intelCanaryScript).toContain("--mode capture-installed");
+    expect(intelCanaryScript).toContain('updated_pid="$(target_process_id_from_trace');
+    expect(intelCanaryScript).toContain('terminate_process "$updated_pid" "Updater-relaunched Relayer"');
+    expect(intelCanaryScript).not.toContain('pkill -f "$application/Contents/MacOS/Relayer"');
+    expect(intelCanaryScript).toContain("macos-intel-preview-update.partial.jsonl");
     expect(intelCanaryScript).toContain('install -m 600 "$live_state_log" "$state_log"');
+    const updatedPidIndex = intelCanaryScript.indexOf('updated_pid="$(target_process_id_from_trace');
+    const updatedTerminateIndex = intelCanaryScript.indexOf('terminate_process "$updated_pid" "Updater-relaunched Relayer"');
+    const targetRelaunchIndex = intelCanaryScript.indexOf("--remote-debugging-port=9230");
     const targetKillIndex = intelCanaryScript.indexOf('kill "$target_pid"');
     const targetWaitIndex = intelCanaryScript.indexOf('wait "$target_pid"');
     const processCheckIndex = intelCanaryScript.indexOf('pgrep -f "$application/Contents/MacOS/Relayer"');
     const traceFreezeIndex = intelCanaryScript.indexOf('install -m 600 "$live_state_log" "$state_log"');
-    const evidenceSealIndex = intelCanaryScript.indexOf('node "$script_directory/canary-evidence.mjs"');
+    const evidenceSealIndex = intelCanaryScript.lastIndexOf('node "$script_directory/canary-evidence.mjs"');
+    expect(updatedPidIndex).toBeGreaterThan(-1);
+    expect(updatedPidIndex).toBeLessThan(updatedTerminateIndex);
+    expect(updatedTerminateIndex).toBeLessThan(targetRelaunchIndex);
     expect(targetKillIndex).toBeGreaterThan(-1);
     expect(targetKillIndex).toBeLessThan(targetWaitIndex);
     expect(targetWaitIndex).toBeLessThan(processCheckIndex);
