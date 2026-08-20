@@ -49,6 +49,7 @@ import {
 import {
   classifyStablePointer,
   promoteDesktopStable,
+  validateCanaryEvidenceFile,
   validateStablePromotionProvenance,
 } from "../desktop/release/promote-stable.mjs";
 import { apiUrl } from "../desktop/renderer/src/api.js";
@@ -1156,6 +1157,19 @@ describe("desktop skeleton", () => {
           installed: { file: "installed.png", sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
         },
       });
+      await writeFile(screenshots.ready, "available-image");
+      await expect(createDesktopCanaryEvidence({
+        targetReleaseReceiptPath: targetReceiptPath,
+        previewPublicationReceiptPath: publicationReceiptPath,
+        seedReleaseReceiptPath: seedReceiptPath,
+        stateLogPath,
+        screenshotPaths: screenshots,
+        outputPath,
+        environment: { host: "avd-relayer-win11", os: "Windows 11 24H2", architecture: "x64" },
+        running: true,
+        codeSignatureVerified: true,
+        platformAcceptanceVerified: true,
+      })).rejects.toThrow("Canary available, ready, and installed screenshots must be visually distinct.");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -1191,6 +1205,19 @@ describe("desktop skeleton", () => {
     expect(notarizationScript.indexOf('["stapler", "validate", dmgPath]')).toBeLessThan(notarizationScript.indexOf('"/usr/sbin/spctl"'));
     expect(intelCanaryScript).toContain('launchctl setenv RELAYER_DESKTOP_USER_DATA_DIR "$update_user_data"');
     expect(intelCanaryScript).toContain("trap restore_launch_environment EXIT");
+    expect(intelCanaryScript).toContain('runtime_directory="$(mktemp -d');
+    expect(intelCanaryScript).toContain("--mode capture-installed");
+    expect(intelCanaryScript).toContain('install -m 600 "$live_state_log" "$state_log"');
+    const targetKillIndex = intelCanaryScript.indexOf('kill "$target_pid"');
+    const targetWaitIndex = intelCanaryScript.indexOf('wait "$target_pid"');
+    const processCheckIndex = intelCanaryScript.indexOf('pgrep -f "$application/Contents/MacOS/Relayer"');
+    const traceFreezeIndex = intelCanaryScript.indexOf('install -m 600 "$live_state_log" "$state_log"');
+    const evidenceSealIndex = intelCanaryScript.indexOf('node "$script_directory/canary-evidence.mjs"');
+    expect(targetKillIndex).toBeGreaterThan(-1);
+    expect(targetKillIndex).toBeLessThan(targetWaitIndex);
+    expect(targetWaitIndex).toBeLessThan(processCheckIndex);
+    expect(processCheckIndex).toBeLessThan(traceFreezeIndex);
+    expect(traceFreezeIndex).toBeLessThan(evidenceSealIndex);
     const releaseRunbook = await readFile(new URL("../docs/desktop-release-operations.md", import.meta.url), "utf8");
     expect(releaseRunbook).toContain("repo:vishaltandale00@9222298/relayer-graphcomplete@1327816644:environment:desktop-production-windows");
     expect(releaseRunbook).not.toContain("subject: repo:vishaltandale00/relayer-graphcomplete:environment:desktop-production-windows");
@@ -1927,6 +1954,17 @@ describe("desktop skeleton", () => {
           { file, sha256: createHash("sha256").update(content).digest("hex") },
         ])),
       }));
+      const validCanaryEvidence = JSON.parse(await readFile(join(directory, canaryEvidenceName), "utf8"));
+      const duplicateCanaryEvidence = structuredClone(validCanaryEvidence);
+      duplicateCanaryEvidence.screenshots.ready = { ...duplicateCanaryEvidence.screenshots.available };
+      await writeFile(join(directory, canaryEvidenceName), JSON.stringify(duplicateCanaryEvidence));
+      const previewReceipt = JSON.parse(objects.get(receiptKey).body.toString("utf8"));
+      await expect(validateCanaryEvidenceFile({
+        filePath: join(directory, canaryEvidenceName),
+        version,
+        previewReceipt,
+      })).rejects.toThrow("Stable promotion requires visually distinct available, ready, and installed screenshots.");
+      await writeFile(join(directory, canaryEvidenceName), JSON.stringify(validCanaryEvidence));
       const stableEnvironment = {
         GITHUB_REF: "refs/heads/main",
         GITHUB_SHA: "d".repeat(40),

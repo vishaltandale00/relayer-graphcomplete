@@ -116,19 +116,21 @@ target_version="$(json_value "$target_receipt" version)"
 verify_dmg "$seed_dmg" "$seed_receipt"
 verify_dmg "$target_dmg" "$target_receipt"
 
-install_root="$evidence_directory/Applications"
+runtime_directory="$(mktemp -d "${TMPDIR:-/tmp}/relayer-intel-canary.XXXXXX")"
+install_root="$runtime_directory/Applications"
 application="$install_root/Relayer.app"
 mkdir -p "$install_root"
 first_install_screenshot="$evidence_directory/macos-intel-target-first-install.png"
 available_screenshot="$evidence_directory/macos-intel-preview-available.png"
 ready_screenshot="$evidence_directory/macos-intel-preview-ready.png"
 installed_screenshot="$evidence_directory/macos-intel-preview-installed.png"
+live_state_log="$runtime_directory/macos-intel-preview-update.live.jsonl"
 state_log="$evidence_directory/macos-intel-preview-update.jsonl"
 output="$evidence_directory/macos-intel-preview-canary.json"
 
 install_dmg "$target_dmg" "$application"
 verify_app "$application" "$target_version"
-RELAYER_DESKTOP_USER_DATA_DIR="$evidence_directory/first-install-user-data" \
+RELAYER_DESKTOP_USER_DATA_DIR="$runtime_directory/first-install-user-data" \
   "$application/Contents/MacOS/Relayer" --remote-debugging-port=9228 >"$evidence_directory/first-install.log" 2>&1 &
 first_install_pid=$!
 node "$script_directory/electron-cdp-canary.mjs" --mode capture --port 9228 --screenshot "$first_install_screenshot" --timeout-seconds 60
@@ -137,10 +139,10 @@ wait "$first_install_pid" >/dev/null 2>&1 || true
 
 install_dmg "$seed_dmg" "$application"
 verify_app "$application" "$seed_version"
-update_user_data="$evidence_directory/update-user-data"
+update_user_data="$runtime_directory/update-user-data"
 mkdir -p "$update_user_data"
 printf '%s\n' '{"appearance":"light","updateChannel":"preview"}' >"$update_user_data/desktop-settings.json"
-rm -f "$state_log"
+rm -f "$live_state_log" "$state_log"
 previous_user_data="$(launchctl getenv RELAYER_DESKTOP_USER_DATA_DIR 2>/dev/null || true)"
 previous_canary_log="$(launchctl getenv RELAYER_DESKTOP_CANARY_LOG 2>/dev/null || true)"
 restore_launch_environment() {
@@ -157,9 +159,9 @@ restore_launch_environment() {
 }
 trap restore_launch_environment EXIT
 launchctl setenv RELAYER_DESKTOP_USER_DATA_DIR "$update_user_data"
-launchctl setenv RELAYER_DESKTOP_CANARY_LOG "$state_log"
+launchctl setenv RELAYER_DESKTOP_CANARY_LOG "$live_state_log"
 RELAYER_DESKTOP_USER_DATA_DIR="$update_user_data" \
-RELAYER_DESKTOP_CANARY_LOG="$state_log" \
+RELAYER_DESKTOP_CANARY_LOG="$live_state_log" \
   "$application/Contents/MacOS/Relayer" --remote-debugging-port=9229 >"$evidence_directory/seed-update.log" 2>&1 &
 seed_pid=$!
 node "$script_directory/electron-cdp-canary.mjs" \
@@ -169,17 +171,33 @@ node "$script_directory/electron-cdp-canary.mjs" \
   --screenshot-available "$available_screenshot" \
   --screenshot-ready "$ready_screenshot" \
   --timeout-seconds "$timeout_seconds"
-wait_for_target_trace "$state_log" "$target_version" "$seed_pid"
+wait_for_target_trace "$live_state_log" "$target_version" "$seed_pid"
 verify_app "$application" "$target_version"
 
 pkill -f "$application/Contents/MacOS/Relayer" >/dev/null 2>&1 || true
 sleep 2
 RELAYER_DESKTOP_USER_DATA_DIR="$update_user_data" \
-RELAYER_DESKTOP_CANARY_LOG="$state_log" \
+RELAYER_DESKTOP_CANARY_LOG="$live_state_log" \
   "$application/Contents/MacOS/Relayer" --remote-debugging-port=9230 >"$evidence_directory/target-relaunch.log" 2>&1 &
 target_pid=$!
-node "$script_directory/electron-cdp-canary.mjs" --mode capture --port 9230 --screenshot "$installed_screenshot" --timeout-seconds 60
-kill -0 "$target_pid"
+node "$script_directory/electron-cdp-canary.mjs" \
+  --mode capture-installed \
+  --port 9230 \
+  --target-version "$target_version" \
+  --screenshot "$installed_screenshot" \
+  --timeout-seconds 60
+if ! kill "$target_pid"; then
+  echo "Relayer exited before final Intel canary teardown." >&2
+  exit 1
+fi
+wait "$target_pid" >/dev/null 2>&1 || true
+if pgrep -f "$application/Contents/MacOS/Relayer" >/dev/null; then
+  echo "Relayer is still running after the final Intel canary capture." >&2
+  exit 1
+fi
+restore_launch_environment
+trap - EXIT
+install -m 600 "$live_state_log" "$state_log"
 
 node "$script_directory/canary-evidence.mjs" \
   --target-release-receipt "$target_receipt" \
@@ -198,6 +216,4 @@ node "$script_directory/canary-evidence.mjs" \
   --signature-verified true \
   --platform-acceptance-verified true
 
-restore_launch_environment
-trap - EXIT
 echo "Intel macOS canary evidence written to $output"

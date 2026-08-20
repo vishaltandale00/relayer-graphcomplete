@@ -251,6 +251,14 @@ export async function createDesktopCanaryEvidence({
     if (source !== destination) await copyFile(source, destination);
     screenshots[name] = { file, sha256: await sha256File(destination) };
   }
+  const updaterStateScreenshotHashes = new Set([
+    screenshots.available.sha256,
+    screenshots.ready.sha256,
+    screenshots.installed.sha256,
+  ]);
+  if (updaterStateScreenshotHashes.size !== 3) {
+    throw new Error("Canary available, ready, and installed screenshots must be visually distinct.");
+  }
 
   const artifactSha256 = Object.fromEntries(candidate.primaryNames.map((name) => [
     name,
