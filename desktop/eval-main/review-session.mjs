@@ -32,12 +32,20 @@ function validateState(executionId, state) {
   if (!state || state.executionId !== executionId) {
     throw new Error("The production workspace returned state for another evaluation execution.");
   }
-  if (!state.threadId || !state.turnId || !state.layerId) {
-    throw new Error("The production review workspace has no selected thread, turn, and layer.");
+  if (!state.threadId || !state.turnId) {
+    throw new Error("The production review workspace has no selected thread and turn.");
   }
   if (!Array.isArray(state.navigationPath) || state.navigationPath.some((entry) => (
     !entry?.layerId || !(entry.viaActionId === null || typeof entry.viaActionId === "string")
   ))) throw new Error("The production review workspace returned an invalid navigation path.");
+  const hasLayer = state.layerId !== null && state.layerId !== undefined;
+  if (
+    (!hasLayer && (state.navigationPath.length > 0 || state.selectedNodeId != null))
+    || (hasLayer && (
+      state.navigationPath.length === 0
+      || String(state.navigationPath.at(-1)?.layerId) !== String(state.layerId)
+    ))
+  ) throw new Error("The production review workspace returned inconsistent layer state.");
   if (!state.viewport || !Number.isFinite(state.viewport.width) || !Number.isFinite(state.viewport.height)) {
     throw new Error("The production review workspace returned an invalid viewport.");
   }
@@ -46,7 +54,7 @@ function validateState(executionId, state) {
     executionId: String(state.executionId),
     threadId: String(state.threadId),
     turnId: String(state.turnId),
-    layerId: String(state.layerId),
+    layerId: hasLayer ? String(state.layerId) : null,
     selectedNodeId: state.selectedNodeId === null || state.selectedNodeId === undefined
       ? null
       : String(state.selectedNodeId),
@@ -108,8 +116,7 @@ export class ReviewSession {
     this.ipc = ipc;
     this.commandTimeoutMs = commandTimeoutMs;
     this.readyTimeoutMs = readyTimeoutMs;
-    this.historyEntries = [];
-    this.historyIndex = -1;
+    this.opened = false;
     this.interactionTrace = [];
     this.artifacts = new Map();
   }
@@ -133,8 +140,7 @@ export class ReviewSession {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
     }
-    this.historyEntries = [structuredClone(state)];
-    this.historyIndex = 0;
+    this.opened = true;
     this.interactionTrace.push({ type: "session-opened", at: new Date().toISOString(), state: structuredClone(state) });
     return structuredClone(state);
   }
@@ -237,7 +243,6 @@ export class ReviewSession {
     if (control.disabled) throw new Error(`Review control is disabled: ${elementRef}`);
     await this.#rendererCommand("activate", { elementRef, operation: "activate" });
     const after = await this.#waitForInteractionState(before, control);
-    this.#appendHistory(after);
     this.interactionTrace.push({
       type: "interact",
       at: new Date().toISOString(),
@@ -254,24 +259,21 @@ export class ReviewSession {
     if (!Number.isSafeInteger(delta) || delta === 0) {
       throw new Error("History delta must be a non-zero signed integer.");
     }
-    const targetIndex = this.historyIndex + delta;
-    if (targetIndex < 0 || targetIndex >= this.historyEntries.length) {
-      throw new Error(`History delta ${delta} is outside the review session history.`);
-    }
-    const expected = this.historyEntries[targetIndex];
-    const restored = validateState(this.executionId, await this.#rendererCommand("restore", expected));
-    if (presentationKey(restored) !== presentationKey(expected)) {
+    const restored = validateState(
+      this.executionId,
+      await this.#rendererCommand("history", { delta }),
+    );
+    const observed = validateState(this.executionId, await this.#rendererCommand("snapshot"));
+    if (presentationKey(observed) !== presentationKey(restored)) {
       throw new Error("The production workspace did not restore the requested review history state.");
     }
-    this.historyIndex = targetIndex;
     this.interactionTrace.push({
       type: "history",
       at: new Date().toISOString(),
       delta,
-      historyIndex: targetIndex,
-      state: structuredClone(restored),
+      state: structuredClone(observed),
     });
-    return { ok: true, state: reviewUiState(restored) };
+    return { ok: true, state: reviewUiState(observed) };
   }
 
   trace() {
@@ -282,13 +284,6 @@ export class ReviewSession {
     return this.artifacts.get(screenshotId) || null;
   }
 
-  #appendHistory(state) {
-    if (presentationKey(state) === presentationKey(this.historyEntries[this.historyIndex])) return;
-    this.historyEntries.splice(this.historyIndex + 1);
-    this.historyEntries.push(structuredClone(state));
-    this.historyIndex = this.historyEntries.length - 1;
-  }
-
   async #waitForInteractionState(before, control) {
     const deadline = Date.now() + this.commandTimeoutMs;
     let current = validateState(this.executionId, await this.#rendererCommand("snapshot"));
@@ -297,17 +292,21 @@ export class ReviewSession {
       if (control.kind === "navigate-action") return state.layerId !== before.layerId;
       if (control.kind === "turn") return state.turnId !== before.turnId;
       if (control.kind === "thread") return state.threadId !== before.threadId;
+      if (control.kind === "history") return presentationKey(state) !== presentationKey(before);
       return true;
     };
     while (!changedAsExpected(current) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25));
       current = validateState(this.executionId, await this.#rendererCommand("snapshot"));
     }
+    if (!changedAsExpected(current)) {
+      throw new Error(`Review control did not change the expected presentation: ${control.elementRef}`);
+    }
     return current;
   }
 
   #assertOpen() {
-    if (this.historyIndex < 0) throw new Error("ReviewSession must be opened before using tools.");
+    if (!this.opened) throw new Error("ReviewSession must be opened before using tools.");
     if (this.webContents.isDestroyed?.()) throw new Error("The production review window is closed.");
   }
 

@@ -74,14 +74,53 @@ function validateMode(mode) {
   }
 }
 
+function logicalPresentationKey(presentation) {
+  return JSON.stringify({
+    threadId: presentation?.threadId ?? null,
+    turnId: presentation?.turnId ?? null,
+    layerId: presentation?.layerId ?? null,
+    selectedNodeId: presentation?.selectedNodeId ?? null,
+    navigationPath: Array.isArray(presentation?.navigationPath)
+      ? presentation.navigationPath.map((entry) => [
+        String(entry.layerId),
+        entry.viaActionId == null ? null : String(entry.viaActionId),
+      ])
+      : [],
+  });
+}
+
+function canonicalNavigationPath(path) {
+  return (path || []).map((entry) => ({
+    layerId: String(entry.layerId),
+    viaActionId: entry.viaActionId == null ? null : String(entry.viaActionId),
+  }));
+}
+
+function activatedActionForPath(path) {
+  return [...path].reverse().find((entry) => entry.viaActionId !== null)?.viaActionId ?? null;
+}
+
+function presentationIsInternallyConsistent(presentation) {
+  if (presentation?.threadId == null || presentation?.turnId == null) return false;
+  if (!Array.isArray(presentation.navigationPath)) return false;
+  if (presentation.layerId == null) {
+    return presentation.navigationPath.length === 0 && presentation.selectedNodeId == null;
+  }
+  return presentation.navigationPath.length > 0
+    && String(presentation.navigationPath.at(-1)?.layerId) === String(presentation.layerId);
+}
+
 export function createReviewPresentationAdapter({
   executionId,
   getPresentationState,
-  restorePresentationState,
+  navigateHistory,
   root = document,
   windowObject = window,
 }) {
   if (!executionId) throw new Error("A review presentation adapter requires an execution ID.");
+  if (typeof navigateHistory !== "function") {
+    throw new Error("A review presentation adapter requires workspace history navigation.");
+  }
   let automaticReference = 0;
   const automaticReferences = new WeakMap();
   const referencedElements = new Map();
@@ -120,8 +159,13 @@ export function createReviewPresentationAdapter({
 
   function snapshot() {
     const presentation = getPresentationState();
-    if (!navigationPath.length && presentation.layerId) {
-      navigationPath = [{ layerId: presentation.layerId, viaActionId: null }];
+    if (Array.isArray(presentation.navigationPath)) {
+      navigationPath = canonicalNavigationPath(presentation.navigationPath);
+    } else if (!navigationPath.length && presentation.layerId) {
+      navigationPath = [{ layerId: String(presentation.layerId), viaActionId: null }];
+    }
+    if (Object.hasOwn(presentation, "activatedActionId")) {
+      activatedActionId = presentation.activatedActionId ?? null;
     }
     return {
       executionId,
@@ -228,22 +272,29 @@ export function createReviewPresentationAdapter({
     const actionId = element.dataset.reviewActionId || null;
     const breadcrumbPathIndex = Number(element.dataset.reviewPathIndex);
     element.click();
+    let settled = false;
     for (let frame = 0; frame < 120; frame++) {
       await nextFrame(windowObject);
       const current = getPresentationState();
-      const settled = kind === "navigate-action" ? current.layerId !== before.layerId
+      settled = kind === "navigate-action" ? current.layerId !== before.layerId
         : kind === "layer-navigation" ? (
           current.layerId !== before.layerId
           || current.selectedNodeId !== before.selectedNodeId
         )
         : kind === "turn" ? current.turnId !== before.turnId
-          : kind === "thread" ? current.threadId !== before.threadId
-            : true;
+          : kind === "thread" ? (
+            current.threadId !== before.threadId
+            && presentationIsInternallyConsistent(current)
+          )
+            : kind === "history" ? logicalPresentationKey(current) !== logicalPresentationKey(before)
+              : true;
       if (settled) break;
     }
+    if (!settled) throw new Error(`Review control did not change the expected presentation: ${elementRef}`);
     const after = getPresentationState();
-    activatedActionId = actionId;
-    if (actionId && kind === "navigate-action" && after.layerId !== before.layerId) {
+    if (Array.isArray(after.navigationPath)) {
+      navigationPath = canonicalNavigationPath(after.navigationPath);
+    } else if (actionId && kind === "navigate-action" && after.layerId !== before.layerId) {
       navigationPath.push({ layerId: after.layerId, viaActionId: actionId });
     } else if (kind === "layer-navigation") {
       navigationPath = Number.isInteger(breadcrumbPathIndex)
@@ -252,14 +303,25 @@ export function createReviewPresentationAdapter({
     } else if (["turn", "thread"].includes(kind)) {
       navigationPath = after.layerId ? [{ layerId: after.layerId, viaActionId: null }] : [];
     }
+    activatedActionId = ["history", "layer-navigation"].includes(kind)
+      ? activatedActionForPath(navigationPath)
+      : kind === "navigate-action" ? String(actionId)
+        : null;
     return snapshot();
   }
 
-  async function restore(state) {
-    if (state.executionId !== executionId) throw new Error("Review history belongs to another execution.");
-    await restorePresentationState(state);
-    activatedActionId = state.activatedActionId ?? null;
-    navigationPath = Array.isArray(state.navigationPath) ? [...state.navigationPath] : [];
+  async function history({ delta } = {}) {
+    if (!Number.isSafeInteger(delta) || delta === 0) {
+      throw new Error("History delta must be a non-zero signed integer.");
+    }
+    const committed = await navigateHistory(delta);
+    if (Array.isArray(committed?.navigationPath)) {
+      navigationPath = canonicalNavigationPath(committed.navigationPath);
+      activatedActionId = activatedActionForPath(navigationPath);
+    }
+    if (committed && Object.hasOwn(committed, "activatedActionId")) {
+      activatedActionId = committed.activatedActionId ?? null;
+    }
     await nextFrame(windowObject);
     return snapshot();
   }
@@ -270,6 +332,6 @@ export function createReviewPresentationAdapter({
     prepareCaptureTile,
     restoreCapture,
     activate,
-    restore,
+    history,
   });
 }
