@@ -31,6 +31,7 @@ let editSnapshot = null;
 let draftSequence = 0;
 let loading = false;
 let savingFamily = false;
+let savingOrder = false;
 
 function provider(providerId) {
   return settings.providers.find((candidate) => candidate.id === providerId);
@@ -247,8 +248,8 @@ function familySlide(family, index) {
       </div>
       <ol class="family-members">${family.models.map(memberReadOnly).join("")}</ol>
       <div class="family-card-actions">
-        <button type="button" class="secondary" data-family-left="${index}" ${index === 0 ? "disabled" : ""}>← Move</button>
-        <button type="button" class="secondary" data-family-right="${index}" ${index === settings.families.length - 1 ? "disabled" : ""}>Move →</button>
+        <button type="button" class="secondary" data-family-left="${index}" ${savingOrder || index === 0 ? "disabled" : ""}>← Move</button>
+        <button type="button" class="secondary" data-family-right="${index}" ${savingOrder || index === settings.families.length - 1 ? "disabled" : ""}>Move →</button>
         <span class="push"></span>
         ${system
           ? `<button type="button" class="secondary" data-family-copy="${index}">Copy</button>`
@@ -303,6 +304,8 @@ function updateCurrentFamily(mutator) {
 }
 
 async function persistFamilyOrder(fromIndex, toIndex) {
+  if (savingOrder) return;
+  savingOrder = true;
   const previous = settings.families;
   settings.families = moveItem(settings.families, fromIndex, toIndex);
   selectedFamilyIndex = toIndex;
@@ -313,8 +316,10 @@ async function persistFamilyOrder(fromIndex, toIndex) {
   } catch (error) {
     settings.families = previous;
     selectedFamilyIndex = fromIndex;
-    render();
     toast(error.message);
+  } finally {
+    savingOrder = false;
+    render();
   }
 }
 

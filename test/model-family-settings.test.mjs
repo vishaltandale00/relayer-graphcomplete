@@ -241,5 +241,8 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("refreshNewThreadModelPicker();");
     expect(settingsSource).toContain('$("#familyNameInput").value = current.name;');
     expect(settingsSource).not.toContain('value="${escapeHtml(family.name)}"');
+    expect(settingsSource).toContain("if (savingOrder) return;");
+    expect(settingsSource).toContain('savingOrder || index === 0 ? "disabled"');
+    expect(settingsSource).toContain('savingOrder || index === settings.families.length - 1 ? "disabled"');
   });
 });
