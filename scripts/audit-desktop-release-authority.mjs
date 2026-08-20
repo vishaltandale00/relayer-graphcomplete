@@ -65,7 +65,7 @@ function refIncludes(ruleset, expected) {
   return (ruleset?.conditions?.ref_name?.include || []).includes(expected);
 }
 
-export function evaluateDesktopReleaseAuthority(snapshot) {
+export function evaluateDesktopReleaseAuthority(snapshot, { windowsCandidateEnabled = false } = {}) {
   const results = [];
   const record = (passed, label) => results.push({ passed: Boolean(passed), label });
 
@@ -74,6 +74,9 @@ export function evaluateDesktopReleaseAuthority(snapshot) {
 
   for (const [name, expected] of Object.entries(ENVIRONMENTS)) {
     const environment = snapshot.environments?.[name];
+    const requiredVariables = name === "desktop-production-windows" && !windowsCandidateEnabled
+      ? expected.variables.filter((variable) => variable !== "RELAYER_WINDOWS_PUBLISHER_NAME")
+      : expected.variables;
     record(Boolean(environment), `environment ${name} exists`);
     record(
       environment?.protection_rules?.some((rule) => rule.type === "branch_policy"),
@@ -81,7 +84,7 @@ export function evaluateDesktopReleaseAuthority(snapshot) {
     );
     record(matchesExactly(environment?.branches || [], expected.branches), `environment ${name} allows only its required refs`);
     record(includesAll(environment?.secrets || [], expected.secrets), `environment ${name} has required secret names`);
-    record(includesAll(environment?.variables || [], expected.variables), `environment ${name} has required variable names`);
+    record(includesAll(environment?.variables || [], requiredVariables), `environment ${name} has required variable names`);
   }
 
   record(
@@ -169,9 +172,12 @@ export async function readDesktopReleaseAuthority(repository = DEFAULT_REPOSITOR
 }
 
 async function main() {
-  const repository = process.argv[2] || DEFAULT_REPOSITORY;
+  const arguments_ = process.argv.slice(2);
+  const windowsCandidateEnabled = arguments_.includes("--include-windows-candidate");
+  const repository = arguments_.find((argument) => !argument.startsWith("--")) || DEFAULT_REPOSITORY;
   const snapshot = await readDesktopReleaseAuthority(repository);
-  const results = evaluateDesktopReleaseAuthority(snapshot);
+  const results = evaluateDesktopReleaseAuthority(snapshot, { windowsCandidateEnabled });
+  console.log(`INFO  Windows candidate authority is ${windowsCandidateEnabled ? "included" : "excluded"} from this audit.`);
   for (const result of results) {
     console.log(`${result.passed ? "PASS" : "FAIL"}  ${result.label}`);
   }

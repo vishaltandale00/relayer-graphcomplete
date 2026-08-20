@@ -986,7 +986,12 @@ describe("desktop skeleton", () => {
     expect(evaluateDesktopReleaseAuthority(snapshot).every((result) => result.passed)).toBe(true);
     snapshot.environments["desktop-production-windows"].variables.pop();
     mainRuleset.enforcement = "disabled";
-    const failures = evaluateDesktopReleaseAuthority(snapshot).filter((result) => !result.passed);
+    const disabledWindowsFailures = evaluateDesktopReleaseAuthority(snapshot).filter((result) => !result.passed);
+    expect(disabledWindowsFailures.map((failure) => failure.label)).not.toContain(
+      "environment desktop-production-windows has required variable names",
+    );
+    const failures = evaluateDesktopReleaseAuthority(snapshot, { windowsCandidateEnabled: true })
+      .filter((result) => !result.passed);
     expect(failures.map((failure) => failure.label)).toEqual(expect.arrayContaining([
       "environment desktop-production-windows has required variable names",
       "an active ruleset targets main",
@@ -1135,13 +1140,17 @@ describe("desktop skeleton", () => {
     const stableWorkflow = await readFile(new URL("../.github/workflows/desktop-promote-stable.yml", import.meta.url), "utf8");
     const intelCanaryWorkflow = await readFile(new URL("../.github/workflows/desktop-intel-canary.yml", import.meta.url), "utf8");
     const intelCanaryScript = await readFile(new URL("../desktop/release/run-macos-intel-canary.sh", import.meta.url), "utf8");
-    expect(releaseWorkflow).toContain('if: startsWith(github.ref, \'refs/tags/desktop-v\')');
+    expect(releaseWorkflow).toContain("if: ${{ always() && startsWith(github.ref, 'refs/tags/desktop-v') }}");
     expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main');
     expect(releaseWorkflow).toContain("uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca");
     expect(releaseWorkflow).toContain("subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}");
     expect(releaseWorkflow).toContain("AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}");
     expect(releaseWorkflow).toContain("RELAYER_WINDOWS_PUBLISHER_NAME: ${{ vars.RELAYER_WINDOWS_PUBLISHER_NAME }}");
     expect(releaseWorkflow).toContain("Missing required Windows signing variable");
+    expect(releaseWorkflow).toContain("if: ${{ false }}");
+    expect(releaseWorkflow).toContain("needs: [package-macos]");
+    expect(releaseWorkflow).toContain("target: [macos-arm64, macos-x64]");
+    expect(releaseWorkflow).not.toContain("needs: [package-macos, package-windows]");
     expect(releaseWorkflow).not.toContain("AZURE_FEDERATED_TOKEN_FILE");
     expect(releaseWorkflow).toContain("environment:\n      name: desktop-update-preview");
     expect(stableWorkflow).toContain("workflow_dispatch:");
@@ -1698,25 +1707,32 @@ describe("desktop skeleton", () => {
 
       const objects = new Map();
       const writes = [];
-      const probes = [];
+      const releaseObjectPrefix = `desktop/macos/arm64/releases/${version}`;
+      let deniedPutKey = `${releaseObjectPrefix}/${dmg.name}`;
+      const raceOnceKey = `${releaseObjectPrefix}/${dmgBlockmap.name}`;
+      const stableHistoryKey = `private/history/macos-arm64/latest/${version}/latest-mac.yml`;
+      const conflictOnceKeys = new Set([`${releaseObjectPrefix}/${zipBlockmap.name}`, stableHistoryKey]);
+      const conditionalConflicts = new Set();
+      const conditionalRaces = new Set();
       const argument = (args, name) => args[args.indexOf(name) + 1];
+      const objectFromPut = async (args) => {
+        const body = await readFile(argument(args, "--body"));
+        return {
+          body,
+          metadata: Object.fromEntries(argument(args, "--metadata").split(",").map((item) => item.split("="))),
+          checksumSha256: argument(args, "--checksum-sha256"),
+          etag: `"${createHash("sha256").update(body).digest("hex").slice(0, 32)}"`,
+        };
+      };
       const execute = async (command, args) => {
         expect(command).toBe("aws");
         const operation = args[1];
         const key = argument(args, "--key");
-        if (operation === "list-objects-v2") {
-          const prefix = argument(args, "--prefix");
-          probes.push(prefix);
-          expect(argument(args, "--max-keys")).toBe("1");
-          return { stdout: JSON.stringify({
-            Contents: objects.has(prefix) ? [{ Key: prefix }] : [],
-          }) };
-        }
         if (operation === "head-object") {
           const object = objects.get(key);
           if (!object) {
-            const error = new Error("Not Found");
-            error.stderr = "404 Not Found";
+            const error = new Error("Forbidden");
+            error.stderr = "An error occurred (403) when calling the HeadObject operation: Forbidden";
             throw error;
           }
           return { stdout: JSON.stringify({
@@ -1733,19 +1749,26 @@ describe("desktop skeleton", () => {
           return { stdout: "{}" };
         }
         if (operation !== "put-object") throw new Error(`unexpected AWS operation ${operation}`);
+        if (key === deniedPutKey) {
+          const error = new Error("AccessDenied");
+          error.stderr = "An error occurred (AccessDenied) when calling the PutObject operation: 403 Forbidden";
+          throw error;
+        }
         const existing = objects.get(key);
+        if (args.includes("--if-none-match") && key === raceOnceKey && !conditionalRaces.has(key)) {
+          objects.set(key, await objectFromPut(args));
+          conditionalRaces.add(key);
+          throw new Error("PreconditionFailed 412");
+        }
         if (args.includes("--if-none-match") && existing) throw new Error("PreconditionFailed");
+        if (args.includes("--if-none-match") && conflictOnceKeys.has(key) && !conditionalConflicts.has(key)) {
+          conditionalConflicts.add(key);
+          throw new Error("ConditionalRequestConflict 409");
+        }
         if (args.includes("--if-match") && existing?.etag !== argument(args, "--if-match")) {
           throw new Error("PreconditionFailed");
         }
-        const body = await readFile(argument(args, "--body"));
-        const metadata = Object.fromEntries(argument(args, "--metadata").split(",").map((item) => item.split("=")));
-        const object = {
-          body,
-          metadata,
-          checksumSha256: argument(args, "--checksum-sha256"),
-          etag: `"${createHash("sha256").update(body).digest("hex").slice(0, 32)}"`,
-        };
+        const object = await objectFromPut(args);
         objects.set(key, object);
         writes.push(key);
         return { stdout: JSON.stringify({ ETag: object.etag }) };
@@ -1776,9 +1799,21 @@ describe("desktop skeleton", () => {
         environment,
         execute,
         fetchImpl,
+      })).rejects.toThrow("AccessDenied");
+      expect(objects.has(pointerKey)).toBe(false);
+      deniedPutKey = null;
+
+      await expect(publishDesktopPreview({
+        bucket: "updates",
+        distRoot: directory,
+        environment,
+        execute,
+        fetchImpl,
       })).rejects.toThrow("Public update object is unavailable");
       expect(objects.has(pointerKey)).toBe(false);
       expect(objects.has(receiptKey)).toBe(false);
+      expect(conditionalRaces.has(raceOnceKey)).toBe(true);
+      expect(conditionalConflicts.has(`${releaseObjectPrefix}/${zipBlockmap.name}`)).toBe(true);
 
       failPublicArtifact = false;
       await expect(publishDesktopPreview({
@@ -1804,8 +1839,6 @@ describe("desktop skeleton", () => {
         fetchImpl,
       })).resolves.toMatchObject({ receipt: { workflowRunAttempt: "1" } });
       expect(writes).toEqual(writesAfterSuccess);
-      expect(probes.length).toBeGreaterThan(0);
-      expect(probes.every((prefix) => typeof prefix === "string" && !prefix.endsWith("/"))).toBe(true);
 
       const screenshotFixtures = Object.fromEntries(["first-install", "available", "ready", "installed"].map((name) => [
         name,
@@ -1890,11 +1923,11 @@ describe("desktop skeleton", () => {
         },
       });
       const stablePointerKey = "desktop/macos/arm64/latest-mac.yml";
-      const stableHistoryKey = `private/history/macos-arm64/latest/${version}/latest-mac.yml`;
       const stableReceiptKey = `private/receipts/macos-arm64/stable/${version}.json`;
       expect(objects.get(stablePointerKey).body).toEqual(objects.get(pointerKey).body);
       expect(writes.indexOf(stablePointerKey)).toBeGreaterThan(writes.indexOf(stableHistoryKey));
       expect(writes.indexOf(stableReceiptKey)).toBeGreaterThan(writes.indexOf(stablePointerKey));
+      expect(conditionalConflicts.has(stableHistoryKey)).toBe(true);
 
       await writeFile(join(directory, canaryTraceName), `${canaryTrace}\n{}`);
       await expect(promoteDesktopStable({

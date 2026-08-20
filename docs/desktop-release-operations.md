@@ -8,9 +8,9 @@ This runbook covers the operator-controlled steps around the code-owned release 
 | --- | --- | --- | --- | --- |
 | `macos-arm64` | Developer ID DMG and updater ZIP | `desktop/macos/arm64/beta-mac.yml` | `desktop/macos/arm64/latest-mac.yml` | Physical or remote Apple Silicon Mac |
 | `macos-x64` | Developer ID DMG and updater ZIP | `desktop/macos/x64/beta-mac.yml` | `desktop/macos/x64/latest-mac.yml` | GitHub `macos-15-intel`; physical Intel Mac remains stronger final proof |
-| `windows-x64` | Azure Artifact Signing NSIS installer | `desktop/windows/x64/beta.yml` | `desktop/windows/x64/latest.yml` | Interactive Windows 11 Azure Virtual Desktop |
+| `windows-x64` | **Blocked; pipeline disabled.** Azure Artifact Signing NSIS installer is implemented but unverified. | `desktop/windows/x64/beta.yml` | `desktop/windows/x64/latest.yml` | Interactive Windows 11 Azure Virtual Desktop |
 
-All three targets for a version come from one commit. Preview publication and Stable promotion happen independently per target.
+Enabled targets for a version come from one commit. Preview publication and Stable promotion happen independently per target. Windows is disabled until the exact publisher variable exists, Azure signing succeeds, and the interactive canary passes.
 
 ## One-time Windows signing setup
 
@@ -72,28 +72,41 @@ Run the read-only live audit before every release-control change and before crea
 npm run desktop:release:audit-authority
 ```
 
-The audit checks environment branch policies, required Apple secret names, required Azure variable names, AWS OIDC variable names, the immutable GitHub OIDC subject prefix, and active branch/tag rules. It reads names only and never prints secret or variable values. A failure is a release blocker, not permission to weaken the workflow or audit.
+This default audit excludes the disabled Windows candidate. It still checks the existing Azure identity variables but does not require the missing publisher name. Before enabling the Windows candidate, run `npm run desktop:release:audit-authority -- --include-windows-candidate`. That mode requires every Windows variable. The selected audit mode must match the enabled workflow targets.
+
+The audit checks environment branch policies, target-required secret and variable names, AWS OIDC variable names, the immutable GitHub OIDC subject prefix, and active branch/tag rules. It reads names only and never prints secret or variable values. A failure for an enabled target is a release blocker, not permission to weaken the workflow or audit.
 
 ## Candidate and Preview sequence
 
 1. Merge reviewed release changes to `main`.
 2. Increment `desktop/package.json` to one numeric version shared by all targets.
 3. Run `npm run check` and `npm run build` from the exact commit.
-4. Run `Desktop Signed Preview Candidates` manually to prove all three signing jobs without publication.
+4. Run `Desktop Signed Preview Candidates` manually to prove both enabled macOS signing jobs without publication.
 5. Review every release receipt and installer signature.
 6. Create `desktop-vX.Y.Z` on that exact `main` commit only after explicit publication approval.
-7. The tagged workflow publishes immutable artifacts for each target and moves each Preview pointer last.
+7. The tagged workflow publishes immutable artifacts for each enabled target and moves each Preview pointer last.
 
-### First Intel and Windows rollout
+### First Intel rollout
 
-Intel macOS and Windows do not yet have an older published Preview that can seed an updater canary. The initial rollout therefore needs two reviewed versions:
+Intel macOS does not yet have an older published Preview that can seed an updater canary. Its initial rollout needs two reviewed versions:
 
-1. Publish `0.2.6` as the bootstrap Preview for all three targets after signing and artifact review.
-2. Bump only the desktop version to `0.2.7`, rerun the full signed-candidate workflow, and publish it as the target Preview.
-3. Exercise `0.2.6` to `0.2.7` on native Intel macOS and interactive Windows 11.
-4. Commit the sealed canary evidence and promote `0.2.7` independently for each target.
+1. Publish the next reviewed version as the Intel bootstrap Preview after signing and artifact review.
+2. Bump the desktop version again, rerun the signed-candidate workflow, and publish it as the Intel target Preview.
+3. Exercise the bootstrap-to-target update on native Intel macOS.
+4. Commit the sealed canary evidence and promote the target version for Intel.
 
-Do not promote the bootstrap version to Stable. Existing Apple Silicon Preview `0.2.5` and Stable `0.2.4` remain valid independent feed history.
+Do not promote the bootstrap version to Stable. Existing Apple Silicon Preview `0.2.5` and Stable `0.2.4` remain valid independent feed history. The immutable `desktop-v0.2.6` tag predates the target-aware publisher and is not an Intel or Windows bootstrap candidate.
+
+### Windows rollout blocker
+
+The Windows workflow path is implemented but disabled. Use this sequence:
+
+1. Complete identity validation and set the exact `RELAYER_WINDOWS_PUBLISHER_NAME` value.
+2. Enable only the Windows candidate job and run the Windows-inclusive authority audit.
+3. Run the manual workflow and verify the Azure-signed installer and receipt. Manual runs cannot publish.
+4. Add Windows Preview publication and publish two new reviewed Windows versions.
+5. Prove the bootstrap-to-target update in the interactive Windows 11 AVD session.
+6. Allow Windows Stable promotion only after the committed canary evidence passes review.
 
 The manual run cannot publish. The tag run rejects a tag/version mismatch and a commit outside `origin/main`.
 
