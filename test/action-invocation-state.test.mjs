@@ -3,6 +3,7 @@ import {
   actionWasInvoked,
   reconcileActionTransitions,
   visibleLayerAfterRefresh,
+  withoutPendingActionInvocation,
 } from "../desktop/renderer/src/action-invocation-state.js";
 
 describe("durable action invocation renderer state", () => {
@@ -26,6 +27,17 @@ describe("durable action invocation renderer state", () => {
       1,
       2,
     )).toBe(false);
+  });
+
+  it("clears only the rejected action's optimistic lock", () => {
+    expect(withoutPendingActionInvocation([
+      { sourceInteractionId: 1, actionId: 2 },
+      { sourceInteractionId: 1, actionId: 3 },
+      { sourceInteractionId: 4, actionId: 2 },
+    ], "1", "2")).toEqual([
+      { sourceInteractionId: 1, actionId: 3 },
+      { sourceInteractionId: 4, actionId: 2 },
+    ]);
   });
 
   it("keeps the source selected while running and advances it only on acceptance", () => {

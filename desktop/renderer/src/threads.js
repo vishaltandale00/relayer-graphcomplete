@@ -2,6 +2,7 @@ import { request } from "./api.js";
 import {
   actionWasInvoked,
   visibleLayerAfterRefresh,
+  withoutPendingActionInvocation,
 } from "./action-invocation-state.js";
 import {
   createAcceptedLayerCache,
@@ -561,13 +562,25 @@ export async function invokeAction(action) {
       `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(sourceInteractionId)}/actions/${encodeURIComponent(action.id)}/invoke`,
       { method: "POST" },
     );
-  } catch {
-    if (String(viewState.currentThreadId) !== String(threadId)) return;
+  } catch (error) {
+    if (String(viewState.currentThreadId) !== String(threadId)) {
+      appState.pendingActionInvocations = withoutPendingActionInvocation(
+        appState.pendingActionInvocations,
+        sourceInteractionId,
+        action.id,
+      );
+      return;
+    }
     await refreshState(threadId).catch(() => {});
     const durable = appState.actionInvocations.find((invocation) => (
       String(invocation.sourceInteractionId) === String(sourceInteractionId)
       && String(invocation.actionId) === String(action.id)
     ));
+    appState.pendingActionInvocations = withoutPendingActionInvocation(
+      appState.pendingActionInvocations,
+      sourceInteractionId,
+      action.id,
+    );
     const sourceIsStillSelected = (
       currentNavigationEntry()
       && navigationEntryKey(currentNavigationEntry()) === sourceLocationKey
@@ -576,6 +589,9 @@ export async function invokeAction(action) {
       supersedePendingHistory({ presentationChanged: true });
       viewState.currentInteractionId = durable.resultInteractionId;
       await refreshState(threadId, { historyMode: "push" }).catch(() => {});
+    } else {
+      renderThread();
+      toast(error.message);
     }
     return;
   }
@@ -585,10 +601,11 @@ export async function invokeAction(action) {
       && String(invocation.actionId) === String(action.id)
     ));
     appState.actionInvocations.push(response.invocation);
-    appState.pendingActionInvocations = appState.pendingActionInvocations.filter((invocation) => !(
-      String(invocation.sourceInteractionId) === String(sourceInteractionId)
-      && String(invocation.actionId) === String(action.id)
-    ));
+    appState.pendingActionInvocations = withoutPendingActionInvocation(
+      appState.pendingActionInvocations,
+      sourceInteractionId,
+      action.id,
+    );
   }
   const sourceIsStillSelected = (
     currentNavigationEntry()

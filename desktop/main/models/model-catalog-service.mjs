@@ -25,7 +25,9 @@ export class ModelCatalogService {
     if (!adapter) throw new Error(`Unknown model provider: ${providerId}`);
     if (!REFRESH_REASONS.has(reason)) throw new Error(`Unknown model-catalog refresh reason: ${reason}`);
 
-    const previous = this.refreshQueues.get(providerId) ?? Promise.resolve();
+    const inFlight = this.refreshQueues.get(providerId);
+    if (reason === "pre-inference" && inFlight) return inFlight;
+    const previous = inFlight ?? Promise.resolve();
     const operation = previous.catch(() => undefined).then(async () => {
       let snapshot;
       try {

@@ -120,31 +120,36 @@ describe("provider-neutral model catalog", () => {
     });
   });
 
-  it("serializes distinct pre-inference refreshes without coalescing them", async () => {
+  it("reuses an in-flight catalog refresh for concurrent pre-inference callers", async () => {
     let active = 0;
     let maximumActive = 0;
     let calls = 0;
     const published = [];
+    let releaseDiscovery;
+    const discoveryReleased = new Promise((resolve) => { releaseDiscovery = resolve; });
     const service = new ModelCatalogService({
       adapters: [new FakeModelCatalogAdapter(async () => {
         calls += 1;
         active += 1;
         maximumActive = Math.max(maximumActive, active);
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        await discoveryReleased;
         active -= 1;
         return providerSnapshot({ models: [{ id: `model-${calls}` }] });
       })],
       publishSnapshot: async (snapshot, context) => published.push({ snapshot, context }),
     });
 
-    await Promise.all([service.beforeInference(), service.beforeInference(), service.beforeInference()]);
+    const settingsRefresh = service.settingsOpened();
+    await vi.waitFor(() => expect(calls).toBe(1));
+    const firstInference = service.beforeInference();
+    const secondInference = service.beforeInference();
+    releaseDiscovery();
+    await Promise.all([settingsRefresh, firstInference, secondInference]);
 
-    expect(calls).toBe(3);
+    expect(calls).toBe(1);
     expect(maximumActive).toBe(1);
-    expect(published).toHaveLength(3);
-    expect(published.map(({ context }) => context.reason)).toEqual([
-      "pre-inference", "pre-inference", "pre-inference",
-    ]);
+    expect(published).toHaveLength(1);
+    expect(published[0].context.reason).toBe("settings-open");
   });
 });
 

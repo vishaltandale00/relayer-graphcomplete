@@ -12,6 +12,17 @@ export function actionWasInvoked(
   ));
 }
 
+export function withoutPendingActionInvocation(
+  pendingInvocations = [],
+  sourceInteractionId,
+  actionId,
+) {
+  return pendingInvocations.filter((invocation) => !(
+    String(invocation.sourceInteractionId) === String(sourceInteractionId)
+    && String(invocation.actionId) === String(actionId)
+  ));
+}
+
 export function reconcileActionTransitions(interactions, selected, transitions) {
   const remaining = new Map(transitions);
   let nextSelected = selected;
