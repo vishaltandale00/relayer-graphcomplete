@@ -99,6 +99,29 @@ async function capture(client, outputPath) {
   await writeFile(resolve(outputPath), Buffer.from(result.data, "base64"), { mode: 0o600 });
 }
 
+async function waitForRendererState(client, expression, predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let state;
+  while (Date.now() < deadline) {
+    state = await client.evaluate(expression);
+    if (state && predicate(state)) return state;
+    await delay(250);
+  }
+  throw new Error(`Timed out waiting for visible updater evidence; last state=${JSON.stringify(state)}.`);
+}
+
+async function showUpdaterPopover(client, { title, detail, timeoutMs }) {
+  await waitForRendererState(client, `(() => {
+    const popover = document.querySelector("#updatePopover");
+    popover?.classList.remove("hidden");
+    return {
+      visible: Boolean(popover && !popover.classList.contains("hidden")),
+      title: document.querySelector("#updateTitle")?.textContent || "",
+      detail: document.querySelector("#updateDetail")?.textContent || "",
+    };
+  })()`, (state) => state.visible && state.title === title && state.detail === detail, timeoutMs);
+}
+
 export async function driveElectronUpdateCanary({
   port,
   targetVersion,
@@ -114,11 +137,21 @@ export async function driveElectronUpdateCanary({
     await waitForUpdater(client, (state) => (
       state.phase === "available" && state.availableVersion === targetVersion && state.channel === "preview"
     ), timeoutMs);
+    await showUpdaterPopover(client, {
+      title: "Update available",
+      detail: `Version ${targetVersion} available`,
+      timeoutMs,
+    });
     await capture(client, availableScreenshotPath);
     await client.evaluate("window.relayerDesktop.updater.download()");
     await waitForUpdater(client, (state) => (
       state.phase === "ready" && state.availableVersion === targetVersion && state.channel === "preview"
     ), timeoutMs);
+    await showUpdaterPopover(client, {
+      title: "Ready to restart",
+      detail: "Ready to restart",
+      timeoutMs,
+    });
     await capture(client, readyScreenshotPath);
     try {
       await client.evaluate("window.relayerDesktop.updater.install()");
@@ -133,6 +166,31 @@ export async function driveElectronUpdateCanary({
 export async function captureElectronRenderer({ port, outputPath, timeoutMs = 60_000 } = {}) {
   const client = await connect(port, timeoutMs);
   try {
+    await capture(client, outputPath);
+  } finally {
+    client.close();
+  }
+}
+
+export async function captureInstalledUpdateState({ port, outputPath, targetVersion, timeoutMs = 60_000 } = {}) {
+  const client = await connect(port, timeoutMs);
+  try {
+    await waitForUpdater(client, (state) => (
+      state.phase === "idle" && state.version === targetVersion && state.channel === "preview" && state.error == null
+    ), timeoutMs);
+    await waitForRendererState(client, `(() => {
+      document.querySelector("#settingsButton")?.click();
+      const settings = document.querySelector("#settingsView");
+      return {
+        visible: Boolean(settings && !settings.classList.contains("hidden")),
+        version: document.querySelector("#currentVersion")?.textContent || "",
+        status: document.querySelector("#updateStatus")?.textContent || "",
+        channel: document.querySelector("#updateChannel")?.value || "",
+      };
+    })()`, (state) => (
+      state.visible && state.version === `Current version ${targetVersion}` &&
+      state.status === "Up to date" && state.channel === "preview"
+    ), timeoutMs);
     await capture(client, outputPath);
   } finally {
     client.close();
@@ -161,8 +219,15 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     });
   } else if (mode === "capture") {
     await captureElectronRenderer({ port, outputPath: argument("screenshot"), timeoutMs });
+  } else if (mode === "capture-installed") {
+    await captureInstalledUpdateState({
+      port,
+      outputPath: argument("screenshot"),
+      targetVersion: argument("target-version"),
+      timeoutMs,
+    });
   } else {
-    throw new Error("--mode must be update or capture.");
+    throw new Error("--mode must be update, capture, or capture-installed.");
   }
   console.log(JSON.stringify({ ok: true, mode }, null, 2));
 }

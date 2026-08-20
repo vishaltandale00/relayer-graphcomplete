@@ -355,6 +355,14 @@ export async function validateCanaryEvidenceFile({ filePath, version, previewRec
       throw new Error(`Canary screenshot bytes do not match: ${screenshot.file}`);
     }
   }
+  const updaterStateScreenshotHashes = new Set([
+    capture.screenshots.available.sha256,
+    capture.screenshots.ready.sha256,
+    capture.screenshots.installed.sha256,
+  ]);
+  if (updaterStateScreenshotHashes.size !== 3) {
+    throw new Error("Stable promotion requires visually distinct available, ready, and installed screenshots.");
+  }
   return { capture, size: content.length, sha256: sha256(content) };
 }
 
