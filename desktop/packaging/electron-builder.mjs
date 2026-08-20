@@ -82,6 +82,7 @@ export function createDesktopBuilderConfig(contract) {
       notarize: release,
       strictVerify: true,
     },
+    dmg: { sign: release },
     win: {
       icon: resolve(desktopRoot, "renderer/assets/relayer-logo.svg"),
       target: [{ target: "nsis", arch: [target.architecture] }],
