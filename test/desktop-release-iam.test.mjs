@@ -15,6 +15,11 @@ function resourcesFor(statement) {
   return Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource];
 }
 
+function prefixesFor(statement) {
+  const prefixes = statement.Condition?.StringLike?.["s3:prefix"];
+  return Array.isArray(prefixes) ? prefixes : [prefixes];
+}
+
 function targetResources(target) {
   return {
     release: `${bucketArn}/${target.publicPrefix}/releases/*`,
@@ -30,21 +35,27 @@ function targetResources(target) {
 describe("desktop release AWS authority", () => {
   it("limits Preview to target release objects and Preview control objects", async () => {
     const policy = await readPolicy("preview-policy.json");
-    expect(policy.Statement).toHaveLength(1);
-    expect(policy.Statement[0].Action).toEqual(["s3:GetObject", "s3:PutObject"]);
+    expect(policy.Statement).toHaveLength(2);
+    const list = policy.Statement.find((statement) => statement.Action === "s3:ListBucket");
+    const objects = policy.Statement.find((statement) => Array.isArray(statement.Action));
+    expect(resourcesFor(list)).toEqual([bucketArn]);
+    expect(objects.Action).toEqual(["s3:GetObject", "s3:PutObject"]);
 
     const expected = Object.values(DESKTOP_RELEASE_TARGETS).flatMap((target) => {
       const resources = targetResources(target);
       return [resources.release, resources.previewPointer, resources.previewHistory, resources.previewReceipt];
     });
-    expect(resourcesFor(policy.Statement[0]).sort()).toEqual(expected.sort());
+    expect(resourcesFor(objects).sort()).toEqual(expected.sort());
+    expect(prefixesFor(list).sort()).toEqual(expected.map((resource) => resource.slice(`${bucketArn}/`.length)).sort());
   });
 
   it("lets Stable read Preview evidence but write only Stable control objects", async () => {
     const policy = await readPolicy("stable-policy.json");
-    expect(policy.Statement).toHaveLength(2);
+    expect(policy.Statement).toHaveLength(3);
+    const list = policy.Statement.find((statement) => statement.Action === "s3:ListBucket");
     const read = policy.Statement.find((statement) => statement.Action === "s3:GetObject");
     const write = policy.Statement.find((statement) => statement.Action === "s3:PutObject");
+    expect(resourcesFor(list)).toEqual([bucketArn]);
 
     const expectedRead = Object.values(DESKTOP_RELEASE_TARGETS).flatMap((target) => {
       const resources = targetResources(target);
@@ -62,6 +73,7 @@ describe("desktop release AWS authority", () => {
       return [resources.stablePointer, resources.stableHistory, resources.stableReceipt];
     });
     expect(resourcesFor(read).sort()).toEqual(expectedRead.sort());
+    expect(prefixesFor(list).sort()).toEqual(expectedRead.map((resource) => resource.slice(`${bucketArn}/`.length)).sort());
     expect(resourcesFor(write).sort()).toEqual(expectedWrite.sort());
     expect(resourcesFor(write)).not.toEqual(expect.arrayContaining(
       Object.values(DESKTOP_RELEASE_TARGETS).map((target) => targetResources(target).release),

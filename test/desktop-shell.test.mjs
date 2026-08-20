@@ -1698,11 +1698,20 @@ describe("desktop skeleton", () => {
 
       const objects = new Map();
       const writes = [];
+      const probes = [];
       const argument = (args, name) => args[args.indexOf(name) + 1];
       const execute = async (command, args) => {
         expect(command).toBe("aws");
         const operation = args[1];
         const key = argument(args, "--key");
+        if (operation === "list-objects-v2") {
+          const prefix = argument(args, "--prefix");
+          probes.push(prefix);
+          expect(argument(args, "--max-keys")).toBe("1");
+          return { stdout: JSON.stringify({
+            Contents: objects.has(prefix) ? [{ Key: prefix }] : [],
+          }) };
+        }
         if (operation === "head-object") {
           const object = objects.get(key);
           if (!object) {
@@ -1795,6 +1804,8 @@ describe("desktop skeleton", () => {
         fetchImpl,
       })).resolves.toMatchObject({ receipt: { workflowRunAttempt: "1" } });
       expect(writes).toEqual(writesAfterSuccess);
+      expect(probes.length).toBeGreaterThan(0);
+      expect(probes.every((prefix) => typeof prefix === "string" && !prefix.endsWith("/"))).toBe(true);
 
       const screenshotFixtures = Object.fromEntries(["first-install", "available", "ready", "installed"].map((name) => [
         name,
