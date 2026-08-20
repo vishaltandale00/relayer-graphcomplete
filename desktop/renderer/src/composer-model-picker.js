@@ -35,7 +35,9 @@ export function newThreadModelSelectionReady() {
 }
 
 export function newThreadModelSelectionPayload() {
-  return pickerSelectionPayload(newThreadPicker?.getSelection());
+  return newThreadPicker?.isReady()
+    ? pickerSelectionPayload(newThreadPicker.getSelection())
+    : null;
 }
 
 export function openNewThreadModelPicker(tab = "model") {

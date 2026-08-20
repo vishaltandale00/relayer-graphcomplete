@@ -12,6 +12,7 @@ import {
 } from "./model-family-model.js";
 import {
   createModelFamily,
+  deleteModelFamily,
   loadModelSettings,
   saveModelDefaults,
   saveModelFamilyOrder,
@@ -235,7 +236,8 @@ function familySlide(family, index) {
         <span class="push"></span>
         ${system
           ? `<button type="button" class="secondary" data-family-copy="${index}">Copy</button>`
-          : `<button type="button" class="secondary" data-family-edit="${index}">Edit</button>`}
+          : `<button type="button" class="secondary" data-family-delete="${index}">Delete</button>
+             <button type="button" class="secondary" data-family-edit="${index}">Edit</button>`}
       </div>
     </article>
   </div>`;
@@ -357,6 +359,20 @@ async function saveEdit() {
   }
 }
 
+async function deleteFamily(index) {
+  const family = settings.families[index];
+  if (!family || family.kind === "system" || family.draft) return;
+  if (!window.confirm(`Delete “${family.name}”?`)) return;
+  try {
+    await deleteModelFamily(family.id);
+    selectedFamilyIndex = Math.min(index, Math.max(0, settings.families.length - 2));
+    await refresh();
+    setStatus("Deleted", "success");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
 function bindEditorEvents(family) {
   $("#familyNameInput").oninput = (event) => { family.name = event.target.value; };
   $("#familyNameInput").onkeydown = (event) => {
@@ -421,6 +437,9 @@ function bindRenderedEvents() {
   });
   $$('[data-family-edit]').forEach((button) => {
     button.onclick = () => beginEdit(Number(button.dataset.familyEdit));
+  });
+  $$('[data-family-delete]').forEach((button) => {
+    button.onclick = () => void deleteFamily(Number(button.dataset.familyDelete));
   });
   const current = settings.families[selectedFamilyIndex];
   if (current?.draft || current?.editing) bindEditorEvents(current);

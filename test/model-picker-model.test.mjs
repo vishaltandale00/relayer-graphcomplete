@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   availablePickerFamilies,
   firstAvailableSelection,
+  harnessUsesConfigurationModel,
   NO_MODELS_FOR_HARNESS,
   normalizePickerSelection,
   pickerSelectionIsAvailable,
@@ -12,7 +13,7 @@ import {
   selectionForInteraction,
   validateCandidateHarness,
 } from "../desktop/renderer/src/model-picker-model.js";
-import { selectionForNextInteraction } from "../desktop/renderer/src/model-picker.js";
+import { modelSelectionLabels, selectionForNextInteraction } from "../desktop/renderer/src/model-picker.js";
 
 function settings() {
   return {
@@ -64,6 +65,31 @@ describe("composer model picker selection", () => {
       providerId: "codex",
       modelId: "one",
     });
+  });
+
+  it("keeps a configuration-owned model path for development harnesses without a provider catalog", async () => {
+    const catalog = settings();
+    catalog.harnesses.push({
+      id: "prime-agent-basic",
+      label: "Prime Agent Basic",
+      available: true,
+      compatibleProviderIds: [],
+      modelCompatibility: [],
+    });
+    expect(harnessUsesConfigurationModel(catalog, "prime-agent-basic")).toBe(true);
+    expect(normalizePickerSelection(catalog, { harnessId: "prime-agent-basic" }))
+      .toEqual({ harnessId: "prime-agent-basic" });
+    expect(pickerSelectionIsAvailable(catalog, { harnessId: "prime-agent-basic" })).toBe(true);
+    expect(pickerSelectionPayload({ harnessId: "prime-agent-basic" }))
+      .toEqual({ harnessId: "prime-agent-basic" });
+    expect(modelSelectionLabels(catalog, { harnessId: "prime-agent-basic" })).toBeNull();
+    const validate = async () => { throw new Error("model validation must not run"); };
+    await expect(validateCandidateHarness(
+      catalog,
+      normalizePickerSelection(catalog, { harnessId: "codex-basic" }),
+      "prime-agent-basic",
+      validate,
+    )).resolves.toEqual({ selection: { harnessId: "prime-agent-basic" }, error: null });
   });
 
   it("respects explicit cross-provider member order instead of the default provider", () => {

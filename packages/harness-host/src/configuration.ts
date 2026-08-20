@@ -88,6 +88,20 @@ export function sameHarnessConfiguration(left: HarnessConfiguration, right: Harn
   return canonicalJson(left) === canonicalJson(right);
 }
 
+/**
+ * Compares the configuration that owns provider session execution. Catalog-only
+ * model compatibility may be added or refreshed without invalidating a saved
+ * provider session; the current descriptor is persisted after it is resumed.
+ */
+export function sameHarnessExecutionConfiguration(
+  left: HarnessConfiguration,
+  right: HarnessConfiguration,
+): boolean {
+  const { modelCompatibility: _leftModelCompatibility, ...leftExecution } = left;
+  const { modelCompatibility: _rightModelCompatibility, ...rightExecution } = right;
+  return canonicalJson(leftExecution) === canonicalJson(rightExecution);
+}
+
 export function digestHarnessConfiguration(configuration: HarnessConfiguration): string {
   return `sha256:${createHash("sha256").update(canonicalJson(configuration)).digest("hex")}`;
 }

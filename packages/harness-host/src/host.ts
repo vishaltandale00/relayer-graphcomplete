@@ -3,7 +3,11 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, resolve } from "node:path";
 import { GraphApiError, RelayerGraphClient, type GraphCapability } from "@relayer/graph-client";
-import { isJsonObject, parseHarnessConfiguration, sameHarnessConfiguration } from "./configuration.js";
+import {
+  isJsonObject,
+  parseHarnessConfiguration,
+  sameHarnessExecutionConfiguration,
+} from "./configuration.js";
 import { resolveHarnessFactory } from "./registry.js";
 import type {
   Harness,
@@ -102,7 +106,7 @@ export class HarnessHost {
     const live = this.sessions.get(descriptor.threadId);
     if (live !== undefined) {
       await this.withSessionLock(live, async () => {
-        if (!sameHarnessConfiguration(live.descriptor.configuration, descriptor.configuration)
+        if (!sameHarnessExecutionConfiguration(live.descriptor.configuration, descriptor.configuration)
           || live.descriptor.permissionProfileId !== descriptor.permissionProfileId
           || live.descriptor.workingDirectory !== descriptor.workingDirectory) {
           throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${live.descriptor.configuration.name}`);
@@ -117,7 +121,7 @@ export class HarnessHost {
       return;
     }
     const prior = this.saved.get(descriptor.threadId);
-    if (prior !== undefined && (!sameHarnessConfiguration(prior.configuration, descriptor.configuration)
+    if (prior !== undefined && (!sameHarnessExecutionConfiguration(prior.configuration, descriptor.configuration)
       || prior.permissionProfileId !== descriptor.permissionProfileId
       || prior.workingDirectory !== descriptor.workingDirectory)) {
       throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${prior.configuration.name}`);
@@ -445,7 +449,10 @@ function sameLegacyHarnessConfiguration(
   legacy: Omit<HarnessConfiguration, "permissionBindings">,
   current: HarnessConfiguration,
 ): boolean {
-  return sameHarnessConfiguration({ ...legacy, permissionBindings: current.permissionBindings }, current);
+  return sameHarnessExecutionConfiguration(
+    { ...legacy, permissionBindings: current.permissionBindings },
+    current,
+  );
 }
 
 function readPersistedSession(value: unknown): PersistedHarnessSessionDescriptor {

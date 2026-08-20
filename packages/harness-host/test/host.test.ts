@@ -590,6 +590,51 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("resumes schema-v4 provider state when only catalog model compatibility was added", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-model-metadata-"));
+    const stateFile = join(directory, "sessions.json");
+    const currentConfiguration: HarnessConfiguration = {
+      ...testConfiguration,
+      modelCompatibility: [{ providerId: "codex" }],
+    };
+    let restoredState: HarnessSessionState | undefined;
+    const host = new HarnessHost({
+      stateFile,
+      controlToken: "control",
+      implementations: { test: (context) => {
+        restoredState = context.savedState;
+        return { async complete() {}, state: () => context.savedState ?? emptyState() };
+      } },
+    });
+    try {
+      await writeFile(stateFile, JSON.stringify({
+        schemaVersion: 4,
+        sessions: [{
+          threadId: 1,
+          configuration: testConfiguration,
+          permissionProfileId: "auto",
+          workingDirectory: directory,
+          state: { providerSessionId: "existing-session" },
+        }],
+      }), { mode: 0o600 });
+      await host.initialize();
+
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: currentConfiguration,
+        workingDirectory: directory,
+      });
+
+      expect(restoredState).toEqual({ providerSessionId: "existing-session" });
+      expect(JSON.parse(await readFile(stateFile, "utf8")).sessions[0].configuration)
+        .toEqual(currentConfiguration);
+    } finally {
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("migrates schema-v3 state on startup and safely resumes matching Auto sessions", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v3-"));
     const stateFile = join(directory, "sessions.json");

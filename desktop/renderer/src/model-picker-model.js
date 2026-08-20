@@ -4,6 +4,16 @@ function harnessFor(settings, harnessId) {
   return settings.harnesses.find((harness) => harness.id === harnessId);
 }
 
+export function harnessUsesConfigurationModel(settings, harnessId) {
+  const harness = harnessFor(settings, harnessId);
+  return Boolean(
+    harness
+    && harness.available !== false
+    && (harness.modelCompatibility?.length ?? 0) === 0
+    && (harness.compatibleProviderIds?.length ?? 0) === 0
+  );
+}
+
 function providerModel(settings, providerId, modelId) {
   return settings.providers
     .find((provider) => provider.id === providerId)
@@ -60,7 +70,9 @@ export function firstAvailableSelection(settings, harnessId) {
 export function normalizePickerSelection(settings, candidate) {
   const harnessId = candidate?.harnessId ?? settings.defaults.harnessId;
   const families = availablePickerFamilies(settings, harnessId);
-  if (families.length === 0) return null;
+  if (families.length === 0) {
+    return harnessUsesConfigurationModel(settings, harnessId) ? { harnessId } : null;
+  }
   const requestedFamily = candidate?.familyId == null
     ? null
     : families.find((item) => String(item.id) === String(candidate.familyId));
@@ -102,6 +114,9 @@ export function reconcilePickerSelection(settings, candidate) {
 }
 
 export function pickerSelectionIsAvailable(settings, candidate) {
+  if (candidate?.harnessId && candidate.familyId == null) {
+    return harnessUsesConfigurationModel(settings, candidate.harnessId);
+  }
   if (
     !candidate
     || candidate.familyId == null
@@ -135,6 +150,7 @@ export async function validateCandidateHarness(
 ) {
   const candidate = selectCandidateHarness(settings, currentSelection, harnessId);
   if (candidate.error) return candidate;
+  if (candidate.selection.familyId == null) return candidate;
   try {
     await validateSelection(candidate.selection);
     return candidate;
@@ -145,6 +161,7 @@ export async function validateCandidateHarness(
 
 export function pickerSelectionPayload(selection) {
   if (!selection) return null;
+  if (selection.familyId == null) return { harnessId: selection.harnessId };
   return {
     harnessId: selection.harnessId,
     modelSelection: {

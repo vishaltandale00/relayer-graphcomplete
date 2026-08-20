@@ -45,3 +45,7 @@ function workspace() {
 export function renderThread() {
   workspace().render();
 }
+
+export function currentThreadModelSelectionPayload() {
+  return workspace().modelSelectionPayload();
+}

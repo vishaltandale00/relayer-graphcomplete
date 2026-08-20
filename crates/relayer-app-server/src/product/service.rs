@@ -239,24 +239,6 @@ impl ProductService {
         &self,
         command: ReorderModelFamiliesCommand,
     ) -> Result<(), ProductError> {
-        let settings = self.storage.load_model_settings().await?;
-        let expected = settings
-            .families
-            .iter()
-            .map(|family| family.id)
-            .collect::<std::collections::HashSet<_>>();
-        let supplied = command
-            .family_ids
-            .iter()
-            .copied()
-            .collect::<std::collections::HashSet<_>>();
-        if supplied.len() != command.family_ids.len() || supplied != expected {
-            return Err(CatalogError::invalid(
-                "model_family_order_invalid",
-                "familyIds must contain every model family exactly once.",
-            )
-            .into());
-        }
         self.storage.reorder_model_families(&command).await?;
         Ok(())
     }

@@ -179,6 +179,34 @@ async fn model_catalog_families_defaults_and_selection_are_typed_and_durable() {
         "system_family_read_only"
     );
 
+    let incomplete_order = app
+        .clone()
+        .oneshot(cookie_request(
+            "PUT",
+            "/api/model-families/order",
+            Some(json!({ "familyIds": [custom_family_id] })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(incomplete_order.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        response_json(incomplete_order).await["code"],
+        "model_family_order_invalid"
+    );
+    let settings_after_invalid_order = app
+        .clone()
+        .oneshot(cookie_request("GET", "/api/model-settings", None))
+        .await
+        .unwrap();
+    let settings_after_invalid_order = response_json(settings_after_invalid_order).await;
+    let positions = settings_after_invalid_order["families"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|family| family["position"].as_i64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(positions, vec![0, 1]);
+
     let reordered = app
         .clone()
         .oneshot(cookie_request(

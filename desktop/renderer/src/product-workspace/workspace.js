@@ -1128,6 +1128,9 @@ export function createProductWorkspace({
     mode,
     capabilities,
     render,
+    modelSelectionPayload: () => modelPicker?.isReady()
+      ? pickerSelectionPayload(modelPicker.getSelection())
+      : null,
     dispose,
   });
 }

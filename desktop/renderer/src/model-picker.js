@@ -1,5 +1,6 @@
 import {
   availablePickerFamilies,
+  harnessUsesConfigurationModel,
   pickerSelectionIsAvailable,
   reconcilePickerSelection,
   validateCandidateHarness,
@@ -70,7 +71,7 @@ export function createModelPickerRequestGate() {
 }
 
 export function modelSelectionLabels(settings, selection) {
-  if (!settings || !selection) return null;
+  if (!settings || !selection?.providerId || !selection?.modelId) return null;
   const family = familyFor(settings, selection.familyId);
   const provider = settings.providers?.find((item) => item.id === selection.providerId);
   const model = modelFor(settings, selection.providerId, selection.modelId);
@@ -167,6 +168,10 @@ export function createModelPicker({
       String(family.id) === String(currentSelection?.familyId)
     )) ?? families[0];
     if (!selectedFamily || !currentSelection) {
+      if (harnessUsesConfigurationModel(currentSettings, selectedHarnessId())) {
+        panel.innerHTML = `<div class="model-picker-empty"><strong>Harness default</strong><span>The model is set by this harness configuration.</span></div>`;
+        return;
+      }
       panel.innerHTML = `<div class="model-picker-empty"><strong>No available models</strong><button type="button" class="secondary" data-model-picker-settings>Open Settings</button></div>`;
       panel.querySelector("[data-model-picker-settings]").onclick = () => {
         close();
@@ -223,7 +228,10 @@ export function createModelPicker({
     }
     const harnesses = (currentSettings?.harnesses ?? []).filter((harness) => (
       harness.available !== false
-      && availablePickerFamilies(currentSettings, harness.id).length > 0
+      && (
+        availablePickerFamilies(currentSettings, harness.id).length > 0
+        || harnessUsesConfigurationModel(currentSettings, harness.id)
+      )
     ));
     panel.innerHTML = harnesses.length
       ? `<div class="harness-option-list" role="radiogroup" aria-label="Harnesses">${harnesses.map((harness) => {
@@ -265,11 +273,16 @@ export function createModelPicker({
   function render() {
     const ready = selectionReady();
     const labels = ready ? modelSelectionLabels(currentSettings, currentSelection) : null;
+    const configurationOwnedModel = ready
+      && harnessUsesConfigurationModel(currentSettings, selectedHarnessId());
     const hasAvailableModels = currentSettings
       ? availablePickerFamilies(currentSettings, selectedHarnessId()).length > 0
       : false;
-    triggerLabel.textContent = labels?.compact ?? (hasAvailableModels ? "Choose model" : "Set up models");
-    trigger.title = labels ? `Model: ${labels.compact}` : "Choose an available model";
+    triggerLabel.textContent = labels?.compact
+      ?? (configurationOwnedModel ? "Harness default" : (hasAvailableModels ? "Choose model" : "Set up models"));
+    trigger.title = labels
+      ? `Model: ${labels.compact}`
+      : (configurationOwnedModel ? "Model set by harness configuration" : "Choose an available model");
     trigger.disabled = disabled;
     root.querySelectorAll("[data-model-picker-tab]").forEach((tab) => {
       const selected = tab.dataset.modelPickerTab === activeTab;

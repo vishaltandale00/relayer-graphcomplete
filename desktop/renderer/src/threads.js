@@ -8,7 +8,7 @@ import {
   createLatestRequestGate,
   createNavigationHistory,
 } from "./navigation-history.js";
-import { renderThread } from "./graph.js";
+import { currentThreadModelSelectionPayload, renderThread } from "./graph.js";
 import {
   renderScopeMenu,
   renderSidebar,
@@ -40,9 +40,12 @@ import {
   closeNewThreadModelPicker,
   newThreadModelSelectionPayload,
   newThreadModelSelectionReady,
+  refreshNewThreadModelPicker,
   setNewThreadModelPickerDisabled,
 } from "./composer-model-picker.js";
 import { refreshModelFamilySettings } from "./model-family-settings.js";
+import { validateModelSelection } from "./model-settings-api.js";
+import { harnessUsesConfigurationModel } from "./model-picker-model.js";
 
 let creatingFirstThread = false;
 let pendingRefreshTimer;
@@ -287,12 +290,23 @@ export async function submitInteraction(text, modelSelection) {
   recordCurrentNavigation();
   const sourceLocationKey = navigationEntryKey(navigationHistory.current);
   supersedePendingHistory({ cancelLayerNavigation: true });
-  if (!modelSelection) {
+  const thread = appState.threads.find((candidate) => String(candidate.id) === String(threadId));
+  const harnessId = thread?.harnessId ?? thread?.harnessConfigurationName;
+  if (!modelSelection && !harnessUsesConfigurationModel(appState.modelSettings, harnessId)) {
     setSettingsTab("models");
     setMainView("settings");
     throw new Error("Choose an available model in Settings before sending.");
   }
-  if (desktop?.models?.refresh) await refreshModelCatalogBeforeSend();
+  if (desktop?.models?.refresh) {
+    await refreshModelCatalogBeforeSend();
+    renderThread();
+    const refreshedPayload = currentThreadModelSelectionPayload();
+    if (!refreshedPayload) {
+      if (modelSelection) await validateModelSelection({ harnessId, ...modelSelection });
+      throw new Error("Choose an available model in Settings before sending.");
+    }
+    modelSelection = refreshedPayload.modelSelection;
+  }
   await request(`/api/threads/${encodeURIComponent(threadId)}/interactions`, {
     method: "POST",
     body: JSON.stringify(followupRequestBody(text, modelSelection)),
@@ -621,7 +635,19 @@ export async function createFirstThread(pickerPayloadOverride = null) {
   closePermissionMenu();
   closeNewThreadModelPicker();
   try {
-    if (desktop?.models?.refresh) await refreshModelCatalogBeforeSend();
+    if (desktop?.models?.refresh) {
+      await refreshModelCatalogBeforeSend();
+      refreshNewThreadModelPicker();
+      const refreshedPayload = newThreadModelSelectionPayload();
+      if (!refreshedPayload) {
+        await validateModelSelection({
+          harnessId: pickerPayload.harnessId,
+          ...pickerPayload.modelSelection,
+        });
+        throw new Error("Choose an available model in Settings before sending.");
+      }
+      pickerPayload = refreshedPayload;
+    }
     const selectedScope = viewState.selectedScope;
     if (!productApiAvailable) {
       const thread = addLocalThread(appState, {

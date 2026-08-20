@@ -202,6 +202,7 @@ describe("desktop skeleton", () => {
     expect(rendererMain).toContain('bindComposerKeydown($("#newThreadPrompt"), () => {');
     expect(rendererMain).toContain('openNewThreadModelPicker("model")');
     expect(desktopMain).toContain("RelayerAppServerService");
+    expect(desktopMain).toContain('allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-")');
     expect(desktopMain).toContain("productServer.start()");
     expect(desktopMain).toContain("productServer.close()");
     expect(desktopMain).toContain("Promise.allSettled");

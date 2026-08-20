@@ -12,6 +12,7 @@ import {
 } from "../desktop/renderer/src/model-family-model.js";
 import {
   createModelFamily,
+  deleteModelFamily,
   loadModelSettings,
   saveModelDefaults,
   saveModelFamilyOrder,
@@ -159,6 +160,7 @@ describe("model settings API boundary", () => {
     await validateModelSelection({ harnessId: "codex-basic", familyId: 1, providerId: "codex", modelId: "gpt-5" });
     await createModelFamily({ name: "Coding", enabled: true, members: [] });
     await updateModelFamily(12, { name: "Coding", enabled: false, members: [] });
+    await deleteModelFamily(12);
     await saveModelFamilyOrder([12, 4]);
 
     expect(fetchMock.mock.calls.map(([path, options]) => [path, options?.method ?? "GET"])).toEqual([
@@ -167,6 +169,7 @@ describe("model settings API boundary", () => {
       ["/api/model-selection/validate", "POST"],
       ["/api/model-families", "POST"],
       ["/api/model-families/12", "PUT"],
+      ["/api/model-families/12", "DELETE"],
       ["/api/model-families/order", "PUT"],
     ]);
   });
@@ -207,5 +210,7 @@ describe("model family settings layout", () => {
     expect(html).not.toContain("Families contain up to 5 models");
     const settingsSource = await readFile(new URL("../desktop/renderer/src/model-family-settings.js", import.meta.url), "utf8");
     expect(settingsSource).toContain("owner?.connected === false || model.visible === false || model.available === false");
+    expect(settingsSource).toContain('data-family-delete="${index}"');
+    expect(settingsSource).toContain("await deleteModelFamily(family.id);");
   });
 });

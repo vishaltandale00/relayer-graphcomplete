@@ -174,6 +174,7 @@ if (primaryInstance) {
       permissionCatalogPath,
       runtimeSession,
       defaultHarnessConfiguration,
+      allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-"),
       onUnexpectedStop: () => {
         dialog.showErrorBox(
           "Relayer app server stopped",

@@ -289,6 +289,22 @@ impl SqliteProductStore {
         command: &ReorderModelFamiliesCommand,
     ) -> Result<(), StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let expected = sqlx::query_scalar::<_, i64>("SELECT id FROM model_families")
+            .fetch_all(&mut *transaction)
+            .await?
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        let supplied = command
+            .family_ids
+            .iter()
+            .map(|id| id.value())
+            .collect::<std::collections::HashSet<_>>();
+        if supplied.len() != command.family_ids.len() || supplied != expected {
+            return Err(StorageError::Catalog(CatalogError::invalid(
+                "model_family_order_invalid",
+                "familyIds must contain every model family exactly once.",
+            )));
+        }
         // Offset first so the UNIQUE(position) constraint cannot observe transient collisions.
         sqlx::query("UPDATE model_families SET position=position+1000000")
             .execute(&mut *transaction)
