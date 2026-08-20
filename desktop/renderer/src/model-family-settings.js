@@ -18,6 +18,7 @@ import {
   saveModelFamilyOrder,
   updateModelFamily,
 } from "./model-settings-api.js";
+import { resetNewThreadModelPicker } from "./composer-model-picker.js";
 import { appState } from "./state.js";
 import { $, $$, escapeHtml, toast } from "./ui.js";
 
@@ -26,6 +27,7 @@ let selectedFamilyIndex = 0;
 let editSnapshot = null;
 let draftSequence = 0;
 let loading = false;
+let savingFamily = false;
 
 function provider(providerId) {
   return settings.providers.find((candidate) => candidate.id === providerId);
@@ -200,12 +202,12 @@ function memberEditor(member, index, count) {
   const reason = member.available === false ? member.unavailableReason : null;
   return `<li class="family-member-editor${reason ? " unavailable" : ""}" data-member-index="${index}">
     <span class="member-order">${index + 1}</span>
-    <select aria-label="Provider for model ${index + 1}" data-member-provider="${index}">${providerOptions(member.providerId)}</select>
-    <select aria-label="Model ${index + 1}" data-member-model="${index}">${modelOptions(member)}</select>
+    <select aria-label="Provider for model ${index + 1}" data-member-provider="${index}" ${savingFamily ? "disabled" : ""}>${providerOptions(member.providerId)}</select>
+    <select aria-label="Model ${index + 1}" data-member-model="${index}" ${savingFamily ? "disabled" : ""}>${modelOptions(member)}</select>
     <span class="member-actions">
-      <button type="button" class="icon-button" data-member-up="${index}" title="Move up" aria-label="Move model ${index + 1} up" ${index === 0 ? "disabled" : ""}>↑</button>
-      <button type="button" class="icon-button" data-member-down="${index}" title="Move down" aria-label="Move model ${index + 1} down" ${index === count - 1 ? "disabled" : ""}>↓</button>
-      <button type="button" class="icon-button" data-member-remove="${index}" title="Remove" aria-label="Remove model ${index + 1}">×</button>
+      <button type="button" class="icon-button" data-member-up="${index}" title="Move up" aria-label="Move model ${index + 1} up" ${savingFamily || index === 0 ? "disabled" : ""}>↑</button>
+      <button type="button" class="icon-button" data-member-down="${index}" title="Move down" aria-label="Move model ${index + 1} down" ${savingFamily || index === count - 1 ? "disabled" : ""}>↓</button>
+      <button type="button" class="icon-button" data-member-remove="${index}" title="Remove" aria-label="Remove model ${index + 1}" ${savingFamily ? "disabled" : ""}>×</button>
     </span>
     ${reason ? `<span class="member-error">${escapeHtml(reason)}</span>` : ""}
   </li>`;
@@ -213,19 +215,19 @@ function memberEditor(member, index, count) {
 
 function familyEditor(family) {
   const errors = family.validationErrors ?? {};
-  return `<article class="family-card family-editor-card">
+  return `<article class="family-card family-editor-card" aria-busy="${savingFamily}">
     <div class="family-card-heading">
-      <label class="family-name-field"><span>Name</span><input id="familyNameInput" value="${escapeHtml(family.name)}" placeholder="Family name" aria-invalid="${Boolean(errors.name)}" /></label>
+      <label class="family-name-field"><span>Name</span><input id="familyNameInput" value="${escapeHtml(family.name)}" placeholder="Family name" aria-invalid="${Boolean(errors.name)}" ${savingFamily ? "disabled" : ""} /></label>
       <span class="family-kind">Custom</span>
     </div>
     ${errors.name ? `<div class="field-error">${escapeHtml(errors.name)}</div>` : ""}
     <ol class="family-members family-member-editors">${family.models.map((member, index) => memberEditor(member, index, family.models.length)).join("")}</ol>
     ${errors.models ? `<div class="field-error">${escapeHtml(errors.models)}</div>` : ""}
     <div class="family-editor-actions">
-      <button type="button" class="secondary" id="addFamilyModel" ${family.models.length >= MAX_MODELS_PER_FAMILY || !nextAvailableMember(family) ? "disabled" : ""}>＋ Add model</button>
+      <button type="button" class="secondary" id="addFamilyModel" ${savingFamily || family.models.length >= MAX_MODELS_PER_FAMILY || !nextAvailableMember(family) ? "disabled" : ""}>＋ Add model</button>
       <span class="push"></span>
-      <button type="button" class="secondary" id="cancelFamilyEdit">Cancel</button>
-      <button type="button" class="primary" id="saveFamilyEdit">Save</button>
+      <button type="button" class="secondary" id="cancelFamilyEdit" ${savingFamily ? "disabled" : ""}>Cancel</button>
+      <button type="button" class="primary" id="saveFamilyEdit" ${savingFamily ? "disabled" : ""}>Save</button>
     </div>
   </article>`;
 }
@@ -338,6 +340,7 @@ function beginNewFamily(seed = null) {
 }
 
 function beginEdit(index) {
+  if (settings.families.some((family) => family.draft || family.editing)) return;
   const family = settings.families[index];
   editSnapshot = structuredClone(family);
   family.editing = true;
@@ -355,10 +358,13 @@ function cancelEdit() {
 }
 
 async function saveEdit() {
+  if (savingFamily) return;
   const family = settings.families[selectedFamilyIndex];
   family.name = $("#familyNameInput").value;
   family.validationErrors = validateCustomFamily(family, settings.families);
   if (Object.keys(family.validationErrors).length) return render();
+  savingFamily = true;
+  render();
   try {
     if (family.draft) await createModelFamily(familyPayload(family));
     else await updateModelFamily(family.id, familyPayload(family));
@@ -366,6 +372,9 @@ async function saveEdit() {
     setStatus("Saved", "success");
   } catch (error) {
     setStatus(error.message, "error");
+  } finally {
+    savingFamily = false;
+    render();
   }
 }
 
@@ -464,6 +473,7 @@ async function persistDefault(field) {
   try {
     await saveModelDefaults({ [field]: settings.defaults[field] });
     await refresh({ preserveEdit: true });
+    if (field === "harnessId") resetNewThreadModelPicker();
     setStatus("Saved", "success");
   } catch (error) {
     settings.defaults = previous;

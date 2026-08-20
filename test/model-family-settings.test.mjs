@@ -235,5 +235,8 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("owner?.connected === false || model.visible === false || model.available === false");
     expect(settingsSource).toContain('data-family-delete="${index}"');
     expect(settingsSource).toContain("await deleteModelFamily(family.id);");
+    expect(settingsSource).toContain("if (settings.families.some((family) => family.draft || family.editing)) return;");
+    expect(settingsSource).toContain("if (savingFamily) return;");
+    expect(settingsSource).toContain('if (field === "harnessId") resetNewThreadModelPicker();');
   });
 });
