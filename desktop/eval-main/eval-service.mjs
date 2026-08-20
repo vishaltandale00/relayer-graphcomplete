@@ -15,6 +15,7 @@ import {
   H3_UPSTREAM_COMMIT,
   h3ProjectEvalCase,
   materializeH3ProjectFixture,
+  selectStandalonePermissionProfile,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
 import {
@@ -434,7 +435,7 @@ export class EvalService {
       execution,
       title: definition.name,
       prompts: definition.prompts,
-      permissionProfileId: standalonePermissionProfile(execution.harnessConfiguration),
+      permissionProfileId: selectStandalonePermissionProfile(execution.harnessConfiguration),
     });
     const detail = await this.#productRequest(`/api/threads/${thread.id}`);
     return { thread, threadDefinition: null, detail, workspaceChecks: new Map() };
@@ -677,7 +678,7 @@ export class EvalService {
 
 function validateEvalPermissionProfiles(execution) {
   if (execution.testCaseId !== H3_PROJECT_CASE_ID) {
-    standalonePermissionProfile(execution.harnessConfiguration);
+    selectStandalonePermissionProfile(execution.harnessConfiguration);
     return;
   }
   const missing = [...new Set(h3ProjectEvalCase.threads.map((thread) => thread.permissionProfileId))]
@@ -685,13 +686,6 @@ function validateEvalPermissionProfiles(execution) {
   if (missing.length > 0) {
     throw new Error(`Eval case ${execution.testCaseId} requires permission profiles not supported by ${execution.harnessConfigurationName}: ${missing.join(", ")}.`);
   }
-}
-
-function standalonePermissionProfile(configuration) {
-  const profiles = Object.keys(configuration.permissionBindings);
-  if (profiles.includes("auto")) return "auto";
-  if (profiles.length === 1) return profiles[0];
-  throw new Error(`Standalone Eval cases need Auto or one unambiguous permission profile in ${configuration.name}.`);
 }
 
 async function invokeSimulatedUserJudge(runner, context) {

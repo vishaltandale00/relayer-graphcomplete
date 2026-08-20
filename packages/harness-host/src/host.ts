@@ -33,7 +33,7 @@ interface PersistedHarnessSessionDescriptor {
 
 interface LegacyPersistedHarnessSessionDescriptor {
   readonly threadId: number;
-  readonly configurationName: string;
+  readonly configuration: Omit<HarnessConfiguration, "permissionBindings">;
   readonly workingDirectory: string;
   readonly state?: HarnessSessionState;
 }
@@ -124,7 +124,7 @@ export class HarnessHost {
     const legacy = this.legacySaved.get(descriptor.threadId);
     const legacyState = legacy !== undefined
       && descriptor.permissionProfileId === legacyPermissionProfileId(descriptor.configuration)
-      && legacy.configurationName === descriptor.configuration.name
+      && sameLegacyHarnessConfiguration(legacy.configuration, descriptor.configuration)
       && legacy.workingDirectory === descriptor.workingDirectory
       ? legacy.state
       : undefined;
@@ -408,6 +408,13 @@ function legacyPermissionProfileId(configuration: HarnessConfiguration): string 
   return profiles.length === 1 ? profiles[0] : undefined;
 }
 
+function sameLegacyHarnessConfiguration(
+  legacy: Omit<HarnessConfiguration, "permissionBindings">,
+  current: HarnessConfiguration,
+): boolean {
+  return sameHarnessConfiguration({ ...legacy, permissionBindings: current.permissionBindings }, current);
+}
+
 function readPersistedSession(value: unknown): PersistedHarnessSessionDescriptor {
   if (!isRecord(value)) throw new Error("Harness state contains an invalid session descriptor");
   const { threadId, permissionProfileId, workingDirectory } = value;
@@ -433,16 +440,20 @@ function readLegacyPersistedSession(value: unknown): LegacyPersistedHarnessSessi
     throw new Error("Harness state contains an invalid legacy session descriptor");
   }
   const { threadId, workingDirectory } = value;
-  const configurationName = value.configuration.name;
+  const { schemaVersion, name, implementation, implementationVersion, settings } = value.configuration;
   if (typeof threadId !== "number" || !Number.isSafeInteger(threadId) || threadId < 1
-    || typeof configurationName !== "string" || !/^[a-z0-9][a-z0-9._-]*$/i.test(configurationName)
+    || schemaVersion !== 1
+    || typeof name !== "string" || !/^[a-z0-9][a-z0-9._-]*$/i.test(name)
+    || typeof implementation !== "string" || !/^[a-z0-9][a-z0-9._-]*$/i.test(implementation)
+    || typeof implementationVersion !== "number" || !Number.isSafeInteger(implementationVersion) || implementationVersion < 1
+    || !isJsonObject(settings)
     || typeof workingDirectory !== "string") {
     throw new Error("Harness state contains an invalid legacy session descriptor");
   }
   const state = readHarnessState(value.state);
   return {
     threadId,
-    configurationName,
+    configuration: { schemaVersion, name, implementation, implementationVersion, settings },
     workingDirectory,
     ...(state === undefined ? {} : { state }),
   };

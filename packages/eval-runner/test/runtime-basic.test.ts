@@ -6,7 +6,7 @@ import { productHarnessImplementations } from "@relayer/harness-host";
 import type { CompletionOutput } from "@relayer/graph-client";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
-import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, executionDirectory, judgeVisibleGraph, renderArtifact, runBasicRuntimeEval } from "../src/runtime-basic.js";
+import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, executionDirectory, judgeVisibleGraph, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -40,6 +40,19 @@ describe("first runtime evaluation", () => {
     expect(isAbsolute(paths[0]!)).toBe(true);
     expect(paths[0]).toMatch(/python[/\\]relayer-graph[/\\]src$/);
     expect(paths[1]).toBe("existing-python-path");
+  });
+
+  it("selects a standalone permission profile supported by the harness", () => {
+    expect(selectStandalonePermissionProfile(taskSystemFixtureConfiguration)).toBe("auto");
+    expect(selectStandalonePermissionProfile({
+      ...taskSystemFixtureConfiguration,
+      name: "prime-agent-basic",
+      permissionBindings: { full: {} },
+    })).toBe("full");
+    expect(() => selectStandalonePermissionProfile({
+      ...taskSystemFixtureConfiguration,
+      permissionBindings: { ask: {}, full: {} },
+    })).toThrow("need Auto or one unambiguous permission profile");
   });
 
   it("recognizes equivalent concurrency language and gives the judge endpoint-resolvable node IDs", () => {

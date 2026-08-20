@@ -25,6 +25,10 @@ const testConfiguration: HarnessConfiguration = {
   permissionBindings: { ask: {}, auto: {}, full: {} },
   settings: {},
 };
+const legacyConfiguration = (configuration: HarnessConfiguration) => {
+  const { permissionBindings: _permissionBindings, ...legacy } = configuration;
+  return legacy;
+};
 
 describe("HarnessHost", () => {
   it("persists resumable harness state even when completion fails", async () => {
@@ -566,7 +570,7 @@ describe("HarnessHost", () => {
         sessions: [],
         legacySessions: [{
           threadId: 1,
-          configurationName: testConfiguration.name,
+          configuration: legacyConfiguration(testConfiguration),
           workingDirectory: directory,
           state: { providerSessionId: "legacy-session" },
         }],
@@ -613,7 +617,7 @@ describe("HarnessHost", () => {
         schemaVersion: 3,
         sessions: [{
           threadId: 1,
-          configuration: { name: testConfiguration.name },
+          configuration: legacyConfiguration(testConfiguration),
           workingDirectory: directory,
           state: { providerSessionId: "legacy-session" },
         }],
@@ -661,7 +665,7 @@ describe("HarnessHost", () => {
         schemaVersion: 3,
         sessions: [{
           threadId: 1,
-          configuration: { name: configuration.name },
+          configuration: legacyConfiguration(configuration),
           workingDirectory: directory,
           state: { providerSessionId: "legacy-prime-session" },
         }],
@@ -686,6 +690,54 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("does not resume schema-v3 provider state after configuration settings change", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v3-settings-"));
+    const stateFile = join(directory, "sessions.json");
+    const currentConfiguration = { ...testConfiguration, settings: { model: "new" } };
+    let restoredState: HarnessSessionState | undefined;
+    const host = new HarnessHost({
+      stateFile,
+      controlToken: "control",
+      implementations: { test: (context) => {
+        restoredState = context.savedState;
+        return { async complete() {}, state: emptyState };
+      } },
+    });
+    try {
+      await writeFile(stateFile, JSON.stringify({
+        schemaVersion: 3,
+        sessions: [{
+          threadId: 1,
+          configuration: { ...legacyConfiguration(testConfiguration), settings: { model: "old" } },
+          workingDirectory: directory,
+          state: { providerSessionId: "legacy-session" },
+        }],
+      }), { mode: 0o600 });
+      await host.initialize();
+
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: currentConfiguration,
+        workingDirectory: directory,
+      });
+
+      expect(restoredState).toBeUndefined();
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).toMatchObject({
+        schemaVersion: 4,
+        sessions: [{
+          threadId: 1,
+          configuration: currentConfiguration,
+          permissionProfileId: "auto",
+          state: {},
+        }],
+      });
+    } finally {
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("skips an invalid schema-v3 entry without blocking valid session migration", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v3-invalid-"));
     const stateFile = join(directory, "sessions.json");
@@ -696,7 +748,7 @@ describe("HarnessHost", () => {
         schemaVersion: 3,
         sessions: [
           { threadId: "invalid", configuration: {}, workingDirectory: directory },
-          { threadId: 2, configuration: { name: testConfiguration.name }, workingDirectory: directory },
+          { threadId: 2, configuration: legacyConfiguration(testConfiguration), workingDirectory: directory },
         ],
       }), { mode: 0o600 });
 
@@ -705,7 +757,7 @@ describe("HarnessHost", () => {
       expect(warning).toHaveBeenCalledOnce();
       expect(JSON.parse(await readFile(stateFile, "utf8")).legacySessions).toEqual([{
         threadId: 2,
-        configurationName: testConfiguration.name,
+        configuration: legacyConfiguration(testConfiguration),
         workingDirectory: directory,
       }]);
     } finally {
