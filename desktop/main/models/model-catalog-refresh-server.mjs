@@ -5,10 +5,10 @@ export const MODEL_CATALOG_REFRESH_PATH = "/v1/provider-catalog/refresh";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_MAX_BODY_BYTES = 1_024;
-// Leave headroom inside the Rust client's ten-second end-to-end timeout so a
-// stalled discovery produces an authenticated HTTP failure instead of a race
-// with the transport deadline.
-const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
+// Codex discovery performs account/read and at least one model/list request,
+// each with a 20-second provider deadline. Bound the combined operation while
+// leaving enough time for both requests to use their own budgets.
+export const MODEL_CATALOG_REFRESH_TIMEOUT_MS = 45_000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 
 class RequestError extends Error {
@@ -72,7 +72,7 @@ function withTimeout(operation, timeoutMs) {
 export async function startModelCatalogRefreshServer({
   refresh,
   maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
-  requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  requestTimeoutMs = MODEL_CATALOG_REFRESH_TIMEOUT_MS,
   shutdownTimeoutMs = DEFAULT_SHUTDOWN_TIMEOUT_MS,
   token = randomBytes(32).toString("hex"),
 } = {}) {

@@ -22,8 +22,9 @@ import {
   refreshNewThreadModelPicker,
   resetNewThreadModelPicker,
 } from "./composer-model-picker.js";
+import { preparePermissionProfiles } from "./permission-profiles.js";
 import { appState } from "./state.js";
-import { $, $$, escapeHtml, toast } from "./ui.js";
+import { $, $$, escapeHtml, escapeHtmlAttribute, toast } from "./ui.js";
 
 let settings = null;
 let selectedFamilyIndex = 0;
@@ -150,10 +151,10 @@ async function refresh({ preserveIndex = true, preserveEdit = false } = {}) {
 
 function harnessOptions() {
   const selectedConfigured = settings.harnesses.some((harness) => harness.id === settings.defaults.harnessId);
-  const missing = selectedConfigured ? "" : `<option value="${escapeHtml(settings.defaults.harnessId)}" selected disabled>${escapeHtml(settings.defaults.harnessId)} (unavailable)</option>`;
+  const missing = selectedConfigured ? "" : `<option value="${escapeHtmlAttribute(settings.defaults.harnessId)}" selected disabled>${escapeHtml(settings.defaults.harnessId)} (unavailable)</option>`;
   return `${missing}${settings.harnesses.map((harness) => {
     const selected = harness.id === settings.defaults.harnessId;
-    return `<option value="${escapeHtml(harness.id)}" ${selected ? "selected" : ""} ${harness.available === false ? "disabled" : ""}>${escapeHtml(harness.label)}</option>`;
+    return `<option value="${escapeHtmlAttribute(harness.id)}" ${selected ? "selected" : ""} ${harness.available === false ? "disabled" : ""}>${escapeHtml(harness.label)}</option>`;
   }).join("")}`;
 }
 
@@ -161,7 +162,7 @@ function providerOptions(selectedProviderId) {
   return settings.providers.map((item) => {
     const selected = item.id === selectedProviderId;
     const unavailable = item.connected === false;
-    return `<option value="${escapeHtml(item.id)}" ${selected ? "selected" : ""} ${unavailable ? "disabled" : ""}>${escapeHtml(item.label)}</option>`;
+    return `<option value="${escapeHtmlAttribute(item.id)}" ${selected ? "selected" : ""} ${unavailable ? "disabled" : ""}>${escapeHtml(item.label)}</option>`;
   }).join("");
 }
 
@@ -171,7 +172,7 @@ function defaultProviderOptions() {
 
 function unavailableModelOption(member) {
   if (providerModel(member.providerId, member.modelId)) return "";
-  return `<option value="${escapeHtml(member.modelId)}" selected disabled>${escapeHtml(member.modelLabel)}</option>`;
+  return `<option value="${escapeHtmlAttribute(member.modelId)}" selected disabled>${escapeHtml(member.modelLabel)}</option>`;
 }
 
 function modelOptions(member) {
@@ -181,7 +182,7 @@ function modelOptions(member) {
   )).map((model) => {
     const selected = model.id === member.modelId;
     const unavailable = owner?.connected === false || model.visible === false || model.available === false;
-    return `<option value="${escapeHtml(model.id)}" ${selected ? "selected" : ""} ${unavailable ? "disabled" : ""}>${escapeHtml(model.label)}</option>`;
+    return `<option value="${escapeHtmlAttribute(model.id)}" ${selected ? "selected" : ""} ${unavailable ? "disabled" : ""}>${escapeHtml(model.label)}</option>`;
   }).join("")}`;
 }
 
@@ -481,9 +482,15 @@ async function persistDefault(field) {
     : $("#defaultProviderSelect").value;
   render();
   try {
+    const applyPermissionProfiles = field === "harnessId"
+      ? await preparePermissionProfiles(settings.defaults.harnessId)
+      : null;
     await saveModelDefaults({ [field]: settings.defaults[field] });
     await refresh({ preserveEdit: true });
-    if (field === "harnessId") resetNewThreadModelPicker();
+    if (field === "harnessId") {
+      applyPermissionProfiles?.();
+      resetNewThreadModelPicker();
+    }
     setStatus("Saved", "success");
   } catch (error) {
     settings.defaults = previous;

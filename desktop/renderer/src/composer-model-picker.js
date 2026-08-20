@@ -1,6 +1,7 @@
 import { createModelPicker } from "./model-picker.js";
 import { pickerSelectionPayload } from "./model-picker-model.js";
 import { validateModelSelection } from "./model-settings-api.js";
+import { preparePermissionProfiles } from "./permission-profiles.js";
 import { appState } from "./state.js";
 import { $ } from "./ui.js";
 
@@ -16,6 +17,7 @@ export function initializeNewThreadModelPicker({
     settings: appState.modelSettings,
     onSelectionChange,
     onOpenSettings,
+    prepareHarnessChange: preparePermissionProfiles,
     validateSelection: (selection) => validateModelSelection({
       harnessId: selection.harnessId,
       familyId: selection.familyId,

@@ -3,6 +3,7 @@ import { request as httpRequest } from "node:http";
 
 import {
   MODEL_CATALOG_REFRESH_PATH,
+  MODEL_CATALOG_REFRESH_TIMEOUT_MS,
   startModelCatalogRefreshServer,
 } from "../desktop/main/models/model-catalog-refresh-server.mjs";
 
@@ -32,6 +33,10 @@ function requestWithHost(service, host) {
 }
 
 describe("trusted pre-inference model catalog refresh server", () => {
+  it("allows account and model discovery to use their provider request budgets", () => {
+    expect(MODEL_CATALOG_REFRESH_TIMEOUT_MS).toBeGreaterThan(40_000);
+  });
+
   it("binds only to IPv4 loopback and authenticates one bodyless refresh per request", async () => {
     const refresh = vi.fn(async () => {});
     const service = await startModelCatalogRefreshServer({ refresh });

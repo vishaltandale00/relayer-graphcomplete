@@ -191,8 +191,8 @@ async function boot() {
   else applyAppearance(document.documentElement.dataset.theme);
   if (desktop) renderUpdate(await desktop.updater.status());
   await refreshAccount();
-  await loadPermissionProfiles();
   await initializeModelFamilySettings();
+  await loadPermissionProfiles(appState.modelSettings?.defaults?.harnessId);
   initializeNewThreadModelPicker({
     onSelectionChange: updateCreateThreadAvailability,
     onOpenSettings: () => {

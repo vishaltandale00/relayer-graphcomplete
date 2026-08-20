@@ -5,7 +5,7 @@ import {
   reconcilePickerSelection,
   validateCandidateHarness,
 } from "./model-picker-model.js";
-import { escapeHtml } from "./ui.js";
+import { escapeHtml, escapeHtmlAttribute } from "./ui.js";
 
 const TABS = ["model", "advanced"];
 
@@ -122,6 +122,7 @@ export function createModelPicker({
   selection = null,
   onSelectionChange = () => {},
   onOpenSettings = () => {},
+  prepareHarnessChange = async () => () => {},
   validateSelection = async () => {},
 }) {
   if (!root) throw new Error("Model picker requires a root element.");
@@ -181,13 +182,13 @@ export function createModelPicker({
       };
       return;
     }
-    panel.innerHTML = `<label class="model-family-field"><span>Family</span><select data-model-family aria-label="Model family">${families.map((family) => `<option value="${escapeHtml(family.id)}" ${String(family.id) === String(selectedFamily.id) ? "selected" : ""}>${escapeHtml(family.name)}</option>`).join("")}</select></label>
-      <div class="model-option-list" role="radiogroup" aria-label="Models in ${escapeHtml(selectedFamily.name)}">${selectedFamily.availableMembers.map((member) => {
+    panel.innerHTML = `<label class="model-family-field"><span>Family</span><select data-model-family aria-label="Model family">${families.map((family) => `<option value="${escapeHtmlAttribute(family.id)}" ${String(family.id) === String(selectedFamily.id) ? "selected" : ""}>${escapeHtml(family.name)}</option>`).join("")}</select></label>
+      <div class="model-option-list" role="radiogroup" aria-label="Models in ${escapeHtmlAttribute(selectedFamily.name)}">${selectedFamily.availableMembers.map((member) => {
         const model = modelFor(currentSettings, member.providerId, member.modelId);
         const provider = currentSettings.providers.find((item) => item.id === member.providerId);
         const checked = member.providerId === currentSelection.providerId
           && member.modelId === currentSelection.modelId;
-        return `<button type="button" role="radio" aria-checked="${checked}" data-model-option data-provider-id="${escapeHtml(member.providerId)}" data-model-id="${escapeHtml(member.modelId)}"><span><strong>${escapeHtml(model?.label ?? member.modelId)}</strong><small>${escapeHtml(provider?.label ?? member.providerId)}</small></span><i aria-hidden="true">${checked ? "✓" : ""}</i></button>`;
+        return `<button type="button" role="radio" aria-checked="${checked}" data-model-option data-provider-id="${escapeHtmlAttribute(member.providerId)}" data-model-id="${escapeHtmlAttribute(member.modelId)}"><span><strong>${escapeHtml(model?.label ?? member.modelId)}</strong><small>${escapeHtml(provider?.label ?? member.providerId)}</small></span><i aria-hidden="true">${checked ? "✓" : ""}</i></button>`;
       }).join("")}</div>`;
     panel.querySelector("[data-model-family]").onchange = (event) => {
       const nextFamily = families.find((family) => String(family.id) === event.target.value);
@@ -238,7 +239,7 @@ export function createModelPicker({
     panel.innerHTML = harnesses.length
       ? `<div class="harness-option-list" role="radiogroup" aria-label="Harnesses">${harnesses.map((harness) => {
         const checked = harness.id === harnessId;
-        return `<button type="button" role="radio" aria-checked="${checked}" data-harness-option="${escapeHtml(harness.id)}" ${validatingHarness ? "disabled" : ""}><span><strong>${escapeHtml(harness.label)}</strong></span><i aria-hidden="true">${checked ? "✓" : ""}</i></button>`;
+        return `<button type="button" role="radio" aria-checked="${checked}" data-harness-option="${escapeHtmlAttribute(harness.id)}" ${validatingHarness ? "disabled" : ""}><span><strong>${escapeHtml(harness.label)}</strong></span><i aria-hidden="true">${checked ? "✓" : ""}</i></button>`;
       }).join("")}</div>`
       : `<div class="model-picker-empty"><strong>No available harnesses</strong><button type="button" class="secondary" data-model-picker-settings>Open Settings</button></div>`;
     panel.querySelector("[data-model-picker-settings]")?.addEventListener("click", () => {
@@ -260,14 +261,30 @@ export function createModelPicker({
           validateSelection,
         );
         if (!harnessValidationGate.isCurrent(validationSequence)) return;
-        validatingHarness = false;
         if (result.error) {
+          validatingHarness = false;
           error = result.error;
           render();
           onSelectionChange(selectionReady() ? currentSelection : null);
           [...root.querySelectorAll("[data-harness-option]")]
             .find((candidate) => candidate.dataset.harnessOption === candidateHarnessId)
             ?.focus();
+          return;
+        }
+        let applyHarnessChange;
+        try {
+          applyHarnessChange = await prepareHarnessChange(candidateHarnessId);
+          if (!harnessValidationGate.isCurrent(validationSequence)) return;
+          if (typeof applyHarnessChange !== "function") {
+            throw new Error("Harness change preparation must return an apply function.");
+          }
+          applyHarnessChange();
+        } catch (changeError) {
+          if (!harnessValidationGate.isCurrent(validationSequence)) return;
+          validatingHarness = false;
+          error = changeError instanceof Error ? changeError.message : String(changeError);
+          render();
+          onSelectionChange(selectionReady() ? currentSelection : null);
           return;
         }
         commit(result.selection);

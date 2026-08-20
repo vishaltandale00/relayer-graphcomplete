@@ -50,7 +50,7 @@ impl ProviderCatalogRefreshClient {
             ));
         }
         let client = Client::builder()
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(50))
             .build()
             .map_err(|error| ProviderCatalogRefreshError::Configuration(error.to_string()))?;
         Ok(Self {

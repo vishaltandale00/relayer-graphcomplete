@@ -23,6 +23,12 @@ pub(super) struct PermissionProfilesResponse {
     profiles: Vec<PermissionProfileAvailability>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct PermissionProfilesQuery {
+    harness_id: Option<String>,
+}
+
 pub(super) async fn health() -> Json<Value> {
     Json(json!({
         "ok": true,
@@ -42,10 +48,18 @@ pub(super) async fn capabilities(
 pub(super) async fn permission_profiles(
     State(state): State<ApiState>,
     headers: HeaderMap,
+    Query(query): Query<PermissionProfilesQuery>,
 ) -> Result<Json<PermissionProfilesResponse>, ApiError> {
     authorize_read(&state, &headers)?;
     let bindings = match &state.runtime {
-        Some(runtime) => Some(runtime.permission_bindings(&state.default_harness_configuration)?),
+        Some(runtime) => Some(
+            runtime.permission_bindings(
+                query
+                    .harness_id
+                    .as_deref()
+                    .unwrap_or(&state.default_harness_configuration),
+            )?,
+        ),
         None => None,
     };
     let profiles = state.permission_catalog.availability(bindings);

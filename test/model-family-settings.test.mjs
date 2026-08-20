@@ -237,7 +237,8 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("await deleteModelFamily(family.id);");
     expect(settingsSource).toContain("if (settings.families.some((family) => family.draft || family.editing)) return;");
     expect(settingsSource).toContain("if (savingFamily) return;");
-    expect(settingsSource).toContain('if (field === "harnessId") resetNewThreadModelPicker();');
+    expect(settingsSource).toContain("await preparePermissionProfiles(settings.defaults.harnessId)");
+    expect(settingsSource).toContain("resetNewThreadModelPicker();");
     expect(settingsSource).toContain("refreshNewThreadModelPicker();");
     expect(settingsSource).toContain('$("#familyNameInput").value = current.name;');
     expect(settingsSource).not.toContain('value="${escapeHtml(family.name)}"');

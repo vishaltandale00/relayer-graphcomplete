@@ -16,6 +16,7 @@ import {
   modelSelectionLabels,
 } from "../desktop/renderer/src/model-picker.js";
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
+import { escapeHtmlAttribute } from "../desktop/renderer/src/ui.js";
 
 const settings = {
   families: [{ id: 7, name: "Codex latest", enabled: true, position: 0 }],
@@ -67,6 +68,12 @@ describe("composer model picker UI contract", () => {
     const root = { contains: (target) => target === inside };
     expect(modelPickerClickIsOutside(root, inside)).toBe(false);
     expect(modelPickerClickIsOutside(root, outside)).toBe(true);
+  });
+
+  it("escapes connector identities for HTML attribute context", () => {
+    expect(escapeHtmlAttribute('provider&model"quoted\'')).toBe(
+      "provider&amp;model&quot;quoted&#39;",
+    );
   });
 
   it("ignores stale asynchronous Advanced harness validation results", () => {
@@ -147,7 +154,11 @@ describe("composer model picker UI contract", () => {
   });
 
   it("server-validates Advanced harness candidates before committing them", async () => {
-    const picker = await readFile(new URL("../desktop/renderer/src/model-picker.js", import.meta.url), "utf8");
+    const [picker, composerPicker, permissions] = await Promise.all([
+      readFile(new URL("../desktop/renderer/src/model-picker.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/composer-model-picker.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/permission-profiles.js", import.meta.url), "utf8"),
+    ]);
     expect(picker).toContain("await validateCandidateHarness(");
     expect(picker.indexOf("await validateCandidateHarness(")).toBeLessThan(
       picker.indexOf("commit(result.selection);"),
@@ -156,6 +167,11 @@ describe("composer model picker UI contract", () => {
       picker.indexOf("await validateCandidateHarness("),
     );
     expect(picker).toContain("onSelectionChange(null);");
+    expect(picker.indexOf("await prepareHarnessChange(candidateHarnessId)")).toBeLessThan(
+      picker.indexOf("commit(result.selection);"),
+    );
+    expect(composerPicker).toContain("prepareHarnessChange: preparePermissionProfiles");
+    expect(permissions).toContain("/api/permission-profiles?harnessId=${encodeURIComponent(harnessId)}");
   });
 
   it("reloads renderer model state after provider account changes", async () => {
