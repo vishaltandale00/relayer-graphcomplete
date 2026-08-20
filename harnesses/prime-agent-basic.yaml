@@ -4,5 +4,5 @@ implementation: prime.agent
 implementationVersion: 1
 settings:
   thinkingLevel: medium
-  rlmMaxDepth: 2
+  rlmMaxDepth: 1
   prewarmIpythonKernel: true

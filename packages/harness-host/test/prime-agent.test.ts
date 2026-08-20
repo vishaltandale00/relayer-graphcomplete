@@ -7,7 +7,7 @@ const configuration: HarnessConfiguration = {
   name: "prime-agent-basic",
   implementation: "prime.agent",
   implementationVersion: 1,
-  settings: { thinkingLevel: "medium", rlmMaxDepth: 2, prewarmIpythonKernel: true },
+  settings: { thinkingLevel: "medium", rlmMaxDepth: 1, prewarmIpythonKernel: true },
 };
 
 describe("PrimeAgentHarness", () => {
