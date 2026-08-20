@@ -8,7 +8,7 @@ The canonical future product boundary remains conceptually:
 const result = await complete(inputGraph);
 ```
 
-This top-level function is not exported by the first runtime slice yet. `inputGraph` is the pointer to the current user-interaction node. The selected thread harness already holds its graph capability, working directory, and provider session. A root model ending its turn does not mean the graph is complete; the harness must finish with `graph.submit(interactionNode)`.
+This top-level function is not exported by the first runtime slice yet. `inputGraph` is the pointer to the current user-interaction node. The selected thread harness keeps its working directory and provider session, while each `complete()` call receives a separate graph scope. A root model ending its turn does not mean the graph is complete; the harness must finish with `graph.submit(interactionNode)`.
 
 The executable first slice enters through the persistent `HarnessHost` while the app-server integration behind the canonical product boundary remains future work. There is intentionally no second structured-output harness path: accepted product output must come from graph-tool writes and explicit submission.
 
@@ -20,6 +20,7 @@ Pre-alpha executable runtime slice. The repository now includes:
 - object-based TypeScript and Python clients for nodes, undirected edges, layers, actions, and submission;
 - a persistent Node harness host that loads named file-backed configurations, caches one harness object per thread, persists opaque provider resume state without graph credentials, and supports cancellation and deterministic disposal;
 - a graph-tool `codex.basic` harness using the OpenAI Codex TypeScript SDK;
+- a `prime.agent` harness that passes the current graph scope through Prime Agent's run-scoped IPython host context;
 - an inference-free evaluation that starts the real Rust server and Node host and checks two interactions in one empty-project thread;
 - a separate internal Relayer Eval desktop application that runs test-case × harness matrices through the product app server and opens their threads in the production graph/chat workspace;
 - Rust, TypeScript, Python, and process-level integration tests.
@@ -28,7 +29,7 @@ The Node runtime is split into explicit workspace packages: `@relayer/graph-clie
 
 ## Core design
 
-- Prime Agent owns recursive model execution when the production harness is added; GraphComplete does not add another scheduler.
+- Prime Agent owns recursive model execution; GraphComplete does not add another scheduler.
 - GraphComplete owns graph records, active-interaction write authority, validation, immutable accepted history, and explicit submission.
 - Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
 - The Node harness host owns live per-thread harness objects and provider-session resume state, not graph rules or product lifecycle.
@@ -37,11 +38,19 @@ The implemented basic loop is:
 
 1. A trusted runtime supplies its existing positive-integer project/thread IDs; graph core creates the canonical user-interaction node and activates a capability for that node.
 2. The Node host resolves the thread's harness once and keeps that object alive.
-3. The harness submits node objects, creates undirected edges, packages the exact visible layer, and adds the interaction's response navigate action. It may also attach useful navigate or invoke actions to output nodes; nested layers are an available authoring capability, not a per-node requirement.
-4. `graph.submit(interactionNode)` recursively validates navigate targets and atomically accepts only the reachable drafts.
-5. Complete returns the resolved root layer for immediate display; later navigation reads the persisted layer.
+3. The host supplies the current graph scope only for that `complete()` call. The harness submits node objects, creates undirected edges, packages the exact visible layer, and adds the interaction's response navigate action. It may also attach useful navigate or invoke actions to output nodes; nested layers are an available authoring capability, not a per-node requirement.
+4. The host reads the accepted output and closes the turn's in-memory graph scope. The calling runtime that minted the graph capability revokes its token after the Complete call settles. The host has a separate API credential and never receives graph control authority. A cached client from an earlier IPython turn cannot modify a later interaction.
+5. `graph.submit(interactionNode)` recursively validates navigate targets and atomically accepts only the reachable drafts.
+6. Complete returns the resolved root layer for immediate display; later navigation reads the persisted layer.
 
 Independent self-assessment will later add an optional review gate to this same loop.
+
+The `prime.agent` adapter targets the run-context API in
+[Prime Agent PR #1538](https://github.com/PrimeIntellect-ai/prime-agent/pull/1538).
+Its inference-free adapter tests run in this repository. A clean live install
+still needs that forked package exposed under its canonical
+`@earendil-works/pi-coding-agent` package name; the PR branch is a monorepo, not
+an installable npm subdirectory.
 
 See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/architecture.md), and [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
 
@@ -78,6 +87,28 @@ npm run desktop:dev
 
 Ask a question in the composer to open the thread immediately while the default `codex-basic` harness builds its graph in the background. Follow-up turns reuse the same harness/provider session while receiving a fresh graph capability. The graph workspace supports node arrangement and background-drag canvas panning; the same interactions are available in read-only Eval review windows.
 
+To try the Prime Agent harness in the real Relayer chat, first build the Prime Agent
+[run-context branch](https://github.com/vishaltandale00/prime-agent/tree/codex/run-scoped-kernel-context)
+and expose its coding-agent workspace under the package's canonical name:
+
+```sh
+cd /path/to/prime-agent
+npm install
+npm run build
+
+cd /path/to/relayer-graphcomplete
+npm install
+npm install --no-save /path/to/prime-agent/packages/coding-agent
+npm run desktop:dev:prime
+```
+
+The Prime launcher selects `prime-agent-basic`, adds the local Python graph client
+to every IPython kernel, and uses a separate ignored desktop profile. Prime Agent
+reads its normal local provider credentials. Use
+`npm run desktop:dev:prime -- --configuration prime-agent-deep` to try the deeper
+configuration. The packaged Relayer application remains pinned to its production
+harness configuration.
+
 ## Relayer Eval
 
 Relayer Eval is a separate internal application and profile. Its dashboard configures cases, named harness configurations, and a judge; shows persisted test runs and aggregate results by harness; and opens any specific case × harness execution in a separate read-only production workspace window.
@@ -86,7 +117,7 @@ Relayer Eval is a separate internal application and profile. Its dashboard confi
 npm run eval-app:dev
 ```
 
-The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. Build the unsigned internal application with `npm run eval-app:pack`.
+The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. When the local Prime Agent package is linked as described above, the development picker also exposes `prime-agent-basic` and `prime-agent-deep` and supplies the Python graph client to their IPython kernels. Packaged Eval builds omit those unpublished development-only options. Build the unsigned internal application with `npm run eval-app:pack`.
 
 The public Relayer and internal Relayer Eval builds use distinct application identifiers, entry points, data profiles, and dashboard assets. They share the graph runtime, harness host, app server, product records, API contracts, and production workspace. See [ADR 0003](docs/decisions/0003-shared-product-eval-workspace.md).
 

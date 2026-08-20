@@ -26,7 +26,9 @@ struct Arguments {
     #[arg(long)]
     harness_url: Option<String>,
     #[arg(long)]
-    runtime_control_token: Option<String>,
+    graph_control_token: Option<String>,
+    #[arg(long)]
+    harness_control_token: Option<String>,
     #[arg(long)]
     harness_configurations: Option<PathBuf>,
     #[arg(long, default_value = "codex-basic")]
@@ -57,21 +59,27 @@ async fn main() -> anyhow::Result<()> {
     let runtime = match (
         arguments.graph_url,
         arguments.harness_url,
-        arguments.runtime_control_token,
+        arguments.graph_control_token,
+        arguments.harness_control_token,
         arguments.harness_configurations,
     ) {
-        (Some(graph_url), Some(harness_url), Some(control_token), Some(configurations)) => {
-            Some(RelayerRuntimeConfig {
-                graph_url,
-                harness_url,
-                control_token,
-                harness_configurations: configurations,
-                default_harness_configuration: arguments.default_harness_configuration,
-                allow_harness_override: arguments.allow_harness_override,
-                standalone_workspaces_directory: arguments.data_dir.join("workspaces"),
-            })
-        }
-        (None, None, None, None) => None,
+        (
+            Some(graph_url),
+            Some(harness_url),
+            Some(graph_control_token),
+            Some(harness_control_token),
+            Some(configurations),
+        ) => Some(RelayerRuntimeConfig {
+            graph_url,
+            harness_url,
+            graph_control_token,
+            harness_control_token,
+            harness_configurations: configurations,
+            default_harness_configuration: arguments.default_harness_configuration,
+            allow_harness_override: arguments.allow_harness_override,
+            standalone_workspaces_directory: arguments.data_dir.join("workspaces"),
+        }),
+        (None, None, None, None, None) => None,
         _ => anyhow::bail!("GraphComplete runtime arguments must be supplied together"),
     };
     let app_server = RelayerAppServer::open(RelayerAppServerConfig {

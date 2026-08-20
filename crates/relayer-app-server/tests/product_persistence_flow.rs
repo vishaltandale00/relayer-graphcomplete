@@ -67,7 +67,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     let graph = axum::Router::new()
         .route(
             "/api/control/capabilities",
-            axum::routing::post(|| async { axum::Json(json!({ "graphToken": "graph" })) }),
+            axum::routing::post(|| async { axum::Json(json!({ "graphToken": "graph" })) })
+                .delete(|| async { axum::Json(json!({ "revoked": true })) }),
         )
         .route(
             "/api/graph/actions/41",
@@ -858,7 +859,8 @@ async fn open_app_with_runtime(
         runtime: Some(RelayerRuntimeConfig {
             graph_url: graph_url.to_owned(),
             harness_url: harness_url.to_owned(),
-            control_token: "runtime-control".to_owned(),
+            graph_control_token: "graph-control".to_owned(),
+            harness_control_token: "harness-control".to_owned(),
             harness_configurations: catalog.to_owned(),
             default_harness_configuration: "codex-basic".to_owned(),
             allow_harness_override: false,

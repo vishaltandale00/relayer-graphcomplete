@@ -28,7 +28,7 @@ describe("harness configuration", () => {
     expect(parseHarnessConfiguration({
       schemaVersion: 1,
       name: "prime-production",
-      implementation: "prime-agent",
+      implementation: "prime.agent",
       implementationVersion: 7,
       settings: { root: { model: "luna" }, reviewers: [{ model: "sol", effort: "high" }] },
     }).settings).toEqual({ root: { model: "luna" }, reviewers: [{ model: "sol", effort: "high" }] });
@@ -38,14 +38,14 @@ describe("harness configuration", () => {
     const left = parseHarnessConfiguration({
       schemaVersion: 1,
       name: "prime-production",
-      implementation: "prime-agent",
+      implementation: "prime.agent",
       implementationVersion: 1,
       settings: { reviewers: [{ effort: "high", model: "sol" }], root: { model: "luna" } },
     });
     const reordered = parseHarnessConfiguration({
       settings: { root: { model: "luna" }, reviewers: [{ model: "sol", effort: "high" }] },
       implementationVersion: 1,
-      implementation: "prime-agent",
+      implementation: "prime.agent",
       name: "prime-production",
       schemaVersion: 1,
     });
@@ -71,6 +71,17 @@ describe("harness configuration", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("loads two production configurations for the same Prime Agent harness", async () => {
+    const catalog = await loadHarnessConfigurations([
+      join(repositoryRoot, "harnesses/prime-agent-basic.yaml"),
+      join(repositoryRoot, "harnesses/prime-agent-deep.yaml"),
+    ]);
+
+    expect([...catalog.keys()]).toEqual(["prime-agent-basic", "prime-agent-deep"]);
+    expect([...catalog.values()].map(({ implementation }) => implementation)).toEqual(["prime.agent", "prime.agent"]);
+    expect(catalog.get("prime-agent-basic")?.settings).not.toEqual(catalog.get("prime-agent-deep")?.settings);
   });
 
   it("rejects duplicate configuration names in a catalog", async () => {

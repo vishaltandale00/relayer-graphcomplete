@@ -10,6 +10,10 @@ import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-creden
 import { CredentialAdapter } from "../desktop/main/credentials/credential-adapter.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
+import {
+  DEFAULT_DESKTOP_HARNESS_CONFIGURATION,
+  resolveDesktopHarnessConfiguration,
+} from "../desktop/main/services/desktop-harness-configuration.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
 import { createCanaryEvidenceLog } from "../desktop/main/services/canary-evidence-log.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "../desktop/main/services/updater.mjs";
@@ -86,6 +90,23 @@ describe("desktop skeleton", () => {
       distRoot,
       contract: { platform: "linux", architecture: "x64", productName: "Relayer" },
     })).toThrow("Unsupported desktop release platform: linux.");
+  });
+
+  it("allows a named development harness without changing the packaged harness", () => {
+    expect(resolveDesktopHarnessConfiguration({ isPackaged: false, environment: {} }))
+      .toBe(DEFAULT_DESKTOP_HARNESS_CONFIGURATION);
+    expect(resolveDesktopHarnessConfiguration({
+      isPackaged: false,
+      environment: { RELAYER_DESKTOP_HARNESS_CONFIGURATION: "prime-agent-basic" },
+    })).toBe("prime-agent-basic");
+    expect(resolveDesktopHarnessConfiguration({
+      isPackaged: true,
+      environment: { RELAYER_DESKTOP_HARNESS_CONFIGURATION: "prime-agent-basic" },
+    })).toBe(DEFAULT_DESKTOP_HARNESS_CONFIGURATION);
+    expect(() => resolveDesktopHarnessConfiguration({
+      isPackaged: false,
+      environment: { RELAYER_DESKTOP_HARNESS_CONFIGURATION: "../other" },
+    })).toThrow("must be a harness configuration name");
   });
 
   it("moves graph world coordinates through a shared camera offset", () => {
@@ -300,6 +321,8 @@ describe("desktop skeleton", () => {
     expect(evalMain).toContain("productSession.readOnlyCookie");
     expect(evalMain).toContain("claimPrimaryDesktopInstance");
     expect(evalMain).toContain("createReviewWindow(executionId)");
+    expect(evalMain).toContain("evalHarnessConfigurationPaths({ harnessDirectory, isPackaged: app.isPackaged })");
+    expect(evalMain).toContain("process.env.PYTHONPATH");
     expect(evalDashboard).toContain("Test cases");
     expect(evalDashboard).toContain("Harnesses under test");
     expect(evalDashboard).toContain("Open the judge review or the read-only production workspace");
@@ -612,11 +635,20 @@ describe("desktop skeleton", () => {
 
     try {
       const session = await service.start();
-      expect(session.controlToken).toMatch(/^[a-f0-9]{64}$/);
-      expect(suppliedToken).toBe(`${session.controlToken}\n`);
+      expect(session.graphControlToken).toMatch(/^[a-f0-9]{64}$/);
+      expect(session.harnessControlToken).toMatch(/^[a-f0-9]{64}$/);
+      expect(session.harnessControlToken).not.toBe(session.graphControlToken);
+      expect(suppliedToken).toBe(`${session.graphControlToken}\n`);
       expect(invocations[0].args).not.toContain("--control-token");
-      expect(invocations[0].args).not.toContain(session.controlToken);
+      expect(invocations[0].args).not.toContain(session.graphControlToken);
+      expect(invocations[0].args).not.toContain(session.harnessControlToken);
       expect(invocations[0].options.stdio).toEqual(["pipe", "pipe", "pipe"]);
+      expect((await fetch(`${session.harnessUrl}/health`, {
+        headers: { authorization: `Bearer ${session.graphControlToken}` },
+      })).status).toBe(401);
+      expect((await fetch(`${session.harnessUrl}/health`, {
+        headers: { authorization: `Bearer ${session.harnessControlToken}` },
+      })).status).toBe(200);
 
       child.exitCode = 9;
       child.emit("exit", 9, null);

@@ -1,11 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { codexBinaryPath, nativeBinaryName } from "../shared/target.mjs";
 
 import { taskSystemFixtureFactory } from "@relayer/eval-runner";
+import { evalHarnessConfigurationPaths } from "./configuration-paths.mjs";
 import { EvalService } from "./eval-service.mjs";
 import { loadJudgeScreenshotArtifact } from "./judge-screenshot-loader.mjs";
 import { ReviewSession } from "./review-session.mjs";
@@ -34,11 +35,11 @@ const appServerBinary = app.isPackaged
 const harnessDirectory = app.isPackaged ? join(process.resourcesPath, "harnesses") : join(repositoryRoot, "harnesses");
 const productRendererDirectory = app.isPackaged ? join(process.resourcesPath, "renderer") : join(desktopDirectory, "renderer");
 const evalRendererDirectory = app.isPackaged ? join(process.resourcesPath, "eval-renderer") : join(desktopDirectory, "eval-renderer");
-const configurationPaths = [
-  join(harnessDirectory, "fixture-task-system.yaml"),
-  join(harnessDirectory, "codex-basic.yaml"),
-  join(harnessDirectory, "codex-basic-high.yaml"),
-];
+const configurationPaths = evalHarnessConfigurationPaths({ harnessDirectory, isPackaged: app.isPackaged });
+if (!app.isPackaged) {
+  const pythonClientPath = join(repositoryRoot, "python", "relayer-graph", "src");
+  process.env.PYTHONPATH = [pythonClientPath, process.env.PYTHONPATH].filter(Boolean).join(delimiter);
+}
 const graphClientModuleUrl = app.isPackaged
   ? pathToFileURL(join(process.resourcesPath, "graph-client", "index.js")).href
   : undefined;

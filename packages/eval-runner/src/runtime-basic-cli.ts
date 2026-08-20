@@ -4,9 +4,10 @@ import { fileURLToPath } from "node:url";
 import { loadHarnessConfigurations, productHarnessImplementations, type HarnessConfiguration } from "@relayer/harness-host";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "./fixtures/task-system.js";
 import { expandTestRun, type TestRunSelection } from "./run-plan.js";
-import { basicEvalCaseId, executionDirectory, runBasicRuntimeEval, type BasicJudgeConfiguration } from "./runtime-basic.js";
+import { basicEvalCaseId, basicEvalPythonPath, executionDirectory, runBasicRuntimeEval, type BasicJudgeConfiguration } from "./runtime-basic.js";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
+process.env.PYTHONPATH = basicEvalPythonPath(process.env.PYTHONPATH);
 
 async function main(): Promise<void> {
   const outputDirectory = resolve(singleArgument("--output-dir") ?? ".relayer/evals/runtime");

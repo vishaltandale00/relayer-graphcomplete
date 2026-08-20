@@ -1,12 +1,12 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { productHarnessImplementations } from "@relayer/harness-host";
 import type { CompletionOutput } from "@relayer/graph-client";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
-import { basicEvalCaseId, basicEvalFacts, checkBasicFacts, checkBasicOutput, checkNodeNavigation, executionDirectory, judgeVisibleGraph, renderArtifact, runBasicRuntimeEval } from "../src/runtime-basic.js";
+import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, executionDirectory, judgeVisibleGraph, renderArtifact, runBasicRuntimeEval } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -35,6 +35,13 @@ function navigationOutput(actions: CompletionOutput["rootLayer"]["actions"] = []
 }
 
 describe("first runtime evaluation", () => {
+  it("configures an absolute Python client path for kernels launched from temporary directories", () => {
+    const paths = basicEvalPythonPath("existing-python-path").split(delimiter);
+    expect(isAbsolute(paths[0]!)).toBe(true);
+    expect(paths[0]).toMatch(/python[/\\]relayer-graph[/\\]src$/);
+    expect(paths[1]).toBe("existing-python-path");
+  });
+
   it("recognizes equivalent concurrency language and gives the judge endpoint-resolvable node IDs", () => {
     const concurrency = basicEvalFacts.find((fact) => fact.id === "two-active-limit")!;
     expect(concurrency.patterns.some((pattern) => pattern.test("allowing up to two tasks to run at the same time"))).toBe(true);
@@ -54,6 +61,18 @@ describe("first runtime evaluation", () => {
     });
     expect(visible.nodes.map((node) => node.id)).toEqual([2, 6]);
     expect(visible.edges).toEqual([[2, 6]]);
+    const judgePrompt = basicJudgePrompt({
+      nodeId: 1,
+      rootAction: { id: 1, sourceNodeId: 1, kind: "navigate", label: "Response", variant: "pill", targetLayerId: 3, response: true, state: "accepted" },
+      rootLayer: {
+        layer: { id: 3, nodes: [2, 6], edges: [4], state: "accepted" },
+        nodes: visible.nodes.map((node) => ({ ...node, kind: "concept" as const, state: "accepted" as const })),
+        edges: [{ id: 4, endpoints: [6, 2], state: "accepted" }],
+        actions: [],
+      },
+    }, basicEvalPrompt);
+    expect(judgePrompt).toContain("[a,b] means the same thing as [b,a]");
+    expect(judgePrompt).toContain("exactly two worker nodes shown busy while additional work remains queued clearly establishes the two-active-task limit");
 
     const mismatched = {
       nodeId: 1,
@@ -106,7 +125,8 @@ describe("first runtime evaluation", () => {
     expect(artifact.turns.every((turn) => checkBasicFacts(turn.output).every((check) => check.passed))).toBe(true);
     expect(artifact.sessionChecks).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "single-harness-object", passed: true }),
-      expect.objectContaining({ name: "rotated-interaction-capability", passed: true }),
+      expect.objectContaining({ name: "distinct-interaction-capabilities", passed: true }),
+      expect.objectContaining({ name: "revoked-interaction-capabilities", passed: true }),
     ]));
     const directory = executionDirectory(outputDirectory, execution);
     expect(JSON.parse(await readFile(join(directory, "result.json"), "utf8"))).toMatchObject({

@@ -33,7 +33,8 @@ pub(crate) struct RuntimeClient {
     client: Client,
     graph_url: Url,
     harness_url: Url,
-    control_token: String,
+    graph_control_token: String,
+    harness_control_token: String,
     configurations: HashMap<String, CatalogEntry>,
 }
 
@@ -66,9 +67,15 @@ impl RuntimeClient {
     pub(crate) async fn open(
         graph_url: &str,
         harness_url: &str,
-        control_token: String,
+        graph_control_token: String,
+        harness_control_token: String,
         catalog_path: &Path,
     ) -> Result<Self, RuntimeError> {
+        if graph_control_token == harness_control_token {
+            return Err(RuntimeError::Configuration(
+                "graph and harness control tokens must be distinct".into(),
+            ));
+        }
         let catalog: ConfigurationCatalog =
             serde_json::from_slice(&tokio::fs::read(catalog_path).await?)?;
         if catalog.schema_version != 1 {
@@ -91,7 +98,8 @@ impl RuntimeClient {
             client: Client::new(),
             graph_url: loopback_url(graph_url, "graph")?,
             harness_url: loopback_url(harness_url, "harness")?,
-            control_token,
+            graph_control_token,
+            harness_control_token,
             configurations,
         })
     }
@@ -121,34 +129,50 @@ impl RuntimeClient {
                     "threadId": command.thread_id,
                     "text": command.text,
                 }),
+                &self.graph_control_token,
                 StatusCode::OK,
             )
             .await?;
         let graph = serde_json::json!({
             "url": self.graph_url.as_str().trim_end_matches('/'),
-            "token": interaction.graph_token,
+            "token": &interaction.graph_token,
             "nodeId": interaction.node.id,
         });
-        let _: Value = self
-            .post(
-                self.harness_url.join("sessions")?,
-                &serde_json::json!({
-                    "threadId": command.thread_id,
-                    "configuration": selected.configuration,
-                    "workingDirectory": command.working_directory,
-                    "graph": graph,
-                }),
-                StatusCode::CREATED,
-            )
-            .await?;
-        let completed: CompleteResponse = self
-            .post(
+        let completion = async {
+            let _: Value = self
+                .post(
+                    self.harness_url.join("sessions")?,
+                    &serde_json::json!({
+                        "threadId": command.thread_id,
+                        "configuration": selected.configuration,
+                        "workingDirectory": command.working_directory,
+                    }),
+                    &self.harness_control_token,
+                    StatusCode::CREATED,
+                )
+                .await?;
+            self.post(
                 self.harness_url
                     .join(&format!("sessions/{}/complete", command.thread_id))?,
-                &serde_json::json!({"nodeId": interaction.node.id}),
+                &serde_json::json!({"graph": graph}),
+                &self.harness_control_token,
                 StatusCode::OK,
             )
-            .await?;
+            .await
+        }
+        .await;
+        let revocation = self.revoke_capability(&interaction.graph_token).await;
+        let completed: CompleteResponse = match (completion, revocation) {
+            (Ok(completed), Ok(())) => completed,
+            (Err(operation), Ok(())) => return Err(operation),
+            (Ok(_), Err(cleanup)) => return Err(cleanup),
+            (Err(operation), Err(cleanup)) => {
+                return Err(RuntimeError::Cleanup {
+                    operation: Box::new(operation),
+                    cleanup: Box::new(cleanup),
+                });
+            }
+        };
         Ok(RuntimeCompletion {
             graph_node_id: interaction.node.id,
             harness_configuration_name: selected.configuration.name.clone(),
@@ -201,21 +225,35 @@ impl RuntimeClient {
         self.post(
             self.graph_url.join("api/control/capabilities")?,
             &serde_json::json!({"nodeId": interaction_node_id}),
+            &self.graph_control_token,
             StatusCode::OK,
         )
         .await
+    }
+
+    async fn revoke_capability(&self, graph_token: &str) -> Result<(), RuntimeError> {
+        let response = self
+            .client
+            .delete(self.graph_url.join("api/control/capabilities")?)
+            .bearer_auth(&self.graph_control_token)
+            .json(&serde_json::json!({"graphToken": graph_token}))
+            .send()
+            .await?;
+        response_json(response, StatusCode::OK).await?;
+        Ok(())
     }
 
     async fn post<T: for<'de> Deserialize<'de>>(
         &self,
         url: Url,
         body: &Value,
+        control_token: &str,
         expected: StatusCode,
     ) -> Result<T, RuntimeError> {
         let response = self
             .client
             .post(url)
-            .bearer_auth(&self.control_token)
+            .bearer_auth(control_token)
             .json(body)
             .send()
             .await?;
@@ -295,6 +333,13 @@ pub(crate) enum RuntimeError {
     Configuration(String),
     #[error("runtime request failed with HTTP {status}: {body}")]
     Remote { status: u16, body: Value },
+    #[error(
+        "runtime completion failed: {operation}; graph capability revocation also failed: {cleanup}"
+    )]
+    Cleanup {
+        operation: Box<RuntimeError>,
+        cleanup: Box<RuntimeError>,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -303,4 +348,235 @@ pub(crate) enum RuntimeError {
     Http(#[from] reqwest::Error),
     #[error(transparent)]
     Url(#[from] url::ParseError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CompleteInteraction, RuntimeClient};
+    use axum::{
+        Json, Router,
+        http::{HeaderMap, StatusCode},
+        routing,
+    };
+    use serde_json::json;
+    use std::{
+        fs,
+        path::Path,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[tokio::test]
+    async fn rejects_shared_graph_and_harness_control_authority() {
+        let error = RuntimeClient::open(
+            "http://127.0.0.1:1234/",
+            "http://127.0.0.1:5678/",
+            "shared".to_owned(),
+            "shared".to_owned(),
+            Path::new("/not-read"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert!(error.to_string().contains("must be distinct"));
+    }
+
+    #[tokio::test]
+    async fn revokes_the_interaction_capability_when_session_registration_fails() {
+        let revocations = Arc::new(AtomicUsize::new(0));
+        let observed_revocations = revocations.clone();
+        let graph = Router::new()
+            .route(
+                "/api/control/interactions",
+                routing::post(|headers: HeaderMap| async move {
+                    assert_eq!(headers["authorization"], "Bearer graph-control");
+                    Json(json!({ "node": { "id": 41 }, "graphToken": "turn-token" }))
+                }),
+            )
+            .route(
+                "/api/control/capabilities",
+                routing::delete(move |headers: HeaderMap| {
+                    let observed_revocations = observed_revocations.clone();
+                    async move {
+                        assert_eq!(headers["authorization"], "Bearer graph-control");
+                        observed_revocations.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({ "revoked": true }))
+                    }
+                }),
+            );
+        let harness = Router::new().route(
+            "/sessions",
+            routing::post(|headers: HeaderMap| async move {
+                assert_eq!(headers["authorization"], "Bearer harness-control");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "registration failed" })),
+                )
+            }),
+        );
+        let (graph_url, graph_task) = serve(graph).await;
+        let (harness_url, harness_task) = serve(harness).await;
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "relayer-runtime-capability-cleanup-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog = root.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({
+                "schemaVersion": 1,
+                "configurations": [{
+                    "configuration": {
+                        "schemaVersion": 1,
+                        "name": "test",
+                        "implementation": "test",
+                        "implementationVersion": 1,
+                        "settings": {}
+                    },
+                    "digest": "sha256:test"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            &graph_url,
+            &harness_url,
+            "graph-control".to_owned(),
+            "harness-control".to_owned(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+
+        let result = runtime
+            .complete(CompleteInteraction {
+                project_id: None,
+                thread_id: 1,
+                text: "question",
+                working_directory: root.to_str().unwrap(),
+                harness_configuration_name: "test",
+            })
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(revocations.load(Ordering::SeqCst), 1);
+        graph_task.abort();
+        harness_task.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn revokes_the_interaction_capability_after_successful_completion() {
+        let revocations = Arc::new(AtomicUsize::new(0));
+        let observed_revocations = revocations.clone();
+        let graph = Router::new()
+            .route(
+                "/api/control/interactions",
+                routing::post(|headers: HeaderMap| async move {
+                    assert_eq!(headers["authorization"], "Bearer graph-control");
+                    Json(json!({ "node": { "id": 41 }, "graphToken": "turn-token" }))
+                }),
+            )
+            .route(
+                "/api/control/capabilities",
+                routing::delete(move |headers: HeaderMap| {
+                    let observed_revocations = observed_revocations.clone();
+                    async move {
+                        assert_eq!(headers["authorization"], "Bearer graph-control");
+                        observed_revocations.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({ "revoked": true }))
+                    }
+                }),
+            );
+        let harness = Router::new()
+            .route(
+                "/sessions",
+                routing::post(|headers: HeaderMap| async move {
+                    assert_eq!(headers["authorization"], "Bearer harness-control");
+                    (StatusCode::CREATED, Json(json!({ "ok": true })))
+                }),
+            )
+            .route(
+                "/sessions/1/complete",
+                routing::post(|headers: HeaderMap| async move {
+                    assert_eq!(headers["authorization"], "Bearer harness-control");
+                    Json(json!({ "output": { "nodeId": 41 } }))
+                }),
+            );
+        let (graph_url, graph_task) = serve(graph).await;
+        let (harness_url, harness_task) = serve(harness).await;
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "relayer-runtime-capability-owner-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog = root.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({
+                "schemaVersion": 1,
+                "configurations": [{
+                    "configuration": {
+                        "schemaVersion": 1,
+                        "name": "test",
+                        "implementation": "test",
+                        "implementationVersion": 1,
+                        "settings": {}
+                    },
+                    "digest": "sha256:test"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            &graph_url,
+            &harness_url,
+            "graph-control".to_owned(),
+            "harness-control".to_owned(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+
+        let completed = runtime
+            .complete(CompleteInteraction {
+                project_id: None,
+                thread_id: 1,
+                text: "question",
+                working_directory: root.to_str().unwrap(),
+                harness_configuration_name: "test",
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(completed.output, json!({ "nodeId": 41 }));
+        assert_eq!(revocations.load(Ordering::SeqCst), 1);
+        graph_task.abort();
+        harness_task.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{address}/"), task)
+    }
 }

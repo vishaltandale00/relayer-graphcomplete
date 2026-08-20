@@ -41,6 +41,8 @@
     "prd": "node docs/prd/server.mjs",
     "prd:check-readability": "node docs/prd/check-readability.mjs",
     "desktop:dev": "npm run build && electron desktop/main/index.mjs",
+    "predesktop:dev:prime": "npm run build",
+    "desktop:dev:prime": "node scripts/run-prime-desktop.mjs",
     "eval-app:dev": "npm run build && electron desktop/eval-main/index.mjs",
     "eval:basic": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js",
     "eval:basic:live": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --require-configuration --judge-configuration codex-structured",

@@ -1421,9 +1421,9 @@ GET  /api/graph/layers/:id
 GET  /api/graph/nodes/:id/output
 </code></pre>
 <p>Every harness request carries an opaque random capability token. The server stores only <code>token -&gt; canonical NodeId</code> in the current slice. That node defines project and thread visibility. It also defines the writable draft subgraph for the short-lived <code>GraphWriter</code>. <code>submit(node)</code> must receive the same root node. The engine rejects writes after that node has an accepted completion.</p>
-<p>The token never enters graph content, evaluation evidence, the renderer, or the harness state file. A newer interaction can register the same live thread again. The host serializes this update after an active Complete call. It gives the existing harness object the new URL, token, and node capability.</p>
-<p>The host persists the copied harness configuration and implementation-owned opaque JSON resume state. Trusted control code must remint and register a capability after a restart. The host then recreates the harness object. <code>codex.basic</code> refreshes its SDK environment and resumes the persisted Codex thread ID.</p>
-<p>The two-turn evaluation verifies live capability rotation. Recovery fails closed until fresh capability registration. A full process-restart recovery evaluation remains future work. Provider credentials remain in product-owned secret storage.</p>
+<p>The token never enters graph content, evaluation evidence, the renderer, or the harness state file. Each Complete call receives a host-owned graph-scope handle. The handle closes and the Rust token is revoked when that call settles.</p>
+<p>The host persists the copied harness configuration and implementation-owned opaque JSON resume state. It recreates the harness object after a restart without graph credentials. Trusted control code supplies a new capability only when it starts a Complete call.</p>
+<p>The two-turn evaluation verifies distinct, revoked capabilities and one persistent harness object. A full process-restart recovery evaluation remains future work. Provider credentials remain in product-owned secret storage.</p>
 <h3>11.7 Required graph-engine proof</h3>
 <ul>
 <li>Rust unit tests cover every node, edge, layer, action, submission, transaction, migration, and concurrent-read/write rule without inference.</li>
@@ -1436,24 +1436,28 @@ GET  /api/graph/nodes/:id/output
 <h3>12.1 Canonical input and accepted output</h3>
 <pre><code class="language-ts">type CompleteInputGraph = NodeReference;
 
+interface HarnessRunContext {
+  inputGraph: GraphNode;
+  graph: HarnessGraphScope;
+}
+
 interface Harness {
-  complete(interactionNode: GraphNode, signal?: AbortSignal): Promise&lt;CompleteResult&gt;;
-  setGraphCapability(graph: GraphCapability): void | Promise&lt;void&gt;;
+  complete(context: HarnessRunContext, signal?: AbortSignal): Promise&lt;void&gt;;
   state(): HarnessSessionState;
   dispose?(): void | Promise&lt;void&gt;;
 }
 </code></pre>
-<p>The external name remains <code>complete(inputGraph)</code>, and that input graph is only a pointer to the current interaction node. The host resolves the pointer once and calls the selected harness with the interaction node. The harness object already holds its graph client, thread/project context, working-directory capability, and provider session. It resolves broader graph or filesystem context only when needed.</p>
-<p>Complete has one required job: build and submit one response graph under that interaction, or stop/fail explicitly. A successful Complete call is the successful return from <code>graph.submit(interactionNode)</code>. The accepted result includes the resolved root layer used for immediate display; later movement through the graph uses app-server reads.</p>
+<p>The external name remains <code>complete(inputGraph)</code>, and that input graph is only a pointer to the current interaction node. The host resolves the pointer once and creates one run context. The persistent harness keeps its provider session and working directory, but it does not keep a current graph credential.</p>
+<p>Complete has one required job: build and submit one response graph under that interaction, or stop/fail explicitly. After the harness returns, the host reads the accepted result from Rust. A turn that ends without <code>graph.submit(interactionNode)</code> is a failure.</p>
 <h3>12.2 Persistent Node harness host</h3>
 <p>The Node harness host is a long-lived child process of the evaluator or Relayer app server. It resolves a small code-owned implementation map and lazily constructs one harness object per thread:</p>
 <pre><code class="language-ts">const harnessImplementations: Record&lt;string, HarnessFactory&gt; = {
   &quot;codex.basic&quot;: createBasicCodexHarness,
-  &quot;prime-agent&quot;: createPrimeAgentHarness,
+  &quot;prime.agent&quot;: createPrimeAgentHarness,
 };
 </code></pre>
 <p>The thread stores a copy of its selected named harness configuration. The configuration's <code>implementation</code> field selects a factory from the map. The host does not interpret the implementation-specific <code>settings</code> object. The host keeps the same JavaScript harness object and provider session alive across turns. Factories may initialize asynchronously.</p>
-<p>If the Node process or provider session expires, trusted control code first registers a fresh graph capability. The host then recreates the object from stored configuration and opaque provider resume state. Continuous conversation must not start a new Codex conversation on every Complete call.</p>
+<p>If the Node process or provider session expires, the host recreates the object from stored configuration and opaque provider resume state. The next Complete call supplies its own graph scope. Continuous conversation must not start a new provider conversation on every Complete call.</p>
 <p>The Relayer app server owns one-active-root-completion coordination for a thread. The Node host owns the live JavaScript object. It serializes construction and Complete calls, forwards cancellation through an <code>AbortSignal</code>, and disposes live harnesses during shutdown. Harness objects for different threads can run concurrently. Prime Agent owns recursive child-agent scheduling inside a completion.</p>
 <h3>12.3 Minimal harness configuration</h3>
 <p>Each YAML file has a unique machine-readable <code>name</code>, selects an implementation type and version, and carries implementation-owned settings. The host validates only the common envelope. Each implementation validates its own settings, so a later Prime Agent harness can add model policy, recursion, review, and budget settings without changing host types.</p>
@@ -1644,10 +1648,10 @@ settings:
 <li>Start the standalone Rust graph server with an isolated database and wait for health.</li>
 <li>Supply synthetic product-owned project and thread IDs. Ask graph core to create the first canonical interaction node. Create the active harness session. Issue an opaque graph token for that node.</li>
 <li>Pass the resolved harness configuration to case execution. Start the Node harness host and resolve its implementation.</li>
-<li>Call <code>complete({ interactionNode })</code>; Codex constructs the response using the TypeScript graph client.</li>
+<li>Call Complete with the resolved input graph and that call's graph scope. Codex constructs the response using the TypeScript graph client.</li>
 <li>Require Codex to submit nodes, undirected edges, a layer, the interaction&#39;s response navigate action, and finally <code>graph.submit(interactionNode)</code>.</li>
 <li>Receive the first resolved root layer and run its deterministic checks.</li>
-<li>Create the second interaction in the same thread. Issue a different capability and register the session again. Verify that the host adopts the new capability. It must not construct another harness object.</li>
+<li>Create the second interaction in the same thread. Issue a different capability for its Complete call. Verify that the host does not construct another harness object.</li>
 <li>Call Complete for the second interaction and run the same deterministic checks. The opt-in live path runs an independent structured Codex judge for each accepted turn.</li>
 <li>Save one immutable result bundle. It contains accepted graph records, display data, checks, judge result, timing, configuration snapshot and digest, implementation version, and trace reference.</li>
 <li>For this lower-level slice, save a minimal HTML inspection artifact. The forthcoming Eval application reviews executions through the real product app-server and shared production graph/chat workspace.</li>
@@ -1657,7 +1661,8 @@ settings:
 <ul>
 <li>Complete returned <code>accepted</code> only after <code>graph.submit(interactionNode)</code> succeeded;</li>
 <li>both Complete outputs and response actions belong to their requested interaction nodes;</li>
-<li>the second interaction uses a distinct capability token and node ID while the harness factory is called exactly once;</li>
+<li>the interactions use distinct capability tokens and node IDs while the harness factory is called exactly once;</li>
+<li>both tokens are revoked after their Complete calls settle;</li>
 <li>the interaction has exactly one accepted response navigate action;</li>
 <li>that action targets the returned submitted root layer;</li>
 <li>the layer contains between one and eight submitted nodes;</li>
@@ -1677,7 +1682,7 @@ settings:
 <p>A passing JSON result is insufficient. The current evaluator saves <code>index.html</code> beside <code>result.json</code>. Previous and Next arrows select an accepted turn. Each view shows its exact layer with movable nodes and edges.</p>
 <p>Desktop <strong>See in App</strong>, the product inspector, and read-only evaluation threads need app-server integration. Thus, current visual proof does not claim that the result runs inside the product.</p>
 <h3>15D.6 Next evaluations after the first slice</h3>
-<p>The current case verifies two interactions, capability rotation, one harness construction, and the accepted output contract for both turns. The next memory case must additionally require the second interaction to use prior accepted graph state. Later capability cases add context attachments, invoke and navigate actions, repository grounding, graph reuse, recursive Prime Agent work, and harder tasks.</p>
+<p>The current case verifies two interactions, distinct revoked capabilities, one harness construction, and the accepted output contract for both turns. The next memory case must additionally require the second interaction to use prior accepted graph state. Later capability cases add context attachments, invoke and navigate actions, repository grounding, graph reuse, recursive Prime Agent work, and harder tasks.</p>
 <h2 data-prd-layer="Evidence" data-prd-order="15.5">15E. GraphComplete runtime evidence</h2>
 <div class="delivery-legend"><span class="delivery-status verified">Verified</span><span class="delivery-status partial">Partial</span><span class="delivery-status deferred">Deferred</span></div>
 <p>This checkpoint tracks the pre-app-server slice separately from the desktop-shell checkpoint. Automated process tests can verify backend components. A visible renderer also requires saved visual evidence.</p>
@@ -1685,10 +1690,11 @@ settings:
 <thead><tr><th>Requirement</th><th>Status</th><th>Current proof or remaining gap</th></tr></thead>
 <tbody>
 <tr><td>Rust SQLx/SQLite graph core and standalone async loopback server</td><td><span class="delivery-status verified">Verified</span></td><td>The crate separates graph behavior in <code>graph/</code> from SQLx persistence in <code>storage/sqlite/</code>. <code>SqliteGraphStore</code> owns the pool and connection lifecycle. Graph behavior does not import SQLx. The migration directory contains the embedded runner and versioned SQL. Reads use the asynchronous pool. Short <code>BEGIN IMMEDIATE</code> transactions prevent SQLite snapshot-upgrade failures. Rust tests cover IDs, visibility, layers, actions, edges, drafts, accepted records, atomic acceptance, concurrent writes, and control-token interaction creation.</td></tr>
-<tr><td>Opaque graph capability and active-interaction authority</td><td><span class="delivery-status partial">Partial</span></td><td>The server maps each graph token to one canonical interaction <code>NodeId</code>. Every request derives its project/thread visibility and writable subgraph from that persisted node. Trusted control authority can remint a capability for a canonical persisted interaction after server restart. Capability expiry and the full invalid/cross-scope API matrix remain.</td></tr>
+<tr><td>Opaque graph capability and active-interaction authority</td><td><span class="delivery-status partial">Partial</span></td><td>The server maps each graph token to one canonical interaction <code>NodeId</code>. Every request derives visibility and write scope from that node. The host revokes each token after its Complete call. The full invalid and cross-scope API matrix remains.</td></tr>
 <tr><td>Object-based TypeScript client</td><td><span class="delivery-status verified">Verified</span></td><td>The process-level eval uses the real client against the Rust server to submit nodes, edges, a layer, an action, and the final interaction submission.</td></tr>
 <tr><td>Object-based Python client</td><td><span class="delivery-status partial">Partial</span></td><td>The async client and object composition tests exist. A shared real-server conformance fixture with the TypeScript client remains.</td></tr>
-<tr><td>Persistent Node harness host</td><td><span class="delivery-status partial">Partial</span></td><td>The host caches one harness object for each thread. It serializes construction, Complete calls, and capability changes. It stores the copied configuration and opaque provider resume state. A restart requires a fresh registered graph capability. A full process-restart recovery evaluation remains open.</td></tr>
+<tr><td>Persistent Node harness host</td><td><span class="delivery-status partial">Partial</span></td><td>The host caches one harness object for each thread. It serializes construction and Complete calls. Each call receives an isolated graph scope. The host stores only copied configuration and opaque provider resume state. A full process-restart recovery evaluation remains open.</td></tr>
+<tr><td><code>prime.agent</code> IPython graph harness</td><td><span class="delivery-status partial">Partial</span></td><td>The adapter, stable <code>relayer.graph.current</code> handler, run-context wiring, Python <code>GraphSession.current()</code>, resume state, cancellation, and inference-free tests exist. The forked Prime Agent package still needs a consumable release before the live harness can run from a clean install.</td></tr>
 <tr><td><code>codex.basic</code> graph-tool harness</td><td><span class="delivery-status verified">Verified</span></td><td>The optional live case proved four functions. Codex runs the bundled TypeScript client and reaches the loopback Rust server. It submits an accepted graph. It returns the resolved layer.</td></tr>
 <tr><td>Inference-free correctness-boundary eval</td><td><span class="delivery-status verified">Verified</span></td><td><code>npm run eval:basic</code> starts the real Rust server and Node host. It completes two interactions through one harness object. Each interaction has a different capability. The test checks both accepted graphs and session reuse. It saves <code>result.json</code> and a navigable HTML result.</td></tr>
 <tr><td>Live independent judge</td><td><span class="delivery-status verified">Verified</span></td><td><code>npm run eval:basic:live</code> passed the deterministic gate and independent structured judge using the exact saved visible layer.</td></tr>

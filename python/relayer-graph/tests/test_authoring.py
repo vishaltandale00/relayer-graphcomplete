@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import pickle
+import sys
 import threading
+import types
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from relayer_graph import (APIError, EdgeObject, LayerObject, NodeObject,
+from relayer_graph import (APIError, ConfigurationError, EdgeObject, GraphSession,
+                           LayerObject, NodeObject,
                            RELAYER_ICON_NAMES, RelayerGraphClient, ValidationError,
                            is_supported_relayer_icon, resolve_relayer_icon_name)
 
@@ -149,6 +153,43 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         orphan = NodeObject("box", "Orphan", "Not submitted")
         with self.assertRaisesRegex(ValueError, "must be submitted"):
             await self.client.create_edge(orphan, 7)
+
+    async def test_current_session_uses_the_prime_agent_host_scope(self):
+        requests = []
+
+        async def host_request(request_type):
+            requests.append(request_type)
+            return {"url": self.url, "token": "run-token", "nodeId": 11}
+
+        previous = sys.modules.get("rlm")
+        sys.modules["rlm"] = types.SimpleNamespace(host_request=host_request)
+        try:
+            graph = await GraphSession.current(timeout=4.0)
+        finally:
+            if previous is None:
+                del sys.modules["rlm"]
+            else:
+                sys.modules["rlm"] = previous
+
+        self.assertEqual(requests, ["relayer.graph.current"])
+        self.assertEqual((graph.url, graph.token, graph.node_id, graph.timeout), (self.url, "run-token", 11, 4.0))
+        with self.assertRaisesRegex(TypeError, "run-scoped"):
+            pickle.dumps(graph)
+
+    async def test_current_session_rejects_an_invalid_host_scope(self):
+        async def host_request(_request_type):
+            return {"url": self.url, "token": "", "nodeId": 0}
+
+        previous = sys.modules.get("rlm")
+        sys.modules["rlm"] = types.SimpleNamespace(host_request=host_request)
+        try:
+            with self.assertRaisesRegex(ConfigurationError, "invalid graph scope"):
+                await GraphSession.current()
+        finally:
+            if previous is None:
+                del sys.modules["rlm"]
+            else:
+                sys.modules["rlm"] = previous
 
 
 class IconVocabularyTests(unittest.TestCase):

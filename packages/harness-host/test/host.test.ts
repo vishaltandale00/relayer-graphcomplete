@@ -16,6 +16,7 @@ const completion = {
   },
 };
 const emptyState = (): HarnessSessionState => ({});
+const graph = (nodeId = 1, token = "token") => ({ url: "http://127.0.0.1:43123", token, nodeId });
 const testConfiguration: HarnessConfiguration = {
   schemaVersion: 1,
   name: "test-default",
@@ -28,8 +29,8 @@ describe("HarnessHost", () => {
   it("persists resumable harness state even when completion fails", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-host-"));
     const stateFile = join(directory, "sessions.json");
-    const graph = { url: "http://127.0.0.1:43123", token: "graph-token", nodeId: 1 };
-    const descriptor = { threadId: 1, configuration: testConfiguration, workingDirectory: directory, graph };
+    const capability = graph(1, "graph-token");
+    const descriptor = { threadId: 1, configuration: testConfiguration, workingDirectory: directory };
     let restoredState: HarnessSessionState | undefined;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
       ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
@@ -42,14 +43,13 @@ describe("HarnessHost", () => {
         implementations: {
           test: () => ({
             async complete() { throw new Error("model failed"); },
-            setGraphCapability() {},
             state: () => ({ primeAgentSessionId: "resume-after-failure" }),
           }),
         },
       });
       await failing.initialize();
       await failing.createSession(descriptor);
-      await expect(failing.complete(descriptor.threadId)).rejects.toThrow("model failed");
+      await expect(failing.complete(descriptor.threadId, capability)).rejects.toThrow("model failed");
       await expect(failing.createSession({ ...descriptor, configuration: { ...testConfiguration, name: "other" } })).rejects.toThrow("already pinned");
 
       const restored = new HarnessHost({
@@ -60,7 +60,6 @@ describe("HarnessHost", () => {
             restoredState = context.savedState;
             return {
               async complete() { throw new Error("unused"); },
-              setGraphCapability() {},
               state: () => context.savedState ?? emptyState(),
             };
           },
@@ -86,7 +85,7 @@ describe("HarnessHost", () => {
         implementations: {
           test: async () => {
             await factoryReady;
-            return { async complete() { return completion; }, setGraphCapability() {}, state: emptyState };
+            return { async complete() {}, state: emptyState };
           },
         },
       });
@@ -95,7 +94,6 @@ describe("HarnessHost", () => {
         threadId: 1,
         configuration: testConfiguration,
         workingDirectory: directory,
-        graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 },
       });
       await new Promise((resolveTurn) => setTimeout(resolveTurn, 0));
       expect(host.sessionCount()).toBe(0);
@@ -118,11 +116,11 @@ describe("HarnessHost", () => {
         implementations: { test: async () => {
           factoryCalls += 1;
           await new Promise((resolveTurn) => setTimeout(resolveTurn, 5));
-          return { async complete() { return completion; }, setGraphCapability() {}, state: emptyState };
+          return { async complete() {}, state: emptyState };
         } },
       });
       await host.initialize();
-      const descriptor = { threadId: 1, configuration: testConfiguration, workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } };
+      const descriptor = { threadId: 1, configuration: testConfiguration, workingDirectory: directory };
 
       await Promise.all([host.createSession(descriptor), host.createSession(descriptor)]);
 
@@ -144,11 +142,11 @@ describe("HarnessHost", () => {
         controlToken: "control",
         implementations: { test: async () => {
           await factoryReady;
-          return { async complete() { return completion; }, setGraphCapability() {}, state: emptyState, dispose };
+          return { async complete() {}, state: emptyState, dispose };
         } },
       });
       await host.initialize();
-      const creating = host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } });
+      const creating = host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
       await new Promise((resolveTurn) => setTimeout(resolveTurn, 0));
 
       await host.close();
@@ -170,8 +168,7 @@ describe("HarnessHost", () => {
         stateFile: join(directory, "sessions.json"),
         controlToken: "control",
         implementations: { test: () => ({
-          async complete() { return completion; },
-          setGraphCapability() {},
+          async complete() {},
           state: () => ({ invalid: Number.NaN }),
           dispose,
         }) },
@@ -182,7 +179,6 @@ describe("HarnessHost", () => {
         threadId: 1,
         configuration: testConfiguration,
         workingDirectory: directory,
-        graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 },
       })).rejects.toThrow("invalid implementation state");
       expect(dispose).toHaveBeenCalledTimes(1);
       expect(host.sessionCount()).toBe(0);
@@ -191,20 +187,19 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("requires a freshly minted graph capability before resuming saved state", async () => {
+  it("restores saved state when the stable session is registered again", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-fresh-capability-"));
     const stateFile = join(directory, "sessions.json");
     const descriptor = {
       threadId: 1,
       configuration: testConfiguration,
       workingDirectory: directory,
-      graph: { url: "http://127.0.0.1:1", token: "old-token", nodeId: 1 },
     };
     try {
       const first = new HarnessHost({
         stateFile,
         controlToken: "control",
-        implementations: { test: () => ({ async complete() { return completion; }, setGraphCapability() {}, state: () => ({ sessionId: "saved" }) }) },
+        implementations: { test: () => ({ async complete() {}, state: () => ({ sessionId: "saved" }) }) },
       });
       await first.initialize();
       await first.createSession(descriptor);
@@ -215,12 +210,12 @@ describe("HarnessHost", () => {
         controlToken: "control",
         implementations: { test: (context) => {
           restoredState = context.savedState;
-          return { async complete() { return completion; }, setGraphCapability() {}, state: () => context.savedState ?? emptyState() };
+          return { async complete() {}, state: () => context.savedState ?? emptyState() };
         } },
       });
       await restored.initialize();
-      await expect(restored.complete(1)).rejects.toThrow("requires a fresh graph capability");
-      await restored.createSession({ ...descriptor, graph: { ...descriptor.graph, token: "new-token", nodeId: 2 } });
+      await expect(restored.complete(1, graph())).rejects.toThrow("must be registered");
+      await restored.createSession(descriptor);
       expect(restoredState).toEqual({ sessionId: "saved" });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -243,14 +238,13 @@ describe("HarnessHost", () => {
             completionStarted();
             return new Promise<never>((_resolve, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
           },
-          setGraphCapability() {},
           state: emptyState,
         }) },
       });
       await host.initialize();
-      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } });
+      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
 
-      const completing = host.complete(1);
+      const completing = host.complete(1, graph());
       await started;
       expect(host.cancel(1)).toBe(true);
       await expect(completing).rejects.toThrow("cancelled for thread 1");
@@ -268,10 +262,10 @@ describe("HarnessHost", () => {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
         controlToken: "control",
-        implementations: { test: () => ({ async complete() { return completion; }, setGraphCapability() {}, state: emptyState, dispose }) },
+        implementations: { test: () => ({ async complete() {}, state: emptyState, dispose }) },
       });
       await host.initialize();
-      const descriptor = { threadId: 1, configuration: testConfiguration, workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } };
+      const descriptor = { threadId: 1, configuration: testConfiguration, workingDirectory: directory };
       await host.createSession(descriptor);
 
       await host.close();
@@ -284,6 +278,52 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("rejects admitted queued completions before disposing during shutdown", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-close-queue-"));
+    let completionStarted!: () => void;
+    const started = new Promise<void>((resolveStarted) => { completionStarted = resolveStarted; });
+    const calls: number[] = [];
+    const dispose = vi.fn(async () => undefined);
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/output")) {
+        return new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ node: { id: Number(/nodes\/(\d+)/.exec(url)?.[1]), kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          complete(context, signal) {
+            calls.push(context.inputGraph.id);
+            if (calls.length > 1) return Promise.resolve();
+            completionStarted();
+            return new Promise<never>((_resolve, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
+          },
+          state: emptyState,
+          dispose,
+        }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
+
+      const active = host.complete(1, graph(1, "active-token"));
+      await started;
+      const queued = host.complete(1, graph(2, "queued-token"));
+      const closing = host.close();
+
+      await expect(active).rejects.toThrow("closed");
+      await expect(queued).rejects.toThrow("closed");
+      await closing;
+      expect(calls).toEqual([1]);
+      expect(dispose).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("returns an accepted completion without rerunning the harness", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-idempotent-"));
     let calls = 0;
@@ -292,12 +332,12 @@ describe("HarnessHost", () => {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
         controlToken: "control",
-        implementations: { test: () => ({ async complete() { calls += 1; return completion; }, setGraphCapability() {}, state: emptyState }) },
+        implementations: { test: () => ({ async complete() { calls += 1; }, state: emptyState }) },
       });
       await host.initialize();
-      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } });
+      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
 
-      await expect(host.complete(1)).resolves.toMatchObject({ output: completion });
+      await expect(host.complete(1, graph())).resolves.toMatchObject({ output: completion });
       expect(calls).toBe(0);
     } finally {
       vi.unstubAllGlobals();
@@ -305,15 +345,26 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("rotates a live session capability without rebuilding its harness", async () => {
+  it("supplies a distinct run scope without rebuilding the harness", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-advance-"));
-    const output = { ...completion, nodeId: 2 };
-    const requested: { url: string; authorization: string | null }[] = [];
     const adopted: { url: string; token: string; nodeId: number }[] = [];
+    const accepted = new Set<number>();
+    const scopes: { acquireCapability(): unknown }[] = [];
+    let revocationRequests = 0;
     let factoryCalls = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      requested.push({ url, authorization: new Headers(init?.headers).get("authorization") });
-      return new Response(JSON.stringify(output), { status: 200, headers: { "content-type": "application/json" } });
+      const nodeId = Number(/nodes\/(\d+)/.exec(url)?.[1] ?? 1);
+      if (url.endsWith("/output")) {
+        return accepted.has(nodeId)
+          ? new Response(JSON.stringify({ ...completion, nodeId }), { status: 200, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      if (url.endsWith("/api/control/capabilities")) {
+        revocationRequests += 1;
+        return new Response(JSON.stringify({ revoked: true }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${nodeId === 1 ? "first-token" : "second-token"}`);
+      return new Response(JSON.stringify({ node: { id: nodeId, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } });
     }));
     try {
       const host = new HarnessHost({
@@ -322,64 +373,71 @@ describe("HarnessHost", () => {
         implementations: { test: () => {
           factoryCalls += 1;
           return {
-            async complete() { return output; },
-            setGraphCapability(graph) { adopted.push(graph); },
+            async complete(context) {
+              scopes.push(context.graph);
+              adopted.push(context.graph.acquireCapability());
+              accepted.add(context.inputGraph.id);
+            },
             state: emptyState,
           };
         } },
       });
       await host.initialize();
-      const base = { threadId: 1, configuration: testConfiguration, workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "first-token", nodeId: 1 } };
+      const base = { threadId: 1, configuration: testConfiguration, workingDirectory: directory };
       await host.createSession(base);
-      await host.createSession({ ...base, graph: { ...base.graph, token: "second-token", nodeId: 2 } });
 
-      await expect(host.complete(1)).resolves.toMatchObject({ output });
+      await host.complete(1, graph(1, "first-token"));
+      await expect(host.complete(1, graph(2, "second-token"))).resolves.toMatchObject({ output: { nodeId: 2 } });
       expect(factoryCalls).toBe(1);
-      expect(adopted).toEqual([{ url: "http://127.0.0.1:1", token: "second-token", nodeId: 2 }]);
-      expect(requested).toEqual([{
-        url: "http://127.0.0.1:1/api/graph/nodes/2/output",
-        authorization: "Bearer second-token",
-      }]);
+      expect(adopted.map(({ token, nodeId }) => [token, nodeId])).toEqual([["first-token", 1], ["second-token", 2]]);
+      expect(revocationRequests).toBe(0);
+      expect(() => scopes[0]!.acquireCapability()).toThrow("no longer active");
     } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
     }
   });
 
-  it("waits for an active completion before rotating its capability", async () => {
+  it("serializes complete calls while preserving each call's graph scope", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-serialized-rotation-"));
     let completionStarted!: () => void;
     let finishCompletion!: () => void;
     const started = new Promise<void>((resolveStarted) => { completionStarted = resolveStarted; });
     const finish = new Promise<void>((resolveFinish) => { finishCompletion = resolveFinish; });
     const adopted: string[] = [];
+    const accepted = new Set<number>();
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
-      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
-      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+      ? (accepted.has(Number(/nodes\/(\d+)/.exec(url)?.[1]))
+        ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } }))
+      : new Response(JSON.stringify({ node: { id: Number(/nodes\/(\d+)/.exec(url)?.[1]), kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
     try {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
         controlToken: "control",
         implementations: { test: () => ({
-          async complete() { completionStarted(); await finish; return completion; },
-          setGraphCapability(graph) { adopted.push(graph.token); },
+          async complete(context) {
+            adopted.push(context.graph.acquireCapability().token);
+            if (adopted.length === 1) { completionStarted(); await finish; }
+            accepted.add(context.inputGraph.id);
+          },
           state: emptyState,
         }) },
       });
       await host.initialize();
-      const first = { threadId: 1, configuration: testConfiguration, workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "first-token", nodeId: 1 } };
+      const first = { threadId: 1, configuration: testConfiguration, workingDirectory: directory };
       await host.createSession(first);
 
-      const completing = host.complete(1);
+      const completing = host.complete(1, graph(1, "first-token"));
       await started;
-      const rotating = host.createSession({ ...first, graph: { ...first.graph, token: "second-token", nodeId: 2 } });
+      const queued = host.complete(1, graph(2, "second-token"));
       await new Promise((resolveTurn) => setTimeout(resolveTurn, 0));
-      expect(adopted).toEqual([]);
+      expect(adopted).toEqual(["first-token"]);
 
       finishCompletion();
       await completing;
-      await rotating;
-      expect(adopted).toEqual(["second-token"]);
+      await queued;
+      expect(adopted).toEqual(["first-token", "second-token"]);
     } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
@@ -389,24 +447,26 @@ describe("HarnessHost", () => {
   it("releases the per-thread queue when harness state capture throws", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-queue-"));
     let stateCalls = 0;
+    let accepted = false;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
-      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      ? (accepted
+        ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } }))
       : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
     try {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
         controlToken: "control",
         implementations: { test: () => ({
-          async complete() { return completion; },
-          setGraphCapability() {},
+          async complete() { accepted = true; },
           state() { if (stateCalls++ === 1) throw new Error("state failed"); return emptyState(); },
         }) },
       });
       await host.initialize();
-      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } });
+      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
 
-      await expect(host.complete(1)).rejects.toThrow("state failed");
-      await expect(host.complete(1)).resolves.toMatchObject({ output: completion });
+      await expect(host.complete(1, graph())).rejects.toThrow("state failed");
+      await expect(host.complete(1, graph())).resolves.toMatchObject({ output: completion });
     } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
@@ -420,9 +480,9 @@ describe("HarnessHost", () => {
     const host = new HarnessHost({
       stateFile,
       controlToken: "control",
-      implementations: { test: () => ({ async complete() { return completion; }, setGraphCapability() {}, state: emptyState }) },
+      implementations: { test: () => ({ async complete() {}, state: emptyState }) },
     });
-    const descriptor = { threadId: 1, configuration: testConfiguration, workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "token", nodeId: 1 } };
+    const descriptor = { threadId: 1, configuration: testConfiguration, workingDirectory: directory };
     try {
       await host.initialize();
       await writeFile(blocker, "not a directory", "utf8");
@@ -445,10 +505,10 @@ describe("HarnessHost", () => {
       const host = new HarnessHost({
         stateFile,
         controlToken: "control",
-        implementations: { test: () => ({ async complete() { return completion; }, setGraphCapability() {}, state: () => ({ providerSessionId: "session" }) }) },
+        implementations: { test: () => ({ async complete() {}, state: () => ({ providerSessionId: "session" }) }) },
       });
       await host.initialize();
-      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory, graph: { url: "http://127.0.0.1:1", token: "secret", nodeId: 1 } });
+      await host.createSession({ threadId: 1, configuration: testConfiguration, workingDirectory: directory });
 
       expect((await stat(stateFile)).mode & 0o777).toBe(0o600);
       const persisted = await readFile(stateFile, "utf8");
@@ -509,6 +569,11 @@ describe("HarnessHost", () => {
       await running?.close();
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("rejects graph capabilities outside the authenticated loopback server", async () => {
+    const host = new HarnessHost({ stateFile: "/tmp/unused-harness-state.json", controlToken: "control", implementations: {} });
+    await expect(host.complete(1, { url: "https://example.com", token: "secret", nodeId: 1 })).rejects.toThrow("127.0.0.1 HTTP");
   });
 
   it("reports an IPv6 URL when bound to an IPv6 host", async () => {
