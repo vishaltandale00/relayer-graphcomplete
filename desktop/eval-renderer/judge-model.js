@@ -39,6 +39,7 @@ export function evidenceIdsForReview(review) {
   if (!review || typeof review !== "object") return [];
   const evidence = collectEvidence(review.evidence);
   for (const finding of asArray(review.findings)) collectEvidence(finding?.evidence, evidence);
+  collectEvidence(review.structure?.evidence, evidence);
   return [...evidence];
 }
 
@@ -132,6 +133,7 @@ function normalizeTurn(turn, position) {
             kind: "action",
             actionId,
             actionKind: action.actionKind ?? actionReview?.kind ?? "action",
+            relation: action.relation ?? null,
             targetLayerId: id(action.targetLayerId),
             position: actionIndex,
             review: actionReview,

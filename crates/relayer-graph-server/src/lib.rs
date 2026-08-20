@@ -381,8 +381,15 @@ impl From<GraphError> for ApiError {
                 message,
             } => Self(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                json!({"error":{"code":code,"path":path,"message":message}}),
+                json!({"error":{"code":code,"path":path,"message":message,"issues":[{"code":code,"path":path,"message":message}]}}),
             ),
+            GraphError::ValidationIssues { message, issues } => {
+                let first = issues.first().expect("validation issues are non-empty");
+                Self(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    json!({"error":{"code":first.code,"path":first.path,"message":message,"issues":issues}}),
+                )
+            }
             GraphError::NotFound(message) => Self(
                 StatusCode::NOT_FOUND,
                 json!({"error":{"code":"not_found","message":message}}),
@@ -615,6 +622,26 @@ mod tests {
             .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "hello")
             .await
             .unwrap();
+        let writer = graph.writer_for_subgraph(interaction.id).await.unwrap();
+        let source = writer
+            .submit_node(&NodeDraft {
+                client_key: "source".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Source".into(),
+                detail: "Source detail".into(),
+            })
+            .await
+            .unwrap();
+        let source_layer = writer
+            .submit_layer(&LayerDraft {
+                client_key: "source-layer".into(),
+                nodes: vec![source.id],
+                edges: vec![],
+                size_justification: None,
+            })
+            .await
+            .unwrap();
         let state = ServerState::new(graph, "control");
         let graph_token = mint_capability(&state, interaction.id).ok().unwrap();
         let app = router(state);
@@ -628,8 +655,8 @@ mod tests {
                     .header("content-type", "application/json")
                     .header("authorization", format!("Bearer {graph_token}"))
                     .body(Body::from(format!(
-                        r#"{{"clientKey":"older","sourceNodeId":{},"kind":"invoke","label":"Continue","interactionText":"Continue from here"}}"#,
-                        interaction.id.value()
+                        r#"{{"clientKey":"older","sourceNodeId":{},"sourceLayerId":{},"kind":"invoke","label":"Continue","interactionText":"Continue from here"}}"#,
+                        source.id.value(), source_layer.id.value()
                     )))
                     .unwrap(),
             )
@@ -651,8 +678,8 @@ mod tests {
                     .header("content-type", "application/json")
                     .header("authorization", format!("Bearer {graph_token}"))
                     .body(Body::from(format!(
-                        r#"{{"clientKey":"unsupported","sourceNodeId":{},"kind":"invoke","label":"Continue","variant":"banner","interactionText":"Continue from here"}}"#,
-                        interaction.id.value()
+                        r#"{{"clientKey":"unsupported","sourceNodeId":{},"sourceLayerId":{},"kind":"invoke","label":"Continue","variant":"banner","interactionText":"Continue from here"}}"#,
+                        source.id.value(), source_layer.id.value()
                     )))
                     .unwrap(),
             )
@@ -684,26 +711,28 @@ mod tests {
             })
             .await
             .unwrap();
+        let layer = writer
+            .submit_layer(&LayerDraft {
+                client_key: "root".into(),
+                nodes: vec![answer.id],
+                edges: vec![],
+                size_justification: None,
+            })
+            .await
+            .unwrap();
         let invoke = writer
             .add_action(&ActionDraft {
                 client_key: "continue".into(),
                 source_node_id: answer.id,
+                source_layer_id: Some(layer.id),
                 kind: ActionKind::Invoke,
+                relation: None,
                 label: "Continue".into(),
                 variant: relayer_graph_core::ActionVariant::Pill,
                 icon: None,
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Continue from here".into()),
-                response: false,
-            })
-            .await
-            .unwrap();
-        let layer = writer
-            .submit_layer(&LayerDraft {
-                client_key: "root".into(),
-                nodes: vec![answer.id],
-                edges: vec![],
             })
             .await
             .unwrap();
@@ -711,14 +740,15 @@ mod tests {
             .add_action(&ActionDraft {
                 client_key: "response".into(),
                 source_node_id: interaction.id,
+                source_layer_id: None,
                 kind: ActionKind::Navigate,
+                relation: Some(relayer_graph_core::NavigateRelation::Expand),
                 label: "Response".into(),
                 variant: relayer_graph_core::ActionVariant::Pill,
                 icon: None,
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
-                response: true,
             })
             .await
             .unwrap();

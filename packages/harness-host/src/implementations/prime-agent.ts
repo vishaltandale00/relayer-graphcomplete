@@ -39,6 +39,7 @@ interface PrimeAgentConfiguration {
   readonly thinkingLevel?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly rlmMaxDepth?: number;
   readonly prewarmIpythonKernel?: boolean;
+  readonly promptProfile?: "layered-navigation-v1";
 }
 
 export class PrimeAgentHarness implements Harness {
@@ -129,6 +130,9 @@ export class PrimeAgentHarness implements Harness {
   }
 
   private prompt(interaction: GraphNode): string {
+    if (this.context.configuration.settings.promptProfile === "layered-navigation-v1") {
+      return this.layeredNavigationPrompt(interaction);
+    }
     return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response.
 
 Current interaction node: ${interaction.id}
@@ -146,6 +150,32 @@ Author nodes, edges, layers, and useful navigate or invoke actions. The visible 
 await graph.submit(${interaction.id})
 
 A model turn ending is not completion. If graph.submit() has not succeeded, continue working or report the blocking graph error.`;
+  }
+
+  private layeredNavigationPrompt(interaction: GraphNode): string {
+    return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
+
+Current interaction node: ${interaction.id}
+User text: ${interaction.detail}
+
+Use this entry point:
+
+from relayer_graph import GraphSession
+graph = await GraphSession.current()
+
+The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interaction.id}); call it only after the full response has been authored.
+
+Navigation has two meanings:
+- relation="expand" continues the explanation with a more detailed layer. Expansion must not point back to an expansion ancestor.
+- relation="reference" opens supporting evidence or context. References may reuse an accepted layer, may point to other reference layers, and may revisit a layer.
+
+The interaction node must have one root navigate action with relation="expand" and no source_layer. Every action on a response node must include source_layer: the LayerObject in which you are authoring that action. Expansion layers may author expand, reference, or invoke actions. A layer reached as a reference may author only reference actions. Do not create both expand and reference actions to the same new target layer.
+
+Layers normally contain 1 to 5 nodes. A layer may contain 6 to 8 nodes only when keeping them together is important; pass that private reason as await graph.submit_layer(layer, size_justification="..."). Never mention or expose the size justification in user-facing node text. More than 8 nodes must be split into useful layers.
+
+Layer edges are exactly what the user sees and are undirected. Use supported Relayer icons and useful markdown detail. At any layer, add expand, reference, or invoke actions only when they materially improve the response.
+
+The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue, repair the rejected object or missing closure, and retry. A model turn ending is not completion. The task is complete only when the final graph.submit call succeeds.`;
   }
 }
 
@@ -257,18 +287,20 @@ function parsePrimeAgentConfiguration(context: HarnessFactoryContext): PrimeAgen
     throw new Error("prime.agent currently supports only the Full access permission profile");
   }
   const settings = selected.settings;
-  const allowed = new Set(["model", "thinkingLevel", "rlmMaxDepth", "prewarmIpythonKernel"]);
+  const allowed = new Set(["model", "thinkingLevel", "rlmMaxDepth", "prewarmIpythonKernel", "promptProfile"]);
   const unknown = Object.keys(settings).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new Error(`Unknown prime.agent configuration field: ${unknown.join(", ")}`);
   const model = optionalModel(settings.model);
   const thinkingLevel = optionalEnum(settings.thinkingLevel, ["minimal", "low", "medium", "high", "xhigh", "max"] as const, "thinkingLevel");
   const rlmMaxDepth = optionalPositiveInteger(settings.rlmMaxDepth, "rlmMaxDepth");
   const prewarmIpythonKernel = optionalBoolean(settings.prewarmIpythonKernel, "prewarmIpythonKernel");
+  const promptProfile = optionalEnum(settings.promptProfile, ["layered-navigation-v1"] as const, "promptProfile");
   return {
     ...(model === undefined ? {} : { model }),
     ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
     ...(rlmMaxDepth === undefined ? {} : { rlmMaxDepth }),
     ...(prewarmIpythonKernel === undefined ? {} : { prewarmIpythonKernel }),
+    ...(promptProfile === undefined ? {} : { promptProfile }),
   };
 }
 

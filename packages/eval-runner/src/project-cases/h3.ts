@@ -79,8 +79,8 @@ export const h3ProjectEvalCase: ProjectEvalCaseDefinition = Object.freeze({
       mutationPolicy: "read-only",
       workspaceGrade: "question",
       prompts: Object.freeze([
-        "In this h3 checkout, explain how a handler result becomes a standards-compliant Response. Trace the important response and error boundaries, including where HTTP status values are normalized. Ground the explanation in exact files and symbols. Author a genuinely recursive layered response with visible navigate actions where deeper detail is useful, including at least one root-to-child-to-grandchild path. Do not modify the checkout.",
-        "Think deeper. Trace at least two distinct handler-output paths into response construction, explain which invariants are shared or path-specific, and show where invalid status values can cross a boundary. Preserve a genuinely recursive response with visible navigate actions and at least one root-to-child-to-grandchild path. Keep the checkout unchanged.",
+        "In this h3 checkout, explain how a handler result becomes a standards-compliant Response. Trace the important response and error boundaries, including where HTTP status values are normalized. Ground the explanation in exact files and symbols. Do not modify the checkout.",
+        "Think deeper. Trace at least two distinct handler-output paths into response construction, explain which invariants are shared or path-specific, and show where invalid status values can cross a boundary. Keep the checkout unchanged.",
       ]),
     }),
     Object.freeze({

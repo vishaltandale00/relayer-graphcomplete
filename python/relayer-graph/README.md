@@ -14,7 +14,13 @@ async with RelayerGraphClient.from_env() as graph:
     await graph.create_edge(connection)
     layer = LayerObject((intro, detail), (connection,))
     await graph.submit_layer(layer)
-    await graph.add_navigate_action(graph.node_id, "Response", layer, response=True, client_key="response")
+    await graph.add_navigate_action(
+        graph.node_id,
+        "Response",
+        layer,
+        relation="expand",
+        client_key="response",
+    )
     output = await graph.submit()
 ```
 

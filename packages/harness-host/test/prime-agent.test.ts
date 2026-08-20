@@ -92,6 +92,39 @@ describe("PrimeAgentHarness", () => {
     expect(session.abort).toHaveBeenCalledTimes(1);
   });
 
+  it("uses the separate layered-navigation prompt profile", async () => {
+    let prompt = "";
+    const session = {
+      promptAndWait: vi.fn(async (text: string) => { prompt = text; }),
+      abort: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7,
+      workingDirectory: "/tmp/project",
+      ...fullPermission,
+      configuration: {
+        ...configuration,
+        name: "prime-agent-layered-navigation-luna",
+        settings: { ...configuration.settings, promptProfile: "layered-navigation-v1" },
+      },
+    }, { loadModule: async () => ({
+      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionFromServices: vi.fn(async () => ({ session })),
+    }) as never });
+
+    await harness.complete(runContext(11, "token"));
+
+    expect(prompt).toContain('relation="expand"');
+    expect(prompt).toContain('relation="reference"');
+    expect(prompt).toContain("A flat answer is valid");
+    expect(prompt).toContain("Author in whatever order fits the task");
+    expect(prompt).toContain("final graph call must be await graph.submit(11)");
+    expect(prompt).toContain("Never mention or expose the size justification");
+  });
+
   it("does not start a prompt when the run was already cancelled", async () => {
     const session = {
       promptAndWait: vi.fn(async () => undefined),

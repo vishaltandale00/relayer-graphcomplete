@@ -11,7 +11,8 @@ from typing import Any, Literal, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .exceptions import APIError, AuthenticationError, ConfigurationError, NotFound, TransportError, ValidationError
+from .exceptions import (APIError, AuthenticationError, ConfigurationError, NotFound,
+                         TransportError, ValidationError, ValidationIssue)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +84,7 @@ NodeReference = int | GraphNode | NodeObject
 EdgeReference = int | GraphEdge | EdgeObject
 LayerReference = int | GraphLayer | LayerObject
 ActionVariant = Literal["chip", "pill", "wide", "card"]
+NavigateRelation = Literal["expand", "reference"]
 
 
 class RelayerGraphClient:
@@ -133,31 +135,45 @@ class RelayerGraphClient:
         edge.ref = GraphEdge.from_dict(value["edge"])
         return edge.ref
 
-    async def submit_layer(self, layer: LayerObject) -> GraphLayer:
+    async def submit_layer(self, layer: LayerObject, *, size_justification: str | None = None) -> GraphLayer:
+        """Submit a layer. Layers with 6-8 nodes require a private justification."""
         value = await self._request("POST", "/api/graph/layers", {
             "clientKey": layer.client_key,
             "nodes": [_node_id(item) for item in layer.nodes],
             "edges": [_edge_id(item) for item in layer.edges],
+            "sizeJustification": size_justification,
         })
         layer.ref = GraphLayer.from_dict(value["layer"])
         return layer.ref
 
     async def add_navigate_action(self, source: NodeReference, label: str, target: LayerReference,
-                                  *, response: bool = False, client_key: str,
+                                  *, relation: NavigateRelation, client_key: str,
+                                  source_layer: LayerReference | None = None,
                                   variant: ActionVariant = "pill", icon: str | None = None,
                                   description: str | None = None) -> Mapping[str, Any]:
+        """Add expansion or supporting-reference navigation.
+
+        Omit ``source_layer`` only for the interaction node's root expansion.
+        At any layer, add navigation only when opening it materially improves
+        understanding or support. The service returns direct repair guidance
+        when the action violates the current layer's authoring contract.
+        """
         return await self._request("POST", "/api/graph/actions", {
             "clientKey": client_key, "sourceNodeId": _node_id(source),
-            "kind": "navigate", "label": label, "targetLayerId": _layer_id(target), "response": response,
+            "sourceLayerId": None if source_layer is None else _layer_id(source_layer),
+            "kind": "navigate", "relation": relation, "label": label,
+            "targetLayerId": _layer_id(target),
             **_action_presentation(variant, icon, description),
         })
 
     async def add_invoke_action(self, source: NodeReference, label: str, interaction_text: str,
-                                *, client_key: str, variant: ActionVariant = "pill",
+                                *, source_layer: LayerReference, client_key: str,
+                                variant: ActionVariant = "pill",
                                 icon: str | None = None,
                                 description: str | None = None) -> Mapping[str, Any]:
         return await self._request("POST", "/api/graph/actions", {
             "clientKey": client_key, "sourceNodeId": _node_id(source),
+            "sourceLayerId": _layer_id(source_layer),
             "kind": "invoke", "label": label, "interactionText": interaction_text,
             **_action_presentation(variant, icon, description),
         })
@@ -197,6 +213,15 @@ class RelayerGraphClient:
                     else ValidationError if error.code in (400, 409, 422)
                     else APIError
                 )
+                issues = tuple(
+                    ValidationIssue.from_dict(issue)
+                    for issue in item.get("issues", ())
+                    if isinstance(issue, Mapping)
+                )
+                if error_type is ValidationError:
+                    raise ValidationError(
+                        str(message), status=error.code, details=details, issues=issues
+                    ) from error
                 raise error_type(str(message), status=error.code, details=details) from error
             except (URLError, socket.timeout, TimeoutError, OSError) as error:
                 raise TransportError(f"could not reach Relayer Graph at {self.url}: {error}") from error

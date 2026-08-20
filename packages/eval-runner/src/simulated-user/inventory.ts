@@ -6,6 +6,7 @@ export interface ReviewTopologyAction {
   readonly id: ActionId;
   readonly sourceNodeId: NodeId;
   readonly kind: "navigate" | "invoke";
+  readonly relation?: "expand" | "reference" | null;
   readonly targetLayerId?: LayerId | null;
 }
 
@@ -41,6 +42,7 @@ export interface ActionReviewSubject {
   readonly nodeId: NodeId;
   readonly actionId: ActionId;
   readonly actionKind: "navigate" | "invoke";
+  readonly relation?: "expand" | "reference";
   readonly targetLayerId?: LayerId;
 }
 
@@ -59,10 +61,10 @@ export interface ReviewSubjectInventory {
 /**
  * Inventories the UI subjects reachable from one accepted turn's root layer.
  *
- * Layer depth is the shortest navigate-action distance from the root. A shared
- * destination is reviewed once, while each visible source action remains a
- * subject nested in its source node. Unreachable layers are intentionally not
- * part of review coverage.
+ * Layer depth is the shortest expansion distance from the root. Expansion
+ * destinations are reviewed recursively. Reference destinations are reached
+ * and graded as part of the source action, but their layers and nodes are not
+ * regraded. Unreachable layers are intentionally not part of review coverage.
  */
 export function inventoryReviewSubjects(topology: ReviewTopology): ReviewSubjectInventory {
   const layersById = new Map<LayerId, ReviewTopologyLayer>();
@@ -77,7 +79,7 @@ export function inventoryReviewSubjects(topology: ReviewTopology): ReviewSubject
     throw new Error(`Unknown root review layer: ${formatId(topology.rootLayerId)}`);
   }
 
-  const adjacency = new Map<LayerId, readonly LayerId[]>();
+  const expansionAdjacency = new Map<LayerId, readonly LayerId[]>();
   for (const layer of topology.layers) {
     const nodeIds = new Set(layer.nodeIds);
     const destinations: LayerId[] = [];
@@ -96,15 +98,22 @@ export function inventoryReviewSubjects(topology: ReviewTopology): ReviewSubject
             `Navigate action ${formatId(action.id)} targets unknown layer ${formatId(action.targetLayerId)}`,
           );
         }
-        destinations.push(action.targetLayerId);
-      } else if (action.targetLayerId !== undefined && action.targetLayerId !== null) {
+        if (action.relation !== "expand" && action.relation !== "reference") {
+          throw new Error(`Navigate action ${formatId(action.id)} has no valid relation`);
+        }
+        if (action.relation === "expand") destinations.push(action.targetLayerId);
+      } else if (
+        action.targetLayerId !== undefined
+        && action.targetLayerId !== null
+        || action.relation !== undefined && action.relation !== null
+      ) {
         throw new Error(`Invoke action ${formatId(action.id)} cannot target a layer`);
       }
     }
-    adjacency.set(layer.id, destinations);
+    expansionAdjacency.set(layer.id, destinations);
   }
 
-  assertReachableLayersAreAcyclic(topology.rootLayerId, adjacency);
+  assertReachableExpansionsAreAcyclic(topology.rootLayerId, expansionAdjacency);
 
   const depths = new Map<LayerId, number>([[topology.rootLayerId, 0]]);
   const orderedLayerIds: LayerId[] = [];
@@ -113,7 +122,7 @@ export function inventoryReviewSubjects(topology: ReviewTopology): ReviewSubject
     const layerId = queue[index]!;
     orderedLayerIds.push(layerId);
     const depth = depths.get(layerId)!;
-    for (const destination of adjacency.get(layerId) ?? []) {
+    for (const destination of expansionAdjacency.get(layerId) ?? []) {
       if (!depths.has(destination)) {
         depths.set(destination, depth + 1);
         queue.push(destination);
@@ -127,7 +136,7 @@ export function inventoryReviewSubjects(topology: ReviewTopology): ReviewSubject
   const incoming = new Map<LayerId, ActionId[]>();
   for (const sourceLayerId of orderedLayerIds) {
     for (const action of layersById.get(sourceLayerId)!.actions) {
-      if (action.kind !== "navigate") continue;
+      if (action.kind !== "navigate" || action.relation !== "expand") continue;
       const targetIncoming = incoming.get(action.targetLayerId!) ?? [];
       targetIncoming.push(action.id);
       incoming.set(action.targetLayerId!, targetIncoming);
@@ -157,6 +166,7 @@ export function inventoryReviewSubjects(topology: ReviewTopology): ReviewSubject
               nodeId,
               actionId: action.id,
               actionKind: "navigate",
+              relation: action.relation!,
               targetLayerId: action.targetLayerId!,
             }
           : {
@@ -178,7 +188,7 @@ export function inventoryReviewSubjects(topology: ReviewTopology): ReviewSubject
   };
 }
 
-function assertReachableLayersAreAcyclic(
+function assertReachableExpansionsAreAcyclic(
   rootLayerId: LayerId,
   adjacency: ReadonlyMap<LayerId, readonly LayerId[]>,
 ): void {
@@ -190,7 +200,7 @@ function assertReachableLayersAreAcyclic(
     if (visiting.has(layerId)) {
       const cycleStart = path.findIndex((pathLayerId) => pathLayerId === layerId);
       const cycle = [...path.slice(cycleStart), layerId].map(formatId).join(" -> ");
-      throw new Error(`Review topology must be acyclic; found ${cycle}`);
+      throw new Error(`Review expansion topology must be acyclic; found ${cycle}`);
     }
     if (visited.has(layerId)) return;
     visiting.add(layerId);

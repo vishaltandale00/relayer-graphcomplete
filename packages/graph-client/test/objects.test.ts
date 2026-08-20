@@ -26,11 +26,11 @@ describe("agent-facing graph objects", () => {
       keys.push(body.clientKey);
       requests.push(body);
       return new Response(JSON.stringify({
-        action: { id: 40, sourceNodeId: 1, kind: "invoke", label: "Ask", variant: "pill", icon: null, description: null, interactionText: "Continue", response: false, state: "draft" },
+        action: { id: 40, sourceNodeId: 1, sourceLayerId: 2, kind: "invoke", label: "Ask", variant: "pill", icon: null, description: null, interactionText: "Continue", state: "draft" },
       }), { status: 200, headers: { "content-type": "application/json" } });
     }));
     const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
-    const action: ActionObject = { kind: "invoke", label: "Ask", interactionText: "Continue" };
+    const action: ActionObject = { kind: "invoke", label: "Ask", interactionText: "Continue", sourceLayer: 2 };
 
     await graph.addAction(1, action);
     await graph.addAction(1, action);
@@ -48,13 +48,14 @@ describe("agent-facing graph objects", () => {
         action: {
           id: 41,
           sourceNodeId: 1,
+          sourceLayerId: 3,
           kind: "navigate",
+          relation: "reference",
           label: "Compare approaches",
           variant: "card",
           icon: "git-compare",
           description: "Lay out the tradeoffs before choosing.",
           targetLayerId: 9,
-          response: false,
           state: "draft",
         },
       }), { status: 200, headers: { "content-type": "application/json" } });
@@ -63,8 +64,10 @@ describe("agent-facing graph objects", () => {
 
     const action = await graph.addAction(1, {
       kind: "navigate",
+      relation: "reference",
       label: "Compare approaches",
       target: 9,
+      sourceLayer: 3,
       variant: "card",
       icon: "git-compare",
       description: "Lay out the tradeoffs before choosing.",
@@ -72,12 +75,37 @@ describe("agent-facing graph objects", () => {
 
     expect(request).toMatchObject({
       kind: "navigate",
+      relation: "reference",
       label: "Compare approaches",
+      sourceLayerId: 3,
       targetLayerId: 9,
       variant: "card",
       icon: "git-compare",
       description: "Lay out the tradeoffs before choosing.",
     });
     expect(action.variant).toBe("card");
+  });
+
+  it("keeps every actionable validation issue from a rejected tool call", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: "layer_node_count",
+        path: "nodes",
+        message: "Repair both layer problems.",
+        issues: [
+          { code: "layer_node_count", path: "nodes", message: "Split the layer." },
+          { code: "duplicate_layer_node", path: "nodes", message: "Remove the duplicate node." },
+        ],
+      },
+    }), { status: 422, headers: { "content-type": "application/json" } })));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+
+    await expect(graph.submitLayer(new LayerObject([1], []))).rejects.toMatchObject({
+      code: "layer_node_count",
+      issues: [
+        { code: "layer_node_count" },
+        { code: "duplicate_layer_node" },
+      ],
+    });
   });
 });

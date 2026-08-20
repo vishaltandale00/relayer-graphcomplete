@@ -30,12 +30,74 @@ async fn node(writer: &GraphWriter, key: &str) -> GraphNode {
         .unwrap()
 }
 
+async fn single_node_layer(writer: &GraphWriter, key: &str, node: &GraphNode) -> GraphLayer {
+    writer
+        .submit_layer(&LayerDraft {
+            client_key: key.into(),
+            nodes: vec![node.id],
+            edges: vec![],
+            size_justification: None,
+        })
+        .await
+        .unwrap()
+}
+
+async fn root_expand(
+    writer: &GraphWriter,
+    interaction: &GraphNode,
+    target: &GraphLayer,
+) -> GraphAction {
+    writer
+        .add_action(&ActionDraft {
+            client_key: "response".into(),
+            source_node_id: interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(target.id),
+            interaction_text: None,
+        })
+        .await
+        .unwrap()
+}
+
+async fn navigate(
+    writer: &GraphWriter,
+    key: &str,
+    source: &GraphNode,
+    source_layer: &GraphLayer,
+    target: &GraphLayer,
+    relation: NavigateRelation,
+) -> GraphAction {
+    writer
+        .add_action(&ActionDraft {
+            client_key: key.into(),
+            source_node_id: source.id,
+            source_layer_id: Some(source_layer.id),
+            kind: ActionKind::Navigate,
+            relation: Some(relation),
+            label: key.into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(target.id),
+            interaction_text: None,
+        })
+        .await
+        .unwrap()
+}
+
 async fn accept_single_node(writer: &GraphWriter, interaction: GraphNode, node: GraphNode) {
     let layer = writer
         .submit_layer(&LayerDraft {
             client_key: "root".into(),
             nodes: vec![node.id],
             edges: vec![],
+            size_justification: None,
         })
         .await
         .unwrap();
@@ -43,14 +105,15 @@ async fn accept_single_node(writer: &GraphWriter, interaction: GraphNode, node: 
         .add_action(&ActionDraft {
             client_key: "response".into(),
             source_node_id: interaction.id,
+            source_layer_id: None,
             kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
             label: "Response".into(),
             variant: ActionVariant::default(),
             icon: None,
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
-            response: true,
         })
         .await
         .unwrap();
@@ -82,6 +145,7 @@ async fn accepts_connected_layer_and_returns_exact_view() {
             client_key: "root".into(),
             nodes: vec![a.id, b.id],
             edges: vec![edge.id],
+            size_justification: None,
         })
         .await
         .unwrap();
@@ -89,14 +153,15 @@ async fn accepts_connected_layer_and_returns_exact_view() {
         .add_action(&ActionDraft {
             client_key: "response".into(),
             source_node_id: interaction.id,
+            source_layer_id: None,
             kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
             label: "Response".into(),
             variant: ActionVariant::default(),
             icon: None,
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
-            response: true,
         })
         .await
         .unwrap();
@@ -133,6 +198,7 @@ async fn rejects_disconnected_layer_with_repair_message() {
             client_key: "root".into(),
             nodes: vec![a.id, b.id],
             edges: vec![],
+            size_justification: None,
         })
         .await
         .unwrap_err();
@@ -232,21 +298,7 @@ async fn accepts_recursive_navigate_subgraph() {
             client_key: "nested".into(),
             nodes: vec![child.id],
             edges: vec![],
-        })
-        .await
-        .unwrap();
-    writer
-        .add_action(&ActionDraft {
-            client_key: "deeper".into(),
-            source_node_id: parent.id,
-            kind: ActionKind::Navigate,
-            label: "Details".into(),
-            variant: ActionVariant::default(),
-            icon: None,
-            description: None,
-            target_layer_id: Some(nested.id),
-            interaction_text: None,
-            response: false,
+            size_justification: None,
         })
         .await
         .unwrap();
@@ -255,6 +307,23 @@ async fn accepts_recursive_navigate_subgraph() {
             client_key: "root".into(),
             nodes: vec![parent.id],
             edges: vec![],
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .add_action(&ActionDraft {
+            client_key: "deeper".into(),
+            source_node_id: parent.id,
+            source_layer_id: Some(root.id),
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Details".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(nested.id),
+            interaction_text: None,
         })
         .await
         .unwrap();
@@ -262,14 +331,15 @@ async fn accepts_recursive_navigate_subgraph() {
         .add_action(&ActionDraft {
             client_key: "response".into(),
             source_node_id: interaction.id,
+            source_layer_id: None,
             kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
             label: "Response".into(),
             variant: ActionVariant::default(),
             icon: None,
             description: None,
             target_layer_id: Some(root.id),
             interaction_text: None,
-            response: true,
         })
         .await
         .unwrap();
@@ -278,6 +348,307 @@ async fn accepts_recursive_navigate_subgraph() {
         writer.get_layer(nested.id).await.unwrap().layer.state,
         RecordState::Accepted
     );
+}
+
+#[tokio::test]
+async fn large_layers_require_a_private_bounded_justification() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let mut nodes = Vec::new();
+    for index in 0..9 {
+        nodes.push(node(&writer, &format!("node-{index}")).await);
+    }
+    let mut edges = Vec::new();
+    for index in 1..nodes.len() {
+        edges.push(
+            writer
+                .create_edge(&EdgeDraft {
+                    client_key: format!("edge-{index}"),
+                    endpoints: [nodes[index - 1].id, nodes[index].id],
+                })
+                .await
+                .unwrap(),
+        );
+    }
+
+    let missing = writer
+        .submit_layer(&LayerDraft {
+            client_key: "large".into(),
+            nodes: nodes[..6].iter().map(|node| node.id).collect(),
+            edges: edges[..5].iter().map(|edge| edge.id).collect(),
+            size_justification: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        missing,
+        GraphError::ValidationIssues { ref issues, .. }
+            if issues.iter().any(|issue| issue.code == "large_layer_justification_required")
+    ));
+
+    let accepted = writer
+        .submit_layer(&LayerDraft {
+            client_key: "large".into(),
+            nodes: nodes[..6].iter().map(|node| node.id).collect(),
+            edges: edges[..5].iter().map(|edge| edge.id).collect(),
+            size_justification: Some(
+                "These six peer states must remain visible together for direct comparison.".into(),
+            ),
+        })
+        .await
+        .unwrap();
+    assert_eq!(accepted.nodes.len(), 6);
+
+    let too_large = writer
+        .submit_layer(&LayerDraft {
+            client_key: "too-large".into(),
+            nodes: nodes.iter().map(|node| node.id).collect(),
+            edges: edges.iter().map(|edge| edge.id).collect(),
+            size_justification: Some("All nine nodes are peers.".into()),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        too_large,
+        GraphError::ValidationIssues { ref issues, .. }
+            if issues.iter().any(|issue| issue.code == "layer_node_count")
+    ));
+}
+
+#[tokio::test]
+async fn reference_can_target_a_visible_prior_accepted_layer_without_reaccepting_it() {
+    let project_id = project(1);
+    let (database, prior_interaction) = setup(Some(project_id), thread(1)).await;
+    let prior_writer = database
+        .writer_for_subgraph(prior_interaction.id)
+        .await
+        .unwrap();
+    let evidence = node(&prior_writer, "evidence").await;
+    let evidence_layer = single_node_layer(&prior_writer, "evidence-layer", &evidence).await;
+    root_expand(&prior_writer, &prior_interaction, &evidence_layer).await;
+    prior_writer.complete(prior_interaction.id).await.unwrap();
+
+    let interaction = database
+        .create_interaction(Some(project_id), thread(2), "Use the prior evidence")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let answer = node(&writer, "answer").await;
+    let root = single_node_layer(&writer, "root", &answer).await;
+    navigate(
+        &writer,
+        "Evidence",
+        &answer,
+        &root,
+        &evidence_layer,
+        NavigateRelation::Reference,
+    )
+    .await;
+    root_expand(&writer, &interaction, &root).await;
+
+    let output = writer.complete(interaction.id).await.unwrap();
+    assert_eq!(
+        output.root_layer.actions[0].relation,
+        Some(NavigateRelation::Reference)
+    );
+    assert_eq!(
+        writer
+            .get_layer(evidence_layer.id)
+            .await
+            .unwrap()
+            .layer
+            .state,
+        RecordState::Accepted
+    );
+}
+
+#[tokio::test]
+async fn reference_layers_can_reference_each_other_in_cycles() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let root_node = node(&writer, "root-node").await;
+    let evidence_a = node(&writer, "evidence-a").await;
+    let evidence_b = node(&writer, "evidence-b").await;
+    let root = single_node_layer(&writer, "root", &root_node).await;
+    let layer_a = single_node_layer(&writer, "evidence-a-layer", &evidence_a).await;
+    let layer_b = single_node_layer(&writer, "evidence-b-layer", &evidence_b).await;
+    root_expand(&writer, &interaction, &root).await;
+    navigate(
+        &writer,
+        "First evidence",
+        &root_node,
+        &root,
+        &layer_a,
+        NavigateRelation::Reference,
+    )
+    .await;
+    navigate(
+        &writer,
+        "Related evidence",
+        &evidence_a,
+        &layer_a,
+        &layer_b,
+        NavigateRelation::Reference,
+    )
+    .await;
+    navigate(
+        &writer,
+        "Back to first evidence",
+        &evidence_b,
+        &layer_b,
+        &layer_a,
+        NavigateRelation::Reference,
+    )
+    .await;
+
+    writer.complete(interaction.id).await.unwrap();
+    assert_eq!(
+        writer.get_layer(layer_b.id).await.unwrap().layer.state,
+        RecordState::Accepted
+    );
+}
+
+#[tokio::test]
+async fn expand_paths_reject_cycles_with_repair_guidance() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let first = node(&writer, "first").await;
+    let second = node(&writer, "second").await;
+    let first_layer = single_node_layer(&writer, "first-layer", &first).await;
+    let second_layer = single_node_layer(&writer, "second-layer", &second).await;
+    root_expand(&writer, &interaction, &first_layer).await;
+    navigate(
+        &writer,
+        "Deeper",
+        &first,
+        &first_layer,
+        &second_layer,
+        NavigateRelation::Expand,
+    )
+    .await;
+    navigate(
+        &writer,
+        "Loop",
+        &second,
+        &second_layer,
+        &first_layer,
+        NavigateRelation::Expand,
+    )
+    .await;
+
+    let error = writer.complete(interaction.id).await.unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation {
+            code: "expand_cycle",
+            ..
+        }
+    ));
+    assert!(error.to_string().contains("Change one link to reference"));
+}
+
+#[tokio::test]
+async fn reference_layers_cannot_author_expand_or_invoke_actions() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let root_node = node(&writer, "root-node").await;
+    let evidence = node(&writer, "evidence").await;
+    let child = node(&writer, "child").await;
+    let root = single_node_layer(&writer, "root", &root_node).await;
+    let evidence_layer = single_node_layer(&writer, "evidence-layer", &evidence).await;
+    let child_layer = single_node_layer(&writer, "child-layer", &child).await;
+    root_expand(&writer, &interaction, &root).await;
+    navigate(
+        &writer,
+        "Evidence",
+        &root_node,
+        &root,
+        &evidence_layer,
+        NavigateRelation::Reference,
+    )
+    .await;
+
+    let error = writer
+        .add_action(&ActionDraft {
+            client_key: "invalid-expand".into(),
+            source_node_id: evidence.id,
+            source_layer_id: Some(evidence_layer.id),
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Invalid expand".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(child_layer.id),
+            interaction_text: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation {
+            code: "reference_layer_authoring_restricted",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn completion_rejects_mixed_relations_to_one_new_target() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let root_node = node(&writer, "root-node").await;
+    let target_node = node(&writer, "target-node").await;
+    let root = single_node_layer(&writer, "root", &root_node).await;
+    let target = single_node_layer(&writer, "target", &target_node).await;
+    root_expand(&writer, &interaction, &root).await;
+    navigate(
+        &writer,
+        "Expand target",
+        &root_node,
+        &root,
+        &target,
+        NavigateRelation::Expand,
+    )
+    .await;
+    navigate(
+        &writer,
+        "Reference target",
+        &root_node,
+        &root,
+        &target,
+        NavigateRelation::Reference,
+    )
+    .await;
+
+    let mixed = writer.complete(interaction.id).await.unwrap_err();
+    assert!(matches!(
+        mixed,
+        GraphError::Validation {
+            code: "mixed_target_relations",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn completion_rejects_orphan_current_draft_layers() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let root_node = node(&writer, "root-node").await;
+    let orphan_node = node(&writer, "orphan-node").await;
+    let root = single_node_layer(&writer, "root", &root_node).await;
+    single_node_layer(&writer, "orphan", &orphan_node).await;
+    root_expand(&writer, &interaction, &root).await;
+
+    let error = writer.complete(interaction.id).await.unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation {
+            code: "orphan_draft_layers",
+            ..
+        }
+    ));
 }
 
 #[tokio::test]
@@ -358,18 +729,37 @@ async fn action_keys_are_scoped_to_their_source_nodes() {
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
     let first = node(&writer, "first-source").await;
     let second = node(&writer, "second-source").await;
+    let first_layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "first-layer".into(),
+            nodes: vec![first.id],
+            edges: vec![],
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    let second_layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "second-layer".into(),
+            nodes: vec![second.id],
+            edges: vec![],
+            size_justification: None,
+        })
+        .await
+        .unwrap();
     let first_action = writer
         .add_action(&ActionDraft {
             client_key: "follow-up".into(),
             source_node_id: first.id,
+            source_layer_id: Some(first_layer.id),
             kind: ActionKind::Invoke,
+            relation: None,
             label: "Ask".into(),
             variant: ActionVariant::default(),
             icon: None,
             description: None,
             target_layer_id: None,
             interaction_text: Some("Ask about the first node".into()),
-            response: false,
         })
         .await
         .unwrap();
@@ -377,14 +767,15 @@ async fn action_keys_are_scoped_to_their_source_nodes() {
         .add_action(&ActionDraft {
             client_key: "follow-up".into(),
             source_node_id: second.id,
+            source_layer_id: Some(second_layer.id),
             kind: ActionKind::Invoke,
+            relation: None,
             label: "Ask".into(),
             variant: ActionVariant::default(),
             icon: None,
             description: None,
             target_layer_id: None,
             interaction_text: Some("Ask about the second node".into()),
-            response: false,
         })
         .await
         .unwrap();
@@ -403,24 +794,23 @@ async fn invoke_actions_reject_whitespace_only_interaction_text() {
         .add_action(&ActionDraft {
             client_key: "empty-follow-up".into(),
             source_node_id: source.id,
+            source_layer_id: None,
             kind: ActionKind::Invoke,
+            relation: None,
             label: "Ask".into(),
             variant: ActionVariant::default(),
             icon: None,
             description: None,
             target_layer_id: None,
             interaction_text: Some("  \n\t".into()),
-            response: false,
         })
         .await
         .unwrap_err();
 
     assert!(matches!(
         error,
-        GraphError::Validation {
-            code: "missing_interaction_text",
-            ..
-        }
+        GraphError::ValidationIssues { ref issues, .. }
+            if issues.iter().any(|issue| issue.code == "missing_interaction_text")
     ));
 }
 
@@ -429,6 +819,15 @@ async fn action_presentation_grammar_round_trips_in_authored_order() {
     let (database, interaction) = setup(Some(project(1)), thread(1)).await;
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
     let source = node(&writer, "source").await;
+    let source_layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "root".into(),
+            nodes: vec![source.id],
+            edges: vec![],
+            size_justification: None,
+        })
+        .await
+        .unwrap();
     let presentations = [
         ("chip", ActionVariant::Chip, None, Some("Circle Alert")),
         ("pill", ActionVariant::Pill, None, None),
@@ -452,14 +851,15 @@ async fn action_presentation_grammar_round_trips_in_authored_order() {
             .add_action(&ActionDraft {
                 client_key: key.into(),
                 source_node_id: source.id,
+                source_layer_id: Some(source_layer.id),
                 kind: ActionKind::Invoke,
+                relation: None,
                 label: format!("Action {key}"),
                 variant,
                 icon: icon.map(str::to_owned),
                 description: description.map(str::to_owned),
                 target_layer_id: None,
                 interaction_text: Some(format!("Run {key}")),
-                response: false,
             })
             .await
             .unwrap();
@@ -506,14 +906,15 @@ async fn action_presentation_errors_are_repairable() {
         .add_action(&ActionDraft {
             client_key: "unsupported".into(),
             source_node_id: source.id,
+            source_layer_id: None,
             kind: ActionKind::Invoke,
+            relation: None,
             label: "Unsupported".into(),
             variant: ActionVariant::Unsupported("banner".into()),
             icon: None,
             description: None,
             target_layer_id: None,
             interaction_text: Some("Try it".into()),
-            response: false,
         })
         .await
         .unwrap_err();
@@ -530,14 +931,15 @@ async fn action_presentation_errors_are_repairable() {
         .add_action(&ActionDraft {
             client_key: "missing-description".into(),
             source_node_id: source.id,
+            source_layer_id: None,
             kind: ActionKind::Invoke,
+            relation: None,
             label: "Card".into(),
             variant: ActionVariant::Card,
             icon: None,
             description: None,
             target_layer_id: None,
             interaction_text: Some("Try it".into()),
-            response: false,
         })
         .await
         .unwrap_err();
@@ -642,6 +1044,7 @@ async fn completion_rejects_an_edge_accepted_by_a_concurrent_interaction() {
                 client_key: "root".into(),
                 nodes: vec![first_node.id, second_node.id],
                 edges: vec![edge.id],
+                size_justification: None,
             })
             .await
             .unwrap();
@@ -649,14 +1052,15 @@ async fn completion_rejects_an_edge_accepted_by_a_concurrent_interaction() {
             .add_action(&ActionDraft {
                 client_key: "response".into(),
                 source_node_id: interaction.id,
+                source_layer_id: None,
                 kind: ActionKind::Navigate,
+                relation: Some(NavigateRelation::Expand),
                 label: "Response".into(),
                 variant: ActionVariant::default(),
                 icon: None,
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
-                response: true,
             })
             .await
             .unwrap();
@@ -689,6 +1093,7 @@ async fn accepted_layers_keep_their_original_action_snapshot() {
             client_key: "root".into(),
             nodes: vec![referenced_interaction.id],
             edges: vec![],
+            size_justification: None,
         })
         .await
         .unwrap();
@@ -696,14 +1101,15 @@ async fn accepted_layers_keep_their_original_action_snapshot() {
         .add_action(&ActionDraft {
             client_key: "response".into(),
             source_node_id: viewer_interaction.id,
+            source_layer_id: None,
             kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
             label: "Response".into(),
             variant: ActionVariant::default(),
             icon: None,
             description: None,
             target_layer_id: Some(viewer_layer.id),
             interaction_text: None,
-            response: true,
         })
         .await
         .unwrap();

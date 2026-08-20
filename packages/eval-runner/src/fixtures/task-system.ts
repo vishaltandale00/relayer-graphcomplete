@@ -53,8 +53,8 @@ class TaskSystemFixtureHarness implements Harness {
     await graph.createEdge(workersResults);
     const layer = new LayerObject([queue, workers, results], [queueWorkers, workersResults], "root-layer");
     await graph.submitLayer(layer);
-    await graph.addAction(queue, { kind: "navigate", label: "See queue behavior", target: queueDetail, clientKey: "queue-detail" });
-    await graph.addAction(interaction.id, { kind: "navigate", label: "Response", target: layer, response: true, clientKey: "response" });
+    await graph.addAction(queue, { kind: "navigate", relation: "expand", sourceLayer: layer, label: "See queue behavior", target: queueDetail, clientKey: "queue-detail" });
+    await graph.addAction(interaction.id, { kind: "navigate", relation: "expand", label: "Response", target: layer, clientKey: "response" });
     await graph.submit(interaction.id);
     context.trace.emit({ type: "tool.call.completed", data: { tool: "fixture.graph-authoring", status: "completed" } });
     context.trace.emit({ type: "message", data: { role: "assistant", text: "Authored and accepted the task-system graph." } });

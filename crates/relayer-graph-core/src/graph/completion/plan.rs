@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::{
-    ActionId, ActionKind, EdgeId, GraphAction, GraphError, LayerId, NodeId, RecordState,
+    ActionId, ActionKind, EdgeId, GraphAction, GraphError, LayerId, NavigateRelation, NodeId,
+    RecordState,
     graph::{InteractionScope, model::validate_connected},
     storage::{
         GraphConnection,
@@ -25,27 +26,40 @@ impl CompletionPlan {
         connection: &mut GraphConnection,
         scope: &InteractionScope,
     ) -> Result<Self, GraphError> {
-        let response_actions = ActionTable::new(&mut *connection)
+        let root_actions = ActionTable::new(&mut *connection)
             .for_source(scope, scope.root_node_id, Some(scope.root_node_id), false)
             .await?
             .into_iter()
             .map(|record| record.action)
-            .filter(|action| action.response && action.kind == ActionKind::Navigate)
             .collect::<Vec<_>>();
-        if response_actions.len() != 1 {
+        if root_actions.len() != 1 {
             return Err(GraphError::validation(
-                "response_action_count",
+                "root_action_count",
                 "interactionNode",
                 format!(
-                    "The interaction node needs exactly one new response navigate action; found {}. Add one navigate action with response=true.",
-                    response_actions.len()
+                    "The interaction needs exactly one new root action; found {}. Create one navigate action with relation=expand from the interaction.",
+                    root_actions.len()
                 ),
             ));
         }
-        let root_action = response_actions[0].clone();
-        let root_layer = root_action
-            .target_layer_id
-            .ok_or_else(|| GraphError::Internal("response navigate action has no layer".into()))?;
+        let root_action = root_actions[0].clone();
+        if root_action.kind != ActionKind::Navigate
+            || root_action.relation != Some(NavigateRelation::Expand)
+            || root_action.source_layer_id.is_some()
+        {
+            return Err(GraphError::validation(
+                "invalid_root_action",
+                "interactionNode",
+                "The single root action must be navigate with relation=expand and no sourceLayerId.",
+            ));
+        }
+        let root_layer = root_action.target_layer_id.ok_or_else(|| {
+            GraphError::validation(
+                "missing_target_layer",
+                "rootAction.targetLayerId",
+                "The root expand action needs a submitted current-interaction draft layer.",
+            )
+        })?;
         let mut plan = Self {
             root_action,
             nodes: HashSet::new(),
@@ -56,6 +70,8 @@ impl CompletionPlan {
         };
         plan.actions.insert(plan.root_action.id);
         plan.walk_layers(connection, scope, root_layer).await?;
+        plan.validate_expand_acyclic(connection, scope).await?;
+        plan.validate_no_orphan_layers(connection, scope).await?;
         plan.validate_edge_uniqueness(connection, scope).await?;
         Ok(plan)
     }
@@ -92,11 +108,10 @@ impl CompletionPlan {
         scope: &InteractionScope,
         root: LayerId,
     ) -> Result<(), GraphError> {
-        let mut pending = VecDeque::from([root]);
-        while let Some(layer_id) = pending.pop_front() {
-            if !self.layers.insert(layer_id) {
-                continue;
-            }
+        let mut pending = VecDeque::from([(root, NavigateRelation::Expand)]);
+        let mut arrivals = HashMap::<LayerId, NavigateRelation>::new();
+        while let Some((layer_id, arrival)) = pending.pop_front() {
+            register_arrival(&mut arrivals, layer_id, arrival)?;
             let record = LayerTable::new(&mut *connection)
                 .record(scope, layer_id)
                 .await?
@@ -105,16 +120,31 @@ impl CompletionPlan {
                         "missing_layer",
                         "targetLayerId",
                         format!(
-                            "Navigate action points to missing layer {layer_id}. Submit that layer first."
+                            "A navigate action points to missing layer {layer_id}. Submit that layer first."
                         ),
                     )
                 })?;
-            if record.layer.state != RecordState::Accepted && record.owner != scope.root_node_id {
+            if record.layer.state == RecordState::Accepted {
+                if arrival != NavigateRelation::Reference {
+                    return Err(GraphError::validation(
+                        "expand_target_must_be_current_draft",
+                        "targetLayerId",
+                        format!(
+                            "Expand points to accepted layer {layer_id}. Use relation=reference for accepted context, or create a current draft expansion layer."
+                        ),
+                    ));
+                }
+                continue;
+            }
+            if record.owner != scope.root_node_id {
                 return Err(GraphError::Forbidden(format!(
-                    "layer {layer_id} belongs to another interaction"
+                    "draft layer {layer_id} belongs to another interaction"
                 )));
             }
-            let snapshots_actions = record.layer.state == RecordState::Draft;
+            if !self.layers.insert(layer_id) {
+                continue;
+            }
+
             let resolved = layers::resolve(&mut *connection, scope, layer_id, false).await?;
             validate_connected(&record.layer.nodes, &resolved.edges)?;
             let node_ids = resolved
@@ -148,33 +178,182 @@ impl CompletionPlan {
                 }
                 self.nodes.insert(node.id);
             }
-            if snapshots_actions {
-                self.layer_actions.insert(
-                    layer_id,
-                    resolved.actions.iter().map(|action| action.id).collect(),
-                );
-            }
-            for action in resolved.actions {
-                if action.state == RecordState::Draft {
-                    let owner = ActionTable::new(&mut *connection)
-                        .record(scope, action.id)
-                        .await?
-                        .map(|record| record.owner);
-                    if owner != Some(scope.root_node_id) {
-                        return Err(GraphError::Forbidden(format!(
-                            "action {} belongs to another interaction",
-                            action.id
-                        )));
-                    }
+
+            self.layer_actions.insert(
+                layer_id,
+                resolved.actions.iter().map(|action| action.id).collect(),
+            );
+            let current_actions = ActionTable::new(&mut *connection)
+                .for_source_layer(scope, layer_id)
+                .await?;
+            for record in current_actions {
+                let action = record.action;
+                if !node_ids.contains(&action.source_node_id) {
+                    return Err(GraphError::validation(
+                        "source_node_outside_layer",
+                        format!("action[{}].sourceNodeId", action.id),
+                        format!(
+                            "Action {} claims source layer {layer_id}, but source node {} is not in that layer. Choose a containing source layer.",
+                            action.id, action.source_node_id
+                        ),
+                    ));
+                }
+                if arrival == NavigateRelation::Reference
+                    && (action.kind != ActionKind::Navigate
+                        || action.relation != Some(NavigateRelation::Reference))
+                {
+                    return Err(GraphError::validation(
+                        "reference_layer_authoring_restricted",
+                        format!("action[{}].relation", action.id),
+                        "A reference layer may author only reference navigation. Change this action to reference, or author it from an expansion layer.",
+                    ));
                 }
                 self.actions.insert(action.id);
-                if action.kind == ActionKind::Navigate {
-                    pending.push_back(action.target_layer_id.ok_or_else(|| {
-                        GraphError::Internal("navigate action has no target".into())
-                    })?);
+                if action.kind != ActionKind::Navigate {
+                    continue;
                 }
+                let relation = action.relation.ok_or_else(|| {
+                    GraphError::validation(
+                        "missing_navigate_relation",
+                        format!("action[{}].relation", action.id),
+                        "Choose relation=expand for deeper explanation or relation=reference for supporting evidence or context.",
+                    )
+                })?;
+                let target = action.target_layer_id.ok_or_else(|| {
+                    GraphError::validation(
+                        "missing_target_layer",
+                        format!("action[{}].targetLayerId", action.id),
+                        "Submit or select the navigate target layer and retry.",
+                    )
+                })?;
+                register_arrival(&mut arrivals, target, relation)?;
+                pending.push_back((target, relation));
             }
         }
         Ok(())
     }
+
+    async fn validate_expand_acyclic(
+        &self,
+        connection: &mut GraphConnection,
+        scope: &InteractionScope,
+    ) -> Result<(), GraphError> {
+        let mut adjacency = HashMap::<LayerId, Vec<LayerId>>::new();
+        for layer_id in &self.layers {
+            for record in ActionTable::new(&mut *connection)
+                .for_source_layer(scope, *layer_id)
+                .await?
+            {
+                let action = record.action;
+                if action.kind == ActionKind::Navigate
+                    && action.relation == Some(NavigateRelation::Expand)
+                {
+                    let target = action.target_layer_id.ok_or_else(|| {
+                        GraphError::Internal("validated expand action has no target".into())
+                    })?;
+                    adjacency.entry(*layer_id).or_default().push(target);
+                }
+            }
+        }
+        if let Some(cycle) = find_cycle(&adjacency) {
+            return Err(GraphError::validation(
+                "expand_cycle",
+                "actions",
+                format!(
+                    "Expand navigation must be acyclic. This expand path repeats a layer: {}. Change one link to reference or remove it.",
+                    cycle
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" -> ")
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn validate_no_orphan_layers(
+        &self,
+        connection: &mut GraphConnection,
+        scope: &InteractionScope,
+    ) -> Result<(), GraphError> {
+        let orphaned = LayerTable::new(connection)
+            .draft_ids_by_owner(scope.root_node_id)
+            .await?
+            .into_iter()
+            .filter(|layer_id| !self.layers.contains(layer_id))
+            .collect::<Vec<_>>();
+        if orphaned.is_empty() {
+            return Ok(());
+        }
+        Err(GraphError::validation(
+            "orphan_draft_layers",
+            "layers",
+            format!(
+                "Current draft layers are not reachable from the root action: {}. Connect each layer with a current expand or reference action, or stop authoring the unused layer.",
+                orphaned
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ))
+    }
+}
+
+fn register_arrival(
+    arrivals: &mut HashMap<LayerId, NavigateRelation>,
+    layer_id: LayerId,
+    relation: NavigateRelation,
+) -> Result<(), GraphError> {
+    if let Some(existing) = arrivals.insert(layer_id, relation)
+        && existing != relation
+    {
+        return Err(GraphError::validation(
+            "mixed_target_relations",
+            "targetLayerId",
+            format!(
+                "Layer {layer_id} is targeted as both expand and reference in this interaction. Use one relation for that target layer."
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn find_cycle(adjacency: &HashMap<LayerId, Vec<LayerId>>) -> Option<Vec<LayerId>> {
+    fn visit(
+        layer: LayerId,
+        adjacency: &HashMap<LayerId, Vec<LayerId>>,
+        visiting: &mut HashSet<LayerId>,
+        visited: &mut HashSet<LayerId>,
+        path: &mut Vec<LayerId>,
+    ) -> Option<Vec<LayerId>> {
+        if visiting.contains(&layer) {
+            let start = path.iter().position(|candidate| *candidate == layer)?;
+            return Some(path[start..].iter().copied().chain([layer]).collect());
+        }
+        if !visited.insert(layer) {
+            return None;
+        }
+        visiting.insert(layer);
+        path.push(layer);
+        for target in adjacency.get(&layer).into_iter().flatten() {
+            if let Some(cycle) = visit(*target, adjacency, visiting, visited, path) {
+                return Some(cycle);
+            }
+        }
+        path.pop();
+        visiting.remove(&layer);
+        None
+    }
+
+    let mut visiting = HashSet::new();
+    let mut visited = HashSet::new();
+    let mut path = Vec::new();
+    for layer in adjacency.keys().copied() {
+        if let Some(cycle) = visit(layer, adjacency, &mut visiting, &mut visited, &mut path) {
+            return Some(cycle);
+        }
+    }
+    None
 }

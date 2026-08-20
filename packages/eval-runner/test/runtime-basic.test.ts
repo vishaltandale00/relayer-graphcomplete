@@ -24,7 +24,7 @@ function fixtureExecution() {
 function navigationOutput(actions: CompletionOutput["rootLayer"]["actions"] = []): CompletionOutput {
   return {
     nodeId: 1,
-    rootAction: { id: 1, sourceNodeId: 1, kind: "navigate" as const, label: "Response", variant: "pill", targetLayerId: 3, response: true, state: "accepted" as const },
+    rootAction: { id: 1, sourceNodeId: 1, sourceLayerId: null, kind: "navigate" as const, relation: "expand" as const, label: "Response", variant: "pill", targetLayerId: 3, state: "accepted" as const },
     rootLayer: {
       layer: { id: 3, nodes: [2], edges: [], state: "accepted" as const },
       nodes: [{ id: 2, kind: "concept", icon: "N", title: "Overview", detail: "Details", state: "accepted" as const }],
@@ -61,7 +61,7 @@ describe("first runtime evaluation", () => {
     expect(concurrency.patterns.some((pattern) => pattern.test("While both workers are busy: no new task starts."))).toBe(true);
     const visible = judgeVisibleGraph({
       nodeId: 1,
-      rootAction: { id: 1, sourceNodeId: 1, kind: "navigate", label: "Response", variant: "pill", targetLayerId: 3, response: true, state: "accepted" },
+      rootAction: { id: 1, sourceNodeId: 1, sourceLayerId: null, kind: "navigate", relation: "expand", label: "Response", variant: "pill", targetLayerId: 3, state: "accepted" },
       rootLayer: {
         layer: { id: 3, nodes: [2, 6], edges: [4], state: "accepted" },
         nodes: [
@@ -76,7 +76,7 @@ describe("first runtime evaluation", () => {
     expect(visible.edges).toEqual([[2, 6]]);
     const judgePrompt = basicJudgePrompt({
       nodeId: 1,
-      rootAction: { id: 1, sourceNodeId: 1, kind: "navigate", label: "Response", variant: "pill", targetLayerId: 3, response: true, state: "accepted" },
+      rootAction: { id: 1, sourceNodeId: 1, sourceLayerId: null, kind: "navigate", relation: "expand", label: "Response", variant: "pill", targetLayerId: 3, state: "accepted" },
       rootLayer: {
         layer: { id: 3, nodes: [2, 6], edges: [4], state: "accepted" },
         nodes: visible.nodes.map((node) => ({ ...node, kind: "concept" as const, state: "accepted" as const })),
@@ -89,7 +89,7 @@ describe("first runtime evaluation", () => {
 
     const mismatched = {
       nodeId: 1,
-      rootAction: { id: 1, sourceNodeId: 1, kind: "navigate" as const, label: "Response", variant: "pill" as const, targetLayerId: 3, response: true, state: "accepted" as const },
+      rootAction: { id: 1, sourceNodeId: 1, sourceLayerId: null, kind: "navigate" as const, relation: "expand" as const, label: "Response", variant: "pill" as const, targetLayerId: 3, state: "accepted" as const },
       rootLayer: {
         layer: { id: 3, nodes: [2], edges: [], state: "accepted" as const },
         nodes: [{ id: 6, kind: "concept", icon: "R", title: "Results", detail: "Stored", state: "draft" as const }],
@@ -112,11 +112,12 @@ describe("first runtime evaluation", () => {
     const withNavigation = navigationOutput([{
       id: 9,
       sourceNodeId: output.rootLayer.nodes[0]!.id,
+      sourceLayerId: output.rootLayer.layer.id,
       kind: "navigate",
+      relation: "expand",
       label: "Open details",
       variant: "pill",
       targetLayerId: 10,
-      response: false,
       state: "accepted" as const,
     }]);
     expect(checkNodeNavigation(withNavigation)).toEqual([

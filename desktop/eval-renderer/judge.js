@@ -113,8 +113,20 @@ function actionsMarkup(subject) {
   if (subject?.kind !== "node" || !subject.actions.length) return "";
   return `<section class="detail-section"><h3>Actions</h3><div class="action-list">${subject.actions.map((action) => {
     const active = state.selection.kind === "action" && state.selection.actionId === action.actionId;
-    return `<button class="action-chip ${active ? "active" : ""} ${action.reviewed ? "" : "missing"}" data-action-id="${escapeHtml(action.actionId)}" data-layer-id="${escapeHtml(subject.layerId)}" data-node-id="${escapeHtml(subject.nodeId)}"><span>${escapeHtml(titleCase(action.actionKind))} ${escapeHtml(action.actionId)}</span><b>${action.reviewed ? scoreLabel(action.review?.ratings) : "Not reviewed"}</b></button>`;
+    const actionLabel = action.relation ? `${titleCase(action.relation)} navigation` : titleCase(action.actionKind);
+    return `<button class="action-chip ${active ? "active" : ""} ${action.reviewed ? "" : "missing"}" data-action-id="${escapeHtml(action.actionId)}" data-layer-id="${escapeHtml(subject.layerId)}" data-node-id="${escapeHtml(subject.nodeId)}"><span>${escapeHtml(actionLabel)} ${escapeHtml(action.actionId)}</span><b>${action.reviewed ? scoreLabel(action.review?.ratings) : "Not reviewed"}</b></button>`;
   }).join("")}</div></section>`;
+}
+
+function structureMarkup(subject) {
+  if (subject?.kind !== "turn" || !subject.review?.structure) return "";
+  const structure = subject.review.structure;
+  return `<section class="detail-section"><h3>Structure judgment</h3>
+    <dl class="ratings">
+      <div><dt>Overall</dt><dd>${escapeHtml(titleCase(structure.overall))}</dd></div>
+      <div><dt>Expansion</dt><dd>${escapeHtml(`${titleCase(structure.expansion?.need)} · ${titleCase(structure.expansion?.result)}`)}</dd></div>
+      <div><dt>References</dt><dd>${escapeHtml(`${titleCase(structure.references?.need)} · ${titleCase(structure.references?.result)}`)}</dd></div>
+    </dl><p class="review-summary">${escapeHtml(structure.reason)}</p></section>`;
 }
 
 function subjectTitle(subject) {
@@ -163,6 +175,7 @@ function render() {
         ${turn.stateReason ? `<p class="state-reason">${escapeHtml(turn.stateReason)}</p>` : ""}
         <p class="review-summary">${escapeHtml(review?.summary || turn.result?.summary || "The judge did not submit a review for this subject.")}</p>
         <section class="detail-section"><h3>Criterion scores</h3>${ratingsMarkup(review)}</section>
+        ${structureMarkup(subject)}
         ${actionsMarkup(subject)}
         <section class="detail-section"><h3>Findings</h3>${findingsMarkup(review)}</section>
       </article>

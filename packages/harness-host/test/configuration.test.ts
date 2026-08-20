@@ -150,6 +150,30 @@ describe("harness configuration", () => {
     expect(catalog.get("prime-agent-basic")?.settings).not.toEqual(catalog.get("prime-agent-deep")?.settings);
   });
 
+  it("loads the opt-in Luna layered-navigation configurations without changing legacy names", async () => {
+    const catalog = await loadHarnessConfigurations([
+      join(repositoryRoot, "harnesses/codex-basic.yaml"),
+      join(repositoryRoot, "harnesses/codex-layered-navigation-luna.yaml"),
+      join(repositoryRoot, "harnesses/prime-agent-layered-navigation-luna.yaml"),
+    ]);
+
+    expect([...catalog.keys()]).toEqual([
+      "codex-basic",
+      "codex-layered-navigation-luna",
+      "prime-agent-layered-navigation-luna",
+    ]);
+    expect(catalog.get("codex-layered-navigation-luna")?.settings).toMatchObject({
+      model: "gpt-5.6-luna",
+      modelReasoningEffort: "medium",
+      promptProfile: "layered-navigation-v1",
+    });
+    expect(catalog.get("prime-agent-layered-navigation-luna")?.settings).toMatchObject({
+      model: { provider: "openai-codex", id: "gpt-5.6-luna" },
+      thinkingLevel: "medium",
+      promptProfile: "layered-navigation-v1",
+    });
+  });
+
   it("rejects duplicate configuration names in a catalog", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-config-"));
     const first = join(directory, "first.yaml");

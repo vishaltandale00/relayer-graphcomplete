@@ -51,10 +51,12 @@ export const evalCases = Object.freeze([
 export const evalJudges = Object.freeze([
   Object.freeze({ id: "deterministic-graph-contract", name: "Deterministic graph contract" }),
   Object.freeze({ id: "simulated-user", name: "Screenshot-grounded simulated user" }),
+  Object.freeze({ id: "simulated-user-sol-high", name: "Screenshot-grounded simulated user · Sol high" }),
 ]);
 
 const deterministicJudgeId = "deterministic-graph-contract";
 const simulatedUserJudgeId = "simulated-user";
+const simulatedUserJudgeIds = new Set([simulatedUserJudgeId, "simulated-user-sol-high"]);
 
 function copy(value) {
   return structuredClone(value);
@@ -218,7 +220,7 @@ export class EvalService {
     if (testCaseIds.includes(H3_PROJECT_CASE_ID) && this.platform !== "darwin") {
       throw new Error("The pinned h3 project case is local Mac only.");
     }
-    if (judgeConfigurationName === simulatedUserJudgeId && this.simulatedUserJudgeRunner === null) {
+    if (simulatedUserJudgeIds.has(judgeConfigurationName) && this.simulatedUserJudgeRunner === null) {
       throw new Error("Simulated-user judge is not available in this EvalService.");
     }
     if (!evalJudges.some((judge) => judge.id === judgeConfigurationName)) {
@@ -388,7 +390,6 @@ export class EvalService {
             })));
           }
           if (definition.id === H3_PROJECT_CASE_ID) {
-            const requireGrandchild = threadDefinition?.id === "architecture";
             try {
               const topology = await this.acceptedTopologyBuilder({
                 turnId: interaction.id,
@@ -399,7 +400,7 @@ export class EvalService {
                     + `/layers/${encodeURIComponent(layerId)}`,
                 ),
               });
-              turnChecks.push(...this.acceptedTopologyGrader(topology, { requireGrandchild }).map((check) => ({
+              turnChecks.push(...this.acceptedTopologyGrader(topology).map((check) => ({
                 ...check,
                 name: `${checkPrefix}:${check.name}`,
               })));
@@ -410,13 +411,6 @@ export class EvalService {
                 passed: false,
                 detail,
               });
-              if (requireGrandchild) {
-                turnChecks.push({
-                  name: `${checkPrefix}:graph:root-child-grandchild`,
-                  passed: false,
-                  detail,
-                });
-              }
             }
           }
         }
@@ -456,7 +450,7 @@ export class EvalService {
       execution.checks = checks;
       const deterministicPassed = checks.length > 0 && checks.every((check) => check.passed);
       let simulatedUserPassed = true;
-      if (execution.judgeConfiguration.name === simulatedUserJudgeId) {
+      if (simulatedUserJudgeIds.has(execution.judgeConfiguration.name)) {
         const eligibleTurns = interactions
           .map(({ thread, interaction }, turnIndex) => ({ thread, interaction, turn: execution.turns[turnIndex] }))
           .filter(({ interaction, turn }) => (
@@ -572,6 +566,7 @@ export class EvalService {
   }
 
   async #judgeAcceptedTurn({ execution, thread, interaction, turn, reviewSequence }) {
+    const judgeConfigurationId = execution.judgeConfiguration.name;
     const previousTurnIds = execution.turns
       .filter((candidate) => (
         String(candidate.threadId) === String(turn.threadId)
@@ -586,13 +581,13 @@ export class EvalService {
       encodeURIComponent(execution.id),
       "turns",
       encodeURIComponent(String(interaction.id)),
-      simulatedUserJudgeId,
+      judgeConfigurationId,
     );
     await mkdir(artifactDirectory, { recursive: true });
     const judgeResult = {
       schemaVersion: 1,
       id: randomUUID(),
-      judge: simulatedUserJudgeId,
+      judge: judgeConfigurationId,
       status: "running",
       passed: null,
       startedAt: new Date().toISOString(),

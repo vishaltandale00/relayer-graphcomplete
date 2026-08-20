@@ -128,6 +128,13 @@ const turnReview: TurnReview = {
   nullRatingJustifications: { follow_up_progress: "This is the initial turn." },
   summary: "The turn is complete and navigable.",
   findings: [],
+  structure: {
+    overall: "helps",
+    expansion: { need: "helpful", result: "works" },
+    references: { need: "none", result: "absent" },
+    reason: "The useful child detail keeps the root concise.",
+    evidence: ["shot-root", "shot-child"],
+  },
 };
 
 function makeStore(): IncrementalReviewStore {
@@ -142,6 +149,7 @@ function makeStore(): IncrementalReviewStore {
           id: "action-child",
           sourceNodeId: "node-root",
           kind: "navigate",
+          relation: "expand",
           targetLayerId: "layer-child",
         }],
       },
@@ -275,6 +283,7 @@ describe("screenshot evidence validation", () => {
     const result = store.submitReview({
       ...turnReview,
       evidence: { representative: ["shot-root", "shot-previous-turn"] },
+      structure: { ...turnReview.structure, evidence: ["shot-root"] },
       findings: [{
         type: "strength",
         text: "The follow-up improves on the prior turn.",

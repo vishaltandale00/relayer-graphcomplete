@@ -7,7 +7,7 @@ import type { HarnessConfiguration, HarnessFactoryContext, HarnessSessionState }
 
 const completion = {
   nodeId: 1,
-  rootAction: { id: 4, sourceNodeId: 1, kind: "navigate" as const, label: "Response", variant: "pill" as const, targetLayerId: 3, response: true, state: "accepted" as const },
+  rootAction: { id: 4, sourceNodeId: 1, sourceLayerId: null, kind: "navigate" as const, relation: "expand" as const, label: "Response", variant: "pill" as const, targetLayerId: 3, state: "accepted" as const },
   rootLayer: {
     layer: { id: 3, nodes: [2], edges: [], state: "accepted" as const },
     nodes: [{ id: 2, kind: "concept", icon: "box", title: "Answer", detail: "Detail", state: "accepted" as const }],

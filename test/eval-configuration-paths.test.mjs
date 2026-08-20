@@ -16,8 +16,10 @@ describe("Eval harness configuration availability", () => {
       "fixture-task-system.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
+      "codex-layered-navigation-luna.yaml",
       "prime-agent-basic.yaml",
       "prime-agent-deep.yaml",
+      "prime-agent-layered-navigation-luna.yaml",
     ]);
     expect(packageAvailable).toHaveBeenCalledWith("@earendil-works/pi-coding-agent");
   });
@@ -31,6 +33,7 @@ describe("Eval harness configuration availability", () => {
       "fixture-task-system.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
+      "codex-layered-navigation-luna.yaml",
     ]);
   });
 
@@ -45,6 +48,7 @@ describe("Eval harness configuration availability", () => {
       "fixture-task-system.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
+      "codex-layered-navigation-luna.yaml",
     ]);
     expect(packageAvailable).not.toHaveBeenCalled();
   });

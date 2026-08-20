@@ -1,6 +1,24 @@
 """Exceptions raised by :mod:`relayer_graph`."""
 from __future__ import annotations
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Mapping
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationIssue:
+    """One deterministic graph-contract problem and its repair guidance."""
+
+    code: str
+    path: str
+    message: str
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "ValidationIssue":
+        return cls(
+            code=str(value.get("code", "validation_error")),
+            path=str(value.get("path", "graph")),
+            message=str(value.get("message", "The graph request is invalid.")),
+        )
 
 
 class RelayerGraphError(Exception):
@@ -31,7 +49,10 @@ class NotFound(APIError):
 
 
 class ValidationError(APIError):
-    pass
+    def __init__(self, message: str, *, status: int, details: Any = None,
+                 issues: tuple[ValidationIssue, ...] = ()) -> None:
+        super().__init__(message, status=status, details=details)
+        self.issues = issues
 
 
 class VersionConflict(APIError):

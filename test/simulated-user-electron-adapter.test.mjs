@@ -36,8 +36,11 @@ describe("local Electron simulated-user judge adapter", () => {
     expect(resolveLocalSimulatedUserAutorun({ environment: {}, arguments: [] })).toBeNull();
     const selection = {
       testCaseIds: ["project.h3.sanitize-status-code"],
-      harnessConfigurationNames: ["codex-basic-high"],
-      judgeConfigurationName: "simulated-user",
+      harnessConfigurationNames: [
+        "codex-layered-navigation-luna",
+        "prime-agent-layered-navigation-luna",
+      ],
+      judgeConfigurationName: "simulated-user-sol-high",
     };
     expect(resolveLocalSimulatedUserAutorun({
       environment: { [LOCAL_SIMULATED_USER_AUTORUN_ENV]: "1" },
@@ -108,7 +111,7 @@ describe("local Electron simulated-user judge adapter", () => {
           nodeIds: ["2"],
           edgeIds: [],
           actions: [
-            { id: "11", sourceNodeId: "2", kind: "navigate", targetLayerId: "20" },
+            { id: "11", sourceNodeId: "2", kind: "navigate", relation: "expand", targetLayerId: "20" },
             { id: "12", sourceNodeId: "2", kind: "invoke" },
           ],
         },
@@ -134,7 +137,7 @@ describe("local Electron simulated-user judge adapter", () => {
       {
         name: "graph:root-child-grandchild",
         passed: true,
-        detail: "The accepted response reaches graph depth 2 from its root.",
+        detail: "The accepted response reaches expansion depth 2 from its root.",
       },
     ]);
     expect(gradeAcceptedReviewTopology(await buildAcceptedReviewTopology({
@@ -227,6 +230,13 @@ describe("local Electron simulated-user judge adapter", () => {
         nullRatingJustifications: { follow_up_progress: "Initial turn." },
         summary: "Complete rendered review.",
         findings: [],
+        structure: {
+          overall: "helps",
+          expansion: { need: "helpful", result: "works" },
+          references: { need: "none", result: "absent" },
+          reason: "The child layer adds useful detail.",
+          evidence: ["shot-root-context", "shot-child-context"],
+        },
       });
       return {
         rubric: DEFAULT_SIMULATED_USER_RUBRIC,
@@ -326,7 +336,7 @@ function acceptedLayers({ includeGrandchild = false } = {}) {
       nodes: [{ id: 2, state: "accepted" }],
       edges: [],
       actions: [
-        { id: 11, sourceNodeId: 2, kind: "navigate", targetLayerId: 20, state: "accepted" },
+        { id: 11, sourceNodeId: 2, sourceLayerId: 10, kind: "navigate", relation: "expand", targetLayerId: 20, state: "accepted" },
         { id: 12, sourceNodeId: 2, kind: "invoke", state: "accepted" },
       ],
     }],
@@ -335,7 +345,7 @@ function acceptedLayers({ includeGrandchild = false } = {}) {
       nodes: [{ id: 3, state: "accepted" }],
       edges: [],
       actions: includeGrandchild
-        ? [{ id: 21, sourceNodeId: 3, kind: "navigate", targetLayerId: 30, state: "accepted" }]
+        ? [{ id: 21, sourceNodeId: 3, sourceLayerId: 20, kind: "navigate", relation: "expand", targetLayerId: 30, state: "accepted" }]
         : [],
     }],
   ]);

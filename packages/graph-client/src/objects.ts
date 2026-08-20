@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { GraphAction, GraphEdge, GraphId, GraphLayer, GraphNode } from "./types.js";
+import type { GraphAction, GraphEdge, GraphId, GraphLayer, GraphNode, NavigateRelation } from "./types.js";
 
 export class NodeObject {
   readonly clientKey: string;
@@ -48,9 +48,10 @@ export type ActionPresentationObject =
 
 export interface NavigateActionFields {
   readonly kind: "navigate";
+  readonly relation: NavigateRelation;
   readonly label: string;
   readonly target: LayerReference;
-  readonly response?: boolean;
+  readonly sourceLayer?: LayerReference;
   clientKey?: string;
   ref?: GraphAction;
 }
@@ -59,6 +60,7 @@ export interface InvokeActionFields {
   readonly kind: "invoke";
   readonly label: string;
   readonly interactionText: string;
+  readonly sourceLayer: LayerReference;
   clientKey?: string;
   ref?: GraphAction;
 }

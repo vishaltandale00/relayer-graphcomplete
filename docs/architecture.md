@@ -70,10 +70,11 @@ Each product or Eval review window owns one bounded renderer-side navigation his
 3. A turn is centered on one canonical user-interaction graph node. Its `NodeId` is the interaction identity; there is no separate interaction-graph record.
 4. Harnesses inspect and mutate graph state only through the typed graph clients and loopback Rust API.
 5. Every capability maps to one canonical interaction `NodeId`. `GraphDatabase::writer_for_subgraph(node_id)` derives project/thread visibility and draft-write ownership from that node instead of trusting repeated caller context.
-6. Prior stable nodes may be referenced across turns rather than duplicated.
-7. Draft records remain distinct from atomically accepted completion closures. Accepted layers snapshot their exact node, edge, and action membership so later graph writes cannot rewrite prior output.
-8. A model turn ending is not completion; the root must explicitly submit or stop.
-9. Prime Agent owns recursive execution; GraphComplete does not add another scheduler.
+6. Navigate actions are explicitly `expand` or `reference`. Expansion is acyclic decomposition; references may share or revisit accepted supporting context. Non-root actions record their exact source layer.
+7. Prior stable nodes and layers may be referenced across turns rather than duplicated. A reference destination is an accepted boundary, not a request to reaccept historical records.
+8. Draft records remain distinct from atomically accepted completion closures. Accepted layers snapshot their exact node, edge, and action membership so later graph writes cannot rewrite prior output.
+9. A model turn ending is not completion; the root must explicitly submit or stop. Submission validates authored closure, expansion cycles, reference visibility, orphan drafts, and layer size.
+10. Prime Agent owns recursive execution; GraphComplete does not add another scheduler. See [ADR 0005](decisions/0005-layered-navigation-contract.md).
 
 ## Target self-assessing policy invariants
 

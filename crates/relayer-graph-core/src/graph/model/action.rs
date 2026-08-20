@@ -1,12 +1,38 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{ActionId, GraphError, LayerId, NodeId, RecordState};
+use crate::{ActionId, GraphError, LayerId, NodeId, RecordState, ValidationIssue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ActionKind {
     Navigate,
     Invoke,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NavigateRelation {
+    Expand,
+    Reference,
+}
+
+impl NavigateRelation {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Expand => "expand",
+            Self::Reference => "reference",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, GraphError> {
+        match value {
+            "expand" => Ok(Self::Expand),
+            "reference" => Ok(Self::Reference),
+            other => Err(GraphError::Internal(format!(
+                "unknown navigate relation {other}"
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -90,14 +116,15 @@ impl ActionKind {
 pub struct GraphAction {
     pub id: ActionId,
     pub source_node_id: NodeId,
+    pub source_layer_id: Option<LayerId>,
     pub kind: ActionKind,
+    pub relation: Option<NavigateRelation>,
     pub label: String,
     pub variant: ActionVariant,
     pub icon: Option<String>,
     pub description: Option<String>,
     pub target_layer_id: Option<LayerId>,
     pub interaction_text: Option<String>,
-    pub response: bool,
     pub state: RecordState,
 }
 
@@ -106,7 +133,11 @@ pub struct GraphAction {
 pub struct ActionDraft {
     pub client_key: String,
     pub source_node_id: NodeId,
+    #[serde(default)]
+    pub source_layer_id: Option<LayerId>,
     pub kind: ActionKind,
+    #[serde(default)]
+    pub relation: Option<NavigateRelation>,
     pub label: String,
     #[serde(default)]
     pub variant: ActionVariant,
@@ -116,8 +147,6 @@ pub struct ActionDraft {
     pub description: Option<String>,
     pub target_layer_id: Option<LayerId>,
     pub interaction_text: Option<String>,
-    #[serde(default)]
-    pub response: bool,
 }
 
 impl ActionDraft {
@@ -166,20 +195,28 @@ impl ActionDraft {
             }
             (_, None) => {}
         }
+        let mut issues = Vec::new();
         match self.kind {
             ActionKind::Navigate => {
                 if self.target_layer_id.is_none() {
-                    return Err(GraphError::validation(
+                    issues.push(ValidationIssue::new(
                         "missing_target_layer",
                         "targetLayerId",
-                        "A navigate action must point to a submitted draft layer.",
+                        "A navigate action needs a target layer. Submit or select the layer, then retry with its target.",
                     ));
                 }
                 if self.interaction_text.is_some() {
-                    return Err(GraphError::validation(
+                    issues.push(ValidationIssue::new(
                         "unexpected_interaction_text",
                         "interactionText",
                         "A navigate action opens a layer and cannot also start an interaction.",
+                    ));
+                }
+                if self.relation.is_none() {
+                    issues.push(ValidationIssue::new(
+                        "missing_navigate_relation",
+                        "relation",
+                        "Choose relation=expand for deeper explanation or relation=reference for supporting evidence or context.",
                     ));
                 }
             }
@@ -189,27 +226,30 @@ impl ActionDraft {
                     .as_deref()
                     .is_none_or(|text| text.trim().is_empty())
                 {
-                    return Err(GraphError::validation(
+                    issues.push(ValidationIssue::new(
                         "missing_interaction_text",
                         "interactionText",
                         "An invoke action needs the user interaction text it will start.",
                     ));
                 }
                 if self.target_layer_id.is_some() {
-                    return Err(GraphError::validation(
+                    issues.push(ValidationIssue::new(
                         "unexpected_target_layer",
                         "targetLayerId",
                         "An invoke action starts an interaction and does not point to a layer.",
                     ));
                 }
-                if self.response {
-                    return Err(GraphError::validation(
-                        "invalid_response_action",
-                        "response",
-                        "The completion response action must be a navigate action.",
+                if self.relation.is_some() {
+                    issues.push(ValidationIssue::new(
+                        "unexpected_navigate_relation",
+                        "relation",
+                        "An invoke action starts an interaction and cannot have an expand or reference relation.",
                     ));
                 }
             }
+        }
+        if !issues.is_empty() {
+            return Err(GraphError::validation_issues(issues));
         }
         Ok(canonical_icon)
     }

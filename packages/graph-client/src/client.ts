@@ -56,10 +56,15 @@ export class RelayerGraphClient {
     return edges;
   }
 
-  async submitLayer(layer: LayerObject): Promise<ResolvedLayer["layer"]> {
+  async submitLayer(layer: LayerObject, options: { readonly sizeJustification?: string } = {}): Promise<ResolvedLayer["layer"]> {
     const body = await this.request<{ layer: ResolvedLayer["layer"] }>("/api/graph/layers", {
       method: "POST",
-      body: JSON.stringify({ clientKey: layer.clientKey, nodes: layer.nodes.map(nodeId), edges: layer.edges.map(edgeId) }),
+      body: JSON.stringify({
+        clientKey: layer.clientKey,
+        nodes: layer.nodes.map(nodeId),
+        edges: layer.edges.map(edgeId),
+        sizeJustification: options.sizeJustification,
+      }),
     });
     layer.ref = body.layer;
     return body.layer;
@@ -72,16 +77,18 @@ export class RelayerGraphClient {
       body: JSON.stringify(action.kind === "navigate" ? {
         clientKey,
         sourceNodeId: nodeId(source),
+        sourceLayerId: action.sourceLayer === undefined ? null : layerId(action.sourceLayer),
         kind: action.kind,
+        relation: action.relation,
         label: action.label,
         variant: action.variant ?? "pill",
         icon: action.icon ?? null,
         description: action.description ?? null,
         targetLayerId: layerId(action.target),
-        response: action.response ?? false,
       } : {
         clientKey,
         sourceNodeId: nodeId(source),
+        sourceLayerId: layerId(action.sourceLayer),
         kind: action.kind,
         label: action.label,
         variant: action.variant ?? "pill",
@@ -116,7 +123,13 @@ export class RelayerGraphClient {
     });
     const body = await response.json().catch(() => ({})) as T & GraphApiErrorBody;
     if (!response.ok) {
-      throw new GraphApiError(response.status, body.error?.code ?? "request_failed", body.error?.path, body.error?.message ?? `Graph request failed with ${response.status}`);
+      throw new GraphApiError(
+        response.status,
+        body.error?.code ?? "request_failed",
+        body.error?.path,
+        body.error?.message ?? `Graph request failed with ${response.status}`,
+        body.error?.issues ?? [],
+      );
     }
     return body;
   }

@@ -51,7 +51,7 @@ function fixture() {
                 { layerId: "layer-a", nodeId: "node-1", actionIds: [] },
                 { layerId: "layer-a", nodeId: "node-2", actionIds: ["action-2"] },
               ],
-              actions: [{ layerId: "layer-a", nodeId: "node-2", actionId: "action-2", actionKind: "navigate", targetLayerId: "layer-b" }],
+              actions: [{ layerId: "layer-a", nodeId: "node-2", actionId: "action-2", actionKind: "navigate", relation: "reference", targetLayerId: "layer-b" }],
             },
             layers: [{ subject: { layerId: "layer-a" }, history: { current: {
               layerId: "layer-a",
@@ -95,6 +95,7 @@ describe("judge analysis view model", () => {
     expect(analysis.turns[0].layers[0].nodes[0].reviewed).toBe(true);
     expect(analysis.turns[0].layers[0].nodes[1].reviewed).toBe(false);
     expect(analysis.turns[0].layers[0].nodes[1].actions[0].reviewed).toBe(false);
+    expect(analysis.turns[0].layers[0].nodes[1].actions[0].relation).toBe("reference");
     expect(analysis.turns[1]).toMatchObject({ state: "skipped", stateReason: "Workspace was dirty." });
   });
 

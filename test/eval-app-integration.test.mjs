@@ -88,7 +88,7 @@ describe("Relayer Eval application service", () => {
         workspaceGrades.push(grade);
         return [{ name: `workspace:${grade}`, passed: true, detail: `${grade} policy passed.` }];
       },
-      acceptedTopologyGrader: (topology, { requireGrandchild }) => {
+      acceptedTopologyGrader: (topology, { requireGrandchild = false } = {}) => {
         acceptedTopologyGrades.push({
           turnId: topology.turnId,
           layerCount: topology.layers.length,
@@ -179,9 +179,10 @@ describe("Relayer Eval application service", () => {
     expect(layer.actions).toEqual([
       expect.objectContaining({
         sourceNodeId: layer.nodes[0].id,
+        sourceLayerId: layer.layer.id,
         kind: "navigate",
+        relation: "expand",
         label: "See queue behavior",
-        response: false,
       }),
     ]);
     const childLayer = await productRequest(
@@ -227,7 +228,7 @@ describe("Relayer Eval application service", () => {
     ]);
     expect(workspaceGrades).toEqual(["question", "question", "diagnosis", "diagnosis", "implementation"]);
     expect(acceptedTopologyGrades).toHaveLength(6);
-    expect(acceptedTopologyGrades.filter((grade) => grade.requireGrandchild)).toHaveLength(2);
+    expect(acceptedTopologyGrades.filter((grade) => grade.requireGrandchild)).toHaveLength(0);
     expect(acceptedTopologyGrades.every((grade) => grade.layerCount === 2)).toBe(true);
     const h3Threads = await Promise.all(h3Execution.threadIds.map((threadId) => (
       productRequest(productSession, `/api/threads/${threadId}`)

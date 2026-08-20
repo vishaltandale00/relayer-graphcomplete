@@ -4,7 +4,8 @@ mod plan;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ActionKind, GraphAction, GraphDatabase, GraphError, NodeId, RecordState, ResolvedLayer,
+    ActionKind, GraphAction, GraphDatabase, GraphError, NavigateRelation, NodeId, RecordState,
+    ResolvedLayer,
     graph::InteractionScope,
     storage::sqlite::{actions::ActionTable, completions::CompletionTable, layers},
 };
@@ -53,10 +54,11 @@ pub(crate) async fn read_output(
         .action;
     if action.state != RecordState::Accepted
         || action.kind != ActionKind::Navigate
-        || !action.response
+        || action.relation != Some(NavigateRelation::Expand)
+        || action.source_layer_id.is_some()
     {
         return Err(GraphError::Internal(
-            "completion root action is not an accepted response navigate action".into(),
+            "completion root action is not an accepted root expand action".into(),
         ));
     }
     let layer_id = action

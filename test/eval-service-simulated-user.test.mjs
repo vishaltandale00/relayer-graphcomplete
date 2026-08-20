@@ -47,6 +47,7 @@ describe("EvalService simulated-user result persistence", () => {
     expect(service.catalog().judges.map(({ id }) => id)).toEqual([
       "deterministic-graph-contract",
       "simulated-user",
+      "simulated-user-sol-high",
     ]);
     const created = await service.createRun(simulatedUserSelection());
     const completed = await waitForCompletedRun(service, created.id);
@@ -332,10 +333,11 @@ function acceptedOutput() {
     rootAction: {
       id: 11,
       sourceNodeId: 1,
+      sourceLayerId: null,
       kind: "navigate",
+      relation: "expand",
       label: "Response",
       targetLayerId: layer.id,
-      response: true,
       state: "accepted",
     },
     rootLayer: { layer, nodes: [node], edges: [], actions: [] },
