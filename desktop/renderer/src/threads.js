@@ -9,7 +9,12 @@ import {
   createNavigationHistory,
 } from "./navigation-history.js";
 import { renderThread } from "./graph.js";
-import { renderScopeMenu, renderSidebar, setMainView } from "./navigation.js";
+import {
+  renderScopeMenu,
+  renderSidebar,
+  setMainView,
+  setSettingsTab,
+} from "./navigation.js";
 import {
   appendLayerPath,
   createLayerNavigationCoordinator,
@@ -283,6 +288,7 @@ export async function submitInteraction(text, modelSelection) {
   const sourceLocationKey = navigationEntryKey(navigationHistory.current);
   supersedePendingHistory({ cancelLayerNavigation: true });
   if (!modelSelection) {
+    setSettingsTab("models");
     setMainView("settings");
     throw new Error("Choose an available model in Settings before sending.");
   }
@@ -601,6 +607,7 @@ export async function createFirstThread(pickerPayloadOverride = null) {
   const permissionProfileId = viewState.selectedPermissionProfileId;
   let pickerPayload = pickerPayloadOverride ?? newThreadModelSelectionPayload();
   if (!pickerPayload) {
+    setSettingsTab("models");
     setMainView("settings");
     toast("Choose an available model in Settings before sending.");
     return;

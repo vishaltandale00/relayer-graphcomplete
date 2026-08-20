@@ -156,6 +156,14 @@ describe("composer model picker UI contract", () => {
     expect(main).toContain("refreshNewThreadModelPicker();");
   });
 
+  it("routes every model setup failure to Models and harnesses", async () => {
+    const graph = await readFile(new URL("../desktop/renderer/src/graph.js", import.meta.url), "utf8");
+    const threads = await readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8");
+    const modelTab = 'setSettingsTab("models");';
+    expect(graph.indexOf(modelTab)).toBeLessThan(graph.indexOf('querySelector("#settingsButton")?.click();'));
+    expect(threads.match(/setSettingsTab\("models"\);/g)).toHaveLength(2);
+  });
+
   it("defines a viewport-safe narrow layout and light-mode surface", async () => {
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
     expect(styles).toContain(".model-picker-popover{position:fixed;left:12px;right:12px;bottom:72px;width:auto");

@@ -5,11 +5,14 @@ import {
   firstAvailableSelection,
   NO_MODELS_FOR_HARNESS,
   normalizePickerSelection,
+  pickerSelectionIsAvailable,
   pickerSelectionPayload,
+  reconcilePickerSelection,
   selectCandidateHarness,
   selectionForInteraction,
   validateCandidateHarness,
 } from "../desktop/renderer/src/model-picker-model.js";
+import { selectionForNextInteraction } from "../desktop/renderer/src/model-picker.js";
 
 function settings() {
   return {
@@ -95,16 +98,42 @@ describe("composer model picker selection", () => {
     ]);
   });
 
-  it("inherits an available prior interaction model and falls back within its family", () => {
+  it("inherits an available prior interaction model without replacing a stale selection", () => {
     const catalog = settings();
     expect(selectionForInteraction(catalog, "codex-basic", {
       modelSelection: { familyId: 1, providerId: "codex", modelId: "one" },
     })).toMatchObject({ modelId: "one" });
-    expect(selectionForInteraction(catalog, "codex-basic", {
+    const stale = selectionForInteraction(catalog, "codex-basic", {
       modelFamilyId: 1,
       modelProviderId: "codex",
       providerModelId: "two",
-    })).toMatchObject({ modelId: "one" });
+    });
+    expect(stale).toMatchObject({ familyId: 1, providerId: "codex", modelId: "two" });
+    expect(selectionForNextInteraction(catalog, "codex-basic", {
+      modelSelection: { familyId: 1, providerId: "codex", modelId: "two" },
+    })).toEqual(stale);
+    expect(pickerSelectionIsAvailable(catalog, stale)).toBe(false);
+    expect(normalizePickerSelection(catalog, stale)).toBeNull();
+  });
+
+  it("uses first available only when no explicit model was selected", () => {
+    const catalog = settings();
+    expect(normalizePickerSelection(catalog, { harnessId: "codex-basic" })).toMatchObject({
+      familyId: 1,
+      providerId: "codex",
+      modelId: "one",
+    });
+    expect(reconcilePickerSelection(catalog, {
+      harnessId: "codex-basic",
+      familyId: 99,
+      providerId: "codex",
+      modelId: "removed",
+    })).toEqual({
+      harnessId: "codex-basic",
+      familyId: 99,
+      providerId: "codex",
+      modelId: "removed",
+    });
   });
 
   it("rolls back the complete selection when a candidate harness has no models", () => {

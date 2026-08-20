@@ -61,11 +61,19 @@ export function normalizePickerSelection(settings, candidate) {
   const harnessId = candidate?.harnessId ?? settings.defaults.harnessId;
   const families = availablePickerFamilies(settings, harnessId);
   if (families.length === 0) return null;
-  const family = families.find((item) => String(item.id) === String(candidate?.familyId))
-    ?? families[0];
-  const member = family.availableMembers.find((item) => (
+  const requestedFamily = candidate?.familyId == null
+    ? null
+    : families.find((item) => String(item.id) === String(candidate.familyId));
+  const hasExplicitModel = candidate?.familyId != null
+    && typeof candidate?.providerId === "string"
+    && typeof candidate?.modelId === "string";
+  if (hasExplicitModel && !requestedFamily) return null;
+  const family = requestedFamily ?? families[0];
+  const requestedMember = family.availableMembers.find((item) => (
     item.providerId === candidate?.providerId && item.modelId === candidate?.modelId
-  )) ?? family.availableMembers[0];
+  ));
+  if (hasExplicitModel && !requestedMember) return null;
+  const member = requestedMember ?? family.availableMembers[0];
   return {
     harnessId,
     familyId: family.id,
@@ -74,9 +82,38 @@ export function normalizePickerSelection(settings, candidate) {
   };
 }
 
+export function reconcilePickerSelection(settings, candidate) {
+  const harnessId = candidate?.harnessId ?? settings.defaults.harnessId;
+  const normalized = normalizePickerSelection(settings, { ...candidate, harnessId });
+  if (normalized) return normalized;
+  if (
+    candidate?.familyId != null
+    && typeof candidate.providerId === "string"
+    && typeof candidate.modelId === "string"
+  ) {
+    return {
+      harnessId,
+      familyId: candidate.familyId,
+      providerId: candidate.providerId,
+      modelId: candidate.modelId,
+    };
+  }
+  return null;
+}
+
+export function pickerSelectionIsAvailable(settings, candidate) {
+  if (
+    !candidate
+    || candidate.familyId == null
+    || typeof candidate.providerId !== "string"
+    || typeof candidate.modelId !== "string"
+  ) return false;
+  return normalizePickerSelection(settings, candidate) !== null;
+}
+
 export function selectionForInteraction(settings, harnessId, interaction) {
   const selected = interaction?.modelSelection;
-  return normalizePickerSelection(settings, {
+  return reconcilePickerSelection(settings, {
     harnessId,
     familyId: selected?.familyId ?? interaction?.modelFamilyId,
     providerId: selected?.providerId ?? interaction?.modelProviderId,

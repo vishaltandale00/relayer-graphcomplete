@@ -1,4 +1,4 @@
-import { setMainView } from "./navigation.js";
+import { setMainView, setSettingsTab } from "./navigation.js";
 import { createProductWorkspace } from "./product-workspace/index.js";
 import { activeThread, appState, evalReview, query, viewState } from "./state.js";
 import { toast } from "./ui.js";
@@ -32,7 +32,10 @@ function workspace() {
     onSelectTurnById: selectTurnById,
     onSelectionChange: replaceCurrentSelection,
     onSubmitInteraction: (text, modelSelection) => import("./threads.js").then(({ submitInteraction }) => submitInteraction(text, modelSelection)),
-    onOpenSettings: () => document.querySelector("#settingsButton")?.click(),
+    onOpenSettings: () => {
+      setSettingsTab("models");
+      document.querySelector("#settingsButton")?.click();
+    },
     onNavigateLayer: (layerId, navigation) => import("./threads.js").then(({ navigateLayer }) => navigateLayer(layerId, navigation)),
     onInvokeAction: (action) => import("./threads.js").then(({ invokeAction }) => invokeAction(action)),
   });

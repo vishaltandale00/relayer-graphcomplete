@@ -1,6 +1,7 @@
 import {
   availablePickerFamilies,
-  normalizePickerSelection,
+  pickerSelectionIsAvailable,
+  reconcilePickerSelection,
   validateCandidateHarness,
 } from "./model-picker-model.js";
 import { escapeHtml } from "./ui.js";
@@ -109,7 +110,7 @@ export function interactionModelSelection(interaction) {
 export function selectionForNextInteraction(settings, harnessId, interaction) {
   if (!settings || !harnessId) return null;
   const prior = interactionModelSelection(interaction);
-  return normalizePickerSelection(settings, { harnessId, ...prior });
+  return reconcilePickerSelection(settings, { harnessId, ...prior });
 }
 
 export function createModelPicker({
@@ -130,7 +131,7 @@ export function createModelPicker({
   let currentSettings = settings;
   let currentPinnedHarnessId = pinnedHarnessId;
   let currentSelection = currentSettings
-    ? normalizePickerSelection(currentSettings, selection ?? {
+    ? reconcilePickerSelection(currentSettings, selection ?? {
       harnessId: currentPinnedHarnessId ?? currentSettings.defaults?.harnessId,
     })
     : null;
@@ -138,6 +139,10 @@ export function createModelPicker({
   let error = null;
   let disabled = false;
   const harnessValidationGate = createModelPickerRequestGate();
+
+  function selectionReady() {
+    return pickerSelectionIsAvailable(currentSettings, currentSelection);
+  }
 
   function selectedHarnessId() {
     return mode === "ongoing"
@@ -258,9 +263,13 @@ export function createModelPicker({
   }
 
   function render() {
-    const labels = modelSelectionLabels(currentSettings, currentSelection);
-    triggerLabel.textContent = labels?.compact ?? "Set up models";
-    trigger.title = labels ? `Model: ${labels.compact}` : "Choose an available model in Settings";
+    const ready = selectionReady();
+    const labels = ready ? modelSelectionLabels(currentSettings, currentSelection) : null;
+    const hasAvailableModels = currentSettings
+      ? availablePickerFamilies(currentSettings, selectedHarnessId()).length > 0
+      : false;
+    triggerLabel.textContent = labels?.compact ?? (hasAvailableModels ? "Choose model" : "Set up models");
+    trigger.title = labels ? `Model: ${labels.compact}` : "Choose an available model";
     trigger.disabled = disabled;
     root.querySelectorAll("[data-model-picker-tab]").forEach((tab) => {
       const selected = tab.dataset.modelPickerTab === activeTab;
@@ -337,8 +346,8 @@ export function createModelPicker({
 
   return Object.freeze({
     close,
-    getSelection: () => currentSelection ? { ...currentSelection } : null,
-    isReady: () => Boolean(currentSelection),
+    getSelection: () => selectionReady() ? { ...currentSelection } : null,
+    isReady: selectionReady,
     open,
     setDisabled(nextDisabled) {
       disabled = Boolean(nextDisabled);
@@ -359,11 +368,11 @@ export function createModelPicker({
         : nextSelection?.harnessId ?? currentSelection?.harnessId ?? currentSettings?.defaults?.harnessId;
       const candidate = replaceSelection ? nextSelection : currentSelection ?? nextSelection;
       currentSelection = currentSettings
-        ? normalizePickerSelection(currentSettings, { ...candidate, harnessId })
+        ? reconcilePickerSelection(currentSettings, { ...candidate, harnessId })
         : null;
       error = null;
       render();
-      onSelectionChange(currentSelection);
+      onSelectionChange(selectionReady() ? currentSelection : null);
     },
   });
 }
