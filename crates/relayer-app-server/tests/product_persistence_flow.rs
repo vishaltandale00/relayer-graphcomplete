@@ -15,7 +15,7 @@ use std::{
     process::{Command, Stdio},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread,
     time::Duration,
@@ -172,7 +172,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     )
     .unwrap();
 
-    let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let (app, provider_refreshes) =
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
     let rejected = app
         .clone()
         .oneshot(api_request(
@@ -200,6 +201,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             .count(),
         1
     );
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
 
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     loop {
@@ -246,6 +248,83 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             "providerId": "codex",
             "modelId": "test-model"
         })
+    );
+
+    let ordinary_unselected = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({
+                "title": "Still requires a model",
+                "initialMessage": "Do not run without a selection",
+                "harnessId": "codex-basic"
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        ordinary_unselected.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        response_json(ordinary_unselected).await["code"],
+        "model_selection_required"
+    );
+
+    // A pre-selector accepted interaction has no model columns, but its thread already pins the
+    // only harness configuration ordinary Product execution may use.
+    let pool = sqlite_pool(&database).await;
+    let legacy_timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let legacy_thread = sqlx::query(
+        "INSERT INTO threads(title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES ('Legacy action',?1,?1,'codex-basic','auto')",
+    )
+    .bind(&legacy_timestamp)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let legacy_thread_id = legacy_thread.last_insert_rowid();
+    let legacy_source = sqlx::query(
+        "INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,permission_profile_id) VALUES (?1,1,'Legacy source',?2,303,'accepted','codex-basic','auto')",
+    )
+    .bind(legacy_thread_id)
+    .bind(&legacy_timestamp)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let legacy_source_interaction_id = legacy_source.last_insert_rowid();
+    pool.close().await;
+
+    let legacy_uri = format!(
+        "/api/threads/{legacy_thread_id}/interactions/{legacy_source_interaction_id}/actions/41/invoke"
+    );
+    let legacy_invocation = app
+        .clone()
+        .oneshot(api_request("POST", &legacy_uri, None, true))
+        .await
+        .unwrap();
+    assert_eq!(legacy_invocation.status(), StatusCode::CREATED);
+    let legacy_state = wait_for_interaction_count_and_terminal(&app, legacy_thread_id, 2).await;
+    assert_eq!(
+        legacy_state["interactions"][1]["completionStatus"],
+        "accepted"
+    );
+    assert_eq!(
+        legacy_state["interactions"][1]["modelSelection"],
+        Value::Null
+    );
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        observed_models.lock().unwrap().as_slice(),
+        [
+            json!({ "providerId": "codex", "modelId": "test-model" }),
+            Value::Null,
+        ]
     );
 
     // Simulate a request disappearing after its durable one-shot record commits but before the
@@ -316,8 +395,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         assert!(std::time::Instant::now() < deadline);
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert_eq!(harness_completions.load(Ordering::SeqCst), 2);
-    assert_eq!(observed_models.lock().unwrap().len(), 2);
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 3);
+    assert_eq!(observed_models.lock().unwrap().len(), 3);
     drop(app);
 
     let reopened =
@@ -423,7 +502,8 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         .to_string(),
     )
     .unwrap();
-    let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let (app, provider_refreshes) =
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
     assert_eq!(
         app.clone()
             .oneshot(provider_publish_request(test_provider_snapshot()))
@@ -456,6 +536,28 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         .await
         .unwrap();
     assert_eq!(raw_override.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    provider_refreshes.succeed.store(false, Ordering::SeqCst);
+    let refresh_failed = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({
+                "initialMessage": "Fail closed before persistence",
+                "harnessId": "codex-basic",
+                "modelSelection": model_selection(family_id, "test-model")
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refresh_failed.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        response_json(refresh_failed).await["code"],
+        "provider_catalog_refresh_failed"
+    );
+    provider_refreshes.succeed.store(true, Ordering::SeqCst);
 
     let invalid = app
         .clone()
@@ -585,6 +687,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         interactions[0]["effectiveExecutionDigest"],
         interactions[2]["effectiveExecutionDigest"]
     );
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 7);
     assert_eq!(
         observed_models.lock().unwrap().as_slice(),
         [
@@ -1124,6 +1227,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: None,
+        provider_catalog_refresh_url: None,
+        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await;
@@ -1149,6 +1254,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: None,
+        provider_catalog_refresh_url: None,
+        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await;
@@ -1187,6 +1294,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: None,
+        provider_catalog_refresh_url: None,
+        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await;
@@ -1225,6 +1334,8 @@ async fn open_app(database: &Path, web_directory: &Path) -> Router {
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: Some("review".to_owned()),
+        provider_catalog_refresh_url: None,
+        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await
@@ -1239,12 +1350,51 @@ async fn open_app_with_runtime(
     graph_url: &str,
     harness_url: &str,
 ) -> Router {
-    RelayerAppServer::open(RelayerAppServerConfig {
+    open_app_with_runtime_observed(database, web_directory, catalog, graph_url, harness_url)
+        .await
+        .0
+}
+
+struct ProviderRefreshProbe {
+    calls: Arc<AtomicUsize>,
+    succeed: Arc<AtomicBool>,
+}
+
+async fn open_app_with_runtime_observed(
+    database: &Path,
+    web_directory: &Path,
+    catalog: &Path,
+    graph_url: &str,
+    harness_url: &str,
+) -> (Router, ProviderRefreshProbe) {
+    let provider_refreshes = Arc::new(AtomicUsize::new(0));
+    let observed_refreshes = provider_refreshes.clone();
+    let refresh_succeeds = Arc::new(AtomicBool::new(true));
+    let observed_success = refresh_succeeds.clone();
+    let refresh = axum::Router::new().route(
+        "/v1/provider-catalog/refresh",
+        axum::routing::post(move || {
+            let observed_refreshes = observed_refreshes.clone();
+            let observed_success = observed_success.clone();
+            async move {
+                observed_refreshes.fetch_add(1, Ordering::SeqCst);
+                if observed_success.load(Ordering::SeqCst) {
+                    StatusCode::NO_CONTENT
+                } else {
+                    StatusCode::SERVICE_UNAVAILABLE
+                }
+            }
+        }),
+    );
+    let (provider_catalog_refresh_url, _refresh_task) = serve_test_app(refresh).await;
+    let app = RelayerAppServer::open(RelayerAppServerConfig {
         database_path: database.to_owned(),
         web_directory: web_directory.to_owned(),
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: Some("review".to_owned()),
+        provider_catalog_refresh_url: Some(provider_catalog_refresh_url),
+        provider_catalog_refresh_token: Some("provider-refresh-control-token-0001".to_owned()),
         runtime: Some(RelayerRuntimeConfig {
             graph_url: graph_url.to_owned(),
             harness_url: harness_url.to_owned(),
@@ -1258,7 +1408,14 @@ async fn open_app_with_runtime(
     })
     .await
     .unwrap()
-    .router()
+    .router();
+    (
+        app,
+        ProviderRefreshProbe {
+            calls: provider_refreshes,
+            succeed: refresh_succeeds,
+        },
+    )
 }
 
 fn permission_catalog() -> std::path::PathBuf {

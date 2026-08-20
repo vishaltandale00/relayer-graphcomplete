@@ -595,6 +595,16 @@ impl ProductService {
         })
     }
 
+    pub(crate) async fn permits_unselected_action_execution(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .permits_unselected_action_execution(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn get_action_invocation(
         &self,
         source_interaction_id: InteractionId,

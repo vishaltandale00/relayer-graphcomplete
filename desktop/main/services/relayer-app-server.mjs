@@ -7,6 +7,38 @@ import { terminateChildProcess } from "./child-process.mjs";
 
 export const RELAYER_CONTROL_COOKIE = "relayer_control";
 
+function validateProviderCatalogRefreshSession(session) {
+  if (session === null) return null;
+  let origin;
+  try {
+    origin = new URL(session?.origin);
+  } catch {
+    throw new Error("Provider catalog refresh server returned an invalid origin.");
+  }
+  if (
+    origin.protocol !== "http:"
+    || origin.hostname !== "127.0.0.1"
+    || !origin.port
+    || origin.username
+    || origin.password
+    || origin.pathname !== "/"
+    || origin.search
+    || origin.hash
+  ) {
+    throw new Error("Provider catalog refresh server must use an authenticated 127.0.0.1 origin.");
+  }
+  if (!/^[a-f0-9]{64}$/.test(session?.token)) {
+    throw new Error("Provider catalog refresh server returned an invalid bearer token.");
+  }
+  return Object.freeze({ origin: origin.origin, token: session.token });
+}
+
+function distinctToken(excludedTokens) {
+  let token;
+  do token = randomBytes(32).toString("hex"); while (excludedTokens.has(token));
+  return token;
+}
+
 function validateReadyMessage(message) {
   if (message?.ready !== true) return null;
   if (message.cookieName !== RELAYER_CONTROL_COOKIE) {
@@ -40,6 +72,7 @@ export class RelayerAppServerService {
     webDirectory,
     permissionCatalogPath,
     runtimeSession = null,
+    providerCatalogRefreshSession = null,
     defaultHarnessConfiguration = "codex-basic",
     allowHarnessOverride = false,
     enableReadOnlySession = false,
@@ -53,6 +86,7 @@ export class RelayerAppServerService {
     this.webDirectory = webDirectory;
     this.permissionCatalogPath = permissionCatalogPath;
     this.runtimeSession = runtimeSession;
+    this.providerCatalogRefreshSession = validateProviderCatalogRefreshSession(providerCatalogRefreshSession);
     this.defaultHarnessConfiguration = defaultHarnessConfiguration;
     this.allowHarnessOverride = allowHarnessOverride;
     this.enableReadOnlySession = enableReadOnlySession;
@@ -84,9 +118,11 @@ export class RelayerAppServerService {
     await mkdir(dataDirectory, { recursive: true });
     await chmod(dataDirectory, 0o700);
     if (this.closing) throw new Error("Relayer app server is shutting down.");
-    const controlToken = randomBytes(32).toString("hex");
+    const excludedTokens = new Set(this.providerCatalogRefreshSession ? [this.providerCatalogRefreshSession.token] : []);
+    const controlToken = distinctToken(excludedTokens);
+    excludedTokens.add(controlToken);
     const readOnlyControlToken = this.enableReadOnlySession
-      ? randomBytes(32).toString("hex")
+      ? distinctToken(excludedTokens)
       : null;
     const serverArguments = [
       "--data-dir", dataDirectory,
@@ -106,6 +142,12 @@ export class RelayerAppServerService {
       if (this.allowHarnessOverride) serverArguments.push("--allow-harness-override");
     }
     if (readOnlyControlToken) serverArguments.push("--read-only-control-token-stdin");
+    if (this.providerCatalogRefreshSession) {
+      serverArguments.push(
+        "--provider-catalog-refresh-url", this.providerCatalogRefreshSession.origin,
+        "--provider-catalog-refresh-token-stdin",
+      );
+    }
     const child = this.spawnProcess(this.binaryPath, serverArguments, {
       env: { ...process.env },
       stdio: ["pipe", "pipe", "pipe"],
@@ -114,7 +156,11 @@ export class RelayerAppServerService {
     const stderr = [];
     try {
       child.stdin?.on("error", () => {});
-      child.stdin?.write(`${controlToken}\n${readOnlyControlToken ? `${readOnlyControlToken}\n` : ""}`);
+      child.stdin?.write([
+        controlToken,
+        ...(readOnlyControlToken ? [readOnlyControlToken] : []),
+        ...(this.providerCatalogRefreshSession ? [this.providerCatalogRefreshSession.token] : []),
+      ].map((value) => `${value}\n`).join(""));
       child.stderr?.on("data", (chunk) => {
         stderr.push(String(chunk));
         if (stderr.join("").length > 8_000) stderr.shift();

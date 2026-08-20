@@ -7,6 +7,19 @@ use crate::storage::{ActionInvocationInsertOutcome, StorageError};
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 
 impl SqliteProductStore {
+    pub(crate) async fn permits_unselected_action_execution(
+        &self,
+        result_interaction_id: InteractionId,
+    ) -> Result<bool, StorageError> {
+        sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM action_invocations ai JOIN interactions source ON source.id=ai.source_interaction_id JOIN interactions result ON result.id=ai.result_interaction_id AND result.thread_id=source.thread_id WHERE result.id=?1 AND result.model_provider_id IS NULL AND result.provider_model_id IS NULL AND result.model_family_id IS NULL AND source.completion_status='accepted' AND source.graph_node_id IS NOT NULL AND source.model_provider_id IS NULL AND source.provider_model_id IS NULL AND source.model_family_id IS NULL)",
+        )
+        .bind(result_interaction_id.value())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
     pub(crate) async fn get_action_invocation(
         &self,
         source_interaction_id: InteractionId,
@@ -48,7 +61,7 @@ impl SqliteProductStore {
             });
         }
 
-        let source = sqlx::query("SELECT i.thread_id,t.permission_profile_id,t.harness_configuration_name,i.model_provider_id,i.provider_model_id,i.model_family_id FROM interactions i JOIN threads t ON t.id=i.thread_id WHERE i.id=?1")
+        let source = sqlx::query("SELECT i.thread_id,t.permission_profile_id,t.harness_configuration_name,i.model_provider_id,i.provider_model_id,i.model_family_id,i.completion_status,i.graph_node_id FROM interactions i JOIN threads t ON t.id=i.thread_id WHERE i.id=?1")
             .bind(source_interaction_id.value())
             .fetch_one(&mut *transaction)
             .await?;
@@ -70,6 +83,8 @@ impl SqliteProductStore {
                 "Wait for the active interaction to finish.",
             )));
         }
+        let source_accepted: bool = source.try_get::<String, _>("completion_status")? == "accepted"
+            && source.try_get::<Option<i64>, _>("graph_node_id")?.is_some();
         let model_selection = match (model_provider_id, provider_model_id, model_family_id) {
             (Some(provider_id), Some(model_id), Some(family_id)) if family_id > 0 => {
                 Some(InteractionModelSelection {
@@ -78,7 +93,10 @@ impl SqliteProductStore {
                     model_id,
                 })
             }
-            (None, None, None) => None,
+            // Accepted pre-selector interactions have no provider/model columns. Their pinned
+            // thread harness remains the only execution authority; ordinary callers still
+            // cannot supply a raw harness override.
+            (None, None, None) if source_accepted => None,
             _ => {
                 return Err(StorageError::Catalog(CatalogError::invalid(
                     "source_model_selection_missing",
@@ -337,6 +355,18 @@ mod tests {
             ActionInvocationInsertOutcome::Existing { .. } => panic!("first invocation existed"),
         };
         assert_eq!(interaction.model_selection, None);
+        assert!(
+            store
+                .permits_unselected_action_execution(interaction.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .permits_unselected_action_execution(thread.root_interaction_id)
+                .await
+                .unwrap()
+        );
         assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 2);
 
         store.pool.close().await;
@@ -430,6 +460,72 @@ mod tests {
                 .await
                 .unwrap()
         );
+
+        let outcome = store
+            .insert_action_invocation(thread.root_interaction_id, 41, "Historical follow-up")
+            .await
+            .unwrap();
+        let interaction = match outcome {
+            ActionInvocationInsertOutcome::Created { interaction, .. } => interaction,
+            ActionInvocationInsertOutcome::Existing { .. } => panic!("first invocation existed"),
+        };
+        assert_eq!(interaction.model_selection, Some(model_selection));
+
+        store.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn historical_action_can_reuse_a_hidden_available_model() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-hidden-model-action-invocation-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_model_selection(&store).await;
+        let model_selection = InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(1),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: "test-model".into(),
+        };
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Historical hidden model",
+                project_id: None,
+                initial_message: "Original prompt",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&model_selection),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
+        sqlx::query(
+            "UPDATE provider_models SET visible=0 WHERE provider_id='codex' AND model_id='test-model'",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        let selection_error = store
+            .validate_model_selection(&crate::product::ValidateModelSelectionCommand {
+                harness_id: "codex-basic".into(),
+                family_id: model_selection.family_id,
+                provider_id: model_selection.provider_id.clone(),
+                model_id: model_selection.model_id.clone(),
+            })
+            .await
+            .err()
+            .unwrap();
+        match selection_error {
+            StorageError::Catalog(error) => assert_eq!(error.code(), "model_hidden"),
+            other => panic!("unexpected error: {other}"),
+        }
 
         let outcome = store
             .insert_action_invocation(thread.root_interaction_id, 41, "Historical follow-up")
@@ -625,7 +721,9 @@ mod tests {
     }
 
     async fn mark_interaction_accepted(store: &SqliteProductStore, id: InteractionId) {
-        sqlx::query("UPDATE interactions SET completion_status='accepted' WHERE id=?1")
+        sqlx::query(
+            "UPDATE interactions SET completion_status='accepted',graph_node_id=COALESCE(graph_node_id,777) WHERE id=?1",
+        )
             .bind(id.value())
             .execute(&store.pool)
             .await

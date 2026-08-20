@@ -205,6 +205,10 @@ describe("desktop skeleton", () => {
     expect(desktopMain).toContain('allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-")');
     expect(desktopMain).toContain("productServer.start()");
     expect(desktopMain).toContain("productServer.close()");
+    expect(desktopMain).toContain("startModelCatalogRefreshServer");
+    expect(desktopMain).toContain("providerCatalogRefreshSession: modelCatalogRefreshServer.session");
+    expect(desktopPreload).not.toContain("provider-catalog/refresh");
+    expect(desktopPreload).not.toContain("providerCatalogRefresh");
     expect(desktopMain).toContain("Promise.allSettled");
     expect(desktopMain).toContain("Relayer app server stopped");
     expect(desktopMain).toContain("app.isPackaged");
@@ -470,6 +474,10 @@ describe("desktop skeleton", () => {
       binaryPath: "/test/bin/relayer-app-server",
       webDirectory: "/test/renderer",
       permissionCatalogPath: "/test/permissions/desktop.json",
+      providerCatalogRefreshSession: {
+        origin: "http://127.0.0.1:43122",
+        token: "ab".repeat(32),
+      },
       enableReadOnlySession: true,
       spawnProcess: (binary, args, options) => {
         invocations.push({ binary, args, options });
@@ -503,11 +511,14 @@ describe("desktop skeleton", () => {
         "--permission-catalog", "/test/permissions/desktop.json",
         "--port", "0",
         "--read-only-control-token-stdin",
+        "--provider-catalog-refresh-url", "http://127.0.0.1:43122",
+        "--provider-catalog-refresh-token-stdin",
       ]);
-      expect(suppliedToken).toBe(`${session.cookie.value}\n${session.readOnlyCookie.value}\n`);
+      expect(suppliedToken).toBe(`${session.cookie.value}\n${session.readOnlyCookie.value}\n${"ab".repeat(32)}\n`);
       expect(child.stdin.writableEnded).toBe(false);
       expect(invocations[0].args).not.toContain(session.cookie.value);
       expect(invocations[0].args).not.toContain(session.readOnlyCookie.value);
+      expect(invocations[0].args).not.toContain("ab".repeat(32));
       expect((await stat(join(directory, "product-data"))).mode & 0o777).toBe(0o700);
       expect(await service.start()).toBe(session);
       const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(null, { status: 204 }));

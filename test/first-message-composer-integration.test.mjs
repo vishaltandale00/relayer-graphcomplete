@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { startModelCatalogRefreshServer } from "../desktop/main/models/model-catalog-refresh-server.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { bindComposerKeydown } from "../desktop/renderer/src/product-workspace/workspace.js";
@@ -32,12 +33,18 @@ describe("first-message composer integration", () => {
     });
     services.push(runtime);
     const runtimeSession = await runtime.start();
-    const product = new RelayerAppServerService({
+    let product;
+    const modelCatalogRefreshServer = await startModelCatalogRefreshServer({
+      refresh: () => product.publishProviderCatalog(fixtureCatalogSnapshot()),
+    });
+    services.push(modelCatalogRefreshServer);
+    product = new RelayerAppServerService({
       userDataDirectory: dataDirectory,
       binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
       webDirectory: join(repositoryRoot, "desktop", "renderer"),
       permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
       runtimeSession,
+      providerCatalogRefreshSession: modelCatalogRefreshServer.session,
       defaultHarnessConfiguration: "fixture-task-system",
     });
     services.push(product);

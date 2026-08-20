@@ -14,6 +14,108 @@ use std::{
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn default_selection_uses_family_and_member_order_not_harness_preference() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-model-order-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let app = open_app(&database, &root).await;
+
+    let published = app
+        .clone()
+        .oneshot(bearer_request(
+            "PUT",
+            "/api/internal/provider-catalog",
+            Some(provider_snapshot(None)),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(published.status(), StatusCode::NO_CONTENT);
+
+    let pool = sqlite_pool(&database).await;
+    sqlx::query(
+        "UPDATE product_harnesses SET available=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let preferred_update = sqlx::query("UPDATE harness_provider_compatibility SET preferred_model_id='gpt-5.6-luna' WHERE harness_configuration_name='codex-basic' AND provider_id='codex'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(preferred_update.rows_affected(), 1);
+    pool.close().await;
+
+    let settings = response_json(
+        app.clone()
+            .oneshot(cookie_request("GET", "/api/model-settings", None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let system_family_id = settings["families"][0]["id"].as_i64().unwrap();
+    assert_eq!(
+        settings["harnesses"][0]["modelCompatibility"][0]["preferredModelId"],
+        "gpt-5.6-luna"
+    );
+    assert_eq!(
+        settings["families"][0]["members"][2]["modelId"],
+        "gpt-5.6-luna"
+    );
+    let first_family = response_json(
+        app.clone()
+            .oneshot(cookie_request(
+                "POST",
+                "/api/model-families",
+                Some(json!({
+                    "name": "First family",
+                    "members": [
+                        { "providerId": "codex", "modelId": "gpt-5.6-sol" },
+                        { "providerId": "codex", "modelId": "gpt-5.6-terra" }
+                    ]
+                })),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let first_family_id = first_family["id"].as_i64().unwrap();
+    let reordered = app
+        .clone()
+        .oneshot(cookie_request(
+            "PUT",
+            "/api/model-families/order",
+            Some(json!({ "familyIds": [first_family_id, system_family_id] })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(reordered.status(), StatusCode::NO_CONTENT);
+
+    let default = response_json(
+        app.clone()
+            .oneshot(cookie_request(
+                "GET",
+                "/api/model-selection/default?harnessId=codex-basic",
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(default["familyId"], first_family_id);
+    assert_eq!(default["providerId"], "codex");
+    assert_eq!(default["modelId"], "gpt-5.6-sol");
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn model_catalog_families_defaults_and_selection_are_typed_and_durable() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -376,6 +478,8 @@ async fn open_app(database: &Path, web_directory: &Path) -> Router {
             .join("../../permissions/desktop.json"),
         control_token: "control".to_owned(),
         read_only_control_token: None,
+        provider_catalog_refresh_url: None,
+        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await

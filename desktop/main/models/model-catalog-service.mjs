@@ -4,7 +4,7 @@ import {
   unavailableModelCatalogSnapshot,
 } from "./model-catalog-adapter.mjs";
 
-const REFRESH_REASONS = new Set(["startup", "provider-change", "settings-open", "explicit"]);
+const REFRESH_REASONS = new Set(["startup", "provider-change", "settings-open", "explicit", "pre-inference"]);
 
 export class ModelCatalogService {
   constructor({ adapters, publishSnapshot }) {
@@ -49,6 +49,7 @@ export class ModelCatalogService {
   }
 
   startup() { return this.refreshAll("startup"); }
+  beforeInference() { return this.refreshAll("pre-inference"); }
   providerChanged(providerId) { return this.refresh(providerId, "provider-change"); }
   settingsOpened() { return this.refreshAll("settings-open"); }
   explicitRefresh(providerId) {

@@ -90,7 +90,7 @@ describe("provider-neutral model catalog", () => {
     let call = 0;
     const adapter = new FakeModelCatalogAdapter(async () => {
       call += 1;
-      if (call === 5) throw new Error("provider login expired");
+      if (call === 6) throw new Error("provider login expired");
       return providerSnapshot({ models: [{ id: `model-${call}` }] });
     });
     const service = new ModelCatalogService({
@@ -102,10 +102,11 @@ describe("provider-neutral model catalog", () => {
     await service.providerChanged("fake");
     await service.settingsOpened();
     await service.explicitRefresh("fake");
+    await service.beforeInference();
     const failed = await service.explicitRefresh();
 
     expect(published.map(({ context }) => context.reason)).toEqual([
-      "startup", "provider-change", "settings-open", "explicit", "explicit",
+      "startup", "provider-change", "settings-open", "explicit", "pre-inference", "explicit",
     ]);
     expect(published[0].snapshot).toMatchObject({
       providerId: "fake",
@@ -117,6 +118,33 @@ describe("provider-neutral model catalog", () => {
       provider: { id: "fake", status: "unavailable", unavailableReason: "provider login expired" },
       models: [],
     });
+  });
+
+  it("serializes distinct pre-inference refreshes without coalescing them", async () => {
+    let active = 0;
+    let maximumActive = 0;
+    let calls = 0;
+    const published = [];
+    const service = new ModelCatalogService({
+      adapters: [new FakeModelCatalogAdapter(async () => {
+        calls += 1;
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return providerSnapshot({ models: [{ id: `model-${calls}` }] });
+      })],
+      publishSnapshot: async (snapshot, context) => published.push({ snapshot, context }),
+    });
+
+    await Promise.all([service.beforeInference(), service.beforeInference(), service.beforeInference()]);
+
+    expect(calls).toBe(3);
+    expect(maximumActive).toBe(1);
+    expect(published).toHaveLength(3);
+    expect(published.map(({ context }) => context.reason)).toEqual([
+      "pre-inference", "pre-inference", "pre-inference",
+    ]);
   });
 });
 

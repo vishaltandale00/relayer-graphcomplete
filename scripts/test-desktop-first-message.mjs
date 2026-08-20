@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 
+import { startModelCatalogRefreshServer } from "../desktop/main/models/model-catalog-refresh-server.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { createWindowFactory } from "../desktop/main/window.mjs";
@@ -102,18 +103,8 @@ async function run() {
   });
   services.push(runtime);
   const runtimeSession = await runtime.start();
-  const product = new RelayerAppServerService({
-    userDataDirectory: dataDirectory,
-    binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
-    webDirectory: join(repositoryRoot, "desktop", "renderer"),
-    permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
-    runtimeSession,
-    defaultHarnessConfiguration: "fixture-task-system",
-    enableReadOnlySession: true,
-  });
-  services.push(product);
-  const productSession = await product.start();
-  await product.publishProviderCatalog({
+  let product;
+  const catalogSnapshot = {
     providerId: "codex",
     label: "Codex",
     connected: true,
@@ -127,7 +118,24 @@ async function run() {
       metadata: {},
     }],
     systemFamily: { key: "codex", name: "Codex", modelIds: ["fixture-model"] },
+  };
+  const modelCatalogRefreshServer = await startModelCatalogRefreshServer({
+    refresh: () => product.publishProviderCatalog(catalogSnapshot),
   });
+  services.push(modelCatalogRefreshServer);
+  product = new RelayerAppServerService({
+    userDataDirectory: dataDirectory,
+    binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
+    webDirectory: join(repositoryRoot, "desktop", "renderer"),
+    permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
+    runtimeSession,
+    providerCatalogRefreshSession: modelCatalogRefreshServer.session,
+    defaultHarnessConfiguration: "fixture-task-system",
+    enableReadOnlySession: true,
+  });
+  services.push(product);
+  const productSession = await product.start();
+  await product.publishProviderCatalog(catalogSnapshot);
   const createWindow = createWindowFactory({
     BrowserWindow,
     desktopDirectory: join(repositoryRoot, "desktop"),

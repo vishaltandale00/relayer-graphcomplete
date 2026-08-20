@@ -8,6 +8,7 @@ import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 
 import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-credential-adapter.mjs";
 import { CodexModelCatalogAdapter } from "../desktop/main/models/codex-model-catalog-adapter.mjs";
+import { startModelCatalogRefreshServer } from "../desktop/main/models/model-catalog-refresh-server.mjs";
 import { ModelCatalogService } from "../desktop/main/models/model-catalog-service.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
@@ -165,20 +166,29 @@ async function run() {
   });
   services.push(runtime);
   const runtimeSession = await runtime.start();
-  const product = new RelayerAppServerService({
+  let product;
+  const modelCatalog = new ModelCatalogService({
+    adapters: [new CodexModelCatalogAdapter({ credentials })],
+    publishSnapshot: (snapshot) => {
+      if (!product) throw new Error("Relayer app server is not ready to accept a provider catalog.");
+      return product.publishProviderCatalog(snapshot);
+    },
+  });
+  const modelCatalogRefreshServer = await startModelCatalogRefreshServer({
+    refresh: () => modelCatalog.beforeInference(),
+  });
+  services.push(modelCatalogRefreshServer);
+  product = new RelayerAppServerService({
     userDataDirectory: dataDirectory,
     binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
     webDirectory: join(repositoryRoot, "desktop", "renderer"),
     permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
     runtimeSession,
+    providerCatalogRefreshSession: modelCatalogRefreshServer.session,
     defaultHarnessConfiguration: "codex-basic",
   });
   services.push(product);
   const productSession = await product.start();
-  const modelCatalog = new ModelCatalogService({
-    adapters: [new CodexModelCatalogAdapter({ credentials })],
-    publishSnapshot: (snapshot) => product.publishProviderCatalog(snapshot),
-  });
   const [catalog] = await modelCatalog.startup();
   if (catalog.provider.status !== "available" || catalog.systemFamily.modelIds.length < 2) {
     throw new Error("Evidence capture requires a connected Codex account with at least two visible models.");

@@ -39,13 +39,20 @@ struct Arguments {
     allow_harness_override: bool,
     #[arg(long, default_value_t = false)]
     read_only_control_token_stdin: bool,
+    #[arg(long)]
+    provider_catalog_refresh_url: Option<String>,
+    #[arg(long, default_value_t = false)]
+    provider_catalog_refresh_token_stdin: bool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let arguments = Arguments::parse();
-    let (control_token, read_only_control_token) =
-        read_control_tokens(arguments.read_only_control_token_stdin)?;
+    let (control_token, read_only_control_token, provider_catalog_refresh_token) =
+        read_control_tokens(
+            arguments.read_only_control_token_stdin,
+            arguments.provider_catalog_refresh_token_stdin,
+        )?;
     let parent_disconnected = watch_parent_connection();
     if arguments.host != IpAddr::V4(Ipv4Addr::LOCALHOST) {
         anyhow::bail!("Relayer app server only binds to 127.0.0.1");
@@ -90,6 +97,8 @@ async fn main() -> anyhow::Result<()> {
         permission_catalog: arguments.permission_catalog,
         control_token,
         read_only_control_token,
+        provider_catalog_refresh_url: arguments.provider_catalog_refresh_url,
+        provider_catalog_refresh_token,
         runtime,
     })
     .await
@@ -113,17 +122,32 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn read_control_tokens(read_only_enabled: bool) -> anyhow::Result<(String, Option<String>)> {
+fn read_control_tokens(
+    read_only_enabled: bool,
+    provider_refresh_enabled: bool,
+) -> anyhow::Result<(String, Option<String>, Option<String>)> {
     let stdin = io::stdin();
     let mut input = stdin.lock();
     let control_token = read_token_line(&mut input, "desktop control token")?;
     let read_only_control_token = read_only_enabled
         .then(|| read_token_line(&mut input, "read-only desktop control token"))
         .transpose()?;
-    if read_only_control_token.as_deref() == Some(control_token.as_str()) {
-        anyhow::bail!("read-only desktop control token must be distinct");
+    let provider_catalog_refresh_token = provider_refresh_enabled
+        .then(|| read_token_line(&mut input, "provider catalog refresh token"))
+        .transpose()?;
+    if read_only_control_token.as_deref() == Some(control_token.as_str())
+        || provider_catalog_refresh_token.as_deref() == Some(control_token.as_str())
+        || provider_catalog_refresh_token
+            .as_deref()
+            .is_some_and(|token| read_only_control_token.as_deref() == Some(token))
+    {
+        anyhow::bail!("desktop control tokens must be pairwise distinct");
     }
-    Ok((control_token, read_only_control_token))
+    Ok((
+        control_token,
+        read_only_control_token,
+        provider_catalog_refresh_token,
+    ))
 }
 
 fn read_token_line(input: &mut impl BufRead, label: &str) -> anyhow::Result<String> {

@@ -112,6 +112,7 @@ pub(super) async fn create(
                 .product
                 .harness_uses_configuration_model(&harness_configuration_name)
                 .await?);
+    refresh_provider_catalog(&state).await?;
     let thread = state
         .product
         .create_thread(CreateThreadCommand {
@@ -197,6 +198,7 @@ pub(super) async fn create_interaction(
                 .product
                 .harness_uses_configuration_model(&thread.harness_configuration_name)
                 .await?);
+    refresh_provider_catalog(&state).await?;
     let interaction = state
         .product
         .create_interaction(
@@ -275,6 +277,9 @@ async fn invoke_action_with_authority(
         .get_action_invocation(source_interaction_id, action_id)
         .await?
     {
+        if outcome.interaction.completion_status == "not_started" {
+            refresh_provider_catalog(state).await?;
+        }
         return spawn_action_handoff(state.clone(), thread, outcome).await;
     }
     let graph_node_id = source
@@ -303,6 +308,7 @@ async fn invoke_action_with_authority(
         .as_deref()
         .ok_or_else(|| ApiError::invalid("invoke action has no interaction text"))?
         .to_owned();
+    refresh_provider_catalog(state).await?;
 
     // One-shot invocation is a temporary UX simplification. The durable product record is
     // intentionally shaped so future retryable or repeatable action semantics can replace it.
@@ -315,6 +321,13 @@ async fn invoke_action_with_authority(
         finish_action_handoff(&owned_state, &thread, outcome).await
     });
     await_action_handoff(handoff).await
+}
+
+async fn refresh_provider_catalog(state: &ApiState) -> Result<(), ApiError> {
+    if let Some(refresh) = &state.provider_catalog_refresh {
+        refresh.refresh().await?;
+    }
+    Ok(())
 }
 
 async fn spawn_action_handoff(
@@ -516,6 +529,29 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
     let Some(runtime) = &state.runtime else {
         return;
     };
+    if interaction.model_selection.is_none() && !state.allow_harness_override {
+        match state
+            .product
+            .permits_unselected_action_execution(interaction.id)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                record_background_failure(
+                    &state,
+                    &thread,
+                    &interaction,
+                    "The interaction has no model selection.".into(),
+                )
+                .await;
+                return;
+            }
+            Err(error) => {
+                record_background_failure(&state, &thread, &interaction, error.to_string()).await;
+                return;
+            }
+        }
+    }
     if let Some(model_selection) = interaction.model_selection.as_ref()
         && let Err(error) = state
             .product
