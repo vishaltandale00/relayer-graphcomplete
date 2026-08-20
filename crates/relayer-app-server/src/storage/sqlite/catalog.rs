@@ -80,7 +80,7 @@ impl SqliteProductStore {
             }
         }
         sqlx::query(
-            "UPDATE product_model_preferences SET default_harness_configuration_name=?1,defaults_modified=1 WHERE singleton=1 AND defaults_modified=0",
+            "UPDATE product_model_preferences SET default_harness_configuration_name=?1 WHERE singleton=1 AND defaults_modified=0",
         )
         .bind(default_harness)
         .execute(&mut *transaction)

@@ -18,7 +18,10 @@ import {
   saveModelFamilyOrder,
   updateModelFamily,
 } from "./model-settings-api.js";
-import { resetNewThreadModelPicker } from "./composer-model-picker.js";
+import {
+  refreshNewThreadModelPicker,
+  resetNewThreadModelPicker,
+} from "./composer-model-picker.js";
 import { appState } from "./state.js";
 import { $, $$, escapeHtml, toast } from "./ui.js";
 
@@ -141,6 +144,7 @@ async function refresh({ preserveIndex = true, preserveEdit = false } = {}) {
     ? previousEditSnapshot ?? preserved.editSnapshot
     : null;
   render();
+  refreshNewThreadModelPicker();
 }
 
 function harnessOptions() {
@@ -217,7 +221,7 @@ function familyEditor(family) {
   const errors = family.validationErrors ?? {};
   return `<article class="family-card family-editor-card" aria-busy="${savingFamily}">
     <div class="family-card-heading">
-      <label class="family-name-field"><span>Name</span><input id="familyNameInput" value="${escapeHtml(family.name)}" placeholder="Family name" aria-invalid="${Boolean(errors.name)}" ${savingFamily ? "disabled" : ""} /></label>
+      <label class="family-name-field"><span>Name</span><input id="familyNameInput" placeholder="Family name" aria-invalid="${Boolean(errors.name)}" ${savingFamily ? "disabled" : ""} /></label>
       <span class="family-kind">Custom</span>
     </div>
     ${errors.name ? `<div class="field-error">${escapeHtml(errors.name)}</div>` : ""}
@@ -273,6 +277,7 @@ function render() {
   $("#familyCarousel").innerHTML = count
     ? settings.families.map(familySlide).join("")
     : `<div class="family-slide"><div class="family-empty">Create your first model family.</div></div>`;
+  if (current?.draft || current?.editing) $("#familyNameInput").value = current.name;
   bindRenderedEvents();
   requestAnimationFrame(() => {
     const viewport = $("#familyCarousel");

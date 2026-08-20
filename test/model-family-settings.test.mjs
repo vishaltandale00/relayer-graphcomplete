@@ -238,5 +238,8 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("if (settings.families.some((family) => family.draft || family.editing)) return;");
     expect(settingsSource).toContain("if (savingFamily) return;");
     expect(settingsSource).toContain('if (field === "harnessId") resetNewThreadModelPicker();');
+    expect(settingsSource).toContain("refreshNewThreadModelPicker();");
+    expect(settingsSource).toContain('$("#familyNameInput").value = current.name;');
+    expect(settingsSource).not.toContain('value="${escapeHtml(family.name)}"');
   });
 });
