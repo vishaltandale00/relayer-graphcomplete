@@ -66,83 +66,20 @@ export function layerPathForVisibleLayer(path, interaction, layer) {
   }];
 }
 
-function evalLocationForThread(evalContext, threadId) {
-  for (const testCase of evalContext?.cases || []) {
-    const reviewThread = testCase.threads?.find((candidate) => sameId(candidate.id, threadId));
-    if (reviewThread || testCase.threadIds?.some((candidate) => sameId(candidate, threadId))) {
-      return { testCase, reviewThread };
-    }
-  }
-  return { testCase: null, reviewThread: null };
-}
-
 export function workspaceBreadcrumbItems(state, thread, selection) {
   if (!thread) return [];
   const interaction = interactionForThread(state, thread);
-  const turns = (state.interactions || []).filter((candidate) => sameId(candidate.threadId, thread.id));
-  const turnIndex = turns.findIndex((candidate) => sameId(candidate.id, interaction?.id));
-  const selectedNode = (state.nodes || []).find((node) => sameId(node.id, selection?.selectedNodeId));
-  const { testCase: evalCase, reviewThread } = evalLocationForThread(
-    selection?.evalContext,
-    thread.id,
-  );
-  const project = (state.projects || []).find((candidate) => sameId(candidate.id, thread.projectId));
   const path = layerPathForVisibleLayer(selection?.layerPath, interaction, state.visibleLayer);
-  const hasNode = Boolean(selectedNode);
-
-  const items = [
-    {
-      key: `scope:${evalCase?.id ?? project?.id ?? "standalone"}`,
-      kind: evalCase ? "eval-case" : "project",
-      label: evalCase?.name || project?.name || "No project",
-      interactive: false,
-    },
-    {
-      key: `thread:${thread.id}`,
-      kind: "thread",
-      label: reviewThread?.name || thread.title || "Untitled thread",
-      interactive: false,
-    },
-  ];
-
-  if (interaction) {
-    items.push({
-      key: `turn:${interaction.id}`,
-      kind: "turn",
-      label: turnIndex >= 0 ? `Turn ${turnIndex + 1}` : "Turn",
-      description: interaction.text || interaction.summary || interaction.content || "",
-      interactive: path.length > 1 || hasNode,
-      pathIndex: 0,
-      layerId: path[0]?.layerId ?? null,
-    });
-  }
-
-  path.forEach((entry, pathIndex) => {
-    items.push({
-      key: `layer:${pathIndex}:${entry.layerId}`,
-      kind: "layer",
-      label: entry.label,
-      interactive: pathIndex < path.length - 1 || hasNode,
-      pathIndex,
-      layerId: entry.layerId,
-      actionId: entry.actionId,
-      sourceNodeId: entry.sourceNodeId,
-    });
-  });
-
-  if (selectedNode) {
-    items.push({
-      key: `node:${selectedNode.id}`,
-      kind: "node",
-      label: selectedNode.title || "Selected node",
-      interactive: false,
-      nodeId: selectedNode.id,
-    });
-  }
-
-  return items.map((item, index) => ({
-    ...item,
-    current: index === items.length - 1,
+  return path.map((entry, pathIndex) => ({
+    key: `layer:${pathIndex}:${entry.layerId}`,
+    kind: "layer",
+    label: entry.label,
+    interactive: pathIndex < path.length - 1,
+    pathIndex,
+    layerId: entry.layerId,
+    actionId: entry.actionId,
+    sourceNodeId: entry.sourceNodeId,
+    current: pathIndex === path.length - 1,
   }));
 }
 

@@ -5,7 +5,7 @@ export function productWorkspaceMarkup() {
       <div><h2 id="threadTitle">New thread</h2><p id="threadScope">No folder</p></div>
       <div class="run-state" id="runState"><i></i><span>Ready</span></div>
     </header>
-    <nav class="workspace-breadcrumb" id="workspaceBreadcrumb" data-review-capture="breadcrumb" aria-label="Workspace location"></nav>
+    <nav class="workspace-breadcrumb" id="workspaceBreadcrumb" data-review-capture="breadcrumb" aria-label="Graph layer path"></nav>
     <div class="thread-workspace" data-review-capture="workspace" role="region" aria-label="Thread workspace">
       <div class="graph-column">
         <div class="interaction-banner" id="interactionBanner"><span class="interaction-icon">›_</span><div><small>Your interaction</small><p id="interactionText"></p></div></div>

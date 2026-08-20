@@ -43,6 +43,5 @@ button.breadcrumb-segment{height:26px;padding:0 7px;border:0;border-radius:6px;b
 button.breadcrumb-segment:hover{color:var(--text);background:var(--hover);text-decoration-color:currentColor}
 button.breadcrumb-segment:focus-visible{outline:2px solid var(--blue);outline-offset:-2px;color:var(--text)}
 .breadcrumb-segment[aria-current="location"]{max-width:360px;color:var(--text);font-weight:650}
-.breadcrumb-node[aria-current="location"]{color:var(--blue)}
 .breadcrumb-separator{flex:none;color:var(--faint);font-size:9px;user-select:none}
 html[data-theme="light"] .workspace-breadcrumb{background:#fff}

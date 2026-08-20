@@ -39,7 +39,7 @@ function fixture() {
 }
 
 describe("product workspace breadcrumb", () => {
-  it("shows product scope, thread, turn, layer path, and selected node", () => {
+  it("shows only the parent-child path established by navigate actions", () => {
     const { interaction, state, thread } = fixture();
     let layerPath = rootLayerPath(interaction);
     layerPath = appendLayerPath(layerPath, {
@@ -71,24 +71,18 @@ describe("product workspace breadcrumb", () => {
     });
 
     expect(items.map((item) => item.label)).toEqual([
-      "Relayer",
-      "Breadcrumb work",
-      "Turn 2",
       "Response",
       "Architecture",
       "API",
-      "Storage",
     ]);
     expect(items.filter((item) => item.interactive).map((item) => item.label)).toEqual([
-      "Turn 2",
       "Response",
       "Architecture",
-      "API",
     ]);
-    expect(items.at(-1)).toMatchObject({ kind: "node", current: true, nodeId: 12 });
+    expect(items.at(-1)).toMatchObject({ kind: "layer", current: true, layerId: 102 });
   });
 
-  it("uses the Eval test case as the shared workspace's first segment", () => {
+  it("does not mix product scope, turn history, or node selection into graph ancestry", () => {
     const { interaction, state, thread } = fixture();
     const items = workspaceBreadcrumbItems(state, thread, {
       layerPath: rootLayerPath(interaction),
@@ -104,9 +98,6 @@ describe("product workspace breadcrumb", () => {
     });
 
     expect(items.map(({ kind, label }) => ({ kind, label }))).toEqual([
-      { kind: "eval-case", label: "Architecture case" },
-      { kind: "thread", label: "Architecture question" },
-      { kind: "turn", label: "Turn 2" },
       { kind: "layer", label: "Response" },
     ]);
   });
@@ -164,6 +155,6 @@ describe("product workspace breadcrumb", () => {
   it("renders one shared, accessible breadcrumb host", () => {
     const markup = productWorkspaceMarkup();
     expect(markup).toContain('id="workspaceBreadcrumb"');
-    expect(markup).toContain('aria-label="Workspace location"');
+    expect(markup).toContain('aria-label="Graph layer path"');
   });
 });
