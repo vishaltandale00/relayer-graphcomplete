@@ -95,7 +95,7 @@ Intel macOS does not yet have an older compliant signed-DMG Preview that can see
 3. Publish `0.2.10` as the signed-DMG Intel bootstrap Preview.
 4. Publish `0.2.11` as the signed-DMG Intel target Preview.
 5. Exercise the `0.2.10` to `0.2.11` update on native Intel macOS.
-6. Commit the sealed canary evidence and promote `0.2.11` for Intel.
+6. Commit the sealed canary evidence. After separate action-time approval, promote `0.2.11` for Intel.
 
 Do not promote the bootstrap version to Stable. Apple Silicon Preview `0.2.9` and Stable `0.2.4` remain valid independent feed history; `0.2.7` is the historical first target-aware Apple Silicon candidate. The immutable `desktop-v0.2.6` tag predates the target-aware publisher and is not an Intel or Windows bootstrap candidate.
 

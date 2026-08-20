@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 2,
+  "capturedAt": "2026-08-20T08:45:46.907Z",
+  "environment": {
+    "target": "macos-x64",
+    "host": "sat12-jr311-e47d68af-eced-4400-838f-90ac1a6a0277-1EED4A54E678",
+    "architecture": "x64",
+    "os": "macOS 15.7.7"
+  },
+  "seed": {
+    "version": "0.2.10",
+    "sourceCommit": "579a034b1a6ad003a2635f5ca7485f63115f5efc",
+    "processId": 18495
+  },
+  "target": {
+    "version": "0.2.11",
+    "sourceCommit": "088a4168e066bd9a62f2837cfddfd1bb14f8ff07",
+    "workflowRunId": "32344205644",
+    "artifactSha256": {
+      "Relayer-0.2.11-mac-x64.dmg": "3ca50a030705bc928b5bc04e0918f751fd6a551ff8f411e74d27cd63564bec4e",
+      "Relayer-0.2.11-mac-x64.zip": "79489d76dc46f6a8ea27faab844642287180bf9de11d19f3c8f92fb61dea2c12"
+    }
+  },
+  "productFlow": [
+    {
+      "phase": "idle",
+      "version": "0.2.10",
+      "channel": "preview",
+      "error": null
+    },
+    {
+      "phase": "available",
+      "version": "0.2.10",
+      "availableVersion": "0.2.11",
+      "channel": "preview",
+      "error": null
+    },
+    {
+      "phase": "downloading",
+      "version": "0.2.10",
+      "availableVersion": "0.2.11",
+      "channel": "preview",
+      "displayedPercentages": [
+        19,
+        37,
+        47,
+        60,
+        72,
+        84,
+        97,
+        99
+      ],
+      "error": null
+    },
+    {
+      "phase": "ready",
+      "version": "0.2.10",
+      "availableVersion": "0.2.11",
+      "channel": "preview",
+      "error": null
+    },
+    {
+      "phase": "installed-and-relaunched",
+      "version": "0.2.11",
+      "channel": "preview",
+      "error": null
+    }
+  ],
+  "trace": {
+    "file": "macos-intel-preview-update.jsonl",
+    "sha256": "73893ea07be7decab5c74bc35eccd7b69f85d0d6f861499bb2c4040446b62c93",
+    "records": 22
+  },
+  "postUpdate": {
+    "installedVersion": "0.2.11",
+    "running": true,
+    "codeSignatureVerified": true,
+    "platformAcceptanceVerified": true,
+    "processId": 19567,
+    "channel": "preview",
+    "updateStatus": "idle"
+  },
+  "screenshots": {
+    "firstInstall": {
+      "file": "macos-intel-target-first-install.png",
+      "sha256": "9443f44c9f72513f93fcebb3dcaa59174f5ad9c795bce238437f1b3a3889aa03"
+    },
+    "available": {
+      "file": "macos-intel-preview-available.png",
+      "sha256": "c5d806a859f97099a199c27d116f8718317812633d4c54007935e3ef504e8928"
+    },
+    "ready": {
+      "file": "macos-intel-preview-ready.png",
+      "sha256": "745d31338c5f40d3f7837064304b69947e5bbe9db3d639ae2745b408cd5d45b2"
+    },
+    "installed": {
+      "file": "macos-intel-preview-installed.png",
+      "sha256": "1f7c2a3214fd155913318efd21fd98db535d639a8dc4be4d74ad4d14eec2f7cb"
+    }
+  }
+}
