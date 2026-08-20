@@ -114,21 +114,24 @@ The Windows workflow path is implemented but disabled. Use this sequence:
 
 The manual run cannot publish. The tag run rejects a tag/version mismatch and a commit outside `origin/main`.
 
-## Intel macOS canary
+## Native macOS canaries
 
-After both an older Intel Preview seed and a newer Intel Preview target are published, run `Intel macOS Desktop Preview Canary` with both versions, full source commits, and signed-candidate workflow run IDs.
+After both an older Preview seed and a newer Preview target are published for the same macOS architecture, run the target-specific workflow with both versions, full source commits, and signed-candidate workflow run IDs:
 
-The native `macos-15-intel` job:
+- `Apple Silicon macOS Desktop Preview Canary` runs on `macos-15` and consumes only `macos-arm64` artifacts and receipts.
+- `Intel macOS Desktop Preview Canary` runs on `macos-15-intel` and consumes only `macos-x64` artifacts and receipts.
+
+Each native job:
 
 - verifies both DMG hashes against their release receipts;
-- validates Developer ID signatures, notarization tickets, Gatekeeper acceptance, and Intel-only executable architecture;
+- validates Developer ID signatures, notarization tickets, Gatekeeper acceptance, and the target's executable architecture;
 - mounts and launches the exact target DMG as first-install proof;
 - installs the older seed, drives the real packaged updater through Preview, and observes relaunch into the target in a new process;
 - seals available, ready, and post-update screenshots plus the updater JSONL trace against the immutable Preview publication receipt.
 
 The runner temporarily places the isolated canary profile and evidence-log paths in the per-user launch environment. This preserves them when Squirrel relaunches through LaunchServices; the script restores any prior values before it exits.
 
-The hosted runner proves native Intel packaging and updater behavior. It does not replace a physical Intel Mac check for release-critical hardware or user-specific security software.
+The hosted runner proves native packaging and updater behavior for its target. It does not replace a physical-device check for release-critical hardware or user-specific security software.
 
 ## Windows 11 interactive canary
 

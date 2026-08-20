@@ -1,0 +1,129 @@
+name: Apple Silicon macOS Desktop Preview Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed_version:
+        description: Older published Preview version
+        required: true
+        type: string
+      seed_commit:
+        description: Full source commit for the seed candidate artifact
+        required: true
+        type: string
+      seed_run_id:
+        description: Signed Preview workflow run containing the seed artifact
+        required: true
+        type: string
+      target_version:
+        description: Newer published Preview version
+        required: true
+        type: string
+      target_commit:
+        description: Full source commit for the target candidate and publication artifacts
+        required: true
+        type: string
+      target_run_id:
+        description: Signed Preview workflow run containing the target artifacts
+        required: true
+        type: string
+
+concurrency:
+  group: desktop-arm64-canary
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  canary:
+    name: Install and update Apple Silicon macOS Preview
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout canary implementation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate immutable candidate inputs
+        shell: bash
+        env:
+          SEED_VERSION: ${{ inputs.seed_version }}
+          TARGET_VERSION: ${{ inputs.target_version }}
+          SEED_COMMIT: ${{ inputs.seed_commit }}
+          TARGET_COMMIT: ${{ inputs.target_commit }}
+          SEED_RUN_ID: ${{ inputs.seed_run_id }}
+          TARGET_RUN_ID: ${{ inputs.target_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$SEED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$SEED_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TARGET_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$SEED_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$TARGET_RUN_ID" =~ ^[0-9]+$ ]]
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22.22.0"
+          cache: npm
+
+      - name: Install locked canary dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Download signed Apple Silicon seed candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: relayer-desktop-preview-macos-arm64-${{ inputs.seed_commit }}
+          path: ${{ runner.temp }}/relayer-arm64-seed
+          run-id: ${{ inputs.seed_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download signed Apple Silicon target candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: relayer-desktop-preview-macos-arm64-${{ inputs.target_commit }}
+          path: ${{ runner.temp }}/relayer-arm64-target
+          run-id: ${{ inputs.target_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download target Preview publication receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: relayer-desktop-preview-publication-macos-arm64-${{ inputs.target_commit }}
+          path: ${{ runner.temp }}/relayer-arm64-publication
+          run-id: ${{ inputs.target_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Exercise DMG install and Preview update on native Apple Silicon macOS
+        shell: bash
+        env:
+          SEED_VERSION: ${{ inputs.seed_version }}
+          TARGET_VERSION: ${{ inputs.target_version }}
+        run: |
+          set -euo pipefail
+          seed_root="$RUNNER_TEMP/relayer-arm64-seed"
+          target_root="$RUNNER_TEMP/relayer-arm64-target"
+          publication_root="$RUNNER_TEMP/relayer-arm64-publication"
+          evidence_root="$RUNNER_TEMP/relayer-arm64-evidence"
+          desktop/release/run-macos-arm64-canary.sh \
+            --seed-dmg "$seed_root/Relayer-${SEED_VERSION}-mac-arm64.dmg" \
+            --seed-release-receipt "$seed_root/Relayer-${SEED_VERSION}-mac-arm64-RELEASE.json" \
+            --target-dmg "$target_root/Relayer-${TARGET_VERSION}-mac-arm64.dmg" \
+            --target-release-receipt "$target_root/Relayer-${TARGET_VERSION}-mac-arm64-RELEASE.json" \
+            --preview-publication-receipt "$publication_root/preview-publication-macos-arm64-${TARGET_VERSION}.json" \
+            --evidence-directory "$evidence_root"
+
+      - name: Preserve Apple Silicon install and updater evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: relayer-desktop-canary-macos-arm64-${{ inputs.target_version }}-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 90
+          path: ${{ runner.temp }}/relayer-arm64-evidence
