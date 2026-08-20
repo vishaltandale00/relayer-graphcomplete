@@ -99,6 +99,19 @@ impl ProductService {
         self.storage.load_model_settings().await.map_err(Into::into)
     }
 
+    pub(crate) async fn harness_uses_configuration_model(
+        &self,
+        harness_id: &str,
+    ) -> Result<bool, ProductError> {
+        let settings = self.storage.load_model_settings().await?;
+        Ok(settings.harnesses.iter().any(|harness| {
+            harness.id == harness_id
+                && harness.available
+                && harness.model_compatibility.is_empty()
+                && harness.compatible_provider_ids.is_empty()
+        }))
+    }
+
     pub(crate) async fn update_model_settings_defaults(
         &self,
         command: UpdateModelSettingsDefaultsCommand,
@@ -534,6 +547,7 @@ impl ProductService {
                 text,
                 model_selection,
                 self.runtime_available && !allow_unselected_model,
+                self.runtime_available,
             )
             .await
             .map_err(Into::into)
@@ -773,4 +787,61 @@ fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::product::{HarnessModelCompatibility, ProviderId, RuntimeProductHarness};
+
+    #[tokio::test]
+    async fn configuration_model_exemption_is_scoped_to_the_selected_harness() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-configuration-model-harness-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let storage = SqliteProductStore::open(&path).await.unwrap();
+        storage
+            .initialize_model_catalog(
+                "prime-agent-basic",
+                &[
+                    RuntimeProductHarness {
+                        id: "prime-agent-basic".into(),
+                        model_compatibility: vec![],
+                    },
+                    RuntimeProductHarness {
+                        id: "codex-basic".into(),
+                        model_compatibility: vec![HarnessModelCompatibility {
+                            provider_id: ProviderId::parse("codex").unwrap(),
+                            model_ids: None,
+                            preferred_model_id: None,
+                        }],
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        let service = ProductService::new(storage.clone(), true);
+
+        assert!(
+            service
+                .harness_uses_configuration_model("prime-agent-basic")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !service
+                .harness_uses_configuration_model("codex-basic")
+                .await
+                .unwrap()
+        );
+
+        drop(service);
+        drop(storage);
+        std::fs::remove_file(path).unwrap();
+    }
 }

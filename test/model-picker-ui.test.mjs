@@ -141,6 +141,9 @@ describe("composer model picker UI contract", () => {
     expect(threads).toContain("refreshNewThreadModelPicker();");
     expect(threads).toContain("const refreshedPayload = currentThreadModelSelectionPayload();");
     expect(threads).toContain("pickerPayload = refreshedPayload;");
+    expect(threads.indexOf("await createOrReuseProject(selectedScope);")).toBeLessThan(
+      threads.lastIndexOf("await refreshModelCatalogBeforeSend();"),
+    );
   });
 
   it("server-validates Advanced harness candidates before committing them", async () => {
@@ -149,6 +152,10 @@ describe("composer model picker UI contract", () => {
     expect(picker.indexOf("await validateCandidateHarness(")).toBeLessThan(
       picker.indexOf("commit(result.selection);"),
     );
+    expect(picker.indexOf("validatingHarness = true;")).toBeLessThan(
+      picker.indexOf("await validateCandidateHarness("),
+    );
+    expect(picker).toContain("onSelectionChange(null);");
   });
 
   it("reloads renderer model state after provider account changes", async () => {

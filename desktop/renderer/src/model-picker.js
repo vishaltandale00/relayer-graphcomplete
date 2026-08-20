@@ -139,10 +139,11 @@ export function createModelPicker({
   let activeTab = "model";
   let error = null;
   let disabled = false;
+  let validatingHarness = false;
   const harnessValidationGate = createModelPickerRequestGate();
 
   function selectionReady() {
-    return pickerSelectionIsAvailable(currentSettings, currentSelection);
+    return !validatingHarness && pickerSelectionIsAvailable(currentSettings, currentSelection);
   }
 
   function selectedHarnessId() {
@@ -153,6 +154,7 @@ export function createModelPicker({
 
   function commit(nextSelection) {
     harnessValidationGate.invalidate();
+    validatingHarness = false;
     currentSelection = nextSelection;
     error = null;
     render();
@@ -236,7 +238,7 @@ export function createModelPicker({
     panel.innerHTML = harnesses.length
       ? `<div class="harness-option-list" role="radiogroup" aria-label="Harnesses">${harnesses.map((harness) => {
         const checked = harness.id === harnessId;
-        return `<button type="button" role="radio" aria-checked="${checked}" data-harness-option="${escapeHtml(harness.id)}"><span><strong>${escapeHtml(harness.label)}</strong></span><i aria-hidden="true">${checked ? "✓" : ""}</i></button>`;
+        return `<button type="button" role="radio" aria-checked="${checked}" data-harness-option="${escapeHtml(harness.id)}" ${validatingHarness ? "disabled" : ""}><span><strong>${escapeHtml(harness.label)}</strong></span><i aria-hidden="true">${checked ? "✓" : ""}</i></button>`;
       }).join("")}</div>`
       : `<div class="model-picker-empty"><strong>No available harnesses</strong><button type="button" class="secondary" data-model-picker-settings>Open Settings</button></div>`;
     panel.querySelector("[data-model-picker-settings]")?.addEventListener("click", () => {
@@ -247,6 +249,10 @@ export function createModelPicker({
       button.onclick = async () => {
         const candidateHarnessId = button.dataset.harnessOption;
         const validationSequence = harnessValidationGate.begin();
+        validatingHarness = true;
+        error = null;
+        render();
+        onSelectionChange(null);
         const result = await validateCandidateHarness(
           currentSettings,
           currentSelection,
@@ -254,9 +260,11 @@ export function createModelPicker({
           validateSelection,
         );
         if (!harnessValidationGate.isCurrent(validationSequence)) return;
+        validatingHarness = false;
         if (result.error) {
           error = result.error;
           render();
+          onSelectionChange(selectionReady() ? currentSelection : null);
           [...root.querySelectorAll("[data-harness-option]")]
             .find((candidate) => candidate.dataset.harnessOption === candidateHarnessId)
             ?.focus();
@@ -310,8 +318,11 @@ export function createModelPicker({
 
   function close({ returnFocus = false } = {}) {
     harnessValidationGate.invalidate();
+    const wasValidatingHarness = validatingHarness;
+    validatingHarness = false;
     popover.classList.add("hidden");
     trigger.setAttribute("aria-expanded", "false");
+    if (wasValidatingHarness) onSelectionChange(selectionReady() ? currentSelection : null);
     if (returnFocus) trigger.focus();
   }
 
@@ -374,6 +385,7 @@ export function createModelPicker({
       replaceSelection = false,
     } = {}) {
       harnessValidationGate.invalidate();
+      validatingHarness = false;
       currentSettings = nextSettings;
       currentPinnedHarnessId = nextPinnedHarnessId;
       const harnessId = mode === "ongoing"

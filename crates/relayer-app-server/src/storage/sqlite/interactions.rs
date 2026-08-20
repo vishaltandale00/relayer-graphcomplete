@@ -38,6 +38,7 @@ impl SqliteProductStore {
         text: &str,
         model_selection: Option<&InteractionModelSelection>,
         require_model_selection: bool,
+        enforce_single_active_interaction: bool,
     ) -> Result<Interaction, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let (previous_timestamp, permission_profile_id, harness_id): (String, String, String) =
@@ -45,6 +46,22 @@ impl SqliteProductStore {
                 .bind(thread_id.value())
                 .fetch_one(&mut *transaction)
                 .await?;
+        if enforce_single_active_interaction {
+            let interaction_in_progress: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM interactions WHERE thread_id=?1 AND completion_status IN ('not_started','running','submitted'))",
+            )
+            .bind(thread_id.value())
+            .fetch_one(&mut *transaction)
+            .await?;
+            if interaction_in_progress {
+                return Err(StorageError::Catalog(
+                    crate::product::CatalogError::invalid(
+                        "interaction_in_progress",
+                        "Wait for the active interaction to finish.",
+                    ),
+                ));
+            }
+        }
         let model_selection = match model_selection {
             Some(selection) => Some(selection.clone()),
             None => sqlx::query(
@@ -288,12 +305,24 @@ mod tests {
             .await
             .unwrap();
 
+        let queued = store
+            .insert_interaction(thread.id, "Queued", Some(&second_model), true, true)
+            .await
+            .err()
+            .unwrap();
+        match queued {
+            StorageError::Catalog(error) => assert_eq!(error.code(), "interaction_in_progress"),
+            other => panic!("unexpected error: {other}"),
+        }
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
+
         let explicit = store
-            .insert_interaction(thread.id, "Explicit", Some(&second_model), true)
+            .insert_interaction(thread.id, "Explicit", Some(&second_model), true, true)
             .await
             .unwrap();
+        mark_interaction_accepted(&store, explicit.id).await;
         let inherited = store
-            .insert_interaction(thread.id, "Inherited", None, true)
+            .insert_interaction(thread.id, "Inherited", None, true, true)
             .await
             .unwrap();
 
@@ -354,12 +383,13 @@ mod tests {
             })
             .await
             .unwrap();
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
         sqlx::query("UPDATE model_providers SET refreshed_at='0' WHERE id='codex'")
             .execute(&store.pool)
             .await
             .unwrap();
         let error = store
-            .insert_interaction(thread.id, "Blocked stale follow-up", None, true)
+            .insert_interaction(thread.id, "Blocked stale follow-up", None, true, true)
             .await
             .err()
             .unwrap();
@@ -417,6 +447,14 @@ mod tests {
             .to_string();
         sqlx::query("UPDATE model_providers SET connected=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL,refreshed_at=?1 WHERE id='codex'")
             .bind(refreshed_at)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+    }
+
+    async fn mark_interaction_accepted(store: &SqliteProductStore, id: InteractionId) {
+        sqlx::query("UPDATE interactions SET completion_status='accepted' WHERE id=?1")
+            .bind(id.value())
             .execute(&store.pool)
             .await
             .unwrap();

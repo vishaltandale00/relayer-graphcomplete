@@ -92,13 +92,26 @@ describe("Relayer Eval application service", () => {
       platform: "darwin",
     }).open();
 
+    const productModelRequired = await fetch(new URL("/api/threads", productSession.origin), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`,
+      },
+      body: JSON.stringify({
+        initialMessage: "Product selection must not inherit Eval's raw harness exemption.",
+        harnessId: "fixture-task-system",
+      }),
+    });
+    expect(productModelRequired.status).toBe(422);
+    expect((await productModelRequired.json()).code).toBe("model_selection_required");
+
     const created = await evalService.createRun({
       testCaseIds: ["empty-project.task-system.two-turn", "empty-project.task-system.single-turn", "empty-project.hierarchical-overview.single-turn"],
       harnessConfigurationNames: ["fixture-task-system"],
       judgeConfigurationName: "deterministic-graph-contract",
     });
     const completed = await waitForCompletedRun(evalService, created.id);
-
     expect(completed.status).toBe("passed");
     expect(completed.summary).toMatchObject({ passed: 3, total: 3 });
     expect(completed.executions).toHaveLength(3);

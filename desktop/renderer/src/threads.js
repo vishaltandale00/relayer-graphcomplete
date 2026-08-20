@@ -646,19 +646,6 @@ export async function createFirstThread(pickerPayloadOverride = null) {
   closePermissionMenu();
   closeNewThreadModelPicker();
   try {
-    if (desktop?.models?.refresh) {
-      await refreshModelCatalogBeforeSend();
-      refreshNewThreadModelPicker();
-      const refreshedPayload = newThreadModelSelectionPayload();
-      if (!refreshedPayload) {
-        await validateModelSelection({
-          harnessId: pickerPayload.harnessId,
-          ...pickerPayload.modelSelection,
-        });
-        throw new Error("Choose an available model in Settings before sending.");
-      }
-      pickerPayload = refreshedPayload;
-    }
     const selectedScope = viewState.selectedScope;
     if (!productApiAvailable) {
       const thread = addLocalThread(appState, {
@@ -677,6 +664,19 @@ export async function createFirstThread(pickerPayloadOverride = null) {
     if (selectedScope.kind === "folder") {
       const project = await createOrReuseProject(selectedScope);
       projectId = project.id;
+    }
+    if (desktop?.models?.refresh) {
+      await refreshModelCatalogBeforeSend();
+      refreshNewThreadModelPicker();
+      const refreshedPayload = newThreadModelSelectionPayload();
+      if (!refreshedPayload) {
+        await validateModelSelection({
+          harnessId: pickerPayload.harnessId,
+          ...pickerPayload.modelSelection,
+        });
+        throw new Error("Choose an available model in Settings before sending.");
+      }
+      pickerPayload = refreshedPayload;
     }
     const thread = await request("/api/threads", {
       method: "POST",

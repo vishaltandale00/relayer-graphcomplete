@@ -90,6 +90,8 @@ pub(super) async fn create(
 ) -> Result<(StatusCode, Json<ThreadViewResponse>), ApiError> {
     authorize_write(&state, &headers)?;
     let project_id = request.project_id.map(ProjectId::try_from).transpose()?;
+    let privileged_raw_harness_override =
+        state.allow_harness_override && request.harness_configuration_name.is_some();
     let harness_configuration_name = selected_harness_configuration(
         &state,
         request.harness_id.as_deref(),
@@ -104,6 +106,12 @@ pub(super) async fn create(
         &harness_configuration_name,
         request.permission_profile_id.as_deref(),
     )?;
+    let allow_unselected_model = privileged_raw_harness_override
+        || (state.allow_harness_override
+            && state
+                .product
+                .harness_uses_configuration_model(&harness_configuration_name)
+                .await?);
     let thread = state
         .product
         .create_thread(CreateThreadCommand {
@@ -113,7 +121,7 @@ pub(super) async fn create(
             harness_configuration_name,
             permission_profile_id,
             model_selection,
-            allow_unselected_model: state.allow_harness_override,
+            allow_unselected_model,
         })
         .await?;
     let interaction = state
@@ -172,18 +180,30 @@ pub(super) async fn create_interaction(
 ) -> Result<(StatusCode, Json<InteractionResponse>), ApiError> {
     authorize_write(&state, &headers)?;
     let thread_id = ThreadId::try_from(id)?;
-    let thread = state.product.get_thread(thread_id).await?.thread;
+    let thread_detail = state.product.get_thread(thread_id).await?;
+    let privileged_model_less_thread = state.allow_harness_override
+        && thread_detail
+            .interactions
+            .iter()
+            .all(|interaction| interaction.model_selection.is_none());
+    let thread = thread_detail.thread;
     let model_selection = request
         .model_selection
         .map(InteractionModelSelection::try_from)
         .transpose()?;
+    let allow_unselected_model = privileged_model_less_thread
+        || (state.allow_harness_override
+            && state
+                .product
+                .harness_uses_configuration_model(&thread.harness_configuration_name)
+                .await?);
     let interaction = state
         .product
         .create_interaction(
             thread_id,
             &request.text,
             model_selection.as_ref(),
-            state.allow_harness_override,
+            allow_unselected_model,
         )
         .await?;
     let interaction = start_interaction(&state, &thread, interaction).await?;

@@ -58,6 +58,18 @@ impl SqliteProductStore {
         let model_provider_id: Option<String> = source.try_get("model_provider_id")?;
         let provider_model_id: Option<String> = source.try_get("provider_model_id")?;
         let model_family_id: Option<i64> = source.try_get("model_family_id")?;
+        let interaction_in_progress: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM interactions WHERE thread_id=?1 AND completion_status IN ('not_started','running','submitted'))",
+        )
+        .bind(thread_id.value())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if interaction_in_progress {
+            return Err(StorageError::Catalog(CatalogError::invalid(
+                "interaction_in_progress",
+                "Wait for the active interaction to finish.",
+            )));
+        }
         let model_selection = match (model_provider_id, provider_model_id, model_family_id) {
             (Some(provider_id), Some(model_id), Some(family_id)) if family_id > 0 => {
                 Some(InteractionModelSelection {
@@ -237,6 +249,7 @@ mod tests {
             })
             .await
             .unwrap();
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
 
         let mut attempts = tokio::task::JoinSet::new();
         for _ in 0..12 {
@@ -313,6 +326,7 @@ mod tests {
             })
             .await
             .unwrap();
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
 
         let outcome = store
             .insert_action_invocation(thread.root_interaction_id, 41, "Migrated follow-up")
@@ -352,6 +366,7 @@ mod tests {
             })
             .await
             .unwrap();
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
 
         let outcome = store
             .insert_action_invocation(
@@ -408,6 +423,7 @@ mod tests {
             })
             .await
             .unwrap();
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
         assert!(
             store
                 .delete_model_family(ModelFamilyId::from_database(2))
@@ -458,6 +474,7 @@ mod tests {
             })
             .await
             .unwrap();
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
         sqlx::query("UPDATE model_providers SET refreshed_at='0' WHERE id='codex'")
             .execute(&store.pool)
             .await
@@ -473,6 +490,57 @@ mod tests {
             other => panic!("unexpected error: {other}"),
         }
         assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 1);
+
+        store.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn active_turn_blocks_a_second_action_interaction() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-active-turn-action-invocation-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_model_selection(&store).await;
+        let model_selection = InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(1),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: "test-model".into(),
+        };
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Action source",
+                project_id: None,
+                initial_message: "Original prompt",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&model_selection),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
+        sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id,model_provider_id,provider_model_id,model_family_id) VALUES (?1,2,'Running turn','2','running','auto','codex','test-model',1)")
+            .bind(thread.id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let error = store
+            .insert_action_invocation(thread.root_interaction_id, 41, "Must wait")
+            .await
+            .err()
+            .unwrap();
+        match error {
+            StorageError::Catalog(error) => assert_eq!(error.code(), "interaction_in_progress"),
+            other => panic!("unexpected error: {other}"),
+        }
+        assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 2);
 
         store.pool.close().await;
         std::fs::remove_file(path).unwrap();
@@ -507,6 +575,7 @@ mod tests {
             })
             .await
             .unwrap();
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
         sqlx::query("UPDATE provider_models SET visible=0 WHERE provider_id='codex' AND model_id='test-model'")
             .execute(&store.pool)
             .await
@@ -550,6 +619,14 @@ mod tests {
             .await
             .unwrap();
         sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (1,0,'codex','test-model')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+    }
+
+    async fn mark_interaction_accepted(store: &SqliteProductStore, id: InteractionId) {
+        sqlx::query("UPDATE interactions SET completion_status='accepted' WHERE id=?1")
+            .bind(id.value())
             .execute(&store.pool)
             .await
             .unwrap();
