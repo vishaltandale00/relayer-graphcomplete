@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { writeDesktopReleaseEvidence, verifyDesktopReleaseEvidence } from "./artifacts.mjs";
+import { desktopReleaseAppPath } from "./app-path.mjs";
 import { loadDesktopReleaseContract } from "./contract.mjs";
 import { finalizeDesktopUpdateArtifact } from "./finalize-update-artifact.mjs";
 import { notarizeAndStapleDesktopDMGs } from "./notarize-and-staple.mjs";
@@ -51,9 +52,7 @@ export async function buildDesktopRelease({ channelName = process.argv[2], envir
     cwd: repositoryRoot,
     env: releaseEnvironment,
   });
-  const appPath = contract.platform === "darwin"
-    ? resolve(distRoot, `mac-${contract.architecture}`, "Relayer.app")
-    : resolve(distRoot, "win-unpacked");
+  const appPath = desktopReleaseAppPath({ distRoot, contract });
   if (contract.platform === "darwin") {
     await notarizeAndStapleDesktopDMGs({ distRoot, environment: releaseEnvironment });
     await finalizeDesktopUpdateArtifact({ appPath, contract, distRoot });

@@ -32,6 +32,7 @@ import {
   verifyDesktopReleaseEvidence,
   writeDesktopReleaseEvidence,
 } from "../desktop/release/artifacts.mjs";
+import { desktopReleaseAppPath } from "../desktop/release/app-path.mjs";
 import { finalizeDesktopUpdateArtifact } from "../desktop/release/finalize-update-artifact.mjs";
 import { createDesktopCanaryEvidence } from "../desktop/release/canary-evidence.mjs";
 import { macOSNativeRuntimeExecutables } from "../desktop/release/verify-macos-app.mjs";
@@ -61,6 +62,31 @@ import { evaluateDesktopReleaseAuthority } from "../scripts/audit-desktop-releas
 const WINDOWS_PUBLISHER_DN = "CN=Relayer Labs LLC, O=Relayer Labs LLC";
 
 describe("desktop skeleton", () => {
+  it("uses electron-builder's architecture-specific unpacked application directories", () => {
+    const distRoot = "/tmp/relayer-desktop-dist";
+    const contract = { platform: "darwin", productName: "Relayer" };
+    expect(desktopReleaseAppPath({ distRoot, contract: { ...contract, architecture: "arm64" } }))
+      .toBe("/tmp/relayer-desktop-dist/mac-arm64/Relayer.app");
+    expect(desktopReleaseAppPath({ distRoot, contract: { ...contract, architecture: "x64" } }))
+      .toBe("/tmp/relayer-desktop-dist/mac/Relayer.app");
+    expect(desktopReleaseAppPath({
+      distRoot,
+      contract: { platform: "win32", architecture: "x64", productName: "Relayer" },
+    })).toBe("/tmp/relayer-desktop-dist/win-unpacked");
+    expect(() => desktopReleaseAppPath({
+      distRoot,
+      contract: { ...contract, architecture: "riscv64" },
+    })).toThrow("Unsupported macOS release architecture: riscv64.");
+    expect(() => desktopReleaseAppPath({
+      distRoot,
+      contract: { platform: "win32", architecture: "arm64", productName: "Relayer" },
+    })).toThrow("Unsupported Windows release architecture: arm64.");
+    expect(() => desktopReleaseAppPath({
+      distRoot,
+      contract: { platform: "linux", architecture: "x64", productName: "Relayer" },
+    })).toThrow("Unsupported desktop release platform: linux.");
+  });
+
   it("moves graph world coordinates through a shared camera offset", () => {
     expect(graphScreenPoint({ x: 120, y: 80 }, { x: -35, y: 24 })).toEqual({ x: 85, y: 104 });
   });
