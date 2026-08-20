@@ -246,6 +246,35 @@ describe("EvalService simulated-user result persistence", () => {
       run: { status: "interrupted" },
     });
   });
+
+  it("uses a harness's sole bound profile and rejects incompatible H3 runs before execution", async () => {
+    const { stateFile } = await testPaths();
+    const product = fakeAcceptedProduct();
+    globalThis.fetch = product;
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [join(repositoryRoot, "harnesses", "prime-agent-basic.yaml")],
+      platform: "darwin",
+    }).open();
+
+    await expect(service.createRun({
+      testCaseIds: ["project.h3.sanitize-status-code"],
+      harnessConfigurationNames: ["prime-agent-basic"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow("requires permission profiles not supported by prime-agent-basic: ask, auto");
+
+    const created = await service.createRun({
+      testCaseIds: ["empty-project.task-system.single-turn"],
+      harnessConfigurationNames: ["prime-agent-basic"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    await waitForCompletedRun(service, created.id);
+    const createRequest = product.mock.calls.find(([url, options]) => (
+      new URL(url).pathname === "/api/threads" && options?.method === "POST"
+    ));
+    expect(JSON.parse(createRequest[1].body).permissionProfileId).toBe("full");
+  });
 });
 
 async function testPaths() {

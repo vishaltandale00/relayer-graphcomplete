@@ -38,8 +38,6 @@ interface LegacyPersistedHarnessSessionDescriptor {
   readonly state?: HarnessSessionState;
 }
 
-const LEGACY_PERMISSION_PROFILE_ID = "auto";
-
 export interface HarnessHostOptions {
   readonly implementations: HarnessImplementationMap;
   readonly stateFile: string;
@@ -125,7 +123,7 @@ export class HarnessHost {
     }
     const legacy = this.legacySaved.get(descriptor.threadId);
     const legacyState = legacy !== undefined
-      && descriptor.permissionProfileId === LEGACY_PERMISSION_PROFILE_ID
+      && descriptor.permissionProfileId === legacyPermissionProfileId(descriptor.configuration)
       && legacy.configurationName === descriptor.configuration.name
       && legacy.workingDirectory === descriptor.workingDirectory
       ? legacy.state
@@ -402,6 +400,12 @@ function persistedDescriptor(descriptor: HarnessSessionDescriptor): PersistedHar
     workingDirectory: descriptor.workingDirectory,
     ...(descriptor.state === undefined ? {} : { state: descriptor.state }),
   };
+}
+
+function legacyPermissionProfileId(configuration: HarnessConfiguration): string | undefined {
+  const profiles = Object.keys(configuration.permissionBindings);
+  if (profiles.includes("auto")) return "auto";
+  return profiles.length === 1 ? profiles[0] : undefined;
 }
 
 function readPersistedSession(value: unknown): PersistedHarnessSessionDescriptor {

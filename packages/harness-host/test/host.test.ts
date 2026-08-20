@@ -639,6 +639,53 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("resumes schema-v3 provider state with the sole bound Full profile", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v3-full-"));
+    const stateFile = join(directory, "sessions.json");
+    const configuration = {
+      ...testConfiguration,
+      name: "prime-agent-basic",
+      permissionBindings: { full: {} },
+    };
+    let restoredState: HarnessSessionState | undefined;
+    const host = new HarnessHost({
+      stateFile,
+      controlToken: "control",
+      implementations: { test: (context) => {
+        restoredState = context.savedState;
+        return { async complete() {}, state: () => context.savedState ?? emptyState() };
+      } },
+    });
+    try {
+      await writeFile(stateFile, JSON.stringify({
+        schemaVersion: 3,
+        sessions: [{
+          threadId: 1,
+          configuration: { name: configuration.name },
+          workingDirectory: directory,
+          state: { providerSessionId: "legacy-prime-session" },
+        }],
+      }), { mode: 0o600 });
+      await host.initialize();
+
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "full",
+        configuration,
+        workingDirectory: directory,
+      });
+
+      expect(restoredState).toEqual({ providerSessionId: "legacy-prime-session" });
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).toMatchObject({
+        schemaVersion: 4,
+        sessions: [{ threadId: 1, permissionProfileId: "full" }],
+      });
+    } finally {
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("skips an invalid schema-v3 entry without blocking valid session migration", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v3-invalid-"));
     const stateFile = join(directory, "sessions.json");
