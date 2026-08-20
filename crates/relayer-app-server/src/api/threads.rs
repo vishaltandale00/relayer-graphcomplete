@@ -290,12 +290,7 @@ async fn invoke_action_with_authority(
     let handoff = tokio::spawn(async move {
         let outcome = owned_state
             .product
-            .invoke_action(
-                source_interaction_id,
-                action_id,
-                &interaction_text,
-                owned_state.allow_harness_override,
-            )
+            .invoke_action(source_interaction_id, action_id, &interaction_text)
             .await?;
         finish_action_handoff(&owned_state, &thread, outcome).await
     });
@@ -501,16 +496,6 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
     let Some(runtime) = &state.runtime else {
         return;
     };
-    if interaction.model_selection.is_none() && !state.allow_harness_override {
-        record_background_failure(
-            &state,
-            &thread,
-            &interaction,
-            "The interaction has no model selection.".into(),
-        )
-        .await;
-        return;
-    }
     if let Some(model_selection) = interaction.model_selection.as_ref()
         && let Err(error) = state
             .product

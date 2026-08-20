@@ -544,7 +544,6 @@ impl ProductService {
         source_interaction_id: InteractionId,
         action_id: i64,
         text: &str,
-        allow_unselected_model: bool,
     ) -> Result<InvokeActionOutcome, ProductError> {
         if action_id <= 0 {
             return Err(ProductError::Invalid(
@@ -560,12 +559,7 @@ impl ProductService {
         let text = required(text, "interactionText")?;
         let outcome = self
             .storage
-            .insert_action_invocation(
-                source_interaction_id,
-                action_id,
-                text,
-                allow_unselected_model,
-            )
+            .insert_action_invocation(source_interaction_id, action_id, text)
             .await?;
         Ok(match outcome {
             ActionInvocationInsertOutcome::Created {

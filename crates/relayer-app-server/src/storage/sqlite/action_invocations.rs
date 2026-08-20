@@ -36,7 +36,6 @@ impl SqliteProductStore {
         source_interaction_id: InteractionId,
         action_id: i64,
         text: &str,
-        allow_unselected_model: bool,
     ) -> Result<ActionInvocationInsertOutcome, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some((invocation, interaction)) =
@@ -67,7 +66,7 @@ impl SqliteProductStore {
                     model_id,
                 })
             }
-            (None, None, None) if allow_unselected_model => None,
+            (None, None, None) => None,
             _ => {
                 return Err(StorageError::Catalog(CatalogError::invalid(
                     "source_model_selection_missing",
@@ -244,12 +243,7 @@ mod tests {
             let store = store.clone();
             attempts.spawn(async move {
                 store
-                    .insert_action_invocation(
-                        thread.root_interaction_id,
-                        41,
-                        "Authored follow-up",
-                        false,
-                    )
+                    .insert_action_invocation(thread.root_interaction_id, 41, "Authored follow-up")
                     .await
                     .unwrap()
             });
@@ -274,12 +268,7 @@ mod tests {
         drop(store);
         let reopened = SqliteProductStore::open(&path).await.unwrap();
         let replay = reopened
-            .insert_action_invocation(
-                thread.root_interaction_id,
-                41,
-                "Different text is ignored",
-                false,
-            )
+            .insert_action_invocation(thread.root_interaction_id, 41, "Different text is ignored")
             .await
             .unwrap();
         let replay_interaction = match replay {
@@ -302,7 +291,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_source_without_model_selection_fails_before_invocation_insert() {
+    async fn migrated_source_without_model_selection_preserves_action_execution() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -325,18 +314,16 @@ mod tests {
             .await
             .unwrap();
 
-        let error = store
-            .insert_action_invocation(thread.root_interaction_id, 41, "Must not persist", false)
+        let outcome = store
+            .insert_action_invocation(thread.root_interaction_id, 41, "Migrated follow-up")
             .await
-            .err()
             .unwrap();
-        match error {
-            StorageError::Catalog(error) => {
-                assert_eq!(error.code(), "source_model_selection_missing")
-            }
-            other => panic!("unexpected error: {other}"),
-        }
-        assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 1);
+        let interaction = match outcome {
+            ActionInvocationInsertOutcome::Created { interaction, .. } => interaction,
+            ActionInvocationInsertOutcome::Existing { .. } => panic!("first invocation existed"),
+        };
+        assert_eq!(interaction.model_selection, None);
+        assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 2);
 
         store.pool.close().await;
         std::fs::remove_file(path).unwrap();
@@ -371,7 +358,6 @@ mod tests {
                 thread.root_interaction_id,
                 41,
                 "Configuration-owned follow-up",
-                true,
             )
             .await
             .unwrap();
@@ -430,12 +416,7 @@ mod tests {
         );
 
         let outcome = store
-            .insert_action_invocation(
-                thread.root_interaction_id,
-                41,
-                "Historical follow-up",
-                false,
-            )
+            .insert_action_invocation(thread.root_interaction_id, 41, "Historical follow-up")
             .await
             .unwrap();
         let interaction = match outcome {
@@ -483,7 +464,7 @@ mod tests {
             .unwrap();
 
         let error = store
-            .insert_action_invocation(thread.root_interaction_id, 41, "Must not persist", false)
+            .insert_action_invocation(thread.root_interaction_id, 41, "Must not persist")
             .await
             .err()
             .unwrap();
@@ -492,6 +473,54 @@ mod tests {
             other => panic!("unexpected error: {other}"),
         }
         assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 1);
+
+        store.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn hidden_available_model_remains_runnable_for_historical_actions() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-hidden-model-action-invocation-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_model_selection(&store).await;
+        let model_selection = InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(1),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: "test-model".into(),
+        };
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Historical hidden model",
+                project_id: None,
+                initial_message: "Original prompt",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&model_selection),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        sqlx::query("UPDATE provider_models SET visible=0 WHERE provider_id='codex' AND model_id='test-model'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let outcome = store
+            .insert_action_invocation(thread.root_interaction_id, 41, "Historical follow-up")
+            .await
+            .unwrap();
+        let interaction = match outcome {
+            ActionInvocationInsertOutcome::Created { interaction, .. } => interaction,
+            ActionInvocationInsertOutcome::Existing { .. } => panic!("first invocation existed"),
+        };
+        assert_eq!(interaction.model_selection, Some(model_selection));
 
         store.pool.close().await;
         std::fs::remove_file(path).unwrap();

@@ -458,11 +458,6 @@ pub(super) async fn validate_execution_model_selection_on(
             "The selected provider is not connected.",
         ),
         (
-            row.get::<bool, _>("model_visible"),
-            "model_hidden",
-            "The selected model is hidden.",
-        ),
-        (
             row.get::<bool, _>("model_available"),
             "model_unavailable",
             "The selected model is unavailable.",
