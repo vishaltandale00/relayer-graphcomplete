@@ -53,6 +53,7 @@ export function createDesktopBuilderConfig(contract) {
       { from: resolve(repositoryRoot, `target/${serverTarget}/release/relayer-app-server${target.platform === "win32" ? ".exe" : ""}`), to: `bin/relayer-app-server${target.platform === "win32" ? ".exe" : ""}` },
       { from: resolve(repositoryRoot, `target/${serverTarget}/release/relayer-graph-server${target.platform === "win32" ? ".exe" : ""}`), to: `bin/relayer-graph-server${target.platform === "win32" ? ".exe" : ""}` },
       { from: resolve(repositoryRoot, "harnesses/codex-basic.yaml"), to: "harnesses/codex-basic.yaml" },
+      { from: resolve(repositoryRoot, "harnesses/codex-basic-high.yaml"), to: "harnesses/codex-basic-high.yaml" },
       { from: resolve(repositoryRoot, "permissions/desktop.json"), to: "permissions/desktop.json" },
       { from: resolve(repositoryRoot, "packages/graph-client/dist"), to: "graph-client" },
       { from: resolve(desktopRoot, "renderer"), to: "renderer" },

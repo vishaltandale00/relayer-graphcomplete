@@ -1,4 +1,4 @@
-use super::{InteractionId, ProjectId, ThreadId};
+use super::{InteractionId, InteractionModelSelection, ProjectId, ThreadId};
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,7 @@ pub(crate) struct Interaction {
     pub(crate) harness_configuration_name: Option<String>,
     pub(crate) harness_configuration_digest: Option<String>,
     pub(crate) permission_profile_id: String,
+    pub(crate) model_selection: Option<InteractionModelSelection>,
     pub(crate) effective_execution_digest: Option<String>,
     pub(crate) effective_permission_receipt: Option<Value>,
     pub(crate) completion_output: Option<Value>,

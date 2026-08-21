@@ -1,0 +1,118 @@
+import {
+  sanitizeModelCatalogSnapshot,
+  toProductCatalogSnapshot,
+  unavailableModelCatalogSnapshot,
+} from "./model-catalog-adapter.mjs";
+
+const REFRESH_REASONS = new Set(["startup", "provider-change", "settings-open", "explicit", "pre-inference"]);
+
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException("The operation was aborted.", "AbortError");
+}
+
+function waitForRefresh(entry, signal) {
+  const waiter = Symbol("model-catalog-refresh-waiter");
+  entry.waiters.add(waiter);
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    const cleanup = (aborted) => {
+      if (finished) return false;
+      finished = true;
+      signal?.removeEventListener("abort", onAbort);
+      entry.waiters.delete(waiter);
+      if (aborted && !entry.settled && entry.waiters.size === 0) {
+        entry.controller.abort(signal?.reason);
+      }
+      return true;
+    };
+    const onAbort = () => {
+      if (!cleanup(true)) return;
+      try {
+        throwIfAborted(signal);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    entry.promise.then(
+      (value) => { if (cleanup(false)) resolve(value); },
+      (error) => { if (cleanup(false)) reject(error); },
+    );
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
+}
+
+export class ModelCatalogService {
+  constructor({ adapters, publishSnapshot }) {
+    if (!Array.isArray(adapters) || adapters.length === 0) throw new Error("ModelCatalogService requires at least one adapter.");
+    if (typeof publishSnapshot !== "function") throw new Error("ModelCatalogService requires a snapshot publisher.");
+    this.adapters = new Map();
+    for (const adapter of adapters) {
+      if (!adapter?.providerId || typeof adapter.discover !== "function") throw new Error("Invalid model catalog adapter.");
+      if (this.adapters.has(adapter.providerId)) throw new Error(`Duplicate model catalog adapter: ${adapter.providerId}`);
+      this.adapters.set(adapter.providerId, adapter);
+    }
+    this.publishSnapshot = publishSnapshot;
+    this.refreshQueues = new Map();
+  }
+
+  async refresh(providerId, reason = "explicit", { signal } = {}) {
+    throwIfAborted(signal);
+    const adapter = this.adapters.get(providerId);
+    if (!adapter) throw new Error(`Unknown model provider: ${providerId}`);
+    if (!REFRESH_REASONS.has(reason)) throw new Error(`Unknown model-catalog refresh reason: ${reason}`);
+
+    const inFlight = this.refreshQueues.get(providerId);
+    if (reason === "pre-inference" && inFlight && !inFlight.controller.signal.aborted) {
+      return waitForRefresh(inFlight, signal);
+    }
+    const previous = inFlight?.promise ?? Promise.resolve();
+    const controller = new AbortController();
+    const entry = { controller, promise: undefined, settled: false, waiters: new Set() };
+    const operation = previous.catch(() => undefined).then(async () => {
+      const operationSignal = controller.signal;
+      throwIfAborted(operationSignal);
+      let snapshot;
+      try {
+        snapshot = sanitizeModelCatalogSnapshot(await adapter.discover({ signal: operationSignal }));
+      } catch (error) {
+        throwIfAborted(operationSignal);
+        snapshot = unavailableModelCatalogSnapshot(adapter, error);
+      }
+      throwIfAborted(operationSignal);
+      await this.publishSnapshot(
+        toProductCatalogSnapshot(snapshot),
+        Object.freeze({ reason, signal: operationSignal }),
+      );
+      throwIfAborted(operationSignal);
+      return snapshot;
+    }).finally(() => {
+      entry.settled = true;
+      if (this.refreshQueues.get(providerId) === entry) this.refreshQueues.delete(providerId);
+    });
+    entry.promise = operation;
+    this.refreshQueues.set(providerId, entry);
+    return waitForRefresh(entry, signal);
+  }
+
+  refreshAll(reason, options) {
+    return Promise.all([...this.adapters.keys()].map((providerId) => (
+      this.refresh(providerId, reason, options)
+    )));
+  }
+
+  startup() { return this.refreshAll("startup"); }
+  beforeInference({ providerId, signal } = {}) {
+    return providerId
+      ? this.refresh(providerId, "pre-inference", { signal })
+      : this.refreshAll("pre-inference", { signal });
+  }
+  providerChanged(providerId) { return this.refresh(providerId, "provider-change"); }
+  settingsOpened() { return this.refreshAll("settings-open"); }
+  explicitRefresh(providerId) {
+    return providerId === undefined ? this.refreshAll("explicit") : this.refresh(providerId, "explicit");
+  }
+}

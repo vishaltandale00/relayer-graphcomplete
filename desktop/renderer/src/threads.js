@@ -2,6 +2,7 @@ import { request } from "./api.js";
 import {
   actionWasInvoked,
   visibleLayerAfterRefresh,
+  withoutPendingActionInvocation,
 } from "./action-invocation-state.js";
 import {
   createAcceptedLayerCache,
@@ -9,7 +10,12 @@ import {
   createNavigationHistory,
 } from "./navigation-history.js";
 import { renderThread } from "./graph.js";
-import { renderScopeMenu, renderSidebar, setMainView } from "./navigation.js";
+import {
+  renderScopeMenu,
+  renderSidebar,
+  setMainView,
+  setSettingsTab,
+} from "./navigation.js";
 import {
   appendLayerPath,
   createLayerNavigationCoordinator,
@@ -30,6 +36,18 @@ import { appState, productApiAvailable, viewState } from "./state.js";
 import { $, threadTitle, toast } from "./ui.js";
 import { addLocalThread } from "./thread-model.js";
 import { closePermissionMenu } from "./permission-profiles.js";
+import { followupRequestBody, newThreadRequestBody } from "./interaction-request-model.js";
+import {
+  closeNewThreadModelPicker,
+  newThreadModelSelectionPayload,
+  newThreadModelSelectionReady,
+  setNewThreadModelPickerDisabled,
+} from "./composer-model-picker.js";
+import { refreshModelFamilySettings } from "./model-family-settings.js";
+import {
+  harnessUsesConfigurationModel,
+  isModelSelectionCatalogError,
+} from "./model-picker-model.js";
 
 let creatingFirstThread = false;
 let pendingRefreshTimer;
@@ -49,7 +67,8 @@ const refreshGate = createLatestRequestGate();
 export function updateCreateThreadAvailability() {
   $("#createThread").disabled = creatingFirstThread
     || !$("#newThreadPrompt").value.trim()
-    || !viewState.selectedPermissionProfileId;
+    || !viewState.selectedPermissionProfileId
+    || (productApiAvailable && !newThreadModelSelectionReady());
 }
 
 function currentNavigationEntry() {
@@ -267,21 +286,39 @@ export function selectTurnById(interactionId) {
   schedulePendingRefresh(viewState.currentThreadId);
 }
 
-export async function submitInteraction(text) {
+export async function submitInteraction(text, modelSelection) {
   if (!viewState.currentThreadId) throw new Error("Select a thread before sending a follow-up.");
   const threadId = viewState.currentThreadId;
   recordCurrentNavigation();
   const sourceLocationKey = navigationEntryKey(navigationHistory.current);
   supersedePendingHistory({ cancelLayerNavigation: true });
-  await request(`/api/threads/${encodeURIComponent(threadId)}/interactions`, {
-    method: "POST",
-    body: JSON.stringify({ text }),
-  });
+  const thread = appState.threads.find((candidate) => String(candidate.id) === String(threadId));
+  const harnessId = thread?.harnessId ?? thread?.harnessConfigurationName;
+  if (!modelSelection && !harnessUsesConfigurationModel(appState.modelSettings, harnessId)) {
+    setSettingsTab("models");
+    setMainView("settings");
+    throw new Error("Choose an available model in Settings before sending.");
+  }
+  try {
+    await request(`/api/threads/${encodeURIComponent(threadId)}/interactions`, {
+      method: "POST",
+      body: JSON.stringify(followupRequestBody(text, modelSelection)),
+    });
+  } catch (error) {
+    await refreshAfterModelSelectionRejection(error, true);
+    throw error;
+  }
   const current = currentNavigationEntry();
   if (!current || navigationEntryKey(current) !== sourceLocationKey) return;
   supersedePendingHistory({ presentationChanged: true });
   viewState.currentInteractionId = null;
   await refreshState(threadId, { historyMode: "push" });
+}
+
+async function refreshAfterModelSelectionRejection(error, renderOngoingPicker = false) {
+  if (!isModelSelectionCatalogError(error)) return;
+  await refreshModelFamilySettings().catch(() => {});
+  if (renderOngoingPicker) renderThread();
 }
 
 export async function navigateLayer(layerId, navigation = {}) {
@@ -510,13 +547,26 @@ export async function invokeAction(action) {
       `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(sourceInteractionId)}/actions/${encodeURIComponent(action.id)}/invoke`,
       { method: "POST" },
     );
-  } catch {
-    if (String(viewState.currentThreadId) !== String(threadId)) return;
+  } catch (error) {
+    if (String(viewState.currentThreadId) !== String(threadId)) {
+      appState.pendingActionInvocations = withoutPendingActionInvocation(
+        appState.pendingActionInvocations,
+        sourceInteractionId,
+        action.id,
+      );
+      return;
+    }
+    await refreshAfterModelSelectionRejection(error, true);
     await refreshState(threadId).catch(() => {});
     const durable = appState.actionInvocations.find((invocation) => (
       String(invocation.sourceInteractionId) === String(sourceInteractionId)
       && String(invocation.actionId) === String(action.id)
     ));
+    appState.pendingActionInvocations = withoutPendingActionInvocation(
+      appState.pendingActionInvocations,
+      sourceInteractionId,
+      action.id,
+    );
     const sourceIsStillSelected = (
       currentNavigationEntry()
       && navigationEntryKey(currentNavigationEntry()) === sourceLocationKey
@@ -525,6 +575,9 @@ export async function invokeAction(action) {
       supersedePendingHistory({ presentationChanged: true });
       viewState.currentInteractionId = durable.resultInteractionId;
       await refreshState(threadId, { historyMode: "push" }).catch(() => {});
+    } else {
+      renderThread();
+      toast(error.message);
     }
     return;
   }
@@ -534,10 +587,11 @@ export async function invokeAction(action) {
       && String(invocation.actionId) === String(action.id)
     ));
     appState.actionInvocations.push(response.invocation);
-    appState.pendingActionInvocations = appState.pendingActionInvocations.filter((invocation) => !(
-      String(invocation.sourceInteractionId) === String(sourceInteractionId)
-      && String(invocation.actionId) === String(action.id)
-    ));
+    appState.pendingActionInvocations = withoutPendingActionInvocation(
+      appState.pendingActionInvocations,
+      sourceInteractionId,
+      action.id,
+    );
   }
   const sourceIsStillSelected = (
     currentNavigationEntry()
@@ -575,16 +629,27 @@ async function createOrReuseProject(selectedScope) {
   }
 }
 
-export async function createFirstThread() {
+export async function createFirstThread(pickerPayloadOverride = null) {
   const input = $("#newThreadPrompt");
   const promptText = input.value.trim();
   const permissionProfileId = viewState.selectedPermissionProfileId;
+  const pickerPayload = productApiAvailable
+    ? pickerPayloadOverride ?? newThreadModelSelectionPayload()
+    : null;
+  if (productApiAvailable && !pickerPayload) {
+    setSettingsTab("models");
+    setMainView("settings");
+    toast("Choose an available model in Settings before sending.");
+    return;
+  }
   if (!promptText || !permissionProfileId || creatingFirstThread) return;
   creatingFirstThread = true;
   input.disabled = true;
   $("#createThread").disabled = true;
   $("#permissionButton").disabled = true;
+  setNewThreadModelPickerDisabled(true);
   closePermissionMenu();
+  closeNewThreadModelPicker();
   try {
     const selectedScope = viewState.selectedScope;
     if (!productApiAvailable) {
@@ -607,22 +672,25 @@ export async function createFirstThread() {
     }
     const thread = await request("/api/threads", {
       method: "POST",
-      body: JSON.stringify({
+      body: JSON.stringify(newThreadRequestBody({
         title: threadTitle(promptText),
         initialMessage: promptText,
         permissionProfileId,
-        ...(projectId ? { projectId } : {}),
-      }),
+        projectId,
+        pickerPayload,
+      })),
     });
     viewState.currentThreadId = thread.id;
     input.value = "";
     await loadThread(thread.id);
   } catch (error) {
+    await refreshAfterModelSelectionRejection(error);
     toast(error.message);
   } finally {
     creatingFirstThread = false;
     input.disabled = false;
     $("#permissionButton").disabled = !viewState.selectedPermissionProfileId;
+    setNewThreadModelPickerDisabled(false);
     updateCreateThreadAvailability();
   }
 }

@@ -147,8 +147,8 @@ describe("CodexBasicHarness", () => {
         configuration: codexBasicConfiguration,
       }, { createCodex });
 
-    await harness.complete(runContext(1, "first-token"));
-    await harness.complete(runContext(2, "second-token"));
+    await harness.complete({ ...runContext(1, "first-token"), model: { providerId: "codex", modelId: "gpt-first" } });
+    await harness.complete({ ...runContext(2, "second-token"), model: { providerId: "codex", modelId: "gpt-second" } });
 
     expect(createCodex).toHaveBeenCalledTimes(2);
     expect(environments.map((environment) => [environment.RELAYER_GRAPH_TOKEN, environment.RELAYER_NODE_ID])).toEqual([
@@ -156,8 +156,27 @@ describe("CodexBasicHarness", () => {
       ["second-token", "2"],
     ]);
     expect(firstCodex.startThread).toHaveBeenCalledTimes(1);
-    expect(secondCodex.resumeThread).toHaveBeenCalledWith("codex-thread-1", expect.any(Object));
+    expect(firstCodex.startThread).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-first" }));
+    expect(secondCodex.resumeThread).toHaveBeenCalledWith("codex-thread-1", expect.objectContaining({ model: "gpt-second" }));
     expect(harness.state()).toEqual({ codexThreadId: "codex-thread-1" });
+  });
+
+  it("rejects a provider model that codex.basic cannot execute before starting a thread", async () => {
+    const codex = { startThread: vi.fn(), resumeThread: vi.fn() };
+    const harness = new CodexBasicHarness({
+      threadId: 1,
+      permissionProfileId: "auto",
+      permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
+      workingDirectory: process.cwd(),
+      configuration: codexBasicConfiguration,
+    }, { createCodex: () => codex as unknown as Codex });
+
+    await expect(harness.complete({
+      ...runContext(1, "token"),
+      model: { providerId: "future-provider", modelId: "future-model" },
+    })).rejects.toThrow("codex.basic cannot run provider future-provider");
+    expect(codex.startThread).not.toHaveBeenCalled();
+    expect(codex.resumeThread).not.toHaveBeenCalled();
   });
 });
 

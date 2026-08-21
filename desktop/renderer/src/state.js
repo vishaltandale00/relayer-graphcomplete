@@ -11,6 +11,7 @@ export const appState = {
   pendingActionInvocations: [],
   permissionProfiles: [],
   defaultPermissionProfileId: null,
+  modelSettings: null,
   nodes: [],
   edges: [],
   actions: [],

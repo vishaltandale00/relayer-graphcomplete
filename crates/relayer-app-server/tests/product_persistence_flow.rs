@@ -14,8 +14,8 @@ use std::{
     path::Path,
     process::{Command, Stdio},
     sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread,
     time::Duration,
@@ -37,13 +37,41 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     let database = root.join("product.sqlite3");
 
     let app = open_app(&database, &root).await;
+    let published = app
+        .clone()
+        .oneshot(provider_publish_request(test_provider_snapshot()))
+        .await
+        .unwrap();
+    assert_eq!(published.status(), StatusCode::NO_CONTENT);
+    let pool = sqlite_pool(&database).await;
+    sqlx::query(
+        "UPDATE product_harnesses SET available=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    let settings = response_json(
+        app.clone()
+            .oneshot(api_request("GET", "/api/model-settings", None, true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let family_id = settings["families"][0]["id"].as_i64().unwrap();
     let thread = app
         .oneshot(api_request(
             "POST",
             "/api/threads",
             Some(json!({
                 "title": "Invoke once",
-                "initialMessage": "Start here"
+                "initialMessage": "Start here",
+                "harnessId": "codex-basic",
+                "modelSelection": {
+                    "familyId": family_id,
+                    "providerId": "codex",
+                    "modelId": "test-model"
+                }
             })),
             true,
         ))
@@ -95,6 +123,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         );
     let harness_completions = Arc::new(AtomicUsize::new(0));
     let completion_counter = harness_completions.clone();
+    let observed_models = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let harness_models = observed_models.clone();
     let harness = axum::Router::new()
         .route(
             "/sessions",
@@ -102,9 +132,11 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         )
         .route(
             "/sessions/{id}/complete",
-            axum::routing::post(move || {
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let completion_counter = completion_counter.clone();
+                let harness_models = harness_models.clone();
                 async move {
+                    harness_models.lock().unwrap().push(body["model"].clone());
                     let completion_number = completion_counter.fetch_add(1, Ordering::SeqCst);
                     let node_id = 202 + completion_number;
                     axum::Json(json!({
@@ -130,6 +162,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
                     "implementation": "test",
                     "implementationVersion": 1,
                     "permissionBindings": { "ask": {}, "auto": {}, "full": {} },
+                    "modelCompatibility": [{ "providerId": "codex" }],
                     "settings": {}
                 },
                 "digest": "sha256:test"
@@ -139,7 +172,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     )
     .unwrap();
 
-    let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let (app, provider_refreshes) =
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
     let rejected = app
         .clone()
         .oneshot(api_request(
@@ -167,6 +201,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             .count(),
         1
     );
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
 
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     loop {
@@ -190,6 +225,109 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(harness_completions.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        observed_models.lock().unwrap().as_slice(),
+        [json!({ "providerId": "codex", "modelId": "test-model" })]
+    );
+    let action_state = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        action_state["interactions"][1]["modelSelection"],
+        json!({
+            "familyId": family_id,
+            "providerId": "codex",
+            "modelId": "test-model"
+        })
+    );
+
+    let ordinary_unselected = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({
+                "title": "Still requires a model",
+                "initialMessage": "Do not run without a selection",
+                "harnessId": "codex-basic"
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        ordinary_unselected.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        response_json(ordinary_unselected).await["code"],
+        "model_selection_required"
+    );
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
+
+    // A pre-selector accepted interaction has no model columns, but its thread already pins the
+    // only harness configuration ordinary Product execution may use.
+    let pool = sqlite_pool(&database).await;
+    let legacy_timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let legacy_thread = sqlx::query(
+        "INSERT INTO threads(title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES ('Legacy action',?1,?1,'codex-basic','auto')",
+    )
+    .bind(&legacy_timestamp)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let legacy_thread_id = legacy_thread.last_insert_rowid();
+    let legacy_source = sqlx::query(
+        "INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,permission_profile_id) VALUES (?1,1,'Legacy source',?2,303,'accepted','codex-basic','auto')",
+    )
+    .bind(legacy_thread_id)
+    .bind(&legacy_timestamp)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let legacy_source_interaction_id = legacy_source.last_insert_rowid();
+    pool.close().await;
+
+    let legacy_uri = format!(
+        "/api/threads/{legacy_thread_id}/interactions/{legacy_source_interaction_id}/actions/41/invoke"
+    );
+    let legacy_invocation = app
+        .clone()
+        .oneshot(api_request("POST", &legacy_uri, None, true))
+        .await
+        .unwrap();
+    assert_eq!(legacy_invocation.status(), StatusCode::CREATED);
+    let legacy_state = wait_for_interaction_count_and_terminal(&app, legacy_thread_id, 2).await;
+    assert_eq!(
+        legacy_state["interactions"][1]["completionStatus"],
+        "accepted"
+    );
+    assert_eq!(
+        legacy_state["interactions"][1]["modelSelection"],
+        Value::Null
+    );
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        observed_models.lock().unwrap().as_slice(),
+        [
+            json!({ "providerId": "codex", "modelId": "test-model" }),
+            Value::Null,
+        ]
+    );
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
 
     // Simulate a request disappearing after its durable one-shot record commits but before the
     // old handler starts execution. Retrying the saved invocation must claim it exactly once and
@@ -201,10 +339,11 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         .as_millis()
         .to_string();
     let result = sqlx::query(
-        "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,3,'Recovered follow-up',?2,'not_started')",
+        "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,model_provider_id,provider_model_id,model_family_id) VALUES (?1,3,'Recovered follow-up',?2,'not_started','codex','test-model',?3)",
     )
     .bind(thread_id)
     .bind(&created_at)
+    .bind(family_id)
     .execute(&pool)
     .await
     .unwrap();
@@ -258,7 +397,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         assert!(std::time::Instant::now() < deadline);
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert_eq!(harness_completions.load(Ordering::SeqCst), 2);
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 3);
+    assert_eq!(observed_models.lock().unwrap().len(), 3);
     drop(app);
 
     let reopened =
@@ -273,6 +413,330 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     assert_eq!(replay["created"], false);
     assert_eq!(replay["interaction"]["text"], "Authored follow-up");
 
+    harness_task.abort();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn product_model_selection_is_validated_inherited_transported_and_auditable() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-model-interactions-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+
+    let graph_node_ids = Arc::new(AtomicUsize::new(700));
+    let next_graph_node_id = graph_node_ids.clone();
+    let graph = axum::Router::new()
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(move || {
+                let next_graph_node_id = next_graph_node_id.clone();
+                async move {
+                    let node_id = next_graph_node_id.fetch_add(1, Ordering::SeqCst);
+                    axum::Json(json!({
+                        "node": { "id": node_id },
+                        "graphToken": format!("graph-{node_id}")
+                    }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::delete(|| async { axum::Json(json!({ "revoked": true })) }),
+        );
+    let observed_models = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let harness_models = observed_models.clone();
+    let harness = axum::Router::new()
+        .route(
+            "/sessions",
+            axum::routing::post(|| async { (StatusCode::CREATED, axum::Json(json!({}))) }),
+        )
+        .route(
+            "/sessions/{id}/complete",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let harness_models = harness_models.clone();
+                async move {
+                    harness_models.lock().unwrap().push(body["model"].clone());
+                    if body["model"]["modelId"] == "broken-model" {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(json!({ "error": "deterministic harness failure" })),
+                        );
+                    }
+                    (
+                        StatusCode::OK,
+                        axum::Json(json!({
+                            "output": {
+                                "nodeId": body["graph"]["nodeId"],
+                                "rootLayer": { "layer": { "id": 1 }, "nodes": [], "edges": [], "actions": [] }
+                            }
+                        })),
+                    )
+                }
+            }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(harness).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion": 1,
+            "configurations": [
+                {
+                    "configuration": {
+                        "schemaVersion": 1,
+                        "name": "codex-basic",
+                        "implementation": "test",
+                        "implementationVersion": 1,
+                        "permissionBindings": { "ask": {}, "auto": {}, "full": {} },
+                        "modelCompatibility": [{ "providerId": "codex" }],
+                        "settings": {}
+                    },
+                    "digest": "sha256:model-test"
+                },
+                {
+                    "configuration": {
+                        "schemaVersion": 1,
+                        "name": "full-only",
+                        "implementation": "test",
+                        "implementationVersion": 1,
+                        "permissionBindings": { "full": {} },
+                        "modelCompatibility": [{ "providerId": "codex" }],
+                        "settings": {}
+                    },
+                    "digest": "sha256:full-only"
+                }
+            ]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let (app, provider_refreshes) =
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let full_only_permissions = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "GET",
+                "/api/permission-profiles?harnessId=full-only",
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        full_only_permissions["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|profile| profile["available"] == true)
+            .map(|profile| profile["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["full"]
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(provider_publish_request(test_provider_snapshot()))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let settings = response_json(
+        app.clone()
+            .oneshot(api_request("GET", "/api/model-settings", None, true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let family_id = settings["families"][0]["id"].as_i64().unwrap();
+
+    let raw_override = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({
+                "initialMessage": "Do not create",
+                "harnessConfigurationName": "codex-basic",
+                "modelSelection": model_selection(family_id, "test-model")
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(raw_override.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    provider_refreshes.succeed.store(false, Ordering::SeqCst);
+    let refresh_failed = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({
+                "initialMessage": "Fail closed before persistence",
+                "harnessId": "codex-basic",
+                "modelSelection": model_selection(family_id, "test-model")
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refresh_failed.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        response_json(refresh_failed).await["code"],
+        "provider_catalog_refresh_failed"
+    );
+    provider_refreshes.succeed.store(true, Ordering::SeqCst);
+
+    let invalid = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({
+                "initialMessage": "Still do not create",
+                "harnessId": "codex-basic",
+                "modelSelection": model_selection(family_id, "missing-model")
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        response_json(invalid).await["code"],
+        "model_selection_unknown"
+    );
+    let empty_state = response_json(
+        app.clone()
+            .oneshot(api_request("GET", "/api/state", None, true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(empty_state["threads"].as_array().unwrap().is_empty());
+
+    let created = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({
+                "title": "Model transport",
+                "initialMessage": "First",
+                "harnessId": "codex-basic",
+                "modelSelection": model_selection(family_id, "test-model")
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created = response_json(created).await;
+    assert_eq!(created["harnessId"], "codex-basic");
+    assert_eq!(created["harnessConfigurationName"], "codex-basic");
+    let thread_id = created["id"].as_i64().unwrap();
+    wait_for_interaction_count_and_terminal(&app, thread_id, 1).await;
+
+    let inherited = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({ "text": "Second" })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(inherited.status(), StatusCode::CREATED);
+    assert_eq!(
+        response_json(inherited).await["modelSelection"],
+        model_selection(family_id, "test-model")
+    );
+    wait_for_interaction_count_and_terminal(&app, thread_id, 2).await;
+
+    let changed = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({
+                "text": "Third",
+                "modelSelection": model_selection(family_id, "second-model")
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(changed.status(), StatusCode::CREATED);
+    wait_for_interaction_count_and_terminal(&app, thread_id, 3).await;
+
+    let invalid_follow_up = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({
+                "text": "Must not persist",
+                "modelSelection": model_selection(family_id, "missing-model")
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid_follow_up.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let failed = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({
+                "text": "Persist my failure identity",
+                "modelSelection": model_selection(family_id, "broken-model")
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(failed.status(), StatusCode::CREATED);
+    let state = wait_for_interaction_count_and_terminal(&app, thread_id, 4).await;
+    let interactions = state["interactions"].as_array().unwrap();
+    assert_eq!(interactions.len(), 4);
+    assert_eq!(interactions[3]["completionStatus"], "failed");
+    assert_eq!(
+        interactions[3]["modelSelection"],
+        model_selection(family_id, "broken-model")
+    );
+    assert_eq!(
+        interactions[0]["effectiveExecutionDigest"],
+        interactions[1]["effectiveExecutionDigest"]
+    );
+    assert_ne!(
+        interactions[0]["effectiveExecutionDigest"],
+        interactions[2]["effectiveExecutionDigest"]
+    );
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 7);
+    assert_eq!(
+        observed_models.lock().unwrap().as_slice(),
+        [
+            json!({ "providerId": "codex", "modelId": "test-model" }),
+            json!({ "providerId": "codex", "modelId": "test-model" }),
+            json!({ "providerId": "codex", "modelId": "second-model" }),
+            json!({ "providerId": "codex", "modelId": "broken-model" }),
+        ]
+    );
+
+    graph_task.abort();
     harness_task.abort();
     fs::remove_dir_all(root).unwrap();
 }
@@ -359,6 +823,103 @@ async fn interrupted_action_invocation_becomes_failed_on_restart() {
             .unwrap()
             .contains("temporary one-shot UX")
     );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn interrupted_ordinary_interaction_becomes_failed_and_releases_the_thread_on_restart() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-interrupted-interaction-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({
+                    "title": "Interrupted interaction",
+                    "initialMessage": "Start here"
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let root_interaction_id = thread["rootInteractionId"].as_i64().unwrap();
+
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE interactions SET completion_status='failed',completion_error='fixture terminal state' WHERE id=?1")
+        .bind(root_interaction_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let interrupted = sqlx::query(
+        "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,2,'Interrupted follow-up',?2,'running')",
+    )
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let interrupted_id = interrupted.last_insert_rowid();
+    pool.close().await;
+    drop(app);
+
+    let reopened = open_app(&database, &root).await;
+    let state = response_json(
+        reopened
+            .clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let recovered = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == interrupted_id)
+        .unwrap();
+    assert_eq!(recovered["completionStatus"], "failed");
+    assert!(
+        recovered["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("Send a follow-up to continue")
+    );
+
+    let follow_up = reopened
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({ "text": "Continue after restart" })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(follow_up.status(), StatusCode::CREATED);
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -785,7 +1346,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 4);
+    assert_eq!(applied_migrations, 5);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -801,6 +1362,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: None,
+        provider_catalog_refresh_url: None,
+        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await;
@@ -826,6 +1389,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: None,
+        provider_catalog_refresh_url: None,
+        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await;
@@ -848,7 +1413,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
         "DROP TABLE projects",
         "CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,path TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
         "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto')",
-        "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL,graph_node_id INTEGER,completion_status TEXT NOT NULL DEFAULT 'not_started',harness_configuration_name TEXT,harness_configuration_digest TEXT,completion_output_json TEXT,completion_error TEXT,permission_profile_id TEXT NOT NULL DEFAULT 'auto',effective_execution_digest TEXT,effective_permission_receipt_json TEXT)",
+        "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL,graph_node_id INTEGER,completion_status TEXT NOT NULL DEFAULT 'not_started',harness_configuration_name TEXT,harness_configuration_digest TEXT,completion_output_json TEXT,completion_error TEXT,permission_profile_id TEXT NOT NULL DEFAULT 'auto',effective_execution_digest TEXT,effective_permission_receipt_json TEXT,model_provider_id TEXT,provider_model_id TEXT,model_family_id INTEGER)",
         "CREATE UNIQUE INDEX projects_path_partial ON projects(path) WHERE id > 0",
         "CREATE UNIQUE INDEX interactions_sequence_partial ON interactions(thread_id,sequence) WHERE id > 0",
     ] {
@@ -864,6 +1429,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: None,
+        provider_catalog_refresh_url: None,
+        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await;
@@ -902,6 +1469,8 @@ async fn open_app(database: &Path, web_directory: &Path) -> Router {
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: Some("review".to_owned()),
+        provider_catalog_refresh_url: None,
+        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await
@@ -916,12 +1485,51 @@ async fn open_app_with_runtime(
     graph_url: &str,
     harness_url: &str,
 ) -> Router {
-    RelayerAppServer::open(RelayerAppServerConfig {
+    open_app_with_runtime_observed(database, web_directory, catalog, graph_url, harness_url)
+        .await
+        .0
+}
+
+struct ProviderRefreshProbe {
+    calls: Arc<AtomicUsize>,
+    succeed: Arc<AtomicBool>,
+}
+
+async fn open_app_with_runtime_observed(
+    database: &Path,
+    web_directory: &Path,
+    catalog: &Path,
+    graph_url: &str,
+    harness_url: &str,
+) -> (Router, ProviderRefreshProbe) {
+    let provider_refreshes = Arc::new(AtomicUsize::new(0));
+    let observed_refreshes = provider_refreshes.clone();
+    let refresh_succeeds = Arc::new(AtomicBool::new(true));
+    let observed_success = refresh_succeeds.clone();
+    let refresh = axum::Router::new().route(
+        "/v1/provider-catalog/refresh",
+        axum::routing::post(move || {
+            let observed_refreshes = observed_refreshes.clone();
+            let observed_success = observed_success.clone();
+            async move {
+                observed_refreshes.fetch_add(1, Ordering::SeqCst);
+                if observed_success.load(Ordering::SeqCst) {
+                    StatusCode::NO_CONTENT
+                } else {
+                    StatusCode::SERVICE_UNAVAILABLE
+                }
+            }
+        }),
+    );
+    let (provider_catalog_refresh_url, _refresh_task) = serve_test_app(refresh).await;
+    let app = RelayerAppServer::open(RelayerAppServerConfig {
         database_path: database.to_owned(),
         web_directory: web_directory.to_owned(),
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: Some("review".to_owned()),
+        provider_catalog_refresh_url: Some(provider_catalog_refresh_url),
+        provider_catalog_refresh_token: Some("provider-refresh-control-token-0001".to_owned()),
         runtime: Some(RelayerRuntimeConfig {
             graph_url: graph_url.to_owned(),
             harness_url: harness_url.to_owned(),
@@ -935,7 +1543,14 @@ async fn open_app_with_runtime(
     })
     .await
     .unwrap()
-    .router()
+    .router();
+    (
+        app,
+        ProviderRefreshProbe {
+            calls: provider_refreshes,
+            succeed: refresh_succeeds,
+        },
+    )
 }
 
 fn permission_catalog() -> std::path::PathBuf {
@@ -978,4 +1593,97 @@ fn api_request_with_token(
             body.map(|value| value.to_string()).unwrap_or_default(),
         ))
         .unwrap()
+}
+
+fn provider_publish_request(body: Value) -> Request<Body> {
+    Request::builder()
+        .method("PUT")
+        .uri("/api/internal/provider-catalog")
+        .header("authorization", "Bearer control")
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+fn model_selection(family_id: i64, model_id: &str) -> Value {
+    json!({
+        "familyId": family_id,
+        "providerId": "codex",
+        "modelId": model_id
+    })
+}
+
+async fn wait_for_interaction_count_and_terminal(
+    app: &Router,
+    thread_id: i64,
+    expected_count: usize,
+) -> Value {
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let state = response_json(
+            app.clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let interactions = state["interactions"].as_array().unwrap();
+        if interactions.len() == expected_count
+            && interactions.last().is_some_and(|interaction| {
+                matches!(
+                    interaction["completionStatus"].as_str(),
+                    Some("accepted" | "failed")
+                )
+            })
+        {
+            return state;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+fn test_provider_snapshot() -> Value {
+    json!({
+        "providerId": "codex",
+        "label": "Codex",
+        "connected": true,
+        "models": [
+            {
+                "id": "test-model",
+                "label": "Test model",
+                "order": 0,
+                "visible": true,
+                "available": true,
+                "providerDefault": true,
+                "metadata": {}
+            },
+            {
+                "id": "second-model",
+                "label": "Second model",
+                "order": 1,
+                "visible": true,
+                "available": true,
+                "metadata": {}
+            },
+            {
+                "id": "broken-model",
+                "label": "Broken model",
+                "order": 2,
+                "visible": true,
+                "available": true,
+                "metadata": {}
+            }
+        ],
+        "systemFamily": {
+            "key": "codex",
+            "name": "Codex",
+            "modelIds": ["test-model", "second-model", "broken-model"]
+        }
+    })
 }

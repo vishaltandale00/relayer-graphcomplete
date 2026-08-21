@@ -2,6 +2,7 @@ import { appState, desktop, viewState } from "./state.js";
 import { $, $$, escapeHtml } from "./ui.js";
 
 const settingsTabs = {
+  models: "Models and harnesses",
   appearance: "Appearance",
   codex: "Codex",
   updates: "Application updates",

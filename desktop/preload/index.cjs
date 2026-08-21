@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld("relayerDesktop", {
   folder: {
     choose: () => ipcRenderer.invoke("relayer:folder-choose"),
   },
+  models: {
+    settingsOpened: () => ipcRenderer.invoke("relayer:model-catalog-settings-open"),
+    refresh: (providerId) => ipcRenderer.invoke("relayer:model-catalog-refresh", providerId),
+  },
   appearance: {
     read: () => ipcRenderer.invoke("relayer:appearance-read"),
     set: (appearance) => ipcRenderer.invoke("relayer:appearance-set", appearance),

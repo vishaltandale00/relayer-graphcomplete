@@ -59,6 +59,18 @@ impl DesktopSessionAuthenticator {
             Err(ApiError::unauthorized())
         }
     }
+
+    pub(crate) fn authorize_provider_publish(&self, headers: &HeaderMap) -> Result<(), ApiError> {
+        let supplied = headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "));
+        if supplied == Some(self.control_token.as_ref()) {
+            Ok(())
+        } else {
+            Err(ApiError::unauthorized())
+        }
+    }
 }
 
 pub(crate) fn authorize_read(state: &ApiState, headers: &HeaderMap) -> Result<(), ApiError> {
@@ -67,4 +79,11 @@ pub(crate) fn authorize_read(state: &ApiState, headers: &HeaderMap) -> Result<()
 
 pub(crate) fn authorize_write(state: &ApiState, headers: &HeaderMap) -> Result<(), ApiError> {
     state.authenticator.authorize_write(headers)
+}
+
+pub(crate) fn authorize_provider_publish(
+    state: &ApiState,
+    headers: &HeaderMap,
+) -> Result<(), ApiError> {
+    state.authenticator.authorize_provider_publish(headers)
 }

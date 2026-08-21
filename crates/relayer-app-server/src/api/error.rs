@@ -1,7 +1,9 @@
 use super::types::ProjectResponse;
 use crate::permissions::PermissionError;
-use crate::product::{InvalidProductId, ProductError};
+use crate::product::{CatalogError, InvalidProductId, ProductError};
+use crate::provider_catalog_refresh::ProviderCatalogRefreshError;
 use crate::runtime::RuntimeError;
+use crate::storage::StorageError;
 use axum::{
     Json,
     http::StatusCode,
@@ -54,6 +56,18 @@ impl From<RuntimeError> for ApiError {
     }
 }
 
+impl From<ProviderCatalogRefreshError> for ApiError {
+    fn from(error: ProviderCatalogRefreshError) -> Self {
+        Self(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "code": "provider_catalog_refresh_failed",
+                "error": error.to_string(),
+            }),
+        )
+    }
+}
+
 impl From<PermissionError> for ApiError {
     fn from(error: PermissionError) -> Self {
         match error {
@@ -101,9 +115,33 @@ impl From<ProductError> for ApiError {
                     "reason": reason,
                 }),
             ),
+            ProductError::Catalog(error) | ProductError::Storage(StorageError::Catalog(error)) => {
+                catalog_error(error)
+            }
             ProductError::Storage(error) => Self::internal(&error.to_string()),
         }
     }
+}
+
+impl From<CatalogError> for ApiError {
+    fn from(error: CatalogError) -> Self {
+        catalog_error(error)
+    }
+}
+
+fn catalog_error(error: CatalogError) -> ApiError {
+    let (harness_id, family_id, provider_id, model_id) = error.selection_context();
+    ApiError(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        json!({
+            "code": error.code(),
+            "error": error.to_string(),
+            "harnessId": harness_id,
+            "familyId": family_id,
+            "providerId": provider_id,
+            "modelId": model_id,
+        }),
+    )
 }
 
 impl IntoResponse for ApiError {

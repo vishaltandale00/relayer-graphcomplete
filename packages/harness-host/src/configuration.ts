@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { parse } from "yaml";
-import type { HarnessConfiguration, JsonObject, JsonValue } from "./types.js";
+import type { HarnessConfiguration, HarnessModelCompatibility, JsonObject, JsonValue } from "./types.js";
 
 export async function loadHarnessConfiguration(path: string): Promise<HarnessConfiguration> {
   return parseHarnessConfiguration(parse(await readFile(path, "utf8")));
@@ -19,7 +19,7 @@ export async function loadHarnessConfigurations(paths: readonly string[]): Promi
 
 export function parseHarnessConfiguration(value: unknown): HarnessConfiguration {
   if (!isRecord(value)) throw new Error("Harness configuration must be an object");
-  const { schemaVersion, name, implementation, implementationVersion, permissionBindings, settings } = value;
+  const { schemaVersion, name, implementation, implementationVersion, permissionBindings, modelCompatibility, settings } = value;
   if (schemaVersion !== 1) throw new Error(`Unsupported harness configuration schema version: ${String(schemaVersion)}`);
   if (!isIdentifier(name)) throw new Error("Harness configuration name must be a non-empty machine identifier");
   if (!isIdentifier(implementation)) throw new Error("Harness implementation must be a non-empty machine identifier");
@@ -34,12 +34,72 @@ export function parseHarnessConfiguration(value: unknown): HarnessConfiguration 
     if (!isJsonObject(binding)) throw new Error(`Harness permission binding ${profileId} must be a JSON object`);
     return [profileId, binding];
   }));
+  const parsedModelCompatibility = parseModelCompatibility(modelCompatibility);
   if (!isJsonObject(settings)) throw new Error("Harness implementation settings must be a JSON object");
-  return { schemaVersion, name, implementation, implementationVersion, permissionBindings: parsedBindings, settings };
+  return {
+    schemaVersion,
+    name,
+    implementation,
+    implementationVersion,
+    permissionBindings: parsedBindings,
+    ...(parsedModelCompatibility ? { modelCompatibility: parsedModelCompatibility } : {}),
+    settings,
+  };
+}
+
+function parseModelCompatibility(value: unknown): readonly HarnessModelCompatibility[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("Harness modelCompatibility must be a non-empty array");
+  }
+  const providers = new Set<string>();
+  return value.map((entry, index) => {
+    if (!isRecord(entry) || !isIdentifier(entry.providerId)) {
+      throw new Error(`Harness modelCompatibility[${index}].providerId must be a machine identifier`);
+    }
+    if (providers.has(entry.providerId)) throw new Error(`Duplicate harness model provider: ${entry.providerId}`);
+    providers.add(entry.providerId);
+    let modelIds: readonly string[] | undefined;
+    if (entry.modelIds !== undefined) {
+      if (!Array.isArray(entry.modelIds) || entry.modelIds.length === 0 || !entry.modelIds.every(isStableModelId)) {
+        throw new Error(`Harness modelCompatibility[${index}].modelIds must be a non-empty model ID array`);
+      }
+      modelIds = [...new Set(entry.modelIds as string[])];
+      if (modelIds.length !== entry.modelIds.length) {
+        throw new Error(`Harness modelCompatibility[${index}].modelIds contains a duplicate`);
+      }
+    }
+    const preferredModelId = entry.preferredModelId;
+    if (preferredModelId !== undefined && !isStableModelId(preferredModelId)) {
+      throw new Error(`Harness modelCompatibility[${index}].preferredModelId must be a model ID`);
+    }
+    if (preferredModelId !== undefined && modelIds && !modelIds.includes(preferredModelId)) {
+      throw new Error(`Harness modelCompatibility[${index}].preferredModelId must be allowed`);
+    }
+    return {
+      providerId: entry.providerId,
+      ...(modelIds ? { modelIds } : {}),
+      ...(preferredModelId ? { preferredModelId } : {}),
+    };
+  });
 }
 
 export function sameHarnessConfiguration(left: HarnessConfiguration, right: HarnessConfiguration): boolean {
   return canonicalJson(left) === canonicalJson(right);
+}
+
+/**
+ * Compares the configuration that owns provider session execution. Catalog-only
+ * model compatibility may be added or refreshed without invalidating a saved
+ * provider session; the current descriptor is persisted after it is resumed.
+ */
+export function sameHarnessExecutionConfiguration(
+  left: HarnessConfiguration,
+  right: HarnessConfiguration,
+): boolean {
+  const { modelCompatibility: _leftModelCompatibility, ...leftExecution } = left;
+  const { modelCompatibility: _rightModelCompatibility, ...rightExecution } = right;
+  return canonicalJson(leftExecution) === canonicalJson(rightExecution);
 }
 
 export function digestHarnessConfiguration(configuration: HarnessConfiguration): string {
@@ -60,6 +120,17 @@ function canonicalize(value: JsonValue | HarnessConfiguration): JsonValue {
 
 function isIdentifier(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9][a-z0-9._-]*$/i.test(value);
+}
+
+function isStableModelId(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const characters = [...value];
+  return characters.length > 0
+    && characters.length <= 200
+    && !/\p{White_Space}/u.test(characters[0]!)
+    && !/\p{White_Space}/u.test(characters.at(-1)!)
+    && !characters.some((character) => character.length === 1 && /[\uD800-\uDFFF]/u.test(character))
+    && !characters.some((character) => /\p{Cc}/u.test(character));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

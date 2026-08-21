@@ -154,7 +154,7 @@ describe("desktop skeleton", () => {
     expect(secondaryApp.on).not.toHaveBeenCalled();
   });
 
-  it("exposes Codex setup, New thread permissions, and updates without a harness selector", async () => {
+  it("exposes Codex setup, separate permissions, and the advanced composer picker", async () => {
     const html = await readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8");
     const desktopMain = await readFile(new URL("../desktop/main/index.mjs", import.meta.url), "utf8");
     const packageManifest = await readFile(new URL("../package.json", import.meta.url), "utf8");
@@ -178,6 +178,8 @@ describe("desktop skeleton", () => {
     expect(html).toContain('id="scopeMenu"');
     expect(html).toContain('id="permissionButton"');
     expect(html).toContain('id="permissionMenu"');
+    expect(html).toContain('id="newModelControl"');
+    expect(html).toContain('data-model-picker-tab="advanced"');
     expect(html).toContain('id="createThread" title="Create thread and send" disabled');
     expect(html).toContain('id="disconnectCodex"');
     expect(html).toContain('id="updateChannel"');
@@ -197,10 +199,16 @@ describe("desktop skeleton", () => {
     expect(html.toLowerCase()).not.toContain("harness selector");
     expect(desktopMain).not.toContain("PrimeAgentThreadRunner");
     expect(rendererMain).toContain('import { bindComposerKeydown } from "./product-workspace/workspace.js";');
-    expect(rendererMain).toContain('bindComposerKeydown($("#newThreadPrompt"), () => $("#createThread").click());');
+    expect(rendererMain).toContain('bindComposerKeydown($("#newThreadPrompt"), () => {');
+    expect(rendererMain).toContain('openNewThreadModelPicker("model")');
     expect(desktopMain).toContain("RelayerAppServerService");
+    expect(desktopMain).toContain('allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-")');
     expect(desktopMain).toContain("productServer.start()");
     expect(desktopMain).toContain("productServer.close()");
+    expect(desktopMain).toContain("startModelCatalogRefreshServer");
+    expect(desktopMain).toContain("providerCatalogRefreshSession: modelCatalogRefreshServer.session");
+    expect(desktopPreload).not.toContain("provider-catalog/refresh");
+    expect(desktopPreload).not.toContain("providerCatalogRefresh");
     expect(desktopMain).toContain("Promise.allSettled");
     expect(desktopMain).toContain("Relayer app server stopped");
     expect(desktopMain).toContain("app.isPackaged");
@@ -413,10 +421,17 @@ describe("desktop skeleton", () => {
       const { viewState } = await import("../desktop/renderer/src/state.js");
       viewState.selectedPermissionProfileId = "auto";
       const { createFirstThread } = await import("../desktop/renderer/src/threads.js?submission-guard");
-      const first = createFirstThread();
-      const repeated = createFirstThread();
+      const pickerPayload = {
+        harnessId: "codex-basic",
+        modelSelection: { familyId: 1, providerId: "codex", modelId: "gpt-5" },
+      };
+      const first = createFirstThread(pickerPayload);
+      const repeated = createFirstThread(pickerPayload);
       expect(fetch).toHaveBeenCalledOnce();
-      expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({ permissionProfileId: "auto" });
+      expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({
+        permissionProfileId: "auto",
+        ...pickerPayload,
+      });
       expect(input.disabled).toBe(true);
       expect(button.disabled).toBe(true);
 
@@ -424,7 +439,7 @@ describe("desktop skeleton", () => {
       await Promise.all([first, repeated]);
       expect(fetch).toHaveBeenCalledOnce();
       expect(input.disabled).toBe(false);
-      expect(button.disabled).toBe(false);
+      expect(button.disabled).toBe(true);
       expect(toastElement.textContent).toBe("test request stopped");
     } finally {
       vi.clearAllTimers();
@@ -459,6 +474,10 @@ describe("desktop skeleton", () => {
       binaryPath: "/test/bin/relayer-app-server",
       webDirectory: "/test/renderer",
       permissionCatalogPath: "/test/permissions/desktop.json",
+      providerCatalogRefreshSession: {
+        origin: "http://127.0.0.1:43122",
+        token: "ab".repeat(32),
+      },
       enableReadOnlySession: true,
       spawnProcess: (binary, args, options) => {
         invocations.push({ binary, args, options });
@@ -492,13 +511,31 @@ describe("desktop skeleton", () => {
         "--permission-catalog", "/test/permissions/desktop.json",
         "--port", "0",
         "--read-only-control-token-stdin",
+        "--provider-catalog-refresh-url", "http://127.0.0.1:43122",
+        "--provider-catalog-refresh-token-stdin",
       ]);
-      expect(suppliedToken).toBe(`${session.cookie.value}\n${session.readOnlyCookie.value}\n`);
+      expect(suppliedToken).toBe(`${session.cookie.value}\n${session.readOnlyCookie.value}\n${"ab".repeat(32)}\n`);
       expect(child.stdin.writableEnded).toBe(false);
       expect(invocations[0].args).not.toContain(session.cookie.value);
       expect(invocations[0].args).not.toContain(session.readOnlyCookie.value);
+      expect(invocations[0].args).not.toContain("ab".repeat(32));
       expect((await stat(join(directory, "product-data"))).mode & 0o777).toBe(0o700);
       expect(await service.start()).toBe(session);
+      const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(null, { status: 204 }));
+      await service.publishProviderCatalog({ providerId: "codex", models: [] });
+      expect(fetch).toHaveBeenCalledWith(
+        new URL("http://127.0.0.1:43123/api/internal/provider-catalog"),
+        expect.objectContaining({
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${session.cookie.value}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ providerId: "codex", models: [] }),
+        }),
+      );
+      expect(fetch.mock.calls[0][1].headers).not.toHaveProperty("Cookie");
+      fetch.mockRestore();
       await service.close();
       expect(child.kill).toHaveBeenCalledWith("SIGTERM");
 
@@ -766,6 +803,10 @@ describe("desktop skeleton", () => {
     expect(await client.account()).toEqual({ status: "connected", account });
 
     await expect(client.request("never-respond", {}, 5)).rejects.toThrow("Codex request timed out");
+    const abortController = new AbortController();
+    const canceled = client.request("never-respond", {}, 1_000, abortController.signal);
+    abortController.abort(new Error("catalog refresh canceled"));
+    await expect(canceled).rejects.toThrow("catalog refresh canceled");
     const interrupted = client.request("never-respond", {}, 1_000);
     child.emit("exit", 1, null);
     await expect(interrupted).rejects.toThrow("Codex app-server stopped");

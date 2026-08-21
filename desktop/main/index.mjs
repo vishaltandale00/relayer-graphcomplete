@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 
 import { CodexCredentialAdapter } from "./credentials/codex-credential-adapter.mjs";
+import { CodexModelCatalogAdapter } from "./models/codex-model-catalog-adapter.mjs";
+import { startModelCatalogRefreshServer } from "./models/model-catalog-refresh-server.mjs";
+import { ModelCatalogService } from "./models/model-catalog-service.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
@@ -77,7 +80,11 @@ if (primaryInstance) {
   const graphRuntime = new GraphCompleteRuntimeService({
     userDataDirectory: userDataPath,
     graphServerBinary: relayerGraphServerBinary,
-    configurationPaths: [join(harnessDirectory, `${defaultHarnessConfiguration}.yaml`)],
+    configurationPaths: [...new Set([
+      defaultHarnessConfiguration,
+      "codex-basic",
+      "codex-basic-high",
+    ])].map((name) => join(harnessDirectory, `${name}.yaml`)),
     codexBasicClientModuleUrl: graphClientModuleUrl,
     codexPathOverride: bundledCodexBinary,
     onUnexpectedStop: () => {
@@ -89,15 +96,20 @@ if (primaryInstance) {
     },
   });
   let productServer;
+  let modelCatalog;
+  let modelCatalogRefreshServer;
 
   const credentials = new CodexCredentialAdapter({
     environment: { ...process.env, CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: bundledCodexBinary },
     onAccountChanged: (event) => {
-      if (event?.status === "unavailable") {
-        mainWindow?.webContents.send("relayer:account-changed", event);
-        return;
-      }
-      void credentials.account().then((account) => mainWindow?.webContents.send("relayer:account-changed", account));
+      void (async () => {
+        await modelCatalog?.providerChanged("codex");
+        const account = event?.status === "unavailable" ? event : await credentials.account();
+        mainWindow?.webContents.send("relayer:account-changed", account);
+      })().catch((error) => {
+        console.error("Codex model catalog refresh failed:", error);
+        mainWindow?.webContents.send("relayer:account-changed", { status: "unavailable", error: error.message });
+      });
     },
   });
 
@@ -132,15 +144,21 @@ if (primaryInstance) {
 
   async function shutdownServices() {
     shutdownPromise ??= (async () => {
-      const results = await Promise.allSettled([
-        credentials.close(),
-        productServer ? productServer.close() : Promise.resolve(),
-      ]);
+      const results = [];
       try {
-        await graphRuntime.close();
+        if (productServer) await productServer.close();
       } catch (error) {
         results.push({ status: "rejected", reason: error });
       }
+      try {
+        await modelCatalogRefreshServer?.close();
+      } catch (error) {
+        results.push({ status: "rejected", reason: error });
+      }
+      results.push(...await Promise.allSettled([
+        credentials.close(),
+        graphRuntime.close(),
+      ]));
       const failures = results.filter((result) => result.status === "rejected");
       if (failures.length) {
         throw new AggregateError(failures.map((result) => result.reason), "Relayer services did not all stop cleanly.");
@@ -157,13 +175,25 @@ if (primaryInstance) {
     const channel = resolveUpdateChannel(saved.updateChannel);
     if (channel === "preview") updater.setChannel("preview");
     const runtimeSession = await graphRuntime.start();
+    modelCatalog = new ModelCatalogService({
+      adapters: [new CodexModelCatalogAdapter({ credentials })],
+      publishSnapshot: (snapshot, { signal } = {}) => {
+        if (!productServer) throw new Error("Relayer app server is not ready to accept a provider catalog.");
+        return productServer.publishProviderCatalog(snapshot, { signal });
+      },
+    });
+    modelCatalogRefreshServer = await startModelCatalogRefreshServer({
+      refresh: ({ signal, providerId }) => modelCatalog.beforeInference({ signal, providerId }),
+    });
     productServer = new RelayerAppServerService({
       userDataDirectory: userDataPath,
       binaryPath: relayerAppServerBinary,
       webDirectory: rendererDirectory,
       permissionCatalogPath,
       runtimeSession,
+      providerCatalogRefreshSession: modelCatalogRefreshServer.session,
       defaultHarnessConfiguration,
+      allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-"),
       onUnexpectedStop: () => {
         dialog.showErrorBox(
           "Relayer app server stopped",
@@ -173,6 +203,7 @@ if (primaryInstance) {
       },
     });
     const productSession = await productServer.start();
+    await modelCatalog.startup();
 
     registerDesktopIpc({
       ipcMain,
@@ -180,6 +211,7 @@ if (primaryInstance) {
       shell,
       nativeTheme,
       credentials,
+      modelCatalog,
       settings,
       updater,
       getWindow: () => mainWindow,

@@ -16,6 +16,8 @@ permissionBindings:
   full:
     sandboxMode: danger-full-access
     approvalPolicy: never
+modelCompatibility:
+  - providerId: codex
 settings:
   modelReasoningEffort: high
   skipGitRepoCheck: true

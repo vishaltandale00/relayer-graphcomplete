@@ -3,13 +3,18 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, resolve } from "node:path";
 import { GraphApiError, RelayerGraphClient, type GraphCapability } from "@relayer/graph-client";
-import { isJsonObject, parseHarnessConfiguration, sameHarnessConfiguration } from "./configuration.js";
+import {
+  isJsonObject,
+  parseHarnessConfiguration,
+  sameHarnessExecutionConfiguration,
+} from "./configuration.js";
 import { resolveHarnessFactory } from "./registry.js";
 import type {
   Harness,
   HarnessCompleteResult,
   HarnessConfiguration,
   HarnessImplementationMap,
+  InteractionModelSelection,
   HarnessGraphScope,
   HarnessSessionDescriptor,
   HarnessSessionRegistration,
@@ -101,7 +106,7 @@ export class HarnessHost {
     const live = this.sessions.get(descriptor.threadId);
     if (live !== undefined) {
       await this.withSessionLock(live, async () => {
-        if (!sameHarnessConfiguration(live.descriptor.configuration, descriptor.configuration)
+        if (!sameHarnessExecutionConfiguration(live.descriptor.configuration, descriptor.configuration)
           || live.descriptor.permissionProfileId !== descriptor.permissionProfileId
           || live.descriptor.workingDirectory !== descriptor.workingDirectory) {
           throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${live.descriptor.configuration.name}`);
@@ -116,7 +121,7 @@ export class HarnessHost {
       return;
     }
     const prior = this.saved.get(descriptor.threadId);
-    if (prior !== undefined && (!sameHarnessConfiguration(prior.configuration, descriptor.configuration)
+    if (prior !== undefined && (!sameHarnessExecutionConfiguration(prior.configuration, descriptor.configuration)
       || prior.permissionProfileId !== descriptor.permissionProfileId
       || prior.workingDirectory !== descriptor.workingDirectory)) {
       throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${prior.configuration.name}`);
@@ -159,10 +164,32 @@ export class HarnessHost {
     await this.persist();
   }
 
-  async complete(threadId: number, capability: GraphCapability, signal?: AbortSignal): Promise<HarnessCompleteResult> {
+  async complete(threadId: number, capability: GraphCapability, signal?: AbortSignal): Promise<HarnessCompleteResult>;
+  async complete(
+    threadId: number,
+    capability: GraphCapability,
+    model: InteractionModelSelection,
+    signal?: AbortSignal,
+  ): Promise<HarnessCompleteResult>;
+  async complete(
+    threadId: number,
+    capability: GraphCapability,
+    model: undefined,
+    signal: AbortSignal,
+  ): Promise<HarnessCompleteResult>;
+  async complete(
+    threadId: number,
+    capability: GraphCapability,
+    modelOrSignal?: InteractionModelSelection | AbortSignal,
+    trailingSignal?: AbortSignal,
+  ): Promise<HarnessCompleteResult> {
     if (this.closed) throw new Error("Harness host is closed");
     validateGraphCapability(capability);
+    const model = isAbortSignal(modelOrSignal) ? undefined : modelOrSignal;
+    const signal = isAbortSignal(modelOrSignal) ? modelOrSignal : trailingSignal;
+    if (model !== undefined) validateInteractionModelSelection(model);
     const session = this.liveSession(threadId);
+    if (model !== undefined) validateConfiguredModelSelection(session.descriptor.configuration, model);
     return this.withSessionLock(session, async () => {
       const controller = new AbortController();
       const detachSignal = forwardAbort(signal, controller);
@@ -172,7 +199,7 @@ export class HarnessHost {
       try {
         if (this.closed) throw new Error("Harness host is closed");
         controller.signal.throwIfAborted();
-        result = await this.executeCompletion(threadId, session, capability, controller.signal);
+        result = await this.executeCompletion(threadId, session, capability, model, controller.signal);
       } catch (error) {
         operationError = error;
       }
@@ -192,7 +219,13 @@ export class HarnessHost {
     });
   }
 
-  private async executeCompletion(threadId: number, session: LiveSession, capability: GraphCapability, signal: AbortSignal): Promise<HarnessCompleteResult> {
+  private async executeCompletion(
+    threadId: number,
+    session: LiveSession,
+    capability: GraphCapability,
+    model: InteractionModelSelection | undefined,
+    signal: AbortSignal,
+  ): Promise<HarnessCompleteResult> {
     const graph = new RelayerGraphClient(capability);
     const interactionNodeId = capability.nodeId;
     try {
@@ -204,7 +237,7 @@ export class HarnessHost {
     const interaction = await graph.getNode(interactionNodeId);
     const scope = new ActiveHarnessGraphScope(capability);
     try {
-      await session.harness.complete({ inputGraph: interaction, graph: scope }, signal);
+      await session.harness.complete({ inputGraph: interaction, graph: scope, ...(model === undefined ? {} : { model }) }, signal);
     } finally {
       scope.close();
     }
@@ -367,11 +400,15 @@ async function route(host: HarnessHost, token: string, request: IncomingMessage,
       if (!Number.isSafeInteger(threadId) || threadId < 1) return reply(response, 400, { error: "invalid_thread_id" });
       const input = await body(request);
       const capability = readGraphCapability(input);
+      const model = readInteractionModelSelection(input);
       const controller = new AbortController();
       const abort = () => controller.abort(new Error("Harness completion request disconnected"));
       request.once("aborted", abort);
       try {
-        return reply(response, 200, await host.complete(threadId, capability, controller.signal));
+        const completed = model === undefined
+          ? await host.complete(threadId, capability, controller.signal)
+          : await host.complete(threadId, capability, model, controller.signal);
+        return reply(response, 200, completed);
       } finally {
         request.off("aborted", abort);
       }
@@ -412,7 +449,10 @@ function sameLegacyHarnessConfiguration(
   legacy: Omit<HarnessConfiguration, "permissionBindings">,
   current: HarnessConfiguration,
 ): boolean {
-  return sameHarnessConfiguration({ ...legacy, permissionBindings: current.permissionBindings }, current);
+  return sameHarnessExecutionConfiguration(
+    { ...legacy, permissionBindings: current.permissionBindings },
+    current,
+  );
 }
 
 function readPersistedSession(value: unknown): PersistedHarnessSessionDescriptor {
@@ -519,6 +559,53 @@ function readGraphCapability(value: unknown): GraphCapability {
   const capability = { url, token, nodeId };
   validateGraphCapability(capability);
   return capability;
+}
+
+function readInteractionModelSelection(value: unknown): InteractionModelSelection | undefined {
+  if (!isRecord(value) || value.model === undefined) return undefined;
+  if (!isRecord(value.model)) throw new Error("Harness completion contains an invalid model selection");
+  const { providerId, modelId } = value.model;
+  const selection = { providerId, modelId };
+  validateInteractionModelSelection(selection);
+  return selection;
+}
+
+function validateInteractionModelSelection(value: unknown): asserts value is InteractionModelSelection {
+  if (!isRecord(value)
+    || !isStableId(value.providerId)
+    || !isStableId(value.modelId)) {
+    throw new Error("Harness completion contains an invalid model selection");
+  }
+}
+
+function validateConfiguredModelSelection(
+  configuration: HarnessConfiguration,
+  selection: InteractionModelSelection,
+): void {
+  const compatibility = configuration.modelCompatibility;
+  if (compatibility === undefined) return;
+  const provider = compatibility.find((entry) => entry.providerId === selection.providerId);
+  if (!provider || (provider.modelIds !== undefined && !provider.modelIds.includes(selection.modelId))) {
+    throw new Error("Harness completion model is not compatible with this configuration");
+  }
+}
+
+function isStableId(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const characters = [...value];
+  return characters.length > 0
+    && characters.length <= 200
+    && !/\p{White_Space}/u.test(characters[0]!)
+    && !/\p{White_Space}/u.test(characters.at(-1)!)
+    && !characters.some((character) => character.length === 1 && /[\uD800-\uDFFF]/u.test(character))
+    && !characters.some((character) => /\p{Cc}/u.test(character));
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return isRecord(value)
+    && typeof value.aborted === "boolean"
+    && typeof value.addEventListener === "function"
+    && typeof value.removeEventListener === "function";
 }
 
 function validateGraphCapability(capability: GraphCapability): void {

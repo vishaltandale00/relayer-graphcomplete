@@ -3,9 +3,18 @@ import { returnFromSettings, selectScope, setMainView, setSettingsTab } from "./
 import {
   closePermissionMenu,
   loadPermissionProfiles,
+  preparePermissionProfiles,
   togglePermissionMenu,
 } from "./permission-profiles.js";
-import { appState, desktop, evalReview, viewState } from "./state.js";
+import { appState, desktop, evalReview, productApiAvailable, viewState } from "./state.js";
+import {
+  closeNewThreadModelPicker,
+  initializeNewThreadModelPicker,
+  newThreadModelSelectionReady,
+  openNewThreadModelPicker,
+  refreshNewThreadModelPicker,
+  resetNewThreadModelPicker,
+} from "./composer-model-picker.js";
 import {
   cancelNavigationHistory,
   connectEvents,
@@ -16,6 +25,10 @@ import {
   updateCreateThreadAvailability,
 } from "./threads.js";
 import { bindComposerKeydown } from "./product-workspace/workspace.js";
+import {
+  initializeModelFamilySettings,
+  refreshModelFamilySettings,
+} from "./model-family-settings.js";
 import { createReviewPresentationAdapter } from "./review-tools.js";
 import { $, applyAppearance, toast } from "./ui.js";
 import { renderUpdate, updateAction } from "./updates.js";
@@ -27,17 +40,36 @@ function applyPlatformCopy() {
   $("#appearanceDescription").textContent = `Choose how Relayer looks on this ${device}.`;
 }
 
+async function refreshProviderModelUi() {
+  if (productApiAvailable) {
+    await refreshModelFamilySettings();
+    refreshNewThreadModelPicker();
+    updateCreateThreadAvailability();
+  }
+  if (viewState.currentThreadId) await refreshState(viewState.currentThreadId);
+}
+
 function bindEvents() {
   $("#connectCodex").onclick = connectCodex;
-  $("#newThread").onclick = () => {
-    cancelNavigationHistory();
-    viewState.currentThreadId = null;
-    selectScope({ kind: "standalone", label: "No folder" });
-    setMainView("new");
-    $("#newThreadPrompt").focus();
+  $("#newThread").onclick = async () => {
+    try {
+      const applyPermissionProfiles = await preparePermissionProfiles(
+        appState.modelSettings?.defaults?.harnessId,
+      );
+      applyPermissionProfiles?.();
+      cancelNavigationHistory();
+      viewState.currentThreadId = null;
+      selectScope({ kind: "standalone", label: "No folder" });
+      resetNewThreadModelPicker();
+      setMainView("new");
+      $("#newThreadPrompt").focus();
+    } catch (error) {
+      toast(error.message);
+    }
   };
   $("#scopeButton").onclick = () => {
     closePermissionMenu();
+    closeNewThreadModelPicker();
     const menu = $("#scopeMenu");
     const opening = menu.classList.contains("hidden");
     menu.classList.toggle("hidden", !opening);
@@ -46,22 +78,35 @@ function bindEvents() {
   $("#permissionButton").onclick = () => {
     $("#scopeMenu").classList.add("hidden");
     $("#scopeButton").setAttribute("aria-expanded", "false");
+    closeNewThreadModelPicker();
     togglePermissionMenu();
   };
-  $("#createThread").onclick = createFirstThread;
+  $("#createThread").onclick = () => createFirstThread();
   $("#newThreadPrompt").oninput = () => {
     updateCreateThreadAvailability();
   };
-  bindComposerKeydown($("#newThreadPrompt"), () => $("#createThread").click());
+  bindComposerKeydown($("#newThreadPrompt"), () => {
+    if (productApiAvailable && !newThreadModelSelectionReady()) openNewThreadModelPicker("model");
+    else $("#createThread").click();
+  });
   $("#collapseSidebar").onclick = () => {
     const collapsed = document.body.classList.toggle("sidebar-collapsed");
     const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
     $("#collapseSidebar").title = label;
     $("#collapseSidebar").setAttribute("aria-label", label);
   };
-  $("#settingsButton").onclick = () => {
+  $("#settingsButton").onclick = async () => {
     cancelNavigationHistory();
     setMainView("settings", { moveFocus: true });
+    try {
+      if (productApiAvailable) {
+        await desktop?.models?.settingsOpened?.();
+        await refreshModelFamilySettings();
+        refreshNewThreadModelPicker();
+      }
+    } catch (error) {
+      toast(error.message);
+    }
   };
   $("#settingsBackButton").onclick = async () => {
     try {
@@ -91,6 +136,7 @@ function bindEvents() {
   $("#disconnectCodex").onclick = async () => {
     await desktop?.account.logout();
     await refreshAccount();
+    await refreshProviderModelUi();
   };
   $("#updateButton").onclick = () => $("#updatePopover").classList.toggle("hidden");
   $("#closeUpdate").onclick = () => $("#updatePopover").classList.add("hidden");
@@ -147,15 +193,28 @@ async function boot() {
   applyPlatformCopy();
   bindEvents();
   desktop?.account.onChanged((event) => {
-    if (event?.status === "unavailable") showAuth(event.error || "Codex is unavailable.");
-    else void refreshAccount();
+    void (async () => {
+      if (event?.status === "unavailable") showAuth(event.error || "Codex is unavailable.");
+      else await refreshAccount();
+      await refreshProviderModelUi();
+    })().catch((error) => toast(error.message));
   });
   desktop?.updater.onChanged(renderUpdate);
   if (desktop?.appearance) applyAppearance((await desktop.appearance.read()).appearance);
   else applyAppearance(document.documentElement.dataset.theme);
   if (desktop) renderUpdate(await desktop.updater.status());
   await refreshAccount();
-  await loadPermissionProfiles();
+  if (productApiAvailable) await initializeModelFamilySettings();
+  await loadPermissionProfiles(appState.modelSettings?.defaults?.harnessId);
+  if (productApiAvailable) {
+    initializeNewThreadModelPicker({
+      onSelectionChange: updateCreateThreadAvailability,
+      onOpenSettings: () => {
+        setSettingsTab("models");
+        $("#settingsButton").click();
+      },
+    });
+  }
   updateCreateThreadAvailability();
   await refreshState(viewState.currentThreadId);
   if (evalReview) {

@@ -16,6 +16,15 @@ export function escapeHtml(value) {
   return element.innerHTML;
 }
 
+export function escapeHtmlAttribute(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 export function toast(message) {
   clearTimeout(toastTimer);
   const element = $("#toast");

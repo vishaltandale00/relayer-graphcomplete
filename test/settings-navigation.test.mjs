@@ -49,10 +49,10 @@ describe("Settings navigation", () => {
       ["#settingsSidebarContent", { classList: classList("hidden") }],
       ["#settingsTitle", { textContent: "Settings" }],
     ]);
-    const tabs = [tab("appearance"), tab("codex"), tab("updates")];
-    const panels = ["appearance", "codex", "updates"].map((name, index) => ({
+    const tabs = [tab("models"), tab("appearance"), tab("codex"), tab("updates")];
+    const panels = ["models", "appearance", "codex", "updates"].map((name) => ({
       dataset: { settingsPanel: name },
-      classList: index === 0 ? classList() : classList("hidden"),
+      classList: name === "appearance" ? classList() : classList("hidden"),
     }));
 
     Object.assign(globalThis, {
@@ -82,14 +82,14 @@ describe("Settings navigation", () => {
     expect(elements.get("#appSidebarContent").classList.contains("hidden")).toBe(true);
     expect(elements.get("#settingsSidebarContent").classList.contains("hidden")).toBe(false);
     expect(elements.get("#settingsTitle").textContent).toBe("Appearance");
-    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
-    expect(tabs[0].focusCount).toBe(1);
+    expect(tabs[1].getAttribute("aria-selected")).toBe("true");
+    expect(tabs[1].focusCount).toBe(1);
     expect(elements.get("#settingsButton").classList.contains("hidden")).toBe(true);
 
     navigation.setSettingsTab("updates");
     expect(elements.get("#settingsTitle").textContent).toBe("Application updates");
-    expect(panels[0].classList.contains("hidden")).toBe(true);
-    expect(panels[2].classList.contains("hidden")).toBe(false);
+    expect(panels[1].classList.contains("hidden")).toBe(true);
+    expect(panels[3].classList.contains("hidden")).toBe(false);
 
     await navigation.returnFromSettings();
     expect(viewState.mainView).toBe("new");

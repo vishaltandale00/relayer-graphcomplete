@@ -1,3 +1,5 @@
+import { modelPickerMarkup } from "../model-picker.js";
+
 export function productWorkspaceMarkup() {
   return `
     <header class="thread-header">
@@ -12,7 +14,7 @@ export function productWorkspaceMarkup() {
       <div class="graph-column">
         <div class="interaction-banner" id="interactionBanner">
           <span class="interaction-icon">›_</span>
-          <div class="interaction-copy"><small>Your interaction</small><p id="interactionText"></p></div>
+          <div class="interaction-copy"><small>Your interaction<span class="interaction-model-identity hidden" id="interactionModelIdentity"></span></small><p id="interactionText"></p></div>
           <div class="turn-picker" id="turnPicker">
             <div class="turn-stepper" role="group" aria-label="Turn navigation">
               <button id="previousTurn" data-review-ref="previous-turn" data-review-kind="turn" disabled title="Previous turn" aria-label="Previous turn">←</button>
@@ -36,7 +38,7 @@ export function productWorkspaceMarkup() {
             <button id="recenterGraph" data-review-ref="recenter-graph" title="Recenter graph" aria-label="Recenter graph">⌾</button>
           </div>
         </div>
-        <div class="thread-composer" id="threadComposer"><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div>
+        <div class="thread-composer" id="threadComposer"><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div></div>
       </div>
       <aside class="inspector hidden" id="inspector" data-review-capture="node-detail" aria-label="Selected node detail">
         <div class="inspector-header"><span>Node details</span><button class="icon-button" id="closeInspector" data-review-ref="close-node-detail" aria-label="Close node details">×</button></div>

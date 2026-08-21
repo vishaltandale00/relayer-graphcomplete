@@ -20,11 +20,71 @@ describe("harness configuration", () => {
         auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
         full: { sandboxMode: "danger-full-access", approvalPolicy: "never" },
       },
+      modelCompatibility: [{ providerId: "codex" }],
       settings: {
         modelReasoningEffort: "medium",
         skipGitRepoCheck: true,
       },
     });
+  });
+
+  it("validates provider-neutral all-model and subset compatibility", () => {
+    const parsed = parseHarnessConfiguration({
+      schemaVersion: 1,
+      name: "subset",
+      implementation: "codex.basic",
+      implementationVersion: 1,
+      permissionBindings,
+      modelCompatibility: [{
+        providerId: "codex",
+        modelIds: ["model-a", "model-b"],
+        preferredModelId: "model-b",
+      }],
+      settings: {},
+    });
+    expect(parsed.modelCompatibility).toEqual([{
+      providerId: "codex",
+      modelIds: ["model-a", "model-b"],
+      preferredModelId: "model-b",
+    }]);
+    expect(() => parseHarnessConfiguration({
+      ...parsed,
+      modelCompatibility: [{ providerId: "codex", modelIds: ["model-a"], preferredModelId: "model-b" }],
+    })).toThrow("preferredModelId must be allowed");
+
+    const stableModelId = 'vendor/model:latest"quoted';
+    expect(parseHarnessConfiguration({
+      ...parsed,
+      modelCompatibility: [{
+        providerId: "codex",
+        modelIds: [stableModelId],
+        preferredModelId: stableModelId,
+      }],
+    }).modelCompatibility).toEqual([{
+      providerId: "codex",
+      modelIds: [stableModelId],
+      preferredModelId: stableModelId,
+    }]);
+    const unicodeModelId = "🧠".repeat(200);
+    expect(parseHarnessConfiguration({
+      ...parsed,
+      modelCompatibility: [{ providerId: "codex", modelIds: [unicodeModelId] }],
+    }).modelCompatibility).toEqual([{ providerId: "codex", modelIds: [unicodeModelId] }]);
+    const byteOrderMarkModelId = "\uFEFFmodel\uFEFF";
+    expect(parseHarnessConfiguration({
+      ...parsed,
+      modelCompatibility: [{ providerId: "codex", modelIds: [byteOrderMarkModelId] }],
+    }).modelCompatibility).toEqual([{ providerId: "codex", modelIds: [byteOrderMarkModelId] }]);
+    for (const modelId of [" model", "model\n", "model\uD800", "m".repeat(201)]) {
+      expect(() => parseHarnessConfiguration({
+        ...parsed,
+        modelCompatibility: [{ providerId: "codex", modelIds: [modelId] }],
+      })).toThrow("modelIds must be a non-empty model ID array");
+    }
+    expect(() => parseHarnessConfiguration({
+      ...parsed,
+      modelCompatibility: [{ providerId: "codex", modelIds: ["🧠".repeat(201)] }],
+    })).toThrow("modelIds must be a non-empty model ID array");
   });
 
   it("keeps implementation-specific configuration opaque to the host", () => {

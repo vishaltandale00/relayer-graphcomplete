@@ -2,6 +2,7 @@ mod api;
 mod app_server;
 mod permissions;
 mod product;
+mod provider_catalog_refresh;
 mod storage;
 
 pub use api::CONTROL_COOKIE;
