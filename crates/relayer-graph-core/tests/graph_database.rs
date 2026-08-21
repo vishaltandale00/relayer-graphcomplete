@@ -386,6 +386,47 @@ async fn large_layers_require_a_private_bounded_justification() {
             if issues.iter().any(|issue| issue.code == "large_layer_justification_required")
     ));
 
+    let unicode_too_short = writer
+        .submit_layer(&LayerDraft {
+            client_key: "unicode-too-short".into(),
+            nodes: nodes[..6].iter().map(|node| node.id).collect(),
+            edges: edges[..5].iter().map(|edge| edge.id).collect(),
+            size_justification: Some("🚀".repeat(5)),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        unicode_too_short,
+        GraphError::ValidationIssues { ref issues, .. }
+            if issues.iter().any(|issue| issue.code == "large_layer_justification_required")
+    ));
+
+    let unicode_within_limit = writer
+        .submit_layer(&LayerDraft {
+            client_key: "unicode-within-limit".into(),
+            nodes: nodes[..6].iter().map(|node| node.id).collect(),
+            edges: edges[..5].iter().map(|edge| edge.id).collect(),
+            size_justification: Some("🚀".repeat(126)),
+        })
+        .await
+        .unwrap();
+    assert_eq!(unicode_within_limit.nodes.len(), 6);
+
+    let unicode_too_long = writer
+        .submit_layer(&LayerDraft {
+            client_key: "unicode-too-long".into(),
+            nodes: nodes[..6].iter().map(|node| node.id).collect(),
+            edges: edges[..5].iter().map(|edge| edge.id).collect(),
+            size_justification: Some("🚀".repeat(501)),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        unicode_too_long,
+        GraphError::ValidationIssues { ref issues, .. }
+            if issues.iter().any(|issue| issue.code == "large_layer_justification_too_long")
+    ));
+
     let accepted = writer
         .submit_layer(&LayerDraft {
             client_key: "large".into(),

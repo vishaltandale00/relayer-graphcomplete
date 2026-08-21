@@ -95,7 +95,8 @@ impl LayerDraft {
                 .as_deref()
                 .map(str::trim)
                 .unwrap_or("");
-            if justification.len() < 20 {
+            let justification_length = justification.chars().count();
+            if justification_length < 20 {
                 issues.push(ValidationIssue::new(
                     "large_layer_justification_required",
                     "sizeJustification",
@@ -104,7 +105,7 @@ impl LayerDraft {
                         self.nodes.len()
                     ),
                 ));
-            } else if justification.len() > 500 {
+            } else if justification_length > 500 {
                 issues.push(ValidationIssue::new(
                     "large_layer_justification_too_long",
                     "sizeJustification",
