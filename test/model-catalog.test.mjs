@@ -84,6 +84,9 @@ describe("provider-neutral model catalog", () => {
     expect(() => sanitizeModelCatalogSnapshot(providerSnapshot({
       models: [{ id: " model" }],
     }))).toThrow("models[0].id must be a stable identifier");
+    expect(() => sanitizeModelCatalogSnapshot(providerSnapshot({
+      models: [{ id: "model\uD800" }],
+    }))).toThrow("models[0].id must be a stable identifier");
 
     expect(toProductCatalogSnapshot(snapshot)).toMatchObject({
       providerId: "fake",

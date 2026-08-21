@@ -21,6 +21,7 @@ function stableIdString(value, field) {
     || characters.length > 200
     || /\p{White_Space}/u.test(characters[0])
     || /\p{White_Space}/u.test(characters.at(-1))
+    || characters.some((character) => character.length === 1 && /[\uD800-\uDFFF]/u.test(character))
     || characters.some((character) => /\p{Cc}/u.test(character))) {
     throw new Error(`${field} must be a stable identifier.`);
   }

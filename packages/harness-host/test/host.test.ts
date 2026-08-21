@@ -930,6 +930,8 @@ describe("HarnessHost", () => {
       .rejects.toThrow("invalid model selection");
     await expect(host.complete(1, capability, { providerId: "codex", modelId: "model\n" }))
       .rejects.toThrow("invalid model selection");
+    await expect(host.complete(1, capability, { providerId: "codex", modelId: "model\uD800" }))
+      .rejects.toThrow("invalid model selection");
     await expect(host.complete(1, capability, { providerId: "codex", modelId: "m".repeat(201) }))
       .rejects.toThrow("invalid model selection");
     await expect(host.complete(1, capability, { providerId: "codex", modelId: "🧠".repeat(201) }))

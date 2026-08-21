@@ -75,7 +75,7 @@ describe("harness configuration", () => {
       ...parsed,
       modelCompatibility: [{ providerId: "codex", modelIds: [byteOrderMarkModelId] }],
     }).modelCompatibility).toEqual([{ providerId: "codex", modelIds: [byteOrderMarkModelId] }]);
-    for (const modelId of [" model", "model\n", "m".repeat(201)]) {
+    for (const modelId of [" model", "model\n", "model\uD800", "m".repeat(201)]) {
       expect(() => parseHarnessConfiguration({
         ...parsed,
         modelCompatibility: [{ providerId: "codex", modelIds: [modelId] }],

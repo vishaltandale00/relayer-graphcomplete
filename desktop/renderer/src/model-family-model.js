@@ -1,20 +1,18 @@
 export const MAX_MODELS_PER_FAMILY = 5;
 
 export function createFamilyVisibilityGate() {
-  const pending = new Set();
-  const key = (familyId) => String(familyId);
+  let pending = false;
   return Object.freeze({
-    begin(familyId) {
-      const familyKey = key(familyId);
-      if (pending.has(familyKey)) return false;
-      pending.add(familyKey);
+    begin() {
+      if (pending) return false;
+      pending = true;
       return true;
     },
-    end(familyId) {
-      pending.delete(key(familyId));
+    end() {
+      pending = false;
     },
-    isPending(familyId) {
-      return pending.has(key(familyId));
+    isPending() {
+      return pending;
     },
   });
 }

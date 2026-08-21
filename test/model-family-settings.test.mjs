@@ -57,13 +57,13 @@ describe("model family settings model", () => {
     expect(saved.models).toEqual(draft.models);
   });
 
-  it("serializes visibility updates for each family", () => {
+  it("serializes visibility updates across all families", () => {
     const gate = createFamilyVisibilityGate();
     expect(gate.begin(7)).toBe(true);
-    expect(gate.begin("7")).toBe(false);
-    expect(gate.isPending(7)).toBe(true);
-    gate.end("7");
-    expect(gate.begin(7)).toBe(true);
+    expect(gate.begin(8)).toBe(false);
+    expect(gate.isPending(8)).toBe(true);
+    gate.end(7);
+    expect(gate.begin(8)).toBe(true);
   });
 
   it("starts a custom family with the first available model from a connected provider", () => {
@@ -272,7 +272,7 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("if (savingFamily) return;");
     expect(settingsSource).toContain("reconcileSavedFamily(family, saved)");
     expect(settingsSource).toContain("Saved, but could not refresh:");
-    expect(settingsSource).toContain("familyVisibilityGate.isPending(family.id)");
+    expect(settingsSource).toContain("familyVisibilityGate.isPending()");
     expect(settingsSource).toContain('$("#defaultHarnessSelect").disabled = savingDefaults');
     expect(settingsSource).toContain("await preparePermissionProfiles(candidate)");
     expect(settingsSource).toContain("await saveModelDefaults({ [field]: candidate })");

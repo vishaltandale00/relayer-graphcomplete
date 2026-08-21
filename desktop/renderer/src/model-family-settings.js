@@ -249,7 +249,7 @@ function familySlide(family, index) {
     <article class="family-card">
       <div class="family-card-heading">
         <div><h3>${escapeHtml(family.name)}</h3><span class="family-kind">${system ? "System" : "Custom"}</span></div>
-        <label class="family-enabled"><input type="checkbox" data-family-enabled="${index}" ${family.enabled ? "checked" : ""} ${familyVisibilityGate.isPending(family.id) ? "disabled" : ""} /><span>Enabled</span></label>
+        <label class="family-enabled"><input type="checkbox" data-family-enabled="${index}" ${family.enabled ? "checked" : ""} ${familyVisibilityGate.isPending() ? "disabled" : ""} /><span>Enabled</span></label>
       </div>
       <ol class="family-members">${family.models.map(memberReadOnly).join("")}</ol>
       <div class="family-card-actions">
@@ -332,7 +332,7 @@ async function persistFamilyOrder(fromIndex, toIndex) {
 
 async function persistEnabled(index, enabled) {
   const family = settings.families[index];
-  if (!family || !familyVisibilityGate.begin(family.id)) {
+  if (!family || !familyVisibilityGate.begin()) {
     render();
     return;
   }
@@ -347,7 +347,7 @@ async function persistEnabled(index, enabled) {
     if (currentFamily) currentFamily.enabled = previousEnabled;
     toast(error.message);
   } finally {
-    familyVisibilityGate.end(family.id);
+    familyVisibilityGate.end();
     render();
   }
 }
