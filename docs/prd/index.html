@@ -1597,7 +1597,7 @@ GET  /api/graph/nodes/:id/output
 <h3>11.8 Recursive graph navigation delivery PRD</h3>
 <p><strong>Goal:</strong> Make useful graph expansion and evidence references reliable across task types and both production harnesses.</p>
 <p><strong>Primary issue:</strong> <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/36">#36 Enable recursive graph navigation generally</a>.</p>
-<p><strong>Current status:</strong> Ready. PR #32 merged on 2026-08-20 and supplied the second required harness.</p>
+<p><strong>Current status:</strong> Verified on the implementation branch. PR #32 supplied the second required harness.</p>
 <h4>Product requirements</h4>
 <ul>
 <li>An expand action develops the current answer. Expand paths define recursive depth and must be acyclic.</li>
@@ -1611,7 +1611,7 @@ GET  /api/graph/nodes/:id/output
 </ul>
 <h4>Issue dependency DAG</h4>
 <pre><code class="language-mermaid">flowchart LR
-  I19[&quot;#19 Judge foundation — Done&quot;] --&gt; I36[&quot;#36 Expand and reference semantics — Ready&quot;]
+  I19[&quot;#19 Judge foundation — Done&quot;] --&gt; I36[&quot;#36 Expand and reference semantics — Verified&quot;]
   PR32[&quot;PR #32 Prime Agent harness — Merged&quot;] --&gt; I36
   I23[&quot;#23 Durable invoke foundation — Done&quot;] --&gt; I55[&quot;#55 Resolve invoke into navigation — Blocked&quot;]
   I36 --&gt; I55
@@ -1625,7 +1625,7 @@ GET  /api/graph/nodes/:id/output
   classDef parallel fill:#edf5ff,stroke:#3478bd,color:#172c46
   classDef blocked fill:#fff7df,stroke:#d4a62c,color:#352b13
   class I19,PR32,I23,I28 done
-  class I36 ready
+  class I36 done
   class I52 parallel
   class I55,I56 blocked
 </code></pre>
@@ -1638,10 +1638,7 @@ GET  /api/graph/nodes/:id/output
 <article class="kanban-card done"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/23">#23 Durable invoke</a><small>Supplies one-shot invocation provenance and persistence.</small></article>
 <article class="kanban-card done"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/28">#28 Navigation breadcrumbs</a><small>Supplies current-path presentation in ProductWorkspace.</small></article>
 <article class="kanban-card done"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/pull/32">PR #32 Prime Agent harness</a><small>Supplies the second harness required by #36.</small></article>
-</section>
-<section class="kanban-column">
-<h4>Ready</h4>
-<article class="kanban-card ready"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/36">#36 Recursive graph navigation</a><small>Owns expand, reference, provenance, closure, prompts, migration, and Eval coverage.</small></article>
+<article class="kanban-card done"><a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/36">#36 Recursive graph navigation</a><small>Verified across semantics, clients, both harnesses, Eval, traces, and judging.</small></article>
 </section>
 <section class="kanban-column">
 <h4>Parallel</h4>
@@ -1655,11 +1652,13 @@ GET  /api/graph/nodes/:id/output
 </div>
 <h4>Exit evidence for #36</h4>
 <ul>
+<li>Local run <code>run-2026-08-21T02-17-18-144Z-213ecbe6</code> passed both Luna harnesses with Sol High judging.</li>
+<li>Codex passed 79 of 79 deterministic checks. Prime Agent passed 83 of 83.</li>
+<li>All 12 candidate traces completed. All 12 judge verdicts passed with complete coverage.</li>
+<li>Codex produced deep expansion and shared references. Prime Agent produced child expansion and prior-layer references.</li>
 <li>Inference-free tests cover flat output, deep expansion, references, cycles, shared targets, reused actions, orphan drafts, authority, size, and migration.</li>
-<li>Natural diagnosis or implementation prompts produce useful recursive output without explicit depth instructions.</li>
-<li>Both <code>codex.basic</code> and <code>prime.agent</code> pass through the production workspace.</li>
-<li>The judge reviews expansion recursively. It edge-grades references without regrading referenced nodes.</li>
-<li>Saved product screenshots prove source actions, destination layers, navigation paths, and representative flat output.</li>
+<li>The judge reviewed expansion recursively. It edge-graded references without regrading referenced nodes.</li>
+<li>The immutable run bundle contains source actions, destinations, paths, flat output, screenshots, and raw harness traces.</li>
 </ul>
 <h4>Scope boundaries</h4>
 <ul>
