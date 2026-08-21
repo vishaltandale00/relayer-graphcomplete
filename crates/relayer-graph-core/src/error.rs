@@ -1,4 +1,27 @@
+use serde::Serialize;
 use thiserror::Error;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationIssue {
+    pub code: &'static str,
+    pub path: String,
+    pub message: String,
+}
+
+impl ValidationIssue {
+    pub(crate) fn new(
+        code: &'static str,
+        path: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            code,
+            path: path.into(),
+            message: message.into(),
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum GraphError {
@@ -7,6 +30,11 @@ pub enum GraphError {
         code: &'static str,
         path: String,
         message: String,
+    },
+    #[error("{message}")]
+    ValidationIssues {
+        message: String,
+        issues: Vec<ValidationIssue>,
     },
     #[error("not found: {0}")]
     NotFound(String),
@@ -31,5 +59,15 @@ impl GraphError {
             path: path.into(),
             message: message.into(),
         }
+    }
+
+    pub(crate) fn validation_issues(issues: Vec<ValidationIssue>) -> Self {
+        debug_assert!(!issues.is_empty());
+        let message = issues
+            .iter()
+            .map(|issue| issue.message.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        Self::ValidationIssues { message, issues }
     }
 }

@@ -21,15 +21,29 @@ export function resolveLocalSimulatedUserAutorun({
   environment = process.env,
   arguments: commandLineArguments = process.argv,
   packaged = false,
+  availableHarnessConfigurationNames,
 } = {}) {
   const enabled = environment[LOCAL_SIMULATED_USER_AUTORUN_ENV] === "1"
     || commandLineArguments.includes(LOCAL_SIMULATED_USER_AUTORUN_FLAG);
   if (!enabled) return null;
   if (packaged) throw new Error("The simulated-user H3 autorun is available only in a local development checkout.");
+  const requestedHarnesses = [
+    "codex-layered-navigation-luna",
+    "prime-agent-layered-navigation-luna",
+  ];
+  const availableHarnesses = availableHarnessConfigurationNames === undefined
+    ? null
+    : new Set(availableHarnessConfigurationNames);
+  const harnessConfigurationNames = availableHarnesses === null
+    ? requestedHarnesses
+    : requestedHarnesses.filter((name) => availableHarnesses.has(name));
+  if (!harnessConfigurationNames.includes("codex-layered-navigation-luna")) {
+    throw new Error("The simulated-user H3 autorun requires codex-layered-navigation-luna.");
+  }
   return {
     testCaseIds: ["project.h3.sanitize-status-code"],
-    harnessConfigurationNames: ["codex-basic-high"],
-    judgeConfigurationName: "simulated-user",
+    harnessConfigurationNames,
+    judgeConfigurationName: "simulated-user-sol-high",
   };
 }
 
@@ -119,11 +133,14 @@ export async function buildAcceptedReviewTopology({ turnId, rootLayerId, loadLay
           throw new Error(`Accepted navigate action has no target layer: ${action.id}`);
         }
         const targetLayerId = String(action.targetLayerId);
+        if (action.relation !== "expand" && action.relation !== "reference") {
+          throw new Error(`Accepted navigate action has no valid relation: ${action.id}`);
+        }
         if (!scheduled.has(targetLayerId)) {
           scheduled.add(targetLayerId);
           pending.push(targetLayerId);
         }
-        return { ...base, targetLayerId };
+        return { ...base, relation: action.relation, targetLayerId };
       }
       if (action.kind !== "invoke") throw new Error(`Unknown accepted action kind: ${action.kind}`);
       return base;
@@ -148,7 +165,7 @@ export function gradeAcceptedReviewTopology(topology, { requireGrandchild = fals
   const byId = new Map(layers.map((layer) => [String(layer.id), layer]));
   const pending = rootLayerId && byId.has(rootLayerId) ? [{ layerId: rootLayerId, depth: 0 }] : [];
   const visited = new Set();
-  let maxDepth = -1;
+  let maxExpansionDepth = -1;
   let closureError = rootLayerId ? null : "The accepted topology has no root layer ID.";
   if (rootLayerId && !byId.has(rootLayerId)) closureError = `The accepted topology omits root layer ${rootLayerId}.`;
 
@@ -156,7 +173,6 @@ export function gradeAcceptedReviewTopology(topology, { requireGrandchild = fals
     const { layerId, depth } = pending[index];
     if (visited.has(layerId)) continue;
     visited.add(layerId);
-    maxDepth = Math.max(maxDepth, depth);
     const layer = byId.get(layerId);
     const nodeIds = new Set((layer?.nodeIds ?? []).map(String));
     for (const action of layer?.actions ?? []) {
@@ -174,6 +190,22 @@ export function gradeAcceptedReviewTopology(topology, { requireGrandchild = fals
     }
   }
 
+  const expansionPending = rootLayerId && byId.has(rootLayerId)
+    ? [{ layerId: rootLayerId, depth: 0 }]
+    : [];
+  const expansionVisited = new Set();
+  for (let index = 0; index < expansionPending.length; index += 1) {
+    const { layerId, depth } = expansionPending[index];
+    if (expansionVisited.has(layerId)) continue;
+    expansionVisited.add(layerId);
+    maxExpansionDepth = Math.max(maxExpansionDepth, depth);
+    for (const action of byId.get(layerId)?.actions ?? []) {
+      if (action.kind === "navigate" && action.relation === "expand") {
+        expansionPending.push({ layerId: String(action.targetLayerId), depth: depth + 1 });
+      }
+    }
+  }
+
   if (closureError === null && visited.size !== byId.size) {
     closureError = `Topology contains ${byId.size - visited.size} layer(s) outside the root's reachable closure.`;
   }
@@ -188,10 +220,10 @@ export function gradeAcceptedReviewTopology(topology, { requireGrandchild = fals
   if (requireGrandchild) {
     checks.push({
       name: "graph:root-child-grandchild",
-      passed: closurePassed && maxDepth >= 2,
-      detail: closurePassed && maxDepth >= 2
-        ? `The accepted response reaches graph depth ${maxDepth} from its root.`
-        : `The accepted response reaches graph depth ${Math.max(maxDepth, 0)}; architecture requires at least 2.`,
+      passed: closurePassed && maxExpansionDepth >= 2,
+      detail: closurePassed && maxExpansionDepth >= 2
+        ? `The accepted response reaches expansion depth ${maxExpansionDepth} from its root.`
+        : `The accepted response reaches expansion depth ${Math.max(maxExpansionDepth, 0)}; architecture requires at least 2.`,
     });
   }
   return checks;

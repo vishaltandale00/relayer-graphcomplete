@@ -26,19 +26,21 @@ export interface GraphLayer {
 }
 
 export type ActionKind = "navigate" | "invoke";
+export type NavigateRelation = "expand" | "reference";
 export type ActionVariant = "chip" | "pill" | "wide" | "card";
 
 export interface GraphAction {
   readonly id: GraphId;
   readonly sourceNodeId: GraphId;
+  readonly sourceLayerId?: GraphId | null;
   readonly kind: ActionKind;
+  readonly relation?: NavigateRelation | null;
   readonly label: string;
   readonly variant: ActionVariant;
   readonly icon?: RelayerIconName | null;
   readonly description?: string | null;
   readonly targetLayerId?: GraphId | null;
   readonly interactionText?: string | null;
-  readonly response: boolean;
   readonly state: RecordState;
 }
 
@@ -66,7 +68,14 @@ export interface GraphApiErrorBody {
     readonly code?: string;
     readonly path?: string;
     readonly message?: string;
+    readonly issues?: readonly GraphValidationIssue[];
   };
+}
+
+export interface GraphValidationIssue {
+  readonly code: string;
+  readonly path: string;
+  readonly message: string;
 }
 
 export class GraphApiError extends Error {
@@ -75,6 +84,7 @@ export class GraphApiError extends Error {
     readonly code: string,
     readonly path: string | undefined,
     message: string,
+    readonly issues: readonly GraphValidationIssue[] = [],
   ) {
     super(message);
     this.name = "GraphApiError";

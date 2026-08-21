@@ -2,7 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{EdgeId, GraphAction, GraphEdge, GraphError, GraphNode, LayerId, NodeId, RecordState};
+use crate::{
+    EdgeId, GraphAction, GraphEdge, GraphError, GraphNode, LayerId, NodeId, RecordState,
+    ValidationIssue,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +31,8 @@ pub struct LayerDraft {
     pub client_key: String,
     pub nodes: Vec<NodeId>,
     pub edges: Vec<EdgeId>,
+    #[serde(default)]
+    pub size_justification: Option<String>,
 }
 
 pub(crate) struct LayerCandidate<'draft> {
@@ -59,29 +64,57 @@ impl LayerCandidate<'_> {
 impl LayerDraft {
     fn validate_shape(&self) -> Result<(), GraphError> {
         super::require_nonempty(&self.client_key, "clientKey")?;
+        let mut issues = Vec::new();
         if !(1..=8).contains(&self.nodes.len()) {
-            return Err(GraphError::validation(
+            issues.push(ValidationIssue::new(
                 "layer_node_count",
                 "nodes",
                 format!(
-                    "A visible layer needs 1 to 8 nodes; received {}.",
+                    "A visible layer needs 1 to 8 nodes; received {}. Split this material into smaller useful layers.",
                     self.nodes.len()
                 ),
             ));
         }
         if self.nodes.iter().collect::<HashSet<_>>().len() != self.nodes.len() {
-            return Err(GraphError::validation(
+            issues.push(ValidationIssue::new(
                 "duplicate_layer_node",
                 "nodes",
                 "A node may appear only once in a layer.",
             ));
         }
         if self.edges.iter().collect::<HashSet<_>>().len() != self.edges.len() {
-            return Err(GraphError::validation(
+            issues.push(ValidationIssue::new(
                 "duplicate_layer_edge",
                 "edges",
                 "An edge may appear only once in a layer.",
             ));
+        }
+        if (6..=8).contains(&self.nodes.len()) {
+            let justification = self
+                .size_justification
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("");
+            let justification_length = justification.chars().count();
+            if justification_length < 20 {
+                issues.push(ValidationIssue::new(
+                    "large_layer_justification_required",
+                    "sizeJustification",
+                    format!(
+                        "This layer has {} nodes. Layers with 6 to 8 nodes need a private justification of at least 20 characters explaining why one larger layer is clearer. Resubmit with sizeJustification; do not copy it into user-visible content.",
+                        self.nodes.len()
+                    ),
+                ));
+            } else if justification_length > 500 {
+                issues.push(ValidationIssue::new(
+                    "large_layer_justification_too_long",
+                    "sizeJustification",
+                    "Keep the private layer-size justification to 500 characters or fewer and resubmit.",
+                ));
+            }
+        }
+        if !issues.is_empty() {
+            return Err(GraphError::validation_issues(issues));
         }
         Ok(())
     }

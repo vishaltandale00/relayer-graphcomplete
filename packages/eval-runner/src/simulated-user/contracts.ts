@@ -150,6 +150,23 @@ export interface TurnReview {
   readonly nullRatingJustifications?: Readonly<Partial<Record<keyof TurnRatings, string>>>;
   readonly summary: string;
   readonly findings: readonly Finding[];
+  readonly structure: StructureReview;
+}
+
+export type StructureNeed = "none" | "helpful" | "required";
+export type StructureResult = "absent" | "works" | "mixed" | "fails";
+
+export interface StructureDimensionReview {
+  readonly need: StructureNeed;
+  readonly result: StructureResult;
+}
+
+export interface StructureReview {
+  readonly overall: "helps" | "neutral" | "mixed" | "hurts";
+  readonly expansion: StructureDimensionReview;
+  readonly references: StructureDimensionReview;
+  readonly reason: string;
+  readonly evidence: readonly ScreenshotEvidenceRef[];
 }
 
 export interface ScreenshotToolInput {

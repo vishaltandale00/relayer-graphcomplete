@@ -1,0 +1,23 @@
+schemaVersion: 1
+name: codex-layered-navigation-luna
+implementation: codex.basic
+implementationVersion: 1
+permissionBindings:
+  ask:
+    sandboxMode: workspace-write
+    approvalPolicy: on-request
+    approvalsReviewer: user
+    networkAccessEnabled: true
+  auto:
+    sandboxMode: workspace-write
+    approvalPolicy: on-request
+    approvalsReviewer: auto_review
+    networkAccessEnabled: true
+  full:
+    sandboxMode: danger-full-access
+    approvalPolicy: never
+settings:
+  model: gpt-5.6-luna
+  modelReasoningEffort: medium
+  promptProfile: layered-navigation-v1
+  skipGitRepoCheck: true

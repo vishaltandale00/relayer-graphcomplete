@@ -37,7 +37,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.endswith("/nodes") and body["title"] == "server-error":
             self._reply({"error": {"message": "database failed"}}, 500)
         elif self.path.endswith("/nodes") and not body["title"].strip():
-            self._reply({"error": {"message": "title is required"}}, 422)
+            self._reply({"error": {"message": "title is required", "issues": [{
+                "code": "node_title_required", "path": "node.title",
+                "message": "Add a short title and submit the node again."
+            }]}}, 422)
         elif self.path.endswith("/nodes"):
             self._reply({"node": {"id": Handler.next_id, "kind": body["kind"], "icon": body["icon"], "title": body["title"], "detail": body["detail"], "state": "draft"}})
         elif self.path.endswith("/edges"):
@@ -92,8 +95,8 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Handler.requests[-1][0], "/api/graph/nodes/7/output")
 
     async def test_action_retries_use_the_caller_owned_key(self):
-        await self.client.add_invoke_action(7, "Ask", "Continue", client_key="ask-again")
-        await self.client.add_invoke_action(7, "Ask", "Continue", client_key="ask-again")
+        await self.client.add_invoke_action(7, "Ask", "Continue", source_layer=8, client_key="ask-again")
+        await self.client.add_invoke_action(7, "Ask", "Continue", source_layer=8, client_key="ask-again")
         self.assertEqual(
             [request[2]["clientKey"] for request in Handler.requests[-2:]],
             ["ask-again", "ask-again"],
@@ -108,6 +111,8 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
             7,
             "Compare approaches",
             9,
+            relation="expand",
+            source_layer=8,
             client_key="compare",
             variant="card",
             icon="git-compare",
@@ -116,19 +121,34 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             {
                 key: Handler.requests[-1][2][key]
-                for key in ("variant", "icon", "description", "targetLayerId")
+                for key in ("variant", "icon", "description", "targetLayerId", "relation", "sourceLayerId")
             },
             {
                 "variant": "card",
                 "icon": "git-compare",
                 "description": "Lay out the tradeoffs before choosing.",
                 "targetLayerId": 9,
+                "relation": "expand",
+                "sourceLayerId": 8,
             },
         )
 
     async def test_validation_errors_preserve_server_guidance(self):
-        with self.assertRaisesRegex(ValidationError, "title is required"):
+        with self.assertRaisesRegex(ValidationError, "title is required") as raised:
             await self.client.submit_node(NodeObject("box", "", "detail"))
+        self.assertEqual(raised.exception.issues[0].code, "node_title_required")
+        self.assertIn("submit the node again", raised.exception.issues[0].message)
+
+    async def test_large_layer_justification_is_request_only_authoring_data(self):
+        layer = LayerObject((1, 2, 3, 4, 5, 6), (), client_key="large")
+        await self.client.submit_layer(
+            layer,
+            size_justification="These six concepts must stay together for comparison.",
+        )
+        self.assertEqual(
+            Handler.requests[-1][2]["sizeJustification"],
+            "These six concepts must stay together for comparison.",
+        )
 
     async def test_internal_server_errors_are_not_classified_as_validation_errors(self):
         with self.assertRaisesRegex(APIError, "database failed") as raised:

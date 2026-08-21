@@ -11,11 +11,13 @@ export function evalHarnessConfigurationPaths({
     join(harnessDirectory, "fixture-task-system.yaml"),
     join(harnessDirectory, "codex-basic.yaml"),
     join(harnessDirectory, "codex-basic-high.yaml"),
+    join(harnessDirectory, "codex-layered-navigation-luna.yaml"),
   ];
   if (!isPackaged && packageAvailable(primeAgentPackage)) {
     paths.push(
       join(harnessDirectory, "prime-agent-basic.yaml"),
       join(harnessDirectory, "prime-agent-deep.yaml"),
+      join(harnessDirectory, "prime-agent-layered-navigation-luna.yaml"),
     );
   }
   return paths;

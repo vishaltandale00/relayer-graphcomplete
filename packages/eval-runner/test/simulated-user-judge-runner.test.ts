@@ -102,7 +102,9 @@ describe("simulated-user Codex judge runner", () => {
       },
     });
     expect(result.prompt.text).toContain("Original user request:\nExplain the architecture.");
-    expect(result.prompt.text).toContain("root and child layers have no different rules");
+    expect(result.prompt.text).toContain("root and expansion layers have no different rules");
+    expect(result.prompt.text).toContain("Do not regrade the reference destination node by node");
+    expect(result.prompt.text).toContain("Need is independent of execution");
     expect(result.codexTrace).toEqual([{ id: "message-1", type: "agent_message", text: "Review submitted." }]);
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.codexTrace)).toBe(true);
@@ -184,6 +186,13 @@ function finalizedStore(): IncrementalReviewStore<LayerReview, NodeReview, TurnR
     nullRatingJustifications: { follow_up_progress: "This is the first turn." },
     summary: "Strong overall.",
     findings: [],
+    structure: {
+      overall: "neutral",
+      expansion: { need: "none", result: "absent" },
+      references: { need: "none", result: "absent" },
+      reason: "A flat response is sufficient.",
+      evidence: ["shot-layer"],
+    },
   });
   return store;
 }

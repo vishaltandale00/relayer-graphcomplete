@@ -94,6 +94,13 @@ export function validateScreenshotEvidence(
         undefined,
         allowedTurnIds,
       );
+      collector.requireNonEmpty(request.review.structure.evidence, ["structure", "evidence"]);
+      collector.references(
+        request.review.structure.evidence,
+        ["structure", "evidence"],
+        (shot) => lowerReviewEvidence.has(shot.screenshotId),
+        "Structure evidence must cite completed current-turn lower-subject reviews",
+      );
       collector.findings(
         request.review.findings,
         ["findings"],

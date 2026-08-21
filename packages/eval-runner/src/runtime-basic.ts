@@ -170,7 +170,7 @@ export function checkBasicOutput(output: CompletionOutput, expectedInteractionNo
     { name: "interaction-output", passed: output.nodeId === expectedInteractionNodeId && output.rootAction.sourceNodeId === expectedInteractionNodeId, detail: "Completion output and response action belong to the requested interaction." },
     { name: "accepted-closure", passed: output.rootAction.state === "accepted" && layer.layer.state === "accepted" && layer.nodes.every((node) => node.state === "accepted") && layer.edges.every((edge) => edge.state === "accepted") && layer.actions.every((action) => action.state === "accepted"), detail: "The response action and complete visible closure are accepted." },
     { name: "resolved-membership", passed: arraysEqual(declaredNodeIds, resolvedNodeIds) && arraysEqual(declaredEdgeIds, resolvedEdgeIds), detail: "Resolved records exactly match the accepted layer references." },
-    { name: "response-action", passed: output.rootAction.kind === "navigate" && output.rootAction.response && output.rootAction.targetLayerId === layer.layer.id, detail: "Interaction has one accepted response navigate action." },
+    { name: "response-action", passed: output.rootAction.kind === "navigate" && output.rootAction.relation === "expand" && output.rootAction.sourceLayerId == null && output.rootAction.targetLayerId === layer.layer.id, detail: "Interaction has one accepted root expansion action." },
     { name: "visible-layer", passed: layer.nodes.length >= 1 && layer.nodes.length <= 8 && layer.nodes.every((node) => node.icon.trim() && node.title.trim() && node.detail.trim()), detail: `${layer.nodes.length} complete visible nodes.` },
     { name: "exact-edges", passed: layer.edges.every((edge) => edge.endpoints[0] !== edge.endpoints[1] && nodeIds.has(edge.endpoints[0]) && nodeIds.has(edge.endpoints[1])), detail: `${layer.edges.length} visible undirected edges stay inside the layer.` },
     { name: "connected", passed: visited.size === layer.nodes.length, detail: `${visited.size}/${layer.nodes.length} nodes connected.` },
@@ -182,7 +182,8 @@ export function checkNodeNavigation(output: CompletionOutput): EvalCheck[] {
   const navigation = output.rootLayer.actions.find((action) => (
     action.kind === "navigate"
     && action.state === "accepted"
-    && action.response === false
+    && action.relation === "expand"
+    && action.sourceLayerId === output.rootLayer.layer.id
     && Number.isInteger(action.targetLayerId)
     && visibleNodeIds.has(action.sourceNodeId)
   ));

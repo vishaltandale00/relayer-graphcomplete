@@ -20,7 +20,7 @@ pub(crate) struct HarnessConfiguration {
     implementation: String,
     implementation_version: u32,
     permission_bindings: Map<String, Value>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     model_compatibility: Vec<HarnessModelCompatibility>,
     settings: Value,
 }
@@ -514,7 +514,7 @@ pub(crate) enum RuntimeError {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompleteInteraction, RuntimeClient};
+    use super::{CompleteInteraction, HarnessConfiguration, RuntimeClient};
     use crate::permissions::PermissionProfile;
     use axum::{
         Json, Router,
@@ -531,6 +531,23 @@ mod tests {
         },
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn configuration_owned_model_omits_empty_compatibility_when_forwarded() {
+        let configuration: HarnessConfiguration = serde_json::from_value(json!({
+            "schemaVersion": 1,
+            "name": "configuration-owned-model",
+            "implementation": "test",
+            "implementationVersion": 1,
+            "permissionBindings": { "auto": {} },
+            "settings": { "model": "pinned-model" }
+        }))
+        .unwrap();
+
+        let forwarded = serde_json::to_value(configuration).unwrap();
+
+        assert!(forwarded.get("modelCompatibility").is_none());
+    }
 
     #[tokio::test]
     async fn rejects_shared_graph_and_harness_control_authority() {

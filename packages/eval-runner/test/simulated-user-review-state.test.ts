@@ -37,8 +37,8 @@ const topology: ReviewTopology = {
       id: "layer-root",
       nodeIds: ["node-a", "node-b"],
       actions: [
-        { id: "action-child", sourceNodeId: "node-a", kind: "navigate", targetLayerId: "layer-child" },
-        { id: "action-shared", sourceNodeId: "node-b", kind: "navigate", targetLayerId: "layer-deep" },
+        { id: "action-child", sourceNodeId: "node-a", kind: "navigate", relation: "expand", targetLayerId: "layer-child" },
+        { id: "action-shared", sourceNodeId: "node-b", kind: "navigate", relation: "reference", targetLayerId: "layer-deep" },
         { id: "action-invoke", sourceNodeId: "node-b", kind: "invoke" },
       ],
     },
@@ -46,7 +46,7 @@ const topology: ReviewTopology = {
       id: "layer-child",
       nodeIds: ["node-c"],
       actions: [
-        { id: "action-deep", sourceNodeId: "node-c", kind: "navigate", targetLayerId: "layer-deep" },
+        { id: "action-deep", sourceNodeId: "node-c", kind: "navigate", relation: "expand", targetLayerId: "layer-deep" },
       ],
     },
     { id: "layer-deep", nodeIds: ["node-d"], actions: [] },
@@ -54,7 +54,7 @@ const topology: ReviewTopology = {
       id: "layer-unreachable",
       nodeIds: ["node-hidden"],
       actions: [
-        { id: "action-hidden", sourceNodeId: "node-hidden", kind: "navigate", targetLayerId: "layer-deep" },
+        { id: "action-hidden", sourceNodeId: "node-hidden", kind: "navigate", relation: "expand", targetLayerId: "layer-deep" },
       ],
     },
   ],
@@ -74,7 +74,7 @@ function nodeReview(
 }
 
 describe("recursive simulated-user review state", () => {
-  it("inventories only root-reachable DAG subjects and keeps actions nested in source-node context", () => {
+  it("recursively inventories expansion subjects but grades reference inclusion from its source action", () => {
     const inventory = inventoryReviewSubjects(topology);
 
     expect(inventory.layers).toEqual([
@@ -83,8 +83,8 @@ describe("recursive simulated-user review state", () => {
       {
         kind: "layer",
         layerId: "layer-deep",
-        depth: 1,
-        incomingActionIds: ["action-shared", "action-deep"],
+        depth: 2,
+        incomingActionIds: ["action-deep"],
       },
     ]);
     expect(inventory.nodes.map(({ layerId, nodeId, actionIds }) => ({ layerId, nodeId, actionIds }))).toEqual([
@@ -103,7 +103,7 @@ describe("recursive simulated-user review state", () => {
     ]);
   });
 
-  it("rejects cycles instead of silently turning recursive coverage into a loop", () => {
+  it("rejects expansion cycles instead of silently turning recursive coverage into a loop", () => {
     expect(() => inventoryReviewSubjects({
       turnId: "turn-1",
       rootLayerId: "layer-a",
@@ -111,15 +111,38 @@ describe("recursive simulated-user review state", () => {
         {
           id: "layer-a",
           nodeIds: ["node-a"],
-          actions: [{ id: "action-ab", sourceNodeId: "node-a", kind: "navigate", targetLayerId: "layer-b" }],
+          actions: [{ id: "action-ab", sourceNodeId: "node-a", kind: "navigate", relation: "expand", targetLayerId: "layer-b" }],
         },
         {
           id: "layer-b",
           nodeIds: ["node-b"],
-          actions: [{ id: "action-ba", sourceNodeId: "node-b", kind: "navigate", targetLayerId: "layer-a" }],
+          actions: [{ id: "action-ba", sourceNodeId: "node-b", kind: "navigate", relation: "expand", targetLayerId: "layer-a" }],
         },
       ],
-    })).toThrow("Review topology must be acyclic; found \"layer-a\" -> \"layer-b\" -> \"layer-a\"");
+    })).toThrow("Review expansion topology must be acyclic; found \"layer-a\" -> \"layer-b\" -> \"layer-a\"");
+  });
+
+  it("allows reference cycles without recursively regrading their destination layers", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-1",
+      rootLayerId: "layer-a",
+      layers: [
+        {
+          id: "layer-a",
+          nodeIds: ["node-a"],
+          actions: [{ id: "action-ab", sourceNodeId: "node-a", kind: "navigate", relation: "reference", targetLayerId: "layer-b" }],
+        },
+        {
+          id: "layer-b",
+          nodeIds: ["node-b"],
+          actions: [{ id: "action-ba", sourceNodeId: "node-b", kind: "navigate", relation: "reference", targetLayerId: "layer-a" }],
+        },
+      ],
+    });
+
+    expect(inventory.layers.map((layer) => layer.layerId)).toEqual(["layer-a"]);
+    expect(inventory.nodes.map((node) => node.nodeId)).toEqual(["node-a"]);
+    expect(inventory.actions.map((action) => action.actionId)).toEqual(["action-ab"]);
   });
 
   it("preserves revisions and invokes evidence validation before mutating state", () => {

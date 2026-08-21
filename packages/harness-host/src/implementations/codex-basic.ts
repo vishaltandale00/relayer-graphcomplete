@@ -29,18 +29,21 @@ type CodexConfiguration = NonNullable<CodexOptions["config"]>;
 interface ResolvedCodexConfiguration {
   readonly threadOptions: CodexBasicConfiguration;
   readonly codexConfig: CodexConfiguration;
+  readonly promptProfile?: "layered-navigation-v1";
 }
 
 export class CodexBasicHarness implements Harness {
   private readonly clientModuleUrl: string;
   private readonly threadOptions: CodexBasicConfiguration;
   private readonly codexConfig: CodexConfiguration;
+  private readonly promptProfile: ResolvedCodexConfiguration["promptProfile"];
   private codexThreadId: string | undefined;
 
   constructor(private readonly context: HarnessFactoryContext, private readonly dependencies: CodexBasicDependencies = {}) {
     const resolved = parseCodexBasicConfiguration(context);
     this.threadOptions = resolved.threadOptions;
     this.codexConfig = resolved.codexConfig;
+    this.promptProfile = resolved.promptProfile;
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
     const codexThreadId = context.savedState?.codexThreadId;
     this.codexThreadId = typeof codexThreadId === "string" ? codexThreadId : undefined;
@@ -116,6 +119,9 @@ export class CodexBasicHarness implements Harness {
   }
 
   private prompt(interactionNode: GraphNode): string {
+    if (this.promptProfile === "layered-navigation-v1") {
+      return this.layeredNavigationPrompt(interactionNode);
+    }
     return `You are the basic Relayer graph harness. Answer the current user interaction by authoring and accepting a useful graph layer.
 
 Current interaction node: ${interactionNode.id}
@@ -153,6 +159,39 @@ Choose variants with the available inspector space in mind: chips and pills suit
 Navigate and invoke actions are first-class options, not requirements for every node. Use them where they materially improve the answer, and submit every referenced node, edge, and layer before adding its action.
 
 If a graph call rejects an object, read its error message, repair only that object, and retry. The graph is complete only after graph.submit succeeds.`;
+  }
+
+  private layeredNavigationPrompt(interactionNode: GraphNode): string {
+    return `You are the Relayer layered-navigation harness. Your task is to answer the current user interaction with a useful graph. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
+
+Current interaction node: ${interactionNode.id}
+User text: ${interactionNode.detail}
+
+Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a small .mjs file in the system temporary directory, not in the project checkout, and run it with Node.js. Import from:
+${this.clientModuleUrl}
+
+The module exports RelayerGraphClient, NodeObject, EdgeObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.
+
+Navigation has two meanings:
+- "expand" continues the explanation with a more detailed layer. Expansion must not point back to an expansion ancestor.
+- "reference" opens supporting evidence or context. References may reuse an accepted layer, may point to other reference layers, and may revisit a layer.
+
+The interaction node must have one root navigate action with relation: "expand" and no sourceLayer. Every action on a response node must include sourceLayer: the LayerObject in which you are authoring that action. Expansion layers may author expand, reference, or invoke actions. A layer reached as a reference may author only reference actions. Do not create both expand and reference actions to the same new target layer.
+
+Examples:
+await graph.addAction(${interactionNode.id}, { kind: "navigate", relation: "expand", label: "Response", target: rootLayer });
+await graph.addAction(node, { kind: "navigate", relation: "expand", sourceLayer: rootLayer, label: "Explain further", target: detailLayer });
+await graph.addAction(node, { kind: "navigate", relation: "reference", sourceLayer: rootLayer, label: "View evidence", target: evidenceLayer });
+await graph.addAction(node, { kind: "invoke", sourceLayer: rootLayer, label: "Follow up", interactionText: "Ask a useful follow-up" });
+
+Layers normally contain 1 to 5 nodes. A layer may contain 6 to 8 nodes only when keeping them together is important; pass that private reason as await graph.submitLayer(layer, { sizeJustification: "..." }). Never mention or expose the size justification in user-facing node text. More than 8 nodes must be split into useful layers.
+
+Layer edges are exactly what the user sees and are undirected. Every node needs a supported icon, a short title, and useful markdown detail. Optional action icons must also use a supported Relayer icon name:
+${RELAYER_ICON_NAMES.join(", ")}
+
+Action variants are "chip", "pill", "wide", or "card". A card requires description; other variants do not accept one. Do not author HTML, CSS, colors, dimensions, or style fields.
+
+The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue, repair the rejected object or missing closure, and retry. A model turn ending is not completion. The task is complete only when the final graph.submit call succeeds.`;
   }
 }
 
@@ -250,7 +289,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
     throw new Error(`Unsupported codex.basic implementation version: ${selected.implementationVersion}`);
   }
   const configuration = selected.settings;
-  const allowed = new Set(["model", "modelReasoningEffort", "webSearchMode", "skipGitRepoCheck", "additionalDirectories"]);
+  const allowed = new Set(["model", "modelReasoningEffort", "webSearchMode", "skipGitRepoCheck", "additionalDirectories", "promptProfile"]);
   const unknown = Object.keys(configuration).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new Error(`Unknown codex.basic configuration field: ${unknown.join(", ")}`);
 
@@ -259,6 +298,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
   const webSearchMode = optionalEnum(configuration.webSearchMode, ["disabled", "cached", "live"] as const, "webSearchMode");
   const skipGitRepoCheck = optionalBoolean(configuration.skipGitRepoCheck, "skipGitRepoCheck");
   const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
+  const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1"] as const, "promptProfile");
   const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);
 
   return {
@@ -273,6 +313,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
       ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
     },
     codexConfig: permission.approvalsReviewer === undefined ? {} : { approvals_reviewer: permission.approvalsReviewer },
+    ...(promptProfile === undefined ? {} : { promptProfile }),
   };
 }
 

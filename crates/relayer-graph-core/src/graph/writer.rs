@@ -1,6 +1,7 @@
 use crate::{
     ActionDraft, CompletionOutput, EdgeDraft, GraphAction, GraphDatabase, GraphEdge, GraphError,
-    GraphLayer, GraphNode, LayerDraft, LayerId, NodeDraft, NodeId, RecordState, ResolvedLayer,
+    GraphLayer, GraphNode, LayerDraft, LayerId, NavigateRelation, NodeDraft, NodeId, RecordState,
+    ResolvedLayer,
     graph::{InteractionScope, completion, model::LayerCandidate},
     storage::{
         GraphConnection,
@@ -152,20 +153,118 @@ impl GraphWriter {
             .record(draft.source_node_id)
             .await?
             .ok_or_else(|| GraphError::NotFound(format!("source node {}", draft.source_node_id)))?;
-        if draft.source_node_id != self.scope.root_node_id
-            && !(source.node.state == RecordState::Draft
+        if draft.source_node_id == self.scope.root_node_id {
+            if draft.source_layer_id.is_some() {
+                return Err(GraphError::validation(
+                    "unexpected_root_source_layer",
+                    "sourceLayerId",
+                    "The interaction root is not authored from a layer. Remove sourceLayerId and retry.",
+                ));
+            }
+            if draft.kind != crate::ActionKind::Navigate
+                || draft.relation != Some(NavigateRelation::Expand)
+            {
+                return Err(GraphError::validation(
+                    "invalid_root_action",
+                    "relation",
+                    "The interaction root action must be navigate with relation=expand.",
+                ));
+            }
+        } else {
+            if !(source.node.state == RecordState::Draft
                 && source.owner == Some(self.scope.root_node_id))
-        {
-            return Err(GraphError::validation(
-                "immutable_action_source",
-                "sourceNodeId",
-                "Actions can only be added to the current interaction node or a draft node created for this interaction.",
-            ));
+            {
+                return Err(GraphError::validation(
+                    "immutable_action_source",
+                    "sourceNodeId",
+                    "New actions can only be authored on a draft node created for this interaction. Reused accepted nodes keep their existing actions.",
+                ));
+            }
+            let source_layer_id = draft.source_layer_id.ok_or_else(|| {
+                GraphError::validation(
+                    "missing_source_layer",
+                    "sourceLayerId",
+                    "Identify the layer you are authoring from with sourceLayerId and retry.",
+                )
+            })?;
+            let source_layer = LayerTable::new(&mut transaction)
+                .record(&self.scope, source_layer_id)
+                .await?
+                .ok_or_else(|| {
+                    GraphError::validation(
+                        "unknown_source_layer",
+                        "sourceLayerId",
+                        format!("Source layer {source_layer_id} does not exist. Submit that layer first."),
+                    )
+                })?;
+            if source_layer.owner != self.scope.root_node_id
+                || source_layer.layer.state != RecordState::Draft
+            {
+                return Err(GraphError::validation(
+                    "invalid_source_layer",
+                    "sourceLayerId",
+                    "New actions must be authored from a current-interaction draft layer.",
+                ));
+            }
+            if !source_layer.layer.nodes.contains(&draft.source_node_id) {
+                return Err(GraphError::validation(
+                    "source_node_outside_layer",
+                    "sourceNodeId",
+                    format!(
+                        "Node {} is not in source layer {source_layer_id}. Choose a source layer that contains the node.",
+                        draft.source_node_id
+                    ),
+                ));
+            }
+            let incoming = ActionTable::new(&mut transaction)
+                .relations_for_owned_target(self.scope.root_node_id, source_layer_id)
+                .await?;
+            if incoming.contains(&NavigateRelation::Reference)
+                && (draft.kind != crate::ActionKind::Navigate
+                    || draft.relation != Some(NavigateRelation::Reference))
+            {
+                return Err(GraphError::validation(
+                    "reference_layer_authoring_restricted",
+                    "relation",
+                    "This action starts from a reference layer. Reference layers may author only reference navigation. Change the relation to reference, or author the action from an expansion layer.",
+                ));
+            }
         }
         if let Some(layer_id) = draft.target_layer_id {
-            LayerTable::new(&mut transaction)
-                .visible(&self.scope, layer_id)
-                .await?;
+            let target = LayerTable::new(&mut transaction)
+                .record(&self.scope, layer_id)
+                .await?
+                .ok_or_else(|| {
+                    GraphError::validation(
+                        "unknown_target_layer",
+                        "targetLayerId",
+                        format!("Target layer {layer_id} does not exist. Submit that layer first."),
+                    )
+                })?;
+            match draft.relation {
+                Some(NavigateRelation::Expand)
+                    if target.owner != self.scope.root_node_id
+                        || target.layer.state != RecordState::Draft =>
+                {
+                    return Err(GraphError::validation(
+                        "expand_target_must_be_current_draft",
+                        "targetLayerId",
+                        "Expand actions must target a draft layer created for the current interaction. Create a current draft layer, or use relation=reference for visible accepted context.",
+                    ));
+                }
+                Some(NavigateRelation::Reference)
+                    if target.layer.state != RecordState::Accepted
+                        && (target.owner != self.scope.root_node_id
+                            || target.layer.state != RecordState::Draft) =>
+                {
+                    return Err(GraphError::validation(
+                        "reference_target_not_visible",
+                        "targetLayerId",
+                        "Reference actions may target a current draft layer or a visible accepted layer.",
+                    ));
+                }
+                _ => {}
+            }
         }
         let mut actions = ActionTable::new(&mut transaction);
         let action = match actions

@@ -30,8 +30,19 @@ edge = EdgeObject((first, second))
 await client.create_edge(edge)
 layer = LayerObject((first, second), (edge,))
 await client.submit_layer(layer)
-await client.add_navigate_action(node_id, "Response", layer, response=True, client_key="response")
+await client.add_navigate_action(
+    node_id,
+    "Response",
+    layer,
+    relation="expand",
+    client_key="response",
+)
 await client.submit(node_id)
 ```
+
+The interaction root uses one `relation="expand"` navigate action without
+`source_layer`. Every action authored from a response node includes the exact
+`source_layer`. Layers with six to eight nodes also pass a private
+`size_justification` to `submit_layer`; larger layers are rejected.
 
 Reuse stable prior node IDs returned by `get_node` or `get_neighbors`. A model turn is complete only after `submit(node_id)` succeeds.

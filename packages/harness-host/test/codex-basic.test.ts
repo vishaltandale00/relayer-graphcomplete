@@ -106,6 +106,36 @@ describe("CodexBasicHarness", () => {
     );
   });
 
+  it("selects the layered-navigation prompt only for the opt-in profile", async () => {
+    let submittedPrompt = "";
+    const thread = {
+      id: "layered-thread",
+      run: vi.fn(async (prompt: string) => { submittedPrompt = prompt; }),
+    };
+    const codex = { startThread: vi.fn(() => thread), resumeThread: vi.fn() };
+    const harness = new CodexBasicHarness({
+      threadId: 1,
+      permissionProfileId: "auto",
+      permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
+      workingDirectory: process.cwd(),
+      configuration: {
+        ...codexBasicConfiguration,
+        name: "codex-layered-navigation-luna",
+        settings: { ...codexBasicConfiguration.settings, promptProfile: "layered-navigation-v1" },
+      },
+    }, { createCodex: () => codex as unknown as Codex });
+
+    await harness.complete(runContext(1, "token"));
+
+    expect(submittedPrompt).toContain('"expand" continues the explanation');
+    expect(submittedPrompt).toContain('"reference" opens supporting evidence');
+    expect(submittedPrompt).toContain("A flat answer is valid");
+    expect(submittedPrompt).toContain("Author in whatever order fits the task");
+    expect(submittedPrompt).toContain("final graph call must be await graph.submit(1)");
+    expect(submittedPrompt).toContain("Never mention or expose the size justification");
+    expect(submittedPrompt).not.toContain("The required order is:");
+  });
+
   it("translates the three product profiles without adding a fixture-only profile", async () => {
     const cases = [
       ["ask", { sandboxMode: "workspace-write", approvalPolicy: "on-request", networkAccessEnabled: true }, { approvals_reviewer: "user" }],

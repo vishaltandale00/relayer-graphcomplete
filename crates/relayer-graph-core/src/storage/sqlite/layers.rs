@@ -78,6 +78,10 @@ pub(crate) async fn resolve(
                     .for_source(scope, *node_id, None, accepted_only)
                     .await?
                     .into_iter()
+                    .filter(|record| {
+                        record.action.state == RecordState::Accepted
+                            || record.action.source_layer_id == Some(layer.id)
+                    })
                     .map(|record| record.action),
             );
         }
@@ -187,6 +191,21 @@ impl<'connection> LayerTable<'connection> {
         .await?;
         row.map(|(id, state)| Ok((valid_layer_id(id)?, RecordState::parse(&state)?)))
             .transpose()
+    }
+
+    pub(crate) async fn draft_ids_by_owner(
+        &mut self,
+        owner: NodeId,
+    ) -> Result<Vec<LayerId>, GraphError> {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM layers WHERE owner_interaction_id=?1 AND state='draft' ORDER BY id",
+        )
+        .bind(owner.value())
+        .fetch_all(&mut *self.connection)
+        .await?
+        .into_iter()
+        .map(valid_layer_id)
+        .collect()
     }
 
     pub(crate) async fn upsert_draft(

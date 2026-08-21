@@ -41,7 +41,7 @@ The implemented basic loop is:
 2. The Node host resolves the thread's harness once and keeps that object alive.
 3. The host supplies the current graph scope only for that `complete()` call. The harness submits node objects, creates undirected edges, packages the exact visible layer, and adds the interaction's response navigate action. It may also attach useful navigate or invoke actions to output nodes; nested layers are an available authoring capability, not a per-node requirement.
 4. The host reads the accepted output and closes the turn's in-memory graph scope. The calling runtime that minted the graph capability revokes its token after the Complete call settles. The host has a separate API credential and never receives graph control authority. A cached client from an earlier IPython turn cannot modify a later interaction.
-5. `graph.submit(interactionNode)` recursively validates navigate targets and atomically accepts only the reachable drafts.
+5. `graph.submit(interactionNode)` recursively validates typed `expand` and `reference` navigation, exact source-layer provenance, and layer size, then atomically accepts only the current authored closure. Flat answers remain valid. See [ADR 0005](docs/decisions/0005-layered-navigation-contract.md).
 6. Complete returns the resolved root layer for immediate display; later navigation reads the persisted layer.
 
 Independent self-assessment will later add an optional review gate to this same loop.

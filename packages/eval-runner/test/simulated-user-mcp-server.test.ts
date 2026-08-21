@@ -304,6 +304,13 @@ function validTurnReview(): TurnReview {
     nullRatingJustifications: { follow_up_progress: "This is the first turn." },
     summary: "Strong overall.",
     findings: [],
+    structure: {
+      overall: "neutral",
+      expansion: { need: "none", result: "absent" },
+      references: { need: "none", result: "absent" },
+      reason: "A flat response is sufficient.",
+      evidence: ["shot-layer"],
+    },
   };
 }
 

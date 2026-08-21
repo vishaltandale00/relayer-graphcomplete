@@ -189,6 +189,19 @@ const turnReviewSchema = z.object({
   nullRatingJustifications: optionalJustifications(turnRatingsSchema.shape),
   summary: z.string().min(1),
   findings: z.array(findingSchema),
+  structure: z.object({
+    overall: z.enum(["helps", "neutral", "mixed", "hurts"]),
+    expansion: z.object({
+      need: z.enum(["none", "helpful", "required"]),
+      result: z.enum(["absent", "works", "mixed", "fails"]),
+    }).strict(),
+    references: z.object({
+      need: z.enum(["none", "helpful", "required"]),
+      result: z.enum(["absent", "works", "mixed", "fails"]),
+    }).strict(),
+    reason: z.string().min(1),
+    evidence: z.array(screenshotReferenceSchema).min(1),
+  }).strict(),
 }).strict();
 
 export async function startSimulatedUserReviewMcpServer(

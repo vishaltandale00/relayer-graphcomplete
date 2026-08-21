@@ -1,0 +1,14 @@
+schemaVersion: 1
+name: prime-agent-layered-navigation-luna
+implementation: prime.agent
+implementationVersion: 1
+permissionBindings:
+  full: {}
+settings:
+  model:
+    provider: openai-codex
+    id: gpt-5.6-luna
+  thinkingLevel: medium
+  rlmMaxDepth: 4
+  prewarmIpythonKernel: true
+  promptProfile: layered-navigation-v1
