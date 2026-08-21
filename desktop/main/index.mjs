@@ -183,7 +183,7 @@ if (primaryInstance) {
       },
     });
     modelCatalogRefreshServer = await startModelCatalogRefreshServer({
-      refresh: ({ signal }) => modelCatalog.beforeInference({ signal }),
+      refresh: ({ signal, providerId }) => modelCatalog.beforeInference({ signal, providerId }),
     });
     productServer = new RelayerAppServerService({
       userDataDirectory: userDataPath,

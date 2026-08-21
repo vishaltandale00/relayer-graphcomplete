@@ -43,7 +43,11 @@ import {
   newThreadModelSelectionReady,
   setNewThreadModelPickerDisabled,
 } from "./composer-model-picker.js";
-import { harnessUsesConfigurationModel } from "./model-picker-model.js";
+import { refreshModelFamilySettings } from "./model-family-settings.js";
+import {
+  harnessUsesConfigurationModel,
+  isModelSelectionCatalogError,
+} from "./model-picker-model.js";
 
 let creatingFirstThread = false;
 let pendingRefreshTimer;
@@ -295,15 +299,26 @@ export async function submitInteraction(text, modelSelection) {
     setMainView("settings");
     throw new Error("Choose an available model in Settings before sending.");
   }
-  await request(`/api/threads/${encodeURIComponent(threadId)}/interactions`, {
-    method: "POST",
-    body: JSON.stringify(followupRequestBody(text, modelSelection)),
-  });
+  try {
+    await request(`/api/threads/${encodeURIComponent(threadId)}/interactions`, {
+      method: "POST",
+      body: JSON.stringify(followupRequestBody(text, modelSelection)),
+    });
+  } catch (error) {
+    await refreshAfterModelSelectionRejection(error, true);
+    throw error;
+  }
   const current = currentNavigationEntry();
   if (!current || navigationEntryKey(current) !== sourceLocationKey) return;
   supersedePendingHistory({ presentationChanged: true });
   viewState.currentInteractionId = null;
   await refreshState(threadId, { historyMode: "push" });
+}
+
+async function refreshAfterModelSelectionRejection(error, renderOngoingPicker = false) {
+  if (!isModelSelectionCatalogError(error)) return;
+  await refreshModelFamilySettings().catch(() => {});
+  if (renderOngoingPicker) renderThread();
 }
 
 export async function navigateLayer(layerId, navigation = {}) {
@@ -541,6 +556,7 @@ export async function invokeAction(action) {
       );
       return;
     }
+    await refreshAfterModelSelectionRejection(error, true);
     await refreshState(threadId).catch(() => {});
     const durable = appState.actionInvocations.find((invocation) => (
       String(invocation.sourceInteractionId) === String(sourceInteractionId)
@@ -666,6 +682,7 @@ export async function createFirstThread(pickerPayloadOverride = null) {
     input.value = "";
     await loadThread(thread.id);
   } catch (error) {
+    await refreshAfterModelSelectionRejection(error);
     toast(error.message);
   } finally {
     creatingFirstThread = false;

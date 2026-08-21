@@ -146,6 +146,8 @@ describe("composer model picker UI contract", () => {
     expect(threads).not.toContain("refreshModelCatalogBeforeSend");
     expect(threads).toContain('await request("/api/threads", {');
     expect(threads).toContain("/actions/${encodeURIComponent(action.id)}/invoke");
+    expect(threads).toContain("await refreshAfterModelSelectionRejection(error, true)");
+    expect(threads).toContain("await refreshAfterModelSelectionRejection(error);");
   });
 
   it("server-validates Advanced harness candidates before committing them", async () => {

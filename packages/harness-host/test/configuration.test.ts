@@ -51,6 +51,26 @@ describe("harness configuration", () => {
       ...parsed,
       modelCompatibility: [{ providerId: "codex", modelIds: ["model-a"], preferredModelId: "model-b" }],
     })).toThrow("preferredModelId must be allowed");
+
+    const stableModelId = 'vendor/model:latest"quoted';
+    expect(parseHarnessConfiguration({
+      ...parsed,
+      modelCompatibility: [{
+        providerId: "codex",
+        modelIds: [stableModelId],
+        preferredModelId: stableModelId,
+      }],
+    }).modelCompatibility).toEqual([{
+      providerId: "codex",
+      modelIds: [stableModelId],
+      preferredModelId: stableModelId,
+    }]);
+    for (const modelId of [" model", "model\n", "m".repeat(201)]) {
+      expect(() => parseHarnessConfiguration({
+        ...parsed,
+        modelCompatibility: [{ providerId: "codex", modelIds: [modelId] }],
+      })).toThrow("modelIds must be a non-empty model ID array");
+    }
   });
 
   it("keeps implementation-specific configuration opaque to the host", () => {

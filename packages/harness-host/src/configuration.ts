@@ -61,7 +61,7 @@ function parseModelCompatibility(value: unknown): readonly HarnessModelCompatibi
     providers.add(entry.providerId);
     let modelIds: readonly string[] | undefined;
     if (entry.modelIds !== undefined) {
-      if (!Array.isArray(entry.modelIds) || entry.modelIds.length === 0 || !entry.modelIds.every(isIdentifier)) {
+      if (!Array.isArray(entry.modelIds) || entry.modelIds.length === 0 || !entry.modelIds.every(isStableModelId)) {
         throw new Error(`Harness modelCompatibility[${index}].modelIds must be a non-empty model ID array`);
       }
       modelIds = [...new Set(entry.modelIds as string[])];
@@ -70,7 +70,7 @@ function parseModelCompatibility(value: unknown): readonly HarnessModelCompatibi
       }
     }
     const preferredModelId = entry.preferredModelId;
-    if (preferredModelId !== undefined && !isIdentifier(preferredModelId)) {
+    if (preferredModelId !== undefined && !isStableModelId(preferredModelId)) {
       throw new Error(`Harness modelCompatibility[${index}].preferredModelId must be a model ID`);
     }
     if (preferredModelId !== undefined && modelIds && !modelIds.includes(preferredModelId)) {
@@ -120,6 +120,14 @@ function canonicalize(value: JsonValue | HarnessConfiguration): JsonValue {
 
 function isIdentifier(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9][a-z0-9._-]*$/i.test(value);
+}
+
+function isStableModelId(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 200
+    && value.trim() === value
+    && ![...value].some((character) => /\p{Cc}/u.test(character));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -112,7 +112,11 @@ pub(super) async fn create(
                 .product
                 .harness_uses_configuration_model(&harness_configuration_name)
                 .await?);
-    refresh_provider_catalog(&state).await?;
+    refresh_provider_catalog(
+        &state,
+        model_selection.as_ref().map(|model| &model.provider_id),
+    )
+    .await?;
     let thread = state
         .product
         .create_thread(CreateThreadCommand {
@@ -187,18 +191,28 @@ pub(super) async fn create_interaction(
             .interactions
             .iter()
             .all(|interaction| interaction.model_selection.is_none());
-    let thread = thread_detail.thread;
     let model_selection = request
         .model_selection
         .map(InteractionModelSelection::try_from)
         .transpose()?;
+    let provider_id = model_selection
+        .as_ref()
+        .map(|model| model.provider_id.clone())
+        .or_else(|| {
+            thread_detail
+                .interactions
+                .last()
+                .and_then(|interaction| interaction.model_selection.as_ref())
+                .map(|model| model.provider_id.clone())
+        });
+    let thread = thread_detail.thread;
     let allow_unselected_model = privileged_model_less_thread
         || (state.allow_harness_override
             && state
                 .product
                 .harness_uses_configuration_model(&thread.harness_configuration_name)
                 .await?);
-    refresh_provider_catalog(&state).await?;
+    refresh_provider_catalog(&state, provider_id.as_ref()).await?;
     let interaction = state
         .product
         .create_interaction(
@@ -278,7 +292,15 @@ async fn invoke_action_with_authority(
         .await?
     {
         if outcome.interaction.completion_status == "not_started" {
-            refresh_provider_catalog(state).await?;
+            refresh_provider_catalog(
+                state,
+                outcome
+                    .interaction
+                    .model_selection
+                    .as_ref()
+                    .map(|model| &model.provider_id),
+            )
+            .await?;
         }
         return spawn_action_handoff(state.clone(), thread, outcome).await;
     }
@@ -308,7 +330,14 @@ async fn invoke_action_with_authority(
         .as_deref()
         .ok_or_else(|| ApiError::invalid("invoke action has no interaction text"))?
         .to_owned();
-    refresh_provider_catalog(state).await?;
+    refresh_provider_catalog(
+        state,
+        source
+            .model_selection
+            .as_ref()
+            .map(|model| &model.provider_id),
+    )
+    .await?;
 
     // One-shot invocation is a temporary UX simplification. The durable product record is
     // intentionally shaped so future retryable or repeatable action semantics can replace it.
@@ -323,9 +352,12 @@ async fn invoke_action_with_authority(
     await_action_handoff(handoff).await
 }
 
-async fn refresh_provider_catalog(state: &ApiState) -> Result<(), ApiError> {
-    if let Some(refresh) = &state.provider_catalog_refresh {
-        refresh.refresh().await?;
+async fn refresh_provider_catalog(
+    state: &ApiState,
+    provider_id: Option<&ProviderId>,
+) -> Result<(), ApiError> {
+    if let (Some(refresh), Some(provider_id)) = (&state.provider_catalog_refresh, provider_id) {
+        refresh.refresh(provider_id).await?;
     }
     Ok(())
 }

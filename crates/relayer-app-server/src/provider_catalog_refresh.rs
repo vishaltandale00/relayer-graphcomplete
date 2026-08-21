@@ -1,3 +1,4 @@
+use crate::product::ProviderId;
 use reqwest::{Client, StatusCode};
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
@@ -60,10 +61,17 @@ impl ProviderCatalogRefreshClient {
         })
     }
 
-    pub(crate) async fn refresh(&self) -> Result<(), ProviderCatalogRefreshError> {
+    pub(crate) async fn refresh(
+        &self,
+        provider_id: &ProviderId,
+    ) -> Result<(), ProviderCatalogRefreshError> {
+        let mut endpoint = self.endpoint.clone();
+        endpoint
+            .query_pairs_mut()
+            .append_pair("providerId", provider_id.as_str());
         let response = self
             .client
-            .post(self.endpoint.clone())
+            .post(endpoint)
             .bearer_auth(self.token.as_ref())
             .header("accept", "application/json")
             .send()
@@ -82,8 +90,11 @@ impl ProviderCatalogRefreshClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{Router, http::HeaderMap, routing::post};
-    use std::sync::{Arc, Mutex};
+    use axum::{Router, extract::Query, http::HeaderMap, routing::post};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
 
     #[test]
     fn accepts_only_exact_ipv4_loopback_origins_and_strong_tokens() {
@@ -111,16 +122,20 @@ mod tests {
         let captured = observed.clone();
         let app = Router::new().route(
             REFRESH_PATH,
-            post(move |headers: HeaderMap| {
-                let captured = captured.clone();
-                async move {
-                    *captured.lock().unwrap() = headers
-                        .get("authorization")
-                        .and_then(|value| value.to_str().ok())
-                        .map(str::to_owned);
-                    StatusCode::NO_CONTENT
-                }
-            }),
+            post(
+                move |headers: HeaderMap, Query(query): Query<HashMap<String, String>>| {
+                    let captured = captured.clone();
+                    async move {
+                        let authorization = headers
+                            .get("authorization")
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_owned);
+                        *captured.lock().unwrap() =
+                            Some((authorization, query.get("providerId").cloned()));
+                        StatusCode::NO_CONTENT
+                    }
+                },
+            ),
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -128,12 +143,12 @@ mod tests {
         let token = "t".repeat(32);
         ProviderCatalogRefreshClient::new(&format!("http://{address}"), &token)
             .unwrap()
-            .refresh()
+            .refresh(&ProviderId::parse("codex").unwrap())
             .await
             .unwrap();
         assert_eq!(
             observed.lock().unwrap().clone(),
-            Some(format!("Bearer {token}"))
+            Some((Some(format!("Bearer {token}")), Some("codex".into())))
         );
         task.abort();
     }
@@ -149,7 +164,7 @@ mod tests {
         let task = tokio::spawn(axum::serve(listener, app).into_future());
         let error = ProviderCatalogRefreshClient::new(&format!("http://{address}"), "t".repeat(32))
             .unwrap()
-            .refresh()
+            .refresh(&ProviderId::parse("codex").unwrap())
             .await
             .unwrap_err();
         assert!(matches!(

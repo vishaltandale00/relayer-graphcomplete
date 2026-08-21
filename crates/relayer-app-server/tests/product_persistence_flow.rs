@@ -272,6 +272,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         response_json(ordinary_unselected).await["code"],
         "model_selection_required"
     );
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
 
     // A pre-selector accepted interaction has no model columns, but its thread already pins the
     // only harness configuration ordinary Product execution may use.
@@ -326,6 +327,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             Value::Null,
         ]
     );
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
 
     // Simulate a request disappearing after its durable one-shot record commits but before the
     // old handler starts execution. Retrying the saved invocation must claim it exactly once and

@@ -67,7 +67,11 @@ export class ModelCatalogService {
   }
 
   startup() { return this.refreshAll("startup"); }
-  beforeInference(options) { return this.refreshAll("pre-inference", options); }
+  beforeInference({ providerId, signal } = {}) {
+    return providerId
+      ? this.refresh(providerId, "pre-inference", { signal })
+      : this.refreshAll("pre-inference", { signal });
+  }
   providerChanged(providerId) { return this.refresh(providerId, "provider-change"); }
   settingsOpened() { return this.refreshAll("settings-open"); }
   explicitRefresh(providerId) {

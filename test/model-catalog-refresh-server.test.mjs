@@ -7,8 +7,10 @@ import {
   startModelCatalogRefreshServer,
 } from "../desktop/main/models/model-catalog-refresh-server.mjs";
 
-function request(service, init = {}) {
-  return fetch(new URL(MODEL_CATALOG_REFRESH_PATH, service.session.origin), {
+function request(service, init = {}, providerId = "codex") {
+  const url = new URL(MODEL_CATALOG_REFRESH_PATH, service.session.origin);
+  url.searchParams.set("providerId", providerId);
+  return fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${service.session.token}` },
     ...init,
@@ -16,8 +18,10 @@ function request(service, init = {}) {
 }
 
 function requestWithHost(service, host) {
+  const url = new URL(MODEL_CATALOG_REFRESH_PATH, service.session.origin);
+  url.searchParams.set("providerId", "codex");
   return new Promise((resolve, reject) => {
-    const outbound = httpRequest(new URL(MODEL_CATALOG_REFRESH_PATH, service.session.origin), {
+    const outbound = httpRequest(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${service.session.token}`,
@@ -51,6 +55,10 @@ describe("trusted pre-inference model catalog refresh server", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${service.session.token}` },
       })).status).toBe(404);
+      expect((await fetch(new URL(MODEL_CATALOG_REFRESH_PATH, service.session.origin), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${service.session.token}` },
+      })).status).toBe(400);
       expect((await request(service, { body: "not empty" })).status).toBe(400);
       expect((await request(service, { body: "x".repeat(1_025) })).status).toBe(413);
       expect(refresh).not.toHaveBeenCalled();
@@ -59,6 +67,10 @@ describe("trusted pre-inference model catalog refresh server", () => {
       expect(response.status).toBe(204);
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(refresh).toHaveBeenCalledOnce();
+      expect(refresh).toHaveBeenCalledWith({
+        providerId: "codex",
+        signal: expect.any(AbortSignal),
+      });
     } finally {
       await service.close();
     }

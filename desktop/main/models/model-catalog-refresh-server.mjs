@@ -27,6 +27,14 @@ function isLoopbackPeer(address) {
   return address === LOOPBACK_HOST || address === `::ffff:${LOOPBACK_HOST}`;
 }
 
+function stableProviderId(value) {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 200
+    && value.trim() === value
+    && ![...value].some((character) => /\p{Cc}/u.test(character));
+}
+
 async function readBoundedBody(request, maxBodyBytes) {
   const declaredLength = Number(request.headers["content-length"]);
   if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
@@ -99,7 +107,7 @@ export async function startModelCatalogRefreshServer({
       if (!isLoopbackPeer(request.socket.remoteAddress)) throw new RequestError(403, "Loopback access is required.");
       if (request.headers.host !== expectedHost) throw new RequestError(400, "Invalid callback host.");
       const requestUrl = new URL(request.url || "/", `http://${LOOPBACK_HOST}`);
-      if (requestUrl.pathname !== MODEL_CATALOG_REFRESH_PATH || requestUrl.search) {
+      if (requestUrl.pathname !== MODEL_CATALOG_REFRESH_PATH) {
         throw new RequestError(404, "Not found.");
       }
       if (request.method !== "POST") {
@@ -107,9 +115,17 @@ export async function startModelCatalogRefreshServer({
         throw new RequestError(405, "Method not allowed.");
       }
       if (!bearerMatches(request.headers.authorization, token)) throw new RequestError(401, "Unauthorized.");
+      const providerIds = requestUrl.searchParams.getAll("providerId");
+      if (providerIds.length !== 1 || requestUrl.searchParams.size !== 1 || !stableProviderId(providerIds[0])) {
+        throw new RequestError(400, "Exactly one valid providerId is required.");
+      }
       const body = await readBoundedBody(request, maxBodyBytes);
       if (body.trim()) throw new RequestError(400, "Request body must be empty.");
-      await withTimeout((signal) => refresh({ signal }), requestTimeoutMs, activeControllers);
+      await withTimeout(
+        (signal) => refresh({ signal, providerId: providerIds[0] }),
+        requestTimeoutMs,
+        activeControllers,
+      );
       send(response, 204);
     })().catch((error) => {
       const status = error instanceof RequestError ? error.status : 503;

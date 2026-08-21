@@ -4,6 +4,7 @@ import {
   availablePickerFamilies,
   firstAvailableSelection,
   harnessUsesConfigurationModel,
+  isModelSelectionCatalogError,
   NO_MODELS_FOR_HARNESS,
   normalizePickerSelection,
   pickerSelectionIsAvailable,
@@ -52,6 +53,13 @@ function settings() {
 }
 
 describe("composer model picker selection", () => {
+  it("recognizes typed catalog rejections that require picker reconciliation", () => {
+    expect(isModelSelectionCatalogError({ code: "model_unavailable" })).toBe(true);
+    expect(isModelSelectionCatalogError({ code: "harness_model_incompatible" })).toBe(true);
+    expect(isModelSelectionCatalogError({ code: "interaction_in_progress" })).toBe(false);
+    expect(isModelSelectionCatalogError(new Error("network"))).toBe(false);
+  });
+
   it("shows only enabled families with currently available compatible models", () => {
     const catalog = settings();
     const families = availablePickerFamilies(catalog, "codex-basic");

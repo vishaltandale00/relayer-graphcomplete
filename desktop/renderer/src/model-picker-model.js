@@ -1,5 +1,23 @@
 export const NO_MODELS_FOR_HARNESS = "No available models for this harness";
 
+const MODEL_SELECTION_CATALOG_ERRORS = new Set([
+  "harness_unknown",
+  "harness_not_product_visible",
+  "harness_unavailable",
+  "provider_unknown",
+  "provider_disconnected",
+  "model_selection_unknown",
+  "model_hidden",
+  "model_unavailable",
+  "model_family_disabled",
+  "harness_model_incompatible",
+  "model_not_in_family",
+]);
+
+export function isModelSelectionCatalogError(error) {
+  return MODEL_SELECTION_CATALOG_ERRORS.has(error?.code);
+}
+
 function harnessFor(settings, harnessId) {
   return settings.harnesses.find((harness) => harness.id === harnessId);
 }

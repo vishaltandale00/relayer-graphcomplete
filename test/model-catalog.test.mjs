@@ -39,8 +39,8 @@ function providerSnapshot({ providerId = "fake", models = [] } = {}) {
 }
 
 class FakeModelCatalogAdapter extends ModelCatalogAdapter {
-  constructor(discover) {
-    super({ providerId: "fake", providerLabel: "Fake" });
+  constructor(discover, providerId = "fake") {
+    super({ providerId, providerLabel: providerId });
     this.discoverSnapshot = discover;
   }
 
@@ -171,6 +171,23 @@ describe("provider-neutral model catalog", () => {
 
     await expect(refresh).rejects.toThrow("trusted refresh deadline exceeded");
     expect(publishSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("refreshes only the provider selected for inference", async () => {
+    const fakeDiscover = vi.fn(async () => providerSnapshot({ providerId: "fake" }));
+    const otherDiscover = vi.fn(async () => providerSnapshot({ providerId: "other" }));
+    const service = new ModelCatalogService({
+      adapters: [
+        new FakeModelCatalogAdapter(fakeDiscover, "fake"),
+        new FakeModelCatalogAdapter(otherDiscover, "other"),
+      ],
+      publishSnapshot: vi.fn(async () => {}),
+    });
+
+    await service.beforeInference({ providerId: "other" });
+
+    expect(fakeDiscover).not.toHaveBeenCalled();
+    expect(otherDiscover).toHaveBeenCalledOnce();
   });
 });
 
