@@ -67,6 +67,23 @@ describe("provider-neutral model catalog", () => {
     expect(() => sanitizeModelCatalogSnapshot(providerSnapshot({
       models: [{ id: "duplicate" }, { id: "duplicate" }],
     }))).toThrow("Duplicate provider model id");
+    const byteOrderMarkId = "\uFEFFmodel\uFEFF";
+    const preserved = sanitizeModelCatalogSnapshot(providerSnapshot({
+      models: [{ id: byteOrderMarkId, executionModel: "\uFEFFexecution\uFEFF" }],
+    }));
+    expect(preserved.models[0]).toMatchObject({
+      id: byteOrderMarkId,
+      catalogId: byteOrderMarkId,
+      executionModel: "\uFEFFexecution\uFEFF",
+    });
+    expect(preserved.systemFamily.modelIds).toEqual([byteOrderMarkId]);
+    expect(toProductCatalogSnapshot(preserved)).toMatchObject({
+      models: [{ id: byteOrderMarkId, metadata: { executionModel: "\uFEFFexecution\uFEFF" } }],
+      systemFamily: { modelIds: [byteOrderMarkId] },
+    });
+    expect(() => sanitizeModelCatalogSnapshot(providerSnapshot({
+      models: [{ id: " model" }],
+    }))).toThrow("models[0].id must be a stable identifier");
 
     expect(toProductCatalogSnapshot(snapshot)).toMatchObject({
       providerId: "fake",

@@ -14,6 +14,24 @@ function optionalString(value, field) {
   return nonEmptyString(value, field);
 }
 
+function stableIdString(value, field) {
+  if (typeof value !== "string") throw new Error(`${field} must be a stable identifier.`);
+  const characters = [...value];
+  if (characters.length === 0
+    || characters.length > 200
+    || /\p{White_Space}/u.test(characters[0])
+    || /\p{White_Space}/u.test(characters.at(-1))
+    || characters.some((character) => /\p{Cc}/u.test(character))) {
+    throw new Error(`${field} must be a stable identifier.`);
+  }
+  return value;
+}
+
+function optionalStableIdString(value, field) {
+  if (value === undefined || value === null) return null;
+  return stableIdString(value, field);
+}
+
 function boolean(value, field) {
   if (typeof value !== "boolean") throw new Error(`${field} must be a boolean.`);
   return value;
@@ -22,6 +40,11 @@ function boolean(value, field) {
 function stringList(value, field) {
   if (!Array.isArray(value)) throw new Error(`${field} must be an array.`);
   return Object.freeze(value.map((item, index) => nonEmptyString(item, `${field}[${index}]`)));
+}
+
+function stableIdList(value, field) {
+  if (!Array.isArray(value)) throw new Error(`${field} must be an array.`);
+  return Object.freeze(value.map((item, index) => stableIdString(item, `${field}[${index}]`)));
 }
 
 function sanitizeEfforts(value, field) {
@@ -45,7 +68,7 @@ function sanitizeUpgradeInfo(value, field) {
   if (value === undefined || value === null) return null;
   if (typeof value !== "object" || Array.isArray(value)) throw new Error(`${field} must be an object.`);
   return Object.freeze({
-    modelId: nonEmptyString(value.modelId, `${field}.modelId`),
+    modelId: stableIdString(value.modelId, `${field}.modelId`),
     copy: optionalString(value.copy, `${field}.copy`),
     link: optionalString(value.link, `${field}.link`),
     migrationMarkdown: optionalString(value.migrationMarkdown, `${field}.migrationMarkdown`),
@@ -64,9 +87,9 @@ function sanitizeModel(model, providerId, index) {
   }
   return Object.freeze({
     providerId,
-    id: nonEmptyString(model?.id, `${field}.id`),
-    catalogId: nonEmptyString(model?.catalogId ?? model?.id, `${field}.catalogId`),
-    executionModel: nonEmptyString(model?.executionModel, `${field}.executionModel`),
+    id: stableIdString(model?.id, `${field}.id`),
+    catalogId: stableIdString(model?.catalogId ?? model?.id, `${field}.catalogId`),
+    executionModel: stableIdString(model?.executionModel, `${field}.executionModel`),
     label: nonEmptyString(model?.label, `${field}.label`),
     description: typeof model?.description === "string" ? model.description : "",
     order: index,
@@ -75,7 +98,7 @@ function sanitizeModel(model, providerId, index) {
     unavailableReason,
     availabilityNotice: optionalString(model?.availabilityNotice, `${field}.availabilityNotice`),
     isDefault: boolean(model?.isDefault, `${field}.isDefault`),
-    replacementModelId: optionalString(model?.replacementModelId, `${field}.replacementModelId`),
+    replacementModelId: optionalStableIdString(model?.replacementModelId, `${field}.replacementModelId`),
     upgradeInfo: sanitizeUpgradeInfo(model?.upgradeInfo, `${field}.upgradeInfo`),
     supportedEfforts: sanitizeEfforts(model?.supportedEfforts, `${field}.supportedEfforts`),
     defaultEffort: optionalString(model?.defaultEffort, `${field}.defaultEffort`),
@@ -88,7 +111,7 @@ function sanitizeModel(model, providerId, index) {
 
 export class ModelCatalogAdapter {
   constructor({ providerId, providerLabel }) {
-    this.providerId = nonEmptyString(providerId, "providerId");
+    this.providerId = stableIdString(providerId, "providerId");
     if (!PROVIDER_ID_PATTERN.test(this.providerId)) {
       throw new Error("providerId must contain only lowercase letters, numbers, dots, underscores, or hyphens.");
     }
@@ -104,7 +127,7 @@ export function sanitizeModelCatalogSnapshot(snapshot) {
   if (typeof snapshot !== "object" || snapshot === null || Array.isArray(snapshot)) {
     throw new Error("A model catalog snapshot must be an object.");
   }
-  const providerId = nonEmptyString(snapshot.provider?.id, "provider.id");
+  const providerId = stableIdString(snapshot.provider?.id, "provider.id");
   if (!PROVIDER_ID_PATTERN.test(providerId)) throw new Error("provider.id is invalid.");
   const status = nonEmptyString(snapshot.provider?.status, "provider.status");
   if (!PROVIDER_STATUSES.has(status)) throw new Error("provider.status is invalid.");
@@ -124,7 +147,7 @@ export function sanitizeModelCatalogSnapshot(snapshot) {
   if (typeof systemFamily !== "object" || systemFamily === null || Array.isArray(systemFamily)) {
     throw new Error("systemFamily must be an object.");
   }
-  const familyModelIds = stringList(systemFamily.modelIds, "systemFamily.modelIds");
+  const familyModelIds = stableIdList(systemFamily.modelIds, "systemFamily.modelIds");
   if (familyModelIds.length > 5) throw new Error("A system model family cannot contain more than five models.");
   const familyIds = new Set();
   for (const modelId of familyModelIds) {
@@ -147,7 +170,7 @@ export function sanitizeModelCatalogSnapshot(snapshot) {
     }),
     models,
     systemFamily: Object.freeze({
-      id: nonEmptyString(systemFamily.id, "systemFamily.id"),
+      id: stableIdString(systemFamily.id, "systemFamily.id"),
       label: nonEmptyString(systemFamily.label, "systemFamily.label"),
       readOnly: true,
       modelIds: familyModelIds,
