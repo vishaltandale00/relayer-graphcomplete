@@ -620,6 +620,7 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
     match runtime
         .complete(CompleteInteraction {
             project_id: thread.project_id.map(ProjectId::value),
+            product_interaction_id: interaction.id.value(),
             thread_id: thread.id.value(),
             text: &interaction.text,
             working_directory: &working_directory,

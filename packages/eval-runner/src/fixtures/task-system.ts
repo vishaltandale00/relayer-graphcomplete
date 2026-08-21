@@ -1,5 +1,5 @@
 import { EdgeObject, LayerObject, NodeObject, RelayerGraphClient } from "@relayer/graph-client";
-import type { Harness, HarnessConfiguration, HarnessFactory, HarnessRunContext, HarnessSessionState } from "@relayer/harness-host";
+import type { Harness, HarnessConfiguration, HarnessFactory, HarnessRunContext, HarnessSessionState, HarnessTraceSupport } from "@relayer/harness-host";
 
 export const taskSystemFixtureConfiguration: HarnessConfiguration = {
   schemaVersion: 1,
@@ -11,11 +11,26 @@ export const taskSystemFixtureConfiguration: HarnessConfiguration = {
 };
 
 class TaskSystemFixtureHarness implements Harness {
+  traceSupport(): HarnessTraceSupport {
+    return {
+      prompt: "full",
+      messages: "full",
+      reasoningSummaries: "none",
+      modelCalls: "none",
+      toolCalls: "summary",
+      usage: "none",
+      childStreams: "none",
+      nativeArtifacts: "none",
+    };
+  }
+
   state(): HarnessSessionState {
     return {};
   }
 
   async complete(context: HarnessRunContext): Promise<void> {
+    context.trace.emit({ type: "prompt", data: { text: context.inputGraph.detail, kind: "fixture-input" } });
+    context.trace.emit({ type: "tool.call.started", data: { tool: "fixture.graph-authoring" } });
     const graph = new RelayerGraphClient(context.graph.acquireCapability());
     const interaction = context.inputGraph;
     const queue = new NodeObject("list", "Incoming queue", "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.", "concept", "queue");
@@ -41,6 +56,8 @@ class TaskSystemFixtureHarness implements Harness {
     await graph.addAction(queue, { kind: "navigate", label: "See queue behavior", target: queueDetail, clientKey: "queue-detail" });
     await graph.addAction(interaction.id, { kind: "navigate", label: "Response", target: layer, response: true, clientKey: "response" });
     await graph.submit(interaction.id);
+    context.trace.emit({ type: "tool.call.completed", data: { tool: "fixture.graph-authoring", status: "completed" } });
+    context.trace.emit({ type: "message", data: { role: "assistant", text: "Authored and accepted the task-system graph." } });
   }
 }
 

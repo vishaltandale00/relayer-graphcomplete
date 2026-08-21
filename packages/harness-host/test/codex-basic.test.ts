@@ -1,7 +1,8 @@
 import type { Codex } from "@openai/codex-sdk";
 import { describe, expect, it, vi } from "vitest";
 import { CodexBasicHarness } from "../src/implementations/codex-basic.js";
-import type { HarnessConfiguration } from "../src/types.js";
+import { createNoopHarnessTraceSink } from "../src/trace.js";
+import type { HarnessConfiguration, HarnessTraceEventInput, HarnessTraceSink } from "../src/types.js";
 
 const codexBasicConfiguration: HarnessConfiguration = {
   schemaVersion: 1,
@@ -178,6 +179,36 @@ describe("CodexBasicHarness", () => {
     expect(codex.startThread).not.toHaveBeenCalled();
     expect(codex.resumeThread).not.toHaveBeenCalled();
   });
+
+  it("normalizes the streamed Codex event surface into the portable trace", async () => {
+    const thread = {
+      id: "streamed-thread",
+      run: vi.fn(),
+      runStreamed: vi.fn(async () => ({ events: (async function* () {
+        yield { type: "thread.started", thread_id: "streamed-thread" } as const;
+        yield { type: "turn.started" } as const;
+        yield { type: "item.completed", item: { id: "message-1", type: "agent_message", text: "Answer" } } as const;
+        yield { type: "item.completed", item: { id: "reasoning-1", type: "reasoning", text: "Checked the result" } } as const;
+        yield { type: "turn.completed", usage: { input_tokens: 2, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 3, reasoning_output_tokens: 1 } } as const;
+      })() })),
+    };
+    const trace = recordingTrace();
+    const harness = new CodexBasicHarness({
+      threadId: 1,
+      permissionProfileId: "auto",
+      permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
+      workingDirectory: process.cwd(),
+      configuration: codexBasicConfiguration,
+    }, { createCodex: () => ({ startThread: () => thread }) as unknown as Codex });
+
+    await harness.complete(runContext(1, "token", trace.sink));
+
+    expect(thread.run).not.toHaveBeenCalled();
+    expect(trace.events.map((event) => event.type)).toEqual(expect.arrayContaining([
+      "provider.event", "model.call.started", "message", "reasoning.summary", "usage", "model.call.completed",
+    ]));
+    expect(harness.traceSupport()).toMatchObject({ messages: "full", reasoningSummaries: "full", childStreams: "none" });
+  });
 });
 
 function interaction(id: number) {
@@ -191,12 +222,19 @@ function interaction(id: number) {
   };
 }
 
-function runContext(id: number, token: string) {
+function runContext(id: number, token: string, trace: HarnessTraceSink = createNoopHarnessTraceSink()) {
   return {
     inputGraph: interaction(id),
     graph: {
       interactionNodeId: id,
       acquireCapability: () => ({ url: "http://127.0.0.1:43123", token, nodeId: id }),
     },
+    trace,
   };
+}
+
+function recordingTrace(): { sink: HarnessTraceSink; events: HarnessTraceEventInput[] } {
+  const events: HarnessTraceEventInput[] = [];
+  const noop = createNoopHarnessTraceSink();
+  return { sink: { ...noop, emit: (event) => { events.push({ ...event, streamId: noop.rootStreamId }); } }, events };
 }

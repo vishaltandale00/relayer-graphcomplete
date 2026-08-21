@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("relayerEval", {
   createRun: (selection) => ipcRenderer.invoke("relayer-eval:create-run", selection),
   openReview: (executionId) => ipcRenderer.invoke("relayer-eval:open-review", executionId),
   openJudgeReview: (executionId) => ipcRenderer.invoke("relayer-eval:open-judge-review", executionId),
+  openCandidateTrace: (executionId, interactionId) => ipcRenderer.invoke("relayer-eval:open-candidate-trace", executionId, interactionId),
   loadJudgeScreenshot: (input) => ipcRenderer.invoke("relayer-eval:load-judge-screenshot", input),
   onRunsChanged: (callback) => subscribe("relayer-eval:runs-changed", callback),
 });

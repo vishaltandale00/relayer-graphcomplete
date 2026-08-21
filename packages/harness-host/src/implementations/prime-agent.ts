@@ -1,5 +1,6 @@
 import type { GraphCapability, GraphNode } from "@relayer/graph-client";
-import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState, JsonObject } from "../types.js";
+import { redactTraceData } from "../trace.js";
+import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState, HarnessTraceStream, HarnessTraceSupport, JsonObject } from "../types.js";
 
 export const PRIME_AGENT_KEY = "prime.agent";
 
@@ -8,6 +9,7 @@ interface PrimeAgentSession {
   promptAndWait(text: string, options: { readonly runContext: HarnessRunContext }): Promise<void>;
   abort(): Promise<void>;
   dispose(): void | Promise<void>;
+  subscribe?(listener: (event: unknown) => void): () => void;
 }
 
 interface PrimeAgentSessionManagerFactory {
@@ -79,6 +81,10 @@ export class PrimeAgentHarness implements Harness {
 
   async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
+    const childStreams = new Map<string, HarnessTraceStream>();
+    const unsubscribe = this.session.subscribe?.((event) => tracePrimeEvent(context, event, childStreams));
+    const prompt = this.prompt(context.inputGraph);
+    context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
     let abortOutcome: Promise<OperationOutcome<void>> | undefined;
     const abort = () => {
       if (abortOutcome !== undefined) return;
@@ -87,9 +93,11 @@ export class PrimeAgentHarness implements Harness {
     signal?.addEventListener("abort", abort, { once: true });
     let promptOutcome: OperationOutcome<void>;
     try {
-      promptOutcome = await operationOutcome(() => this.session.promptAndWait(this.prompt(context.inputGraph), { runContext: context }));
+      promptOutcome = await operationOutcome(() => this.session.promptAndWait(prompt, { runContext: context }));
     } finally {
       signal?.removeEventListener("abort", abort);
+      unsubscribe?.();
+      for (const stream of childStreams.values()) stream.close("partial", { reason: "Prime Agent stopped reporting this child" });
     }
     const settledAbort = await abortOutcome;
     if (!promptOutcome.ok && settledAbort !== undefined && !settledAbort.ok) {
@@ -97,6 +105,19 @@ export class PrimeAgentHarness implements Harness {
     }
     if (!promptOutcome.ok) throw promptOutcome.error;
     if (settledAbort !== undefined && !settledAbort.ok) throw settledAbort.error;
+  }
+
+  traceSupport(): HarnessTraceSupport {
+    return {
+      prompt: "full",
+      messages: "full",
+      reasoningSummaries: "none",
+      modelCalls: "summary",
+      toolCalls: "full",
+      usage: "full",
+      childStreams: "summary",
+      nativeArtifacts: "none",
+    };
   }
 
   state(): HarnessSessionState {
@@ -126,6 +147,92 @@ await graph.submit(${interaction.id})
 
 A model turn ending is not completion. If graph.submit() has not succeeded, continue working or report the blocking graph error.`;
   }
+}
+
+function tracePrimeEvent(context: HarnessRunContext, value: unknown, childStreams: Map<string, HarnessTraceStream>): void {
+  if (!isRecord(value) || typeof value.type !== "string") return;
+  const event = value as Record<string, unknown>;
+  context.trace.emit({ type: "provider.event", data: { provider: "prime-agent", event: safePrimeEvent(event) } });
+  if (event.type === "turn_start") {
+    context.trace.emit({ type: "model.call.started", data: { provider: "prime-agent", eventType: event.type } });
+  } else if (event.type === "turn_end") {
+    context.trace.emit({ type: "model.call.completed", data: { provider: "prime-agent", eventType: event.type, status: "completed" } });
+  } else if (event.type === "tool_execution_start") {
+    context.trace.emit({ type: "tool.call.started", data: safePrimeToolEvent(event) });
+  } else if (event.type === "tool_execution_end") {
+    context.trace.emit({ type: "tool.call.completed", data: safePrimeToolEvent(event) });
+  } else if (event.type === "message_end") {
+    tracePrimeMessage(context, event.message);
+  } else if (event.type === "rlm_child_update") {
+    tracePrimeChild(context, event.child, childStreams);
+  }
+}
+
+function tracePrimeMessage(context: HarnessRunContext, value: unknown): void {
+  if (!isRecord(value)) return;
+  const role = typeof value.role === "string" ? value.role : "unknown";
+  if (role === "assistant" && Array.isArray(value.content)) {
+    const text = value.content.flatMap((block) => isRecord(block) && block.type === "text" && typeof block.text === "string" ? [block.text] : []);
+    if (text.length > 0) context.trace.emit({ type: "message", data: { role, text: text.join("\n") } });
+  }
+  if (isRecord(value.usage)) context.trace.emit({ type: "usage", data: redactTraceData(value.usage) as JsonObject });
+}
+
+function tracePrimeChild(context: HarnessRunContext, value: unknown, childStreams: Map<string, HarnessTraceStream>): void {
+  if (!isRecord(value) || typeof value.id !== "string") return;
+  let stream = childStreams.get(value.id);
+  if (stream === undefined) {
+    const parentId = typeof value.parentId === "string" ? value.parentId : undefined;
+    stream = context.trace.openStream({
+      name: typeof value.label === "string" ? value.label : typeof value.sessionName === "string" ? value.sessionName : "Prime Agent child",
+      kind: "worker",
+      providerStreamId: value.id,
+      ...(parentId === undefined || childStreams.get(parentId) === undefined ? {} : { parentStreamId: childStreams.get(parentId)!.id }),
+    });
+    childStreams.set(value.id, stream);
+  }
+  stream.emit({ type: "provider.event", data: { provider: "prime-agent", eventType: "rlm_child_update", child: redactTraceData(safePrimeChild(value)) } });
+  const status = typeof value.status === "string" ? value.status : "";
+  if (["completed", "failed", "cancelled"].includes(status)) {
+    stream.close(status === "completed" ? "completed" : status === "cancelled" ? "cancelled" : "failed", { status });
+    childStreams.delete(value.id);
+  }
+}
+
+function safePrimeEvent(event: Record<string, unknown>) {
+  if (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") {
+    return redactTraceData({ type: event.type, message: safePrimeMessage(event.message) });
+  }
+  if (event.type === "rlm_child_update") return redactTraceData({ type: event.type, child: safePrimeChild(event.child) });
+  return redactTraceData(event);
+}
+
+function safePrimeMessage(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const content = Array.isArray(value.content)
+    ? value.content.flatMap((block) => isRecord(block) && block.type === "text" && typeof block.text === "string" ? [{ type: "text", text: block.text }] : [])
+    : undefined;
+  return { role: value.role, provider: value.provider, model: value.model, stopReason: value.stopReason, usage: value.usage, content };
+}
+
+function safePrimeToolEvent(event: Record<string, unknown>): JsonObject {
+  return redactTraceData({
+    toolCallId: event.toolCallId,
+    toolName: event.toolName,
+    args: event.args,
+    result: event.result,
+    isError: event.isError,
+  }) as JsonObject;
+}
+
+function safePrimeChild(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const allowed = ["id", "parentId", "sessionName", "model", "label", "status", "durationMs", "answerPreview", "toolUseCount", "tokenCount", "recap", "activity", "error"];
+  return Object.fromEntries(allowed.flatMap((key) => value[key] === undefined ? [] : [[key, value[key]]]));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 type OperationOutcome<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown };

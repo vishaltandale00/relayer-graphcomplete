@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { PrimeAgentHarness } from "../src/implementations/prime-agent.js";
-import type { HarnessConfiguration, HarnessRunContext } from "../src/types.js";
+import { createNoopHarnessTraceSink } from "../src/trace.js";
+import type { HarnessConfiguration, HarnessRunContext, HarnessTraceEventInput, HarnessTraceSink } from "../src/types.js";
 
 const configuration: HarnessConfiguration = {
   schemaVersion: 1,
@@ -186,15 +187,42 @@ describe("PrimeAgentHarness", () => {
     }, { loadModule })).rejects.toThrow("supports only the Full access permission profile");
     expect(loadModule).not.toHaveBeenCalled();
   });
+
+  it("subscribes for the duration of a run and reports recursive coverage honestly", async () => {
+    let listener: ((event: unknown) => void) | undefined;
+    const unsubscribe = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => {
+        listener?.({ type: "turn_start" });
+        listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "hidden" }, { type: "text", text: "Visible" }], usage: { input: 2, output: 3 } } });
+        listener?.({ type: "rlm_child_update", child: { id: "child-1", label: "Research", status: "completed", answerPreview: "Evidence", toolUseCount: 1 } });
+        listener?.({ type: "turn_end" });
+      }),
+      subscribe: vi.fn((next: (event: unknown) => void) => { listener = next; return unsubscribe; }),
+      abort: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const harness = await createHarness(session);
+    const trace = recordingTrace();
+
+    await harness.complete(runContext(11, "token", trace.sink));
+
+    expect(session.subscribe).toHaveBeenCalledOnce();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(JSON.stringify(trace.events)).not.toContain("hidden");
+    expect(trace.events.map((event) => event.type)).toEqual(expect.arrayContaining(["provider.event", "message", "usage", "model.call.started", "model.call.completed"]));
+    expect(harness.traceSupport()).toMatchObject({ childStreams: "summary", reasoningSummaries: "none" });
+  });
 });
 
-function runContext(nodeId: number, token: string): HarnessRunContext {
+function runContext(nodeId: number, token: string, trace: HarnessTraceSink = createNoopHarnessTraceSink()): HarnessRunContext {
   return {
     inputGraph: { id: nodeId, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" },
     graph: {
       interactionNodeId: nodeId,
       acquireCapability: () => ({ url: "http://127.0.0.1:43123", token, nodeId }),
     },
+    trace,
   };
 }
 
@@ -216,6 +244,7 @@ interface PrimeAgentSessionFixture {
   readonly promptAndWait: ReturnType<typeof vi.fn>;
   readonly abort: ReturnType<typeof vi.fn>;
   readonly dispose: ReturnType<typeof vi.fn>;
+  readonly subscribe?: ReturnType<typeof vi.fn>;
 }
 
 function invocation(runContext: HarnessRunContext) {
@@ -224,4 +253,10 @@ function invocation(runContext: HarnessRunContext) {
     signal: new AbortController().signal,
     isCurrent: () => true,
   };
+}
+
+function recordingTrace(): { sink: HarnessTraceSink; events: HarnessTraceEventInput[] } {
+  const events: HarnessTraceEventInput[] = [];
+  const noop = createNoopHarnessTraceSink();
+  return { sink: { ...noop, emit: (event) => { events.push({ ...event, streamId: noop.rootStreamId }); } }, events };
 }

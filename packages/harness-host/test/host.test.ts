@@ -45,6 +45,10 @@ describe("HarnessHost", () => {
       const failing = new HarnessHost({
         stateFile,
         controlToken: "control",
+        trace: {
+          directory: join(directory, "failure-traces"),
+          policy: { mode: "required", requiredFeatures: {}, includeNativeArtifacts: false, maxBytesPerTurn: 10_000, maxEventsPerTurn: 100 },
+        },
         implementations: {
           test: () => ({
             async complete() { throw new Error("model failed"); },
@@ -54,7 +58,11 @@ describe("HarnessHost", () => {
       });
       await failing.initialize();
       await failing.createSession(descriptor);
-      await expect(failing.complete(descriptor.threadId, capability)).rejects.toThrow("model failed");
+      await expect(failing.complete(descriptor.threadId, capability, undefined, undefined, { productInteractionId: 7 })).rejects.toThrow("model failed");
+      await failing.exportCandidateTrace(7, join(directory, "failed-export"), {
+        runId: "run", executionId: "execution", interactionId: "7", harnessConfigurationName: "test-default",
+      });
+      expect(JSON.parse(await readFile(join(directory, "failed-export", "manifest.json"), "utf8"))).toMatchObject({ status: "failed" });
       await expect(failing.createSession({ ...descriptor, configuration: { ...testConfiguration, name: "other" } })).rejects.toThrow("already pinned");
 
       const restored = new HarnessHost({
@@ -238,6 +246,10 @@ describe("HarnessHost", () => {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
         controlToken: "control",
+        trace: {
+          directory: join(directory, "cancel-traces"),
+          policy: { mode: "required", requiredFeatures: {}, includeNativeArtifacts: false, maxBytesPerTurn: 10_000, maxEventsPerTurn: 100 },
+        },
         implementations: { test: () => ({
           complete(_interaction, signal) {
             completionStarted();
@@ -249,11 +261,18 @@ describe("HarnessHost", () => {
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
-      const completing = host.complete(1, graph());
+      const completing = host.complete(1, graph(), undefined, undefined, { productInteractionId: 8 });
       await started;
       expect(host.cancel(1)).toBe(true);
       await expect(completing).rejects.toThrow("cancelled for thread 1");
       expect(host.cancel(1)).toBe(false);
+      await host.exportCandidateTrace(8, join(directory, "cancelled-export"), {
+        runId: "run", executionId: "execution", interactionId: "8", harnessConfigurationName: "test-default",
+      });
+      const cancelledManifest = JSON.parse(await readFile(join(directory, "cancelled-export", "manifest.json"), "utf8"));
+      const cancelledEvents = await readFile(join(directory, "cancelled-export", "events.jsonl"), "utf8");
+      expect(cancelledManifest).toMatchObject({ status: "partial" });
+      expect(cancelledEvents).toContain('"type":"cancelled"');
     } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
@@ -319,6 +338,10 @@ describe("HarnessHost", () => {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
         controlToken: "control",
+        trace: {
+          directory: join(directory, "shutdown-traces"),
+          policy: { mode: "required", requiredFeatures: {}, includeNativeArtifacts: false, maxBytesPerTurn: 10_000, maxEventsPerTurn: 100 },
+        },
         implementations: { test: () => ({
           complete(context, signal) {
             calls.push(context.inputGraph.id);
@@ -333,7 +356,7 @@ describe("HarnessHost", () => {
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
-      const active = host.complete(1, graph(1, "active-token"));
+      const active = host.complete(1, graph(1, "active-token"), undefined, undefined, { productInteractionId: 10 });
       await started;
       const queued = host.complete(1, graph(2, "queued-token"));
       const closing = host.close();
@@ -343,6 +366,10 @@ describe("HarnessHost", () => {
       await closing;
       expect(calls).toEqual([1]);
       expect(dispose).toHaveBeenCalledTimes(1);
+      await host.exportCandidateTrace(10, join(directory, "shutdown-export"), {
+        runId: "run", executionId: "execution", interactionId: "10", harnessConfigurationName: "test-default",
+      });
+      expect(JSON.parse(await readFile(join(directory, "shutdown-export", "manifest.json"), "utf8"))).toMatchObject({ status: "partial" });
     } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
@@ -364,6 +391,87 @@ describe("HarnessHost", () => {
 
       await expect(host.complete(1, graph())).resolves.toMatchObject({ output: completion });
       expect(calls).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects missing required trace coverage before invoking paid inference", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-trace-preflight-"));
+    let completionCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        trace: {
+          directory: join(directory, "traces"),
+          policy: {
+            mode: "required",
+            requiredFeatures: { modelCalls: "full" },
+            includeNativeArtifacts: false,
+            maxBytesPerTurn: 1_000,
+            maxEventsPerTurn: 100,
+          },
+        },
+        implementations: { test: () => ({
+          traceSupport: () => ({
+            prompt: "full", messages: "none", reasoningSummaries: "none", modelCalls: "none",
+            toolCalls: "none", usage: "none", childStreams: "none", nativeArtifacts: "none",
+          }),
+          async complete() { completionCalls += 1; },
+          state: emptyState,
+        }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+
+      await expect(host.complete(1, graph(), undefined, undefined, { productInteractionId: 9 })).rejects.toThrow("before inference");
+      expect(completionCalls).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an accepted graph when required trace sealing fails and never reruns inference", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-trace-seal-failure-"));
+    const blockedTraceDirectory = join(directory, "blocked-trace-path");
+    let accepted = false;
+    let completionCalls = 0;
+    await writeFile(blockedTraceDirectory, "not a directory");
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/output")) {
+        return accepted
+          ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        trace: {
+          directory: blockedTraceDirectory,
+          policy: { mode: "required", requiredFeatures: {}, includeNativeArtifacts: false, maxBytesPerTurn: 10_000, maxEventsPerTurn: 100 },
+        },
+        implementations: { test: () => ({
+          async complete() { completionCalls += 1; accepted = true; },
+          state: emptyState,
+        }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+
+      await expect(host.complete(1, graph(), undefined, undefined, { productInteractionId: 11 })).resolves.toMatchObject({
+        output: completion,
+        trace: { status: "failed", error: expect.stringContaining("could not be sealed") },
+      });
+      expect(completionCalls).toBe(1);
     } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });

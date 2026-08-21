@@ -1,6 +1,7 @@
-import { Codex, type ApprovalMode, type CodexOptions, type ModelReasoningEffort, type SandboxMode, type ThreadOptions, type WebSearchMode } from "@openai/codex-sdk";
+import { Codex, type ApprovalMode, type CodexOptions, type ModelReasoningEffort, type SandboxMode, type ThreadEvent, type ThreadItem, type ThreadOptions, type WebSearchMode } from "@openai/codex-sdk";
 import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relayer/graph-client";
-import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState, JsonObject } from "../types.js";
+import { redactTraceData } from "../trace.js";
+import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState, HarnessTraceSpan, HarnessTraceSupport, JsonObject } from "../types.js";
 
 export const CODEX_BASIC_KEY = "codex.basic";
 
@@ -50,10 +51,31 @@ export class CodexBasicHarness implements Harness {
     const capability = context.graph.acquireCapability();
     const thread = this.openThread(this.createCodex(capability), model);
     try {
-      await thread.run(this.prompt(context.inputGraph), signal === undefined ? {} : { signal });
+      const prompt = this.prompt(context.inputGraph);
+      context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
+      if (typeof thread.runStreamed !== "function") {
+        await thread.run(prompt, signal === undefined ? {} : { signal });
+        return;
+      }
+      const streamed = await thread.runStreamed(prompt, signal === undefined ? {} : { signal });
+      const spans = new Map<string, HarnessTraceSpan>();
+      for await (const event of streamed.events) traceCodexEvent(context, event, spans);
     } finally {
       this.codexThreadId = thread.id ?? this.codexThreadId;
     }
+  }
+
+  traceSupport(): HarnessTraceSupport {
+    return {
+      prompt: "full",
+      messages: "full",
+      reasoningSummaries: "full",
+      modelCalls: "full",
+      toolCalls: "full",
+      usage: "full",
+      childStreams: "none",
+      nativeArtifacts: "none",
+    };
   }
 
   state(): HarnessSessionState {
@@ -132,6 +154,91 @@ Navigate and invoke actions are first-class options, not requirements for every 
 
 If a graph call rejects an object, read its error message, repair only that object, and retry. The graph is complete only after graph.submit succeeds.`;
   }
+}
+
+function traceCodexEvent(context: HarnessRunContext, event: ThreadEvent, spans: Map<string, HarnessTraceSpan>): void {
+  const providerEventId = providerItemId(event);
+  context.trace.emit({
+    type: "provider.event",
+    ...(providerEventId === undefined ? {} : { providerEventId }),
+    data: { provider: "codex", event: redactTraceData(event) },
+  });
+  if (event.type === "turn.started") {
+    spans.set("turn", context.trace.openSpan({ name: "Codex model turn", kind: "model" }));
+    context.trace.emit({ type: "model.call.started", data: { provider: "codex" } });
+    return;
+  }
+  if (event.type === "turn.completed") {
+    context.trace.emit({ type: "usage", data: { provider: "codex", ...event.usage } });
+    context.trace.emit({ type: "model.call.completed", data: { provider: "codex", status: "completed" } });
+    spans.get("turn")?.end("completed");
+    spans.delete("turn");
+    return;
+  }
+  if (event.type === "turn.failed") {
+    context.trace.emit({ type: "model.call.completed", data: { provider: "codex", status: "failed", error: event.error.message } });
+    spans.get("turn")?.end("failed", { error: event.error.message });
+    spans.delete("turn");
+    return;
+  }
+  if (event.type === "error") {
+    context.trace.emit({ type: "error", data: { provider: "codex", message: event.message } });
+    return;
+  }
+  if (event.type === "item.started") traceCodexItemStarted(context, event.item, spans);
+  if (event.type === "item.completed") traceCodexItemCompleted(context, event.item, spans);
+}
+
+function traceCodexItemStarted(context: HarnessRunContext, item: ThreadItem, spans: Map<string, HarnessTraceSpan>): void {
+  if (!isCodexToolItem(item)) return;
+  const span = context.trace.openSpan({ name: codexItemLabel(item), kind: "tool", providerSpanId: item.id });
+  spans.set(item.id, span);
+  span.emit({ type: "tool.call.started", data: codexItemData(item) });
+}
+
+function traceCodexItemCompleted(context: HarnessRunContext, item: ThreadItem, spans: Map<string, HarnessTraceSpan>): void {
+  if (item.type === "agent_message") {
+    context.trace.emit({ type: "message", data: { role: "assistant", text: item.text } });
+    return;
+  }
+  if (item.type === "reasoning") {
+    context.trace.emit({ type: "reasoning.summary", data: { text: item.text } });
+    return;
+  }
+  if (item.type === "error") {
+    context.trace.emit({ type: "error", data: { message: item.message } });
+    return;
+  }
+  if (!isCodexToolItem(item)) return;
+  const span = spans.get(item.id) ?? context.trace.openSpan({ name: codexItemLabel(item), kind: "tool", providerSpanId: item.id });
+  const failed = ("status" in item && item.status === "failed") || (item.type === "mcp_tool_call" && item.error !== undefined);
+  span.emit({ type: "tool.call.completed", data: { ...codexItemData(item), status: failed ? "failed" : "completed" } });
+  span.end(failed ? "failed" : "completed");
+  spans.delete(item.id);
+}
+
+function isCodexToolItem(item: ThreadItem): boolean {
+  return item.type === "command_execution" || item.type === "file_change" || item.type === "mcp_tool_call" || item.type === "web_search";
+}
+
+function codexItemLabel(item: ThreadItem): string {
+  if (item.type === "command_execution") return "Command execution";
+  if (item.type === "file_change") return "File change";
+  if (item.type === "mcp_tool_call") return `${item.server}.${item.tool}`;
+  if (item.type === "web_search") return "Web search";
+  return item.type;
+}
+
+function codexItemData(item: ThreadItem): JsonObject {
+  if (item.type === "command_execution") return redactTraceData({ itemType: item.type, command: item.command, output: item.aggregated_output, exitCode: item.exit_code ?? null }) as JsonObject;
+  if (item.type === "file_change") return redactTraceData({ itemType: item.type, changes: item.changes }) as JsonObject;
+  if (item.type === "mcp_tool_call") return redactTraceData({ itemType: item.type, server: item.server, tool: item.tool, arguments: item.arguments, result: item.result, error: item.error }) as JsonObject;
+  if (item.type === "web_search") return { itemType: item.type, query: item.query };
+  return { itemType: item.type };
+}
+
+function providerItemId(event: ThreadEvent): string | undefined {
+  return "item" in event ? event.item.id : event.type === "thread.started" ? event.thread_id : undefined;
 }
 
 function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedCodexConfiguration {

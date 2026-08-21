@@ -35,6 +35,7 @@ export class GraphCompleteRuntimeService {
     additionalImplementations = {},
     codexBasicClientModuleUrl,
     codexPathOverride,
+    candidateTrace,
     spawnProcess = spawn,
     startupTimeoutMs = 10_000,
     shutdownTimeoutMs = 2_000,
@@ -46,6 +47,7 @@ export class GraphCompleteRuntimeService {
     this.additionalImplementations = additionalImplementations;
     this.codexBasicClientModuleUrl = codexBasicClientModuleUrl;
     this.codexPathOverride = codexPathOverride;
+    this.candidateTrace = candidateTrace;
     this.spawnProcess = spawnProcess;
     this.startupTimeoutMs = startupTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
@@ -99,6 +101,7 @@ export class GraphCompleteRuntimeService {
         }),
         stateFile: join(runtimeDirectory, "harness-sessions.json"),
         controlToken: harnessControlToken,
+        ...(this.candidateTrace ? { trace: this.candidateTrace } : {}),
       });
       this.session = Object.freeze({
         graphUrl,
@@ -113,6 +116,11 @@ export class GraphCompleteRuntimeService {
       await this.close();
       throw error;
     }
+  }
+
+  async exportCandidateTrace(productInteractionId, targetDirectory, correlation) {
+    if (!this.harnessHost) throw new Error("GraphComplete runtime is not running.");
+    return this.harnessHost.host.exportCandidateTrace(productInteractionId, targetDirectory, correlation);
   }
 
   async close() {
