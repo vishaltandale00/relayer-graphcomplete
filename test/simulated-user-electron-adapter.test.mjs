@@ -50,6 +50,19 @@ describe("local Electron simulated-user judge adapter", () => {
       environment: {},
       arguments: [LOCAL_SIMULATED_USER_AUTORUN_FLAG],
     })).toEqual(selection);
+    expect(resolveLocalSimulatedUserAutorun({
+      environment: { [LOCAL_SIMULATED_USER_AUTORUN_ENV]: "1" },
+      arguments: [],
+      availableHarnessConfigurationNames: ["codex-layered-navigation-luna"],
+    })).toEqual({
+      ...selection,
+      harnessConfigurationNames: ["codex-layered-navigation-luna"],
+    });
+    expect(() => resolveLocalSimulatedUserAutorun({
+      environment: { [LOCAL_SIMULATED_USER_AUTORUN_ENV]: "1" },
+      arguments: [],
+      availableHarnessConfigurationNames: [],
+    })).toThrow("requires codex-layered-navigation-luna");
     expect(() => resolveLocalSimulatedUserAutorun({
       environment: { [LOCAL_SIMULATED_USER_AUTORUN_ENV]: "1" },
       arguments: [],

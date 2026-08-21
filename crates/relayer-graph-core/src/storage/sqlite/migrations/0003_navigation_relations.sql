@@ -8,6 +8,9 @@ UPDATE actions
 SET relation = 'expand'
 WHERE kind = 'navigate';
 
+-- Legacy actions were node-owned and could appear in several accepted layer
+-- snapshots. The earliest snapshot is the best available original authoring
+-- context; later snapshots continue to represent reuse of that accepted node.
 UPDATE actions
 SET source_layer_id = (
     SELECT MIN(layer_actions.layer_id)

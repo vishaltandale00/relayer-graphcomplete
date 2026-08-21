@@ -370,7 +370,11 @@ async function start() {
   registerEvalIpc();
   dashboardWindow = await createDashboardWindow();
   primaryInstance.presentPendingWindow();
-  const localAutorun = resolveLocalSimulatedUserAutorun({ packaged: app.isPackaged });
+  const localAutorun = resolveLocalSimulatedUserAutorun({
+    packaged: app.isPackaged,
+    availableHarnessConfigurationNames: evalService.catalog().harnessConfigurations
+      .map((configuration) => configuration.name),
+  });
   if (localAutorun && !localAutorunStarted) {
     localAutorunStarted = true;
     await evalService.createRun(localAutorun);

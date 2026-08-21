@@ -21,17 +21,28 @@ export function resolveLocalSimulatedUserAutorun({
   environment = process.env,
   arguments: commandLineArguments = process.argv,
   packaged = false,
+  availableHarnessConfigurationNames,
 } = {}) {
   const enabled = environment[LOCAL_SIMULATED_USER_AUTORUN_ENV] === "1"
     || commandLineArguments.includes(LOCAL_SIMULATED_USER_AUTORUN_FLAG);
   if (!enabled) return null;
   if (packaged) throw new Error("The simulated-user H3 autorun is available only in a local development checkout.");
+  const requestedHarnesses = [
+    "codex-layered-navigation-luna",
+    "prime-agent-layered-navigation-luna",
+  ];
+  const availableHarnesses = availableHarnessConfigurationNames === undefined
+    ? null
+    : new Set(availableHarnessConfigurationNames);
+  const harnessConfigurationNames = availableHarnesses === null
+    ? requestedHarnesses
+    : requestedHarnesses.filter((name) => availableHarnesses.has(name));
+  if (!harnessConfigurationNames.includes("codex-layered-navigation-luna")) {
+    throw new Error("The simulated-user H3 autorun requires codex-layered-navigation-luna.");
+  }
   return {
     testCaseIds: ["project.h3.sanitize-status-code"],
-    harnessConfigurationNames: [
-      "codex-layered-navigation-luna",
-      "prime-agent-layered-navigation-luna",
-    ],
+    harnessConfigurationNames,
     judgeConfigurationName: "simulated-user-sol-high",
   };
 }

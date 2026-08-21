@@ -8,7 +8,9 @@ Accepted.
 
 GraphComplete distinguishes two navigate relations. `expand` continues an answer's decomposition and must form an acyclic graph. `reference` opens supporting accepted or current-turn context, may be shared, and may contain cycles. Every non-root action records the exact source layer in which it was authored. The interaction root has exactly one `expand` action and no source layer.
 
-The Rust `graph.submit` boundary validates and atomically accepts the current interaction's authored closure. It traverses expansion recursively, traverses references with visited-layer tracking, treats prior accepted reference targets as boundaries, rejects orphan drafts, and prevents a new target from being both expansion and reference. Reference-arrived layers may author only reference actions.
+The Rust `graph.submit` boundary validates and atomically accepts the current interaction's authored closure. It traverses expansion recursively, traverses references with visited-layer tracking, treats prior accepted reference targets as boundaries, rejects orphan draft layers, and prevents a new target from being both expansion and reference. Reference-arrived layers may author only reference actions.
+
+Reused accepted nodes retain their earlier accepted actions. Those actions keep their original source-layer provenance even when the node appears in a later expansion or reference layer; reference-arrival restrictions apply only to actions newly authored from that context. Legacy actions predate exact provenance and typed relations, so migration records their earliest accepted layer snapshot as the best available original source and classifies legacy navigation as expansion without rewriting immutable history.
 
 Layers normally contain one to five nodes. Six to eight nodes require a bounded private justification in the submit-layer request; that reason is validated and discarded rather than persisted or rendered. More than eight nodes are rejected.
 
