@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 2,
+  "channel": "stable",
+  "target": "macos-x64",
+  "version": "0.2.12",
+  "sourceCommit": "a1ca4c76d1dae8fa1d4d2590d23401d7dff2874c",
+  "previewReceipt": {
+    "key": "private/receipts/macos-x64/preview/0.2.12.json",
+    "sha256": "00da4e77e8a82b34b4ad8d4b702a1603539a56188f8fdaeda0db24e046b8a962"
+  },
+  "canaryEvidence": {
+    "repositoryPath": "docs/prd/assets/evidence/desktop/macos-x64-0.2.11-to-0.2.12/macos-intel-preview-canary.json",
+    "sha256": "d1bc498eab145dec35b61e91a3a3b1aba8f6d5f732409a221fecd4d66f90a98f",
+    "capturedAt": "2026-08-21T03:35:34.106Z",
+    "seedVersion": "0.2.11"
+  },
+  "promotion": {
+    "workflowCommit": "c838f25daceda4ec5315f6805f53c66cccdd3e18",
+    "workflowRunId": "32444318263",
+    "workflowRunAttempt": "1",
+    "actor": "vishaltandale00"
+  },
+  "artifacts": [
+    {
+      "name": "Relayer-0.2.12-mac-x64-RELEASE.json",
+      "size": 1104,
+      "sha256": "0b4d47d130f6a012ea9c16a6656c2832d2e5128bf3e027a9e63b5e782d76882d",
+      "sha512": "Y/GssCdYWWjvmL3ogGIMj8pxED5Da6I7ofcRiZlVtoR4OLs+9u2xYxrmHUuL5ZSg8tbiX36ZhQB+uMIU78KyYA==",
+      "key": "desktop/macos/x64/releases/0.2.12/Relayer-0.2.12-mac-x64-RELEASE.json"
+    },
+    {
+      "name": "Relayer-0.2.12-mac-x64-SHA256SUMS.txt",
+      "size": 186,
+      "sha256": "711914db5eaf44b0b297b742a3939affc911ece4804fe43db1c8dd26cd59c268",
+      "sha512": "0+2la+aLRd7i71Dkem7Au4WLcW5sQ2axHZWw2qWxe9mq5hrfyNS8FKJR+4PFpIpRSZMkRq3BkqFHiF1ZECjvnw==",
+      "key": "desktop/macos/x64/releases/0.2.12/Relayer-0.2.12-mac-x64-SHA256SUMS.txt"
+    },
+    {
+      "name": "Relayer-0.2.12-mac-x64.dmg",
+      "size": 255338296,
+      "sha256": "cc71ed25b47f37a06b20ade4e580b49eb602202c2f729b3fb780f25ef9ee47c5",
+      "sha512": "HSonwMUJGD8HwUYD6LWd+p1jZK0VdmZkmkn2hxfJ5p3ugxKtvi01g/uuTkqjtYC6Z6X298Pm2H3buDd3etCgxw==",
+      "key": "desktop/macos/x64/releases/0.2.12/Relayer-0.2.12-mac-x64.dmg"
+    },
+    {
+      "name": "Relayer-0.2.12-mac-x64.dmg.blockmap",
+      "size": 265298,
+      "sha256": "85556ca1967ab696b6267acf22a622743939c8c9eabe3840495f86ee4a729647",
+      "sha512": "v5LpGz45DaDxNCi8rHAfASvbdYnxbxGmmVNpL5YDPGeA761Yk5/KEIrRPCAQU/5lSLO1yLzvFcXxgP/HARp/yA==",
+      "key": "desktop/macos/x64/releases/0.2.12/Relayer-0.2.12-mac-x64.dmg.blockmap"
+    },
+    {
+      "name": "Relayer-0.2.12-mac-x64.zip",
+      "size": 254410485,
+      "sha256": "4e48da60d62866338c0d8d23311948d189ddb525c29db946c41570245731fb3b",
+      "sha512": "tqgVTzmLVHCUv3M+TDjbelBVCHjHkO0L6cb9iOE2VwzV5dkjoSnlkgjHU4vUfmcwmIpRLTaC6cw7cAXdvp1rKA==",
+      "key": "desktop/macos/x64/releases/0.2.12/Relayer-0.2.12-mac-x64.zip"
+    },
+    {
+      "name": "Relayer-0.2.12-mac-x64.zip.blockmap",
+      "size": 267254,
+      "sha256": "a16dfa1944e248d551b9917a9b603079791a7f767a8ef72cd64abb98732e7823",
+      "sha512": "xG3jMVI40UyrnG4AMI7OErJeA8aVED5YuzJOQe3FMtZQB9+LvYs1retfZsOiGOVwIuyxXpHNxhE8+4puHKu7gA==",
+      "key": "desktop/macos/x64/releases/0.2.12/Relayer-0.2.12-mac-x64.zip.blockmap"
+    }
+  ],
+  "manifest": {
+    "key": "desktop/macos/x64/latest-mac.yml",
+    "size": 603,
+    "sha256": "7e84221925bf3639a8e87960f182550b98dcd6f92f78f7753dfe7c9888af248c"
+  },
+  "promotedAt": "2026-08-21T03:43:38.294Z"
+}
