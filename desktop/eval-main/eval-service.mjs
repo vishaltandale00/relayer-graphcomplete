@@ -82,6 +82,8 @@ export class EvalService {
     workspaceGrader = gradeH3Workspace,
     acceptedTopologyBuilder = buildAcceptedReviewTopology,
     acceptedTopologyGrader = gradeAcceptedReviewTopology,
+    candidateTraceExporter = null,
+    candidateTraceRequired = false,
     platform = process.platform,
   }) {
     this.stateFile = stateFile;
@@ -93,6 +95,8 @@ export class EvalService {
     this.workspaceGrader = workspaceGrader;
     this.acceptedTopologyBuilder = acceptedTopologyBuilder;
     this.acceptedTopologyGrader = acceptedTopologyGrader;
+    this.candidateTraceExporter = candidateTraceExporter;
+    this.candidateTraceRequired = candidateTraceRequired;
     this.platform = platform;
     this.runs = [];
     this.configurations = new Map();
@@ -158,6 +162,52 @@ export class EvalService {
     return copy({ ...run, summary: summarize(run) });
   }
 
+  async candidateTraceContext(executionId, interactionId) {
+    for (const run of this.runs) {
+      const execution = run.executions.find((candidate) => candidate.id === executionId);
+      if (!execution) continue;
+      const turn = interactionId === undefined || interactionId === null
+        ? execution.turns[0]
+        : execution.turns.find((candidate) => String(candidate.interactionId) === String(interactionId));
+      if (!turn) throw new Error(`Unknown Eval turn: ${interactionId}`);
+      const expectedRef = [
+        "executions",
+        encodeURIComponent(execution.id),
+        "turns",
+        encodeURIComponent(String(turn.interactionId)),
+        "candidate-trace",
+        "manifest.json",
+      ].join("/");
+      if (turn.candidateTrace?.ref !== expectedRef) {
+        return { execution: copy(execution), turn: copy(turn), manifest: null, events: [] };
+      }
+      const directory = join(dirname(this.stateFile), "runs", encodeURIComponent(run.id), ...expectedRef.split("/").slice(0, -1));
+      const manifest = JSON.parse(await readFile(join(directory, "manifest.json"), "utf8"));
+      const events = (await readFile(join(directory, "events.jsonl"), "utf8"))
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      return {
+        run: { id: run.id },
+        execution: {
+          id: execution.id,
+          testCaseId: execution.testCaseId,
+          harnessConfigurationName: execution.harnessConfigurationName,
+          turns: execution.turns.map((candidate) => ({
+            interactionId: candidate.interactionId,
+            turnIndex: candidate.turnIndex,
+            prompt: candidate.prompt,
+            candidateTrace: copy(candidate.candidateTrace),
+          })),
+        },
+        turn: copy(turn),
+        manifest,
+        events,
+      };
+    }
+    throw new Error(`Unknown execution: ${executionId}`);
+  }
+
   async createRun(selection) {
     const testCaseIds = selection?.testCaseIds;
     const harnessConfigurationNames = selection?.harnessConfigurationNames;
@@ -203,8 +253,10 @@ export class EvalService {
         status: "queued",
         threadIds: [],
         turns: [],
+        candidateTraceCaptures: {},
         checks: [],
         passed: null,
+        promotable: true,
         error: null,
       })),
     };
@@ -306,7 +358,10 @@ export class EvalService {
         deterministicChecks: [],
         deterministicPassed: false,
         judgeResults: [],
+        candidateTrace: copy(execution.candidateTraceCaptures?.[String(interaction.id)] || disabledCandidateTrace()),
       }));
+      delete execution.candidateTraceCaptures;
+      execution.promotable = execution.turns.every((turn) => !this.candidateTraceRequired || turn.candidateTrace.status === "complete");
       const checks = [];
       for (const [turnIndex, executedTurn] of interactions.entries()) {
         const { interaction, threadDefinition, workspaceChecks } = executedTurn;
@@ -501,14 +556,16 @@ export class EvalService {
       },
     });
     execution.threadIds.push(thread.id);
-    await this.#waitForInteraction(thread.id, thread.rootInteractionId);
+    const rootInteraction = await this.#waitForInteraction(thread.id, thread.rootInteractionId);
+    await this.#captureCandidateTrace(execution, rootInteraction);
     await afterTurn(thread.rootInteractionId, 0);
     for (const [offset, prompt] of prompts.slice(1).entries()) {
       const interaction = await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
         method: "POST",
         body: { text: prompt },
       });
-      await this.#waitForInteraction(thread.id, interaction.id);
+      const completedInteraction = await this.#waitForInteraction(thread.id, interaction.id);
+      await this.#captureCandidateTrace(execution, completedInteraction);
       await afterTurn(interaction.id, offset + 1);
     }
     return thread;
@@ -607,6 +664,55 @@ export class EvalService {
     throw new Error(`Product interaction ${interactionId} did not finish within 10 minutes.`);
   }
 
+  async #captureCandidateTrace(execution, interaction) {
+    if (this.candidateTraceExporter === null) {
+      execution.candidateTraceCaptures ||= {};
+      execution.candidateTraceCaptures[String(interaction.id)] = disabledCandidateTrace();
+      await this.#changed();
+      return;
+    }
+    const ref = [
+      "executions",
+      encodeURIComponent(execution.id),
+      "turns",
+      encodeURIComponent(String(interaction.id)),
+      "candidate-trace",
+      "manifest.json",
+    ].join("/");
+    const targetDirectory = join(
+      dirname(this.stateFile),
+      "runs",
+      encodeURIComponent(execution.testRunId),
+      ...ref.split("/").slice(0, -1),
+    );
+    try {
+      const descriptor = await this.candidateTraceExporter(interaction.id, targetDirectory, {
+        runId: execution.testRunId,
+        executionId: execution.id,
+        interactionId: String(interaction.id),
+        harnessConfigurationName: execution.harnessConfigurationName,
+        model: candidateModel(execution.harnessConfiguration),
+      });
+      execution.candidateTraceCaptures ||= {};
+      execution.candidateTraceCaptures[String(interaction.id)] = {
+        ...copy(descriptor),
+        ref,
+        promotable: descriptor.status === "complete",
+      };
+    } catch (error) {
+      execution.candidateTraceCaptures ||= {};
+      execution.candidateTraceCaptures[String(interaction.id)] = {
+        status: "failed",
+        format: "relayer-harness-trace-v1",
+        coverage: emptyTraceCoverage(),
+        error: error instanceof Error ? error.message : String(error),
+        ref: null,
+        promotable: false,
+      };
+    }
+    await this.#changed();
+  }
+
   async #productRequest(path, options = {}) {
     const response = await fetch(new URL(path, this.productSession.origin), {
       method: options.method || "GET",
@@ -674,6 +780,36 @@ export class EvalService {
     }
     run.bundleRef = bundleRef;
   }
+}
+
+function emptyTraceCoverage() {
+  return {
+    prompt: "none",
+    messages: "none",
+    reasoningSummaries: "none",
+    modelCalls: "none",
+    toolCalls: "none",
+    usage: "none",
+    childStreams: "none",
+    nativeArtifacts: "none",
+  };
+}
+
+function disabledCandidateTrace() {
+  return {
+    status: "disabled",
+    format: "relayer-harness-trace-v1",
+    coverage: emptyTraceCoverage(),
+    ref: null,
+    promotable: true,
+  };
+}
+
+function candidateModel(configuration) {
+  const model = configuration?.settings?.model;
+  if (typeof model === "string") return model;
+  if (model && typeof model.provider === "string" && typeof model.id === "string") return `${model.provider}/${model.id}`;
+  return undefined;
 }
 
 function validateEvalPermissionProfiles(execution) {

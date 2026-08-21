@@ -60,6 +60,7 @@ const reviewSessions = new Map();
 const manualReviewWindows = new Map();
 const automatedReviewWindows = new Map();
 const judgeWindows = new Map();
+const traceWindows = new Map();
 const evalStateFile = join(userDataDirectory, "eval-data", "test-runs.json");
 const graphRuntime = new GraphCompleteRuntimeService({
   userDataDirectory,
@@ -68,6 +69,16 @@ const graphRuntime = new GraphCompleteRuntimeService({
   additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory },
   codexBasicClientModuleUrl: graphClientModuleUrl,
   codexPathOverride: bundledCodexBinary,
+  candidateTrace: {
+    directory: join(userDataDirectory, "eval-data", "candidate-trace-spool"),
+    policy: {
+      mode: "required",
+      requiredFeatures: {},
+      includeNativeArtifacts: false,
+      maxBytesPerTurn: 10 * 1024 * 1024,
+      maxEventsPerTurn: 50_000,
+    },
+  },
   onUnexpectedStop: () => app.quit(),
 });
 let productServer;
@@ -157,7 +168,7 @@ async function createJudgeWindow(executionId) {
     titleBarStyle: "hiddenInset",
     backgroundColor: "#0b0c0d",
     webPreferences: {
-      preload: join(desktopDirectory, "preload", "eval-dashboard.cjs"),
+      preload: join(desktopDirectory, "preload", "eval-judge.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -176,6 +187,42 @@ async function createJudgeWindow(executionId) {
     if (!window.isDestroyed()) window.close();
     throw error;
   }
+  return window;
+}
+
+async function createTraceWindow(executionId, interactionId) {
+  const key = `${executionId}:${interactionId || "first"}`;
+  const existing = traceWindows.get(key);
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
+    return existing;
+  }
+  const window = new BrowserWindow({
+    width: 1480,
+    height: 920,
+    minWidth: 980,
+    minHeight: 640,
+    titleBarStyle: "hiddenInset",
+    backgroundColor: "#0b0c0d",
+    webPreferences: {
+      preload: join(desktopDirectory, "preload", "eval-trace.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  traceWindows.set(key, window);
+  window.on("closed", () => {
+    if (traceWindows.get(key) === window) traceWindows.delete(key);
+  });
+  windowSecurity(window);
+  await window.loadFile(join(evalRendererDirectory, "trace.html"), {
+    query: {
+      executionId: String(executionId),
+      ...(interactionId === undefined ? {} : { interactionId: String(interactionId) }),
+    },
+  });
   return window;
 }
 
@@ -274,6 +321,13 @@ function registerEvalIpc() {
     await createJudgeWindow(executionId);
     return true;
   });
+  ipcMain.handle("relayer-eval:open-candidate-trace", async (_event, executionId, interactionId) => {
+    await createTraceWindow(executionId, interactionId);
+    return true;
+  });
+  ipcMain.handle("relayer-eval:load-candidate-trace", (_event, executionId, interactionId) => (
+    evalService.candidateTraceContext(executionId, interactionId)
+  ));
   ipcMain.handle("relayer-eval:load-judge-screenshot", (_event, input) => (
     loadJudgeScreenshotArtifact({ ...input, stateFile: evalStateFile })
   ));
@@ -307,6 +361,10 @@ async function start() {
     productSession,
     configurationPaths,
     simulatedUserJudgeRunner,
+    candidateTraceExporter: (productInteractionId, targetDirectory, correlation) => (
+      graphRuntime.exportCandidateTrace(productInteractionId, targetDirectory, correlation)
+    ),
+    candidateTraceRequired: true,
     onChanged: (runs) => dashboardWindow?.webContents.send("relayer-eval:runs-changed", runs),
   }).open();
   registerEvalIpc();
@@ -346,6 +404,10 @@ function stop() {
       try { if (!window.isDestroyed()) window.close(); } catch (error) { errors.push(error); }
     }
     judgeWindows.clear();
+    for (const window of traceWindows.values()) {
+      try { if (!window.isDestroyed()) window.close(); } catch (error) { errors.push(error); }
+    }
+    traceWindows.clear();
     if (productServer) {
       try { await productServer.close(); } catch (error) { errors.push(error); }
     }

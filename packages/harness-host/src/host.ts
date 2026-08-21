@@ -9,6 +9,13 @@ import {
   sameHarnessExecutionConfiguration,
 } from "./configuration.js";
 import { resolveHarnessFactory } from "./registry.js";
+import {
+  HarnessTraceStore,
+  NO_HARNESS_TRACE_SUPPORT,
+  createNoopHarnessTraceSink,
+  type HarnessTraceExportCorrelation,
+  type HarnessTraceStoreOptions,
+} from "./trace.js";
 import type {
   Harness,
   HarnessCompleteResult,
@@ -19,6 +26,8 @@ import type {
   HarnessSessionDescriptor,
   HarnessSessionRegistration,
   HarnessSessionState,
+  HarnessCompletionTraceContext,
+  HarnessTraceDescriptor,
 } from "./types.js";
 
 interface LiveSession {
@@ -49,6 +58,7 @@ export interface HarnessHostOptions {
   readonly controlToken: string;
   readonly host?: string;
   readonly port?: number;
+  readonly trace?: HarnessTraceStoreOptions;
 }
 
 export interface RunningHarnessHost {
@@ -64,8 +74,11 @@ export class HarnessHost {
   private legacySaved = new Map<number, LegacyPersistedHarnessSessionDescriptor>();
   private persistTail: Promise<void> = Promise.resolve();
   private closed = false;
+  private readonly traceStore: HarnessTraceStore | undefined;
 
-  constructor(private readonly options: HarnessHostOptions) {}
+  constructor(private readonly options: HarnessHostOptions) {
+    this.traceStore = options.trace === undefined ? undefined : new HarnessTraceStore(options.trace);
+  }
 
   async initialize(): Promise<void> {
     try {
@@ -168,20 +181,16 @@ export class HarnessHost {
   async complete(
     threadId: number,
     capability: GraphCapability,
-    model: InteractionModelSelection,
+    model: InteractionModelSelection | undefined,
     signal?: AbortSignal,
-  ): Promise<HarnessCompleteResult>;
-  async complete(
-    threadId: number,
-    capability: GraphCapability,
-    model: undefined,
-    signal: AbortSignal,
+    traceContext?: HarnessCompletionTraceContext,
   ): Promise<HarnessCompleteResult>;
   async complete(
     threadId: number,
     capability: GraphCapability,
     modelOrSignal?: InteractionModelSelection | AbortSignal,
     trailingSignal?: AbortSignal,
+    traceContext?: HarnessCompletionTraceContext,
   ): Promise<HarnessCompleteResult> {
     if (this.closed) throw new Error("Harness host is closed");
     validateGraphCapability(capability);
@@ -199,7 +208,7 @@ export class HarnessHost {
       try {
         if (this.closed) throw new Error("Harness host is closed");
         controller.signal.throwIfAborted();
-        result = await this.executeCompletion(threadId, session, capability, model, controller.signal);
+        result = await this.executeCompletion(threadId, session, capability, model, controller.signal, traceContext);
       } catch (error) {
         operationError = error;
       }
@@ -225,31 +234,71 @@ export class HarnessHost {
     capability: GraphCapability,
     model: InteractionModelSelection | undefined,
     signal: AbortSignal,
+    traceContext?: HarnessCompletionTraceContext,
   ): Promise<HarnessCompleteResult> {
     const graph = new RelayerGraphClient(capability);
     const interactionNodeId = capability.nodeId;
     try {
       const output = await graph.getCompletionOutput(interactionNodeId);
-      return { threadId, configurationName: session.descriptor.configuration.name, output };
+      return { threadId, configurationName: session.descriptor.configuration.name, output, trace: disabledTraceDescriptor() };
     } catch (error) {
       if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) throw error;
     }
     const interaction = await graph.getNode(interactionNodeId);
     const scope = new ActiveHarnessGraphScope(capability);
+    const support = session.harness.traceSupport?.() ?? NO_HARNESS_TRACE_SUPPORT;
+    const trace = this.traceStore?.start({
+      threadId,
+      interactionNodeId,
+      ...(traceContext === undefined ? {} : { productInteractionId: traceContext.productInteractionId }),
+      implementation: session.descriptor.configuration.implementation,
+      configurationName: session.descriptor.configuration.name,
+      support,
+    });
+    const traceSink = trace?.sink ?? createNoopHarnessTraceSink();
+    let completionError: unknown;
     try {
-      await session.harness.complete({ inputGraph: interaction, graph: scope, ...(model === undefined ? {} : { model }) }, signal);
+      await session.harness.complete({
+        inputGraph: interaction,
+        graph: scope,
+        trace: traceSink,
+        ...(model === undefined ? {} : { model }),
+      }, signal);
+    } catch (error) {
+      completionError = error;
     } finally {
       scope.close();
     }
+    if (completionError !== undefined) {
+      traceSink.emit({
+        type: signal.aborted ? "cancelled" : "error",
+        data: { message: errorMessage(completionError) },
+      });
+      await sealTrace(trace, signal.aborted ? "partial" : "failed", errorMessage(completionError));
+      throw completionError;
+    }
     try {
       const output = await graph.getCompletionOutput(interactionNodeId);
-      return { threadId, configurationName: session.descriptor.configuration.name, output };
+      const traceDescriptor = await sealTrace(trace, "complete");
+      return { threadId, configurationName: session.descriptor.configuration.name, output, trace: traceDescriptor };
     } catch (error) {
       if (error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found") {
-        throw new Error("Harness ended its turn without accepting a graph completion.", { cause: error });
+        const completionMissing = new Error("Harness ended its turn without accepting a graph completion.", { cause: error });
+        await sealTrace(trace, "partial", completionMissing.message);
+        throw completionMissing;
       }
+      await sealTrace(trace, "failed", errorMessage(error));
       throw error;
     }
+  }
+
+  exportCandidateTrace(
+    productInteractionId: number,
+    targetDirectory: string,
+    correlation: HarnessTraceExportCorrelation,
+  ): Promise<HarnessTraceDescriptor> {
+    if (this.traceStore === undefined) throw new Error("Candidate trace capture is disabled for this harness host");
+    return this.traceStore.export(productInteractionId, targetDirectory, correlation);
   }
 
   cancel(threadId: number): boolean {
@@ -405,9 +454,13 @@ async function route(host: HarnessHost, token: string, request: IncomingMessage,
       const abort = () => controller.abort(new Error("Harness completion request disconnected"));
       request.once("aborted", abort);
       try {
-        const completed = model === undefined
-          ? await host.complete(threadId, capability, controller.signal)
-          : await host.complete(threadId, capability, model, controller.signal);
+        const completed = await host.complete(
+          threadId,
+          capability,
+          model,
+          controller.signal,
+          readTraceContext(input),
+        );
         return reply(response, 200, completed);
       } finally {
         request.off("aborted", abort);
@@ -606,6 +659,42 @@ function isAbortSignal(value: unknown): value is AbortSignal {
     && typeof value.aborted === "boolean"
     && typeof value.addEventListener === "function"
     && typeof value.removeEventListener === "function";
+}
+
+function readTraceContext(value: unknown): HarnessCompletionTraceContext | undefined {
+  if (!isRecord(value) || value.traceContext === undefined) return undefined;
+  if (!isRecord(value.traceContext)) throw new Error("Harness completion contains an invalid trace context");
+  const { productInteractionId } = value.traceContext;
+  if (typeof productInteractionId !== "number" || !Number.isSafeInteger(productInteractionId) || productInteractionId < 1) {
+    throw new Error("Harness completion trace context requires a positive product interaction id");
+  }
+  return { productInteractionId };
+}
+
+function disabledTraceDescriptor(): HarnessTraceDescriptor {
+  return { status: "disabled", format: "relayer-harness-trace-v1", coverage: NO_HARNESS_TRACE_SUPPORT };
+}
+
+async function sealTrace(
+  trace: ReturnType<HarnessTraceStore["start"]> | undefined,
+  status: "complete" | "partial" | "failed",
+  reason?: string,
+): Promise<HarnessTraceDescriptor> {
+  if (trace === undefined) return disabledTraceDescriptor();
+  try {
+    return await trace.seal(status, reason);
+  } catch (error) {
+    return {
+      status: "failed",
+      format: "relayer-harness-trace-v1",
+      coverage: NO_HARNESS_TRACE_SUPPORT,
+      error: `Candidate trace could not be sealed: ${errorMessage(error)}`,
+    };
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function validateGraphCapability(capability: GraphCapability): void {

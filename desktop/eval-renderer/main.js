@@ -83,7 +83,9 @@ function renderRun(run) {
       const execution = run.executions.find((item) => item.testCaseId === caseId && item.harnessConfigurationName === harness);
       const openable = execution?.threadIds?.length > 0;
       const score = execution?.checks?.length ? `${execution.checks.filter((check) => check.passed).length}/${execution.checks.length}` : "—";
-      return `<td><div class="execution-cell"><div class="execution" aria-label="Execution status and deterministic score"><b class="${escapeHtml(execution?.status)}">${escapeHtml(execution?.status || "missing")}</b><span>${score}</span></div><div class="execution-actions"><button class="open-review" data-judge-execution="${escapeHtml(execution?.id)}" ${execution ? "" : "disabled"}>Judge review ↗</button><button class="open-review" data-product-execution="${escapeHtml(execution?.id)}" ${openable ? "" : "disabled"}>Product workspace ↗</button></div></div></td>`;
+      const traceable = execution?.turns?.some((turn) => turn.candidateTrace);
+      const promotable = execution?.promotable !== false;
+      return `<td><div class="execution-cell"><div class="execution" aria-label="Execution status and deterministic score"><b class="${escapeHtml(execution?.status)}">${escapeHtml(execution?.status || "missing")}</b><span>${score}</span>${promotable ? "" : "<small>trace not promotable</small>"}</div><div class="execution-actions"><button class="open-review" data-trace-execution="${escapeHtml(execution?.id)}" ${traceable ? "" : "disabled"}>Candidate trace ↗</button><button class="open-review" data-judge-execution="${escapeHtml(execution?.id)}" ${execution ? "" : "disabled"}>Judge review ↗</button><button class="open-review" data-product-execution="${escapeHtml(execution?.id)}" ${openable ? "" : "disabled"}>Product workspace ↗</button></div></div></td>`;
     }).join("");
     return `<tr><td><div class="case-copy"><b>${escapeHtml(definition?.name || caseId)}</b><small>${escapeHtml(caseId)}</small></div></td>${cells}</tr>`;
   }).join("");
@@ -95,6 +97,11 @@ function renderRun(run) {
   document.querySelectorAll("[data-judge-execution]:not(:disabled)").forEach((button) => {
     button.onclick = async () => {
       try { await api.openJudgeReview(button.dataset.judgeExecution); } catch (error) { toast(error.message); }
+    };
+  });
+  document.querySelectorAll("[data-trace-execution]:not(:disabled)").forEach((button) => {
+    button.onclick = async () => {
+      try { await api.openCandidateTrace(button.dataset.traceExecution); } catch (error) { toast(error.message); }
     };
   });
 }

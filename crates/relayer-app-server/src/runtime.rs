@@ -51,6 +51,7 @@ pub(crate) struct RuntimeClient {
 
 pub(crate) struct CompleteInteraction<'a> {
     pub(crate) project_id: Option<i64>,
+    pub(crate) product_interaction_id: i64,
     pub(crate) thread_id: i64,
     pub(crate) text: &'a str,
     pub(crate) working_directory: &'a str,
@@ -204,7 +205,10 @@ impl RuntimeClient {
                     StatusCode::CREATED,
                 )
                 .await?;
-            let mut complete_body = serde_json::json!({"graph": graph});
+            let mut complete_body = serde_json::json!({
+                "graph": graph,
+                "traceContext": { "productInteractionId": command.product_interaction_id },
+            });
             if let Some(model_selection) = command.model_selection {
                 complete_body["model"] = serde_json::json!({
                     "providerId": model_selection.provider_id.as_str(),
@@ -627,6 +631,7 @@ mod tests {
         let result = runtime
             .complete(CompleteInteraction {
                 project_id: None,
+                product_interaction_id: 1,
                 thread_id: 1,
                 text: "question",
                 working_directory: root.to_str().unwrap(),
@@ -731,6 +736,7 @@ mod tests {
         let completed = runtime
             .complete(CompleteInteraction {
                 project_id: None,
+                product_interaction_id: 1,
                 thread_id: 1,
                 text: "question",
                 working_directory: root.to_str().unwrap(),

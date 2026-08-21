@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -37,6 +37,16 @@ describe("Relayer Eval application service", () => {
       graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
       configurationPaths: [configurationPath],
       additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory },
+      candidateTrace: {
+        directory: join(dataDirectory, "eval-data", "candidate-trace-spool"),
+        policy: {
+          mode: "required",
+          requiredFeatures: { prompt: "full", messages: "full" },
+          includeNativeArtifacts: false,
+          maxBytesPerTurn: 1_000_000,
+          maxEventsPerTurn: 1_000,
+        },
+      },
     });
     services.push(runtime);
     const runtimeSession = await runtime.start();
@@ -57,6 +67,8 @@ describe("Relayer Eval application service", () => {
       stateFile: join(dataDirectory, "eval-data", "test-runs.json"),
       productSession,
       configurationPaths: [configurationPath],
+      candidateTraceExporter: (interactionId, targetDirectory, correlation) => runtime.exportCandidateTrace(interactionId, targetDirectory, correlation),
+      candidateTraceRequired: true,
       projectFixtureMaterializer: async ({ workspaceDirectory }) => {
         await mkdir(workspaceDirectory, { recursive: true });
         return {
@@ -117,8 +129,26 @@ describe("Relayer Eval application service", () => {
     expect(completed.executions).toHaveLength(3);
     expect(completed.executions.every((execution) => execution.threadIds.length === 1)).toBe(true);
     expect(completed.executions.find((execution) => execution.testCaseId.endsWith("two-turn")).turns).toHaveLength(2);
+    expect(completed.executions.every((execution) => execution.promotable)).toBe(true);
+    expect(completed.executions.flatMap((execution) => execution.turns).every((turn) => (
+      turn.candidateTrace.status === "complete"
+      && turn.candidateTrace.ref.endsWith("candidate-trace/manifest.json")
+      && turn.candidateTrace.sha256.startsWith("sha256:")
+    ))).toBe(true);
 
     const selected = completed.executions[0];
+    const selectedTrace = await evalService.candidateTraceContext(selected.id, selected.turns[0].interactionId);
+    expect(selectedTrace.manifest).toMatchObject({
+      format: "relayer-harness-trace-v1",
+      correlation: { runId: completed.id, executionId: selected.id },
+    });
+    expect(selectedTrace.events.map((event) => event.type)).toEqual(expect.arrayContaining(["prompt", "message", "run.completed"]));
+    const bundle = JSON.parse(await readFile(join(dataDirectory, "eval-data", completed.bundleRef), "utf8"));
+    expect(bundle.run.executions[0].turns[0].candidateTrace).toMatchObject({
+      status: "complete",
+      format: "relayer-harness-trace-v1",
+      ref: selected.turns[0].candidateTrace.ref,
+    });
     const context = evalService.reviewContext(selected.id);
     expect(context).toMatchObject({
       runId: completed.id,
