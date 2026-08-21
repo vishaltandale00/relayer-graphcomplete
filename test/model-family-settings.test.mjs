@@ -273,6 +273,8 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("reconcileSavedFamily(family, saved)");
     expect(settingsSource).toContain("Saved, but could not refresh:");
     expect(settingsSource).toContain("familyVisibilityGate.isPending()");
+    expect(settingsSource).toContain("const settingsRefreshGate = createLatestRequestGate();");
+    expect(settingsSource).toContain("if (!settingsRefreshGate.isCurrent(refreshToken)) return false;");
     expect(settingsSource).toContain('$("#defaultHarnessSelect").disabled = savingDefaults');
     expect(settingsSource).toContain("await preparePermissionProfiles(candidate)");
     expect(settingsSource).toContain("await saveModelDefaults({ [field]: candidate })");

@@ -141,13 +141,20 @@ describe("composer model picker UI contract", () => {
   });
 
   it("delegates the one trusted pre-inference refresh to the product backend", async () => {
-    const threads = await readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8");
+    const [threads, main] = await Promise.all([
+      readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/main.js", import.meta.url), "utf8"),
+    ]);
     expect(threads).not.toContain("desktop.models.refresh");
     expect(threads).not.toContain("refreshModelCatalogBeforeSend");
     expect(threads).toContain('await request("/api/threads", {');
     expect(threads).toContain("/actions/${encodeURIComponent(action.id)}/invoke");
     expect(threads).toContain("await refreshAfterModelSelectionRejection(error, true)");
     expect(threads).toContain("await refreshAfterModelSelectionRejection(error);");
+    expect(threads).toContain("productApiAvailable && !newThreadModelSelectionReady()");
+    expect(threads).toContain("if (productApiAvailable && !pickerPayload)");
+    expect(main).toContain("if (productApiAvailable) await initializeModelFamilySettings();");
+    expect(main).toContain("if (productApiAvailable && !newThreadModelSelectionReady())");
   });
 
   it("server-validates Advanced harness candidates before committing them", async () => {

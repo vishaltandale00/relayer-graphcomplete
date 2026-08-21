@@ -68,7 +68,7 @@ export function updateCreateThreadAvailability() {
   $("#createThread").disabled = creatingFirstThread
     || !$("#newThreadPrompt").value.trim()
     || !viewState.selectedPermissionProfileId
-    || !newThreadModelSelectionReady();
+    || (productApiAvailable && !newThreadModelSelectionReady());
 }
 
 function currentNavigationEntry() {
@@ -633,8 +633,10 @@ export async function createFirstThread(pickerPayloadOverride = null) {
   const input = $("#newThreadPrompt");
   const promptText = input.value.trim();
   const permissionProfileId = viewState.selectedPermissionProfileId;
-  let pickerPayload = pickerPayloadOverride ?? newThreadModelSelectionPayload();
-  if (!pickerPayload) {
+  const pickerPayload = productApiAvailable
+    ? pickerPayloadOverride ?? newThreadModelSelectionPayload()
+    : null;
+  if (productApiAvailable && !pickerPayload) {
     setSettingsTab("models");
     setMainView("settings");
     toast("Choose an available model in Settings before sending.");

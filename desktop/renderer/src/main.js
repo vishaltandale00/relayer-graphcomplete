@@ -6,7 +6,7 @@ import {
   preparePermissionProfiles,
   togglePermissionMenu,
 } from "./permission-profiles.js";
-import { appState, desktop, evalReview, viewState } from "./state.js";
+import { appState, desktop, evalReview, productApiAvailable, viewState } from "./state.js";
 import {
   closeNewThreadModelPicker,
   initializeNewThreadModelPicker,
@@ -41,9 +41,11 @@ function applyPlatformCopy() {
 }
 
 async function refreshProviderModelUi() {
-  await refreshModelFamilySettings();
-  refreshNewThreadModelPicker();
-  updateCreateThreadAvailability();
+  if (productApiAvailable) {
+    await refreshModelFamilySettings();
+    refreshNewThreadModelPicker();
+    updateCreateThreadAvailability();
+  }
   if (viewState.currentThreadId) await refreshState(viewState.currentThreadId);
 }
 
@@ -84,7 +86,7 @@ function bindEvents() {
     updateCreateThreadAvailability();
   };
   bindComposerKeydown($("#newThreadPrompt"), () => {
-    if (!newThreadModelSelectionReady()) openNewThreadModelPicker("model");
+    if (productApiAvailable && !newThreadModelSelectionReady()) openNewThreadModelPicker("model");
     else $("#createThread").click();
   });
   $("#collapseSidebar").onclick = () => {
@@ -97,9 +99,11 @@ function bindEvents() {
     cancelNavigationHistory();
     setMainView("settings", { moveFocus: true });
     try {
-      await desktop?.models?.settingsOpened?.();
-      await refreshModelFamilySettings();
-      refreshNewThreadModelPicker();
+      if (productApiAvailable) {
+        await desktop?.models?.settingsOpened?.();
+        await refreshModelFamilySettings();
+        refreshNewThreadModelPicker();
+      }
     } catch (error) {
       toast(error.message);
     }
@@ -200,15 +204,17 @@ async function boot() {
   else applyAppearance(document.documentElement.dataset.theme);
   if (desktop) renderUpdate(await desktop.updater.status());
   await refreshAccount();
-  await initializeModelFamilySettings();
+  if (productApiAvailable) await initializeModelFamilySettings();
   await loadPermissionProfiles(appState.modelSettings?.defaults?.harnessId);
-  initializeNewThreadModelPicker({
-    onSelectionChange: updateCreateThreadAvailability,
-    onOpenSettings: () => {
-      setSettingsTab("models");
-      $("#settingsButton").click();
-    },
-  });
+  if (productApiAvailable) {
+    initializeNewThreadModelPicker({
+      onSelectionChange: updateCreateThreadAvailability,
+      onOpenSettings: () => {
+        setSettingsTab("models");
+        $("#settingsButton").click();
+      },
+    });
+  }
   updateCreateThreadAvailability();
   await refreshState(viewState.currentThreadId);
   if (evalReview) {

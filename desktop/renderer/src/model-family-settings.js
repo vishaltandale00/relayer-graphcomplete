@@ -26,6 +26,7 @@ import {
 } from "./composer-model-picker.js";
 import { preparePermissionProfiles } from "./permission-profiles.js";
 import { appState } from "./state.js";
+import { createLatestRequestGate } from "./navigation-history.js";
 import { $, $$, escapeHtml, escapeHtmlAttribute, toast } from "./ui.js";
 
 let settings = null;
@@ -37,6 +38,7 @@ let savingFamily = false;
 let savingOrder = false;
 let savingDefaults = false;
 const familyVisibilityGate = createFamilyVisibilityGate();
+const settingsRefreshGate = createLatestRequestGate();
 
 function provider(providerId) {
   return settings.providers.find((candidate) => candidate.id === providerId);
@@ -125,13 +127,22 @@ function setStatus(message = "", kind = "") {
 }
 
 async function refresh({ preserveIndex = true, preserveEdit = false } = {}) {
+  const refreshToken = settingsRefreshGate.begin();
   const previousIndex = selectedFamilyIndex;
   const previousFamilyId = settings?.families?.[previousIndex]?.id;
   const activeFamilies = preserveEdit
     ? settings?.families?.filter((family) => family.draft || family.editing).map((family) => structuredClone(family))
     : [];
   const previousEditSnapshot = editSnapshot;
-  normalizeSettings(await loadModelSettings());
+  let response;
+  try {
+    response = await loadModelSettings();
+  } catch (error) {
+    if (!settingsRefreshGate.isCurrent(refreshToken)) return false;
+    throw error;
+  }
+  if (!settingsRefreshGate.isCurrent(refreshToken)) return false;
+  normalizeSettings(response);
   const preserved = preserveFamilyEditAfterRefresh(settings.families, activeFamilies);
   settings.families = preserved.families;
   for (const index of preserved.preservedIndexes) {
@@ -151,6 +162,7 @@ async function refresh({ preserveIndex = true, preserveEdit = false } = {}) {
     : null;
   render();
   refreshNewThreadModelPicker();
+  return true;
 }
 
 function harnessOptions() {
