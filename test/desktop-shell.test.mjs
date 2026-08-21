@@ -383,6 +383,7 @@ describe("desktop skeleton", () => {
       canCompose: false,
       canNavigate: true,
       canInvokeMutatingActions: false,
+      canResolveApprovals: false,
     });
   });
 
@@ -2267,11 +2268,13 @@ describe("desktop skeleton", () => {
       canNavigate: true,
       canCompose: true,
       canInvokeMutatingActions: true,
+      canResolveApprovals: true,
     });
     expect(workspaceModeCapabilities("review")).toEqual({
       canNavigate: true,
       canCompose: false,
       canInvokeMutatingActions: false,
+      canResolveApprovals: false,
     });
     expect(() => workspaceModeCapabilities("comparison")).toThrow("Unknown product workspace mode");
   });

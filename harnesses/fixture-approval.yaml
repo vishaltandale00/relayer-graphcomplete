@@ -1,0 +1,7 @@
+schemaVersion: 1
+name: fixture-approval
+implementation: fixture.approval
+implementationVersion: 1
+permissionBindings:
+  ask: {}
+settings: {}

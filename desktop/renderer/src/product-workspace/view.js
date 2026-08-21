@@ -38,6 +38,35 @@ export function productWorkspaceMarkup() {
             <button id="recenterGraph" data-review-ref="recenter-graph" title="Recenter graph" aria-label="Recenter graph">⌾</button>
           </div>
         </div>
+        <section class="approval-dock hidden" id="approvalDock" tabindex="-1" aria-labelledby="approvalTitle" aria-describedby="approvalReason approvalActionValue approvalScopeDescription" data-review-capture="approval-dock">
+          <div class="approval-dock-inner">
+            <div class="approval-dock-header">
+              <div class="approval-heading"><span class="approval-status-icon" id="approvalStatusIcon" aria-hidden="true">!</span><div><small id="approvalEyebrow">Needs approval</small><h3 id="approvalTitle">Approval required</h3></div></div>
+              <div class="approval-queue-controls" id="approvalQueueControls" role="group" aria-label="Pending approval requests">
+                <button id="previousApproval" type="button" aria-label="Previous approval request">←</button>
+                <span id="approvalQueuePosition" aria-live="polite">1 of 1</span>
+                <button id="nextApproval" type="button" aria-label="Next approval request">→</button>
+              </div>
+            </div>
+            <p class="approval-reason" id="approvalReason"></p>
+            <div class="approval-action-summary">
+              <span id="approvalActionLabel">Action</span>
+              <code id="approvalActionValue"></code>
+            </div>
+            <dl class="approval-metadata">
+              <div id="approvalWorkingDirectoryRow"><dt>Working folder</dt><dd id="approvalWorkingDirectory"></dd></div>
+              <div id="approvalAffectedFilesRow"><dt>Affected files</dt><dd id="approvalAffectedFiles"></dd></div>
+              <div><dt>Approval scope</dt><dd id="approvalScopeDescription"></dd></div>
+            </dl>
+            <details class="approval-history hidden" id="approvalHistory"><summary id="approvalHistorySummary">Approval history</summary><ol id="approvalHistoryList"></ol></details>
+            <p class="approval-error hidden" id="approvalError" role="alert"></p>
+            <div class="approval-actions" role="group" aria-label="Resolve approval request">
+              <button class="approval-deny" id="denyApproval" type="button">Deny</button>
+              <button class="approval-once" id="approveOnce" type="button">Approve once</button>
+              <button class="approval-always" id="approveAlways" type="button"><span>Approve always</span><small>this session</small></button>
+            </div>
+          </div>
+        </section>
         <div class="thread-composer" id="threadComposer"><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div></div>
       </div>
       <aside class="inspector hidden" id="inspector" data-review-capture="node-detail" aria-label="Selected node detail">
