@@ -137,7 +137,7 @@ Apple Silicon workflow `32399053432` completed the exact `0.2.10` to `0.2.11` Pr
 
 Workflows `32443697093` and `32443698408` completed the exact `0.2.11` to `0.2.12` Preview update on native Apple Silicon and Intel macOS. Their committed evidence is under `docs/prd/assets/evidence/desktop/macos-arm64-0.2.11-to-0.2.12/` and `docs/prd/assets/evidence/desktop/macos-x64-0.2.11-to-0.2.12/`. Protected workflows `32444315112` and `32444318263` later promoted the exact Apple Silicon and Intel Preview bytes to Stable.
 
-Workflows `32534359978` and `32534361604` completed the exact `0.2.12` to `0.2.13` Preview update on native Apple Silicon and Intel macOS. Their committed evidence is under `docs/prd/assets/evidence/desktop/macos-arm64-0.2.12-to-0.2.13/` and `docs/prd/assets/evidence/desktop/macos-x64-0.2.12-to-0.2.13/`. Stable remained at `0.2.12` when this canary evidence was recorded.
+Workflows `32534359978` and `32534361604` completed the exact `0.2.12` to `0.2.13` Preview update on native Apple Silicon and Intel macOS. Their committed evidence is under `docs/prd/assets/evidence/desktop/macos-arm64-0.2.12-to-0.2.13/` and `docs/prd/assets/evidence/desktop/macos-x64-0.2.12-to-0.2.13/`. Protected workflows `32535131928` and `32535133480` later promoted the exact Apple Silicon and Intel Preview bytes to Stable.
 
 ## Windows 11 interactive canary
 
