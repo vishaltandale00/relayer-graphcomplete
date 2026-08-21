@@ -135,6 +135,8 @@ The hosted runner proves native packaging and updater behavior for its target. I
 
 Apple Silicon workflow `32399053432` completed the exact `0.2.10` to `0.2.11` Preview update on native arm64 macOS. Its committed evidence is under `docs/prd/assets/evidence/desktop/macos-arm64-0.2.10-to-0.2.11/`. Protected workflow `32399976404` later promoted the same `0.2.11` bytes to Stable.
 
+Workflows `32443697093` and `32443698408` completed the exact `0.2.11` to `0.2.12` Preview update on native Apple Silicon and Intel macOS. Their committed evidence is under `docs/prd/assets/evidence/desktop/macos-arm64-0.2.11-to-0.2.12/` and `docs/prd/assets/evidence/desktop/macos-x64-0.2.11-to-0.2.12/`. Stable remained at `0.2.11` when this canary evidence was recorded.
+
 ## Windows 11 interactive canary
 
 Use a personal Windows 11 Azure Virtual Desktop rather than a headless CI runner. Assign an eligible Microsoft 365 or Windows license to the test identity, use a small x64 session host, enable automatic shutdown/deallocation, and keep the desktop unavailable from the public internet except through Azure Virtual Desktop.
