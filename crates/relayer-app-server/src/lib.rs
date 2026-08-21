@@ -1,5 +1,6 @@
 mod api;
 mod app_server;
+mod approval;
 mod permissions;
 mod product;
 mod provider_catalog_refresh;

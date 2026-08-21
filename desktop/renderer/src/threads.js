@@ -48,6 +48,10 @@ import {
   harnessUsesConfigurationModel,
   isModelSelectionCatalogError,
 } from "./model-picker-model.js";
+import {
+  pendingApprovalsForThread,
+  validApprovalDecision,
+} from "./approval-model.js";
 
 let creatingFirstThread = false;
 let pendingRefreshTimer;
@@ -151,7 +155,7 @@ function schedulePendingRefresh(threadId) {
   pendingRefreshTimer = undefined;
   const hasPendingInteraction = appState.interactions.some((interaction) => (
     String(interaction.threadId) === String(threadId)
-    && ["not_started", "running", "submitted"].includes(interaction.completionStatus)
+    && ["not_started", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
   ));
   if (!threadId || !hasPendingInteraction) return;
   pendingRefreshTimer = setTimeout(() => {
@@ -185,6 +189,7 @@ export async function refreshState(
   appState.threads = state.threads || [];
   appState.interactions = state.interactions || [];
   appState.actionInvocations = state.actionInvocations || [];
+  appState.approvals = Array.isArray(state.approvals) ? state.approvals : [];
   appState.nodes = [];
   appState.edges = [];
   appState.actions = [];
@@ -321,6 +326,48 @@ async function refreshAfterModelSelectionRejection(error, renderOngoingPicker = 
   if (renderOngoingPicker) renderThread();
 }
 
+export async function decideApproval(requestId, decision) {
+  if (!validApprovalDecision(decision)) {
+    throw new Error(`Unsupported approval decision: ${String(decision)}`);
+  }
+  const threadId = viewState.currentThreadId;
+  const thread = appState.threads.find((candidate) => String(candidate.id) === String(threadId));
+  const receipt = pendingApprovalsForThread(appState, thread).find((candidate) => (
+    String(candidate.request.requestId) === String(requestId)
+  ));
+  if (!threadId || !receipt) {
+    const error = new Error("This approval request is no longer actionable.");
+    error.code = "approval_not_actionable";
+    throw error;
+  }
+  const requestKey = String(requestId);
+  if (appState.pendingApprovalDecisions.some((id) => String(id) === requestKey)) return;
+  appState.pendingApprovalDecisions.push(requestKey);
+  renderThread();
+  try {
+    await request(
+      `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(receipt.request.correlation.interactionId)}/approvals/${encodeURIComponent(requestId)}/decision`,
+      {
+        method: "POST",
+        body: JSON.stringify({ decision }),
+      },
+    );
+    if (String(viewState.currentThreadId) === String(threadId)) {
+      await refreshState(threadId);
+    }
+  } catch (error) {
+    if (String(viewState.currentThreadId) === String(threadId)) {
+      await refreshState(threadId).catch(() => {});
+    }
+    throw error;
+  } finally {
+    appState.pendingApprovalDecisions = appState.pendingApprovalDecisions.filter((id) => (
+      String(id) !== requestKey
+    ));
+    if (String(viewState.currentThreadId) === String(threadId)) renderThread();
+  }
+}
+
 export async function navigateLayer(layerId, navigation = {}) {
   if (!viewState.currentThreadId || !viewState.currentInteractionId) return;
   recordCurrentNavigation();
@@ -409,6 +456,7 @@ function captureWorkspaceState() {
       threads: appState.threads,
       interactions: appState.interactions,
       actionInvocations: appState.actionInvocations,
+      approvals: appState.approvals,
       nodes: appState.nodes,
       edges: appState.edges,
       actions: appState.actions,
@@ -461,6 +509,12 @@ function applyResolvedPresentation(resolved) {
       !resolvedInteractionIds.has(String(invocation.sourceInteractionId))
     )),
     ...resolved.actionInvocations,
+  ];
+  appState.approvals = [
+    ...appState.approvals.filter((receipt) => (
+      String(receipt.request?.correlation?.threadId) !== String(resolved.thread.id)
+    )),
+    ...(Array.isArray(resolved.approvals) ? resolved.approvals : []),
   ];
   viewState.currentThreadId = resolved.thread.id;
   viewState.selectedNodeId = resolved.selectedNodeId;

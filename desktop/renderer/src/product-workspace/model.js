@@ -139,6 +139,7 @@ export function workspaceModeCapabilities(mode) {
       canNavigate: true,
       canCompose: true,
       canInvokeMutatingActions: true,
+      canResolveApprovals: true,
     };
   }
   if (mode === "review") {
@@ -146,6 +147,7 @@ export function workspaceModeCapabilities(mode) {
       canNavigate: true,
       canCompose: false,
       canInvokeMutatingActions: false,
+      canResolveApprovals: false,
     };
   }
   throw new Error(`Unknown product workspace mode: ${mode}`);

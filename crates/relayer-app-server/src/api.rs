@@ -7,11 +7,15 @@ mod threads;
 mod types;
 
 use crate::provider_catalog_refresh::ProviderCatalogRefreshClient;
-use crate::runtime::RuntimeClient;
+use crate::{approval::ApprovalDecision, runtime::RuntimeClient};
 use crate::{permissions::PermissionCatalog, product::ProductService};
 use auth::DesktopSessionAuthenticator;
 use axum::{Router, routing::get};
-use std::path::PathBuf;
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tower_http::services::ServeDir;
 
 pub const CONTROL_COOKIE: &str = "relayer_control";
@@ -26,6 +30,7 @@ pub(crate) struct ApiState {
     pub(crate) allow_harness_override: bool,
     pub(crate) provider_catalog_refresh: Option<ProviderCatalogRefreshClient>,
     pub(crate) standalone_workspaces_directory: PathBuf,
+    pub(crate) approval_decisions: Arc<Mutex<HashMap<String, ApprovalDecision>>>,
 }
 
 pub(crate) struct ApiRuntime {
@@ -53,6 +58,7 @@ pub(crate) fn router(
         allow_harness_override: runtime.allow_harness_override,
         provider_catalog_refresh: runtime.provider_catalog_refresh,
         standalone_workspaces_directory: runtime.standalone_workspaces_directory,
+        approval_decisions: Arc::new(Mutex::new(HashMap::new())),
     };
     Router::new()
         .route("/health", get(state::health))
@@ -102,6 +108,10 @@ pub(crate) fn router(
         .route(
             "/api/threads/{thread_id}/interactions/{interaction_id}/actions/{action_id}/invoke",
             axum::routing::post(threads::invoke_action),
+        )
+        .route(
+            "/api/threads/{thread_id}/interactions/{interaction_id}/approvals/{request_id}/decision",
+            axum::routing::post(threads::decide_approval),
         )
         .fallback_service(ServeDir::new(web_directory).append_index_html_on_directories(true))
         .with_state(state)

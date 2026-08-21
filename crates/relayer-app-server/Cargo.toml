@@ -19,4 +19,5 @@ tower-http.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }

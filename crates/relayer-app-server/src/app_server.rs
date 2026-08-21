@@ -60,6 +60,18 @@ impl RelayerAppServer {
         }
         let permission_catalog = PermissionCatalog::load(&config.permission_catalog).await?;
         let storage = SqliteProductStore::open(&config.database_path).await?;
+        let interrupted_approvals = storage
+            .abort_pending_approvals(
+                None,
+                "Approval request was aborted because its harness session ended when Relayer stopped.",
+                &startup_timestamp(),
+            )
+            .await?;
+        if interrupted_approvals > 0 {
+            eprintln!(
+                "marked {interrupted_approvals} interrupted approval request(s) aborted during backend startup"
+            );
+        }
         let interrupted = storage
             .recover_interrupted_action_invocations(
                 "Action invocation was interrupted when Relayer stopped. Retry is unavailable while actions use the temporary one-shot UX.",
@@ -178,4 +190,12 @@ impl RelayerAppServer {
             },
         )
     }
+}
+
+fn startup_timestamp() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time is before unix epoch")
+        .as_millis()
+        .to_string()
 }

@@ -19,6 +19,16 @@ import { createRelayerIcon } from "./icons.js";
 import { createGraphSimulationController } from "./graph-simulation.js";
 import { renderMarkdown } from "./markdown.js";
 import { productWorkspaceMarkup } from "./view.js";
+import {
+  approvalActionPresentation,
+  approvalDockMode,
+  approvalQueueKeyIntent,
+  approvalQueueTarget,
+  approvalResolutionLabel,
+  pendingApprovalsForThread,
+  resolvedApprovalHistoryForThread,
+  selectedPendingApproval,
+} from "../approval-model.js";
 
 function hash(value) {
   let result = 0;
@@ -38,7 +48,12 @@ const GRAPH_NODE_HALF_WIDTH = 82;
 const GRAPH_NODE_TOP = 28;
 const GRAPH_NODE_BOTTOM = 72;
 const GRAPH_FIT_PADDING = 48;
-const PENDING_COMPLETION_STATUSES = new Set(["not_started", "running", "submitted"]);
+const PENDING_COMPLETION_STATUSES = new Set([
+  "not_started",
+  "running",
+  "submitted",
+  "waiting_for_approval",
+]);
 
 export function graphNodeIdentitySet(nodes) {
   return new Set((nodes || []).map((node) => String(node.id)));
@@ -178,6 +193,9 @@ export function graphTurnNavigationDelta(event, graphFocused) {
 export { workspaceTurns } from "./model.js";
 
 export function turnStatusPresentation(status) {
+  if (status === "waiting_for_approval") {
+    return { kind: "approval", label: "Needs approval" };
+  }
   if (["not_started", "running", "submitted"].includes(status)) {
     return { kind: "running", label: status === "not_started" ? "Waiting" : "Running" };
   }
@@ -266,6 +284,26 @@ export function composerDisabledForState(status, canCompose = true) {
   return !canCompose || PENDING_COMPLETION_STATUSES.has(status);
 }
 
+export function composerFocusRestoration(
+  pendingThreadId,
+  { activeWasInside, dockThreadId, threadId, canCompose, promptDisabled },
+) {
+  const currentThreadId = String(threadId);
+  let nextThreadId = pendingThreadId;
+  if (activeWasInside && String(dockThreadId) === currentThreadId) {
+    nextThreadId = currentThreadId;
+  } else if (String(dockThreadId) !== currentThreadId) {
+    nextThreadId = null;
+  }
+  const shouldFocus = String(nextThreadId) === currentThreadId
+    && canCompose
+    && !promptDisabled;
+  return {
+    pendingThreadId: shouldFocus ? null : nextThreadId,
+    shouldFocus,
+  };
+}
+
 const ACTION_VARIANTS = new Set(["chip", "pill", "wide", "card"]);
 
 export function actionPresentation(action) {
@@ -330,6 +368,7 @@ export function createProductWorkspace({
   onOpenSettings = () => {},
   onNavigateLayer = async () => {},
   onInvokeAction = async () => {},
+  onDecideApproval = async () => {},
 }) {
   const capabilities = workspaceModeCapabilities(mode);
   const graphSimulation = createGraphSimulationController();
@@ -344,6 +383,10 @@ export function createProductWorkspace({
   let camera = { x: 0, y: 0, zoom: 1 };
   let cameraRevision = 0;
   let turnPopoverOpen = false;
+  const approvalSelections = new Map();
+  const approvalErrors = new Map();
+  const approvalDecisionsInFlight = new Set();
+  let restoreComposerFocusThreadId = null;
   const graphViewCache = new Map();
   const activeTouchPointers = new Map();
 
@@ -579,6 +622,57 @@ export function createProductWorkspace({
   };
   syncComposer();
 
+  const approvalDock = $("#approvalDock");
+  const selectApproval = (intent) => {
+    const state = getState();
+    const thread = getThread();
+    const pending = pendingApprovalsForThread(state, thread);
+    const current = approvalSelections.get(String(thread?.id));
+    const target = approvalQueueTarget(pending, current, intent);
+    if (target == null) return;
+    approvalSelections.set(String(thread.id), String(target));
+    renderApprovalDock(state, thread);
+  };
+  $("#previousApproval").onclick = () => selectApproval(-1);
+  $("#nextApproval").onclick = () => selectApproval(1);
+  approvalDock.onkeydown = (event) => {
+    const intent = approvalQueueKeyIntent(event, graphDocument.activeElement === approvalDock);
+    if (intent === null) return;
+    event.preventDefault();
+    selectApproval(intent);
+  };
+  const decideSelectedApproval = async (decision) => {
+    const state = getState();
+    const thread = getThread();
+    const pending = pendingApprovalsForThread(state, thread);
+    const selected = selectedPendingApproval(
+      pending,
+      approvalSelections.get(String(thread?.id)),
+    );
+    const requestId = selected?.request.requestId;
+    if (!capabilities.canResolveApprovals || requestId == null) return;
+    const key = String(requestId);
+    if (approvalDecisionsInFlight.has(key)) return;
+    approvalDecisionsInFlight.add(key);
+    approvalErrors.delete(key);
+    renderApprovalDock(state, thread);
+    try {
+      await onDecideApproval(requestId, decision);
+    } catch (error) {
+      if (String(getThread()?.id) === String(thread.id)) {
+        approvalErrors.set(key, error?.message || "Approval decision failed.");
+      }
+    } finally {
+      approvalDecisionsInFlight.delete(key);
+      if (String(getThread()?.id) === String(thread.id)) {
+        renderApprovalDock(getState(), getThread());
+      }
+    }
+  };
+  $("#denyApproval").onclick = () => decideSelectedApproval("deny");
+  $("#approveOnce").onclick = () => decideSelectedApproval("approve_once");
+  $("#approveAlways").onclick = () => decideSelectedApproval("approve_always");
+
   function applyMode() {
     threadView.dataset.workspaceMode = mode;
     threadView.dataset.canNavigate = String(capabilities.canNavigate);
@@ -713,6 +807,7 @@ export function createProductWorkspace({
       : "";
     identity.classList.toggle("hidden", !identityLabels);
     renderRunState(state);
+    renderApprovalDock(state, thread);
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
       selectNode(state, selection.selectedNodeId, { notify: false });
@@ -763,17 +858,119 @@ export function createProductWorkspace({
   function renderRunState(state) {
     const status = state.status || "idle";
     const pending = PENDING_COMPLETION_STATUSES.has(status);
-    const display = status === "accepted" ? "Complete"
+    const needsApproval = pendingApprovalsForThread(state, getThread()).length > 0;
+    const display = needsApproval ? "Needs approval"
+      : status === "accepted" ? "Complete"
       : pending ? "…"
         : status === "idle" ? "Ready"
           : status[0].toUpperCase() + status.slice(1);
     const runState = $("#runState");
-    runState.className = `run-state ${pending ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
-    runState.setAttribute("aria-label", pending ? "Waiting for graph" : display);
+    runState.className = `run-state ${needsApproval ? "approval" : pending ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
+    runState.setAttribute("aria-label", needsApproval ? "Waiting for user approval" : pending ? "Waiting for graph" : display);
     runState.querySelector("span").textContent = display;
     prompt.disabled = composerDisabledForState(status, capabilities.canCompose);
     modelPicker?.setDisabled(prompt.disabled);
     syncComposer();
+  }
+
+  function renderApprovalDock(state, thread) {
+    const pending = pendingApprovalsForThread(state, thread);
+    const threadKey = String(thread?.id);
+    const priorRequestId = approvalSelections.get(threadKey);
+    const selected = selectedPendingApproval(pending, priorRequestId);
+    const activeWasInside = approvalDock.contains(graphDocument.activeElement);
+    const wasHidden = approvalDock.classList.contains("hidden");
+    const wasHistoryOnly = approvalDock.classList.contains("history-only");
+    const history = resolvedApprovalHistoryForThread(state, thread);
+    const dockMode = approvalDockMode(pending, history);
+    const renderHistory = () => {
+      $("#approvalHistory").classList.toggle("hidden", history.length === 0);
+      $("#approvalHistorySummary").textContent = `Approval history (${history.length})`;
+      $("#approvalHistoryList").replaceChildren(...history.map((receipt) => {
+        const item = graphDocument.createElement("li");
+        item.textContent = `${receipt.request.title} — ${approvalResolutionLabel(receipt)}`;
+        return item;
+      }));
+    };
+    if (!selected) {
+      approvalSelections.delete(threadKey);
+      const focus = composerFocusRestoration(restoreComposerFocusThreadId, {
+        activeWasInside,
+        dockThreadId: approvalDock.dataset.threadId,
+        threadId: threadKey,
+        canCompose: capabilities.canCompose,
+        promptDisabled: prompt.disabled,
+      });
+      restoreComposerFocusThreadId = focus.pendingThreadId;
+      approvalDock.classList.toggle("hidden", dockMode === "hidden");
+      approvalDock.classList.toggle("history-only", dockMode === "history");
+      approvalDock.removeAttribute("aria-busy");
+      approvalDock.dataset.threadId = threadKey;
+      $("#threadComposer").classList.remove("hidden");
+      if (dockMode === "history") {
+        approvalDock.setAttribute("aria-describedby", "approvalHistorySummary");
+        $("#approvalStatusIcon").textContent = "✓";
+        $("#approvalEyebrow").textContent = "Resolved";
+        $("#approvalTitle").textContent = "Approval history";
+        $("#approvalQueueControls").classList.add("hidden");
+        $("#approvalReason").classList.add("hidden");
+        $(".approval-action-summary").classList.add("hidden");
+        $(".approval-metadata").classList.add("hidden");
+        $("#approvalError").classList.add("hidden");
+        $(".approval-actions").classList.add("hidden");
+        renderHistory();
+      }
+      if (focus.shouldFocus) {
+        prompt.focus({ preventScroll: true });
+      }
+      return;
+    }
+    const request = selected.request;
+    const requestId = String(request.requestId);
+    const selectedDisappeared = priorRequestId != null
+      && !pending.some((receipt) => String(receipt.request.requestId) === String(priorRequestId));
+    approvalSelections.set(threadKey, requestId);
+    approvalDock.classList.remove("hidden");
+    approvalDock.classList.remove("history-only");
+    approvalDock.setAttribute(
+      "aria-describedby",
+      "approvalReason approvalActionValue approvalScopeDescription",
+    );
+    approvalDock.dataset.threadId = threadKey;
+    $("#threadComposer").classList.add("hidden");
+    approvalDock.dataset.requestId = requestId;
+    $("#approvalStatusIcon").textContent = "!";
+    $("#approvalEyebrow").textContent = "Needs approval";
+    $("#approvalTitle").textContent = request.title;
+    $("#approvalReason").classList.remove("hidden");
+    $("#approvalReason").textContent = request.reason;
+    $(".approval-action-summary").classList.remove("hidden");
+    $(".approval-metadata").classList.remove("hidden");
+    $(".approval-actions").classList.remove("hidden");
+    $("#approvalScopeDescription").textContent = request.scopeDescription;
+    const action = approvalActionPresentation(request.action);
+    $("#approvalActionLabel").textContent = action.label;
+    $("#approvalActionValue").textContent = action.value;
+    $("#approvalWorkingDirectoryRow").classList.toggle("hidden", !action.workingDirectory);
+    $("#approvalWorkingDirectory").textContent = action.workingDirectory || "";
+    $("#approvalAffectedFilesRow").classList.toggle("hidden", action.affectedFiles.length === 0);
+    $("#approvalAffectedFiles").textContent = action.affectedFiles.join(", ");
+    const index = pending.findIndex((receipt) => String(receipt.request.requestId) === requestId);
+    $("#approvalQueuePosition").textContent = `${index + 1} of ${pending.length}`;
+    $("#approvalQueueControls").classList.toggle("hidden", pending.length < 2);
+    renderHistory();
+    const error = approvalErrors.get(requestId);
+    $("#approvalError").classList.toggle("hidden", !error);
+    $("#approvalError").textContent = error || "";
+    const decisionPending = approvalDecisionsInFlight.has(requestId)
+      || state.pendingApprovalDecisions?.some((id) => String(id) === requestId);
+    approvalDock.setAttribute("aria-busy", String(decisionPending));
+    for (const selector of ["#denyApproval", "#approveOnce", "#approveAlways"]) {
+      $(selector).disabled = decisionPending || !capabilities.canResolveApprovals;
+    }
+    if (wasHidden || wasHistoryOnly || selectedDisappeared) {
+      approvalDock.focus({ preventScroll: true });
+    }
   }
 
   function renderGraph(state, thread) {
