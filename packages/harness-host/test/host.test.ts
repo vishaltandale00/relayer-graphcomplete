@@ -924,6 +924,8 @@ describe("HarnessHost", () => {
     const capability = graph();
     await expect(host.complete(1, capability, { providerId: "codex", modelId: "🧠".repeat(200) }))
       .rejects.toThrow("Unknown harness thread");
+    await expect(host.complete(1, capability, { providerId: "codex", modelId: "\uFEFFmodel\uFEFF" }))
+      .rejects.toThrow("Unknown harness thread");
     await expect(host.complete(1, capability, { providerId: " codex", modelId: "model" }))
       .rejects.toThrow("invalid model selection");
     await expect(host.complete(1, capability, { providerId: "codex", modelId: "model\n" }))

@@ -70,6 +70,11 @@ describe("harness configuration", () => {
       ...parsed,
       modelCompatibility: [{ providerId: "codex", modelIds: [unicodeModelId] }],
     }).modelCompatibility).toEqual([{ providerId: "codex", modelIds: [unicodeModelId] }]);
+    const byteOrderMarkModelId = "\uFEFFmodel\uFEFF";
+    expect(parseHarnessConfiguration({
+      ...parsed,
+      modelCompatibility: [{ providerId: "codex", modelIds: [byteOrderMarkModelId] }],
+    }).modelCompatibility).toEqual([{ providerId: "codex", modelIds: [byteOrderMarkModelId] }]);
     for (const modelId of [" model", "model\n", "m".repeat(201)]) {
       expect(() => parseHarnessConfiguration({
         ...parsed,

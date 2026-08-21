@@ -28,11 +28,13 @@ function isLoopbackPeer(address) {
 }
 
 function stableProviderId(value) {
-  return typeof value === "string"
-    && value.length > 0
-    && [...value].length <= 200
-    && value.trim() === value
-    && ![...value].some((character) => /\p{Cc}/u.test(character));
+  if (typeof value !== "string") return false;
+  const characters = [...value];
+  return characters.length > 0
+    && characters.length <= 200
+    && !/\p{White_Space}/u.test(characters[0])
+    && !/\p{White_Space}/u.test(characters.at(-1))
+    && !characters.some((character) => /\p{Cc}/u.test(character));
 }
 
 async function readBoundedBody(request, maxBodyBytes) {

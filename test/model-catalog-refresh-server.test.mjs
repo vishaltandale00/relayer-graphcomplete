@@ -72,6 +72,11 @@ describe("trusted pre-inference model catalog refresh server", () => {
         providerId: "codex",
         signal: expect.any(AbortSignal),
       });
+      expect((await request(service, {}, "\uFEFFprovider\uFEFF")).status).toBe(204);
+      expect(refresh).toHaveBeenLastCalledWith({
+        providerId: "\uFEFFprovider\uFEFF",
+        signal: expect.any(AbortSignal),
+      });
     } finally {
       await service.close();
     }

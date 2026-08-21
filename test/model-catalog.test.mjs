@@ -173,6 +173,62 @@ describe("provider-neutral model catalog", () => {
     expect(publishSnapshot).not.toHaveBeenCalled();
   });
 
+  it("isolates cancellation between callers sharing a pre-inference refresh", async () => {
+    let releaseDiscovery;
+    let discoverySignal;
+    const discoveryReleased = new Promise((resolve) => { releaseDiscovery = resolve; });
+    const publishSnapshot = vi.fn(async () => {});
+    const service = new ModelCatalogService({
+      adapters: [new FakeModelCatalogAdapter(async ({ signal }) => {
+        discoverySignal = signal;
+        await discoveryReleased;
+        return providerSnapshot({ models: [{ id: "shared" }] });
+      })],
+      publishSnapshot,
+    });
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const first = service.beforeInference({ providerId: "fake", signal: firstController.signal });
+    await vi.waitFor(() => expect(discoverySignal).toBeInstanceOf(AbortSignal));
+    const second = service.beforeInference({ providerId: "fake", signal: secondController.signal });
+
+    firstController.abort(new Error("first deadline expired"));
+
+    await expect(first).rejects.toThrow("first deadline expired");
+    expect(discoverySignal.aborted).toBe(false);
+    releaseDiscovery();
+    await expect(second).resolves.toMatchObject({ models: [{ id: "shared" }] });
+    expect(publishSnapshot).toHaveBeenCalledOnce();
+  });
+
+  it("starts a fresh pre-inference refresh instead of joining an abandoned one", async () => {
+    let calls = 0;
+    let firstSignal;
+    const service = new ModelCatalogService({
+      adapters: [new FakeModelCatalogAdapter(({ signal }) => {
+        calls += 1;
+        if (calls === 1) {
+          firstSignal = signal;
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        }
+        return providerSnapshot({ models: [{ id: "replacement" }] });
+      })],
+      publishSnapshot: vi.fn(async () => {}),
+    });
+    const expiredController = new AbortController();
+    const expired = service.beforeInference({ providerId: "fake", signal: expiredController.signal });
+    await vi.waitFor(() => expect(firstSignal).toBeInstanceOf(AbortSignal));
+    expiredController.abort(new Error("deadline expired"));
+
+    const replacement = service.beforeInference({ providerId: "fake" });
+
+    await expect(expired).rejects.toThrow("deadline expired");
+    await expect(replacement).resolves.toMatchObject({ models: [{ id: "replacement" }] });
+    expect(calls).toBe(2);
+  });
+
   it("refreshes only the provider selected for inference", async () => {
     const fakeDiscover = vi.fn(async () => providerSnapshot({ providerId: "fake" }));
     const otherDiscover = vi.fn(async () => providerSnapshot({ providerId: "other" }));
