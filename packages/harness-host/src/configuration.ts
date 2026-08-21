@@ -125,7 +125,7 @@ function isIdentifier(value: unknown): value is string {
 function isStableModelId(value: unknown): value is string {
   return typeof value === "string"
     && value.length > 0
-    && value.length <= 200
+    && [...value].length <= 200
     && value.trim() === value
     && ![...value].some((character) => /\p{Cc}/u.test(character));
 }

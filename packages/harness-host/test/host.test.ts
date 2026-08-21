@@ -922,11 +922,15 @@ describe("HarnessHost", () => {
   it("uses the product stable-ID rules for interaction model identities", async () => {
     const host = new HarnessHost({ stateFile: "/tmp/unused-harness-state.json", controlToken: "control", implementations: {} });
     const capability = graph();
+    await expect(host.complete(1, capability, { providerId: "codex", modelId: "🧠".repeat(200) }))
+      .rejects.toThrow("Unknown harness thread");
     await expect(host.complete(1, capability, { providerId: " codex", modelId: "model" }))
       .rejects.toThrow("invalid model selection");
     await expect(host.complete(1, capability, { providerId: "codex", modelId: "model\n" }))
       .rejects.toThrow("invalid model selection");
     await expect(host.complete(1, capability, { providerId: "codex", modelId: "m".repeat(201) }))
+      .rejects.toThrow("invalid model selection");
+    await expect(host.complete(1, capability, { providerId: "codex", modelId: "🧠".repeat(201) }))
       .rejects.toThrow("invalid model selection");
   });
 

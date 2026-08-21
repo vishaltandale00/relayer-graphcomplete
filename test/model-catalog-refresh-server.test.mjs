@@ -59,6 +59,7 @@ describe("trusted pre-inference model catalog refresh server", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${service.session.token}` },
       })).status).toBe(400);
+      expect((await request(service, {}, "🧠".repeat(201))).status).toBe(400);
       expect((await request(service, { body: "not empty" })).status).toBe(400);
       expect((await request(service, { body: "x".repeat(1_025) })).status).toBe(413);
       expect(refresh).not.toHaveBeenCalled();

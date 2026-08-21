@@ -65,12 +65,21 @@ describe("harness configuration", () => {
       modelIds: [stableModelId],
       preferredModelId: stableModelId,
     }]);
+    const unicodeModelId = "🧠".repeat(200);
+    expect(parseHarnessConfiguration({
+      ...parsed,
+      modelCompatibility: [{ providerId: "codex", modelIds: [unicodeModelId] }],
+    }).modelCompatibility).toEqual([{ providerId: "codex", modelIds: [unicodeModelId] }]);
     for (const modelId of [" model", "model\n", "m".repeat(201)]) {
       expect(() => parseHarnessConfiguration({
         ...parsed,
         modelCompatibility: [{ providerId: "codex", modelIds: [modelId] }],
       })).toThrow("modelIds must be a non-empty model ID array");
     }
+    expect(() => parseHarnessConfiguration({
+      ...parsed,
+      modelCompatibility: [{ providerId: "codex", modelIds: ["🧠".repeat(201)] }],
+    })).toThrow("modelIds must be a non-empty model ID array");
   });
 
   it("keeps implementation-specific configuration opaque to the host", () => {
