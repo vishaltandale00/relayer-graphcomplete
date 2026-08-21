@@ -271,6 +271,8 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("if (settings.families.some((family) => family.draft || family.editing)) return;");
     expect(settingsSource).toContain("if (savingFamily) return;");
     expect(settingsSource).toContain("reconcileSavedFamily(family, saved)");
+    expect(settingsSource).toContain("String(candidate.id) === String(familyId)");
+    expect(settingsSource).not.toContain("settings.families[selectedFamilyIndex] = reconcileSavedFamily");
     expect(settingsSource).toContain("Saved, but could not refresh:");
     expect(settingsSource).toContain("familyVisibilityGate.isPending()");
     expect(settingsSource).toContain("const settingsRefreshGate = createLatestRequestGate();");

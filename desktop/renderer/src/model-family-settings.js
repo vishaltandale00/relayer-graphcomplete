@@ -398,6 +398,7 @@ function cancelEdit() {
 async function saveEdit() {
   if (savingFamily) return;
   const family = settings.families[selectedFamilyIndex];
+  const familyId = family.id;
   family.name = $("#familyNameInput").value;
   family.validationErrors = validateCustomFamily(family, settings.families);
   if (Object.keys(family.validationErrors).length) return render();
@@ -408,7 +409,11 @@ async function saveEdit() {
     const saved = family.draft
       ? await createModelFamily(familyPayload(family))
       : await updateModelFamily(family.id, familyPayload(family));
-    settings.families[selectedFamilyIndex] = reconcileSavedFamily(family, saved);
+    const savedFamilyIndex = settings.families.findIndex((candidate) => (
+      String(candidate.id) === String(familyId)
+    ));
+    if (savedFamilyIndex < 0) throw new Error("The saved family is no longer available.");
+    settings.families[savedFamilyIndex] = reconcileSavedFamily(family, saved);
     editSnapshot = null;
     persisted = true;
     await refresh();
