@@ -30,7 +30,7 @@ The Node runtime is split into explicit workspace packages: `@relayer/graph-clie
 
 ## Core design
 
-- The selected harness owns model execution and any internal delegation; GraphComplete does not add another scheduler.
+- The selected harness owns model execution. Prime Agent alone owns recursive child scheduling; GraphComplete does not add another scheduler.
 - GraphComplete owns graph records, active-interaction write authority, validation, immutable accepted history, and explicit submission.
 - Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
 - The Node harness host owns live per-thread harness objects and provider-session resume state, not graph rules or product lifecycle.

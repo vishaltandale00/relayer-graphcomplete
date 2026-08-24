@@ -194,8 +194,8 @@
 <body>
   <main><h1>Relayer Desktop and Relayer Harness: Product Requirements</h1>
 <p><strong>Document status:</strong> Draft for product review.<br>
-<strong>Last updated:</strong> 2026-08-21.<br>
-<strong>Current-state baseline:</strong> Commit <code>78e9485</code>.</p>
+<strong>Last updated:</strong> 2026-08-24.<br>
+<strong>Application-state baseline:</strong> Commit <code>38286cb</code>.</p>
 <section class="reading-map" aria-labelledby="reading-map-title">
 <span class="reading-map-eyebrow">Start here</span>
 <h3 class="reading-map-title" id="reading-map-title">Choose the detail that you need</h3>
@@ -444,7 +444,7 @@ type CompleteResult =
 </code></pre>
 <p>The app server creates the interaction and passes its pointer to Complete. The selected harness uses its bound graph client to construct nodes, edges, layers, and actions, then ends by calling <code>graph.submit(interactionNode)</code>. The accepted result includes the fully resolved first layer so the desktop can display it immediately without a second request. The graph engine persists the same layer and serves later navigation. A model turn ending without submission is incomplete.</p>
 <p>The product stores one named harness on the thread. Model is the primary composer choice. Advanced shows compatible harness configurations before thread creation. The pinned harness becomes read-only after creation.</p>
-<p>The selected harness owns model execution, provider-session reuse, and any internal delegation. Provider adapters own authentication and model discovery. Relayer product records do not expose raw credentials, provider flags, runtime sessions, or implementation-specific recursion policy.</p>
+<p>The selected harness owns model execution and provider-session reuse. The <code>prime.agent</code> implementation alone owns recursive child scheduling. Provider adapters own authentication and model discovery. Relayer product records do not expose raw credentials, provider flags, runtime sessions, or implementation-specific recursion policy.</p>
 <h3>1.5 Items not in V1</h3>
 <p>V1 does not include arbitrary harness adapters, third-party conversation views, a generic agent protocol, or a public multi-harness conformance kit. Eval may compare supported harness, provider, and model configurations, but every run still exercises the Relayer product contract. A general platform should be reconsidered only after repeated implementations reveal a concrete reusable seam.</p>
 <h2 data-prd-layer="Evidence" data-prd-order="15">15. Canonical visual product reference</h2>
@@ -1768,7 +1768,7 @@ GET  /api/graph/nodes/:id/output
 <li>#52 owns prior completion discovery. #36 can reference known visible layers without search.</li>
 <li>#55 owns invoke resolution. #36 only defines which layer contexts can author invoke actions.</li>
 <li>#56 owns chronological Back and Forward behavior. #36 does not define navigation history.</li>
-<li>The selected harness owns recursive execution when it provides it. GraphComplete owns graph semantics and acceptance.</li>
+<li>Prime Agent owns recursive agent execution. Other harnesses execute directly. GraphComplete owns graph semantics and acceptance.</li>
 </ul>
 <h2 data-prd-layer="Contracts" data-prd-order="12">12. Complete and harness-host contract</h2>
 <h3>12.1 Canonical input and accepted output</h3>
@@ -1796,9 +1796,9 @@ interface Harness {
 </code></pre>
 <p>The thread stores a copy of its selected named harness configuration. The configuration's <code>implementation</code> field selects a factory from the map. The host does not interpret the implementation-specific <code>settings</code> object. The host keeps the same JavaScript harness object and provider session alive across turns. Factories may initialize asynchronously.</p>
 <p>If the Node process or provider session expires, the host recreates the object from stored configuration and opaque provider resume state. The next Complete call supplies its own graph scope. Continuous conversation must not start a new provider conversation on every Complete call.</p>
-<p>The Relayer app server owns one-active-root-completion coordination for a thread. The Node host owns the live JavaScript object. It serializes construction and Complete calls, forwards cancellation through an <code>AbortSignal</code>, and disposes live harnesses during shutdown. Harness objects for different threads can run concurrently. A selected harness owns any child-agent scheduling inside its completion.</p>
+<p>The Relayer app server owns one-active-root-completion coordination for a thread. The Node host owns the live JavaScript object. It serializes construction and Complete calls, forwards cancellation through an <code>AbortSignal</code>, and disposes live harnesses during shutdown. Harness objects for different threads can run concurrently. Only <code>prime.agent</code> owns recursive child-agent scheduling inside a completion.</p>
 <h3>12.3 Minimal harness configuration</h3>
-<p>Each YAML file has a unique machine-readable <code>name</code>, selects an implementation type and version, and carries implementation-owned settings. The host validates only the common envelope. Each implementation validates its own settings, so it can add model policy, delegation, review, and budget settings without changing host or product types.</p>
+<p>Each YAML file has a unique machine-readable <code>name</code>, selects an implementation type and version, and carries implementation-owned settings. The host validates only the common envelope. Each implementation validates its own settings. Prime Agent can add recursive model policy, review, and budget settings without changing host or product types.</p>
 <pre><code class="language-yaml">schemaVersion: 1
 name: codex-basic
 implementation: codex.basic

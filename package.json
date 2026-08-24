@@ -1,7 +1,7 @@
 {
   "name": "relayer-graphcomplete",
   "version": "0.0.0",
-  "description": "Recursive, self-assessing graph completion built on Prime Agent.",
+  "description": "Graph-native agent workspace with a harness- and provider-agnostic product contract.",
   "license": "Apache-2.0",
   "type": "module",
   "private": false,

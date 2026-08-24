@@ -10,13 +10,14 @@ Product host
         -> persistent Node host resolves the thread's selected harness object
         -> selected harness implementation
             -> selected provider adapter and model
-            -> direct execution or implementation-owned delegation
+            -> direct execution
+            -> or Prime Agent-owned recursive delegation
         -> graph.submit(interaction node)
         -> accepted resolved root layer or explicit failure
     -> product persistence and activation
 ```
 
-Product records pin stable provider, model, harness-configuration, and permission identifiers. Harness implementations and provider adapters translate those selections into runtime-specific credentials, sessions, model calls, and optional delegation. Supporting a new implementation requires an explicit adapter; agnostic does not mean arbitrary runtimes work without integration.
+Product records pin stable provider, model, harness-configuration, and permission identifiers. Harness implementations and provider adapters translate those selections into runtime-specific credentials, sessions, and model calls. Prime Agent alone owns recursive delegation. Supporting a new implementation requires an explicit adapter; agnostic does not mean arbitrary runtimes work without integration.
 
 ## Working desktop product path
 
@@ -73,7 +74,7 @@ Each product or Eval review window owns one bounded renderer-side navigation his
 7. Prior stable nodes and layers may be referenced across turns rather than duplicated. A reference destination is an accepted boundary, not a request to reaccept historical records.
 8. Draft records remain distinct from atomically accepted completion closures. Accepted layers snapshot their exact node, edge, and action membership so later graph writes cannot rewrite prior output.
 9. A model turn ending is not completion; the root must explicitly submit or stop. Submission validates authored closure, expansion cycles, reference visibility, orphan drafts, and layer size.
-10. The selected harness owns its internal execution and delegation. GraphComplete does not add a model-call or recursive-agent scheduler. See [ADR 0006](decisions/0006-harness-provider-agnostic-product-boundary.md).
+10. The selected harness owns model execution. Prime Agent owns recursive child scheduling. GraphComplete does not add a model-call or recursive-agent scheduler. See [ADR 0006](decisions/0006-harness-provider-agnostic-product-boundary.md).
 
 ## Target self-assessing policy invariants
 
@@ -94,7 +95,7 @@ The following apply when the optional recursive self-assessment policy is enable
 
 Model selection is a stable product choice resolved against the selected harness's declared provider and model compatibility. Thinking level is a separate choice. Execution must fail clearly when the selected combination is unavailable.
 
-An implementation may define an internal multi-model policy for delegation or review. For example, a recursive harness may assign different supported models to content ownership, revision, and self-assessment. That policy belongs to its configuration and must not become a Relayer product invariant.
+Prime Agent may define an internal multi-model policy for delegation or review. It may assign different supported models to content ownership, revision, and self-assessment. That policy belongs to its configuration and must not become a Relayer product invariant. Other harnesses execute directly under the current accepted boundary.
 
 ## Harness configurations and evaluation
 
