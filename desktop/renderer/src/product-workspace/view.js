@@ -7,8 +7,8 @@ export function productWorkspaceMarkup() {
         <button id="historyBack" data-review-ref="history-back" data-review-kind="history" disabled title="Back" aria-label="Back"><span aria-hidden="true">←</span><i class="history-spinner hidden" aria-hidden="true"></i></button>
         <button id="historyForward" data-review-ref="history-forward" data-review-kind="history" disabled title="Forward" aria-label="Forward"><span aria-hidden="true">→</span><i class="history-spinner hidden" aria-hidden="true"></i></button>
       </nav>
-      <div><h2 id="threadTitle">New thread</h2><p id="threadScope">No folder</p></div>
-      <div class="thread-header-actions">
+      <div class="thread-title-group">
+        <div class="thread-title-copy"><h2 id="threadTitle">New thread</h2><p id="threadScope">No folder</p></div>
         <div class="conversation-settings hidden" id="conversationSettings">
           <button class="conversation-settings-button" id="conversationSettingsButton" type="button" title="Conversation settings" aria-label="Conversation settings" aria-expanded="false" aria-controls="conversationSettingsMenu">•••</button>
           <div class="conversation-settings-menu hidden" id="conversationSettingsMenu" role="menu" aria-label="Conversation settings">

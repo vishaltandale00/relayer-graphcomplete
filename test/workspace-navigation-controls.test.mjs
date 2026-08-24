@@ -35,6 +35,8 @@ describe("product workspace navigation controls", () => {
 
     expect(markup.indexOf('id="historyBack"')).toBeLessThan(headerEnd);
     expect(markup.indexOf('id="historyForward"')).toBeLessThan(headerEnd);
+    expect(markup).toContain('class="thread-title-group"');
+    expect(markup.indexOf('id="conversationSettingsButton"')).toBeGreaterThan(markup.indexOf('id="threadTitle"'));
     expect(markup.indexOf('id="conversationSettingsButton"')).toBeLessThan(headerEnd);
     expect(markup).toContain('aria-label="Conversation settings"');
     expect(markup).not.toContain('id="runState"');
@@ -126,6 +128,8 @@ describe("product workspace navigation controls", () => {
 
   it("caps the popover viewport at exactly three complete rows", async () => {
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
+    expect(styles).toContain(".thread-title-group{display:flex;align-items:center;gap:7px;");
+    expect(styles).not.toContain(".thread-header-actions{margin-left:auto");
     expect(styles).toContain(".turn-popover{position:absolute;");
     expect(styles).toContain("max-height:calc(52px * 3 + 2px);overflow-y:auto");
     expect(styles).toContain(".turn-option{width:100%;height:52px;");
