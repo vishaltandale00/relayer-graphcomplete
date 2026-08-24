@@ -166,6 +166,14 @@ export function shouldFitInspectorOpen(previousOpen, nextOpen, viewportWidth) {
   return previousOpen === false && nextOpen === true && viewportWidth > 760;
 }
 
+export function shouldFitInspectorDock(previousOverlay, nextOverlay, inspectorOpen) {
+  return inspectorOpen && previousOverlay && !nextOverlay;
+}
+
+export function shouldActivateGraphNodeAfterPointerGesture(moved) {
+  return !moved;
+}
+
 export function inspectorFitRequestIsCurrent(request, {
   cameraRevision,
   graphViewKey,
@@ -417,6 +425,10 @@ export function createProductWorkspace({
   threadView.innerHTML = productWorkspaceMarkup();
   const graphStage = $("#graphStage");
   const graphDocument = graphStage.ownerDocument;
+  const graphWindow = graphDocument.defaultView;
+  const narrowInspectorMedia = graphWindow?.matchMedia?.("(max-width: 760px)");
+  let inspectorUsesOverlay = narrowInspectorMedia?.matches
+    ?? (graphWindow?.innerWidth ?? 0) <= 760;
   const cancelInspectorFit = () => {
     if (inspectorFitFrame !== null) {
       graphDocument.defaultView?.cancelAnimationFrame?.(inspectorFitFrame);
@@ -424,6 +436,37 @@ export function createProductWorkspace({
     }
     inspectorFitRequest = null;
   };
+  const scheduleInspectorFit = () => {
+    cancelInspectorFit();
+    const request = { graphViewKey, cameraRevision };
+    inspectorFitRequest = request;
+    inspectorFitFrame = graphWindow?.requestAnimationFrame?.(() => {
+      inspectorFitFrame = null;
+      if (!inspectorFitRequestIsCurrent(request, {
+        cameraRevision,
+        graphViewKey,
+        inspectorOpen: !$("#inspector").classList.contains("hidden"),
+        viewportWidth: graphWindow?.innerWidth ?? 0,
+      })) {
+        if (inspectorFitRequest === request) inspectorFitRequest = null;
+        return;
+      }
+      updateCamera(fitGraphCamera(graphNodes, graphStage.getBoundingClientRect()), false);
+      if (graphLayoutSettled) inspectorFitRequest = null;
+    }) ?? null;
+  };
+  const handleInspectorLayoutChange = (event) => {
+    const previouslyUsedOverlay = inspectorUsesOverlay;
+    inspectorUsesOverlay = event.matches;
+    const inspectorOpen = !$("#inspector").classList.contains("hidden");
+    const shouldFit = shouldFitInspectorDock(
+      previouslyUsedOverlay,
+      event.matches,
+      inspectorOpen,
+    );
+    if (shouldFit) scheduleInspectorFit();
+  };
+  narrowInspectorMedia?.addEventListener?.("change", handleInspectorLayoutChange);
   $("#closeInspector").onclick = () => {
     cancelInspectorFit();
     selection.selectedNodeId = null;
@@ -1080,6 +1123,7 @@ export function createProductWorkspace({
     $("#nodeLayer").innerHTML = graphNodes.map((node) => `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}" data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}"><div class="glyph"></div><div class="copy"><b>${escapeHtml(node.title)}</b></div></div>`).join("");
     $$('[data-node]').forEach((element) => {
       const authoredNode = graphNodes.find((candidate) => String(candidate.id) === element.dataset.node);
+      let suppressClickAfterDrag = false;
       element.querySelector(".glyph").replaceChildren(createRelayerIcon(
         authoredNode?.icon || authoredNode?.metadata?.relayer?.icon,
         { class: "relayer-node-icon" },
@@ -1090,7 +1134,13 @@ export function createProductWorkspace({
           element.offsetHeight,
         );
       }
-      element.onclick = () => selectNode(state, element.dataset.node);
+      element.onclick = () => {
+        if (!shouldActivateGraphNodeAfterPointerGesture(suppressClickAfterDrag)) {
+          suppressClickAfterDrag = false;
+          return;
+        }
+        selectNode(state, element.dataset.node);
+      };
       element.onkeydown = (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
@@ -1128,9 +1178,14 @@ export function createProductWorkspace({
         if (dragging.moved) dragging.node.pinned = true;
         drawGraph();
       };
-      const finishDrag = () => { dragging = null; };
-      element.onpointerup = finishDrag;
-      element.onpointercancel = finishDrag;
+      element.onpointerup = () => {
+        suppressClickAfterDrag = Boolean(dragging?.moved);
+        if (suppressClickAfterDrag) {
+          graphWindow?.setTimeout?.(() => { suppressClickAfterDrag = false; }, 0);
+        }
+        dragging = null;
+      };
+      element.onpointercancel = () => { dragging = null; };
     });
     if (enteringView && !ids.has(String(selection.selectedNodeId))) {
       selection.selectedNodeId = null;
@@ -1281,25 +1336,12 @@ export function createProductWorkspace({
     if (notify) onSelectionChange(node.id);
     const inspector = $("#inspector");
     const wasOpen = !inspector.classList.contains("hidden");
+    inspectorUsesOverlay = narrowInspectorMedia?.matches
+      ?? (graphWindow?.innerWidth ?? 0) <= 760;
     inspector.classList.remove("hidden");
     const viewportWidth = graphDocument.defaultView?.innerWidth ?? 0;
     if (shouldFitInspectorOpen(wasOpen, true, viewportWidth)) {
-      const request = { graphViewKey, cameraRevision };
-      inspectorFitRequest = request;
-      inspectorFitFrame = graphDocument.defaultView?.requestAnimationFrame?.(() => {
-        inspectorFitFrame = null;
-        if (!inspectorFitRequestIsCurrent(request, {
-          cameraRevision,
-          graphViewKey,
-          inspectorOpen: !inspector.classList.contains("hidden"),
-          viewportWidth: graphDocument.defaultView?.innerWidth ?? 0,
-        })) {
-          if (inspectorFitRequest === request) inspectorFitRequest = null;
-          return;
-        }
-        updateCamera(fitGraphCamera(graphNodes, graphStage.getBoundingClientRect()), false);
-        if (graphLayoutSettled) inspectorFitRequest = null;
-      }) ?? null;
+      scheduleInspectorFit();
     }
     $("#detailIcon").replaceChildren(createRelayerIcon(
       node.icon || node.metadata?.relayer?.icon,
@@ -1374,6 +1416,7 @@ export function createProductWorkspace({
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     graphDocument.removeEventListener("pointerdown", closeTurnPopoverFromOutside, true);
     graphDocument.removeEventListener("keydown", closeTurnPopoverOnEscape, true);
+    narrowInspectorMedia?.removeEventListener?.("change", handleInspectorLayoutChange);
     dragging = null;
     panning = null;
     pinching = null;

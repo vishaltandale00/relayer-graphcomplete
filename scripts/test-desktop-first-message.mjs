@@ -317,6 +317,27 @@ async function run() {
   if (JSON.stringify(nodeRectSignature(productAfterClose)) !== JSON.stringify(productOpenSignature)) {
     throw new Error("Closing the inspector changed the Product graph camera.");
   }
+  const dragPoint = await webContents.executeJavaScript(`(() => {
+    const rect = document.querySelector("[data-node]")?.getBoundingClientRect();
+    return rect ? { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + 23) } : null;
+  })()`);
+  if (!dragPoint) throw new Error("The Product graph did not expose a node to drag.");
+  webContents.sendInputEvent({ type: "mouseDown", ...dragPoint, button: "left", clickCount: 1 });
+  webContents.sendInputEvent({ type: "mouseMove", x: dragPoint.x + 24, y: dragPoint.y + 12 });
+  webContents.sendInputEvent({
+    type: "mouseUp",
+    x: dragPoint.x + 24,
+    y: dragPoint.y + 12,
+    button: "left",
+    clickCount: 1,
+  });
+  await waitForPaint(webContents);
+  const dragSelectionSuppressed = await webContents.executeJavaScript(
+    `document.querySelector("#inspector")?.classList.contains("hidden")`,
+  );
+  if (!dragSelectionSuppressed) {
+    throw new Error("Dragging a Product graph node opened the inspector and refit the camera.");
+  }
   await webContents.executeJavaScript(`document.querySelector('[data-node="${navigateAction.sourceNodeId}"]')?.click()`);
   await waitFor("the navigate action control", () => webContents.executeJavaScript(
     `Boolean(document.querySelector('[data-action-id="${navigateAction.id}"]'))`,
@@ -359,6 +380,7 @@ async function run() {
     restoredContained: nodesAreContained(restoredInspectorFit),
     openToOpenPreserved: true,
     closePreserved: true,
+    dragSelectionSuppressed,
   };
   await mkdir(dirname(screenshotPath), { recursive: true });
   await writeFile(screenshotPath, (await webContents.capturePage()).toPNG());
@@ -447,6 +469,15 @@ async function run() {
   }
   await waitForPaint(evalContents);
   await writeFile(evalNarrowScreenshotPath, (await evalContents.capturePage()).toPNG());
+  evalWindow.setContentSize(1480, 920);
+  const evalRedockedInspector = await waitFor("the redocked Eval inspector fit", async () => {
+    const presentation = await graphPresentation(evalContents);
+    return presentation.innerWidth === 1480
+      && presentation.inspectorOpen
+      && nodesAreContained(presentation)
+      ? presentation
+      : false;
+  });
   await evalContents.executeJavaScript(`document.querySelector("#turnPickerButton")?.click()`);
   const evalNavigationState = await waitFor("the Eval scrolling turn picker", () => evalContents.executeJavaScript(`(() => {
     const popover = document.querySelector("#turnPopover");
@@ -465,6 +496,7 @@ async function run() {
     desktopContained: nodesAreContained(evalInspectorFit),
     narrowOverlayPreservedStage: true,
     narrowOverlayPreservedCamera: true,
+    redockedContained: nodesAreContained(evalRedockedInspector),
   };
 
   const result = {

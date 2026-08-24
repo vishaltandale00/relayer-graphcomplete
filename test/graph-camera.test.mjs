@@ -15,7 +15,9 @@ import {
   graphWorldPoint,
   inspectorFitRequestIsCurrent,
   recenterGraphCamera,
+  shouldActivateGraphNodeAfterPointerGesture,
   shouldAutoFitSettledGraph,
+  shouldFitInspectorDock,
   shouldFitInspectorOpen,
   zoomGraphCameraAt,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
@@ -27,6 +29,18 @@ describe("product workspace graph camera", () => {
     expect(shouldFitInspectorOpen(true, true, 1200)).toBe(false);
     expect(shouldFitInspectorOpen(true, false, 1200)).toBe(false);
     expect(shouldFitInspectorOpen(false, false, 1200)).toBe(false);
+  });
+
+  it("requests a fit when an open overlay inspector becomes docked", () => {
+    expect(shouldFitInspectorDock(true, false, true)).toBe(true);
+    expect(shouldFitInspectorDock(true, false, false)).toBe(false);
+    expect(shouldFitInspectorDock(false, false, true)).toBe(false);
+    expect(shouldFitInspectorDock(false, true, true)).toBe(false);
+  });
+
+  it("does not activate a graph node from the click generated after dragging it", () => {
+    expect(shouldActivateGraphNodeAfterPointerGesture(false)).toBe(true);
+    expect(shouldActivateGraphNodeAfterPointerGesture(true)).toBe(false);
   });
 
   it("invalidates queued inspector fits after camera, view, close, or narrow-layout changes", () => {
