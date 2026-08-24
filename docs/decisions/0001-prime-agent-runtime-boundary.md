@@ -1,10 +1,12 @@
 # ADR 0001: Prime Agent is the recursive execution runtime
 
-Status: accepted
+Status: superseded by [ADR 0006](0006-harness-provider-agnostic-product-boundary.md)
+
+This decision remains valid for the optional `prime.agent` harness implementation. It no longer defines Prime Agent as the product-wide execution runtime.
 
 ## Decision
 
-GraphComplete will use Prime Agent's package boundary for agent sessions, nested RLM children, parent-child communication, model selection, persistence, and cancellation.
+When the `prime.agent` harness is selected, that implementation will use Prime Agent's package boundary for agent sessions, nested RLM children, parent-child communication, implementation-owned model policy, persistence, and cancellation.
 
 GraphComplete will not copy Prime Agent's scheduler or place Prime Agent underneath another RLM orchestration layer.
 
@@ -15,5 +17,5 @@ GraphComplete will not copy Prime Agent's scheduler or place Prime Agent underne
 - Generic missing capabilities, such as per-child thinking selection, should be contributed upstream.
 - GraphComplete supplies one in-memory run context per `complete()` call. Prime Agent propagates it to root and recursive IPython host requests without persisting it.
 - A stable `relayer.graph.current` host handler exposes the current run's graph scope; Prime Agent does not own or interpret graph authority.
-- Product hosts do not need to know Prime Agent's internal session representation.
+- Product hosts and product records do not know Prime Agent's internal session representation.
 - Completion is determined by graph acceptance, not by an agent turn ending.

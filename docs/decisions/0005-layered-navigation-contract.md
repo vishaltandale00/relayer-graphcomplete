@@ -19,6 +19,6 @@ Harness prompts explain the task goal and the meanings of expansion and referenc
 ## Consequences
 
 - Flat accepted answers remain valid.
-- Prime Agent remains the only recursive execution scheduler; GraphComplete owns graph semantics and acceptance only.
+- A selected harness owns any recursive execution scheduling; GraphComplete owns graph semantics and acceptance only.
 - Product and Eval clients use the same relation and provenance contract.
 - Legacy harness configurations remain available as baselines, but they use the same stricter graph tools.
