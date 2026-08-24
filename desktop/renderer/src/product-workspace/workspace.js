@@ -504,7 +504,10 @@ export function createProductWorkspace({
 
   function updateCamera(nextCamera, manual = true) {
     camera = nextCamera;
-    if (manual) cameraRevision += 1;
+    if (manual) {
+      cancelInspectorFit();
+      cameraRevision += 1;
+    }
     drawGraph();
   }
 
@@ -570,6 +573,7 @@ export function createProductWorkspace({
       return;
     }
     if (!panning || panning.pointerId !== event.pointerId) return;
+    cancelInspectorFit();
     camera.x = panning.startCameraX + event.clientX - panning.startClientX;
     camera.y = panning.startCameraY + event.clientY - panning.startClientY;
     cameraRevision += 1;
@@ -1289,7 +1293,10 @@ export function createProductWorkspace({
           graphViewKey,
           inspectorOpen: !inspector.classList.contains("hidden"),
           viewportWidth: graphDocument.defaultView?.innerWidth ?? 0,
-        })) return;
+        })) {
+          if (inspectorFitRequest === request) inspectorFitRequest = null;
+          return;
+        }
         updateCamera(fitGraphCamera(graphNodes, graphStage.getBoundingClientRect()), false);
         if (graphLayoutSettled) inspectorFitRequest = null;
       }) ?? null;
@@ -1362,6 +1369,7 @@ export function createProductWorkspace({
   }
 
   function dispose() {
+    cancelInspectorFit();
     graphSimulation.cancel();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     graphDocument.removeEventListener("pointerdown", closeTurnPopoverFromOutside, true);
