@@ -393,7 +393,7 @@ function normalizeCollaborationItem(value: JsonObject): NormalizedCollaborationI
   const delegationPrompt = optionalPlainString(firstDefined(value, "prompt", "delegation_prompt", "delegationPrompt"));
   const model = optionalNonemptyString(value.model);
   const reasoningEffort = optionalJsonValue(firstDefined(value, "reasoning_effort", "reasoningEffort"));
-  const agentStates = optionalJsonObject(firstDefined(value, "agents_states", "agentsStates"));
+  const agentStates = optionalAgentStates(firstDefined(value, "agents_states", "agentsStates"));
   const status = normalizeCollaborationStatus(value.status);
   return {
     ...(providerItemId === undefined ? {} : { providerItemId }),
@@ -481,8 +481,19 @@ function optionalStringList(value: JsonValue | undefined): readonly string[] | u
   return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : undefined;
 }
 
-function optionalJsonObject(value: JsonValue | undefined): JsonObject | undefined {
-  return isRecord(value) ? value : undefined;
+function optionalAgentStates(value: JsonValue | undefined): JsonObject | undefined {
+  if (!isRecord(value)) return undefined;
+  const states: Record<string, JsonValue> = {};
+  for (const [agentId, agentState] of Object.entries(value)) {
+    if (typeof agentState === "string") {
+      states[agentId] = agentState;
+      continue;
+    }
+    if (!isRecord(agentState)) continue;
+    const status = optionalNonemptyString(firstDefined(agentState, "status", "state"));
+    if (status !== undefined) states[agentId] = { status };
+  }
+  return states;
 }
 
 function optionalJsonValue(value: JsonValue | undefined): JsonValue | undefined {

@@ -280,7 +280,10 @@ describe("CodexBasicHarness", () => {
         id: "spawn-1", type: "collabAgentToolCall", tool: "spawnAgent", status: "completed",
         senderThreadId: "root", receiverThreadIds: ["child-1", "child-2"],
         prompt: "Inspect OPENAI_API_KEY=secret", model: "gpt-child", reasoningEffort: "high",
-        agentsStates: { "child-1": "running", "child-2": "running" },
+        agentsStates: {
+          "child-1": { status: "completed", message: "Full child result stays provider-native" },
+          "child-2": "running",
+        },
       } }],
       ["item.completed", { item: {
         id: "send-1", type: "collab_tool_call", tool: "send_input", status: "failed",
@@ -336,6 +339,12 @@ describe("CodexBasicHarness", () => {
       reasoningEffort: "high",
       status: "in_progress",
     });
+    const spawnCompleted = trace.events.find((event) => event.type === "tool.call.completed" && event.data.providerItemId === "spawn-1");
+    expect(spawnCompleted?.data.agentStates).toEqual({
+      "child-1": { status: "completed" },
+      "child-2": "running",
+    });
+    expect(JSON.stringify(spawnCompleted?.data)).not.toContain("Full child result");
     const recovered = trace.events.filter((event) => event.spanId !== undefined && event.data.providerItemId === "send-1");
     expect(recovered.map((event) => event.type)).toEqual(["tool.call.started", "tool.call.completed"]);
     expect(recovered[0]?.data).toMatchObject({ operation: "send_input", missingStart: true, delegationPrompt: "Check again" });
