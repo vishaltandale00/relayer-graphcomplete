@@ -3039,12 +3039,13 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .iter()
         .find(|interaction| interaction["id"] == strict_missing_lease_id)
         .unwrap();
-    assert_eq!(strict_missing_lease["completionStatus"], "submitted");
+    assert_eq!(strict_missing_lease["completionStatus"], "failed");
+    assert_eq!(strict_missing_lease["projectionFresh"], false);
     assert!(
         strict_missing_lease["completionError"]
             .as_str()
             .unwrap()
-            .contains("Invoke the action again")
+            .contains("reconciliation pending")
     );
     let legacy_pending = state["interactions"]
         .as_array()

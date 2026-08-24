@@ -902,9 +902,30 @@ pub(crate) enum RuntimeError {
     Url(#[from] url::ParseError),
 }
 
+impl RuntimeError {
+    pub(crate) fn is_retryable_startup_failure(&self) -> bool {
+        match self {
+            Self::Timeout(_) | Self::Io(_) => true,
+            Self::Remote { status, .. } => matches!(*status, 408 | 425 | 429) || *status >= 500,
+            Self::Http(error) => error.is_timeout() || error.is_connect() || error.is_request(),
+            // The primary operation determines whether recovery is safe to retry. A transient
+            // capability-cleanup failure must not turn a deterministic protocol violation into
+            // a resumable lease.
+            Self::Cleanup { operation, .. } => operation.is_retryable_startup_failure(),
+            Self::Configuration(_)
+            | Self::Protocol(_)
+            | Self::PermissionUnsupported { .. }
+            | Self::Json(_)
+            | Self::Url(_) => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CompleteInteraction, HarnessConfiguration, PreparedInvocation, RuntimeClient};
+    use super::{
+        CompleteInteraction, HarnessConfiguration, PreparedInvocation, RuntimeClient, RuntimeError,
+    };
     use crate::permissions::PermissionProfile;
     use axum::{
         Json, Router,
@@ -922,6 +943,30 @@ mod tests {
         },
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn startup_retry_classification_follows_the_primary_runtime_failure() {
+        assert!(
+            RuntimeError::Remote {
+                status: 503,
+                body: json!({}),
+            }
+            .is_retryable_startup_failure()
+        );
+        assert!(
+            !RuntimeError::Remote {
+                status: 409,
+                body: json!({}),
+            }
+            .is_retryable_startup_failure()
+        );
+
+        let failure = RuntimeError::Cleanup {
+            operation: Box::new(RuntimeError::Protocol("wrong node identity".into())),
+            cleanup: Box::new(RuntimeError::Timeout("capability cleanup")),
+        };
+        assert!(!failure.is_retryable_startup_failure());
+    }
 
     #[test]
     fn configuration_owned_model_omits_empty_compatibility_when_forwarded() {

@@ -9,6 +9,36 @@ use crate::{
 use axum::Router;
 use std::path::PathBuf;
 
+#[derive(Debug, thiserror::Error)]
+enum StartupReconciliationError {
+    #[error("{0}")]
+    Retryable(#[source] anyhow::Error),
+    #[error("{0}")]
+    Deterministic(#[source] anyhow::Error),
+}
+
+impl StartupReconciliationError {
+    fn retryable(error: impl Into<anyhow::Error>) -> Self {
+        Self::Retryable(error.into())
+    }
+
+    fn deterministic(error: impl Into<anyhow::Error>) -> Self {
+        Self::Deterministic(error.into())
+    }
+
+    fn from_runtime(error: crate::runtime::RuntimeError) -> Self {
+        if error.is_retryable_startup_failure() {
+            Self::retryable(error)
+        } else {
+            Self::deterministic(error)
+        }
+    }
+
+    fn is_retryable(&self) -> bool {
+        matches!(self, Self::Retryable(_))
+    }
+}
+
 pub struct RelayerRuntimeConfig {
     pub graph_url: String,
     pub harness_url: String,
@@ -25,24 +55,37 @@ async fn reconcile_interrupted_interaction(
     runtime: &RuntimeClient,
     permission_catalog: &PermissionCatalog,
     mut interaction: Interaction,
-) -> anyhow::Result<()> {
+) -> Result<(), StartupReconciliationError> {
     if interaction.graph_node_id.is_none()
-        && let Some((source_interaction_node_id, source_action_id)) =
-            storage.invocation_graph_source(interaction.id).await?
+        && let Some((source_interaction_node_id, source_action_id)) = storage
+            .invocation_graph_source(interaction.id)
+            .await
+            .map_err(StartupReconciliationError::retryable)?
     {
         if interaction.completion_status == "not_started"
-            && !storage.claim_interaction_preparing(interaction.id).await?
+            && !storage
+                .claim_interaction_preparing(interaction.id)
+                .await
+                .map_err(StartupReconciliationError::retryable)?
         {
-            anyhow::bail!(
+            return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
                 "could not reserve interrupted interaction {}",
                 interaction.id
-            );
+            )));
         }
         let thread = storage
             .get_thread(interaction.thread_id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("missing thread for {}", interaction.id))?;
-        let permission = permission_catalog.profile(&thread.permission_profile_id)?;
+            .await
+            .map_err(StartupReconciliationError::retryable)?
+            .ok_or_else(|| {
+                StartupReconciliationError::deterministic(anyhow::anyhow!(
+                    "missing thread for {}",
+                    interaction.id
+                ))
+            })?;
+        let permission = permission_catalog
+            .profile(&thread.permission_profile_id)
+            .map_err(StartupReconciliationError::deterministic)?;
         let prepared = runtime
             .prepare(&crate::runtime::CompleteInteraction {
                 project_id: thread.project_id.map(ProjectId::value),
@@ -59,7 +102,8 @@ async fn reconcile_interrupted_interaction(
                     source_action_id,
                 }),
             })
-            .await?;
+            .await
+            .map_err(StartupReconciliationError::from_runtime)?;
         let bound = match storage
             .bind_prepared_interaction(PreparedInteractionBinding {
                 interaction_id: interaction.id,
@@ -74,31 +118,42 @@ async fn reconcile_interrupted_interaction(
             Ok(bound) => bound,
             Err(error) => {
                 let cleanup = runtime.discard_prepared(prepared).await;
-                eprintln!(
-                    "preserving submitted invoke interaction {} for idempotent source-pair recovery after startup binding failed: {error}{}",
-                    interaction.id,
+                return Err(StartupReconciliationError::retryable(anyhow::anyhow!(
+                    "startup binding failed: {error}{}",
                     cleanup
                         .err()
                         .map(|cleanup| format!("; capability cleanup also failed: {cleanup}"))
                         .unwrap_or_default()
-                );
-                return Ok(());
+                )));
             }
         };
         if !bound {
-            anyhow::bail!("could not recover graph binding for {}", interaction.id);
+            return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                "could not recover graph binding for {}",
+                interaction.id
+            )));
         }
         interaction.graph_node_id = Some(prepared.graph_node_id);
     }
     if let Some(graph_node_id) = interaction.graph_node_id {
         // Product never persists writer tokens. Invalidating by node closes the crash window
         // between durable binding and the normal token revocation path.
-        runtime.invalidate_node_capabilities(graph_node_id).await?;
-        let metadata = runtime.interaction_metadata(graph_node_id).await?;
-        let expected = storage.invocation_graph_source(interaction.id).await?;
+        runtime
+            .invalidate_node_capabilities(graph_node_id)
+            .await
+            .map_err(StartupReconciliationError::from_runtime)?;
+        let metadata = runtime
+            .interaction_metadata(graph_node_id)
+            .await
+            .map_err(StartupReconciliationError::from_runtime)?;
+        let expected = storage
+            .invocation_graph_source(interaction.id)
+            .await
+            .map_err(StartupReconciliationError::retryable)?;
         let graph_lease_required = storage
             .invocation_requires_graph_lease(interaction.id)
-            .await?;
+            .await
+            .map_err(StartupReconciliationError::retryable)?;
         let expected = expected.map(|(source_interaction_node_id, source_action_id)| {
             crate::runtime::PreparedInvocation {
                 source_interaction_node_id,
@@ -110,26 +165,31 @@ async fn reconcile_interrupted_interaction(
         if metadata.node_id != graph_node_id
             || (metadata.invocation != expected && !legacy_unleased_invocation)
         {
-            anyhow::bail!(
+            return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
                 "bound graph interaction provenance mismatch for {}",
                 interaction.id
-            );
+            )));
         }
-        if let Some(output) = runtime.completion_output(graph_node_id).await? {
+        if let Some(output) = runtime
+            .completion_output(graph_node_id)
+            .await
+            .map_err(StartupReconciliationError::from_runtime)?
+        {
             if output.get("nodeId").and_then(serde_json::Value::as_i64) != Some(graph_node_id) {
-                anyhow::bail!(
+                return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
                     "canonical output node mismatch for interaction {}",
                     interaction.id
-                );
+                )));
             }
             if !storage
                 .recover_interaction_accepted(interaction.id, &output)
-                .await?
+                .await
+                .map_err(StartupReconciliationError::retryable)?
             {
-                anyhow::bail!(
+                return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
                     "interaction {} changed during startup reconciliation",
                     interaction.id
-                );
+                )));
             }
         }
     }
@@ -215,9 +275,10 @@ impl RelayerAppServer {
                 )
                 .await
                 {
-                    if storage
-                        .invocation_requires_graph_lease(interaction.id)
-                        .await?
+                    if error.is_retryable()
+                        && storage
+                            .invocation_requires_graph_lease(interaction.id)
+                            .await?
                     {
                         // A strict invoke is recoverable by its immutable source pair. Leave its
                         // nonterminal state intact here: the restart recovery passes below will
