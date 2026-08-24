@@ -2258,7 +2258,7 @@ async fn interrupted_action_invocation_remains_submitted_for_source_pair_recover
 }
 
 #[tokio::test]
-async fn startup_prepare_transport_failure_preserves_unbound_lease_for_later_restart() {
+async fn startup_malformed_create_response_preserves_unbound_lease_for_later_restart() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -2337,12 +2337,8 @@ async fn startup_prepare_transport_failure_preserves_unbound_lease_for_later_res
                         body["invocation"],
                         json!({"sourceInteractionNodeId":90,"sourceActionId":41})
                     );
-                    if observed_creates.fetch_add(1, Ordering::SeqCst) < 1 {
-                        return (
-                            StatusCode::SERVICE_UNAVAILABLE,
-                            axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
-                        )
-                            .into_response();
+                    if observed_creates.fetch_add(1, Ordering::SeqCst) < 4 {
+                        return (StatusCode::OK, "truncated successful response").into_response();
                     }
                     axum::Json(json!({"node":{"id":93},"graphToken":""})).into_response()
                 }
@@ -2403,7 +2399,7 @@ async fn startup_prepare_transport_failure_preserves_unbound_lease_for_later_res
     assert_eq!(after_recovery.0, "submitted");
     assert_eq!(after_recovery.1, Some(93));
     assert!(!after_recovery.2.unwrap().contains("reconciliation pending"));
-    assert_eq!(creates.load(Ordering::SeqCst), 2);
+    assert_eq!(creates.load(Ordering::SeqCst), 5);
     pool.close().await;
 
     graph_task.abort();

@@ -361,9 +361,11 @@ impl RuntimeClient {
             .unwrap_or(Err(RuntimeError::Timeout("graph interaction creation")))
             {
                 Ok(interaction) => break interaction,
-                Err(RuntimeError::Http(_) | RuntimeError::Json(_) | RuntimeError::Timeout(_))
-                    if command.invocation.is_some() && attempts < CONTROL_RETRY_ATTEMPTS =>
-                {
+                Err(
+                    RuntimeError::Http(_)
+                    | RuntimeError::ResponseDecode(_)
+                    | RuntimeError::Timeout(_),
+                ) if command.invocation.is_some() && attempts < CONTROL_RETRY_ATTEMPTS => {
                     // Invoke creation is keyed by the immutable source pair in graph core.
                     // Bounded exact retries recover response loss without another lease.
                     tokio::time::sleep(std::time::Duration::from_millis(
@@ -439,8 +441,11 @@ impl RuntimeClient {
                         "graph server returned a different prepared capability".into(),
                     ));
                 }
-                Err(RuntimeError::Http(_) | RuntimeError::Json(_) | RuntimeError::Timeout(_))
-                    if attempt < CONTROL_RETRY_ATTEMPTS => {}
+                Err(
+                    RuntimeError::Http(_)
+                    | RuntimeError::ResponseDecode(_)
+                    | RuntimeError::Timeout(_),
+                ) if attempt < CONTROL_RETRY_ATTEMPTS => {}
                 Err(error) => return Err(error),
             }
             tokio::time::sleep(std::time::Duration::from_millis(attempt * 25)).await;
@@ -457,9 +462,11 @@ impl RuntimeClient {
             attempt += 1;
             match self.delete_control(&body).await {
                 Ok(_) => return Ok(()),
-                Err(RuntimeError::Http(_) | RuntimeError::Json(_) | RuntimeError::Timeout(_))
-                    if attempt < CONTROL_RETRY_ATTEMPTS =>
-                {
+                Err(
+                    RuntimeError::Http(_)
+                    | RuntimeError::ResponseDecode(_)
+                    | RuntimeError::Timeout(_),
+                ) if attempt < CONTROL_RETRY_ATTEMPTS => {
                     tokio::time::sleep(std::time::Duration::from_millis(attempt * 25)).await;
                 }
                 Err(error) => return Err(error),
@@ -759,14 +766,17 @@ async fn response_json(
     expected: StatusCode,
 ) -> Result<Value, RuntimeError> {
     let status = response.status();
-    let value = response.json::<Value>().await.unwrap_or(Value::Null);
     if status != expected {
+        let value = response.json::<Value>().await.unwrap_or(Value::Null);
         return Err(RuntimeError::Remote {
             status: status.as_u16(),
             body: value,
         });
     }
-    Ok(value)
+    response
+        .json::<Value>()
+        .await
+        .map_err(RuntimeError::ResponseDecode)
 }
 
 fn loopback_url(value: &str, service: &str) -> Result<Url, RuntimeError> {
@@ -878,6 +888,8 @@ pub(crate) enum RuntimeError {
     Timeout(&'static str),
     #[error("runtime request failed with HTTP {status}: {body}")]
     Remote { status: u16, body: Value },
+    #[error("runtime successful response body could not be decoded: {0}")]
+    ResponseDecode(#[source] reqwest::Error),
     #[error(
         "runtime completion failed: {operation}; graph capability revocation also failed: {cleanup}"
     )]
@@ -905,7 +917,7 @@ pub(crate) enum RuntimeError {
 impl RuntimeError {
     pub(crate) fn is_retryable_startup_failure(&self) -> bool {
         match self {
-            Self::Timeout(_) | Self::Io(_) => true,
+            Self::Timeout(_) | Self::Io(_) | Self::ResponseDecode(_) => true,
             Self::Remote { status, .. } => matches!(*status, 408 | 425 | 429) || *status >= 500,
             Self::Http(error) => error.is_timeout() || error.is_connect() || error.is_request(),
             // The primary operation determines whether recovery is safe to retry. A transient
@@ -1153,10 +1165,9 @@ mod tests {
                 source_action_id: 23,
             }),
         };
-        assert!(matches!(
-            runtime.prepare(&command).await,
-            Err(super::RuntimeError::Json(_))
-        ));
+        let error = runtime.prepare(&command).await.unwrap_err();
+        assert!(matches!(&error, super::RuntimeError::ResponseDecode(_)));
+        assert!(error.is_retryable_startup_failure());
         assert_eq!(
             creates.load(Ordering::SeqCst),
             super::CONTROL_RETRY_ATTEMPTS as usize
