@@ -1324,16 +1324,21 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "http-body-util",
+ "relayer-graph-core",
+ "relayer-graph-server",
  "reqwest",
  "serde",
  "serde_json",
  "sha2",
  "sqlx",
+ "tempfile",
  "thiserror",
  "tokio",
  "tower",
  "tower-http",
  "url",
+ "uuid",
 ]
 
 [[package]]

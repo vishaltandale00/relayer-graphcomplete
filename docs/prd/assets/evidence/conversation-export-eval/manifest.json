@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-24T17:02:54.026Z",
+  "sourceCommit": "78e9485655f34a881213c7832e5a896ab60d0a86",
+  "workingTreeDirty": true,
+  "command": "RELAYER_CAPTURE_CONVERSATION_EVAL_EVIDENCE=1 electron scripts/capture-conversation-eval-evidence.mjs",
+  "paidInferenceCalls": 0,
+  "ownerExportSha256": "sha256:92b78e38b9f492a093b65de4d5fe44904ef5b12195fb96e45cd195f071900d11",
+  "importedSourceSha256": "sha256:92b78e38b9f492a093b65de4d5fe44904ef5b12195fb96e45cd195f071900d11",
+  "exactOwnerBytesImported": true,
+  "restartReplay": {
+    "runId": "import-8fdda1aa-d006-42bb-bfe1-d6dedaa484bf",
+    "executionId": "execution-8fdda1aa-d006-42bb-bfe1-d6dedaa484bf",
+    "sourceSha256": "sha256:92b78e38b9f492a093b65de4d5fe44904ef5b12195fb96e45cd195f071900d11",
+    "status": "passed",
+    "judgeProvenance": {
+      "kind": "external-conversation-export",
+      "importId": "8fdda1aa-d006-42bb-bfe1-d6dedaa484bf",
+      "sourceSha256": "sha256:92b78e38b9f492a093b65de4d5fe44904ef5b12195fb96e45cd195f071900d11",
+      "sourceTurnId": "turn:1",
+      "producer": {
+        "desktopVersion": "development",
+        "buildCommit": "development",
+        "platform": "darwin",
+        "architecture": "arm64"
+      }
+    }
+  },
+  "renderer": "desktop/renderer ProductWorkspace and desktop/eval-renderer dashboard",
+  "screenshots": [
+    {
+      "file": "ordinary-conversation-export.png",
+      "sha256": "c5aca1a826b9afda3c705754c21b8ad4d06d41e85c1a752df76c74a1d1fa590f",
+      "requirements": [
+        "Owner sees enabled Export conversation control in ordinary ProductWorkspace"
+      ]
+    },
+    {
+      "file": "eval-dashboard-imported.png",
+      "sha256": "d852f996e63b79a34398288d38313e3cfffe33149fc630060cd3a130994461ea",
+      "requirements": [
+        "Eval dashboard imported the exact owner-saved JSONL as an immutable external conversation"
+      ]
+    },
+    {
+      "file": "eval-dashboard-judged.png",
+      "sha256": "3ab03a47ef3ec7ec1493bfd960d6c303a77ce0e531b6cd7e3b83e02627528ca1",
+      "requirements": [
+        "Existing deterministic judge completed",
+        "Product workspace action remains available"
+      ]
+    },
+    {
+      "file": "product-workspace-imported-root.png",
+      "sha256": "9f9b1496ee522110d2f37764667c0a920cc6cf4dd9707495265f19217398b915",
+      "requirements": [
+        "Production ProductWorkspace renders imported accepted turn",
+        "Review mode is read-only",
+        "Turn navigation includes unfinished and failed turns"
+      ]
+    },
+    {
+      "file": "product-workspace-turn-statuses.png",
+      "sha256": "6265e5881b8286513be50180c194051a2182f2acddc85a6f6a899227ca925959",
+      "requirements": [
+        "Turn picker visibly distinguishes accepted, failed, and unfinished imported turns"
+      ]
+    },
+    {
+      "file": "product-workspace-reference-detail.png",
+      "sha256": "a59ba53d851c02ab4a9e59ac8e70005a5fdc223760dda87d4f5d35759945527c",
+      "requirements": [
+        "Reference navigation reached shared layer",
+        "Breadcrumb preserves authored path",
+        "Node detail renders in production inspector"
+      ]
+    },
+    {
+      "file": "eval-dashboard-restarted.png",
+      "sha256": "b0577f7265a7fcd0caa0b59d64761342e2331211c27052ccce2e7f588ebc545f",
+      "requirements": [
+        "Eval restart replays the same imported source digest and completed deterministic judge"
+      ]
+    },
+    {
+      "file": "product-workspace-restarted-reference.png",
+      "sha256": "5ae1f9a4e7375b8a674e219ef7714a8b35b6ecebfa56c5bc99d54623fb31225b",
+      "requirements": [
+        "After graph, product, and Eval restart, the same imported execution reopens and reference navigation still works"
+      ]
+    }
+  ]
+}

@@ -17,8 +17,10 @@ use crate::{
 };
 use axum::{
     Json,
+    body::Body,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
+    response::Response,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -159,6 +161,38 @@ pub(super) async fn get(
             .await?
             .into(),
     ))
+}
+
+pub(super) async fn export(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Response, ApiError> {
+    authorize_write(&state, &headers)?;
+    let runtime = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
+    let exported_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| ApiError::internal("system time is before unix epoch"))?
+        .as_millis()
+        .to_string();
+    let body = crate::conversation_export_service::build_conversation_export(
+        &state.product,
+        runtime,
+        ThreadId::try_from(id)?,
+        state.export_producer.clone(),
+        exported_at,
+    )
+    .await?;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-store")
+        .header(header::CONTENT_LENGTH, body.len())
+        .body(Body::from(body))
+        .map_err(|_| ApiError::internal("could not construct conversation export response"))
 }
 
 pub(super) async fn list_interactions(

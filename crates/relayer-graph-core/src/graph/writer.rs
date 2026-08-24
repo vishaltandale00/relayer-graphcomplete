@@ -316,10 +316,20 @@ impl GraphWriter {
 
     pub async fn complete(&self, interaction: NodeId) -> Result<CompletionOutput, GraphError> {
         self.scope.require_root(interaction)?;
+        if self.scope.read_only {
+            return Err(GraphError::Forbidden(
+                "imported conversation graphs are immutable".into(),
+            ));
+        }
         completion::complete(&self.database, &self.scope).await
     }
 
     async fn ensure_writable(&self, connection: &mut GraphConnection) -> Result<(), GraphError> {
+        if self.scope.read_only {
+            return Err(GraphError::Forbidden(
+                "imported conversation graphs are immutable".into(),
+            ));
+        }
         if CompletionTable::new(connection)
             .root_action(self.scope.root_node_id)
             .await?

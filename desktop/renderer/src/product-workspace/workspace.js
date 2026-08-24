@@ -188,6 +188,18 @@ export function turnStatusPresentation(status) {
   return { kind: "unknown", label: status ? String(status).replaceAll("_", " ") : "Unknown" };
 }
 
+export function runStatePresentation(status, { imported = false } = {}) {
+  const pending = PENDING_COMPLETION_STATUSES.has(status);
+  if (imported && pending) return { pending: false, display: "Unfinished snapshot" };
+  return {
+    pending,
+    display: status === "accepted" ? "Complete"
+      : pending ? "…"
+        : status === "idle" ? "Ready"
+          : status[0].toUpperCase() + status.slice(1),
+  };
+}
+
 export function turnSelectionIntent(turns, currentInteractionId, targetInteractionId) {
   const currentIndex = turns.findIndex((turn) => (
     String(turn.id) === String(currentInteractionId)
@@ -326,6 +338,7 @@ export function createProductWorkspace({
   onSelectTurn = () => {},
   onSelectTurnById,
   onSelectionChange = () => {},
+  onExportConversation = null,
   onSubmitInteraction = async () => {},
   onOpenSettings = () => {},
   onNavigateLayer = async () => {},
@@ -344,6 +357,7 @@ export function createProductWorkspace({
   let camera = { x: 0, y: 0, zoom: 1 };
   let cameraRevision = 0;
   let turnPopoverOpen = false;
+  let exportPending = false;
   const graphViewCache = new Map();
   const activeTouchPointers = new Map();
 
@@ -353,6 +367,37 @@ export function createProductWorkspace({
   const threadView = $("#threadView");
   if (!threadView) throw new Error("Product workspace requires a #threadView host.");
   threadView.innerHTML = productWorkspaceMarkup();
+  const exportButton = $("#exportConversation");
+  const renderExportControl = (thread = getThread()) => {
+    const available = capabilities.canExportConversation
+      && typeof onExportConversation === "function";
+    exportButton.classList.toggle("hidden", !available);
+    exportButton.disabled = !available || exportPending || thread?.id == null;
+    exportButton.setAttribute("aria-busy", String(exportPending));
+    exportButton.textContent = exportPending ? "Exporting…" : "Export conversation…";
+  };
+  exportButton.onclick = async () => {
+    const thread = getThread();
+    if (
+      !capabilities.canExportConversation
+      || exportPending
+      || thread?.id == null
+      || typeof onExportConversation !== "function"
+    ) return;
+    exportPending = true;
+    renderExportControl(thread);
+    try {
+      const result = await onExportConversation(thread.id);
+      if (result?.status === "saved") toast("Conversation exported.");
+      else if (result?.status === "canceled") toast("Export canceled.");
+      else throw new Error("Conversation export returned an unknown status.");
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      exportPending = false;
+      renderExportControl();
+    }
+  };
   $("#closeInspector").onclick = () => {
     selection.selectedNodeId = null;
     onSelectionChange(null);
@@ -584,6 +629,7 @@ export function createProductWorkspace({
     threadView.dataset.canNavigate = String(capabilities.canNavigate);
     threadView.dataset.canCompose = String(capabilities.canCompose);
     threadView.dataset.canInvokeMutatingActions = String(capabilities.canInvokeMutatingActions);
+    threadView.dataset.canExportConversation = String(capabilities.canExportConversation);
     $("#threadComposer").classList.toggle("disabled-composer", !capabilities.canCompose);
     prompt.classList.toggle("hidden", !capabilities.canCompose);
     send.classList.toggle("hidden", !capabilities.canCompose);
@@ -673,6 +719,7 @@ export function createProductWorkspace({
     }
     applyMode();
     showThread();
+    renderExportControl(thread);
     renderHistoryNavigation();
     $("#threadTitle").textContent = thread.title;
     const project = state.projects.find((item) => String(item.id) === String(thread.projectId));
@@ -712,7 +759,7 @@ export function createProductWorkspace({
       ? `${identityLabels.provider}: ${identityLabels.model}`
       : "";
     identity.classList.toggle("hidden", !identityLabels);
-    renderRunState(state);
+    renderRunState(state, thread);
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
       selectNode(state, selection.selectedNodeId, { notify: false });
@@ -760,13 +807,9 @@ export function createProductWorkspace({
     breadcrumb.scrollLeft = breadcrumb.scrollWidth;
   }
 
-  function renderRunState(state) {
+  function renderRunState(state, thread) {
     const status = state.status || "idle";
-    const pending = PENDING_COMPLETION_STATUSES.has(status);
-    const display = status === "accepted" ? "Complete"
-      : pending ? "…"
-        : status === "idle" ? "Ready"
-          : status[0].toUpperCase() + status.slice(1);
+    const { pending, display } = runStatePresentation(status, { imported: thread?.imported === true });
     const runState = $("#runState");
     runState.className = `run-state ${pending ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
     runState.setAttribute("aria-label", pending ? "Waiting for graph" : display);
@@ -794,10 +837,12 @@ export function createProductWorkspace({
       graphLayoutSettled = false;
       selection.selectedNodeId = null;
       $("#inspector").classList.add("hidden");
-      const pending = PENDING_COMPLETION_STATUSES.has(state.status);
+      const pending = thread?.imported !== true && PENDING_COMPLETION_STATUSES.has(state.status);
       $("#thinkingDots").classList.toggle("hidden", !pending);
       $("#graphEmptyMessage").classList.toggle("hidden", pending);
-      $("#graphEmptyMessage").textContent = state.status === "failed"
+      $("#graphEmptyMessage").textContent = thread?.imported === true && PENDING_COMPLETION_STATUSES.has(state.status)
+        ? "This imported interaction was unfinished and has no accepted graph."
+        : state.status === "failed"
         ? "This interaction failed before producing an accepted graph."
         : "This interaction has no accepted graph yet.";
       return;
@@ -1108,6 +1153,7 @@ export function createProductWorkspace({
   }
 
   function dispose() {
+    modelPicker?.dispose();
     graphSimulation.cancel();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     graphDocument.removeEventListener("pointerdown", closeTurnPopoverFromOutside, true);

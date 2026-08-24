@@ -26,6 +26,8 @@ pub struct RelayerAppServerConfig {
     pub provider_catalog_refresh_url: Option<String>,
     pub provider_catalog_refresh_token: Option<String>,
     pub runtime: Option<RelayerRuntimeConfig>,
+    pub allow_conversation_import: bool,
+    pub export_producer: crate::conversation_export::ExportProducer,
 }
 
 pub struct RelayerAppServer {
@@ -38,7 +40,9 @@ pub struct RelayerAppServer {
     permission_catalog: PermissionCatalog,
     default_harness_configuration: String,
     allow_harness_override: bool,
+    allow_conversation_import: bool,
     standalone_workspaces_directory: PathBuf,
+    export_producer: crate::conversation_export::ExportProducer,
 }
 
 impl RelayerAppServer {
@@ -93,6 +97,15 @@ impl RelayerAppServer {
             ),
             None => None,
         };
+        if config.allow_conversation_import {
+            let runtime = runtime.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("conversation import requires the GraphComplete runtime")
+            })?;
+            for import_id in storage.staged_conversation_import_ids().await? {
+                runtime.remove_imported_conversation(&import_id).await?;
+                storage.remove_conversation_import(&import_id).await?;
+            }
+        }
         let default_harness_configuration = config
             .runtime
             .as_ref()
@@ -156,7 +169,9 @@ impl RelayerAppServer {
             permission_catalog,
             default_harness_configuration,
             allow_harness_override,
+            allow_conversation_import: config.allow_conversation_import,
             standalone_workspaces_directory,
+            export_producer: config.export_producer,
         })
     }
 
@@ -173,8 +188,10 @@ impl RelayerAppServer {
                 permission_catalog: self.permission_catalog.clone(),
                 default_harness_configuration: self.default_harness_configuration.clone(),
                 allow_harness_override: self.allow_harness_override,
+                allow_conversation_import: self.allow_conversation_import,
                 provider_catalog_refresh: self.provider_catalog_refresh.clone(),
                 standalone_workspaces_directory: self.standalone_workspaces_directory.clone(),
+                export_producer: self.export_producer.clone(),
             },
         )
     }

@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld("relayerEval", {
   listRuns: () => ipcRenderer.invoke("relayer-eval:list-runs"),
   getRun: (runId) => ipcRenderer.invoke("relayer-eval:get-run", runId),
   createRun: (selection) => ipcRenderer.invoke("relayer-eval:create-run", selection),
+  importConversation: () => ipcRenderer.invoke("relayer-eval:import-conversation"),
+  judgeImportedConversation: (executionId, judgeConfigurationName) => (
+    ipcRenderer.invoke("relayer-eval:judge-imported-conversation", executionId, judgeConfigurationName)
+  ),
   openReview: (executionId) => ipcRenderer.invoke("relayer-eval:open-review", executionId),
   openJudgeReview: (executionId) => ipcRenderer.invoke("relayer-eval:open-judge-review", executionId),
   openCandidateTrace: (executionId, interactionId) => ipcRenderer.invoke("relayer-eval:open-candidate-trace", executionId, interactionId),

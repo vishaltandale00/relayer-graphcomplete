@@ -58,6 +58,7 @@ describe("Relayer Eval application service", () => {
       runtimeSession,
       defaultHarnessConfiguration: "fixture-task-system",
       allowHarnessOverride: true,
+      allowConversationImport: true,
     });
     services.push(product);
     const productSession = await product.start();
@@ -69,6 +70,7 @@ describe("Relayer Eval application service", () => {
       configurationPaths: [configurationPath],
       candidateTraceExporter: (interactionId, targetDirectory, correlation) => runtime.exportCandidateTrace(interactionId, targetDirectory, correlation),
       candidateTraceRequired: true,
+      conversationImportEnabled: true,
       projectFixtureMaterializer: async ({ workspaceDirectory }) => {
         await mkdir(workspaceDirectory, { recursive: true });
         return {

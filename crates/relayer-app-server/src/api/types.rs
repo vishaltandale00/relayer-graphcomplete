@@ -38,6 +38,7 @@ pub(crate) struct ThreadResponse {
     permission_profile_id: String,
     created_at: String,
     updated_at: String,
+    imported: bool,
 }
 
 impl From<Thread> for ThreadResponse {
@@ -52,6 +53,7 @@ impl From<Thread> for ThreadResponse {
             permission_profile_id: thread.permission_profile_id,
             created_at: thread.created_at,
             updated_at: thread.updated_at,
+            imported: thread.imported,
         }
     }
 }

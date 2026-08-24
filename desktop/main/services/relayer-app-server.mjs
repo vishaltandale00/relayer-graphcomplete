@@ -75,7 +75,14 @@ export class RelayerAppServerService {
     providerCatalogRefreshSession = null,
     defaultHarnessConfiguration = "codex-basic",
     allowHarnessOverride = false,
+    allowConversationImport = false,
     enableReadOnlySession = false,
+    exportProducer = {
+      desktopVersion: "development",
+      buildCommit: "development",
+      platform: process.platform,
+      architecture: process.arch,
+    },
     spawnProcess = spawn,
     startupTimeoutMs = 10_000,
     shutdownTimeoutMs = 2_000,
@@ -89,7 +96,14 @@ export class RelayerAppServerService {
     this.providerCatalogRefreshSession = validateProviderCatalogRefreshSession(providerCatalogRefreshSession);
     this.defaultHarnessConfiguration = defaultHarnessConfiguration;
     this.allowHarnessOverride = allowHarnessOverride;
+    this.allowConversationImport = allowConversationImport;
     this.enableReadOnlySession = enableReadOnlySession;
+    for (const [field, value] of Object.entries(exportProducer)) {
+      if (typeof value !== "string" || !value.trim()) {
+        throw new Error(`Conversation export producer ${field} must be a non-empty string.`);
+      }
+    }
+    this.exportProducer = Object.freeze({ ...exportProducer });
     this.spawnProcess = spawnProcess;
     this.startupTimeoutMs = startupTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
@@ -129,6 +143,10 @@ export class RelayerAppServerService {
       "--web-dir", this.webDirectory,
       "--permission-catalog", this.permissionCatalogPath,
       "--port", "0",
+      "--producer-desktop-version", this.exportProducer.desktopVersion,
+      "--producer-build-commit", this.exportProducer.buildCommit,
+      "--producer-platform", this.exportProducer.platform,
+      "--producer-architecture", this.exportProducer.architecture,
     ];
     if (this.runtimeSession) {
       serverArguments.push(
@@ -140,6 +158,7 @@ export class RelayerAppServerService {
         "--default-harness-configuration", this.defaultHarnessConfiguration,
       );
       if (this.allowHarnessOverride) serverArguments.push("--allow-harness-override");
+      if (this.allowConversationImport) serverArguments.push("--allow-conversation-import");
     }
     if (readOnlyControlToken) serverArguments.push("--read-only-control-token-stdin");
     if (this.providerCatalogRefreshSession) {
@@ -240,6 +259,32 @@ export class RelayerAppServerService {
       detail = null;
     }
     throw new Error(detail?.error?.message || detail?.error || `Provider catalog publish failed (${response.status}).`);
+  }
+
+  async exportConversation(threadId, { signal } = {}) {
+    if (!Number.isSafeInteger(threadId) || threadId <= 0) {
+      throw new Error("Conversation export requires a positive thread ID.");
+    }
+    const session = await this.start();
+    signal?.throwIfAborted();
+    const response = await fetch(new URL(`/api/threads/${threadId}/export`, session.origin), {
+      headers: { Cookie: `${session.cookie.name}=${session.cookie.value}` },
+      signal,
+    });
+    if (response.ok) {
+      const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+      if (contentType !== "application/x-ndjson") {
+        throw new Error("Conversation export returned an unexpected content type.");
+      }
+      return new Uint8Array(await response.arrayBuffer());
+    }
+    let detail;
+    try {
+      detail = await response.json();
+    } catch {
+      detail = null;
+    }
+    throw new Error(detail?.error || `Conversation export failed (${response.status}).`);
   }
 
   #waitForReady(child, stderr) {

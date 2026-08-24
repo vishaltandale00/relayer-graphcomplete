@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::{
-    GraphError, GraphNode, GraphWriter, NodeId, ProjectId, ThreadId,
+    AcceptedGraphClosure, GraphError, GraphNode, GraphWriter, NodeId, ProjectId, ThreadId,
     graph::model::require_nonempty,
     storage::{SqliteGraphStore, sqlite::nodes::NodeTable},
 };
@@ -38,11 +38,20 @@ impl GraphDatabase {
     }
 
     pub async fn writer_for_subgraph(&self, node_id: NodeId) -> Result<GraphWriter, GraphError> {
-        let mut connection = self.storage.acquire().await?;
-        let scope = NodeTable::new(&mut connection)
-            .interaction_scope(node_id)
-            .await?;
+        let scope = {
+            let mut connection = self.storage.acquire().await?;
+            NodeTable::new(&mut connection)
+                .interaction_scope(node_id)
+                .await?
+        };
         Ok(GraphWriter::new(self.clone(), scope))
+    }
+
+    pub async fn accepted_graph_closure(
+        &self,
+        node_id: NodeId,
+    ) -> Result<Option<AcceptedGraphClosure>, GraphError> {
+        crate::graph::completion::read_accepted_closure(self, node_id).await
     }
 
     pub async fn close(&self) {

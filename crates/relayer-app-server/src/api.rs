@@ -1,4 +1,5 @@
 mod auth;
+mod conversation_imports;
 mod error;
 mod model_settings;
 mod projects;
@@ -24,8 +25,10 @@ pub(crate) struct ApiState {
     pub(crate) permission_catalog: PermissionCatalog,
     pub(crate) default_harness_configuration: String,
     pub(crate) allow_harness_override: bool,
+    pub(crate) allow_conversation_import: bool,
     pub(crate) provider_catalog_refresh: Option<ProviderCatalogRefreshClient>,
     pub(crate) standalone_workspaces_directory: PathBuf,
+    pub(crate) export_producer: crate::conversation_export::ExportProducer,
 }
 
 pub(crate) struct ApiRuntime {
@@ -33,8 +36,10 @@ pub(crate) struct ApiRuntime {
     pub(crate) permission_catalog: PermissionCatalog,
     pub(crate) default_harness_configuration: String,
     pub(crate) allow_harness_override: bool,
+    pub(crate) allow_conversation_import: bool,
     pub(crate) provider_catalog_refresh: Option<ProviderCatalogRefreshClient>,
     pub(crate) standalone_workspaces_directory: PathBuf,
+    pub(crate) export_producer: crate::conversation_export::ExportProducer,
 }
 
 pub(crate) fn router(
@@ -51,10 +56,12 @@ pub(crate) fn router(
         permission_catalog: runtime.permission_catalog,
         default_harness_configuration: runtime.default_harness_configuration,
         allow_harness_override: runtime.allow_harness_override,
+        allow_conversation_import: runtime.allow_conversation_import,
         provider_catalog_refresh: runtime.provider_catalog_refresh,
         standalone_workspaces_directory: runtime.standalone_workspaces_directory,
+        export_producer: runtime.export_producer,
     };
-    Router::new()
+    let router = Router::new()
         .route("/health", get(state::health))
         .route("/api/capabilities", get(state::capabilities))
         .route("/api/permission-profiles", get(state::permission_profiles))
@@ -87,10 +94,21 @@ pub(crate) fn router(
             "/api/internal/provider-catalog",
             axum::routing::put(model_settings::publish_provider_catalog),
         )
+        .route(
+            "/api/internal/conversation-imports",
+            get(conversation_imports::list)
+                .post(conversation_imports::import)
+                .put(conversation_imports::publish)
+                .delete(conversation_imports::remove)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::conversation_export::MAX_EXPORT_BYTES,
+                )),
+        )
         .route("/api/state", get(state::product_state))
         .route("/api/projects", get(projects::list).post(projects::create))
         .route("/api/threads", get(threads::list).post(threads::create))
         .route("/api/threads/{id}", get(threads::get))
+        .route("/api/threads/{id}/export", get(threads::export))
         .route(
             "/api/threads/{id}/interactions",
             get(threads::list_interactions).post(threads::create_interaction),
@@ -103,6 +121,6 @@ pub(crate) fn router(
             "/api/threads/{thread_id}/interactions/{interaction_id}/actions/{action_id}/invoke",
             axum::routing::post(threads::invoke_action),
         )
-        .fallback_service(ServeDir::new(web_directory).append_index_html_on_directories(true))
-        .with_state(state)
+        .fallback_service(ServeDir::new(web_directory).append_index_html_on_directories(true));
+    router.with_state(state)
 }

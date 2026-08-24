@@ -1,13 +1,14 @@
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{DefaultBodyLimit, Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use relayer_graph_core::{
     ActionDraft, ActionId, ActionKind, CompletionOutput, EdgeDraft, GraphDatabase, GraphError,
-    GraphNode, LayerDraft, LayerId, NodeDraft, NodeId, ProjectId, RecordState, ThreadId,
+    GraphNode, ImportedConversationStage, ImportedTurn, LayerDraft, LayerId, NodeDraft, NodeId,
+    ProjectId, RecordState, ThreadId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -39,6 +40,26 @@ pub fn router(state: ServerState) -> Router {
         .route("/health", get(health))
         .route("/api/control/interactions", post(create_interaction))
         .route(
+            "/api/control/conversation-imports",
+            axum::routing::delete(remove_imported_conversation),
+        )
+        .route(
+            "/api/control/conversation-import-stages",
+            post(begin_imported_conversation),
+        )
+        .route(
+            "/api/control/conversation-import-stages/{import_id}/turns",
+            post(stage_imported_turn).layer(DefaultBodyLimit::max(17 * 1024 * 1024)),
+        )
+        .route(
+            "/api/control/conversation-import-stages/{import_id}/finalize",
+            post(finalize_imported_conversation),
+        )
+        .route(
+            "/api/control/interactions/{id}/accepted-closure",
+            get(accepted_closure),
+        )
+        .route(
             "/api/control/capabilities",
             post(remint_capability).delete(revoke_capability),
         )
@@ -53,6 +74,75 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/graph/submit", post(submit_completion))
         .route("/api/graph/nodes/{id}/output", get(completion_output))
         .with_state(state)
+}
+
+async fn begin_imported_conversation(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<ImportedConversationStage>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    state.graph.begin_imported_conversation(&input).await?;
+    Ok(Json(json!({"staged": true})))
+}
+
+async fn stage_imported_turn(
+    State(state): State<ServerState>,
+    Path(import_id): Path<String>,
+    headers: HeaderMap,
+    Json(input): Json<ImportedTurn>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    state.graph.stage_imported_turn(&import_id, &input).await?;
+    Ok(Json(json!({"staged": true})))
+}
+
+async fn finalize_imported_conversation(
+    State(state): State<ServerState>,
+    Path(import_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(json!(
+        state
+            .graph
+            .finalize_imported_conversation(&import_id)
+            .await?
+    )))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoveImportRequest {
+    import_id: String,
+}
+
+async fn remove_imported_conversation(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<RemoveImportRequest>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    state
+        .graph
+        .remove_imported_conversation(&input.import_id)
+        .await?;
+    Ok(Json(json!({"removed": true})))
+}
+
+async fn accepted_closure(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+) -> Result<Json<relayer_graph_core::AcceptedGraphClosure>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let closure = state.graph.accepted_graph_closure(id).await?.ok_or_else(|| {
+        ApiError(
+            StatusCode::NOT_FOUND,
+            json!({"error":{"code":"completion_not_found","message":"This node has no accepted completion output yet."}}),
+        )
+    })?;
+    Ok(Json(closure))
 }
 
 async fn health() -> Json<Value> {
@@ -416,6 +506,90 @@ mod tests {
         http::Request,
     };
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn staged_import_endpoints_require_control_authority_and_finalize_in_order() {
+        let app = router(ServerState::new(
+            GraphDatabase::in_memory().await.unwrap(),
+            "control",
+        ));
+        let stage = serde_json::to_vec(&ImportedConversationStage {
+            import_id: "import-stage-1".into(),
+            source_sha256: "sha256:fixture".into(),
+            project_id: None,
+            thread_id: ThreadId::new(9001).unwrap(),
+            created_at: "1770000000000".into(),
+        })
+        .unwrap();
+        let denied = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/conversation-import-stages")
+                    .header("content-type", "application/json")
+                    .body(Body::from(stage.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+        let started = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/conversation-import-stages")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(stage))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(started.status(), StatusCode::OK);
+
+        let turn = serde_json::to_vec(&ImportedTurn {
+            source_turn_id: "turn:1".into(),
+            text: "Failed turn".into(),
+            accepted_view: None,
+        })
+        .unwrap();
+        let staged = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/conversation-import-stages/import-stage-1/turns")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(turn))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(staged.status(), StatusCode::OK);
+
+        let finalized = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/conversation-import-stages/import-stage-1/finalize")
+                    .header("authorization", "Bearer control")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(finalized.status(), StatusCode::OK);
+        let receipt: relayer_graph_core::ImportedConversationReceipt =
+            serde_json::from_slice(&to_bytes(finalized.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(receipt.turns.len(), 1);
+        assert_eq!(receipt.turns[0].source_turn_id, "turn:1");
+    }
+
     #[tokio::test]
     async fn external_interaction_requires_control_token_and_mints_scoped_graph_token() {
         let state = ServerState::new(GraphDatabase::in_memory().await.unwrap(), "control");

@@ -5,6 +5,7 @@ pub(crate) struct InteractionScope {
     pub project_id: Option<ProjectId>,
     pub thread_id: ThreadId,
     pub root_node_id: NodeId,
+    pub read_only: bool,
 }
 
 impl InteractionScope {

@@ -12,6 +12,7 @@
     <aside>
       <div class="brand"><span class="mark"></span><div><b>Relayer Eval</b><small>Internal evaluation</small></div></div>
       <button class="primary wide" id="newRun">＋ New test run</button>
+      <button class="secondary wide" id="importConversation">Import conversation…</button>
       <div class="section-label">Test runs</div>
       <div id="runList" class="run-list"></div>
     </aside>
@@ -31,7 +32,7 @@
       <section id="runView" class="view hidden">
         <header class="run-header"><div><span class="eyebrow">Test run</span><h1 id="runTitle"></h1><p id="runMetadata"></p></div><span id="runStatus" class="status"></span></header>
         <div id="aggregate" class="aggregate"></div>
-        <section class="panel"><div class="panel-heading"><div><h2>Test cases</h2><p>Open the judge review or the read-only production workspace for one case × harness execution.</p></div></div><div class="table-wrap"><table><thead id="matrixHead"></thead><tbody id="matrixBody"></tbody></table></div></section>
+        <section class="panel"><div class="panel-heading"><div><h2 id="runPanelTitle">Test cases</h2><p id="runPanelDescription">Open the judge review or the read-only production workspace for one case × harness execution.</p></div></div><div class="table-wrap"><table><thead id="matrixHead"></thead><tbody id="matrixBody"></tbody></table></div></section>
       </section>
     </main>
   </div>

@@ -8,7 +8,10 @@ export function productWorkspaceMarkup() {
         <button id="historyForward" data-review-ref="history-forward" data-review-kind="history" disabled title="Forward" aria-label="Forward"><span aria-hidden="true">→</span><i class="history-spinner hidden" aria-hidden="true"></i></button>
       </nav>
       <div><h2 id="threadTitle">New thread</h2><p id="threadScope">No folder</p></div>
-      <div class="run-state" id="runState"><i></i><span>Ready</span></div>
+      <div class="thread-header-actions">
+        <button class="conversation-export hidden" id="exportConversation" type="button" data-review-ref="export-conversation" data-review-kind="conversation-export" title="Export conversation as JSONL" aria-label="Export conversation as JSONL">Export conversation…</button>
+        <div class="run-state" id="runState"><i></i><span>Ready</span></div>
+      </div>
     </header>
     <div class="thread-workspace" data-review-capture="workspace" role="region" aria-label="Thread workspace">
       <div class="graph-column">

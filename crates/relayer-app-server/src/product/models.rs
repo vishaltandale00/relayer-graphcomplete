@@ -20,6 +20,7 @@ pub(crate) struct Thread {
     pub(crate) permission_profile_id: String,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
+    pub(crate) imported: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

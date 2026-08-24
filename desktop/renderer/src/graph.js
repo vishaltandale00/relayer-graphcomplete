@@ -1,6 +1,10 @@
 import { setMainView, setSettingsTab } from "./navigation.js";
 import { createProductWorkspace } from "./product-workspace/index.js";
-import { activeThread, appState, evalReview, query, viewState } from "./state.js";
+import {
+  productWorkspaceMode,
+  productWorkspaceNeedsRecreation,
+} from "./product-workspace/model.js";
+import { activeThread, appState, desktop, evalReview, query, viewState } from "./state.js";
 import { toast } from "./ui.js";
 import {
   getNavigationHistory,
@@ -13,8 +17,17 @@ import {
 let productWorkspace;
 
 function workspace() {
+  const nextMode = productWorkspaceMode({
+    evalReviewContext: evalReview,
+    reviewRequested: query.get("review") === "1",
+    thread: activeThread(),
+  });
+  if (productWorkspaceNeedsRecreation(productWorkspace?.mode, nextMode)) {
+    productWorkspace.dispose();
+    productWorkspace = undefined;
+  }
   productWorkspace ??= createProductWorkspace({
-    mode: evalReview || query.get("review") === "1" ? "review" : "interactive",
+    mode: nextMode,
     getState: () => appState,
     getThread: activeThread,
     selection: viewState,
@@ -31,6 +44,9 @@ function workspace() {
     onSelectTurn: selectTurn,
     onSelectTurnById: selectTurnById,
     onSelectionChange: replaceCurrentSelection,
+    onExportConversation: desktop?.conversation?.export
+      ? (threadId) => desktop.conversation.export(threadId)
+      : null,
     onSubmitInteraction: (text, modelSelection) => import("./threads.js").then(({ submitInteraction }) => submitInteraction(text, modelSelection)),
     onOpenSettings: () => {
       setSettingsTab("models");
