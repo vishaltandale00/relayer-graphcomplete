@@ -255,7 +255,7 @@ mod tests {
             ExportActionVariant, ExportCompletionReceipt, ExportCompletionStatus,
             ExportConversation, ExportLayer, ExportNavigateRelation, ExportNode, ExportProducer,
             ExportRecordState, ExportResolvedLayer, ExportTurnManifestEntry, ExportTurnOrigin,
-            MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES,
+            MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES, decode_export_jsonl,
         },
         product::ProductService,
         runtime::RuntimeClient,
@@ -799,6 +799,7 @@ mod tests {
         );
 
         let destination = app
+            .clone()
             .oneshot(request_uri(
                 "GET",
                 &format!(
@@ -814,6 +815,107 @@ mod tests {
         assert_eq!(destination["interactionId"], destination_interaction_id);
         assert_eq!(destination["rootLayerId"], destination_root_layer_id);
         assert_eq!(destination["targetLayerId"], destination_root_layer_id);
+
+        let reexported = app
+            .clone()
+            .oneshot(request_uri(
+                "GET",
+                &format!("/api/threads/{thread_id}/export"),
+                "write-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reexported.status(), StatusCode::OK);
+        let reexported_bytes = to_bytes(reexported.into_body(), MAX_EXPORT_BYTES)
+            .await
+            .unwrap();
+        let reexported_records = decode_export_jsonl(&reexported_bytes).unwrap();
+        let ConversationExportRecord::Turn(reexported_source) = &reexported_records[1] else {
+            unreachable!()
+        };
+        let reexported_invoke = reexported_source
+            .accepted_view
+            .as_ref()
+            .unwrap()
+            .layers
+            .iter()
+            .flat_map(|layer| &layer.actions)
+            .find(|action| action.kind == ExportActionKind::Invoke)
+            .unwrap();
+        let ConversationExportRecord::Turn(reexported_destination) = &reexported_records[2] else {
+            unreachable!()
+        };
+        assert_eq!(reexported_invoke.id, "action:invoke");
+        assert_eq!(reexported_invoke.target_layer_id, None);
+        assert_eq!(
+            reexported_destination.origin,
+            ExportTurnOrigin::Action {
+                source_turn_id: reexported_source.id.clone(),
+                source_action_id: reexported_invoke.id.clone(),
+            }
+        );
+
+        let restaged = app
+            .clone()
+            .oneshot(request("POST", "write-token", Body::from(reexported_bytes)))
+            .await
+            .unwrap();
+        assert_eq!(restaged.status(), StatusCode::OK);
+        let restaged = response_json(restaged).await;
+        let republished = app
+            .clone()
+            .oneshot(request(
+                "PUT",
+                "write-token",
+                Body::from(serde_json::json!({"importId":restaged["importId"]}).to_string()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(republished.status(), StatusCode::OK);
+        let republished = response_json(republished).await;
+        let round_trip_thread_id = republished["threadId"].as_i64().unwrap();
+        let round_trip_source_id = republished["turns"][0]["interactionId"].as_i64().unwrap();
+        let round_trip_destination_id = republished["turns"][1]["interactionId"].as_i64().unwrap();
+        let round_trip_thread = app
+            .clone()
+            .oneshot(request_uri(
+                "GET",
+                &format!("/api/threads/{round_trip_thread_id}"),
+                "read-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(round_trip_thread.status(), StatusCode::OK);
+        let round_trip_thread = response_json(round_trip_thread).await;
+        let round_trip_invoke =
+            round_trip_thread["interactions"][0]["completionOutput"]["rootLayer"]["actions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|action| action["kind"] == "invoke")
+                .unwrap();
+        let round_trip_action_id = round_trip_invoke["id"].as_i64().unwrap();
+        let round_trip_target = round_trip_invoke["targetLayerId"].as_i64().unwrap();
+        let round_trip_destination = app
+            .oneshot(request_uri(
+                "GET",
+                &format!(
+                    "/api/threads/{round_trip_thread_id}/interactions/{round_trip_source_id}/actions/{round_trip_action_id}/destination"
+                ),
+                "read-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(round_trip_destination.status(), StatusCode::OK);
+        let round_trip_destination = response_json(round_trip_destination).await;
+        assert_eq!(
+            round_trip_destination["interactionId"],
+            round_trip_destination_id
+        );
+        assert_eq!(round_trip_destination["targetLayerId"], round_trip_target);
         graph_task.abort();
     }
 

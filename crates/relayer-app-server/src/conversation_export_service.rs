@@ -43,6 +43,7 @@ pub(crate) async fn build_conversation_export(
     exported_at: String,
 ) -> Result<Vec<u8>, ConversationExportBuildError> {
     let detail = product.get_thread(thread_id).await?;
+    let imported_turns = product.imported_turn_export_records(thread_id).await?;
     let project_path = detail.project.as_ref().map(|project| project.path.as_str());
     let redactor = ProjectPathRedactor::new(project_path);
     let project_name = detail
@@ -75,6 +76,31 @@ pub(crate) async fn build_conversation_export(
         .interactions
         .iter()
         .map(|interaction| (interaction.id, interaction.sequence))
+        .collect::<HashMap<_, _>>();
+    let imported_turn_sequences = imported_turns
+        .iter()
+        .map(|record| {
+            let sequence = turn_sequences
+                .get(&record.interaction_id)
+                .copied()
+                .ok_or_else(|| {
+                    ConversationExportBuildError::Invalid(format!(
+                        "imported turn {} is outside the conversation snapshot",
+                        record.source_turn_id
+                    ))
+                })?;
+            if record.turn.id != record.source_turn_id {
+                return Err(ConversationExportBuildError::Invalid(format!(
+                    "stored imported turn {} has inconsistent source identity",
+                    record.source_turn_id
+                )));
+            }
+            Ok((record.source_turn_id.as_str(), sequence))
+        })
+        .collect::<Result<HashMap<_, _>, ConversationExportBuildError>>()?;
+    let imported_turns = imported_turns
+        .iter()
+        .map(|record| (record.interaction_id, record))
         .collect::<HashMap<_, _>>();
     let mut ids = PortableIds::default();
     let mut closures = Vec::with_capacity(detail.interactions.len());
@@ -177,6 +203,10 @@ pub(crate) async fn build_conversation_export(
             interaction,
             closure.as_ref(),
             invocations.get(&interaction.id).copied(),
+            ImportedExportContext {
+                turn: imported_turns.get(&interaction.id).copied(),
+                turn_sequences: &imported_turn_sequences,
+            },
             &turn_sequences,
             &mut ids,
             &redactor,
@@ -202,14 +232,28 @@ pub(crate) async fn build_conversation_export(
     Ok(body)
 }
 
+struct ImportedExportContext<'a> {
+    turn: Option<&'a crate::storage::ImportedTurnExportRecord>,
+    turn_sequences: &'a HashMap<&'a str, i64>,
+}
+
 fn export_turn(
     interaction: &Interaction,
     closure: Option<&AcceptedGraphClosure>,
     invocation: Option<&ActionInvocation>,
+    imported: ImportedExportContext<'_>,
     turn_sequences: &HashMap<InteractionId, i64>,
     ids: &mut PortableIds,
     redactor: &ProjectPathRedactor,
 ) -> Result<ConversationExportTurn, ConversationExportBuildError> {
+    if let (Some(closure), Some(imported_view)) = (
+        closure,
+        imported
+            .turn
+            .and_then(|record| record.turn.accepted_view.as_ref()),
+    ) {
+        seed_imported_action_ids(interaction.id, closure, imported_view, ids)?;
+    }
     let accepted_view = closure
         .map(|closure| export_view(closure, ids, redactor))
         .transpose()?;
@@ -231,7 +275,23 @@ fn export_turn(
                 source_action_id,
             }
         }
-        None => ExportTurnOrigin::User,
+        None => match imported.turn.map(|record| &record.origin) {
+            Some(ExportTurnOrigin::Action {
+                source_turn_id,
+                source_action_id,
+            }) => ExportTurnOrigin::Action {
+                source_turn_id: turn_id(*imported.turn_sequences.get(source_turn_id.as_str()).ok_or_else(
+                    || {
+                        ConversationExportBuildError::Invalid(format!(
+                            "imported action origin for interaction {} references turn {} outside the conversation snapshot",
+                            interaction.id, source_turn_id
+                        ))
+                    },
+                )?),
+                source_action_id: source_action_id.clone(),
+            },
+            _ => ExportTurnOrigin::User,
+        },
     };
     let status = completion_status(&interaction.completion_status)?;
     let mut effective_permission_receipt = interaction
@@ -278,6 +338,43 @@ fn export_turn(
         },
         accepted_view,
     })
+}
+
+fn seed_imported_action_ids(
+    interaction_id: InteractionId,
+    closure: &AcceptedGraphClosure,
+    imported: &ExportAcceptedView,
+    ids: &mut PortableIds,
+) -> Result<(), ConversationExportBuildError> {
+    ids.bind_action(
+        closure.root_action.id.value(),
+        imported.root_action.id.clone(),
+    )?;
+    if closure.layers.len() != imported.layers.len() {
+        return Err(ConversationExportBuildError::Invalid(format!(
+            "imported interaction {interaction_id} graph closure no longer matches its portable accepted view"
+        )));
+    }
+    for (resolved, imported_resolved) in closure.layers.iter().zip(&imported.layers) {
+        if resolved.actions.len() != imported_resolved.actions.len() {
+            return Err(ConversationExportBuildError::Invalid(format!(
+                "imported interaction {interaction_id} action inventory no longer matches its portable accepted view"
+            )));
+        }
+        for (action, imported_action) in resolved.actions.iter().zip(&imported_resolved.actions) {
+            let expected_kind = match action.kind {
+                ActionKind::Navigate => ExportActionKind::Navigate,
+                ActionKind::Invoke => ExportActionKind::Invoke,
+            };
+            if imported_action.kind != expected_kind {
+                return Err(ConversationExportBuildError::Invalid(format!(
+                    "imported interaction {interaction_id} action order no longer matches its portable accepted view"
+                )));
+            }
+            ids.bind_action(action.id.value(), imported_action.id.clone())?;
+        }
+    }
+    Ok(())
 }
 
 fn export_view(
@@ -522,13 +619,42 @@ impl PortableIds {
     fn action(&mut self, raw: i64) -> String {
         next_id(&mut self.action, raw, "action")
     }
+
+    fn bind_action(
+        &mut self,
+        raw: i64,
+        portable: String,
+    ) -> Result<(), ConversationExportBuildError> {
+        if let Some(existing) = self.action.get(&raw) {
+            if existing == &portable {
+                return Ok(());
+            }
+            return Err(ConversationExportBuildError::Invalid(format!(
+                "imported action {raw} has conflicting portable IDs"
+            )));
+        }
+        if self.action.values().any(|existing| existing == &portable) {
+            return Err(ConversationExportBuildError::Invalid(format!(
+                "portable action ID {portable} identifies multiple imported actions"
+            )));
+        }
+        self.action.insert(raw, portable);
+        Ok(())
+    }
 }
 
 fn next_id(ids: &mut HashMap<i64, String>, raw: i64, kind: &str) -> String {
     if let Some(id) = ids.get(&raw) {
         return id.clone();
     }
-    let id = format!("{kind}:{}", ids.len() + 1);
+    let mut next = ids.len() + 1;
+    let id = loop {
+        let candidate = format!("{kind}:{next}");
+        if !ids.values().any(|existing| existing == &candidate) {
+            break candidate;
+        }
+        next += 1;
+    };
     ids.insert(raw, id.clone());
     id
 }

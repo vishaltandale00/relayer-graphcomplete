@@ -651,6 +651,16 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn imported_turn_export_records(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<crate::storage::ImportedTurnExportRecord>, ProductError> {
+        self.storage
+            .imported_turn_export_records(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn staged_conversation_turn(
         &self,
         import_id: &str,

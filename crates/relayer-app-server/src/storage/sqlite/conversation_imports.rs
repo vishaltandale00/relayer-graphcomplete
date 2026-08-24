@@ -5,13 +5,42 @@ use crate::{
     },
     product::{InteractionId, ThreadId},
     storage::{
-        ConversationImportRecord, NewConversationImport, StagedConversationImport,
-        StagedConversationTurnSummary, StorageError,
+        ConversationImportRecord, ImportedTurnExportRecord, NewConversationImport,
+        StagedConversationImport, StagedConversationTurnSummary, StorageError,
     },
 };
 use sqlx::Row;
 
 impl SqliteProductStore {
+    pub(crate) async fn imported_turn_export_records(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<ImportedTurnExportRecord>, StorageError> {
+        let rows = sqlx::query(
+            "SELECT it.product_interaction_id,it.source_turn_id,it.source_origin_json,it.source_completion_json
+             FROM imported_turns it
+             JOIN conversation_imports ci ON ci.id=it.conversation_import_id
+             JOIN threads t ON t.conversation_import_id=ci.id
+             WHERE t.id=?1 AND ci.state='published'
+             ORDER BY it.product_interaction_id",
+        )
+        .bind(thread_id.value())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(ImportedTurnExportRecord {
+                    interaction_id: InteractionId::from_database(row.try_get(0)?),
+                    source_turn_id: row.try_get(1)?,
+                    origin: serde_json::from_str(&row.try_get::<String, _>(2)?)
+                        .map_err(serialization)?,
+                    turn: serde_json::from_str(&row.try_get::<String, _>(3)?)
+                        .map_err(serialization)?,
+                })
+            })
+            .collect()
+    }
+
     pub(crate) async fn staged_conversation_import_ids(&self) -> Result<Vec<String>, StorageError> {
         sqlx::query_scalar(
             "SELECT id FROM conversation_imports WHERE state='staging' ORDER BY created_at,id",
