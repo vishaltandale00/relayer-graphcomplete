@@ -76,5 +76,12 @@ pub(super) async fn product_state(
 ) -> Result<Json<ProductStateResponse>, ApiError> {
     authorize_read(&state, &headers)?;
     let thread_id = query.thread_id.map(ThreadId::try_from).transpose()?;
-    Ok(Json(state.product.load_state(thread_id).await?.into()))
+    let mut product_state = state.product.load_state(thread_id).await?;
+    super::threads::refresh_accepted_outputs(
+        state.runtime.as_ref(),
+        &mut product_state.interactions,
+        &product_state.action_invocations,
+    )
+    .await;
+    Ok(Json(product_state.into()))
 }

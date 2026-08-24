@@ -14,11 +14,12 @@ use crate::{
     },
     product::{
         AcceptedInteractionCompletion, CreateThreadCommand, Interaction, InteractionId,
-        InteractionModelSelection, InvokeActionOutcome, ModelFamilyId, ProjectId, ProviderId,
-        Thread, ThreadId, ThreadView,
+        InteractionModelSelection, InvokeActionOutcome, ModelFamilyId, PreparedInteractionBinding,
+        ProjectId, ProviderId, Thread, ThreadId, ThreadView,
     },
     runtime::{
-        ApprovalEvent, ApprovalEventSnapshot, CompleteInteraction, RuntimeCompletion, RuntimeError,
+        ApprovalEvent, ApprovalEventSnapshot, CompleteInteraction, PreparedInteraction,
+        PreparedInvocation, RuntimeCompletion, RuntimeError,
     },
 };
 use axum::{
@@ -152,6 +153,17 @@ pub(super) async fn decide_approval(
     .await
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ActionDestinationResponse {
+    action_id: i64,
+    action_kind: String,
+    target_layer_id: i64,
+    thread_id: i64,
+    interaction_id: i64,
+    root_layer_id: i64,
+}
+
 pub(super) async fn list(
     State(state): State<ApiState>,
     headers: HeaderMap,
@@ -236,13 +248,14 @@ pub(super) async fn get(
     Path(id): Path<i64>,
 ) -> Result<Json<ThreadDetailResponse>, ApiError> {
     authorize_read(&state, &headers)?;
-    Ok(Json(
-        state
-            .product
-            .get_thread(ThreadId::try_from(id)?)
-            .await?
-            .into(),
-    ))
+    let mut detail = state.product.get_thread(ThreadId::try_from(id)?).await?;
+    refresh_accepted_outputs(
+        state.runtime.as_ref(),
+        &mut detail.interactions,
+        &detail.action_invocations,
+    )
+    .await;
+    Ok(Json(detail.into()))
 }
 
 pub(super) async fn export(
@@ -283,13 +296,14 @@ pub(super) async fn list_interactions(
     Path(id): Path<i64>,
 ) -> Result<Json<InteractionsResponse>, ApiError> {
     authorize_read(&state, &headers)?;
-    let interactions = state
-        .product
-        .list_interactions(ThreadId::try_from(id)?)
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
+    let mut detail = state.product.get_thread(ThreadId::try_from(id)?).await?;
+    refresh_accepted_outputs(
+        state.runtime.as_ref(),
+        &mut detail.interactions,
+        &detail.action_invocations,
+    )
+    .await;
+    let interactions = detail.interactions.into_iter().map(Into::into).collect();
     Ok(Json(InteractionsResponse { interactions }))
 }
 
@@ -364,6 +378,130 @@ pub(super) async fn get_layer(
         .as_ref()
         .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
     Ok(Json(runtime.get_layer(graph_node_id, layer_id).await?))
+}
+
+pub(super) async fn get_action_destination(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, interaction_id, action_id)): Path<(i64, i64, i64)>,
+) -> Result<Json<ActionDestinationResponse>, ApiError> {
+    authorize_read(&state, &headers)?;
+    let thread_id = ThreadId::try_from(thread_id)?;
+    let interaction_id = InteractionId::try_from(interaction_id)?;
+    let source = state.product.get_interaction(interaction_id).await?;
+    if source.thread_id != thread_id {
+        return Err(ApiError::invalid(
+            "interaction does not belong to this thread",
+        ));
+    }
+    if source.completion_status != "accepted" {
+        return Err(ApiError::invalid(
+            "action destinations require an accepted source interaction",
+        ));
+    }
+    let source_graph_node_id = source
+        .graph_node_id
+        .ok_or_else(|| ApiError::invalid("interaction has no accepted graph"))?;
+    let runtime = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
+    let action = runtime.get_action(source_graph_node_id, action_id).await?;
+    let target_layer_id = action
+        .target_layer_id
+        .ok_or_else(|| ApiError::invalid("invoke action has not resolved to a destination"))?;
+    if action.id != action_id || action.kind != "invoke" || action.state != "accepted" {
+        return Err(ApiError::invalid(
+            "action is not a resolved accepted invoke action for this interaction",
+        ));
+    }
+    let layer_owner = runtime
+        .get_layer_owner(source_graph_node_id, target_layer_id)
+        .await?;
+    if layer_owner.layer_id != target_layer_id {
+        return Err(ApiError::internal(
+            "GraphComplete returned a mismatched action destination layer",
+        ));
+    }
+    let destination = state
+        .product
+        .get_interaction_by_graph_node_id(layer_owner.owner_interaction_node_id)
+        .await?;
+    if destination.completion_status != "accepted" {
+        return Err(ApiError::invalid(
+            "invoke action destination is not accepted",
+        ));
+    }
+    let output = runtime
+        .completion_output(layer_owner.owner_interaction_node_id)
+        .await?
+        .ok_or_else(|| ApiError::invalid("invoke action destination has no accepted output"))?;
+    if output.get("nodeId").and_then(Value::as_i64) != Some(layer_owner.owner_interaction_node_id) {
+        return Err(ApiError::internal(
+            "GraphComplete returned output for a different destination interaction",
+        ));
+    }
+    let root_layer_id = output
+        .pointer("/rootLayer/layer/id")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| ApiError::internal("accepted destination output has no root layer"))?;
+    if root_layer_id != target_layer_id {
+        return Err(ApiError::internal(
+            "invoke action target does not match its destination root layer",
+        ));
+    }
+    Ok(Json(ActionDestinationResponse {
+        action_id,
+        action_kind: action.kind,
+        target_layer_id,
+        thread_id: destination.thread_id.value(),
+        interaction_id: destination.id.value(),
+        root_layer_id,
+    }))
+}
+
+pub(super) async fn refresh_accepted_outputs(
+    runtime: Option<&crate::runtime::RuntimeClient>,
+    interactions: &mut [Interaction],
+    action_invocations: &[crate::product::ActionInvocation],
+) {
+    let Some(runtime) = runtime else { return };
+    let invoked_action_ids = action_invocations
+        .iter()
+        .map(|invocation| invocation.action_id)
+        .collect::<std::collections::HashSet<_>>();
+    if invoked_action_ids.is_empty() {
+        return;
+    }
+    for interaction in interactions {
+        let Some(graph_node_id) = interaction.graph_node_id else {
+            continue;
+        };
+        if interaction.completion_status != "accepted" {
+            continue;
+        }
+        let contains_invoked_root_action = interaction
+            .completion_output
+            .as_ref()
+            .and_then(|output| output.pointer("/rootLayer/actions"))
+            .and_then(Value::as_array)
+            .is_some_and(|actions| {
+                actions.iter().any(|action| {
+                    action
+                        .get("id")
+                        .and_then(Value::as_i64)
+                        .is_some_and(|id| invoked_action_ids.contains(&id))
+                })
+            });
+        if !contains_invoked_root_action {
+            continue;
+        }
+        if let Ok(Some(output)) = runtime.completion_output(graph_node_id).await
+            && output.get("nodeId").and_then(Value::as_i64) == Some(graph_node_id)
+        {
+            interaction.completion_output = Some(output);
+        }
+    }
 }
 
 pub(super) async fn invoke_action(
@@ -533,33 +671,29 @@ async fn claim_and_start_action_interaction(
         record_background_failure(state, thread, &interaction, message.into()).await;
         return Err(ApiError::invalid(message));
     }
-    let claimed = state
-        .product
-        .claim_interaction_running(interaction.id, &thread.harness_configuration_name)
-        .await?;
-    if !claimed {
+    let prepared = match prepare_and_claim_interaction(state, thread, &interaction).await {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            record_background_failure(state, thread, &interaction, error.message().to_owned())
+                .await;
+            return Err(error);
+        }
+    };
+    let Some(prepared) = prepared else {
         return state
             .product
             .get_interaction(interaction.id)
             .await
             .map_err(Into::into);
-    }
-
-    let mut running = interaction.clone();
-    running.completion_status = "running".into();
-    running.harness_configuration_name = Some(thread.harness_configuration_name.clone());
-    running.harness_configuration_digest = None;
-    running.effective_execution_digest = None;
-    running.effective_permission_receipt = None;
-    running.completion_output = None;
-    running.completion_error = None;
+    };
+    let running = state.product.get_interaction(interaction.id).await?;
 
     // There is no await between the durable claim and spawning execution. Once this detached
     // handoff owns the interaction, losing the HTTP request cannot strand it as not_started.
     let state = state.clone();
     let thread = thread.clone();
     tokio::spawn(async move {
-        execute_interaction(state, thread, interaction).await;
+        execute_prepared_interaction(state, thread, interaction, prepared).await;
     });
     Ok(running)
 }
@@ -660,23 +794,45 @@ async fn start_interaction(
     if state.runtime.is_none() {
         return Ok(interaction);
     }
-    state
-        .product
-        .mark_interaction_running(interaction.id, &thread.harness_configuration_name)
-        .await?;
+    let prepared = match prepare_and_claim_interaction(state, thread, &interaction).await {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            record_background_failure(state, thread, &interaction, error.message().to_owned())
+                .await;
+            return Err(error);
+        }
+    };
+    let Some(prepared) = prepared else {
+        return state
+            .product
+            .get_interaction(interaction.id)
+            .await
+            .map_err(Into::into);
+    };
     let running = state.product.get_interaction(interaction.id).await?;
     let state = state.clone();
     let thread = thread.clone();
     tokio::spawn(async move {
-        execute_interaction(state, thread, interaction).await;
+        execute_prepared_interaction(state, thread, interaction, prepared).await;
     });
     Ok(running)
 }
 
-async fn execute_interaction(state: ApiState, thread: Thread, interaction: Interaction) {
+async fn prepare_and_claim_interaction(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: &Interaction,
+) -> Result<Option<PreparedInteraction>, ApiError> {
     let Some(runtime) = &state.runtime else {
-        return;
+        return Ok(None);
     };
+    if !state
+        .product
+        .claim_interaction_preparing(interaction.id)
+        .await?
+    {
+        return Ok(None);
+    }
     if interaction.model_selection.is_none() && !state.allow_harness_override {
         match state
             .product
@@ -685,18 +841,10 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
         {
             Ok(true) => {}
             Ok(false) => {
-                record_background_failure(
-                    &state,
-                    &thread,
-                    &interaction,
-                    "The interaction has no model selection.".into(),
-                )
-                .await;
-                return;
+                return Err(ApiError::invalid("The interaction has no model selection."));
             }
             Err(error) => {
-                record_background_failure(&state, &thread, &interaction, error.to_string()).await;
-                return;
+                return Err(error.into());
             }
         }
     }
@@ -706,15 +854,13 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
             .validate_execution_model_selection(&thread.harness_configuration_name, model_selection)
             .await
     {
-        record_background_failure(&state, &thread, &interaction, error.to_string()).await;
-        return;
+        return Err(error.into());
     }
     let working_directory = match thread.project_id {
         Some(project_id) => match state.product.project_path(project_id).await {
             Ok(path) => path,
             Err(error) => {
-                record_background_failure(&state, &thread, &interaction, error.to_string()).await;
-                return;
+                return Err(error.into());
             }
         },
         None => state
@@ -724,26 +870,24 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
             .into_owned(),
     };
     if let Err(error) = tokio::fs::create_dir_all(&working_directory).await {
-        record_background_failure(
-            &state,
-            &thread,
-            &interaction,
-            format!("cannot create thread workspace: {error}"),
-        )
-        .await;
-        return;
+        return Err(ApiError::internal(&format!(
+            "cannot create thread workspace: {error}"
+        )));
     }
-    let permission_profile = match state
+    let permission_profile = state
         .permission_catalog
-        .profile(&thread.permission_profile_id)
-    {
-        Ok(profile) => profile,
-        Err(error) => {
-            record_background_failure(&state, &thread, &interaction, error.to_string()).await;
-            return;
-        }
-    };
-    let completion = runtime.complete(CompleteInteraction {
+        .profile(&thread.permission_profile_id)?;
+    let invocation = state
+        .product
+        .invocation_graph_source(interaction.id)
+        .await?
+        .map(
+            |(source_interaction_node_id, source_action_id)| PreparedInvocation {
+                source_interaction_node_id,
+                source_action_id,
+            },
+        );
+    let command = CompleteInteraction {
         project_id: thread.project_id.map(ProjectId::value),
         product_interaction_id: interaction.id.value(),
         thread_id: thread.id.value(),
@@ -753,7 +897,131 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
         harness_configuration_name: &thread.harness_configuration_name,
         permission_profile,
         model_selection: interaction.model_selection.as_ref(),
-    });
+        invocation,
+    };
+    let prepared = runtime.prepare(&command).await?;
+    let bound = state
+        .product
+        .bind_prepared_interaction(PreparedInteractionBinding {
+            interaction_id: interaction.id,
+            graph_node_id: prepared.graph_node_id,
+            harness_configuration_name: &prepared.harness_configuration_name,
+            harness_configuration_digest: &prepared.harness_configuration_digest,
+            effective_execution_digest: &prepared.effective_execution_digest,
+            effective_permission_receipt: &prepared.effective_permission_receipt,
+        })
+        .await;
+    let bound = match bound {
+        Ok(bound) => bound,
+        Err(error) => {
+            return match runtime.discard_prepared(prepared).await {
+                Ok(()) => Err(error.into()),
+                Err(cleanup) => Err(ApiError::internal(&format!(
+                    "could not bind prepared interaction: {error}; capability cleanup also failed: {cleanup}"
+                ))),
+            };
+        }
+    };
+    if !bound {
+        runtime.discard_prepared(prepared).await?;
+        return Ok(None);
+    }
+    let claimed = state
+        .product
+        .claim_interaction_running(interaction.id, &thread.harness_configuration_name)
+        .await;
+    let claimed = match claimed {
+        Ok(claimed) => claimed,
+        Err(error) => {
+            return match runtime.discard_prepared(prepared).await {
+                Ok(()) => Err(error.into()),
+                Err(cleanup) => Err(ApiError::internal(&format!(
+                    "could not claim prepared interaction: {error}; capability cleanup also failed: {cleanup}"
+                ))),
+            };
+        }
+    };
+    if !claimed {
+        runtime.discard_prepared(prepared).await?;
+        return Ok(None);
+    }
+    Ok(Some(prepared))
+}
+
+async fn execute_prepared_interaction(
+    state: ApiState,
+    thread: Thread,
+    interaction: Interaction,
+    prepared: PreparedInteraction,
+) {
+    let Some(runtime) = &state.runtime else {
+        return;
+    };
+    let working_directory = match thread.project_id {
+        Some(project_id) => match state.product.project_path(project_id).await {
+            Ok(path) => path,
+            Err(error) => {
+                let message = match runtime.discard_prepared(prepared).await {
+                    Ok(()) => error.to_string(),
+                    Err(cleanup) => format!("{error}; capability cleanup also failed: {cleanup}"),
+                };
+                record_background_failure(&state, &thread, &interaction, message).await;
+                return;
+            }
+        },
+        None => state
+            .standalone_workspaces_directory
+            .join(thread.id.value().to_string())
+            .to_string_lossy()
+            .into_owned(),
+    };
+    let permission_profile = match state
+        .permission_catalog
+        .profile(&thread.permission_profile_id)
+    {
+        Ok(profile) => profile,
+        Err(error) => {
+            let message = match runtime.discard_prepared(prepared).await {
+                Ok(()) => error.to_string(),
+                Err(cleanup) => format!("{error}; capability cleanup also failed: {cleanup}"),
+            };
+            record_background_failure(&state, &thread, &interaction, message).await;
+            return;
+        }
+    };
+    let invocation = match state.product.invocation_graph_source(interaction.id).await {
+        Ok(value) => {
+            value.map(
+                |(source_interaction_node_id, source_action_id)| PreparedInvocation {
+                    source_interaction_node_id,
+                    source_action_id,
+                },
+            )
+        }
+        Err(error) => {
+            let message = match runtime.discard_prepared(prepared).await {
+                Ok(()) => error.to_string(),
+                Err(cleanup) => format!("{error}; capability cleanup also failed: {cleanup}"),
+            };
+            record_background_failure(&state, &thread, &interaction, message).await;
+            return;
+        }
+    };
+    let command = CompleteInteraction {
+        project_id: thread.project_id.map(ProjectId::value),
+        product_interaction_id: interaction.id.value(),
+        thread_id: thread.id.value(),
+        interaction_id: interaction.id.value(),
+        text: &interaction.text,
+        working_directory: &working_directory,
+        harness_configuration_name: &thread.harness_configuration_name,
+        permission_profile,
+        model_selection: interaction.model_selection.as_ref(),
+        invocation,
+    };
+    let expected_invocation = invocation;
+    let prepared_graph_node_id = prepared.graph_node_id;
+    let completion = runtime.complete_prepared(&command, prepared);
     tokio::pin!(completion);
     let mut cursor = 0;
     let mut harness_session_id = None;
@@ -869,6 +1137,20 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
     };
     match completion_result {
         Ok(completion) => {
+            if let Err(error) = verify_canonical_interaction(
+                runtime,
+                prepared_graph_node_id,
+                expected_invocation,
+                &completion.output,
+            )
+            .await
+            {
+                eprintln!(
+                    "could not verify canonical interaction {} after completion: {error}; leaving it nonterminal for startup recovery",
+                    interaction.id
+                );
+                return;
+            }
             if completion.permission_profile_id != thread.permission_profile_id {
                 record_background_failure(
                     &state,
@@ -902,7 +1184,123 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
             }
         }
         Err(error) => {
+            if let Some(output) =
+                wait_for_completion_output(runtime, prepared_graph_node_id, interaction.id).await
+            {
+                if let Err(verify_error) = verify_canonical_interaction(
+                    runtime,
+                    prepared_graph_node_id,
+                    expected_invocation,
+                    &output,
+                )
+                .await
+                {
+                    eprintln!(
+                        "could not verify interaction {} after runtime failure ({error}): {verify_error}; leaving it nonterminal for startup recovery",
+                        interaction.id
+                    );
+                    return;
+                }
+                match state.product.get_interaction(interaction.id).await {
+                    Ok(bound) => {
+                        let accepted = match (
+                            bound.harness_configuration_name.as_deref(),
+                            bound.harness_configuration_digest.as_deref(),
+                            bound.effective_execution_digest.as_deref(),
+                            bound.effective_permission_receipt.as_ref(),
+                        ) {
+                            (Some(name), Some(digest), Some(execution), Some(receipt)) => {
+                                state
+                                    .product
+                                    .accept_interaction_completion(AcceptedInteractionCompletion {
+                                        interaction_id: interaction.id,
+                                        graph_node_id: prepared_graph_node_id,
+                                        harness_configuration_name: name,
+                                        harness_configuration_digest: digest,
+                                        effective_execution_digest: execution,
+                                        effective_permission_receipt: receipt,
+                                        output: &output,
+                                    })
+                                    .await
+                            }
+                            _ => {
+                                eprintln!(
+                                    "bound interaction {} lost its prepared execution receipt",
+                                    interaction.id
+                                );
+                                return;
+                            }
+                        };
+                        if let Err(persistence_error) = accepted {
+                            eprintln!(
+                                "could not reconcile accepted interaction {} after runtime response loss: {persistence_error}",
+                                interaction.id
+                            );
+                        }
+                        return;
+                    }
+                    Err(read_error) => {
+                        eprintln!(
+                            "could not read interaction {} after runtime response loss: {read_error}",
+                            interaction.id
+                        );
+                        return;
+                    }
+                }
+            }
             record_background_failure(&state, &thread, &interaction, error.to_string()).await;
+        }
+    }
+}
+
+async fn verify_canonical_interaction(
+    runtime: &crate::runtime::RuntimeClient,
+    graph_node_id: i64,
+    expected_invocation: Option<PreparedInvocation>,
+    output: &Value,
+) -> Result<(), String> {
+    if output.get("nodeId").and_then(Value::as_i64) != Some(graph_node_id) {
+        return Err(
+            "completion output nodeId does not match the prepared graph interaction".into(),
+        );
+    }
+    let mut attempt = 0_u64;
+    let metadata = loop {
+        match runtime.interaction_metadata(graph_node_id).await {
+            Ok(metadata) => break metadata,
+            Err(error) => {
+                attempt += 1;
+                eprintln!(
+                    "canonical metadata read failed for graph interaction {graph_node_id}: {error}; retrying"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis((attempt * 25).min(1_000)))
+                    .await;
+            }
+        }
+    };
+    if metadata.node_id != graph_node_id || metadata.invocation != expected_invocation {
+        return Err("graph interaction lease provenance does not match product history".into());
+    }
+    Ok(())
+}
+
+async fn wait_for_completion_output(
+    runtime: &crate::runtime::RuntimeClient,
+    graph_node_id: i64,
+    product_interaction_id: InteractionId,
+) -> Option<Value> {
+    let mut attempt = 0_u64;
+    loop {
+        match runtime.completion_output(graph_node_id).await {
+            Ok(output) => return output,
+            Err(error) => {
+                attempt += 1;
+                eprintln!(
+                    "canonical output read failed for product interaction {product_interaction_id}: {error}; retrying"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis((attempt * 25).min(1_000)))
+                    .await;
+            }
         }
     }
 }
@@ -1120,15 +1518,20 @@ async fn record_background_failure(
         "interaction {} completion failed in the backend: {error}",
         interaction.id
     );
-    if let Err(persistence_error) = state
+    match state
         .product
         .fail_interaction_completion(interaction.id, &thread.harness_configuration_name, &error)
         .await
     {
-        eprintln!(
+        Ok(true) => {}
+        Ok(false) => eprintln!(
+            "interaction {} became terminal before its failure could be recorded",
+            interaction.id
+        ),
+        Err(persistence_error) => eprintln!(
             "could not persist failed interaction {}: {persistence_error}; original failure: {error}",
             interaction.id
-        );
+        ),
     }
 }
 

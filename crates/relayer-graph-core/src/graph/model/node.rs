@@ -1,16 +1,24 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{GraphError, NodeId, RecordState};
+use crate::{ActionId, GraphError, NodeId, RecordState};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphNode {
     pub id: NodeId,
+    pub leased_action_id: Option<ActionId>,
     pub kind: String,
     pub icon: String,
     pub title: String,
     pub detail: String,
     pub state: RecordState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InteractionInvocation {
+    pub source_interaction_node_id: NodeId,
+    pub source_action_id: ActionId,
 }
 
 #[derive(Debug, Clone, Deserialize)]

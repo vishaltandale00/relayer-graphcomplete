@@ -18,6 +18,8 @@ const evalScreenshotPath = process.env.RELAYER_NAVIGATION_EVAL_SCREENSHOT
   || screenshotPath.replace(/\.png$/i, "-eval.png");
 const evalNarrowScreenshotPath = process.env.RELAYER_NAVIGATION_EVAL_NARROW_SCREENSHOT
   || screenshotPath.replace(/\.png$/i, "-eval-narrow.png");
+const invokeEvidenceDirectory = process.env.RELAYER_INVOKE_EVIDENCE_DIR
+  || join(repositoryRoot, ".relayer", "evidence", "invoke-navigation");
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-first-message-app-"));
 const services = [];
 let window;
@@ -141,6 +143,16 @@ async function productRequest(session, path, init = {}) {
   return value;
 }
 
+async function captureEvidence(webContents, name, { settle = true } = {}) {
+  const path = join(invokeEvidenceDirectory, `${name}.png`);
+  await mkdir(dirname(path), { recursive: true });
+  if (settle) {
+    await webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  }
+  await writeFile(path, (await webContents.capturePage()).toPNG());
+  return path;
+}
+
 function pressEnter(webContents, modifiers = [], { insertText = false } = {}) {
   webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter", modifiers });
   if (insertText) webContents.sendInputEvent({ type: "char", keyCode: "\r", modifiers });
@@ -150,6 +162,9 @@ function pressEnter(webContents, modifiers = [], { insertText = false } = {}) {
 async function run() {
   process.stdout.write("Electron application ready.\n");
   registerTestIpc();
+  const invokeGatePath = join(dataDirectory, "invoke-evidence-gate");
+  await writeFile(invokeGatePath, "hold");
+  process.env.RELAYER_FIXTURE_INVOKE_GATE_FILE = invokeGatePath;
   const configurationPath = join(repositoryRoot, "harnesses", "fixture-task-system.yaml");
   const runtime = new GraphCompleteRuntimeService({
     userDataDirectory: dataDirectory,
@@ -275,8 +290,80 @@ async function run() {
   }
 
   const threadId = accepted.thread.id;
-  let navigationDetail = accepted;
-  for (let turnNumber = 2; turnNumber <= 4; turnNumber += 1) {
+  const sourceInteraction = accepted.interactions[0];
+  const invokeAction = sourceInteraction.completionOutput.rootLayer.actions.find((action) => action.kind === "invoke");
+  if (!invokeAction) throw new Error("The deterministic root did not expose an invoke action.");
+  const unresolvedActionVisible = `(() => {
+    const inspector = document.querySelector("#inspector");
+    const button = document.querySelector('[data-action-id="${invokeAction.id}"]');
+    return !inspector?.classList.contains("hidden")
+      && document.querySelector("#detailTitle")?.textContent === "Results store"
+      && Boolean(button && button.offsetParent !== null)
+      && button?.disabled === false;
+  })()`;
+  let unresolvedReady = false;
+  for (let attempt = 0; attempt < 5 && !unresolvedReady; attempt += 1) {
+    await webContents.executeJavaScript(`document.querySelector('[data-node="${invokeAction.sourceNodeId}"]')?.click()`);
+    await webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+    unresolvedReady = await webContents.executeJavaScript(unresolvedActionVisible);
+  }
+  if (!unresolvedReady) throw new Error("The unresolved invoke action did not remain visibly selected for capture.");
+  const invokeEvidencePaths = {
+    unresolved: await captureEvidence(webContents, "01-unresolved", { settle: false }),
+  };
+
+  await webContents.executeJavaScript(`document.querySelector('[data-action-id="${invokeAction.id}"]')?.click()`);
+  await waitFor("the running invoked interaction", async () => {
+    const detail = await productRequest(productSession, `/api/threads/${threadId}`);
+    return detail.interactions.some((interaction) => interaction.completionStatus === "running");
+  });
+  await webContents.executeJavaScript(`document.querySelector("#previousTurn")?.click()`);
+  await waitFor("the source turn while the invoked interaction runs", () => webContents.executeJavaScript(
+    `document.querySelector("#interactionText")?.textContent === "Show the deterministic task system."`,
+  ));
+  await webContents.executeJavaScript(`document.querySelector('[data-node="${invokeAction.sourceNodeId}"]')?.click()`);
+  await waitFor("the visible disabled source invoke while its result runs", () => webContents.executeJavaScript(`(() => {
+    const button = document.querySelector('[data-action-id="${invokeAction.id}"]');
+    return document.querySelector("#interactionText")?.textContent === "Show the deterministic task system."
+      && !document.querySelector("#inspector")?.classList.contains("hidden")
+      && document.querySelector("#detailTitle")?.textContent === "Results store"
+      && Boolean(button && button.offsetParent !== null)
+      && button?.disabled === true;
+  })()`));
+  invokeEvidencePaths.runningDisabled = await captureEvidence(webContents, "02-running-disabled");
+  await writeFile(invokeGatePath, "release");
+
+  const invokedDetail = await waitFor("the invoked result to be accepted", async () => {
+    const detail = await productRequest(productSession, `/api/threads/${threadId}`);
+    return detail.interactions.length === 2
+      && detail.interactions.every((interaction) => interaction.completionStatus === "accepted")
+      ? detail
+      : false;
+  });
+  const invokedResult = invokedDetail.interactions.find((interaction) => interaction.id !== sourceInteraction.id);
+  await waitFor("the visible source invoke to refresh as resolved navigation", () => webContents.executeJavaScript(`(() => {
+    const button = document.querySelector('[data-action-id="${invokeAction.id}"]');
+    return document.querySelector("#interactionText")?.textContent === "Show the deterministic task system."
+      && !document.querySelector("#inspector")?.classList.contains("hidden")
+      && document.querySelector("#detailTitle")?.textContent === "Results store"
+      && Boolean(button && button.offsetParent !== null)
+      && button?.disabled === false;
+  })()`));
+  invokeEvidencePaths.resolved = await captureEvidence(webContents, "03-resolved");
+
+  await webContents.executeJavaScript(`document.querySelector('[data-action-id="${invokeAction.id}"]')?.click()`);
+  await waitFor("the resolved cross-interaction destination", () => webContents.executeJavaScript(
+    `document.querySelector("#turnPickerButton")?.textContent === "Turn 2 of 2"`,
+  ));
+  invokeEvidencePaths.crossInteraction = await captureEvidence(webContents, "04-cross-interaction-destination");
+  await webContents.executeJavaScript(`import("./src/threads.js").then(({ navigateHistory }) => navigateHistory("back"))`);
+  await waitFor("the revisited resolved source", () => webContents.executeJavaScript(
+    `document.querySelector("#interactionText")?.textContent === "Show the deterministic task system."`,
+  ));
+  invokeEvidencePaths.revisited = await captureEvidence(webContents, "05-revisited-source");
+
+  let navigationDetail = invokedDetail;
+  for (let turnNumber = 3; turnNumber <= 4; turnNumber += 1) {
     const created = await productRequest(productSession, `/api/threads/${threadId}/interactions`, {
       method: "POST",
       body: JSON.stringify({ text: `Deterministic navigation turn ${turnNumber}.` }),
@@ -422,6 +509,18 @@ async function run() {
     document.querySelector("#threadView")?.dataset.workspaceMode === "review"
     && document.querySelector("#turnPickerButton")?.textContent === "Turn 4 of 4"
   ))()`));
+  await evalContents.executeJavaScript(`import("./src/threads.js").then(({ selectTurnById }) => selectTurnById(${sourceInteraction.id}))`);
+  await evalContents.executeJavaScript(`document.querySelector('[data-node="${invokeAction.sourceNodeId}"]')?.click()`);
+  await waitFor("the Eval resolved invoke action", () => evalContents.executeJavaScript(`(() => {
+    const button = document.querySelector('[data-action-id="${invokeAction.id}"]');
+    return Boolean(button && button.offsetParent !== null && button.disabled === false);
+  })()`));
+  await evalContents.executeJavaScript(`document.querySelector('[data-action-id="${invokeAction.id}"]')?.click()`);
+  await waitFor("the Eval resolved invoke destination", () => evalContents.executeJavaScript(
+    `document.querySelector("#interactionText")?.textContent === "Propose the most useful next improvement to this task system."`,
+  ));
+  invokeEvidencePaths.evalCrossInteraction = await captureEvidence(evalContents, "06-eval-cross-interaction-destination");
+  await evalContents.executeJavaScript(`import("./src/threads.js").then(({ selectTurnById }) => selectTurnById(${latest.id}))`);
   await evalContents.executeJavaScript(`document.querySelector('[data-node="${navigateAction.sourceNodeId}"]')?.click()`);
   await waitFor("the Eval navigate action", () => evalContents.executeJavaScript(
     `Boolean(document.querySelector('[data-action-id="${navigateAction.id}"]'))`,
@@ -512,6 +611,8 @@ async function run() {
     evalNarrowScreenshotPath,
     productNavigationState,
     evalNavigationState,
+    invokeResultInteractionId: invokedResult.id,
+    invokeEvidencePaths,
   };
   process.stdout.write(`RELAYER_FIRST_MESSAGE_SMOKE ${JSON.stringify(result)}\n`);
   exitCode = 0;
@@ -536,5 +637,9 @@ async function shutdown() {
 process.stdout.write("Starting isolated Electron first-message smoke test...\n");
 void app.whenReady()
   .then(run)
-  .catch((error) => process.stderr.write(`${error.stack || error.message}\n`))
+  .catch((error) => {
+    exitCode = 1;
+    process.exitCode = 1;
+    process.stderr.write(`${error.stack || error.message}\n`);
+  })
   .finally(shutdown);

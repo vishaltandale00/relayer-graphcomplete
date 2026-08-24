@@ -1,6 +1,9 @@
 use crate::{
-    api, permissions::PermissionCatalog, product::ProductService,
-    provider_catalog_refresh::ProviderCatalogRefreshClient, runtime::RuntimeClient,
+    api,
+    permissions::PermissionCatalog,
+    product::{PreparedInteractionBinding, ProductService, ProjectId},
+    provider_catalog_refresh::ProviderCatalogRefreshClient,
+    runtime::RuntimeClient,
     storage::SqliteProductStore,
 };
 use axum::Router;
@@ -76,26 +79,6 @@ impl RelayerAppServer {
                 "marked {interrupted_approvals} interrupted approval request(s) aborted during backend startup"
             );
         }
-        let interrupted = storage
-            .recover_interrupted_action_invocations(
-                "Action invocation was interrupted when Relayer stopped. Retry is unavailable while actions use the temporary one-shot UX.",
-            )
-            .await?;
-        if interrupted > 0 {
-            eprintln!(
-                "marked {interrupted} interrupted action invocation result(s) failed during backend startup"
-            );
-        }
-        let interrupted = storage
-            .recover_interrupted_interactions(
-                "Interaction was interrupted when Relayer stopped. Send a follow-up to continue.",
-            )
-            .await?;
-        if interrupted > 0 {
-            eprintln!(
-                "marked {interrupted} interrupted ordinary interaction(s) failed during backend startup"
-            );
-        }
         let runtime = match &config.runtime {
             Some(runtime) => Some(
                 RuntimeClient::open(
@@ -117,6 +100,126 @@ impl RelayerAppServer {
                 runtime.remove_imported_conversation(&import_id).await?;
                 storage.remove_conversation_import(&import_id).await?;
             }
+        }
+        if let Some(runtime) = &runtime {
+            for mut interaction in storage.interrupted_interactions().await? {
+                if interaction.graph_node_id.is_none()
+                    && let Some((source_interaction_node_id, source_action_id)) =
+                        storage.invocation_graph_source(interaction.id).await?
+                {
+                    if interaction.completion_status == "not_started"
+                        && !storage.claim_interaction_preparing(interaction.id).await?
+                    {
+                        anyhow::bail!(
+                            "could not reserve interrupted interaction {}",
+                            interaction.id
+                        );
+                    }
+                    let thread = storage
+                        .get_thread(interaction.thread_id)
+                        .await?
+                        .ok_or_else(|| anyhow::anyhow!("missing thread for {}", interaction.id))?;
+                    let permission = permission_catalog.profile(&thread.permission_profile_id)?;
+                    let command = crate::runtime::CompleteInteraction {
+                        project_id: thread.project_id.map(ProjectId::value),
+                        product_interaction_id: interaction.id.value(),
+                        thread_id: thread.id.value(),
+                        interaction_id: interaction.id.value(),
+                        text: &interaction.text,
+                        working_directory: "",
+                        harness_configuration_name: &thread.harness_configuration_name,
+                        permission_profile: permission,
+                        model_selection: interaction.model_selection.as_ref(),
+                        invocation: Some(crate::runtime::PreparedInvocation {
+                            source_interaction_node_id,
+                            source_action_id,
+                        }),
+                    };
+                    let prepared = runtime.prepare(&command).await?;
+                    let binding = storage
+                        .bind_prepared_interaction(PreparedInteractionBinding {
+                            interaction_id: interaction.id,
+                            graph_node_id: prepared.graph_node_id,
+                            harness_configuration_name: &prepared.harness_configuration_name,
+                            harness_configuration_digest: &prepared.harness_configuration_digest,
+                            effective_execution_digest: &prepared.effective_execution_digest,
+                            effective_permission_receipt: &prepared.effective_permission_receipt,
+                        })
+                        .await;
+                    let cleanup = runtime.discard_prepared(prepared).await;
+                    let bound = match (binding, cleanup) {
+                        (Ok(bound), Ok(())) => bound,
+                        (Err(operation), Ok(())) => return Err(operation.into()),
+                        (Ok(_), Err(cleanup)) => return Err(cleanup.into()),
+                        (Err(operation), Err(cleanup)) => anyhow::bail!(
+                            "could not recover graph binding: {operation}; capability cleanup also failed: {cleanup}"
+                        ),
+                    };
+                    if !bound {
+                        anyhow::bail!("could not recover graph binding for {}", interaction.id);
+                    }
+                    interaction.graph_node_id = storage
+                        .get_interaction(interaction.id)
+                        .await?
+                        .and_then(|stored| stored.graph_node_id);
+                }
+                if let Some(graph_node_id) = interaction.graph_node_id {
+                    let metadata = runtime.interaction_metadata(graph_node_id).await?;
+                    let expected = storage.invocation_graph_source(interaction.id).await?;
+                    let expected =
+                        expected.map(|(source_interaction_node_id, source_action_id)| {
+                            crate::runtime::PreparedInvocation {
+                                source_interaction_node_id,
+                                source_action_id,
+                            }
+                        });
+                    if metadata.node_id != graph_node_id || metadata.invocation != expected {
+                        anyhow::bail!(
+                            "bound graph interaction provenance mismatch for {}",
+                            interaction.id
+                        );
+                    }
+                    if let Some(output) = runtime.completion_output(graph_node_id).await? {
+                        if output.get("nodeId").and_then(serde_json::Value::as_i64)
+                            != Some(graph_node_id)
+                        {
+                            anyhow::bail!(
+                                "canonical output node mismatch for interaction {}",
+                                interaction.id
+                            );
+                        }
+                        if !storage
+                            .recover_interaction_accepted(interaction.id, &output)
+                            .await?
+                        {
+                            anyhow::bail!(
+                                "interaction {} changed during startup reconciliation",
+                                interaction.id
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        let interrupted = storage
+            .recover_interrupted_action_invocations(
+                "Action invocation was interrupted before graph acceptance. Its leased action remains unresolved.",
+            )
+            .await?;
+        if interrupted > 0 {
+            eprintln!(
+                "marked {interrupted} unresolved interrupted action invocation result(s) failed during backend startup"
+            );
+        }
+        let interrupted = storage
+            .recover_interrupted_interactions(
+                "Interaction was interrupted when Relayer stopped. Send a follow-up to continue.",
+            )
+            .await?;
+        if interrupted > 0 {
+            eprintln!(
+                "marked {interrupted} interrupted ordinary interaction(s) failed during backend startup"
+            );
         }
         let default_harness_configuration = config
             .runtime

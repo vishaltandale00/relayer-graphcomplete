@@ -61,6 +61,27 @@ pub(crate) struct CompleteInteraction<'a> {
     pub(crate) harness_configuration_name: &'a str,
     pub(crate) permission_profile: &'a PermissionProfile,
     pub(crate) model_selection: Option<&'a InteractionModelSelection>,
+    pub(crate) invocation: Option<PreparedInvocation>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PreparedInvocation {
+    pub(crate) source_interaction_node_id: i64,
+    pub(crate) source_action_id: i64,
+}
+
+#[derive(Debug)]
+pub(crate) struct PreparedInteraction {
+    pub(crate) graph_node_id: i64,
+    graph_token: String,
+    pub(crate) harness_configuration_name: String,
+    pub(crate) harness_configuration_digest: String,
+    pub(crate) permission_profile_id: String,
+    pub(crate) effective_execution_digest: String,
+    pub(crate) effective_permission_receipt: Value,
+    configuration: HarnessConfiguration,
+    model_selection: Option<InteractionModelSelection>,
 }
 
 #[derive(Debug)]
@@ -80,6 +101,8 @@ pub(crate) struct RuntimeAction {
     pub(crate) id: i64,
     pub(crate) kind: String,
     pub(crate) interaction_text: Option<String>,
+    #[serde(default)]
+    pub(crate) target_layer_id: Option<i64>,
     pub(crate) state: String,
 }
 
@@ -116,6 +139,20 @@ impl ApprovalEvent {
             Self::Requested { sequence, .. } | Self::Resolved { sequence, .. } => *sequence,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RuntimeLayerOwner {
+    pub(crate) layer_id: i64,
+    pub(crate) owner_interaction_node_id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RuntimeInteractionMetadata {
+    pub(crate) node_id: i64,
+    pub(crate) invocation: Option<PreparedInvocation>,
 }
 
 impl RuntimeClient {
@@ -258,10 +295,19 @@ impl RuntimeClient {
             })
     }
 
+    #[cfg(test)]
     pub(crate) async fn complete(
         &self,
         command: CompleteInteraction<'_>,
     ) -> Result<RuntimeCompletion, RuntimeError> {
+        let prepared = self.prepare(&command).await?;
+        self.complete_prepared(&command, prepared).await
+    }
+
+    pub(crate) async fn prepare(
+        &self,
+        command: &CompleteInteraction<'_>,
+    ) -> Result<PreparedInteraction, RuntimeError> {
         let selected = self
             .configurations
             .get(command.harness_configuration_name)
@@ -280,22 +326,82 @@ impl RuntimeClient {
                 profile_id: command.permission_profile.id.clone(),
                 configuration_name: selected.configuration.name.clone(),
             })?;
-        let interaction: CreateInteractionResponse = self
-            .post(
-                self.graph_url.join("api/control/interactions")?,
-                &serde_json::json!({
-                    "projectId": command.project_id,
-                    "threadId": command.thread_id,
-                    "text": command.text,
-                }),
-                &self.graph_control_token,
-                StatusCode::OK,
-            )
-            .await?;
+        let invocation = command.invocation.map(|invocation| {
+            serde_json::json!({
+                "sourceInteractionNodeId": invocation.source_interaction_node_id,
+                "sourceActionId": invocation.source_action_id,
+            })
+        });
+        let create_url = self.graph_url.join("api/control/interactions")?;
+        let create_body = serde_json::json!({
+            "projectId": command.project_id,
+            "threadId": command.thread_id,
+            "text": command.text,
+            "invocation": invocation,
+        });
+        let mut attempts = 0;
+        let interaction: CreateInteractionResponse = loop {
+            attempts += 1;
+            match self
+                .post(
+                    create_url.clone(),
+                    &create_body,
+                    &self.graph_control_token,
+                    StatusCode::OK,
+                )
+                .await
+            {
+                Ok(interaction) => break interaction,
+                Err(RuntimeError::Http(_) | RuntimeError::Json(_))
+                    if command.invocation.is_some() =>
+                {
+                    // Invoke creation is keyed by the immutable source pair in graph core.
+                    // Bounded exact retries recover response loss without another lease.
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        (attempts * 25).min(1_000),
+                    ))
+                    .await;
+                }
+                Err(error) => return Err(error),
+            }
+        };
+        let effective_execution_digest = effective_execution_digest(
+            &selected.digest,
+            &command.permission_profile.id,
+            command.model_selection,
+        );
+        let unrestricted = command.permission_profile.authority == "unrestricted";
+        Ok(PreparedInteraction {
+            graph_node_id: interaction.node.id,
+            graph_token: interaction.graph_token,
+            harness_configuration_name: selected.configuration.name.clone(),
+            harness_configuration_digest: selected.digest.clone(),
+            permission_profile_id: command.permission_profile.id.clone(),
+            effective_execution_digest,
+            effective_permission_receipt: serde_json::json!({
+                "schemaVersion": 1,
+                "permissionProfileId": &command.permission_profile.id,
+                "label": &command.permission_profile.label,
+                "authority": &command.permission_profile.authority,
+                "reviewer": &command.permission_profile.reviewer,
+                "bindingPresent": true,
+                "unconfinedHostAccess": unrestricted,
+                "disclosure": unrestricted.then_some("Filesystem and network access were not hard-confined."),
+            }),
+            configuration: selected.configuration.clone(),
+            model_selection: command.model_selection.cloned(),
+        })
+    }
+
+    pub(crate) async fn complete_prepared(
+        &self,
+        command: &CompleteInteraction<'_>,
+        prepared: PreparedInteraction,
+    ) -> Result<RuntimeCompletion, RuntimeError> {
         let graph = serde_json::json!({
             "url": self.graph_url.as_str().trim_end_matches('/'),
-            "token": &interaction.graph_token,
-            "nodeId": interaction.node.id,
+            "token": &prepared.graph_token,
+            "nodeId": prepared.graph_node_id,
         });
         let completion = async {
             let _: Value = self
@@ -303,8 +409,8 @@ impl RuntimeClient {
                     self.harness_url.join("sessions")?,
                     &serde_json::json!({
                         "threadId": command.thread_id,
-                        "configuration": selected.configuration,
-                        "permissionProfileId": command.permission_profile.id,
+                        "configuration": prepared.configuration,
+                        "permissionProfileId": &prepared.permission_profile_id,
                         "workingDirectory": command.working_directory,
                     }),
                     &self.harness_control_token,
@@ -316,7 +422,7 @@ impl RuntimeClient {
                 "graph": graph,
                 "traceContext": { "productInteractionId": command.product_interaction_id },
             });
-            if let Some(model_selection) = command.model_selection {
+            if let Some(model_selection) = prepared.model_selection.as_ref() {
                 complete_body["model"] = serde_json::json!({
                     "providerId": model_selection.provider_id.as_str(),
                     "modelId": &model_selection.model_id,
@@ -332,7 +438,7 @@ impl RuntimeClient {
             .await
         }
         .await;
-        let revocation = self.revoke_capability(&interaction.graph_token).await;
+        let revocation = self.revoke_capability(&prepared.graph_token).await;
         let completed: CompleteResponse = match (completion, revocation) {
             (Ok(completed), Ok(())) => completed,
             (Err(operation), Ok(())) => return Err(operation),
@@ -344,28 +450,13 @@ impl RuntimeClient {
                 });
             }
         };
-        let effective_execution_digest = effective_execution_digest(
-            &selected.digest,
-            &command.permission_profile.id,
-            command.model_selection,
-        );
-        let unrestricted = command.permission_profile.authority == "unrestricted";
         Ok(RuntimeCompletion {
-            graph_node_id: interaction.node.id,
-            harness_configuration_name: selected.configuration.name.clone(),
-            harness_configuration_digest: selected.digest.clone(),
-            permission_profile_id: command.permission_profile.id.clone(),
-            effective_execution_digest,
-            effective_permission_receipt: serde_json::json!({
-                "schemaVersion": 1,
-                "permissionProfileId": &command.permission_profile.id,
-                "label": &command.permission_profile.label,
-                "authority": &command.permission_profile.authority,
-                "reviewer": &command.permission_profile.reviewer,
-                "bindingPresent": true,
-                "unconfinedHostAccess": unrestricted,
-                "disclosure": unrestricted.then_some("Filesystem and network access were not hard-confined."),
-            }),
+            graph_node_id: prepared.graph_node_id,
+            harness_configuration_name: prepared.harness_configuration_name,
+            harness_configuration_digest: prepared.harness_configuration_digest,
+            permission_profile_id: prepared.permission_profile_id,
+            effective_execution_digest: prepared.effective_execution_digest,
+            effective_permission_receipt: prepared.effective_permission_receipt,
             output: completed.output,
         })
     }
@@ -426,22 +517,56 @@ impl RuntimeClient {
         .await
     }
 
+    pub(crate) async fn discard_prepared(
+        &self,
+        prepared: PreparedInteraction,
+    ) -> Result<(), RuntimeError> {
+        self.revoke_capability(&prepared.graph_token).await
+    }
+
+    pub(crate) async fn completion_output(
+        &self,
+        interaction_node_id: i64,
+    ) -> Result<Option<Value>, RuntimeError> {
+        match self
+            .control_get(&format!(
+                "api/control/interactions/{interaction_node_id}/output"
+            ))
+            .await
+        {
+            Ok(value) => Ok(Some(value)),
+            Err(RuntimeError::Remote { status: 404, body })
+                if body.pointer("/error/code").and_then(Value::as_str)
+                    == Some("completion_not_found") =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub(crate) async fn get_layer(
         &self,
         interaction_node_id: i64,
         layer_id: i64,
     ) -> Result<Value, RuntimeError> {
-        let capability = self.remint_capability(interaction_node_id).await?;
-        let response = self
-            .client
-            .get(
-                self.graph_url
-                    .join(&format!("api/graph/layers/{layer_id}"))?,
-            )
-            .bearer_auth(capability.graph_token)
-            .send()
-            .await?;
-        response_json(response, StatusCode::OK).await
+        self.control_get(&format!(
+            "api/control/interactions/{interaction_node_id}/layers/{layer_id}"
+        ))
+        .await
+    }
+
+    pub(crate) async fn get_layer_owner(
+        &self,
+        interaction_node_id: i64,
+        layer_id: i64,
+    ) -> Result<RuntimeLayerOwner, RuntimeError> {
+        Ok(serde_json::from_value(
+            self.control_get(&format!(
+                "api/control/interactions/{interaction_node_id}/layers/{layer_id}/owner"
+            ))
+            .await?,
+        )?)
     }
 
     pub(crate) async fn accepted_graph_closure(
@@ -465,31 +590,32 @@ impl RuntimeClient {
         interaction_node_id: i64,
         action_id: i64,
     ) -> Result<RuntimeAction, RuntimeError> {
-        let capability = self.remint_capability(interaction_node_id).await?;
-        let response = self
-            .client
-            .get(
-                self.graph_url
-                    .join(&format!("api/graph/actions/{action_id}"))?,
-            )
-            .bearer_auth(capability.graph_token)
-            .send()
+        let value = self
+            .control_get(&format!(
+                "api/control/interactions/{interaction_node_id}/actions/{action_id}"
+            ))
             .await?;
-        let value = response_json(response, StatusCode::OK).await?;
         Ok(serde_json::from_value(value["action"].clone())?)
     }
 
-    async fn remint_capability(
+    pub(crate) async fn interaction_metadata(
         &self,
         interaction_node_id: i64,
-    ) -> Result<RemintCapabilityResponse, RuntimeError> {
-        self.post(
-            self.graph_url.join("api/control/capabilities")?,
-            &serde_json::json!({"nodeId": interaction_node_id}),
-            &self.graph_control_token,
-            StatusCode::OK,
-        )
-        .await
+    ) -> Result<RuntimeInteractionMetadata, RuntimeError> {
+        Ok(serde_json::from_value(
+            self.control_get(&format!("api/control/interactions/{interaction_node_id}"))
+                .await?,
+        )?)
+    }
+
+    async fn control_get(&self, path: &str) -> Result<Value, RuntimeError> {
+        let response = self
+            .client
+            .get(self.graph_url.join(path)?)
+            .bearer_auth(&self.graph_control_token)
+            .send()
+            .await?;
+        response_json(response, StatusCode::OK).await
     }
 
     async fn revoke_capability(&self, graph_token: &str) -> Result<(), RuntimeError> {
@@ -539,12 +665,6 @@ struct CreateInteractionResponse {
 #[derive(Deserialize)]
 struct CompleteResponse {
     output: Value,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RemintCapabilityResponse {
-    graph_token: String,
 }
 
 async fn response_json(
@@ -693,11 +813,12 @@ pub(crate) enum RuntimeError {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompleteInteraction, HarnessConfiguration, RuntimeClient};
+    use super::{CompleteInteraction, HarnessConfiguration, PreparedInvocation, RuntimeClient};
     use crate::permissions::PermissionProfile;
     use axum::{
         Json, Router,
         http::{HeaderMap, StatusCode},
+        response::IntoResponse,
         routing,
     };
     use serde_json::{Value, json};
@@ -742,6 +863,94 @@ mod tests {
         .unwrap();
 
         assert!(error.to_string().contains("must be distinct"));
+    }
+
+    #[tokio::test]
+    async fn invoke_prepare_retries_two_lost_create_responses_with_the_same_source_pair() {
+        let creates = Arc::new(AtomicUsize::new(0));
+        let observed_creates = creates.clone();
+        let graph = Router::new()
+            .route(
+                "/api/control/interactions",
+                routing::post(move |Json(body): Json<serde_json::Value>| {
+                    let observed_creates = observed_creates.clone();
+                    async move {
+                        assert_eq!(body["invocation"]["sourceInteractionNodeId"], 17);
+                        assert_eq!(body["invocation"]["sourceActionId"], 23);
+                        if observed_creates.fetch_add(1, Ordering::SeqCst) < 2 {
+                            return (StatusCode::OK, "response was truncated").into_response();
+                        }
+                        Json(json!({ "node": { "id": 41 }, "graphToken": "retry-token" }))
+                            .into_response()
+                    }
+                }),
+            )
+            .route(
+                "/api/control/capabilities",
+                routing::delete(|| async { Json(json!({ "revoked": true })) }),
+            );
+        let (graph_url, graph_task) = serve(graph).await;
+        let (harness_url, harness_task) = serve(Router::new()).await;
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "relayer-runtime-create-retry-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog = root.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({
+                "schemaVersion":1,
+                "configurations":[{"configuration":{
+                    "schemaVersion":1,"name":"test","implementation":"test",
+                    "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+                },"digest":"sha256:test"}]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            &graph_url,
+            &harness_url,
+            "graph-control".into(),
+            "harness-control".into(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+        let permission_profile = PermissionProfile {
+            id: "auto".into(),
+            label: "Approve for me".into(),
+            authority: "bounded".into(),
+            reviewer: "automatic".into(),
+        };
+        let command = CompleteInteraction {
+            project_id: None,
+            product_interaction_id: 1,
+            thread_id: 1,
+            interaction_id: 1,
+            text: "question",
+            working_directory: root.to_str().unwrap(),
+            harness_configuration_name: "test",
+            permission_profile: &permission_profile,
+            model_selection: None,
+            invocation: Some(PreparedInvocation {
+                source_interaction_node_id: 17,
+                source_action_id: 23,
+            }),
+        };
+
+        let prepared = runtime.prepare(&command).await.unwrap();
+        assert_eq!(prepared.graph_node_id, 41);
+        assert_eq!(creates.load(Ordering::SeqCst), 3);
+        runtime.discard_prepared(prepared).await.unwrap();
+        graph_task.abort();
+        harness_task.abort();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
@@ -835,6 +1044,7 @@ mod tests {
                 harness_configuration_name: "test",
                 permission_profile: &permission_profile,
                 model_selection: None,
+                invocation: None,
             })
             .await;
 
@@ -954,6 +1164,7 @@ mod tests {
                 harness_configuration_name: "test",
                 permission_profile: &permission_profile,
                 model_selection: None,
+                invocation: None,
             })
             .await
             .unwrap();

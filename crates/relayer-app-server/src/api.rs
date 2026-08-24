@@ -131,6 +131,10 @@ pub(crate) fn router(
             "/api/threads/{thread_id}/interactions/{interaction_id}/approvals/{request_id}/decision",
             axum::routing::post(threads::decide_approval),
         )
+        .route(
+            "/api/threads/{thread_id}/interactions/{interaction_id}/actions/{action_id}/destination",
+            get(threads::get_action_destination),
+        )
         .fallback_service(ServeDir::new(web_directory).append_index_html_on_directories(true))
         .with_state(state)
 }

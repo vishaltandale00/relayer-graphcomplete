@@ -42,6 +42,15 @@ pub(crate) struct AcceptedInteractionCompletion<'a> {
     pub(crate) output: &'a serde_json::Value,
 }
 
+pub(crate) struct PreparedInteractionBinding<'a> {
+    pub(crate) interaction_id: InteractionId,
+    pub(crate) graph_node_id: i64,
+    pub(crate) harness_configuration_name: &'a str,
+    pub(crate) harness_configuration_digest: &'a str,
+    pub(crate) effective_execution_digest: &'a str,
+    pub(crate) effective_permission_receipt: &'a serde_json::Value,
+}
+
 pub(crate) struct ProjectWriteOutcome {
     pub(crate) project: Project,
     pub(crate) created: bool,
@@ -524,19 +533,6 @@ impl ProductService {
         })
     }
 
-    pub(crate) async fn list_interactions(
-        &self,
-        thread_id: ThreadId,
-    ) -> Result<Vec<Interaction>, ProductError> {
-        if self.storage.get_thread(thread_id).await?.is_none() {
-            return Err(ProductError::NotFound(format!("thread {thread_id}")));
-        }
-        self.storage
-            .list_interactions(thread_id)
-            .await
-            .map_err(Into::into)
-    }
-
     pub(crate) async fn create_interaction(
         &self,
         thread_id: ThreadId,
@@ -745,16 +741,14 @@ impl ProductService {
             .ok_or_else(|| ProductError::NotFound(format!("interaction {interaction_id}")))
     }
 
-    pub(crate) async fn mark_interaction_running(
+    pub(crate) async fn get_interaction_by_graph_node_id(
         &self,
-        interaction_id: super::InteractionId,
-        harness_configuration_name: &str,
-    ) -> Result<(), ProductError> {
-        self.ensure_interaction_mutable(interaction_id).await?;
+        graph_node_id: i64,
+    ) -> Result<Interaction, ProductError> {
         self.storage
-            .mark_interaction_running(interaction_id, harness_configuration_name)
-            .await
-            .map_err(Into::into)
+            .get_interaction_by_graph_node_id(graph_node_id)
+            .await?
+            .ok_or_else(|| ProductError::NotFound(format!("graph interaction {graph_node_id}")))
     }
 
     pub(crate) async fn claim_interaction_running(
@@ -765,6 +759,36 @@ impl ProductService {
         self.ensure_interaction_mutable(interaction_id).await?;
         self.storage
             .claim_interaction_running(interaction_id, harness_configuration_name)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn claim_interaction_preparing(
+        &self,
+        interaction_id: super::InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .claim_interaction_preparing(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn bind_prepared_interaction(
+        &self,
+        binding: PreparedInteractionBinding<'_>,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .bind_prepared_interaction(binding)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn invocation_graph_source(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<Option<(i64, i64)>, ProductError> {
+        self.storage
+            .invocation_graph_source(interaction_id)
             .await
             .map_err(Into::into)
     }
@@ -786,7 +810,7 @@ impl ProductService {
         interaction_id: super::InteractionId,
         harness_configuration_name: &str,
         error: &str,
-    ) -> Result<(), ProductError> {
+    ) -> Result<bool, ProductError> {
         self.ensure_interaction_mutable(interaction_id).await?;
         self.storage
             .fail_interaction_completion(interaction_id, harness_configuration_name, error)

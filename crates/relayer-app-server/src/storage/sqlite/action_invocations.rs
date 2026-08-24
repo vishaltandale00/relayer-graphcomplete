@@ -7,6 +7,45 @@ use crate::storage::{ActionInvocationInsertOutcome, StorageError};
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 
 impl SqliteProductStore {
+    pub(crate) async fn invocation_graph_source(
+        &self,
+        result_interaction_id: InteractionId,
+    ) -> Result<Option<(i64, i64)>, StorageError> {
+        sqlx::query_as(
+            "SELECT source.graph_node_id,ai.action_id FROM action_invocations ai JOIN interactions source ON source.id=ai.source_interaction_id WHERE ai.result_interaction_id=?1 AND source.completion_status='accepted' AND source.graph_node_id IS NOT NULL",
+        )
+        .bind(result_interaction_id.value())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub(crate) async fn interrupted_interactions(&self) -> Result<Vec<Interaction>, StorageError> {
+        let rows = sqlx::query(
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id FROM interactions i WHERE i.completion_status IN ('not_started','running','submitted') ORDER BY i.id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(interactions::interaction_from_row)
+            .collect()
+    }
+
+    pub(crate) async fn recover_interaction_accepted(
+        &self,
+        interaction_id: InteractionId,
+        output: &serde_json::Value,
+    ) -> Result<bool, StorageError> {
+        let output = serde_json::to_string(output)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let result = sqlx::query("UPDATE interactions SET completion_status='accepted',completion_output_json=?1,completion_error=NULL WHERE id=?2 AND graph_node_id IS NOT NULL AND harness_configuration_name IS NOT NULL AND harness_configuration_digest IS NOT NULL AND effective_execution_digest IS NOT NULL AND effective_permission_receipt_json IS NOT NULL AND completion_status IN ('not_started','running','submitted')")
+            .bind(output)
+            .bind(interaction_id.value())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     pub(crate) async fn permits_unselected_action_execution(
         &self,
         result_interaction_id: InteractionId,
@@ -187,7 +226,15 @@ pub(super) async fn fetch_action_invocations(
     thread_id: ThreadId,
 ) -> Result<Vec<ActionInvocation>, StorageError> {
     let rows = sqlx::query(
-        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at FROM action_invocations ai JOIN interactions source ON source.id=ai.source_interaction_id WHERE source.thread_id=?1 ORDER BY source.sequence,ai.action_id",
+        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at
+         FROM action_invocations ai
+         JOIN interactions source ON source.id=ai.source_interaction_id
+         JOIN threads source_thread ON source_thread.id=source.thread_id
+         JOIN threads requested_thread ON requested_thread.id=?1
+         WHERE source.thread_id=?1
+            OR (requested_thread.project_id IS NOT NULL
+                AND source_thread.project_id=requested_thread.project_id)
+         ORDER BY source_thread.id,source.sequence,ai.action_id",
     )
     .bind(thread_id.value())
     .fetch_all(connection)
@@ -317,6 +364,28 @@ mod tests {
         assert_eq!(replay_interaction.id, result_ids[0]);
         assert_eq!(replay_interaction.text, "Authored follow-up");
         assert_eq!(replay_interaction.model_selection, Some(model_selection));
+        assert!(
+            reopened
+                .fail_interaction_completion(replay_interaction.id, "codex-basic", "test failure")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !reopened
+                .fail_interaction_completion(replay_interaction.id, "codex-basic", "late failure")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !reopened
+                .fail_interaction_completion(
+                    thread.root_interaction_id,
+                    "codex-basic",
+                    "must not overwrite accepted",
+                )
+                .await
+                .unwrap()
+        );
         reopened.pool.close().await;
         std::fs::remove_file(path).unwrap();
     }

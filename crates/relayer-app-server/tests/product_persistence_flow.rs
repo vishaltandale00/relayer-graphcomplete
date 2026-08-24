@@ -2,6 +2,7 @@ use axum::{
     Router,
     body::{Body, to_bytes},
     http::{Request, Response, StatusCode},
+    response::IntoResponse,
 };
 use relayer_app_server::conversation_export::{
     ConversationExportRecord, ExportCompletionStatus, ExportTurnOrigin, decode_export_jsonl,
@@ -31,6 +32,170 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tower::ServiceExt;
+
+#[tokio::test]
+async fn resolved_invoke_destination_is_readable_cross_thread_in_review_mode() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-resolved-invoke-navigation-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    drop(open_app(&database, &root).await);
+
+    let pool = sqlite_pool(&database).await;
+    let project_id = sqlx::query(
+        "INSERT INTO projects(name,path,created_at,updated_at) VALUES ('Project',?1,'1','1')",
+    )
+    .bind(root.to_string_lossy().as_ref())
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    let source_thread_id = sqlx::query("INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES ('Source',?1,'1','1','codex-basic','auto')")
+        .bind(project_id).execute(&pool).await.unwrap().last_insert_rowid();
+    let result_thread_id = sqlx::query("INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES ('Result',?1,'2','2','codex-basic','auto')")
+        .bind(project_id).execute(&pool).await.unwrap().last_insert_rowid();
+    let stale_source = json!({
+        "nodeId": 90,
+        "rootLayer": {
+            "layer": {"id": 500}, "nodes": [], "edges": [],
+            "actions": [{"id": 41, "sourceNodeId": 7, "kind": "invoke", "targetLayerId": null, "state": "accepted"}]
+        }
+    });
+    let source_interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_output_json,permission_profile_id) VALUES (?1,1,'Source','1',90,'accepted',?2,'auto')")
+        .bind(source_thread_id).bind(stale_source.to_string()).execute(&pool).await.unwrap().last_insert_rowid();
+    let reused_source_interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_output_json,permission_profile_id) VALUES (?1,1,'Reused source','2',92,'accepted',?2,'auto')")
+        .bind(result_thread_id).bind(stale_source.to_string()).execute(&pool).await.unwrap().last_insert_rowid();
+    let result_output = json!({
+        "nodeId": 91,
+        "rootLayer": {"layer": {"id": 501}, "nodes": [], "edges": [], "actions": []}
+    });
+    let result_interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_output_json,permission_profile_id) VALUES (?1,2,'Result','3',91,'accepted',?2,'auto')")
+        .bind(result_thread_id).bind(result_output.to_string()).execute(&pool).await.unwrap().last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,41,?2,'3')")
+        .bind(reused_source_interaction_id).bind(result_interaction_id).execute(&pool).await.unwrap();
+    pool.close().await;
+
+    let canonical_source = json!({
+        "nodeId": 90,
+        "rootLayer": {
+            "layer": {"id": 500}, "nodes": [], "edges": [],
+            "actions": [{"id": 41, "sourceNodeId": 7, "kind": "invoke", "targetLayerId": 501, "state": "accepted"}]
+        }
+    });
+    let graph = axum::Router::new()
+        .route(
+            "/api/control/interactions/90/actions/41",
+            axum::routing::get(|| async {
+                axum::Json(json!({"action": {
+                    "id": 41, "kind": "invoke", "interactionText": "Continue",
+                    "targetLayerId": 501, "state": "accepted"
+                }}))
+            }),
+        )
+        .route(
+            "/api/control/interactions/90/layers/501/owner",
+            axum::routing::get(|| async {
+                axum::Json(json!({"layerId": 501, "ownerInteractionNodeId": 91}))
+            }),
+        )
+        .route(
+            "/api/control/interactions/90/output",
+            axum::routing::get(move || {
+                let canonical_source = canonical_source.clone();
+                async move { axum::Json(canonical_source) }
+            }),
+        )
+        .route(
+            "/api/control/interactions/91/output",
+            axum::routing::get(move || {
+                let result_output = result_output.clone();
+                async move { axum::Json(result_output) }
+            }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(axum::Router::new()).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion": 1,
+            "configurations": [{
+                "configuration": {
+                    "schemaVersion": 1, "name": "codex-basic", "implementation": "test",
+                    "implementationVersion": 1, "permissionBindings": {"auto": {}}, "settings": {}
+                },
+                "digest": "sha256:test"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+
+    let destination = app
+        .clone()
+        .oneshot(api_request_with_token(
+            "GET",
+            &format!(
+                "/api/threads/{source_thread_id}/interactions/{source_interaction_id}/actions/41/destination"
+            ),
+            None,
+            "review",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(destination.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(destination).await,
+        json!({
+            "actionId": 41, "actionKind": "invoke", "targetLayerId": 501,
+            "threadId": result_thread_id, "interactionId": result_interaction_id,
+            "rootLayerId": 501
+        })
+    );
+
+    let state = response_json(
+        app.clone()
+            .oneshot(api_request_with_token(
+                "GET",
+                &format!("/api/state?threadId={source_thread_id}"),
+                None,
+                "review",
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        state["interactions"][0]["completionOutput"]["rootLayer"]["actions"][0],
+        json!({"id": 41, "sourceNodeId": 7, "kind": "invoke", "targetLayerId": 501, "state": "accepted"})
+    );
+    let interactions = response_json(
+        app.oneshot(api_request_with_token(
+            "GET",
+            &format!("/api/threads/{source_thread_id}/interactions"),
+            None,
+            "review",
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        interactions["interactions"][0]["completionOutput"]["rootLayer"]["actions"][0]["targetLayerId"],
+        501
+    );
+
+    graph_task.abort();
+    harness_task.abort();
+    let _ = fs::remove_dir_all(root);
+}
 
 #[tokio::test]
 async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_authority() {
@@ -1065,6 +1230,12 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
 
     let graph_interactions = Arc::new(AtomicUsize::new(202));
     let graph_interaction_counter = graph_interactions.clone();
+    let observed_graph_creates = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let graph_create_bodies = observed_graph_creates.clone();
+    let graph_metadata = Arc::new(Mutex::new(HashMap::<usize, Value>::new()));
+    let created_graph_metadata = graph_metadata.clone();
+    let graph_nodes_by_pair = Arc::new(Mutex::new(HashMap::<(i64, i64), usize>::new()));
+    let created_graph_nodes_by_pair = graph_nodes_by_pair.clone();
     let graph = axum::Router::new()
         .route(
             "/api/control/capabilities",
@@ -1072,7 +1243,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
                 .delete(|| async { axum::Json(json!({ "revoked": true })) }),
         )
         .route(
-            "/api/graph/actions/41",
+            "/api/control/interactions/{id}/actions/41",
             axum::routing::get(|| async {
                 axum::Json(json!({
                     "action": {
@@ -1086,11 +1257,42 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         )
         .route(
             "/api/control/interactions",
-            axum::routing::post(move || {
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let graph_interaction_counter = graph_interaction_counter.clone();
+                let graph_create_bodies = graph_create_bodies.clone();
+                let created_graph_metadata = created_graph_metadata.clone();
+                let created_graph_nodes_by_pair = created_graph_nodes_by_pair.clone();
                 async move {
-                    let node_id = graph_interaction_counter.fetch_add(1, Ordering::SeqCst);
+                    let invocation = body["invocation"].clone();
+                    graph_create_bodies.lock().unwrap().push(body);
+                    let pair = (
+                        invocation["sourceInteractionNodeId"].as_i64().unwrap(),
+                        invocation["sourceActionId"].as_i64().unwrap(),
+                    );
+                    let node_id = *created_graph_nodes_by_pair
+                        .lock()
+                        .unwrap()
+                        .entry(pair)
+                        .or_insert_with(|| {
+                            graph_interaction_counter.fetch_add(1, Ordering::SeqCst)
+                        });
+                    created_graph_metadata
+                        .lock()
+                        .unwrap()
+                        .insert(node_id, invocation);
                     axum::Json(json!({ "node": { "id": node_id }, "graphToken": "next" }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/{id}",
+            axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<usize>| {
+                let graph_metadata = graph_metadata.clone();
+                async move {
+                    axum::Json(json!({
+                        "nodeId": id,
+                        "invocation": graph_metadata.lock().unwrap().get(&id).cloned()
+                    }))
                 }
             }),
         );
@@ -1098,6 +1300,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     let completion_counter = harness_completions.clone();
     let observed_models = Arc::new(Mutex::new(Vec::<Value>::new()));
     let harness_models = observed_models.clone();
+    let product_database = database.clone();
     let harness = axum::Router::new()
         .route(
             "/sessions",
@@ -1108,10 +1311,23 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let completion_counter = completion_counter.clone();
                 let harness_models = harness_models.clone();
+                let product_database = product_database.clone();
                 async move {
+                    let pool = sqlite_pool(&product_database).await;
+                    let prepared: (Option<i64>, String, Option<String>, Option<String>, Option<String>) =
+                        sqlx::query_as("SELECT graph_node_id,completion_status,harness_configuration_digest,effective_execution_digest,effective_permission_receipt_json FROM interactions WHERE id=?1")
+                            .bind(body["traceContext"]["productInteractionId"].as_i64().unwrap())
+                            .fetch_one(&pool).await.unwrap();
+                    pool.close().await;
+                    assert_eq!(prepared.0, body["graph"]["nodeId"].as_i64());
+                    assert_eq!(prepared.1, "running");
+                    assert!(prepared.2.is_some() && prepared.3.is_some() && prepared.4.is_some());
+                    assert!(!prepared.4.as_deref().unwrap().contains(
+                        body["graph"]["token"].as_str().unwrap()
+                    ));
                     harness_models.lock().unwrap().push(body["model"].clone());
-                    let completion_number = completion_counter.fetch_add(1, Ordering::SeqCst);
-                    let node_id = 202 + completion_number;
+                    completion_counter.fetch_add(1, Ordering::SeqCst);
+                    let node_id = body["graph"]["nodeId"].as_i64().unwrap();
                     axum::Json(json!({
                         "output": {
                             "nodeId": node_id,
@@ -1119,17 +1335,6 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
                         }
                     }))
                 }
-            }),
-        )
-        .route(
-            "/sessions/{id}/approval-events",
-            axum::routing::get(|| async {
-                axum::Json(json!({
-                    "harnessSessionId": "session-1",
-                    "latestSequence": 0,
-                    "pendingRequests": [],
-                    "events": []
-                }))
             }),
         );
     let (graph_url, graph_task) = serve_test_app(graph).await;
@@ -1157,8 +1362,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     .unwrap();
 
     let (app, provider_refreshes) =
-        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url, false)
-            .await;
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
     let rejected = app
         .clone()
         .oneshot(api_request(
@@ -1383,6 +1587,48 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(harness_completions.load(Ordering::SeqCst), 3);
+    let invocation_pairs = {
+        let graph_creates = observed_graph_creates.lock().unwrap();
+        graph_creates
+            .iter()
+            .map(|create| {
+                (
+                    create["invocation"]["sourceInteractionNodeId"]
+                        .as_i64()
+                        .unwrap(),
+                    create["invocation"]["sourceActionId"].as_i64().unwrap(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        (1..=2).contains(
+            &invocation_pairs
+                .iter()
+                .filter(|pair| **pair == (101, 41))
+                .count()
+        )
+    );
+    assert_eq!(
+        invocation_pairs
+            .iter()
+            .filter(|pair| **pair == (303, 41))
+            .count(),
+        1
+    );
+    assert!(
+        (1..=2).contains(
+            &invocation_pairs
+                .iter()
+                .filter(|pair| **pair == (101, 43))
+                .count()
+        )
+    );
+    assert!(
+        invocation_pairs
+            .iter()
+            .all(|pair| matches!(pair, (101, 41) | (303, 41) | (101, 43)))
+    );
     assert_eq!(observed_models.lock().unwrap().len(), 3);
     drop(app);
 
@@ -1417,23 +1663,56 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
 
     let graph_node_ids = Arc::new(AtomicUsize::new(700));
     let next_graph_node_id = graph_node_ids.clone();
+    let output_reads = Arc::new(AtomicUsize::new(0));
+    let observed_output_reads = output_reads.clone();
     let graph = axum::Router::new()
         .route(
             "/api/control/interactions",
-            axum::routing::post(move || {
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let next_graph_node_id = next_graph_node_id.clone();
                 async move {
+                    if body["text"] == "ordinary create response loss" {
+                        return (StatusCode::OK, "truncated create response").into_response();
+                    }
                     let node_id = next_graph_node_id.fetch_add(1, Ordering::SeqCst);
                     axum::Json(json!({
                         "node": { "id": node_id },
                         "graphToken": format!("graph-{node_id}")
                     }))
+                    .into_response()
                 }
             }),
         )
         .route(
             "/api/control/capabilities",
-            axum::routing::delete(|| async { axum::Json(json!({ "revoked": true })) }),
+            axum::routing::post(|| async { axum::Json(json!({ "graphToken": "read" })) })
+                .delete(|| async { axum::Json(json!({ "revoked": true })) }),
+        )
+        .route(
+            "/api/control/interactions/{id}",
+            axum::routing::get(
+                |axum::extract::Path(id): axum::extract::Path<usize>| async move {
+                    axum::Json(json!({ "nodeId": id, "invocation": null }))
+                },
+            ),
+        )
+        .route(
+            "/api/control/interactions/{id}/output",
+            axum::routing::get(move || {
+                let observed_output_reads = observed_output_reads.clone();
+                async move {
+                    if observed_output_reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+                        );
+                    }
+                    (
+                        StatusCode::NOT_FOUND,
+                        axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                    )
+                }
+            }),
         );
     let observed_models = Arc::new(Mutex::new(Vec::<Value>::new()));
     let harness_models = observed_models.clone();
@@ -1504,8 +1783,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
     )
     .unwrap();
     let (app, provider_refreshes) =
-        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url, false)
-            .await;
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
     let full_only_permissions = response_json(
         app.clone()
             .oneshot(api_request(
@@ -1712,6 +1990,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         interactions[2]["effectiveExecutionDigest"]
     );
     assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 7);
+    assert_eq!(output_reads.load(Ordering::SeqCst), 2);
     assert_eq!(
         observed_models.lock().unwrap().as_slice(),
         [
@@ -1721,6 +2000,21 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
             json!({ "providerId": "codex", "modelId": "broken-model" }),
         ]
     );
+
+    let lost_create = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({ "text": "ordinary create response loss" })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(lost_create.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let recovered = wait_for_interaction_count_and_terminal(&app, thread_id, 5).await;
+    assert_eq!(recovered["interactions"][4]["completionStatus"], "failed");
+    assert!(recovered["interactions"][4]["graphNodeId"].is_null());
 
     graph_task.abort();
     harness_task.abort();
@@ -1807,9 +2101,208 @@ async fn interrupted_action_invocation_becomes_failed_on_restart() {
         recovered["completionError"]
             .as_str()
             .unwrap()
-            .contains("temporary one-shot UX")
+            .contains("remains unresolved")
     );
 
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-recover-accepted-invoke-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({"initialMessage":"source"})),
+            true,
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let source_id = thread["rootInteractionId"].as_i64().unwrap();
+    let pool = sqlite_pool(&database).await;
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=90,completion_status='accepted' WHERE id=?1",
+    )
+    .bind(source_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let result = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,2,'leased result',?2,91,'running','codex-basic','sha256:test','auto','sha256:execution',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let result_id = result.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,41,?2,?3)")
+        .bind(source_id).bind(result_id).bind(&created_at).execute(&pool).await.unwrap();
+    let ordinary = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,3,'ordinary result',?2,92,'running','codex-basic','sha256:test','auto','sha256:ordinary',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let ordinary_id = ordinary.last_insert_rowid();
+    let unbound = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,4,'lost create response',?2,'not_started','auto')")
+        .bind(thread_id).bind(&created_at).execute(&pool).await.unwrap();
+    let unbound_id = unbound.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,42,?2,?3)")
+        .bind(source_id).bind(unbound_id).bind(&created_at).execute(&pool).await.unwrap();
+    pool.close().await;
+
+    let canonical = json!({
+        "nodeId": 91,
+        "rootLayer": {"layer":{"id":501},"nodes":[],"edges":[],"actions":[]}
+    });
+    let graph_output = canonical.clone();
+    let graph = axum::Router::new()
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                assert_eq!(
+                    body["invocation"],
+                    json!({
+                        "sourceInteractionNodeId":90,"sourceActionId":42
+                    })
+                );
+                axum::Json(json!({"node":{"id":93},"graphToken":"recovered-create"}))
+            }),
+        )
+        .route(
+            "/api/control/interactions/91",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":91,
+                    "invocation":{"sourceInteractionNodeId":90,"sourceActionId":41}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/92",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":92,"invocation":null})) }),
+        )
+        .route(
+            "/api/control/interactions/93",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":93,
+                    "invocation":{"sourceInteractionNodeId":90,"sourceActionId":42}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::post(|| async { axum::Json(json!({"graphToken":"recovered-token"})) })
+                .delete(|| async { axum::Json(json!({"revoked":true})) }),
+        )
+        .route(
+            "/api/control/interactions/91/output",
+            axum::routing::get(move || {
+                let graph_output = graph_output.clone();
+                async move { axum::Json(graph_output) }
+            }),
+        )
+        .route(
+            "/api/control/interactions/92/output",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":92,
+                    "rootLayer":{"layer":{"id":502},"nodes":[],"edges":[],"actions":[]}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/93/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        );
+    let harness = axum::Router::new();
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(harness).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,
+            "configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"ask":{},"auto":{},"full":{}},
+                "settings":{}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let reopened =
+        open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let state = response_json(
+        reopened
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let recovered = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == result_id)
+        .unwrap();
+    assert_eq!(recovered["completionStatus"], "accepted");
+    assert_eq!(recovered["graphNodeId"], 91);
+    assert_eq!(recovered["harnessConfigurationDigest"], "sha256:test");
+    assert_eq!(recovered["effectiveExecutionDigest"], "sha256:execution");
+    assert_eq!(recovered["completionOutput"], canonical);
+    let ordinary = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == ordinary_id)
+        .unwrap();
+    assert_eq!(ordinary["completionStatus"], "accepted");
+    assert_eq!(ordinary["graphNodeId"], 92);
+    assert_eq!(ordinary["effectiveExecutionDigest"], "sha256:ordinary");
+    let unbound = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == unbound_id)
+        .unwrap();
+    assert_eq!(unbound["graphNodeId"], 93);
+    assert_eq!(unbound["completionStatus"], "failed");
+    assert!(
+        unbound["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("remains unresolved")
+    );
+    graph_task.abort();
+    harness_task.abort();
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -1933,14 +2426,6 @@ fn exits_when_desktop_control_pipe_closes() {
             permissions.to_str().unwrap(),
             "--port",
             "0",
-            "--producer-desktop-version",
-            "test",
-            "--producer-build-commit",
-            "test",
-            "--producer-platform",
-            "test",
-            "--producer-architecture",
-            "test",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -2410,7 +2895,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
         "DROP TABLE threads",
         "DROP TABLE projects",
         "CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,path TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
-        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto',conversation_import_id TEXT REFERENCES conversation_imports(id))",
+        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto')",
         "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL,graph_node_id INTEGER,completion_status TEXT NOT NULL DEFAULT 'not_started',harness_configuration_name TEXT,harness_configuration_digest TEXT,completion_output_json TEXT,completion_error TEXT,permission_profile_id TEXT NOT NULL DEFAULT 'auto',effective_execution_digest TEXT,effective_permission_receipt_json TEXT,model_provider_id TEXT,provider_model_id TEXT,model_family_id INTEGER)",
         "CREATE UNIQUE INDEX projects_path_partial ON projects(path) WHERE id > 0",
         "CREATE UNIQUE INDEX interactions_sequence_partial ON interactions(thread_id,sequence) WHERE id > 0",
@@ -2487,16 +2972,9 @@ async fn open_app_with_runtime(
     graph_url: &str,
     harness_url: &str,
 ) -> Router {
-    open_app_with_runtime_observed(
-        database,
-        web_directory,
-        catalog,
-        graph_url,
-        harness_url,
-        true,
-    )
-    .await
-    .0
+    open_app_with_runtime_observed(database, web_directory, catalog, graph_url, harness_url)
+        .await
+        .0
 }
 
 struct ProviderRefreshProbe {
@@ -2510,7 +2988,6 @@ async fn open_app_with_runtime_observed(
     catalog: &Path,
     graph_url: &str,
     harness_url: &str,
-    allow_harness_override: bool,
 ) -> (Router, ProviderRefreshProbe) {
     let provider_refreshes = Arc::new(AtomicUsize::new(0));
     let observed_refreshes = provider_refreshes.clone();
@@ -2547,7 +3024,7 @@ async fn open_app_with_runtime_observed(
             harness_control_token: "harness-control".to_owned(),
             harness_configurations: catalog.to_owned(),
             default_harness_configuration: "codex-basic".to_owned(),
-            allow_harness_override,
+            allow_harness_override: false,
             standalone_workspaces_directory: web_directory.join("workspaces"),
         }),
         allow_conversation_import: false,

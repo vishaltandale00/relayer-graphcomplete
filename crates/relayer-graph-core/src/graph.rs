@@ -14,9 +14,9 @@ pub use import::{
 };
 pub use model::{
     ActionDraft, ActionId, ActionKind, ActionVariant, EdgeDraft, EdgeId, GraphAction, GraphEdge,
-    GraphLayer, GraphNode, LayerDraft, LayerId, NavigateRelation, NodeDraft, NodeId, ProjectId,
-    RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState, ResolvedLayer, ThreadId,
-    is_supported_icon, normalize_icon_name, resolve_icon_name,
+    GraphLayer, GraphNode, InteractionInvocation, LayerDraft, LayerId, NavigateRelation, NodeDraft,
+    NodeId, ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState, ResolvedLayer,
+    ThreadId, is_supported_icon, normalize_icon_name, resolve_icon_name,
 };
 pub use writer::GraphWriter;
 

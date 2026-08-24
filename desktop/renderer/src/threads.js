@@ -68,6 +68,7 @@ const navigationHistory = createNavigationHistory({
 });
 let pendingHistoryTransition = null;
 const refreshGate = createLatestRequestGate();
+const resolvedInvokeNavigationGate = createLatestRequestGate();
 
 export function updateCreateThreadAvailability() {
   $("#createThread").disabled = creatingFirstThread
@@ -134,6 +135,18 @@ function cancelPendingRefresh() {
   refreshGate.invalidate();
 }
 
+function layerContainsInvokedAction(layer, invocations = appState.actionInvocations) {
+  const invokedActionIds = new Set(invocations.map(({ actionId }) => String(actionId)));
+  return layer?.actions?.some(({ id }) => invokedActionIds.has(String(id))) ?? false;
+}
+
+function invalidateResolvedInvokeLayerCache(invocations) {
+  for (const identity of acceptedLayerCache.identities()) {
+    const layer = acceptedLayerCache.get(identity);
+    if (layerContainsInvokedAction(layer, invocations)) acceptedLayerCache.delete(identity);
+  }
+}
+
 function supersedePendingHistory({
   presentationChanged = false,
   renderAfterCancel = true,
@@ -143,6 +156,7 @@ function supersedePendingHistory({
   navigationHistory.cancelPending();
   pendingHistoryTransition = null;
   if (presentationChanged) cancelPendingRefresh();
+  if (presentationChanged) resolvedInvokeNavigationGate.invalidate();
   if (cancelLayerNavigation) layerNavigationCoordinator.cancel();
   if (wasPending && renderAfterCancel) renderThread();
 }
@@ -184,29 +198,64 @@ export async function refreshState(
   ) return false;
   const previousInteractionId = viewState.currentInteractionId;
   const previousVisibleLayer = appState.visibleLayer;
-  appState.projects = state.projects || [];
-  appState.threads = state.threads || [];
-  appState.interactions = state.interactions || [];
-  appState.actionInvocations = state.actionInvocations || [];
-  appState.approvals = Array.isArray(state.approvals) ? state.approvals : [];
-  appState.nodes = [];
-  appState.edges = [];
-  appState.actions = [];
-  appState.visibleLayer = null;
-  appState.status = "idle";
-  appState.capabilities = state.capabilities;
-  const active = state.threads.find((thread) => thread.active);
-  if (threadId || active) viewState.currentThreadId = threadId ?? active?.id;
-  const threadInteractions = appState.interactions.filter((interaction) => (
-    String(interaction.threadId) === String(viewState.currentThreadId)
+  const nextProjects = state.projects || [];
+  const nextThreads = state.threads || [];
+  const nextInteractions = state.interactions || [];
+  const nextActionInvocations = state.actionInvocations || [];
+  const nextApprovals = Array.isArray(state.approvals) ? state.approvals : [];
+  const active = nextThreads.find((thread) => thread.active);
+  const nextThreadId = threadId ?? active?.id ?? viewState.currentThreadId;
+  invalidateResolvedInvokeLayerCache(nextActionInvocations);
+  const threadInteractions = nextInteractions.filter((interaction) => (
+    String(interaction.threadId) === String(nextThreadId)
   ));
-  let selected = threadInteractions.find((interaction) => (
+  const selected = threadInteractions.find((interaction) => (
     String(interaction.id) === String(viewState.currentInteractionId)
   )) || threadInteractions.at(-1);
-  hydrateWorkspace(
+  let refreshedVisibleLayer = visibleLayerAfterRefresh(
+    previousInteractionId,
+    previousVisibleLayer,
     selected,
-    visibleLayerAfterRefresh(previousInteractionId, previousVisibleLayer, selected),
   );
+  const refreshedRootLayerId = selected?.completionOutput?.rootLayer?.layer?.id;
+  const visibleLayerId = refreshedVisibleLayer?.layer?.id;
+  if (
+    selected
+    && visibleLayerId != null
+    && String(visibleLayerId) !== String(refreshedRootLayerId)
+    && layerContainsInvokedAction(refreshedVisibleLayer, nextActionInvocations)
+  ) {
+    const identity = {
+      threadId: nextThreadId,
+      turnId: selected.id,
+      layerId: visibleLayerId,
+    };
+    try {
+      const canonicalLayer = validateResolvedLayer(identity, await request(
+        `/api/threads/${encodeURIComponent(identity.threadId)}/interactions/${encodeURIComponent(identity.turnId)}/layers/${encodeURIComponent(identity.layerId)}`,
+      ));
+      if (
+        !refreshGate.isCurrent(refreshToken)
+        || (requestedThreadId && String(viewState.currentThreadId) !== String(requestedThreadId))
+      ) return false;
+      refreshedVisibleLayer = canonicalLayer;
+      acceptedLayerCache.set(identity, canonicalLayer);
+    } catch {
+      // Preserve the last durable presentation if the local graph read is temporarily unavailable.
+    }
+  }
+  if (
+    !refreshGate.isCurrent(refreshToken)
+    || (requestedThreadId && String(viewState.currentThreadId) !== String(requestedThreadId))
+  ) return false;
+  appState.projects = nextProjects;
+  appState.threads = nextThreads;
+  appState.interactions = nextInteractions;
+  appState.actionInvocations = nextActionInvocations;
+  appState.approvals = nextApprovals;
+  appState.capabilities = state.capabilities;
+  viewState.currentThreadId = nextThreadId;
+  hydrateWorkspace(selected, refreshedVisibleLayer);
   recordCurrentNavigation(historyMode);
   renderSidebar();
   renderScopeMenu();
@@ -417,6 +466,60 @@ export async function navigateLayer(layerId, navigation = {}) {
       schedulePendingRefresh(viewState.currentThreadId);
     }
   }
+}
+
+export async function navigateResolvedInvoke(action) {
+  const sourceThreadId = viewState.currentThreadId;
+  const sourceInteractionId = viewState.currentInteractionId;
+  if (
+    !sourceThreadId
+    || !sourceInteractionId
+    || action?.kind !== "invoke"
+    || action.targetLayerId == null
+    || action.id == null
+  ) return false;
+  recordCurrentNavigation();
+  const sourceEntry = currentNavigationEntry();
+  const sourceLocationKey = navigationEntryKey(sourceEntry);
+  supersedePendingHistory({ presentationChanged: true });
+  const requestToken = resolvedInvokeNavigationGate.begin();
+  const destination = await request(
+    `/api/threads/${encodeURIComponent(sourceThreadId)}/interactions/${encodeURIComponent(sourceInteractionId)}/actions/${encodeURIComponent(action.id)}/destination`,
+  );
+  if (
+    !resolvedInvokeNavigationGate.isCurrent(requestToken)
+    || !currentNavigationEntry()
+    || navigationEntryKey(currentNavigationEntry()) !== sourceLocationKey
+  ) return false;
+  if (
+    String(destination.actionId) !== String(action.id)
+    || destination.actionKind !== "invoke"
+    || String(destination.targetLayerId) !== String(action.targetLayerId)
+    || String(destination.rootLayerId) !== String(action.targetLayerId)
+  ) throw new Error("Resolved invoke destination did not match the selected graph action.");
+  const resolved = await resolveNavigationPresentation({
+    threadId: destination.threadId,
+    turnId: destination.interactionId,
+    navigationPath: [{ layerId: destination.rootLayerId, viaActionId: null }],
+    selectedNodeId: null,
+  }, {
+    loadThread: (threadId) => request(`/api/threads/${encodeURIComponent(threadId)}`),
+    loadLayer: ({ threadId, turnId, layerId }) => request(
+      `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`,
+    ),
+    layerCache: acceptedLayerCache,
+  });
+  if (
+    !resolvedInvokeNavigationGate.isCurrent(requestToken)
+    || !currentNavigationEntry()
+    || navigationEntryKey(currentNavigationEntry()) !== sourceLocationKey
+  ) return false;
+  refreshGate.invalidate();
+  layerNavigationCoordinator.cancel();
+  applyResolvedPresentation(resolved);
+  recordCurrentNavigation("push");
+  schedulePendingRefresh(viewState.currentThreadId);
+  return true;
 }
 
 export function getNavigationHistory() {
