@@ -469,6 +469,7 @@ async function run() {
   if (JSON.stringify(requireAuthoredLayout("Eval root inspector", evalRootInspectorFit)) !== JSON.stringify(evalRootLayout)) {
     throw new Error("Opening the Eval inspector changed canonical root positions.");
   }
+  await waitForPaint(evalContents);
   await mkdir(dirname(evalScreenshotPath), { recursive: true });
   await writeFile(evalScreenshotPath, (await evalContents.capturePage()).toPNG());
   await waitFor("the Eval navigate action", () => evalContents.executeJavaScript(
