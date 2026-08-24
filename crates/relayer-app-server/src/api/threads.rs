@@ -562,15 +562,6 @@ async fn reconcile_quarantined_interaction(
         RuntimeError::Protocol("quarantined interaction has no graph binding".into())
     })?;
     runtime.invalidate_node_capabilities(graph_node_id).await?;
-    let output = runtime
-        .completion_output(graph_node_id)
-        .await?
-        .ok_or_else(|| RuntimeError::Protocol("canonical completion is not accepted yet".into()))?;
-    if output.get("nodeId").and_then(Value::as_i64) != Some(graph_node_id) {
-        return Err(RuntimeError::Protocol(
-            "canonical completion output node mismatch".into(),
-        ));
-    }
     let metadata = runtime.interaction_metadata(graph_node_id).await?;
     let expected = product
         .invocation_graph_source(interaction.id)
@@ -587,9 +578,38 @@ async fn reconcile_quarantined_interaction(
                 source_action_id,
             },
         );
-    if metadata.node_id != graph_node_id || metadata.invocation != expected {
+    let graph_lease_required = product
+        .invocation_requires_graph_lease(interaction.id)
+        .await
+        .map_err(|error| RuntimeError::Protocol(error.to_string()))?;
+    let legacy_unleased_invocation =
+        !graph_lease_required && expected.is_some() && metadata.invocation.is_none();
+    if metadata.node_id != graph_node_id
+        || (metadata.invocation != expected && !legacy_unleased_invocation)
+    {
         return Err(RuntimeError::Protocol(
             "graph interaction lease provenance does not match product history".into(),
+        ));
+    }
+    let Some(output) = runtime.completion_output(graph_node_id).await? else {
+        if legacy_unleased_invocation {
+            const LEGACY_INTERRUPTED: &str = "Legacy action invocation ended without canonical graph acceptance. Its action remains unresolved.";
+            if product
+                .terminate_legacy_action_invocation(interaction.id, LEGACY_INTERRUPTED)
+                .await
+                .map_err(|error| RuntimeError::Protocol(error.to_string()))?
+            {
+                interaction.completion_error = Some(LEGACY_INTERRUPTED.into());
+                return Ok(());
+            }
+        }
+        return Err(RuntimeError::Protocol(
+            "canonical completion is not accepted yet".into(),
+        ));
+    };
+    if output.get("nodeId").and_then(Value::as_i64) != Some(graph_node_id) {
+        return Err(RuntimeError::Protocol(
+            "canonical completion output node mismatch".into(),
         ));
     }
     if product
@@ -782,11 +802,22 @@ async fn finish_action_handoff(
     } else {
         StatusCode::OK
     };
-    let interaction = if outcome.interaction.completion_status == "not_started" {
-        claim_and_start_action_interaction(state, thread, outcome.interaction).await?
+    let owning_thread = if outcome.interaction.thread_id == thread.id {
+        thread.clone()
     } else {
-        outcome.interaction
+        state
+            .product
+            .get_thread(outcome.interaction.thread_id)
+            .await?
+            .thread
     };
+    let recoverable_invoke = outcome.interaction.completion_status == "submitted";
+    let interaction =
+        if outcome.interaction.completion_status == "not_started" || recoverable_invoke {
+            claim_and_start_action_interaction(state, &owning_thread, outcome.interaction).await?
+        } else {
+            outcome.interaction
+        };
     Ok((
         status,
         Json(InvokeActionResponse {
@@ -962,12 +993,21 @@ async fn prepare_and_claim_interaction(
     let Some(runtime) = &state.runtime else {
         return Ok(None);
     };
-    if !state
+    let claimed_preparation = state
         .product
         .claim_interaction_preparing(interaction.id)
-        .await?
-    {
-        return Ok(None);
+        .await?;
+    if !claimed_preparation {
+        let current = state.product.get_interaction(interaction.id).await?;
+        let recoverable_invoke = current.completion_status == "submitted"
+            && state
+                .product
+                .invocation_graph_source(interaction.id)
+                .await?
+                .is_some();
+        if !recoverable_invoke {
+            return Ok(None);
+        }
     }
     if interaction.model_selection.is_none() && !state.allow_harness_override {
         match state
@@ -1035,33 +1075,93 @@ async fn prepare_and_claim_interaction(
         model_selection: interaction.model_selection.as_ref(),
         invocation,
     };
-    let prepared = runtime.prepare(&command).await?;
-    let bound = state
-        .product
-        .bind_prepared_interaction(PreparedInteractionBinding {
-            interaction_id: interaction.id,
-            graph_node_id: prepared.graph_node_id,
-            harness_configuration_name: &prepared.harness_configuration_name,
-            harness_configuration_digest: &prepared.harness_configuration_digest,
-            effective_execution_digest: &prepared.effective_execution_digest,
-            effective_permission_receipt: &prepared.effective_permission_receipt,
-        })
-        .await;
-    let bound = match bound {
-        Ok(bound) => bound,
-        Err(error) => {
-            return match runtime.discard_prepared(prepared).await {
-                Ok(()) => Err(error.into()),
-                Err(cleanup) => Err(ApiError::internal(&format!(
-                    "could not bind prepared interaction: {error}; capability cleanup also failed: {cleanup}"
-                ))),
-            };
+    let mut binding_attempt = 0;
+    let prepared = loop {
+        binding_attempt += 1;
+        let prepared = match runtime.prepare(&command).await {
+            Ok(prepared) => prepared,
+            Err(error) if invocation.is_some() && binding_attempt > 1 => {
+                eprintln!(
+                    "preserving submitted invoke interaction {} after idempotent graph preparation retry failed: {error}",
+                    interaction.id
+                );
+                return Ok(None);
+            }
+            Err(
+                error @ (RuntimeError::Http(_) | RuntimeError::Json(_) | RuntimeError::Timeout(_)),
+            ) if invocation.is_some() => {
+                eprintln!(
+                    "preserving submitted invoke interaction {} after graph preparation ended ambiguously: {error}",
+                    interaction.id
+                );
+                return Ok(None);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        match state
+            .product
+            .bind_prepared_interaction(PreparedInteractionBinding {
+                interaction_id: interaction.id,
+                graph_node_id: prepared.graph_node_id,
+                harness_configuration_name: &prepared.harness_configuration_name,
+                harness_configuration_digest: &prepared.harness_configuration_digest,
+                effective_execution_digest: &prepared.effective_execution_digest,
+                effective_permission_receipt: &prepared.effective_permission_receipt,
+            })
+            .await
+        {
+            Ok(true) => break prepared,
+            Ok(false) => {
+                let current = state.product.get_interaction(interaction.id).await?;
+                let matches_existing_binding = invocation.is_some()
+                    && current.completion_status == "submitted"
+                    && current.graph_node_id == Some(prepared.graph_node_id)
+                    && current.harness_configuration_name.as_deref()
+                        == Some(prepared.harness_configuration_name.as_str())
+                    && current.harness_configuration_digest.as_deref()
+                        == Some(prepared.harness_configuration_digest.as_str())
+                    && current.effective_execution_digest.as_deref()
+                        == Some(prepared.effective_execution_digest.as_str())
+                    && current.effective_permission_receipt.as_ref()
+                        == Some(&prepared.effective_permission_receipt);
+                if matches_existing_binding {
+                    break prepared;
+                }
+                runtime.discard_prepared(prepared).await?;
+                return Ok(None);
+            }
+            Err(error) if invocation.is_some() => {
+                let cleanup = runtime.discard_prepared(prepared).await;
+                if binding_attempt < 3 {
+                    if let Err(cleanup) = cleanup {
+                        eprintln!(
+                            "could not revoke an unactivated invoke capability before binding retry: {cleanup}"
+                        );
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(binding_attempt * 25))
+                        .await;
+                    continue;
+                }
+                eprintln!(
+                    "preserving submitted invoke interaction {} for idempotent source-pair recovery after product binding failed: {error}{}",
+                    interaction.id,
+                    cleanup
+                        .err()
+                        .map(|cleanup| format!("; capability cleanup also failed: {cleanup}"))
+                        .unwrap_or_default()
+                );
+                return Ok(None);
+            }
+            Err(error) => {
+                return match runtime.discard_prepared(prepared).await {
+                    Ok(()) => Err(error.into()),
+                    Err(cleanup) => Err(ApiError::internal(&format!(
+                        "could not bind prepared interaction: {error}; capability cleanup also failed: {cleanup}"
+                    ))),
+                };
+            }
         }
     };
-    if !bound {
-        runtime.discard_prepared(prepared).await?;
-        return Ok(None);
-    }
     let claimed = state
         .product
         .claim_interaction_running(interaction.id, &thread.harness_configuration_name)

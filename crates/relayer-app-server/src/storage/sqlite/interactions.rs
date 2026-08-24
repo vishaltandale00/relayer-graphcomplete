@@ -28,7 +28,7 @@ impl SqliteProductStore {
         // Ordinary completions cannot resume across a backend restart. Make every remaining
         // nonterminal row explicit and terminal so thread-level exclusivity does not deadlock.
         let result = sqlx::query(
-            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('not_started','running','submitted') AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('not_started','running','submitted') AND id NOT IN (SELECT result_interaction_id FROM action_invocations) AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
         )
         .bind(error)
         .execute(&self.pool)

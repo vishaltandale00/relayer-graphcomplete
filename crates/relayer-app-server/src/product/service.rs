@@ -793,6 +793,27 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn invocation_requires_graph_lease(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .invocation_requires_graph_lease(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn terminate_legacy_action_invocation(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .terminate_legacy_action_invocation(interaction_id, error)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn recover_interaction_accepted(
         &self,
         interaction_id: InteractionId,

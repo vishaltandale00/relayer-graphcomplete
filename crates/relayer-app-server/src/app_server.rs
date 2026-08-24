@@ -81,13 +81,20 @@ async fn reconcile_interrupted_interaction(
         runtime.invalidate_node_capabilities(graph_node_id).await?;
         let metadata = runtime.interaction_metadata(graph_node_id).await?;
         let expected = storage.invocation_graph_source(interaction.id).await?;
+        let graph_lease_required = storage
+            .invocation_requires_graph_lease(interaction.id)
+            .await?;
         let expected = expected.map(|(source_interaction_node_id, source_action_id)| {
             crate::runtime::PreparedInvocation {
                 source_interaction_node_id,
                 source_action_id,
             }
         });
-        if metadata.node_id != graph_node_id || metadata.invocation != expected {
+        let legacy_unleased_invocation =
+            !graph_lease_required && expected.is_some() && metadata.invocation.is_none();
+        if metadata.node_id != graph_node_id
+            || (metadata.invocation != expected && !legacy_unleased_invocation)
+        {
             anyhow::bail!(
                 "bound graph interaction provenance mismatch for {}",
                 interaction.id
@@ -233,12 +240,12 @@ impl RelayerAppServer {
         }
         let interrupted = storage
             .recover_interrupted_action_invocations(
-                "Action invocation was interrupted before graph acceptance. Its leased action remains unresolved.",
+                "Action invocation was interrupted before graph acceptance. Invoke the action again to resume its leased result.",
             )
             .await?;
         if interrupted > 0 {
             eprintln!(
-                "marked {interrupted} unresolved interrupted action invocation result(s) failed during backend startup"
+                "reconciled {interrupted} interrupted action invocation result(s), preserving leased results for source-pair recovery"
             );
         }
         let interrupted = storage

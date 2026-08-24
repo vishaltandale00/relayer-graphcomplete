@@ -429,6 +429,49 @@ describe("workspace navigation integration", () => {
     expect(layerReads).toBe(2);
   });
 
+  it("keeps polling an open reused source while its project-visible invoke runs elsewhere", async () => {
+    vi.useFakeTimers();
+    try {
+      const staleRoot = rootLayer(101, 11);
+      staleRoot.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: null }];
+      const resolvedRoot = rootLayer(101, 11);
+      resolvedRoot.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: 303 }];
+      const source = interaction(1, 10, staleRoot);
+      const state = productState([{ id: 10, title: "Reused source" }], [source]);
+      state.actionInvocations = [{
+        sourceInteractionId: 99,
+        actionId: 777,
+        resultInteractionId: 100,
+      }];
+      let layerReads = 0;
+      requestImplementation = vi.fn(async (path) => {
+        if (path.startsWith("/api/state?threadId=10")) return state;
+        if (path.endsWith("/layers/101")) {
+          layerReads += 1;
+          return layerReads === 1 ? staleRoot : resolvedRoot;
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const controller = await loadModules();
+
+      await controller.loadThread(10);
+      expect(controller.appState.interactions).toHaveLength(1);
+      expect(controller.appState.interactions[0].id).toBe(1);
+      expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(controller.appState.visibleLayer.actions[0]).toMatchObject({
+        id: 777,
+        kind: "invoke",
+        targetLayerId: 303,
+      });
+      expect(layerReads).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries a one-shot canonical root failure after the result is already terminal", async () => {
     vi.useFakeTimers();
     try {

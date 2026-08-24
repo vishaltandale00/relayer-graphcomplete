@@ -182,7 +182,11 @@ function schedulePendingRefresh(threadId, { force = false } = {}) {
     || appState.interactions.some((interaction) => (
     String(interaction.threadId) === String(threadId)
     && interaction.projectionFresh === false
-  ));
+  ))
+    || layerContainsUnresolvedInvokedAction(
+      appState.visibleLayer,
+      appState.actionInvocations,
+    );
   if (!force && !hasPendingInteraction) return;
   pendingRefreshTimer = setTimeout(() => {
     if (String(viewState.currentThreadId) !== String(threadId)) return;

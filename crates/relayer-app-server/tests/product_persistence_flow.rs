@@ -2163,7 +2163,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
 }
 
 #[tokio::test]
-async fn interrupted_action_invocation_becomes_failed_on_restart() {
+async fn interrupted_action_invocation_remains_submitted_for_source_pair_recovery() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -2208,7 +2208,7 @@ async fn interrupted_action_invocation_becomes_failed_on_restart() {
     .unwrap();
     let result_interaction_id = result.last_insert_rowid();
     sqlx::query(
-        "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,41,?2,?3)",
+        "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,41,?2,?3,1)",
     )
     .bind(source_interaction_id)
     .bind(result_interaction_id)
@@ -2220,18 +2220,14 @@ async fn interrupted_action_invocation_becomes_failed_on_restart() {
 
     let reopened = open_app(&database, &root).await;
     let pool = sqlite_pool(&database).await;
-    let startup_error: String =
-        sqlx::query_scalar("SELECT completion_error FROM interactions WHERE id=?1")
+    let (startup_status, startup_error): (String, String) =
+        sqlx::query_as("SELECT completion_status,completion_error FROM interactions WHERE id=?1")
             .bind(result_interaction_id)
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert!(startup_error.contains("remains unresolved"));
-    sqlx::query("UPDATE interactions SET completion_error='Canonical reconciliation pending: runtime unavailable fixture' WHERE id=?1")
-        .bind(result_interaction_id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    assert_eq!(startup_status, "submitted");
+    assert!(startup_error.contains("Invoke the action again"));
     pool.close().await;
     let state = response_json(
         reopened
@@ -2251,8 +2247,8 @@ async fn interrupted_action_invocation_becomes_failed_on_restart() {
         .iter()
         .find(|interaction| interaction["id"] == result_interaction_id)
         .unwrap();
-    assert_eq!(recovered["completionStatus"], "failed");
-    assert_eq!(recovered["projectionFresh"], false);
+    assert_eq!(recovered["completionStatus"], "submitted");
+    assert_eq!(recovered["graphNodeId"], serde_json::Value::Null);
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -2301,7 +2297,7 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
         .execute(&pool).await.unwrap();
     let result_id = result.last_insert_rowid();
-    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,41,?2,?3)")
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,41,?2,?3,1)")
         .bind(source_id).bind(result_id).bind(&created_at).execute(&pool).await.unwrap();
     let ordinary = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,3,'ordinary result',?2,92,'running','codex-basic','sha256:test','auto','sha256:ordinary',?3)")
         .bind(thread_id).bind(&created_at)
@@ -2311,7 +2307,7 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
     let unbound = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,4,'lost create response',?2,'not_started','auto')")
         .bind(thread_id).bind(&created_at).execute(&pool).await.unwrap();
     let unbound_id = unbound.last_insert_rowid();
-    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,42,?2,?3)")
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,42,?2,?3,1)")
         .bind(source_id).bind(unbound_id).bind(&created_at).execute(&pool).await.unwrap();
     let corrupt = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,5,'corrupt binding',?2,94,'running','codex-basic','sha256:test','auto','sha256:corrupt',?3)")
         .bind(thread_id).bind(&created_at)
@@ -2325,6 +2321,30 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
     let approval_wait_id = approval_wait.last_insert_rowid();
     sqlx::query("INSERT INTO approval_requests(request_id,interaction_id,complete_call_id,harness_session_id,title,reason,action_json,scope_keys_json,scope_description,created_at,expires_at) VALUES ('restart-approval',?1,'call-1','session-1','Run command','Needed','{\"kind\":\"command\",\"command\":\"npm test\",\"workingDirectory\":\"/workspace\"}','[]','test scope',?2,NULL)")
         .bind(approval_wait_id).bind(&created_at).execute(&pool).await.unwrap();
+    // Rows migrated from the pre-lease schema default to graph_lease_required=0. Their graph
+    // interaction metadata legitimately has no invocation provenance, but canonical acceptance
+    // must still terminate recovery rather than remain quarantined forever.
+    let legacy_unleased = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,7,'legacy unleased result',?2,96,'running','codex-basic','sha256:test','auto','sha256:legacy',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let legacy_unleased_id = legacy_unleased.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,43,?2,?3)")
+        .bind(source_id).bind(legacy_unleased_id).bind(&created_at).execute(&pool).await.unwrap();
+    let strict_missing_lease = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,8,'strict missing lease result',?2,97,'running','codex-basic','sha256:test','auto','sha256:strict',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let strict_missing_lease_id = strict_missing_lease.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,44,?2,?3,1)")
+        .bind(source_id).bind(strict_missing_lease_id).bind(&created_at).execute(&pool).await.unwrap();
+    let legacy_pending = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_error,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,9,'legacy pending result',?2,98,'failed','Canonical reconciliation pending: pre-lease provenance mismatch','codex-basic','sha256:test','auto','sha256:legacy-pending',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let legacy_pending_id = legacy_pending.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,45,?2,?3)")
+        .bind(source_id).bind(legacy_pending_id).bind(&created_at).execute(&pool).await.unwrap();
     pool.close().await;
 
     let canonical = json!({
@@ -2382,6 +2402,18 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
             axum::routing::get(|| async { axum::Json(json!({"nodeId":95,"invocation":null})) }),
         )
         .route(
+            "/api/control/interactions/96",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":96,"invocation":null})) }),
+        )
+        .route(
+            "/api/control/interactions/97",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":97,"invocation":null})) }),
+        )
+        .route(
+            "/api/control/interactions/98",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":98,"invocation":null})) }),
+        )
+        .route(
             "/api/control/capabilities",
             axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
                 axum::Json(json!({"graphToken":body["graphToken"]}))
@@ -2437,6 +2469,33 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
                     "nodeId":95,
                     "rootLayer":{"layer":{"id":505},"nodes":[],"edges":[],"actions":[]}
                 }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/96/output",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":96,
+                    "rootLayer":{"layer":{"id":506},"nodes":[],"edges":[],"actions":[]}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/97/output",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":97,
+                    "rootLayer":{"layer":{"id":507},"nodes":[],"edges":[],"actions":[]}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/98/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
             }),
         );
     let harness = axum::Router::new();
@@ -2531,12 +2590,12 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .find(|interaction| interaction["id"] == unbound_id)
         .unwrap();
     assert_eq!(unbound["graphNodeId"], 93);
-    assert_eq!(unbound["completionStatus"], "failed");
+    assert_eq!(unbound["completionStatus"], "submitted");
     assert!(
         unbound["completionError"]
             .as_str()
             .unwrap()
-            .contains("remains unresolved")
+            .contains("Invoke the action again")
     );
     let corrupt = state["interactions"]
         .as_array()
@@ -2560,6 +2619,43 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .unwrap();
     assert_eq!(approval_wait["completionStatus"], "accepted");
     assert_eq!(approval_wait["completionOutput"]["nodeId"], 95);
+    let legacy_unleased = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == legacy_unleased_id)
+        .unwrap();
+    assert_eq!(legacy_unleased["completionStatus"], "accepted");
+    assert_eq!(legacy_unleased["completionOutput"]["nodeId"], 96);
+    assert_ne!(legacy_unleased["projectionFresh"], false);
+    let strict_missing_lease = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == strict_missing_lease_id)
+        .unwrap();
+    assert_eq!(strict_missing_lease["completionStatus"], "failed");
+    assert_eq!(strict_missing_lease["projectionFresh"], false);
+    assert!(
+        strict_missing_lease["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("reconciliation pending")
+    );
+    let legacy_pending = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == legacy_pending_id)
+        .unwrap();
+    assert_eq!(legacy_pending["completionStatus"], "failed");
+    assert_ne!(legacy_pending["projectionFresh"], false);
+    assert!(
+        legacy_pending["completionError"]
+            .as_str()
+            .unwrap()
+            .starts_with("Legacy action invocation ended")
+    );
     let approval = state["approvals"]
         .as_array()
         .unwrap()
@@ -2567,7 +2663,7 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .find(|approval| approval["request"]["requestId"] == "restart-approval")
         .unwrap();
     assert_eq!(approval["resolution"]["outcome"], "aborted");
-    assert!(invalidations.load(Ordering::SeqCst) >= 4);
+    assert!(invalidations.load(Ordering::SeqCst) >= 7);
     graph_task.abort();
     harness_task.abort();
     fs::remove_dir_all(root).unwrap();
@@ -3111,7 +3207,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 7);
+    assert_eq!(applied_migrations, 8);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");

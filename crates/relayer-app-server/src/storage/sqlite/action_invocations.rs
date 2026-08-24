@@ -20,6 +20,34 @@ impl SqliteProductStore {
         .map_err(Into::into)
     }
 
+    pub(crate) async fn invocation_requires_graph_lease(
+        &self,
+        result_interaction_id: InteractionId,
+    ) -> Result<bool, StorageError> {
+        Ok(sqlx::query_scalar(
+            "SELECT graph_lease_required FROM action_invocations WHERE result_interaction_id=?1",
+        )
+        .bind(result_interaction_id.value())
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or(false))
+    }
+
+    pub(crate) async fn terminate_legacy_action_invocation(
+        &self,
+        result_interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query(
+            "UPDATE interactions SET completion_error=?1 WHERE id=?2 AND completion_status='failed' AND completion_error LIKE 'Canonical reconciliation pending:%' AND EXISTS (SELECT 1 FROM action_invocations WHERE result_interaction_id=?2 AND graph_lease_required=0)",
+        )
+        .bind(error)
+        .bind(result_interaction_id.value())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     pub(crate) async fn interrupted_interactions(&self) -> Result<Vec<Interaction>, StorageError> {
         let rows = sqlx::query(
             "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id FROM interactions i WHERE i.completion_status IN ('not_started','running','submitted','waiting_for_approval') ORDER BY i.id",
@@ -65,17 +93,30 @@ impl SqliteProductStore {
         action_id: i64,
     ) -> Result<Option<(ActionInvocation, Interaction)>, StorageError> {
         let mut connection = self.pool.acquire().await?;
-        existing(&mut connection, source_interaction_id, action_id).await
+        existing_exact(&mut connection, source_interaction_id, action_id).await
     }
 
     pub(crate) async fn recover_interrupted_action_invocations(
         &self,
         error: &str,
     ) -> Result<u64, StorageError> {
-        // One-shot actions cannot be resumed yet. Make interrupted work terminal so the UI does
-        // not poll forever; future retry semantics can replace this startup recovery policy.
+        // The graph lease is durable and keyed by the immutable source pair. Preserve the result
+        // as submitted so invoking the same action can remint authority for that exact graph node
+        // and resume it rather than terminalizing the only interaction allowed to consume it.
         let result = sqlx::query(
-            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE id IN (SELECT result_interaction_id FROM action_invocations) AND completion_status IN ('not_started','running','submitted')",
+            "UPDATE interactions
+             SET completion_status=CASE
+                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1)
+                     THEN 'submitted'
+                   ELSE 'failed'
+                 END,
+                 completion_error=CASE
+                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1)
+                     THEN ?1
+                   ELSE 'Legacy action invocation was interrupted before graph acceptance. Its action remains unresolved.'
+                 END
+             WHERE id IN (SELECT result_interaction_id FROM action_invocations)
+               AND completion_status IN ('not_started','running','submitted')",
         )
         .bind(error)
         .execute(&self.pool)
@@ -91,7 +132,7 @@ impl SqliteProductStore {
     ) -> Result<ActionInvocationInsertOutcome, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some((invocation, interaction)) =
-            existing(&mut transaction, source_interaction_id, action_id).await?
+            existing_for_action_scope(&mut transaction, source_interaction_id, action_id).await?
         {
             transaction.commit().await?;
             return Ok(ActionInvocationInsertOutcome::Existing {
@@ -194,7 +235,7 @@ impl SqliteProductStore {
             created_at: timestamp.clone(),
         };
         sqlx::query(
-            "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,?2,?3,?4)",
+            "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,?2,?3,?4,1)",
         )
         .bind(source_interaction_id.value())
         .bind(action_id)
@@ -242,7 +283,7 @@ pub(super) async fn fetch_action_invocations(
     rows.iter().map(invocation_from_row).collect()
 }
 
-async fn existing(
+async fn existing_exact(
     connection: &mut SqliteConnection,
     source_interaction_id: InteractionId,
     action_id: i64,
@@ -257,6 +298,45 @@ async fn existing(
     else {
         return Ok(None);
     };
+    invocation_with_result(connection, row).await
+}
+
+async fn existing_for_action_scope(
+    connection: &mut SqliteConnection,
+    source_interaction_id: InteractionId,
+    action_id: i64,
+) -> Result<Option<(ActionInvocation, Interaction)>, StorageError> {
+    let Some(row) = sqlx::query(
+        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at
+         FROM interactions requested_source
+         JOIN threads requested_thread ON requested_thread.id=requested_source.thread_id
+         JOIN action_invocations ai ON ai.action_id=?2
+         JOIN interactions existing_source ON existing_source.id=ai.source_interaction_id
+         JOIN threads existing_thread ON existing_thread.id=existing_source.thread_id
+         WHERE requested_source.id=?1
+           AND (
+             (requested_thread.project_id IS NOT NULL
+               AND existing_thread.project_id=requested_thread.project_id)
+             OR (requested_thread.project_id IS NULL
+               AND existing_source.thread_id=requested_source.thread_id)
+           )
+         ORDER BY ai.created_at,ai.source_interaction_id
+         LIMIT 1",
+    )
+    .bind(source_interaction_id.value())
+    .bind(action_id)
+    .fetch_optional(&mut *connection)
+    .await?
+    else {
+        return Ok(None);
+    };
+    invocation_with_result(connection, row).await
+}
+
+async fn invocation_with_result(
+    connection: &mut SqliteConnection,
+    row: SqliteRow,
+) -> Result<Option<(ActionInvocation, Interaction)>, StorageError> {
     let invocation = invocation_from_row(&row)?;
     let interaction = sqlx::query(
         "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json,model_provider_id,provider_model_id,model_family_id FROM interactions WHERE id=?1",
@@ -342,6 +422,12 @@ mod tests {
         assert_eq!(created, 1);
         assert!(result_ids.windows(2).all(|pair| pair[0] == pair[1]));
         assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 2);
+        assert!(
+            store
+                .invocation_requires_graph_lease(result_ids[0])
+                .await
+                .unwrap()
+        );
 
         drop(store);
         let reopened = SqliteProductStore::open(&path).await.unwrap();
@@ -387,6 +473,244 @@ mod tests {
                 .unwrap()
         );
         reopened.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn reused_project_action_is_deduplicated_across_sources_and_concurrent_requests() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-project-action-dedupe-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_model_selection(&store).await;
+        let (project, _) = store
+            .insert_or_get_project("Shared project", "/tmp/shared-project", "1")
+            .await
+            .unwrap();
+        let model_selection = InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(1),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: "test-model".into(),
+        };
+        let mut source_ids = Vec::new();
+        let mut thread_ids = Vec::new();
+        for timestamp in ["2", "3"] {
+            let thread = store
+                .insert_thread_with_initial_interaction(NewThreadRecord {
+                    title: "Reused action source",
+                    project_id: Some(project.id),
+                    initial_message: "Original prompt",
+                    harness_configuration_name: "codex-basic",
+                    permission_profile_id: "auto",
+                    model_selection: Some(&model_selection),
+                    timestamp,
+                })
+                .await
+                .unwrap();
+            mark_interaction_accepted_with_node(
+                &store,
+                thread.root_interaction_id,
+                700 + thread.root_interaction_id.value(),
+            )
+            .await;
+            source_ids.push(thread.root_interaction_id);
+            thread_ids.push(thread.id);
+        }
+
+        let mut attempts = tokio::task::JoinSet::new();
+        for index in 0..12 {
+            let store = store.clone();
+            let source_id = source_ids[index % source_ids.len()];
+            attempts.spawn(async move {
+                store
+                    .insert_action_invocation(source_id, 41, "Authored follow-up")
+                    .await
+                    .unwrap()
+            });
+        }
+        let mut created = 0;
+        let mut result_ids = Vec::new();
+        while let Some(outcome) = attempts.join_next().await {
+            match outcome.unwrap() {
+                ActionInvocationInsertOutcome::Created { interaction, .. } => {
+                    created += 1;
+                    result_ids.push(interaction.id);
+                }
+                ActionInvocationInsertOutcome::Existing { interaction, .. } => {
+                    result_ids.push(interaction.id);
+                }
+            }
+        }
+
+        assert_eq!(created, 1);
+        assert!(result_ids.windows(2).all(|pair| pair[0] == pair[1]));
+        for source_id in source_ids {
+            let replay = store
+                .insert_action_invocation(source_id, 41, "Ignored replay text")
+                .await
+                .unwrap();
+            let interaction = match replay {
+                ActionInvocationInsertOutcome::Existing { interaction, .. } => interaction,
+                ActionInvocationInsertOutcome::Created { .. } => {
+                    panic!("project-visible action invocation was duplicated")
+                }
+            };
+            assert_eq!(interaction.id, result_ids[0]);
+        }
+        let interaction_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM interactions WHERE thread_id IN (?1,?2)",
+        )
+        .bind(thread_ids[0].value())
+        .bind(thread_ids[1].value())
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(interaction_count, 3);
+
+        store.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn standalone_threads_do_not_share_action_invocation_dedupe_scope() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-standalone-action-scope-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_model_selection(&store).await;
+        let model_selection = InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(1),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: "test-model".into(),
+        };
+        let mut result_ids = Vec::new();
+        for timestamp in ["1", "2"] {
+            let thread = store
+                .insert_thread_with_initial_interaction(NewThreadRecord {
+                    title: "Standalone source",
+                    project_id: None,
+                    initial_message: "Original prompt",
+                    harness_configuration_name: "codex-basic",
+                    permission_profile_id: "auto",
+                    model_selection: Some(&model_selection),
+                    timestamp,
+                })
+                .await
+                .unwrap();
+            mark_interaction_accepted_with_node(
+                &store,
+                thread.root_interaction_id,
+                700 + thread.root_interaction_id.value(),
+            )
+            .await;
+            let outcome = store
+                .insert_action_invocation(thread.root_interaction_id, 41, "Follow-up")
+                .await
+                .unwrap();
+            match outcome {
+                ActionInvocationInsertOutcome::Created { interaction, .. } => {
+                    result_ids.push(interaction.id)
+                }
+                ActionInvocationInsertOutcome::Existing { .. } => {
+                    panic!("standalone thread reused another thread's invocation")
+                }
+            }
+        }
+        assert_ne!(result_ids[0], result_ids[1]);
+
+        store.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn interrupted_leased_result_stays_recoverable_and_keeps_its_binding() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-invoke-binding-recovery-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_model_selection(&store).await;
+        let model_selection = InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(1),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: "test-model".into(),
+        };
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Recoverable invoke",
+                project_id: None,
+                initial_message: "Original prompt",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&model_selection),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
+        let result = match store
+            .insert_action_invocation(thread.root_interaction_id, 41, "Follow-up")
+            .await
+            .unwrap()
+        {
+            ActionInvocationInsertOutcome::Created { interaction, .. } => interaction,
+            ActionInvocationInsertOutcome::Existing { .. } => panic!("first invocation existed"),
+        };
+        sqlx::query(
+            "UPDATE interactions SET completion_status='running',graph_node_id=901,harness_configuration_name='codex-basic',harness_configuration_digest='sha256:config',effective_execution_digest='sha256:execution',effective_permission_receipt_json='{}' WHERE id=?1",
+        )
+        .bind(result.id.value())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            store
+                .recover_interrupted_action_invocations("Invoke again to resume.")
+                .await
+                .unwrap(),
+            1
+        );
+        let recovered = store.get_interaction(result.id).await.unwrap().unwrap();
+        assert_eq!(recovered.completion_status, "submitted");
+        assert_eq!(recovered.graph_node_id, Some(901));
+        assert_eq!(
+            recovered.harness_configuration_digest.as_deref(),
+            Some("sha256:config")
+        );
+        assert_eq!(
+            recovered.completion_error.as_deref(),
+            Some("Invoke again to resume.")
+        );
+        let replay = store
+            .insert_action_invocation(thread.root_interaction_id, 41, "Ignored")
+            .await
+            .unwrap();
+        match replay {
+            ActionInvocationInsertOutcome::Existing { interaction, .. } => {
+                assert_eq!(interaction.id, result.id);
+                assert_eq!(interaction.completion_status, "submitted");
+            }
+            ActionInvocationInsertOutcome::Created { .. } => {
+                panic!("recovery created a second product result")
+            }
+        }
+
+        store.pool.close().await;
         std::fs::remove_file(path).unwrap();
     }
 
@@ -790,10 +1114,19 @@ mod tests {
     }
 
     async fn mark_interaction_accepted(store: &SqliteProductStore, id: InteractionId) {
+        mark_interaction_accepted_with_node(store, id, 777).await;
+    }
+
+    async fn mark_interaction_accepted_with_node(
+        store: &SqliteProductStore,
+        id: InteractionId,
+        graph_node_id: i64,
+    ) {
         sqlx::query(
-            "UPDATE interactions SET completion_status='accepted',graph_node_id=COALESCE(graph_node_id,777) WHERE id=?1",
+            "UPDATE interactions SET completion_status='accepted',graph_node_id=COALESCE(graph_node_id,?2) WHERE id=?1",
         )
             .bind(id.value())
+            .bind(graph_node_id)
             .execute(&store.pool)
             .await
             .unwrap();
