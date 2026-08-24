@@ -8,7 +8,7 @@ use axum::{
 use relayer_graph_core::{
     ActionDraft, ActionId, ActionKind, CompletionOutput, EdgeDraft, GraphDatabase, GraphError,
     GraphNode, ImportedConversationStage, ImportedTurn, LayerDraft, LayerId, NodeDraft, NodeId,
-    ProjectId, RecordState, ThreadId,
+    LayerLayout, NodePlacement, ProjectId, RecordState, ThreadId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -295,9 +295,10 @@ async fn create_edge(
 async fn submit_layer(
     State(state): State<ServerState>,
     headers: HeaderMap,
-    Json(input): Json<LayerDraft>,
+    Json(input): Json<LayerDraftRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let node_id = session(&state, &headers)?;
+    let input = LayerDraft::from(input);
     let layer = state
         .graph
         .writer_for_subgraph(node_id)
@@ -305,6 +306,71 @@ async fn submit_layer(
         .submit_layer(&input)
         .await?;
     Ok(Json(json!({"layer":layer})))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LayerDraftRequest {
+    client_key: String,
+    nodes: Vec<NodeId>,
+    edges: Vec<relayer_graph_core::EdgeId>,
+    #[serde(default)]
+    layout: Option<LayerLayoutRequest>,
+    #[serde(default)]
+    size_justification: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LayerLayoutRequest {
+    #[serde(default)]
+    version: Value,
+    #[serde(default)]
+    placements: Vec<NodePlacementRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NodePlacementRequest {
+    node_id: NodeId,
+    #[serde(default)]
+    x: Value,
+    #[serde(default)]
+    y: Value,
+}
+
+impl From<LayerDraftRequest> for LayerDraft {
+    fn from(input: LayerDraftRequest) -> Self {
+        Self {
+            client_key: input.client_key,
+            nodes: input.nodes,
+            edges: input.edges,
+            layout: input.layout.map(|layout| LayerLayout {
+                version: repairable_layout_version(&layout.version),
+                placements: layout
+                    .placements
+                    .into_iter()
+                    .map(|placement| NodePlacement {
+                        node_id: placement.node_id,
+                        x: repairable_coordinate(&placement.x),
+                        y: repairable_coordinate(&placement.y),
+                    })
+                    .collect(),
+            }),
+            size_justification: input.size_justification,
+        }
+    }
+}
+
+fn repairable_coordinate(value: &Value) -> f64 {
+    value.as_f64().unwrap_or(f64::NAN)
+}
+
+fn repairable_layout_version(value: &Value) -> u32 {
+    value
+        .as_u64()
+        .and_then(|version| u32::try_from(version).ok())
+        .unwrap_or(0)
 }
 async fn get_layer(
     State(state): State<ServerState>,
@@ -590,6 +656,14 @@ mod tests {
         assert_eq!(receipt.turns[0].source_turn_id, "turn:1");
     }
 
+    fn authored_layout(node_id: NodeId) -> Option<LayerLayout> {
+        Some(LayerLayout::v1(vec![NodePlacement {
+            node_id,
+            x: 0.5,
+            y: 0.5,
+        }]))
+    }
+
     #[tokio::test]
     async fn external_interaction_requires_control_token_and_mints_scoped_graph_token() {
         let state = ServerState::new(GraphDatabase::in_memory().await.unwrap(), "control");
@@ -790,6 +864,194 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn layer_api_returns_typed_layout_repairs_and_round_trips_valid_layout() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "hello")
+            .await
+            .unwrap();
+        let writer = graph.writer_for_subgraph(interaction.id).await.unwrap();
+        let answer = writer
+            .submit_node(&NodeDraft {
+                client_key: "answer".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Answer".into(),
+                detail: "Answer detail".into(),
+            })
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let graph_token = mint_capability(&state, interaction.id).ok().unwrap();
+        let app = router(state);
+
+        let missing = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/layers")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"root","nodes":[{}],"edges":[]}}"#,
+                        answer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let missing: Value =
+            serde_json::from_slice(&to_bytes(missing.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(missing["error"]["code"], "missing_layer_layout");
+        assert_eq!(missing["error"]["path"], "layout");
+
+        let malformed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/layers")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"root","nodes":[{}],"edges":[],"layout":{{"version":1,"placements":[{{"nodeId":{},"x":null,"y":"not-a-number"}}]}}}}"#,
+                        answer.id.value(), answer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(malformed.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let malformed: Value =
+            serde_json::from_slice(&to_bytes(malformed.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(malformed["error"]["code"], "non_finite_layout_coordinate");
+        assert_eq!(
+            malformed["error"]["issues"][0]["path"],
+            "layout.placements[0].x"
+        );
+        assert_eq!(
+            malformed["error"]["issues"][1]["path"],
+            "layout.placements[0].y"
+        );
+
+        let out_of_range = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/layers")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"root","nodes":[{}],"edges":[],"layout":{{"version":1,"placements":[{{"nodeId":{},"x":-0.01,"y":1.01}}]}}}}"#,
+                        answer.id.value(), answer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(out_of_range.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let out_of_range: Value = serde_json::from_slice(
+            &to_bytes(out_of_range.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            out_of_range["error"]["issues"][0]["path"],
+            "layout.placements[0].x"
+        );
+        assert_eq!(
+            out_of_range["error"]["issues"][1]["path"],
+            "layout.placements[0].y"
+        );
+
+        let valid = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/layers")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"clientKey":"root","nodes":[{}],"edges":[],"layout":{{"version":1,"placements":[{{"nodeId":{},"x":0.25,"y":0.75}}]}}}}"#,
+                        answer.id.value(), answer.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(valid.status(), StatusCode::OK);
+        let valid: Value =
+            serde_json::from_slice(&to_bytes(valid.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        let layer_id = valid["layer"]["id"].as_i64().unwrap();
+        assert_eq!(valid["layer"]["layout"]["version"], 1);
+        assert_eq!(valid["layer"]["layout"]["placements"][0]["x"], 0.25);
+
+        writer
+            .add_action(&ActionDraft {
+                client_key: "response".into(),
+                source_node_id: interaction.id,
+                source_layer_id: None,
+                kind: ActionKind::Navigate,
+                relation: Some(relayer_graph_core::NavigateRelation::Expand),
+                label: "Response".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: LayerId::new(layer_id),
+                interaction_text: None,
+            })
+            .await
+            .unwrap();
+        let completed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/submit")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"nodeId":{}}}"#,
+                        interaction.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(completed.status(), StatusCode::OK);
+        let completed: Value =
+            serde_json::from_slice(&to_bytes(completed.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            completed["rootLayer"]["layer"]["layout"],
+            valid["layer"]["layout"]
+        );
+
+        let read = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/graph/layers/{layer_id}"))
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(read.status(), StatusCode::OK);
+        let read: Value =
+            serde_json::from_slice(&to_bytes(read.into_body(), usize::MAX).await.unwrap()).unwrap();
+        assert_eq!(read["layer"]["layout"], valid["layer"]["layout"]);
+    }
+
+    #[tokio::test]
     async fn action_api_defaults_older_authors_and_returns_repairable_variant_errors() {
         let graph = GraphDatabase::in_memory().await.unwrap();
         let interaction = graph
@@ -812,6 +1074,7 @@ mod tests {
                 client_key: "source-layer".into(),
                 nodes: vec![source.id],
                 edges: vec![],
+                layout: authored_layout(source.id),
                 size_justification: None,
             })
             .await
@@ -890,6 +1153,7 @@ mod tests {
                 client_key: "root".into(),
                 nodes: vec![answer.id],
                 edges: vec![],
+                layout: authored_layout(answer.id),
                 size_justification: None,
             })
             .await

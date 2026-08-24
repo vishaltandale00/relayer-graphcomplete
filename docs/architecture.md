@@ -61,6 +61,14 @@ Relayer and Relayer Eval are separate Electron build targets. Relayer exposes th
 
 Opening one case × harness execution creates a separate review window using the exact production renderer and `ProductWorkspace` component. The review preload supplies only Eval navigation context: the run's cases and product thread IDs for the selected harness. Product graph reads, accepted-layer navigation, turn navigation, layout, and node inspection remain owned by the ordinary product API and workspace. The same app server issues the review window a read-only session capability and rejects writes at the API boundary; workspace review mode also removes composition and mutating controls. See [ADR 0003](decisions/0003-shared-product-eval-workspace.md).
 
+Every newly authored layer carries a versioned layout with exactly one normalized
+placement per member node. Graph core validates and persists those placements as
+part of the draft and accepted layer snapshot. The shared Product/Eval renderer
+projects normalized coordinates into a stable world plane; responsive fitting,
+panning, zooming, and inspector changes affect only the camera. Historical
+accepted layers without layout data remain readable through one deterministic,
+viewport-independent renderer fallback and are never rewritten during reads.
+
 Each product or Eval review window owns one bounded renderer-side navigation history for thread, turn, authored layer path, and remembered node selection. Restoration resolves accepted product data before committing the presentation and cursor together. Eval's judge history command delegates to this controller; the Eval main process records and validates the result but does not own a second stack. Hierarchy breadcrumbs and direct chronological turn controls remain separate presentations of layer ancestry and durable interaction order.
 
 ## Base graph-completion invariants
@@ -73,8 +81,9 @@ Each product or Eval review window owns one bounded renderer-side navigation his
 6. Navigate actions are explicitly `expand` or `reference`. Expansion is acyclic decomposition; references may share or revisit accepted supporting context. Non-root actions record their exact source layer.
 7. Prior stable nodes and layers may be referenced across turns rather than duplicated. A reference destination is an accepted boundary, not a request to reaccept historical records.
 8. Draft records remain distinct from atomically accepted completion closures. Accepted layers snapshot their exact node, edge, and action membership so later graph writes cannot rewrite prior output.
-9. A model turn ending is not completion; the root must explicitly submit or stop. Submission validates authored closure, expansion cycles, reference visibility, orphan drafts, and layer size.
-10. The selected harness owns model execution. Prime Agent owns recursive child scheduling. GraphComplete does not add a model-call or recursive-agent scheduler. See [ADR 0006](decisions/0006-harness-provider-agnostic-product-boundary.md).
+9. New layer submissions include complete versioned normalized placement data. Layout integrity is deterministic graph validation; spatial meaning remains model judgment. Legacy accepted layers may lack layout, but reads never infer and persist replacement graph content.
+10. A model turn ending is not completion; the root must explicitly submit or stop. Submission validates authored closure, expansion cycles, reference visibility, orphan drafts, layer size, and current-draft layout completeness.
+11. The selected harness owns model execution. Prime Agent owns recursive child scheduling. GraphComplete does not add a model-call or recursive-agent scheduler. See [ADR 0006](decisions/0006-harness-provider-agnostic-product-boundary.md).
 
 ## Target self-assessing policy invariants
 

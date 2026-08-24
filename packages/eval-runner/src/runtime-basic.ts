@@ -165,6 +165,16 @@ export function checkBasicOutput(output: CompletionOutput, expectedInteractionNo
   const declaredEdgeIds = layer.layer.edges;
   const resolvedEdgeIds = layer.edges.map((edge) => edge.id);
   const nodeIds = new Set(layer.nodes.map((node) => node.id));
+  const placements = layer.layer.layout?.placements ?? [];
+  const placementIds = new Set(placements.map((placement) => placement.nodeId));
+  const layoutComplete = layer.layer.layout?.version === 1
+    && placements.length === nodeIds.size
+    && placementIds.size === nodeIds.size
+    && [...nodeIds].every((id) => placementIds.has(id))
+    && placements.every(({ x, y }) => (
+      Number.isFinite(x) && x >= 0 && x <= 1
+      && Number.isFinite(y) && y >= 0 && y <= 1
+    ));
   const adjacency = new Map(layer.nodes.map((node) => [node.id, new Set<number>()]));
   for (const edge of layer.edges) { adjacency.get(edge.endpoints[0])?.add(edge.endpoints[1]); adjacency.get(edge.endpoints[1])?.add(edge.endpoints[0]); }
   const visited = new Set<number>(); const pending = layer.nodes[0] === undefined ? [] : [layer.nodes[0].id];
@@ -173,6 +183,7 @@ export function checkBasicOutput(output: CompletionOutput, expectedInteractionNo
     { name: "interaction-output", passed: output.nodeId === expectedInteractionNodeId && output.rootAction.sourceNodeId === expectedInteractionNodeId, detail: "Completion output and response action belong to the requested interaction." },
     { name: "accepted-closure", passed: output.rootAction.state === "accepted" && layer.layer.state === "accepted" && layer.nodes.every((node) => node.state === "accepted") && layer.edges.every((edge) => edge.state === "accepted") && layer.actions.every((action) => action.state === "accepted"), detail: "The response action and complete visible closure are accepted." },
     { name: "resolved-membership", passed: arraysEqual(declaredNodeIds, resolvedNodeIds) && arraysEqual(declaredEdgeIds, resolvedEdgeIds), detail: "Resolved records exactly match the accepted layer references." },
+    { name: "authored-layout", passed: layoutComplete, detail: "The accepted layer has one finite normalized v1 placement per visible node." },
     { name: "response-action", passed: output.rootAction.kind === "navigate" && output.rootAction.relation === "expand" && output.rootAction.sourceLayerId == null && output.rootAction.targetLayerId === layer.layer.id, detail: "Interaction has one accepted root expansion action." },
     { name: "visible-layer", passed: layer.nodes.length >= 1 && layer.nodes.length <= 8 && layer.nodes.every((node) => node.icon.trim() && node.title.trim() && node.detail.trim()), detail: `${layer.nodes.length} complete visible nodes.` },
     { name: "exact-edges", passed: layer.edges.every((edge) => edge.endpoints[0] !== edge.endpoints[1] && nodeIds.has(edge.endpoints[0]) && nodeIds.has(edge.endpoints[1])), detail: `${layer.edges.length} visible undirected edges stay inside the layer.` },
@@ -344,7 +355,16 @@ export function renderArtifact(artifact: RuntimeEvalArtifact): string {
       document.querySelector('#prompt').textContent=turn.prompt;
       document.querySelectorAll('.node').forEach((node)=>node.remove());
       edgeCanvas.replaceChildren();
-      nodes=turn.output.rootLayer.nodes.map((node,index)=>({...node,x:innerWidth/2+Math.cos(index*6.28/turn.output.rootLayer.nodes.length)*220,y:stage.clientHeight/2+Math.sin(index*6.28/turn.output.rootLayer.nodes.length)*150}));
+      const layout=turn.output.rootLayer.layer.layout;
+      const authored=new Map((layout?.version===1?layout.placements:[]).map((placement)=>[String(placement.nodeId),placement]));
+      const legacy=[...turn.output.rootLayer.nodes].sort((left,right)=>String(left.id).localeCompare(String(right.id)));
+      nodes=turn.output.rootLayer.nodes.map((node)=>{
+        const placement=authored.get(String(node.id));
+        if(placement)return {...node,x:110+placement.x*740,y:80+placement.y*440};
+        const index=legacy.findIndex((candidate)=>String(candidate.id)===String(node.id));
+        const angle=-Math.PI/2+(index*2*Math.PI/Math.max(legacy.length,1));
+        return {...node,x:480+(legacy.length===1?0:Math.cos(angle)*260),y:300+(legacy.length===1?0:Math.sin(angle)*180)};
+      });
       edges=turn.output.rootLayer.edges;
       for(const node of nodes){
         const element=document.createElement('div');

@@ -8,6 +8,26 @@ fn thread(value: i64) -> ThreadId {
     ThreadId::new(value).unwrap()
 }
 
+fn authored_layout(nodes: impl IntoIterator<Item = NodeId>) -> Option<LayerLayout> {
+    let nodes = nodes.into_iter().collect::<Vec<_>>();
+    let last = nodes.len().saturating_sub(1).max(1) as f64;
+    Some(LayerLayout::v1(
+        nodes
+            .into_iter()
+            .enumerate()
+            .map(|(index, node_id)| NodePlacement {
+                node_id,
+                x: if last == 1.0 && index == 0 {
+                    0.5
+                } else {
+                    index as f64 / last
+                },
+                y: 0.5,
+            })
+            .collect(),
+    ))
+}
+
 async fn setup(project_id: Option<ProjectId>, thread_id: ThreadId) -> (GraphDatabase, GraphNode) {
     let database = GraphDatabase::in_memory().await.unwrap();
     let interaction = database
@@ -136,6 +156,7 @@ async fn single_node_layer(writer: &GraphWriter, key: &str, node: &GraphNode) ->
             client_key: key.into(),
             nodes: vec![node.id],
             edges: vec![],
+            layout: authored_layout([node.id]),
             size_justification: None,
         })
         .await
@@ -191,12 +212,17 @@ async fn navigate(
         .unwrap()
 }
 
-async fn accept_single_node(writer: &GraphWriter, interaction: GraphNode, node: GraphNode) {
+async fn accept_single_node(
+    writer: &GraphWriter,
+    interaction: GraphNode,
+    node: GraphNode,
+) -> GraphLayer {
     let layer = writer
         .submit_layer(&LayerDraft {
             client_key: "root".into(),
             nodes: vec![node.id],
             edges: vec![],
+            layout: authored_layout([node.id]),
             size_justification: None,
         })
         .await
@@ -218,6 +244,7 @@ async fn accept_single_node(writer: &GraphWriter, interaction: GraphNode, node: 
         .await
         .unwrap();
     writer.complete(interaction.id).await.unwrap();
+    layer
 }
 
 #[tokio::test]
@@ -245,6 +272,7 @@ async fn accepts_connected_layer_and_returns_exact_view() {
             client_key: "root".into(),
             nodes: vec![a.id, b.id],
             edges: vec![edge.id],
+            layout: authored_layout([a.id, b.id]),
             size_justification: None,
         })
         .await
@@ -269,6 +297,7 @@ async fn accepts_connected_layer_and_returns_exact_view() {
     assert_eq!(output.node_id, interaction.id);
     assert_eq!(output.root_layer.nodes.len(), 2);
     assert_eq!(output.root_layer.edges[0].endpoints, [a.id, b.id]);
+    assert_eq!(output.root_layer.layer.layout, layer.layout);
     assert_eq!(output.root_layer.layer.state, RecordState::Accepted);
     let error = writer
         .submit_node(&NodeDraft {
@@ -298,11 +327,131 @@ async fn rejects_disconnected_layer_with_repair_message() {
             client_key: "root".into(),
             nodes: vec![a.id, b.id],
             edges: vec![],
+            layout: authored_layout([a.id, b.id]),
             size_justification: None,
         })
         .await
         .unwrap_err();
     assert!(error.to_string().contains("Add edges"));
+}
+
+#[tokio::test]
+async fn rejects_missing_and_malformed_layouts_with_repairable_field_paths() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let a = node(&writer, "a").await;
+    let b = node(&writer, "b").await;
+    let edge = writer
+        .create_edge(&EdgeDraft {
+            client_key: "ab".into(),
+            endpoints: [a.id, b.id],
+        })
+        .await
+        .unwrap();
+
+    let missing = writer
+        .submit_layer(&LayerDraft {
+            client_key: "missing-layout".into(),
+            nodes: vec![a.id, b.id],
+            edges: vec![edge.id],
+            layout: None,
+            size_justification: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        missing,
+        GraphError::ValidationIssues { ref issues, .. }
+            if issues.iter().any(|issue| issue.code == "missing_layer_layout" && issue.path == "layout")
+    ));
+
+    let unknown = NodeId::new(999_999).unwrap();
+    let malformed = writer
+        .submit_layer(&LayerDraft {
+            client_key: "malformed-layout".into(),
+            nodes: vec![a.id, b.id],
+            edges: vec![edge.id],
+            layout: Some(LayerLayout {
+                version: 7,
+                placements: vec![
+                    NodePlacement {
+                        node_id: a.id,
+                        x: f64::NAN,
+                        y: -0.1,
+                    },
+                    NodePlacement {
+                        node_id: a.id,
+                        x: 0.4,
+                        y: 0.6,
+                    },
+                    NodePlacement {
+                        node_id: unknown,
+                        x: 0.5,
+                        y: 1.1,
+                    },
+                ],
+            }),
+            size_justification: None,
+        })
+        .await
+        .unwrap_err();
+    let GraphError::ValidationIssues { issues, .. } = malformed else {
+        panic!("expected repairable layout issues");
+    };
+    for (code, path) in [
+        ("unsupported_layout_version", "layout.version"),
+        ("non_finite_layout_coordinate", "layout.placements[0].x"),
+        ("layout_coordinate_out_of_range", "layout.placements[0].y"),
+        ("duplicate_layout_placement", "layout.placements[1].nodeId"),
+        ("layout_node_outside_layer", "layout.placements[2].nodeId"),
+        ("layout_coordinate_out_of_range", "layout.placements[2].y"),
+        ("missing_layout_placement", "layout.placements"),
+    ] {
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == code && issue.path == path),
+            "missing {code} at {path}: {issues:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn invalid_layout_retry_preserves_the_last_valid_draft() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let answer = node(&writer, "answer").await;
+    let valid = writer
+        .submit_layer(&LayerDraft {
+            client_key: "root".into(),
+            nodes: vec![answer.id],
+            edges: vec![],
+            layout: Some(LayerLayout::v1(vec![NodePlacement {
+                node_id: answer.id,
+                x: 0.25,
+                y: 0.75,
+            }])),
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    let invalid = writer
+        .submit_layer(&LayerDraft {
+            client_key: "root".into(),
+            nodes: vec![answer.id],
+            edges: vec![],
+            layout: Some(LayerLayout::v1(vec![NodePlacement {
+                node_id: answer.id,
+                x: 2.0,
+                y: 0.5,
+            }])),
+            size_justification: None,
+        })
+        .await;
+    assert!(invalid.is_err());
+
+    let preserved = writer.get_layer(valid.id).await.unwrap();
+    assert_eq!(preserved.layer.layout, valid.layout);
 }
 
 #[tokio::test]
@@ -398,6 +547,7 @@ async fn accepts_recursive_navigate_subgraph() {
             client_key: "nested".into(),
             nodes: vec![child.id],
             edges: vec![],
+            layout: authored_layout([child.id]),
             size_justification: None,
         })
         .await
@@ -407,6 +557,7 @@ async fn accepts_recursive_navigate_subgraph() {
             client_key: "root".into(),
             nodes: vec![parent.id],
             edges: vec![],
+            layout: authored_layout([parent.id]),
             size_justification: None,
         })
         .await
@@ -476,6 +627,7 @@ async fn large_layers_require_a_private_bounded_justification() {
             client_key: "large".into(),
             nodes: nodes[..6].iter().map(|node| node.id).collect(),
             edges: edges[..5].iter().map(|edge| edge.id).collect(),
+            layout: authored_layout(nodes[..6].iter().map(|node| node.id)),
             size_justification: None,
         })
         .await
@@ -491,6 +643,7 @@ async fn large_layers_require_a_private_bounded_justification() {
             client_key: "unicode-too-short".into(),
             nodes: nodes[..6].iter().map(|node| node.id).collect(),
             edges: edges[..5].iter().map(|edge| edge.id).collect(),
+            layout: authored_layout(nodes[..6].iter().map(|node| node.id)),
             size_justification: Some("🚀".repeat(5)),
         })
         .await
@@ -506,6 +659,7 @@ async fn large_layers_require_a_private_bounded_justification() {
             client_key: "unicode-within-limit".into(),
             nodes: nodes[..6].iter().map(|node| node.id).collect(),
             edges: edges[..5].iter().map(|edge| edge.id).collect(),
+            layout: authored_layout(nodes[..6].iter().map(|node| node.id)),
             size_justification: Some("🚀".repeat(126)),
         })
         .await
@@ -517,6 +671,7 @@ async fn large_layers_require_a_private_bounded_justification() {
             client_key: "unicode-too-long".into(),
             nodes: nodes[..6].iter().map(|node| node.id).collect(),
             edges: edges[..5].iter().map(|edge| edge.id).collect(),
+            layout: authored_layout(nodes[..6].iter().map(|node| node.id)),
             size_justification: Some("🚀".repeat(501)),
         })
         .await
@@ -532,6 +687,7 @@ async fn large_layers_require_a_private_bounded_justification() {
             client_key: "large".into(),
             nodes: nodes[..6].iter().map(|node| node.id).collect(),
             edges: edges[..5].iter().map(|edge| edge.id).collect(),
+            layout: authored_layout(nodes[..6].iter().map(|node| node.id)),
             size_justification: Some(
                 "These six peer states must remain visible together for direct comparison.".into(),
             ),
@@ -545,6 +701,7 @@ async fn large_layers_require_a_private_bounded_justification() {
             client_key: "too-large".into(),
             nodes: nodes.iter().map(|node| node.id).collect(),
             edges: edges.iter().map(|edge| edge.id).collect(),
+            layout: authored_layout(nodes.iter().map(|node| node.id)),
             size_justification: Some("All nine nodes are peers.".into()),
         })
         .await
@@ -895,6 +1052,7 @@ async fn action_keys_are_scoped_to_their_source_nodes() {
             client_key: "first-layer".into(),
             nodes: vec![first.id],
             edges: vec![],
+            layout: authored_layout([first.id]),
             size_justification: None,
         })
         .await
@@ -904,6 +1062,7 @@ async fn action_keys_are_scoped_to_their_source_nodes() {
             client_key: "second-layer".into(),
             nodes: vec![second.id],
             edges: vec![],
+            layout: authored_layout([second.id]),
             size_justification: None,
         })
         .await
@@ -985,6 +1144,7 @@ async fn action_presentation_grammar_round_trips_in_authored_order() {
             client_key: "root".into(),
             nodes: vec![source.id],
             edges: vec![],
+            layout: authored_layout([source.id]),
             size_justification: None,
         })
         .await
@@ -1205,6 +1365,7 @@ async fn completion_rejects_an_edge_accepted_by_a_concurrent_interaction() {
                 client_key: "root".into(),
                 nodes: vec![first_node.id, second_node.id],
                 edges: vec![edge.id],
+                layout: authored_layout([first_node.id, second_node.id]),
                 size_justification: None,
             })
             .await
@@ -1254,6 +1415,7 @@ async fn accepted_layers_keep_their_original_action_snapshot() {
             client_key: "root".into(),
             nodes: vec![referenced_interaction.id],
             edges: vec![],
+            layout: authored_layout([referenced_interaction.id]),
             size_justification: None,
         })
         .await
@@ -1298,7 +1460,7 @@ async fn accepted_completion_survives_database_reopen() {
         .unwrap();
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
     let answer = node(&writer, "persisted").await;
-    accept_single_node(&writer, interaction.clone(), answer).await;
+    let layer = accept_single_node(&writer, interaction.clone(), answer).await;
     drop(writer);
     database.close().await;
 
@@ -1307,6 +1469,44 @@ async fn accepted_completion_survives_database_reopen() {
     let output = writer.completion_output().await.unwrap().unwrap();
     assert_eq!(output.node_id, interaction.id);
     assert_eq!(output.root_layer.nodes[0].title, "persisted");
+    assert_eq!(output.root_layer.layer.layout, layer.layout);
+}
+
+#[tokio::test]
+async fn coordinate_free_accepted_history_remains_readable_after_restart() {
+    use sqlx::{Connection, SqliteConnection};
+
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    let interaction = database
+        .create_interaction(Some(project(1)), thread(1), "Read legacy history")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let answer = node(&writer, "legacy").await;
+    let layer = accept_single_node(&writer, interaction.clone(), answer).await;
+    drop(writer);
+    database.close().await;
+
+    let url = format!("sqlite://{}", file.path().display());
+    let mut connection = SqliteConnection::connect(&url).await.unwrap();
+    sqlx::query("DELETE FROM layer_placements WHERE layer_id=?1")
+        .bind(layer.id.value())
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE layers SET layout_schema_version=NULL WHERE id=?1")
+        .bind(layer.id.value())
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    connection.close().await.unwrap();
+
+    let reopened = GraphDatabase::open(file.path()).await.unwrap();
+    let writer = reopened.writer_for_subgraph(interaction.id).await.unwrap();
+    let output = writer.completion_output().await.unwrap().unwrap();
+    assert_eq!(output.root_layer.nodes[0].title, "legacy");
+    assert_eq!(output.root_layer.layer.layout, None);
 }
 
 #[tokio::test]

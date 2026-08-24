@@ -1,4 +1,4 @@
-import { EdgeObject, LayerObject, NodeObject, RelayerGraphClient } from "@relayer/graph-client";
+import { EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient } from "@relayer/graph-client";
 import type { Harness, HarnessConfiguration, HarnessFactory, HarnessRunContext, HarnessSessionState, HarnessTraceSupport } from "@relayer/harness-host";
 
 export const taskSystemFixtureConfiguration: HarnessConfiguration = {
@@ -45,13 +45,30 @@ class TaskSystemFixtureHarness implements Harness {
     await graph.submitNode(claim);
     const waitingClaim = new EdgeObject([waiting, claim], "waiting-claim");
     await graph.createEdge(waitingClaim);
-    const queueDetail = new LayerObject([waiting, claim], [waitingClaim], "queue-detail-layer");
+    const queueDetail = new LayerObject(
+      [waiting, claim],
+      [waitingClaim],
+      new LayerLayoutObject([
+        new NodePlacementObject(waiting, 0.25, 0.5),
+        new NodePlacementObject(claim, 0.75, 0.5),
+      ]),
+      "queue-detail-layer",
+    );
     await graph.submitLayer(queueDetail);
     const queueWorkers = new EdgeObject([queue, workers], "queue-workers");
     const workersResults = new EdgeObject([workers, results], "workers-results");
     await graph.createEdge(queueWorkers);
     await graph.createEdge(workersResults);
-    const layer = new LayerObject([queue, workers, results], [queueWorkers, workersResults], "root-layer");
+    const layer = new LayerObject(
+      [queue, workers, results],
+      [queueWorkers, workersResults],
+      new LayerLayoutObject([
+        new NodePlacementObject(queue, 0.15, 0.5),
+        new NodePlacementObject(workers, 0.5, 0.5),
+        new NodePlacementObject(results, 0.85, 0.5),
+      ]),
+      "root-layer",
+    );
     await graph.submitLayer(layer);
     await graph.addAction(queue, { kind: "navigate", relation: "expand", sourceLayer: layer, label: "See queue behavior", target: queueDetail, clientKey: "queue-detail" });
     await graph.addAction(interaction.id, { kind: "navigate", relation: "expand", label: "Response", target: layer, clientKey: "response" });

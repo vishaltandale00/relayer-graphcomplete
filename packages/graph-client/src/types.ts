@@ -18,10 +18,23 @@ export interface GraphEdge {
   readonly state: RecordState;
 }
 
+export interface NodePlacement {
+  readonly nodeId: GraphId;
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface LayerLayout {
+  readonly version: 1;
+  readonly placements: readonly NodePlacement[];
+}
+
 export interface GraphLayer {
   readonly id: GraphId;
   readonly nodes: readonly GraphId[];
   readonly edges: readonly GraphId[];
+  /** Null or absent only for accepted layers created before authored layouts were introduced. */
+  readonly layout?: LayerLayout | null;
   readonly state: RecordState;
 }
 

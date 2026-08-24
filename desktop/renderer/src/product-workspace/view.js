@@ -41,7 +41,7 @@ export function productWorkspaceMarkup() {
         <div class="graph-stage hidden" id="graphStage" tabindex="-1" data-review-capture="layer-viewport" role="region" aria-label="Visible graph layer">
           <svg id="edgeCanvas" aria-hidden="true"></svg>
           <div id="nodeLayer"></div>
-          <div class="graph-hint">Scroll or pinch to zoom · Drag canvas to pan · Drag nodes to arrange</div>
+          <div class="graph-hint">Scroll or pinch to zoom · Drag canvas to pan · Drag nodes for this view</div>
           <div class="graph-controls" role="toolbar" aria-label="Graph view controls">
             <button id="zoomOutGraph" title="Zoom out" aria-label="Zoom out">−</button>
             <output id="graphZoomLevel" aria-label="Graph zoom level">100%</output>

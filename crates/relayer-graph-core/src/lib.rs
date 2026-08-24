@@ -9,6 +9,7 @@ pub use graph::{
     ImportedAcceptedView, ImportedAction, ImportedConversation, ImportedConversationReceipt,
     ImportedConversationStage, ImportedEdge, ImportedLayer, ImportedNode, ImportedResolvedLayer,
     ImportedTurn, ImportedTurnReceipt, LayerDraft, LayerId, NavigateRelation, NodeDraft, NodeId,
-    ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState, ResolvedLayer, ThreadId,
+    LayerLayout, NodePlacement, ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState,
+    ResolvedLayer, ThreadId,
     is_supported_icon, normalize_icon_name, resolve_icon_name,
 };

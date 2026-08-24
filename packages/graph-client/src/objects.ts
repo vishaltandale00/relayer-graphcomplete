@@ -28,6 +28,20 @@ export class EdgeObject {
   }
 }
 
+export class NodePlacementObject {
+  constructor(
+    public node: NodeReference,
+    public x: number,
+    public y: number,
+  ) {}
+}
+
+export class LayerLayoutObject {
+  readonly version = 1 as const;
+
+  constructor(public placements: readonly NodePlacementObject[]) {}
+}
+
 export class LayerObject {
   readonly clientKey: string;
   ref?: GraphLayer;
@@ -35,6 +49,7 @@ export class LayerObject {
   constructor(
     public nodes: readonly NodeReference[],
     public edges: readonly EdgeReference[],
+    public layout: LayerLayoutObject,
     clientKey: string = randomUUID(),
   ) {
     this.clientKey = clientKey;

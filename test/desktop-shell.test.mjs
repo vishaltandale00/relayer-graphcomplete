@@ -2304,7 +2304,9 @@ describe("desktop skeleton", () => {
 
     expect(productAdapter).toContain("createProductWorkspace");
     expect(productAdapter).not.toContain("function physicsStep");
-    expect(workspace).toContain("function physicsStep");
+    expect(workspace).not.toContain("function physicsStep");
+    expect(workspace).toContain("element.dataset.canonicalWorldX");
+    expect(workspace).toContain("element.dataset.layoutSource");
     expect(productShell).toContain('<section class="thread-view hidden" id="threadView"></section>');
     expect(productShell).not.toContain('id="graphStage"');
     expect(productWorkspaceMarkup()).toContain('id="graphStage"');
@@ -2343,7 +2345,7 @@ describe("desktop skeleton", () => {
     const workspace = await readFile(new URL("../desktop/renderer/src/product-workspace/workspace.js", import.meta.url), "utf8");
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
     expect(workspace).toContain("dragging.node.pinned = true");
-    expect(workspace).toContain("node.pinned || dragging?.node.id === node.id");
+    expect(workspace).toContain("cachedLayoutMatches && prior?.pinned");
     expect(styles).toContain("flex-direction:column");
     expect(styles).toContain("width:46px;height:46px");
   });
