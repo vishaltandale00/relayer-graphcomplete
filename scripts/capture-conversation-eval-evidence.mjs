@@ -14,14 +14,19 @@ import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcompl
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 
 const OPT_IN = "RELAYER_CAPTURE_CONVERSATION_EVAL_EVIDENCE";
+const VIDEO_OPT_IN = "RELAYER_RECORD_CONVERSATION_EVAL_VIDEO";
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const outputDirectory = join(repositoryRoot, "docs", "prd", "assets", "evidence", "conversation-export-eval");
+const videoOutputFile = join(outputDirectory, "conversation-export-eval.mp4");
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-conversation-evidence-"));
+const videoFramesDirectory = join(dataDirectory, "video-frames");
 const ordinaryExportFile = join(dataDirectory, "ordinary-owner-export.jsonl");
 const stateFile = join(dataDirectory, "eval-data", "test-runs.json");
 const ipcChannels = [];
 const services = [];
 const screenshots = [];
+const videoFrames = [];
+const videoEnabled = process.env[VIDEO_OPT_IN] === "1";
 let dashboardWindow;
 let reviewWindow;
 let ordinaryWindow;
@@ -152,13 +157,20 @@ async function createOrdinaryExport() {
   await waitFor("ordinary conversation sidebar", ordinaryWindow, `Boolean(document.querySelector('[data-thread="${thread.id}"]'))`);
   await ordinaryWindow.webContents.executeJavaScript(`document.querySelector('[data-thread="${thread.id}"]')?.click()`);
   await waitFor("ordinary conversation settings", ordinaryWindow, `Boolean(document.querySelector('#conversationSettingsButton:not(.hidden):not(:disabled)'))`);
+  await captureVideoStep(ordinaryWindow, "1. Open Conversation settings", "#conversationSettingsButton");
   await ordinaryWindow.webContents.executeJavaScript(`document.querySelector('#conversationSettingsButton').click()`);
   await waitFor("ordinary export menu item", ordinaryWindow, `Boolean(document.querySelector('#conversationSettingsMenu:not(.hidden) #exportConversation:not(.hidden):not(:disabled)'))`);
+  await captureVideoStep(ordinaryWindow, "2. Choose Export conversation…", "#exportConversation");
   await capture(ordinaryWindow, "ordinary-conversation-export", ["Owner opens Conversation settings and sees the enabled Export conversation menu item"]);
   await ordinaryWindow.webContents.executeJavaScript(`document.querySelector('#exportConversation').click()`);
   const exportDeadline = Date.now() + 10_000;
   while (Date.now() < exportDeadline) {
-    try { if ((await readFile(ordinaryExportFile)).length) return; } catch {}
+    try {
+      if ((await readFile(ordinaryExportFile)).length) {
+        await captureVideoStep(ordinaryWindow, "3. The conversation is saved as JSONL", "#conversationSettingsButton");
+        return;
+      }
+    } catch {}
     await new Promise((resolveWait) => setTimeout(resolveWait, 25));
   }
   throw new Error("Ordinary export UI did not save JSONL bytes.");
@@ -182,6 +194,56 @@ async function capture(window, name, requirements) {
   const path = join(outputDirectory, `${name}.png`);
   await writeFile(path, bytes);
   screenshots.push({ file: `${name}.png`, sha256: createHash("sha256").update(bytes).digest("hex"), requirements });
+}
+
+async function captureVideoStep(window, caption, targetSelector, duration = 2) {
+  if (!videoEnabled) return;
+  await mkdir(videoFramesDirectory, { recursive: true });
+  await window.webContents.executeJavaScript(`(() => {
+    document.querySelector('[data-relayer-video-caption]')?.remove();
+    document.querySelectorAll('[data-relayer-video-highlight]').forEach((element) => {
+      element.style.removeProperty('box-shadow');
+      element.removeAttribute('data-relayer-video-highlight');
+    });
+    const target = document.querySelector(${JSON.stringify(targetSelector)});
+    if (target) {
+      target.dataset.relayerVideoHighlight = 'true';
+      target.style.boxShadow = '0 0 0 3px rgba(128, 174, 248, .7), 0 12px 36px rgba(0, 0, 0, .45)';
+    }
+    const caption = document.createElement('div');
+    caption.dataset.relayerVideoCaption = 'true';
+    caption.textContent = ${JSON.stringify(caption)};
+    caption.style.cssText = 'position:fixed;left:50%;bottom:78px;transform:translateX(-50%);z-index:1000;max-width:760px;padding:10px 16px;border:1px solid #4a5058;border-radius:10px;background:rgba(20,23,27,.96);box-shadow:0 14px 42px rgba(0,0,0,.5);color:#f1f2f3;font:600 14px/1.35 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:center;pointer-events:none';
+    document.body.append(caption);
+  })()`);
+  await new Promise((resolveWait) => setTimeout(resolveWait, 180));
+  const file = join(videoFramesDirectory, `${String(videoFrames.length + 1).padStart(2, "0")}.png`);
+  await writeFile(file, (await window.webContents.capturePage()).toPNG());
+  videoFrames.push({ file, duration, caption });
+}
+
+async function finalizeVideo() {
+  if (!videoEnabled || !videoFrames.length) return null;
+  const concatFile = join(videoFramesDirectory, "frames.txt");
+  const entries = videoFrames.flatMap((frame) => [
+    `file '${frame.file.replaceAll("'", "'\\''")}'`,
+    `duration ${frame.duration}`,
+  ]);
+  entries.push(`file '${videoFrames.at(-1).file.replaceAll("'", "'\\''")}'`);
+  await writeFile(concatFile, `${entries.join("\n")}\n`);
+  execFileSync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-f", "concat", "-safe", "0", "-i", concatFile,
+    "-vf", "scale=1480:920:force_original_aspect_ratio=decrease,pad=1480:920:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+    "-r", "30", "-movflags", "+faststart", videoOutputFile,
+  ], { cwd: repositoryRoot, stdio: "inherit" });
+  const bytes = await readFile(videoOutputFile);
+  return {
+    file: "conversation-export-eval.mp4",
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    durationSeconds: videoFrames.reduce((total, frame) => total + frame.duration, 0),
+    steps: videoFrames.map((frame) => frame.caption),
+  };
 }
 
 async function createReview(executionId) {
@@ -304,8 +366,10 @@ async function run() {
   await dashboardWindow.loadFile(join(repositoryRoot, "desktop", "eval-renderer", "index.html"));
   dashboardWindow.show();
   await waitFor("Eval empty dashboard", dashboardWindow, `Boolean(document.querySelector('#importConversation'))`);
+  await captureVideoStep(dashboardWindow, "4. In Eval, choose Import conversation", "#importConversation");
   await dashboardWindow.webContents.executeJavaScript(`document.querySelector('#importConversation').click()`);
   await waitFor("imported run in dashboard", dashboardWindow, `document.querySelector('#runMetadata')?.textContent.includes('Imported conversation')`);
+  await captureVideoStep(dashboardWindow, "5. Eval imports the JSONL as an immutable external run", "#runMetadata");
   await capture(dashboardWindow, "eval-dashboard-imported", ["Eval dashboard imported the exact owner-saved JSONL as an immutable external conversation"]);
   await dashboardWindow.webContents.executeJavaScript(`document.querySelector('[data-run-imported-judge="deterministic-graph-contract"]').click()`);
   await waitFor("deterministic judge completion", dashboardWindow, `document.querySelector('#runStatus')?.textContent === 'passed'`);
@@ -322,6 +386,7 @@ async function run() {
   await waitFor("accepted turn option after review open", reviewWindow, `Boolean(document.querySelector('[data-turn-id="${acceptedInteractionId}"]'))`);
   await reviewWindow.webContents.executeJavaScript(`document.querySelector('[data-turn-id="${acceptedInteractionId}"]')?.click()`);
   await waitFor("review root", reviewWindow, `document.querySelector('.graph-node b')?.textContent === 'Imported debugging answer'`);
+  await captureVideoStep(reviewWindow, "6. Open the imported conversation to inspect and judge it", ".graph-node");
   await capture(reviewWindow, "product-workspace-imported-root", ["Production ProductWorkspace renders imported accepted turn", "Review mode is read-only", "Turn navigation includes unfinished and failed turns"]);
   await reviewWindow.webContents.executeJavaScript(`document.querySelector('#turnPickerButton').click()`);
   await waitFor("turn statuses", reviewWindow, `document.querySelectorAll('.turn-option-status').length === 3`);
@@ -421,6 +486,7 @@ async function run() {
   const ownerExportBytes = await readFile(ordinaryExportFile);
   const ownerExportSha256 = `sha256:${createHash("sha256").update(ownerExportBytes).digest("hex")}`;
   const ordinaryImportedRun = evalService.listRuns().find((run) => run.title === "Ordinary owner conversation");
+  const video = await finalizeVideo();
   const manifest = {
     schemaVersion: 1,
     capturedAt: new Date().toISOString(),
@@ -440,6 +506,7 @@ async function run() {
     },
     renderer: "desktop/renderer ProductWorkspace and desktop/eval-renderer dashboard",
     screenshots,
+    ...(video ? { video } : {}),
   };
   await writeFile(join(outputDirectory, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
