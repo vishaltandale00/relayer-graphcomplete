@@ -793,6 +793,17 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn recover_interaction_accepted(
+        &self,
+        interaction_id: InteractionId,
+        output: &serde_json::Value,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .recover_interaction_accepted(interaction_id, output)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn accept_interaction_completion(
         &self,
         completion: AcceptedInteractionCompletion<'_>,

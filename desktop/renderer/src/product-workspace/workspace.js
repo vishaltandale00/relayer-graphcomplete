@@ -1445,6 +1445,9 @@ export function createProductWorkspace({
       button.dataset.reviewRef = `action-${action.id}`;
       button.dataset.reviewKind = actionReviewKind(action);
       button.dataset.reviewActionId = String(action.id);
+      if (action.targetLayerId != null) {
+        button.dataset.reviewTargetLayerId = String(action.targetLayerId);
+      }
       if (presentation.icon) {
         button.append(createRelayerIcon(presentation.icon, { class: "relayer-action-icon" }));
       }

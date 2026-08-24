@@ -1,7 +1,7 @@
 use crate::{
     api,
     permissions::PermissionCatalog,
-    product::{PreparedInteractionBinding, ProductService, ProjectId},
+    product::{Interaction, PreparedInteractionBinding, ProductService, ProjectId},
     provider_catalog_refresh::ProviderCatalogRefreshClient,
     runtime::RuntimeClient,
     storage::SqliteProductStore,
@@ -18,6 +18,100 @@ pub struct RelayerRuntimeConfig {
     pub default_harness_configuration: String,
     pub allow_harness_override: bool,
     pub standalone_workspaces_directory: PathBuf,
+}
+
+async fn reconcile_interrupted_interaction(
+    storage: &SqliteProductStore,
+    runtime: &RuntimeClient,
+    permission_catalog: &PermissionCatalog,
+    mut interaction: Interaction,
+) -> anyhow::Result<()> {
+    if interaction.graph_node_id.is_none()
+        && let Some((source_interaction_node_id, source_action_id)) =
+            storage.invocation_graph_source(interaction.id).await?
+    {
+        if interaction.completion_status == "not_started"
+            && !storage.claim_interaction_preparing(interaction.id).await?
+        {
+            anyhow::bail!(
+                "could not reserve interrupted interaction {}",
+                interaction.id
+            );
+        }
+        let thread = storage
+            .get_thread(interaction.thread_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("missing thread for {}", interaction.id))?;
+        let permission = permission_catalog.profile(&thread.permission_profile_id)?;
+        let prepared = runtime
+            .prepare(&crate::runtime::CompleteInteraction {
+                project_id: thread.project_id.map(ProjectId::value),
+                product_interaction_id: interaction.id.value(),
+                thread_id: thread.id.value(),
+                interaction_id: interaction.id.value(),
+                text: &interaction.text,
+                working_directory: "",
+                harness_configuration_name: &thread.harness_configuration_name,
+                permission_profile: permission,
+                model_selection: interaction.model_selection.as_ref(),
+                invocation: Some(crate::runtime::PreparedInvocation {
+                    source_interaction_node_id,
+                    source_action_id,
+                }),
+            })
+            .await?;
+        let bound = storage
+            .bind_prepared_interaction(PreparedInteractionBinding {
+                interaction_id: interaction.id,
+                graph_node_id: prepared.graph_node_id,
+                harness_configuration_name: &prepared.harness_configuration_name,
+                harness_configuration_digest: &prepared.harness_configuration_digest,
+                effective_execution_digest: &prepared.effective_execution_digest,
+                effective_permission_receipt: &prepared.effective_permission_receipt,
+            })
+            .await?;
+        if !bound {
+            anyhow::bail!("could not recover graph binding for {}", interaction.id);
+        }
+        interaction.graph_node_id = Some(prepared.graph_node_id);
+    }
+    if let Some(graph_node_id) = interaction.graph_node_id {
+        // Product never persists writer tokens. Invalidating by node closes the crash window
+        // between durable binding and the normal token revocation path.
+        runtime.invalidate_node_capabilities(graph_node_id).await?;
+        let metadata = runtime.interaction_metadata(graph_node_id).await?;
+        let expected = storage.invocation_graph_source(interaction.id).await?;
+        let expected = expected.map(|(source_interaction_node_id, source_action_id)| {
+            crate::runtime::PreparedInvocation {
+                source_interaction_node_id,
+                source_action_id,
+            }
+        });
+        if metadata.node_id != graph_node_id || metadata.invocation != expected {
+            anyhow::bail!(
+                "bound graph interaction provenance mismatch for {}",
+                interaction.id
+            );
+        }
+        if let Some(output) = runtime.completion_output(graph_node_id).await? {
+            if output.get("nodeId").and_then(serde_json::Value::as_i64) != Some(graph_node_id) {
+                anyhow::bail!(
+                    "canonical output node mismatch for interaction {}",
+                    interaction.id
+                );
+            }
+            if !storage
+                .recover_interaction_accepted(interaction.id, &output)
+                .await?
+            {
+                anyhow::bail!(
+                    "interaction {} changed during startup reconciliation",
+                    interaction.id
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 pub struct RelayerAppServerConfig {
@@ -102,102 +196,35 @@ impl RelayerAppServer {
             }
         }
         if let Some(runtime) = &runtime {
-            for mut interaction in storage.interrupted_interactions().await? {
-                if interaction.graph_node_id.is_none()
-                    && let Some((source_interaction_node_id, source_action_id)) =
-                        storage.invocation_graph_source(interaction.id).await?
+            for interaction in storage.interrupted_interactions().await? {
+                if let Err(error) = reconcile_interrupted_interaction(
+                    &storage,
+                    runtime,
+                    &permission_catalog,
+                    interaction.clone(),
+                )
+                .await
                 {
-                    if interaction.completion_status == "not_started"
-                        && !storage.claim_interaction_preparing(interaction.id).await?
-                    {
-                        anyhow::bail!(
-                            "could not reserve interrupted interaction {}",
-                            interaction.id
-                        );
-                    }
-                    let thread = storage
+                    eprintln!(
+                        "quarantining interrupted interaction {} after reconciliation failure: {error}",
+                        interaction.id
+                    );
+                    let harness = storage
                         .get_thread(interaction.thread_id)
                         .await?
-                        .ok_or_else(|| anyhow::anyhow!("missing thread for {}", interaction.id))?;
-                    let permission = permission_catalog.profile(&thread.permission_profile_id)?;
-                    let command = crate::runtime::CompleteInteraction {
-                        project_id: thread.project_id.map(ProjectId::value),
-                        product_interaction_id: interaction.id.value(),
-                        thread_id: thread.id.value(),
-                        interaction_id: interaction.id.value(),
-                        text: &interaction.text,
-                        working_directory: "",
-                        harness_configuration_name: &thread.harness_configuration_name,
-                        permission_profile: permission,
-                        model_selection: interaction.model_selection.as_ref(),
-                        invocation: Some(crate::runtime::PreparedInvocation {
-                            source_interaction_node_id,
-                            source_action_id,
-                        }),
-                    };
-                    let prepared = runtime.prepare(&command).await?;
-                    let binding = storage
-                        .bind_prepared_interaction(PreparedInteractionBinding {
-                            interaction_id: interaction.id,
-                            graph_node_id: prepared.graph_node_id,
-                            harness_configuration_name: &prepared.harness_configuration_name,
-                            harness_configuration_digest: &prepared.harness_configuration_digest,
-                            effective_execution_digest: &prepared.effective_execution_digest,
-                            effective_permission_receipt: &prepared.effective_permission_receipt,
-                        })
-                        .await;
-                    let cleanup = runtime.discard_prepared(prepared).await;
-                    let bound = match (binding, cleanup) {
-                        (Ok(bound), Ok(())) => bound,
-                        (Err(operation), Ok(())) => return Err(operation.into()),
-                        (Ok(_), Err(cleanup)) => return Err(cleanup.into()),
-                        (Err(operation), Err(cleanup)) => anyhow::bail!(
-                            "could not recover graph binding: {operation}; capability cleanup also failed: {cleanup}"
-                        ),
-                    };
-                    if !bound {
-                        anyhow::bail!("could not recover graph binding for {}", interaction.id);
-                    }
-                    interaction.graph_node_id = storage
-                        .get_interaction(interaction.id)
-                        .await?
-                        .and_then(|stored| stored.graph_node_id);
-                }
-                if let Some(graph_node_id) = interaction.graph_node_id {
-                    let metadata = runtime.interaction_metadata(graph_node_id).await?;
-                    let expected = storage.invocation_graph_source(interaction.id).await?;
-                    let expected =
-                        expected.map(|(source_interaction_node_id, source_action_id)| {
-                            crate::runtime::PreparedInvocation {
-                                source_interaction_node_id,
-                                source_action_id,
-                            }
-                        });
-                    if metadata.node_id != graph_node_id || metadata.invocation != expected {
-                        anyhow::bail!(
-                            "bound graph interaction provenance mismatch for {}",
-                            interaction.id
-                        );
-                    }
-                    if let Some(output) = runtime.completion_output(graph_node_id).await? {
-                        if output.get("nodeId").and_then(serde_json::Value::as_i64)
-                            != Some(graph_node_id)
-                        {
-                            anyhow::bail!(
-                                "canonical output node mismatch for interaction {}",
-                                interaction.id
-                            );
-                        }
-                        if !storage
-                            .recover_interaction_accepted(interaction.id, &output)
-                            .await?
-                        {
-                            anyhow::bail!(
-                                "interaction {} changed during startup reconciliation",
-                                interaction.id
-                            );
-                        }
-                    }
+                        .map(|thread| thread.harness_configuration_name)
+                        .or(interaction.harness_configuration_name.clone())
+                        .unwrap_or_else(|| "unknown".into());
+                    storage
+                        .fail_interaction_completion(
+                            interaction.id,
+                            &harness,
+                            &format!(
+                                "{} {error}",
+                                crate::api::threads::RECONCILIATION_PENDING_PREFIX
+                            ),
+                        )
+                        .await?;
                 }
             }
         }

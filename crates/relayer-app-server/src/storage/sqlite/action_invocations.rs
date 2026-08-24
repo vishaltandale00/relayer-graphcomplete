@@ -38,7 +38,7 @@ impl SqliteProductStore {
     ) -> Result<bool, StorageError> {
         let output = serde_json::to_string(output)
             .map_err(|error| StorageError::Serialization(error.to_string()))?;
-        let result = sqlx::query("UPDATE interactions SET completion_status='accepted',completion_output_json=?1,completion_error=NULL WHERE id=?2 AND graph_node_id IS NOT NULL AND harness_configuration_name IS NOT NULL AND harness_configuration_digest IS NOT NULL AND effective_execution_digest IS NOT NULL AND effective_permission_receipt_json IS NOT NULL AND completion_status IN ('not_started','running','submitted')")
+        let result = sqlx::query("UPDATE interactions SET completion_status='accepted',completion_output_json=?1,completion_error=NULL WHERE id=?2 AND graph_node_id IS NOT NULL AND harness_configuration_name IS NOT NULL AND harness_configuration_digest IS NOT NULL AND effective_execution_digest IS NOT NULL AND effective_permission_receipt_json IS NOT NULL AND (completion_status IN ('not_started','running','submitted') OR (completion_status='failed' AND completion_error LIKE 'Canonical reconciliation pending:%'))")
             .bind(output)
             .bind(interaction_id.value())
             .execute(&self.pool)

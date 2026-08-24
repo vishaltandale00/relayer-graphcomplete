@@ -6,6 +6,7 @@ use crate::{ActionId, GraphError, NodeId, RecordState};
 #[serde(rename_all = "camelCase")]
 pub struct GraphNode {
     pub id: NodeId,
+    #[serde(default)]
     pub leased_action_id: Option<ActionId>,
     pub kind: String,
     pub icon: String,
@@ -56,4 +57,26 @@ impl NodeDraft {
 
 fn default_kind() -> String {
     "concept".into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GraphNode;
+
+    #[test]
+    fn legacy_node_payloads_default_missing_lease_identity() {
+        let node: GraphNode = serde_json::from_str(
+            r#"{
+                "id": 1,
+                "kind": "concept",
+                "icon": "box",
+                "title": "Legacy node",
+                "detail": "Created before interaction leases",
+                "state": "accepted"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(node.leased_action_id, None);
+    }
 }

@@ -13,6 +13,10 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, path::Path};
 use thiserror::Error;
+use uuid::Uuid;
+
+const CONTROL_RETRY_ATTEMPTS: u64 = 4;
+const CONTROL_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -301,6 +305,7 @@ impl RuntimeClient {
         command: CompleteInteraction<'_>,
     ) -> Result<RuntimeCompletion, RuntimeError> {
         let prepared = self.prepare(&command).await?;
+        self.activate_prepared(&prepared).await?;
         self.complete_prepared(&command, prepared).await
     }
 
@@ -338,22 +343,26 @@ impl RuntimeClient {
             "threadId": command.thread_id,
             "text": command.text,
             "invocation": invocation,
+            "mintCapability": false,
         });
         let mut attempts = 0;
         let interaction: CreateInteractionResponse = loop {
             attempts += 1;
-            match self
-                .post(
+            match tokio::time::timeout(
+                CONTROL_REQUEST_TIMEOUT,
+                self.post(
                     create_url.clone(),
                     &create_body,
                     &self.graph_control_token,
                     StatusCode::OK,
-                )
-                .await
+                ),
+            )
+            .await
+            .unwrap_or(Err(RuntimeError::Timeout("graph interaction creation")))
             {
                 Ok(interaction) => break interaction,
-                Err(RuntimeError::Http(_) | RuntimeError::Json(_))
-                    if command.invocation.is_some() =>
+                Err(RuntimeError::Http(_) | RuntimeError::Json(_) | RuntimeError::Timeout(_))
+                    if command.invocation.is_some() && attempts < CONTROL_RETRY_ATTEMPTS =>
                 {
                     // Invoke creation is keyed by the immutable source pair in graph core.
                     // Bounded exact retries recover response loss without another lease.
@@ -365,6 +374,12 @@ impl RuntimeClient {
                 Err(error) => return Err(error),
             }
         };
+        if !interaction.graph_token.is_empty() {
+            self.revoke_capability(&interaction.graph_token).await?;
+            return Err(RuntimeError::Protocol(
+                "graph server minted a capability before the product binding was durable".into(),
+            ));
+        }
         let effective_execution_digest = effective_execution_digest(
             &selected.digest,
             &command.permission_profile.id,
@@ -373,7 +388,7 @@ impl RuntimeClient {
         let unrestricted = command.permission_profile.authority == "unrestricted";
         Ok(PreparedInteraction {
             graph_node_id: interaction.node.id,
-            graph_token: interaction.graph_token,
+            graph_token: Uuid::new_v4().to_string(),
             harness_configuration_name: selected.configuration.name.clone(),
             harness_configuration_digest: selected.digest.clone(),
             permission_profile_id: command.permission_profile.id.clone(),
@@ -391,6 +406,65 @@ impl RuntimeClient {
             configuration: selected.configuration.clone(),
             model_selection: command.model_selection.cloned(),
         })
+    }
+
+    pub(crate) async fn activate_prepared(
+        &self,
+        prepared: &PreparedInteraction,
+    ) -> Result<(), RuntimeError> {
+        let url = self.graph_url.join("api/control/capabilities")?;
+        let body = serde_json::json!({
+            "nodeId": prepared.graph_node_id,
+            "graphToken": &prepared.graph_token,
+        });
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            match tokio::time::timeout(
+                CONTROL_REQUEST_TIMEOUT,
+                self.post::<RemintCapabilityResponse>(
+                    url.clone(),
+                    &body,
+                    &self.graph_control_token,
+                    StatusCode::OK,
+                ),
+            )
+            .await
+            .unwrap_or(Err(RuntimeError::Timeout("graph capability activation")))
+            {
+                Ok(response) if response.graph_token == prepared.graph_token => return Ok(()),
+                Ok(_) if attempt < CONTROL_RETRY_ATTEMPTS => {}
+                Ok(_) => {
+                    return Err(RuntimeError::Protocol(
+                        "graph server returned a different prepared capability".into(),
+                    ));
+                }
+                Err(RuntimeError::Http(_) | RuntimeError::Json(_) | RuntimeError::Timeout(_))
+                    if attempt < CONTROL_RETRY_ATTEMPTS => {}
+                Err(error) => return Err(error),
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(attempt * 25)).await;
+        }
+    }
+
+    pub(crate) async fn invalidate_node_capabilities(
+        &self,
+        graph_node_id: i64,
+    ) -> Result<(), RuntimeError> {
+        let body = serde_json::json!({"nodeId": graph_node_id});
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            match self.delete_control(&body).await {
+                Ok(_) => return Ok(()),
+                Err(RuntimeError::Http(_) | RuntimeError::Json(_) | RuntimeError::Timeout(_))
+                    if attempt < CONTROL_RETRY_ATTEMPTS =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(attempt * 25)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     pub(crate) async fn complete_prepared(
@@ -613,21 +687,28 @@ impl RuntimeClient {
             .client
             .get(self.graph_url.join(path)?)
             .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
             .send()
             .await?;
         response_json(response, StatusCode::OK).await
     }
 
     async fn revoke_capability(&self, graph_token: &str) -> Result<(), RuntimeError> {
+        self.delete_control(&serde_json::json!({"graphToken": graph_token}))
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_control(&self, body: &Value) -> Result<Value, RuntimeError> {
         let response = self
             .client
             .delete(self.graph_url.join("api/control/capabilities")?)
             .bearer_auth(&self.graph_control_token)
-            .json(&serde_json::json!({"graphToken": graph_token}))
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(body)
             .send()
             .await?;
-        response_json(response, StatusCode::OK).await?;
-        Ok(())
+        response_json(response, StatusCode::OK).await
     }
 
     async fn post<T: for<'de> Deserialize<'de>>(
@@ -659,6 +740,12 @@ struct GraphNodeResponse {
 #[serde(rename_all = "camelCase")]
 struct CreateInteractionResponse {
     node: GraphNodeResponse,
+    graph_token: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemintCapabilityResponse {
     graph_token: String,
 }
 
@@ -785,6 +872,10 @@ fn effective_execution_digest(
 pub(crate) enum RuntimeError {
     #[error("runtime configuration error: {0}")]
     Configuration(String),
+    #[error("runtime protocol error: {0}")]
+    Protocol(String),
+    #[error("runtime control request timed out during {0}")]
+    Timeout(&'static str),
     #[error("runtime request failed with HTTP {status}: {body}")]
     Remote { status: u16, body: Value },
     #[error(
@@ -880,8 +971,7 @@ mod tests {
                         if observed_creates.fetch_add(1, Ordering::SeqCst) < 2 {
                             return (StatusCode::OK, "response was truncated").into_response();
                         }
-                        Json(json!({ "node": { "id": 41 }, "graphToken": "retry-token" }))
-                            .into_response()
+                        Json(json!({ "node": { "id": 41 }, "graphToken": "" })).into_response()
                     }
                 }),
             )
@@ -954,6 +1044,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invoke_prepare_bounds_permanent_invalid_json_and_transport_outage() {
+        let creates = Arc::new(AtomicUsize::new(0));
+        let observed = creates.clone();
+        let graph = Router::new().route(
+            "/api/control/interactions",
+            routing::post(move || {
+                let observed = observed.clone();
+                async move {
+                    observed.fetch_add(1, Ordering::SeqCst);
+                    (StatusCode::OK, "permanently invalid json")
+                }
+            }),
+        );
+        let (graph_url, graph_task) = serve(graph).await;
+        let (harness_url, harness_task) = serve(Router::new()).await;
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "relayer-runtime-bounded-retry-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog = root.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({"schemaVersion":1,"configurations":[{"configuration":{
+                "schemaVersion":1,"name":"test","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+            },"digest":"sha256:test"}]})
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            &graph_url,
+            &harness_url,
+            "graph-control".into(),
+            "harness-control".into(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+        let permission_profile = PermissionProfile {
+            id: "auto".into(),
+            label: "Approve for me".into(),
+            authority: "bounded".into(),
+            reviewer: "automatic".into(),
+        };
+        let command = CompleteInteraction {
+            project_id: None,
+            product_interaction_id: 1,
+            thread_id: 1,
+            text: "question",
+            working_directory: root.to_str().unwrap(),
+            harness_configuration_name: "test",
+            permission_profile: &permission_profile,
+            model_selection: None,
+            invocation: Some(PreparedInvocation {
+                source_interaction_node_id: 17,
+                source_action_id: 23,
+            }),
+        };
+        assert!(matches!(
+            runtime.prepare(&command).await,
+            Err(super::RuntimeError::Json(_))
+        ));
+        assert_eq!(
+            creates.load(Ordering::SeqCst),
+            super::CONTROL_RETRY_ATTEMPTS as usize
+        );
+
+        let unavailable = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let unavailable_url = format!("http://{}/", unavailable.local_addr().unwrap());
+        drop(unavailable);
+        let unavailable_runtime = RuntimeClient::open(
+            &unavailable_url,
+            &harness_url,
+            "graph-control".into(),
+            "harness-control".into(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            unavailable_runtime.prepare(&command),
+        )
+        .await;
+        assert!(matches!(result, Ok(Err(super::RuntimeError::Http(_)))));
+        graph_task.abort();
+        harness_task.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn revokes_the_interaction_capability_when_session_registration_fails() {
         let revocations = Arc::new(AtomicUsize::new(0));
         let observed_revocations = revocations.clone();
@@ -962,12 +1148,15 @@ mod tests {
                 "/api/control/interactions",
                 routing::post(|headers: HeaderMap| async move {
                     assert_eq!(headers["authorization"], "Bearer graph-control");
-                    Json(json!({ "node": { "id": 41 }, "graphToken": "turn-token" }))
+                    Json(json!({ "node": { "id": 41 }, "graphToken": "" }))
                 }),
             )
             .route(
                 "/api/control/capabilities",
-                routing::delete(move |headers: HeaderMap| {
+                routing::post(|Json(body): Json<Value>| async move {
+                    Json(json!({"graphToken": body["graphToken"]}))
+                })
+                .delete(move |headers: HeaderMap| {
                     let observed_revocations = observed_revocations.clone();
                     async move {
                         assert_eq!(headers["authorization"], "Bearer graph-control");
@@ -1064,12 +1253,15 @@ mod tests {
                 "/api/control/interactions",
                 routing::post(|headers: HeaderMap| async move {
                     assert_eq!(headers["authorization"], "Bearer graph-control");
-                    Json(json!({ "node": { "id": 41 }, "graphToken": "turn-token" }))
+                    Json(json!({ "node": { "id": 41 }, "graphToken": "" }))
                 }),
             )
             .route(
                 "/api/control/capabilities",
-                routing::delete(move |headers: HeaderMap| {
+                routing::post(|Json(body): Json<Value>| async move {
+                    Json(json!({"graphToken": body["graphToken"]}))
+                })
+                .delete(move |headers: HeaderMap| {
                     let observed_revocations = observed_revocations.clone();
                     async move {
                         assert_eq!(headers["authorization"], "Bearer graph-control");

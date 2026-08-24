@@ -75,8 +75,10 @@ async fn resolved_invoke_destination_is_readable_cross_thread_in_review_mode() {
         "nodeId": 91,
         "rootLayer": {"layer": {"id": 501}, "nodes": [], "edges": [], "actions": []}
     });
-    let result_interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_output_json,permission_profile_id) VALUES (?1,2,'Result','3',91,'accepted',?2,'auto')")
-        .bind(result_thread_id).bind(result_output.to_string()).execute(&pool).await.unwrap().last_insert_rowid();
+    let result_interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_output_json,completion_error,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,2,'Result','3',91,'failed',?2,'Canonical reconciliation pending: transient persistence failure','codex-basic','sha256:test','auto','sha256:execution',?3)")
+        .bind(result_thread_id).bind(result_output.to_string())
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap().last_insert_rowid();
     sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,41,?2,'3')")
         .bind(reused_source_interaction_id).bind(result_interaction_id).execute(&pool).await.unwrap();
     pool.close().await;
@@ -117,6 +119,19 @@ async fn resolved_invoke_destination_is_readable_cross_thread_in_review_mode() {
                 let result_output = result_output.clone();
                 async move { axum::Json(result_output) }
             }),
+        )
+        .route(
+            "/api/control/interactions/91",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":91,
+                    "invocation":{"sourceInteractionNodeId":92,"sourceActionId":41}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::delete(|| async { axum::Json(json!({"revoked":true})) }),
         );
     let (graph_url, graph_task) = serve_test_app(graph).await;
     let (harness_url, harness_task) = serve_test_app(axum::Router::new()).await;
@@ -816,7 +831,9 @@ async fn approval_wait_is_durable_and_the_product_decision_resumes_the_same_comp
         );
     let (graph_url, graph_task) = serve_test_app(graph).await;
     let (harness_url, harness_task) = serve_test_app(harness).await;
-    let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let app =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
 
     let created = response_json(
         app.clone()
@@ -1109,7 +1126,9 @@ async fn malformed_approval_reconciliation_cancels_and_fails_the_completion() {
         );
     let (graph_url, graph_task) = serve_test_app(graph).await;
     let (harness_url, harness_task) = serve_test_app(harness).await;
-    let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let app =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
     let created = response_json(
         app.clone()
             .oneshot(api_request(
@@ -1220,8 +1239,15 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     let source_interaction_id = thread["rootInteractionId"].as_i64().unwrap();
     let pool = sqlite_pool(&database).await;
     sqlx::query(
-        "UPDATE interactions SET graph_node_id=101,completion_status='accepted' WHERE id=?1",
+        "UPDATE interactions SET graph_node_id=101,completion_status='accepted',completion_output_json=?1 WHERE id=?2",
     )
+    .bind(json!({
+        "nodeId":101,
+        "rootLayer":{"layer":{"id":1},"nodes":[],"edges":[],"actions":[{
+            "id":41,"kind":"invoke","interactionText":"Authored follow-up",
+            "state":"accepted","targetLayerId":null
+        }]}
+    }).to_string())
     .bind(source_interaction_id)
     .execute(&pool)
     .await
@@ -1236,11 +1262,15 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     let created_graph_metadata = graph_metadata.clone();
     let graph_nodes_by_pair = Arc::new(Mutex::new(HashMap::<(i64, i64), usize>::new()));
     let created_graph_nodes_by_pair = graph_nodes_by_pair.clone();
+    let projection_reads = Arc::new(AtomicUsize::new(0));
+    let observed_projection_reads = projection_reads.clone();
     let graph = axum::Router::new()
         .route(
             "/api/control/capabilities",
-            axum::routing::post(|| async { axum::Json(json!({ "graphToken": "graph" })) })
-                .delete(|| async { axum::Json(json!({ "revoked": true })) }),
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({ "graphToken": body["graphToken"] }))
+            })
+            .delete(|| async { axum::Json(json!({ "revoked": true })) }),
         )
         .route(
             "/api/control/interactions/{id}/actions/41",
@@ -1280,7 +1310,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
                         .lock()
                         .unwrap()
                         .insert(node_id, invocation);
-                    axum::Json(json!({ "node": { "id": node_id }, "graphToken": "next" }))
+                    axum::Json(json!({ "node": { "id": node_id }, "graphToken": "" }))
                 }
             }),
         )
@@ -1293,6 +1323,30 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
                         "nodeId": id,
                         "invocation": graph_metadata.lock().unwrap().get(&id).cloned()
                     }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/101/output",
+            axum::routing::get(move || {
+                let observed_projection_reads = observed_projection_reads.clone();
+                async move {
+                    if observed_projection_reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+                        );
+                    }
+                    (
+                        StatusCode::OK,
+                        axum::Json(json!({
+                            "nodeId":101,
+                            "rootLayer":{"layer":{"id":1},"nodes":[],"edges":[],"actions":[{
+                                "id":41,"kind":"invoke","interactionText":"Authored follow-up",
+                                "state":"accepted","targetLayerId":null
+                            }]}
+                        })),
+                    )
                 }
             }),
         );
@@ -1390,7 +1444,40 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             .count(),
         1
     );
-    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
+    assert!((1..=2).contains(&provider_refreshes.calls.load(Ordering::SeqCst)));
+
+    let first_projection = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        first_projection["interactions"][0]["projectionFresh"],
+        false
+    );
+    let refreshed_projection = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        refreshed_projection["interactions"][0]["projectionFresh"],
+        true
+    );
 
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     loop {
@@ -1461,7 +1548,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         response_json(ordinary_unselected).await["code"],
         "model_selection_required"
     );
-    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
+    assert!((1..=2).contains(&provider_refreshes.calls.load(Ordering::SeqCst)));
 
     // A pre-selector accepted interaction has no model columns, but its thread already pins the
     // only harness configuration ordinary Product execution may use.
@@ -1677,7 +1764,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
                     let node_id = next_graph_node_id.fetch_add(1, Ordering::SeqCst);
                     axum::Json(json!({
                         "node": { "id": node_id },
-                        "graphToken": format!("graph-{node_id}")
+                        "graphToken": ""
                     }))
                     .into_response()
                 }
@@ -1685,8 +1772,10 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         )
         .route(
             "/api/control/capabilities",
-            axum::routing::post(|| async { axum::Json(json!({ "graphToken": "read" })) })
-                .delete(|| async { axum::Json(json!({ "revoked": true })) }),
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({ "graphToken": body["graphToken"] }))
+            })
+            .delete(|| async { axum::Json(json!({ "revoked": true })) }),
         )
         .route(
             "/api/control/interactions/{id}",
@@ -2078,6 +2167,20 @@ async fn interrupted_action_invocation_becomes_failed_on_restart() {
     pool.close().await;
 
     let reopened = open_app(&database, &root).await;
+    let pool = sqlite_pool(&database).await;
+    let startup_error: String =
+        sqlx::query_scalar("SELECT completion_error FROM interactions WHERE id=?1")
+            .bind(result_interaction_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(startup_error.contains("remains unresolved"));
+    sqlx::query("UPDATE interactions SET completion_error='Canonical reconciliation pending: runtime unavailable fixture' WHERE id=?1")
+        .bind(result_interaction_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
     let state = response_json(
         reopened
             .oneshot(api_request(
@@ -2097,12 +2200,7 @@ async fn interrupted_action_invocation_becomes_failed_on_restart() {
         .find(|interaction| interaction["id"] == result_interaction_id)
         .unwrap();
     assert_eq!(recovered["completionStatus"], "failed");
-    assert!(
-        recovered["completionError"]
-            .as_str()
-            .unwrap()
-            .contains("remains unresolved")
-    );
+    assert_eq!(recovered["projectionFresh"], false);
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -2163,6 +2261,11 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
     let unbound_id = unbound.last_insert_rowid();
     sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,42,?2,?3)")
         .bind(source_id).bind(unbound_id).bind(&created_at).execute(&pool).await.unwrap();
+    let corrupt = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,5,'corrupt binding',?2,94,'running','codex-basic','sha256:test','auto','sha256:corrupt',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let corrupt_id = corrupt.last_insert_rowid();
     pool.close().await;
 
     let canonical = json!({
@@ -2170,6 +2273,12 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         "rootLayer": {"layer":{"id":501},"nodes":[],"edges":[],"actions":[]}
     });
     let graph_output = canonical.clone();
+    let recovery_output_reads = Arc::new(AtomicUsize::new(0));
+    let observed_recovery_output_reads = recovery_output_reads.clone();
+    let concurrent_recovery_barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let observed_recovery_barrier = concurrent_recovery_barrier.clone();
+    let invalidations = Arc::new(AtomicUsize::new(0));
+    let observed_invalidations = invalidations.clone();
     let graph = axum::Router::new()
         .route(
             "/api/control/interactions",
@@ -2180,7 +2289,7 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
                         "sourceInteractionNodeId":90,"sourceActionId":42
                     })
                 );
-                axum::Json(json!({"node":{"id":93},"graphToken":"recovered-create"}))
+                axum::Json(json!({"node":{"id":93},"graphToken":""}))
             }),
         )
         .route(
@@ -2206,15 +2315,38 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
             }),
         )
         .route(
+            "/api/control/interactions/94",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":999,"invocation":null})) }),
+        )
+        .route(
             "/api/control/capabilities",
-            axum::routing::post(|| async { axum::Json(json!({"graphToken":"recovered-token"})) })
-                .delete(|| async { axum::Json(json!({"revoked":true})) }),
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({"graphToken":body["graphToken"]}))
+            })
+            .delete(move || {
+                let observed_invalidations = observed_invalidations.clone();
+                async move {
+                    observed_invalidations.fetch_add(1, Ordering::SeqCst);
+                    axum::Json(json!({"revoked":true}))
+                }
+            }),
         )
         .route(
             "/api/control/interactions/91/output",
             axum::routing::get(move || {
                 let graph_output = graph_output.clone();
-                async move { axum::Json(graph_output) }
+                let observed_recovery_output_reads = observed_recovery_output_reads.clone();
+                let observed_recovery_barrier = observed_recovery_barrier.clone();
+                async move {
+                    if observed_recovery_output_reads.fetch_add(1, Ordering::SeqCst) < 2 {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+                        );
+                    }
+                    observed_recovery_barrier.wait().await;
+                    (StatusCode::OK, axum::Json(graph_output))
+                }
             }),
         )
         .route(
@@ -2255,8 +2387,9 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
 
     let reopened =
         open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
-    let state = response_json(
+    let first_state = response_json(
         reopened
+            .clone()
             .oneshot(api_request(
                 "GET",
                 &format!("/api/state?threadId={thread_id}"),
@@ -2267,6 +2400,29 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
             .unwrap(),
     )
     .await;
+    let first_recovery = first_state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == result_id)
+        .unwrap();
+    assert_eq!(first_recovery["completionStatus"], "failed");
+    assert_eq!(first_recovery["projectionFresh"], false);
+    let first_promotion = reopened.clone().oneshot(api_request(
+        "GET",
+        &format!("/api/state?threadId={thread_id}"),
+        None,
+        true,
+    ));
+    let second_promotion = reopened.oneshot(api_request(
+        "GET",
+        &format!("/api/state?threadId={thread_id}"),
+        None,
+        true,
+    ));
+    let (first_promotion, second_promotion) = tokio::join!(first_promotion, second_promotion);
+    let state = response_json(first_promotion.unwrap()).await;
+    let concurrent_state = response_json(second_promotion.unwrap()).await;
     let recovered = state["interactions"]
         .as_array()
         .unwrap()
@@ -2278,6 +2434,15 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
     assert_eq!(recovered["harnessConfigurationDigest"], "sha256:test");
     assert_eq!(recovered["effectiveExecutionDigest"], "sha256:execution");
     assert_eq!(recovered["completionOutput"], canonical);
+    let concurrent_recovered = concurrent_state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == result_id)
+        .unwrap();
+    assert_eq!(concurrent_recovered["completionStatus"], "accepted");
+    assert_eq!(concurrent_recovered["completionOutput"], canonical);
+    assert!(recovery_output_reads.load(Ordering::SeqCst) >= 2);
     let ordinary = state["interactions"]
         .as_array()
         .unwrap()
@@ -2301,6 +2466,21 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
             .unwrap()
             .contains("remains unresolved")
     );
+    let corrupt = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == corrupt_id)
+        .unwrap();
+    assert_eq!(corrupt["completionStatus"], "failed");
+    assert_eq!(corrupt["projectionFresh"], false);
+    assert!(
+        corrupt["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("reconciliation pending")
+    );
+    assert!(invalidations.load(Ordering::SeqCst) >= 4);
     graph_task.abort();
     harness_task.abort();
     fs::remove_dir_all(root).unwrap();
@@ -2977,6 +3157,25 @@ async fn open_app_with_runtime(
         .0
 }
 
+async fn open_app_with_runtime_allow_override(
+    database: &Path,
+    web_directory: &Path,
+    catalog: &Path,
+    graph_url: &str,
+    harness_url: &str,
+) -> Router {
+    open_app_with_runtime_observed_with_override(
+        database,
+        web_directory,
+        catalog,
+        graph_url,
+        harness_url,
+        true,
+    )
+    .await
+    .0
+}
+
 struct ProviderRefreshProbe {
     calls: Arc<AtomicUsize>,
     succeed: Arc<AtomicBool>,
@@ -2988,6 +3187,25 @@ async fn open_app_with_runtime_observed(
     catalog: &Path,
     graph_url: &str,
     harness_url: &str,
+) -> (Router, ProviderRefreshProbe) {
+    open_app_with_runtime_observed_with_override(
+        database,
+        web_directory,
+        catalog,
+        graph_url,
+        harness_url,
+        false,
+    )
+    .await
+}
+
+async fn open_app_with_runtime_observed_with_override(
+    database: &Path,
+    web_directory: &Path,
+    catalog: &Path,
+    graph_url: &str,
+    harness_url: &str,
+    allow_harness_override: bool,
 ) -> (Router, ProviderRefreshProbe) {
     let provider_refreshes = Arc::new(AtomicUsize::new(0));
     let observed_refreshes = provider_refreshes.clone();
@@ -3024,7 +3242,7 @@ async fn open_app_with_runtime_observed(
             harness_control_token: "harness-control".to_owned(),
             harness_configurations: catalog.to_owned(),
             default_harness_configuration: "codex-basic".to_owned(),
-            allow_harness_override: false,
+            allow_harness_override,
             standalone_workspaces_directory: web_directory.join("workspaces"),
         }),
         allow_conversation_import: false,

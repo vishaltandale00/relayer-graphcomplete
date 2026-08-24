@@ -172,6 +172,12 @@ struct CreateInteractionRequest {
     text: String,
     #[serde(default)]
     invocation: Option<InteractionInvocation>,
+    #[serde(default = "default_mint_capability")]
+    mint_capability: bool,
+}
+
+fn default_mint_capability() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -196,10 +202,13 @@ async fn create_interaction(
             input.invocation,
         )
         .await?;
-    let graph_token = mint_capability(&state, interaction.id)?;
+    let graph_token = input
+        .mint_capability
+        .then(|| mint_capability(&state, interaction.id, None))
+        .transpose()?;
     Ok(Json(CreateInteractionResponse {
         node: interaction,
-        graph_token,
+        graph_token: graph_token.unwrap_or_default(),
     }))
 }
 
@@ -274,6 +283,8 @@ async fn control_action(
 #[serde(rename_all = "camelCase")]
 struct RemintCapabilityRequest {
     node_id: NodeId,
+    #[serde(default)]
+    graph_token: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -290,16 +301,32 @@ async fn remint_capability(
     require_bearer(&headers, &state.control_token)?;
     state.graph.writer_for_subgraph(input.node_id).await?;
     Ok(Json(RemintCapabilityResponse {
-        graph_token: mint_capability(&state, input.node_id)?,
+        graph_token: mint_capability(&state, input.node_id, input.graph_token)?,
     }))
 }
 
-fn mint_capability(state: &ServerState, node_id: NodeId) -> Result<String, ApiError> {
-    let graph_token = Uuid::new_v4().to_string();
+fn mint_capability(
+    state: &ServerState,
+    node_id: NodeId,
+    requested_token: Option<String>,
+) -> Result<String, ApiError> {
+    let graph_token = requested_token.unwrap_or_else(|| Uuid::new_v4().to_string());
+    if graph_token.is_empty() {
+        return Err(ApiError::invalid("graphToken must be non-empty"));
+    }
     let mut sessions = state
         .sessions
         .lock()
         .map_err(|_| ApiError::internal("session lock poisoned"))?;
+    if let Some(active_node_id) = sessions.get(&graph_token) {
+        if *active_node_id != node_id {
+            return Err(ApiError::conflict(
+                "capability_token_conflict",
+                "graphToken is already bound to a different interaction",
+            ));
+        }
+        return Ok(graph_token);
+    }
     sessions.retain(|_, active_node_id| *active_node_id != node_id);
     sessions.insert(graph_token.clone(), node_id);
     Ok(graph_token)
@@ -308,7 +335,10 @@ fn mint_capability(state: &ServerState, node_id: NodeId) -> Result<String, ApiEr
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RevokeCapabilityRequest {
-    graph_token: String,
+    #[serde(default)]
+    graph_token: Option<String>,
+    #[serde(default)]
+    node_id: Option<NodeId>,
 }
 
 async fn revoke_capability(
@@ -317,13 +347,26 @@ async fn revoke_capability(
     Json(input): Json<RevokeCapabilityRequest>,
 ) -> Result<Json<Value>, ApiError> {
     require_bearer(&headers, &state.control_token)?;
-    let revoked = state
+    let mut sessions = state
         .sessions
         .lock()
-        .map_err(|_| ApiError::internal("session lock poisoned"))?
-        .remove(&input.graph_token)
-        .is_some();
-    Ok(Json(json!({"revoked": revoked})))
+        .map_err(|_| ApiError::internal("session lock poisoned"))?;
+    let revoked = match (input.graph_token, input.node_id) {
+        (Some(graph_token), None) => sessions.remove(&graph_token).is_some() as usize,
+        (None, Some(node_id)) => {
+            let before = sessions.len();
+            sessions.retain(|_, active_node_id| *active_node_id != node_id);
+            before - sessions.len()
+        }
+        _ => {
+            return Err(ApiError::invalid(
+                "provide exactly one of graphToken or nodeId",
+            ));
+        }
+    };
+    Ok(Json(
+        json!({"revoked": revoked > 0, "revokedCount": revoked}),
+    ))
 }
 
 async fn submit_node(
@@ -550,6 +593,20 @@ fn session(state: &ServerState, headers: &HeaderMap) -> Result<NodeId, ApiError>
 
 pub struct ApiError(StatusCode, Value);
 impl ApiError {
+    fn invalid(message: &str) -> Self {
+        Self(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            json!({"error":{"code":"invalid_request","message":message}}),
+        )
+    }
+
+    fn conflict(code: &str, message: &str) -> Self {
+        Self(
+            StatusCode::CONFLICT,
+            json!({"error":{"code":code,"message":message}}),
+        )
+    }
+
     fn internal(message: &str) -> Self {
         Self(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -734,6 +791,138 @@ mod tests {
             .unwrap()
             .to_owned();
         assert_eq!(node_id, body.node.id);
+    }
+
+    #[tokio::test]
+    async fn product_can_bind_before_mint_and_invalidate_a_crash_surviving_node_token() {
+        let state = ServerState::new(GraphDatabase::in_memory().await.unwrap(), "control");
+        let app = router(state.clone());
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/interactions")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(
+                        r#"{"threadId":73,"text":"hello","mintCapability":false}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let created: CreateInteractionResponse =
+            serde_json::from_slice(&to_bytes(created.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert!(created.graph_token.is_empty());
+        assert!(state.sessions.lock().unwrap().is_empty());
+
+        let token = "product-chosen-crash-token";
+        let minted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/capabilities")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(format!(
+                        r#"{{"nodeId":{},"graphToken":"{token}"}}"#,
+                        created.node.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(minted.status(), StatusCode::OK);
+
+        let repeated = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/capabilities")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(format!(
+                        r#"{{"nodeId":{},"graphToken":"{token}"}}"#,
+                        created.node.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(repeated.status(), StatusCode::OK);
+
+        let second = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/interactions")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(
+                        r#"{"threadId":74,"text":"second","mintCapability":false}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let second: CreateInteractionResponse =
+            serde_json::from_slice(&to_bytes(second.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        let conflict = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/capabilities")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(format!(
+                        r#"{{"nodeId":{},"graphToken":"{token}"}}"#,
+                        second.node.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(conflict.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            state.sessions.lock().unwrap().get(token),
+            Some(&created.node.id)
+        );
+
+        let invalidated = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/control/capabilities")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(format!(
+                        r#"{{"nodeId":{}}}"#,
+                        created.node.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalidated.status(), StatusCode::OK);
+        let rejected = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/graph/nodes/{}", created.node.id.value()))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -1146,7 +1335,7 @@ mod tests {
             .await
             .unwrap();
         let state = ServerState::new(graph, "control");
-        let graph_token = mint_capability(&state, interaction.id).ok().unwrap();
+        let graph_token = mint_capability(&state, interaction.id, None).ok().unwrap();
         let app = router(state);
 
         let older = app
@@ -1258,7 +1447,7 @@ mod tests {
         writer.complete(interaction.id).await.unwrap();
 
         let state = ServerState::new(graph, "control");
-        let graph_token = mint_capability(&state, interaction.id).ok().unwrap();
+        let graph_token = mint_capability(&state, interaction.id, None).ok().unwrap();
         let app = router(state);
         let readable = app
             .clone()

@@ -4,7 +4,7 @@ mod error;
 mod model_settings;
 mod projects;
 mod state;
-mod threads;
+pub(crate) mod threads;
 mod types;
 
 use crate::provider_catalog_refresh::ProviderCatalogRefreshClient;

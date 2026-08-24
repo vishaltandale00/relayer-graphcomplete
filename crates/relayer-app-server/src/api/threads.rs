@@ -32,6 +32,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub(crate) const RECONCILIATION_PENDING_PREFIX: &str = "Canonical reconciliation pending:";
+const LIVE_RECONCILIATION_ATTEMPTS: u64 = 4;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct CreateThreadRequest {
@@ -249,13 +252,16 @@ pub(super) async fn get(
 ) -> Result<Json<ThreadDetailResponse>, ApiError> {
     authorize_read(&state, &headers)?;
     let mut detail = state.product.get_thread(ThreadId::try_from(id)?).await?;
-    refresh_accepted_outputs(
+    let stale = refresh_accepted_outputs(
+        &state.product,
         state.runtime.as_ref(),
         &mut detail.interactions,
         &detail.action_invocations,
     )
     .await;
-    Ok(Json(detail.into()))
+    let mut response: ThreadDetailResponse = detail.into();
+    response.mark_stale_interactions(&stale);
+    Ok(Json(response))
 }
 
 pub(super) async fn export(
@@ -297,13 +303,25 @@ pub(super) async fn list_interactions(
 ) -> Result<Json<InteractionsResponse>, ApiError> {
     authorize_read(&state, &headers)?;
     let mut detail = state.product.get_thread(ThreadId::try_from(id)?).await?;
-    refresh_accepted_outputs(
+    let stale = refresh_accepted_outputs(
+        &state.product,
         state.runtime.as_ref(),
         &mut detail.interactions,
         &detail.action_invocations,
     )
     .await;
-    let interactions = detail.interactions.into_iter().map(Into::into).collect();
+    let interactions = detail
+        .interactions
+        .into_iter()
+        .map(|interaction| {
+            let id = interaction.id.value();
+            let mut response: InteractionResponse = interaction.into();
+            if stale.contains(&id) {
+                response.mark_projection_stale();
+            }
+            response
+        })
+        .collect();
     Ok(Json(InteractionsResponse { interactions }))
 }
 
@@ -423,10 +441,13 @@ pub(super) async fn get_action_destination(
             "GraphComplete returned a mismatched action destination layer",
         ));
     }
-    let destination = state
+    let mut destination = state
         .product
         .get_interaction_by_graph_node_id(layer_owner.owner_interaction_node_id)
         .await?;
+    if is_reconciliation_pending(&destination) {
+        reconcile_quarantined_interaction(&state.product, runtime, &mut destination).await?;
+    }
     if destination.completion_status != "accepted" {
         return Err(ApiError::invalid(
             "invoke action destination is not accepted",
@@ -461,46 +482,161 @@ pub(super) async fn get_action_destination(
 }
 
 pub(super) async fn refresh_accepted_outputs(
+    product: &crate::product::ProductService,
     runtime: Option<&crate::runtime::RuntimeClient>,
     interactions: &mut [Interaction],
     action_invocations: &[crate::product::ActionInvocation],
-) {
-    let Some(runtime) = runtime else { return };
+) -> std::collections::HashSet<i64> {
+    let mut stale = std::collections::HashSet::new();
+    let invoked_source_interaction_ids = action_invocations
+        .iter()
+        .map(|invocation| invocation.source_interaction_id.value())
+        .collect::<std::collections::HashSet<_>>();
     let invoked_action_ids = action_invocations
         .iter()
         .map(|invocation| invocation.action_id)
         .collect::<std::collections::HashSet<_>>();
-    if invoked_action_ids.is_empty() {
-        return;
-    }
     for interaction in interactions {
+        if is_reconciliation_pending(interaction) {
+            match runtime {
+                Some(runtime) => {
+                    if reconcile_quarantined_interaction(product, runtime, interaction)
+                        .await
+                        .is_err()
+                    {
+                        stale.insert(interaction.id.value());
+                    }
+                }
+                None => {
+                    stale.insert(interaction.id.value());
+                }
+            }
+        }
         let Some(graph_node_id) = interaction.graph_node_id else {
             continue;
         };
         if interaction.completion_status != "accepted" {
             continue;
         }
-        let contains_invoked_root_action = interaction
-            .completion_output
-            .as_ref()
-            .and_then(|output| output.pointer("/rootLayer/actions"))
-            .and_then(Value::as_array)
-            .is_some_and(|actions| {
-                actions.iter().any(|action| {
-                    action
-                        .get("id")
-                        .and_then(Value::as_i64)
-                        .is_some_and(|id| invoked_action_ids.contains(&id))
-                })
-            });
-        if !contains_invoked_root_action {
+        if !invoked_source_interaction_ids.contains(&interaction.id.value())
+            && !interaction
+                .completion_output
+                .as_ref()
+                .is_some_and(|output| output_contains_invoke_action(output, &invoked_action_ids))
+        {
             continue;
         }
-        if let Ok(Some(output)) = runtime.completion_output(graph_node_id).await
-            && output.get("nodeId").and_then(Value::as_i64) == Some(graph_node_id)
-        {
-            interaction.completion_output = Some(output);
+        match runtime {
+            Some(runtime) => match runtime.completion_output(graph_node_id).await {
+                Ok(Some(output))
+                    if output.get("nodeId").and_then(Value::as_i64) == Some(graph_node_id) =>
+                {
+                    interaction.completion_output = Some(output);
+                }
+                _ => {
+                    stale.insert(interaction.id.value());
+                }
+            },
+            None => {
+                stale.insert(interaction.id.value());
+            }
         }
+    }
+    stale
+}
+
+fn is_reconciliation_pending(interaction: &Interaction) -> bool {
+    interaction.completion_status == "failed"
+        && interaction
+            .completion_error
+            .as_deref()
+            .is_some_and(|error| error.starts_with(RECONCILIATION_PENDING_PREFIX))
+}
+
+async fn reconcile_quarantined_interaction(
+    product: &crate::product::ProductService,
+    runtime: &crate::runtime::RuntimeClient,
+    interaction: &mut Interaction,
+) -> Result<(), RuntimeError> {
+    let graph_node_id = interaction.graph_node_id.ok_or_else(|| {
+        RuntimeError::Protocol("quarantined interaction has no graph binding".into())
+    })?;
+    runtime.invalidate_node_capabilities(graph_node_id).await?;
+    let output = runtime
+        .completion_output(graph_node_id)
+        .await?
+        .ok_or_else(|| RuntimeError::Protocol("canonical completion is not accepted yet".into()))?;
+    if output.get("nodeId").and_then(Value::as_i64) != Some(graph_node_id) {
+        return Err(RuntimeError::Protocol(
+            "canonical completion output node mismatch".into(),
+        ));
+    }
+    let metadata = runtime.interaction_metadata(graph_node_id).await?;
+    let expected = product
+        .invocation_graph_source(interaction.id)
+        .await
+        .map_err(|error| {
+            RuntimeError::Protocol(format!(
+                "cannot read product invocation provenance: {error}"
+            ))
+        })?;
+    let expected =
+        expected.map(
+            |(source_interaction_node_id, source_action_id)| PreparedInvocation {
+                source_interaction_node_id,
+                source_action_id,
+            },
+        );
+    if metadata.node_id != graph_node_id || metadata.invocation != expected {
+        return Err(RuntimeError::Protocol(
+            "graph interaction lease provenance does not match product history".into(),
+        ));
+    }
+    if product
+        .recover_interaction_accepted(interaction.id, &output)
+        .await
+        .map_err(|error| RuntimeError::Protocol(error.to_string()))?
+    {
+        interaction.completion_status = "accepted".into();
+        interaction.completion_output = Some(output);
+        interaction.completion_error = None;
+        return Ok(());
+    }
+    let current = product
+        .get_interaction(interaction.id)
+        .await
+        .map_err(|error| RuntimeError::Protocol(error.to_string()))?;
+    if current.completion_status == "accepted"
+        && current.graph_node_id == Some(graph_node_id)
+        && current.completion_output.as_ref() == Some(&output)
+    {
+        *interaction = current;
+        return Ok(());
+    }
+    Err(RuntimeError::Protocol(
+        "product interaction changed before canonical promotion".into(),
+    ))
+}
+
+fn output_contains_invoke_action(
+    value: &Value,
+    invoked_action_ids: &std::collections::HashSet<i64>,
+) -> bool {
+    match value {
+        Value::Object(object) => {
+            (object.get("kind").and_then(Value::as_str) == Some("invoke")
+                && object
+                    .get("id")
+                    .and_then(Value::as_i64)
+                    .is_some_and(|id| invoked_action_ids.contains(&id)))
+                || object
+                    .values()
+                    .any(|value| output_contains_invoke_action(value, invoked_action_ids))
+        }
+        Value::Array(values) => values
+            .iter()
+            .any(|value| output_contains_invoke_action(value, invoked_action_ids)),
+        _ => false,
     }
 }
 
@@ -945,6 +1081,15 @@ async fn prepare_and_claim_interaction(
         runtime.discard_prepared(prepared).await?;
         return Ok(None);
     }
+    if let Err(error) = runtime.activate_prepared(&prepared).await {
+        let cleanup = runtime.discard_prepared(prepared).await;
+        return Err(match cleanup {
+            Ok(()) => error.into(),
+            Err(cleanup) => ApiError::internal(&format!(
+                "{RECONCILIATION_PENDING_PREFIX} could not activate prepared interaction: {error}; capability cleanup also failed: {cleanup}"
+            )),
+        });
+    }
     Ok(Some(prepared))
 }
 
@@ -1145,10 +1290,7 @@ async fn execute_prepared_interaction(
             )
             .await
             {
-                eprintln!(
-                    "could not verify canonical interaction {} after completion: {error}; leaving it nonterminal for startup recovery",
-                    interaction.id
-                );
+                record_reconciliation_pending(&state, &thread, &interaction, &error).await;
                 return;
             }
             if completion.permission_profile_id != thread.permission_profile_id {
@@ -1177,16 +1319,34 @@ async fn execute_prepared_interaction(
                 })
                 .await
             {
-                eprintln!(
-                    "could not persist accepted interaction {}: {error}",
-                    interaction.id
-                );
+                record_reconciliation_pending(
+                    &state,
+                    &thread,
+                    &interaction,
+                    &format!("could not persist accepted interaction: {error}"),
+                )
+                .await;
             }
         }
         Err(error) => {
-            if let Some(output) =
-                wait_for_completion_output(runtime, prepared_graph_node_id, interaction.id).await
+            if let Err(invalidation_error) = runtime
+                .invalidate_node_capabilities(prepared_graph_node_id)
+                .await
             {
+                record_reconciliation_pending(
+                    &state,
+                    &thread,
+                    &interaction,
+                    &format!(
+                        "runtime failed ({error}); node capability invalidation failed: {invalidation_error}"
+                    ),
+                )
+                .await;
+                return;
+            }
+            let recovered_output =
+                wait_for_completion_output(runtime, prepared_graph_node_id, interaction.id).await;
+            if let Ok(Some(output)) = recovered_output {
                 if let Err(verify_error) = verify_canonical_interaction(
                     runtime,
                     prepared_graph_node_id,
@@ -1195,10 +1355,13 @@ async fn execute_prepared_interaction(
                 )
                 .await
                 {
-                    eprintln!(
-                        "could not verify interaction {} after runtime failure ({error}): {verify_error}; leaving it nonterminal for startup recovery",
-                        interaction.id
-                    );
+                    record_reconciliation_pending(
+                        &state,
+                        &thread,
+                        &interaction,
+                        &format!("runtime failed ({error}); {verify_error}"),
+                    )
+                    .await;
                     return;
                 }
                 match state.product.get_interaction(interaction.id).await {
@@ -1232,10 +1395,13 @@ async fn execute_prepared_interaction(
                             }
                         };
                         if let Err(persistence_error) = accepted {
-                            eprintln!(
-                                "could not reconcile accepted interaction {} after runtime response loss: {persistence_error}",
-                                interaction.id
-                            );
+                            record_reconciliation_pending(
+                                &state,
+                                &thread,
+                                &interaction,
+                                &persistence_error.to_string(),
+                            )
+                            .await;
                         }
                         return;
                     }
@@ -1248,7 +1414,24 @@ async fn execute_prepared_interaction(
                     }
                 }
             }
-            record_background_failure(&state, &thread, &interaction, error.to_string()).await;
+            match recovered_output {
+                Ok(None) => {
+                    record_background_failure(&state, &thread, &interaction, error.to_string())
+                        .await;
+                }
+                Err(read_error) => {
+                    record_reconciliation_pending(
+                        &state,
+                        &thread,
+                        &interaction,
+                        &format!(
+                            "runtime failed ({error}); canonical output read failed: {read_error}"
+                        ),
+                    )
+                    .await;
+                }
+                Ok(Some(_)) => unreachable!("accepted output returned above"),
+            }
         }
     }
 }
@@ -1268,7 +1451,7 @@ async fn verify_canonical_interaction(
     let metadata = loop {
         match runtime.interaction_metadata(graph_node_id).await {
             Ok(metadata) => break metadata,
-            Err(error) => {
+            Err(error) if attempt + 1 < LIVE_RECONCILIATION_ATTEMPTS => {
                 attempt += 1;
                 eprintln!(
                     "canonical metadata read failed for graph interaction {graph_node_id}: {error}; retrying"
@@ -1276,6 +1459,7 @@ async fn verify_canonical_interaction(
                 tokio::time::sleep(std::time::Duration::from_millis((attempt * 25).min(1_000)))
                     .await;
             }
+            Err(error) => return Err(error.to_string()),
         }
     };
     if metadata.node_id != graph_node_id || metadata.invocation != expected_invocation {
@@ -1288,18 +1472,51 @@ async fn wait_for_completion_output(
     runtime: &crate::runtime::RuntimeClient,
     graph_node_id: i64,
     product_interaction_id: InteractionId,
-) -> Option<Value> {
+) -> Result<Option<Value>, RuntimeError> {
     let mut attempt = 0_u64;
     loop {
         match runtime.completion_output(graph_node_id).await {
-            Ok(output) => return output,
-            Err(error) => {
+            Ok(output) => return Ok(output),
+            Err(error) if attempt + 1 < LIVE_RECONCILIATION_ATTEMPTS => {
                 attempt += 1;
                 eprintln!(
                     "canonical output read failed for product interaction {product_interaction_id}: {error}; retrying"
                 );
                 tokio::time::sleep(std::time::Duration::from_millis((attempt * 25).min(1_000)))
                     .await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+async fn record_reconciliation_pending(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: &Interaction,
+    error: &str,
+) {
+    let error = format!("{RECONCILIATION_PENDING_PREFIX} {error}");
+    for attempt in 1..=LIVE_RECONCILIATION_ATTEMPTS {
+        match state
+            .product
+            .fail_interaction_completion(interaction.id, &thread.harness_configuration_name, &error)
+            .await
+        {
+            Ok(_) => return,
+            Err(persistence_error) if attempt < LIVE_RECONCILIATION_ATTEMPTS => {
+                eprintln!(
+                    "could not quarantine interaction {}: {persistence_error}; retrying",
+                    interaction.id
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(attempt * 25)).await;
+            }
+            Err(persistence_error) => {
+                eprintln!(
+                    "could not quarantine interaction {} after bounded retries: {persistence_error}; original failure: {error}",
+                    interaction.id
+                );
+                return;
             }
         }
     }

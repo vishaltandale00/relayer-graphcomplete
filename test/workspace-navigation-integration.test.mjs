@@ -238,6 +238,45 @@ describe("workspace navigation integration", () => {
     expect(controller.viewState).toMatchObject({ currentThreadId: 30, currentInteractionId: 3 });
   });
 
+  it("lets a newer Back intent cancel a pending resolved invoke navigation", async () => {
+    const previous = interaction(1, 5, rootLayer(51, 6));
+    const sourceLayer = rootLayer(101, 11);
+    const action = { id: 501, kind: "invoke", sourceNodeId: 11, targetLayerId: 201 };
+    sourceLayer.actions = [action];
+    const source = interaction(2, 10, sourceLayer);
+    const threads = [{ id: 5, title: "Previous" }, { id: 10, title: "Source" }];
+    const destinationRead = deferred();
+    requestImplementation = vi.fn(async (path) => {
+      if (path.startsWith("/api/state?threadId=5")) return productState(threads, [previous]);
+      if (path.startsWith("/api/state?threadId=10")) return productState(threads, [source]);
+      if (path.endsWith("/actions/501/destination")) return destinationRead.promise;
+      if (path === "/api/threads/5") {
+        return { thread: threads[0], interactions: [previous], actionInvocations: [] };
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(5);
+    await controller.loadThread(10);
+
+    const pendingInvoke = controller.navigateResolvedInvoke(action);
+    expect(controller.getNavigationHistory().pendingResolvedInvokeNavigation).toBe(true);
+    const pendingBack = controller.navigateHistory("back");
+    await expect(pendingBack).resolves.toMatchObject({ threadId: "5", turnId: "1" });
+    destinationRead.resolve({
+      actionId: 501,
+      actionKind: "invoke",
+      targetLayerId: 201,
+      threadId: 20,
+      interactionId: 3,
+      rootLayerId: 201,
+    });
+
+    await expect(pendingInvoke).resolves.toBe(false);
+    expect(controller.getNavigationHistory().pendingResolvedInvokeNavigation).toBe(false);
+    expect(controller.viewState).toMatchObject({ currentThreadId: 5, currentInteractionId: 1 });
+  });
+
   it("cancels a pending restoration without re-rendering when the shell takes focus", async () => {
     const turn1 = interaction(1, 10, rootLayer(101, 11));
     const turn2 = interaction(2, 20, rootLayer(201, 21));
@@ -340,6 +379,82 @@ describe("workspace navigation integration", () => {
       targetLayerId: 303,
     });
     expect(layerReads).toBe(2);
+  });
+
+  it("retries a one-shot canonical root failure after the result is already terminal", async () => {
+    vi.useFakeTimers();
+    try {
+      const staleRoot = rootLayer(101, 11);
+      staleRoot.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: null }];
+      const canonicalRoot = rootLayer(101, 11);
+      canonicalRoot.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: 303 }];
+      const source = interaction(1, 10, staleRoot);
+      const state = productState([{ id: 10, title: "Source" }], [source]);
+      state.actionInvocations = [{ sourceInteractionId: 1, actionId: 777, resultInteractionId: 2 }];
+      let layerReads = 0;
+      requestImplementation = vi.fn(async (path) => {
+        if (path.startsWith("/api/state?threadId=10")) return state;
+        if (path.endsWith("/layers/101")) {
+          layerReads += 1;
+          if (layerReads === 1) throw new Error("one-shot graph read failure");
+          return canonicalRoot;
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const controller = await loadModules();
+
+      await controller.loadThread(10);
+      expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBeNull();
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBe(303);
+      expect(layerReads).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a one-shot canonical nested-layer failure after the result is terminal", async () => {
+    vi.useFakeTimers();
+    try {
+      const root = rootLayer(101, 11);
+      root.actions = [{ id: 501, kind: "navigate", sourceNodeId: 11, targetLayerId: 102 }];
+      const staleChild = rootLayer(102, 12);
+      staleChild.actions = [{ id: 777, kind: "invoke", sourceNodeId: 12, targetLayerId: null }];
+      const canonicalChild = rootLayer(102, 12);
+      canonicalChild.actions = [{ id: 777, kind: "invoke", sourceNodeId: 12, targetLayerId: 303 }];
+      const source = interaction(1, 10, root);
+      const initial = productState([{ id: 10, title: "Source" }], [source]);
+      const resolved = productState([{ id: 10, title: "Source" }], [source]);
+      resolved.actionInvocations = [{ sourceInteractionId: 1, actionId: 777, resultInteractionId: 2 }];
+      let stateReads = 0;
+      let layerReads = 0;
+      requestImplementation = vi.fn(async (path) => {
+        if (path.startsWith("/api/state?threadId=10")) {
+          stateReads += 1;
+          return stateReads === 1 ? initial : resolved;
+        }
+        if (path.endsWith("/layers/102")) {
+          layerReads += 1;
+          if (layerReads === 1) return staleChild;
+          if (layerReads === 2) throw new Error("one-shot nested graph read failure");
+          return canonicalChild;
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const controller = await loadModules();
+      await controller.loadThread(10);
+      await controller.navigateLayer(102, { action: root.actions[0], sourceNode: root.nodes[0] });
+
+      await controller.refreshState(10);
+      expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBeNull();
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBe(303);
+      expect(layerReads).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not let a slow nested invoke refresh clobber a newer thread selection", async () => {

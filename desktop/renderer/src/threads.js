@@ -69,6 +69,7 @@ const navigationHistory = createNavigationHistory({
 let pendingHistoryTransition = null;
 const refreshGate = createLatestRequestGate();
 const resolvedInvokeNavigationGate = createLatestRequestGate();
+let pendingResolvedInvokeNavigation = false;
 
 export function updateCreateThreadAvailability() {
   $("#createThread").disabled = creatingFirstThread
@@ -135,15 +136,19 @@ function cancelPendingRefresh() {
   refreshGate.invalidate();
 }
 
-function layerContainsInvokedAction(layer, invocations = appState.actionInvocations) {
+function layerContainsUnresolvedInvokedAction(layer, invocations = appState.actionInvocations) {
   const invokedActionIds = new Set(invocations.map(({ actionId }) => String(actionId)));
-  return layer?.actions?.some(({ id }) => invokedActionIds.has(String(id))) ?? false;
+  return layer?.actions?.some(({ id, kind, targetLayerId }) => (
+    kind === "invoke"
+    && targetLayerId == null
+    && invokedActionIds.has(String(id))
+  )) ?? false;
 }
 
 function invalidateResolvedInvokeLayerCache(invocations) {
   for (const identity of acceptedLayerCache.identities()) {
     const layer = acceptedLayerCache.get(identity);
-    if (layerContainsInvokedAction(layer, invocations)) acceptedLayerCache.delete(identity);
+    if (layerContainsUnresolvedInvokedAction(layer, invocations)) acceptedLayerCache.delete(identity);
   }
 }
 
@@ -156,7 +161,10 @@ function supersedePendingHistory({
   navigationHistory.cancelPending();
   pendingHistoryTransition = null;
   if (presentationChanged) cancelPendingRefresh();
-  if (presentationChanged) resolvedInvokeNavigationGate.invalidate();
+  if (presentationChanged) {
+    resolvedInvokeNavigationGate.invalidate();
+    pendingResolvedInvokeNavigation = false;
+  }
   if (cancelLayerNavigation) layerNavigationCoordinator.cancel();
   if (wasPending && renderAfterCancel) renderThread();
 }
@@ -165,15 +173,20 @@ export function cancelNavigationHistory() {
   supersedePendingHistory({ presentationChanged: true, renderAfterCancel: false });
 }
 
-function schedulePendingRefresh(threadId) {
+function schedulePendingRefresh(threadId, { force = false } = {}) {
   clearTimeout(pendingRefreshTimer);
   pendingRefreshTimer = undefined;
   const thread = appState.threads.find((candidate) => String(candidate.id) === String(threadId));
-  const hasPendingInteraction = shouldPollThreadInteractions(thread, appState.interactions);
-  if (!threadId || !hasPendingInteraction) return;
+  if (!threadId || !thread || thread.imported === true) return;
+  const hasPendingInteraction = shouldPollThreadInteractions(thread, appState.interactions)
+    || appState.interactions.some((interaction) => (
+    String(interaction.threadId) === String(threadId)
+    && interaction.projectionFresh === false
+  ));
+  if (!force && !hasPendingInteraction) return;
   pendingRefreshTimer = setTimeout(() => {
     if (String(viewState.currentThreadId) !== String(threadId)) return;
-    void refreshState(threadId).catch(() => schedulePendingRefresh(threadId));
+    void refreshState(threadId).catch(() => schedulePendingRefresh(threadId, { force }));
   }, PENDING_REFRESH_INTERVAL_MS);
 }
 
@@ -217,13 +230,12 @@ export async function refreshState(
     previousVisibleLayer,
     selected,
   );
-  const refreshedRootLayerId = selected?.completionOutput?.rootLayer?.layer?.id;
   const visibleLayerId = refreshedVisibleLayer?.layer?.id;
+  let canonicalRefreshFailed = false;
   if (
     selected
     && visibleLayerId != null
-    && String(visibleLayerId) !== String(refreshedRootLayerId)
-    && layerContainsInvokedAction(refreshedVisibleLayer, nextActionInvocations)
+    && layerContainsUnresolvedInvokedAction(refreshedVisibleLayer, nextActionInvocations)
   ) {
     const identity = {
       threadId: nextThreadId,
@@ -242,6 +254,9 @@ export async function refreshState(
       acceptedLayerCache.set(identity, canonicalLayer);
     } catch {
       // Preserve the last durable presentation if the local graph read is temporarily unavailable.
+      // The product interaction may already be terminal, so retain an explicit client retry
+      // responsibility instead of relying only on completion-status polling.
+      canonicalRefreshFailed = true;
     }
   }
   if (
@@ -262,7 +277,7 @@ export async function refreshState(
   if (viewState.mainView === "settings") setMainView("settings");
   else if (viewState.currentThreadId) renderThread();
   else setMainView("new");
-  schedulePendingRefresh(viewState.currentThreadId);
+  schedulePendingRefresh(viewState.currentThreadId, { force: canonicalRefreshFailed });
   return true;
 }
 
@@ -483,43 +498,51 @@ export async function navigateResolvedInvoke(action) {
   const sourceLocationKey = navigationEntryKey(sourceEntry);
   supersedePendingHistory({ presentationChanged: true });
   const requestToken = resolvedInvokeNavigationGate.begin();
-  const destination = await request(
-    `/api/threads/${encodeURIComponent(sourceThreadId)}/interactions/${encodeURIComponent(sourceInteractionId)}/actions/${encodeURIComponent(action.id)}/destination`,
-  );
-  if (
-    !resolvedInvokeNavigationGate.isCurrent(requestToken)
-    || !currentNavigationEntry()
-    || navigationEntryKey(currentNavigationEntry()) !== sourceLocationKey
-  ) return false;
-  if (
-    String(destination.actionId) !== String(action.id)
-    || destination.actionKind !== "invoke"
-    || String(destination.targetLayerId) !== String(action.targetLayerId)
-    || String(destination.rootLayerId) !== String(action.targetLayerId)
-  ) throw new Error("Resolved invoke destination did not match the selected graph action.");
-  const resolved = await resolveNavigationPresentation({
-    threadId: destination.threadId,
-    turnId: destination.interactionId,
-    navigationPath: [{ layerId: destination.rootLayerId, viaActionId: null }],
-    selectedNodeId: null,
-  }, {
-    loadThread: (threadId) => request(`/api/threads/${encodeURIComponent(threadId)}`),
-    loadLayer: ({ threadId, turnId, layerId }) => request(
-      `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`,
-    ),
-    layerCache: acceptedLayerCache,
-  });
-  if (
-    !resolvedInvokeNavigationGate.isCurrent(requestToken)
-    || !currentNavigationEntry()
-    || navigationEntryKey(currentNavigationEntry()) !== sourceLocationKey
-  ) return false;
-  refreshGate.invalidate();
-  layerNavigationCoordinator.cancel();
-  applyResolvedPresentation(resolved);
-  recordCurrentNavigation("push");
-  schedulePendingRefresh(viewState.currentThreadId);
-  return true;
+  pendingResolvedInvokeNavigation = true;
+  try {
+    const destination = await request(
+      `/api/threads/${encodeURIComponent(sourceThreadId)}/interactions/${encodeURIComponent(sourceInteractionId)}/actions/${encodeURIComponent(action.id)}/destination`,
+    );
+    if (
+      !resolvedInvokeNavigationGate.isCurrent(requestToken)
+      || !currentNavigationEntry()
+      || navigationEntryKey(currentNavigationEntry()) !== sourceLocationKey
+    ) return false;
+    if (
+      String(destination.actionId) !== String(action.id)
+      || destination.actionKind !== "invoke"
+      || String(destination.targetLayerId) !== String(action.targetLayerId)
+      || String(destination.rootLayerId) !== String(action.targetLayerId)
+    ) throw new Error("Resolved invoke destination did not match the selected graph action.");
+    const resolved = await resolveNavigationPresentation({
+      threadId: destination.threadId,
+      turnId: destination.interactionId,
+      navigationPath: [{ layerId: destination.rootLayerId, viaActionId: null }],
+      selectedNodeId: null,
+    }, {
+      loadThread: (threadId) => request(`/api/threads/${encodeURIComponent(threadId)}`),
+      loadLayer: ({ threadId, turnId, layerId }) => request(
+        `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`,
+      ),
+      layerCache: acceptedLayerCache,
+    });
+    if (
+      !resolvedInvokeNavigationGate.isCurrent(requestToken)
+      || !currentNavigationEntry()
+      || navigationEntryKey(currentNavigationEntry()) !== sourceLocationKey
+    ) return false;
+    refreshGate.invalidate();
+    layerNavigationCoordinator.cancel();
+    applyResolvedPresentation(resolved);
+    recordCurrentNavigation("push");
+    schedulePendingRefresh(viewState.currentThreadId);
+    return true;
+  } finally {
+    if (resolvedInvokeNavigationGate.isCurrent(requestToken)) {
+      pendingResolvedInvokeNavigation = false;
+      renderThread();
+    }
+  }
 }
 
 export function getNavigationHistory() {
@@ -529,6 +552,7 @@ export function getNavigationHistory() {
     canGoBack: Boolean(back),
     canGoForward: Boolean(forward),
     pendingDirection: pendingHistoryTransition?.direction ?? null,
+    pendingResolvedInvokeNavigation,
     backLabel: navigationDestinationLabel("back", back?.metadata),
     forwardLabel: navigationDestinationLabel("forward", forward?.metadata),
   });
@@ -637,6 +661,10 @@ export async function navigateHistory(deltaOrDirection) {
   if (!Number.isInteger(delta) || delta === 0) {
     throw new Error("History navigation requires a non-zero integer delta.");
   }
+  // History is a newer user navigation intent than any resolved-invoke lookup
+  // already in flight. Invalidate it before capturing or restoring history.
+  resolvedInvokeNavigationGate.invalidate();
+  pendingResolvedInvokeNavigation = false;
   recordCurrentNavigation();
   const transition = navigationHistory.go(delta);
   if (!transition) throw new Error(`History delta ${delta} is outside the workspace history.`);

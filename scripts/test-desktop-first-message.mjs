@@ -341,13 +341,41 @@ async function run() {
       : false;
   });
   const invokedResult = invokedDetail.interactions.find((interaction) => interaction.id !== sourceInteraction.id);
+  const canonicalSourceDetail = await productRequest(productSession, `/api/threads/${threadId}`);
+  const canonicalSource = canonicalSourceDetail.interactions.find((interaction) => (
+    String(interaction.id) === String(sourceInteraction.id)
+  ));
+  const canonicalInvoke = canonicalSource?.completionOutput?.rootLayer?.actions?.find((action) => (
+    String(action.id) === String(invokeAction.id)
+  ));
+  const invokedRootLayerId = invokedResult?.completionOutput?.rootLayer?.layer?.id;
+  if (
+    canonicalInvoke?.kind !== "invoke"
+    || canonicalInvoke.targetLayerId == null
+    || String(canonicalInvoke.targetLayerId) !== String(invokedRootLayerId)
+  ) {
+    throw new Error("The accepted source projection did not expose the invoked result root as its durable target.");
+  }
+  const canonicalDestination = await productRequest(
+    productSession,
+    `/api/threads/${threadId}/interactions/${sourceInteraction.id}/actions/${invokeAction.id}/destination`,
+  );
+  if (
+    String(canonicalDestination.interactionId) !== String(invokedResult.id)
+    || String(canonicalDestination.rootLayerId) !== String(invokedRootLayerId)
+    || String(canonicalDestination.targetLayerId) !== String(canonicalInvoke.targetLayerId)
+  ) {
+    throw new Error("The resolved invoke destination did not identify the accepted result interaction and root.");
+  }
   await waitFor("the visible source invoke to refresh as resolved navigation", () => webContents.executeJavaScript(`(() => {
     const button = document.querySelector('[data-action-id="${invokeAction.id}"]');
     return document.querySelector("#interactionText")?.textContent === "Show the deterministic task system."
       && !document.querySelector("#inspector")?.classList.contains("hidden")
       && document.querySelector("#detailTitle")?.textContent === "Results store"
       && Boolean(button && button.offsetParent !== null)
-      && button?.disabled === false;
+      && button?.disabled === false
+      && button?.dataset.reviewKind === "navigate-action"
+      && button?.dataset.reviewTargetLayerId === "${canonicalInvoke.targetLayerId}";
   })()`));
   invokeEvidencePaths.resolved = await captureEvidence(webContents, "03-resolved");
 
