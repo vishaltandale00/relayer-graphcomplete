@@ -6,7 +6,18 @@ import {
   type CodexAppServerSpawn,
   type CodexAppServerTurnOptions,
 } from "./codex-app-server.js";
-import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState, HarnessTraceSupport, JsonObject } from "../types.js";
+import type {
+  Harness,
+  HarnessFactory,
+  HarnessFactoryContext,
+  HarnessRunContext,
+  HarnessSessionState,
+  HarnessTraceSpan,
+  HarnessTraceSupport,
+  HarnessTraceTerminalStatus,
+  JsonObject,
+  JsonValue,
+} from "../types.js";
 
 export const CODEX_BASIC_KEY = "codex.basic";
 
@@ -41,6 +52,23 @@ interface ResolvedCodexPermission {
   readonly networkAccessEnabled?: boolean;
 }
 
+interface CodexTraceState {
+  readonly collaborationSpans: Map<string, HarnessTraceSpan>;
+}
+
+interface NormalizedCollaborationItem {
+  readonly providerItemId?: string;
+  readonly operation: "spawn_agent" | "send_input" | "resume_agent" | "wait" | "close_agent" | "unknown";
+  readonly providerOperation?: string;
+  readonly senderThreadId?: string;
+  readonly receiverThreadIds?: readonly string[];
+  readonly delegationPrompt?: string;
+  readonly model?: string;
+  readonly reasoningEffort?: JsonValue;
+  readonly agentStates?: JsonObject;
+  readonly status?: "in_progress" | "completed" | "failed";
+}
+
 export class CodexBasicHarness implements Harness {
   private readonly clientModuleUrl: string;
   private readonly resolved: ResolvedCodexConfiguration;
@@ -62,21 +90,26 @@ export class CodexBasicHarness implements Harness {
     const run = this.dependencies.runAppServerTurn ?? runCodexAppServerTurn;
     const prompt = this.prompt(context.inputGraph);
     context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
-    await run({
-      environment,
-      ...(this.dependencies.codexPathOverride === undefined ? {} : { codexPathOverride: this.dependencies.codexPathOverride }),
-      ...(this.codexThreadId === undefined ? {} : { savedThreadId: this.codexThreadId }),
-      threadParams: this.threadParams(model),
-      turnParams: this.turnParams(sandboxPolicy, model),
-      prompt,
-      approvals: context.approvals,
-      workingDirectory: this.context.workingDirectory,
-      sandboxPolicy,
-      ...(signal === undefined ? {} : { signal }),
-      ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
-      onThreadId: (threadId) => { this.codexThreadId = threadId; },
-      onNotification: (method, params) => traceCodexAppServerNotification(context, method, params),
-    });
+    const traceState: CodexTraceState = { collaborationSpans: new Map() };
+    try {
+      await run({
+        environment,
+        ...(this.dependencies.codexPathOverride === undefined ? {} : { codexPathOverride: this.dependencies.codexPathOverride }),
+        ...(this.codexThreadId === undefined ? {} : { savedThreadId: this.codexThreadId }),
+        threadParams: this.threadParams(model),
+        turnParams: this.turnParams(sandboxPolicy, model),
+        prompt,
+        approvals: context.approvals,
+        workingDirectory: this.context.workingDirectory,
+        sandboxPolicy,
+        ...(signal === undefined ? {} : { signal }),
+        ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
+        onThreadId: (threadId) => { this.codexThreadId = threadId; },
+        onNotification: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
+      });
+    } finally {
+      closeIncompleteCollaborationSpans(traceState);
+    }
   }
 
   traceSupport(): HarnessTraceSupport {
@@ -243,20 +276,28 @@ The graph service enforces exact provenance, target visibility, layer size, expa
   }
 }
 
-function traceCodexAppServerNotification(context: HarnessRunContext, method: string, params: unknown): void {
-  const data = redactTraceData(params) as JsonObject;
+function traceCodexAppServerNotification(context: HarnessRunContext, method: string, params: unknown, state: CodexTraceState): void {
+  const redactedParams = redactTraceData(params);
+  const data = isRecord(redactedParams) ? redactedParams : {};
   const item = isRecord(data.item) ? data.item : undefined;
-  const providerEventId = typeof item?.id === "string" ? item.id : undefined;
+  const providerEventId = optionalNonemptyString(item?.id);
   context.trace.emit({
     type: "provider.event",
     ...(providerEventId === undefined ? {} : { providerEventId }),
-    data: { provider: "codex", method, params: data },
+    data: { provider: "codex", method, params: redactedParams },
   });
+  try {
+    const phase = collaborationNotificationPhase(method);
+    if (phase !== undefined && item !== undefined && traceCodexCollaborationItem(context, phase, item, state.collaborationSpans)) return;
+  } catch {
+    // The raw provider event remains authoritative when a future or malformed shape cannot be normalized.
+  }
   if (method === "turn/started") {
     context.trace.emit({ type: "model.call.started", data: { provider: "codex" } });
     return;
   }
   if (method === "turn/completed") {
+    closeIncompleteCollaborationSpans(state);
     const turn = isRecord(data.turn) ? data.turn : {};
     const status = turn.status === "completed" ? "completed" : "failed";
     const usage = isRecord(turn.usage) ? turn.usage : isRecord(data.usage) ? data.usage : undefined;
@@ -277,8 +318,175 @@ function traceCodexAppServerNotification(context: HarnessRunContext, method: str
   }
 }
 
+function traceCodexCollaborationItem(
+  context: HarnessRunContext,
+  phase: "started" | "completed",
+  itemValue: JsonObject,
+  spans: Map<string, HarnessTraceSpan>,
+): boolean {
+  const item = normalizeCollaborationItem(itemValue);
+  if (item === undefined) return false;
+  const data = collaborationItemData(item);
+  const providerItemId = item.providerItemId;
+  if (providerItemId === undefined) {
+    context.trace.emit({
+      type: phase === "started" ? "tool.call.started" : "tool.call.completed",
+      data: { ...data, missingProviderItemId: true },
+    });
+    return true;
+  }
+  if (phase === "started") {
+    if (spans.has(providerItemId)) return true;
+    const span = context.trace.openSpan({
+      name: collaborationItemLabel(item.operation),
+      kind: "tool",
+      providerSpanId: providerItemId,
+    });
+    spans.set(providerItemId, span);
+    span.emit({ type: "tool.call.started", providerEventId: providerItemId, data });
+    return true;
+  }
+  const missingStart = !spans.has(providerItemId);
+  const span = spans.get(providerItemId) ?? context.trace.openSpan({
+    name: collaborationItemLabel(item.operation),
+    kind: "tool",
+    providerSpanId: providerItemId,
+  });
+  if (missingStart) {
+    span.emit({
+      type: "tool.call.started",
+      providerEventId: providerItemId,
+      data: { ...data, missingStart: true },
+    });
+  }
+  const terminalStatus: HarnessTraceTerminalStatus = item.status === "failed" ? "failed" : "completed";
+  span.emit({
+    type: "tool.call.completed",
+    providerEventId: providerItemId,
+    data: { ...data, ...(missingStart ? { missingStart: true } : {}) },
+  });
+  span.end(terminalStatus, missingStart ? { missingStart: true } : undefined);
+  spans.delete(providerItemId);
+  return true;
+}
+
+function closeIncompleteCollaborationSpans(state: CodexTraceState): void {
+  for (const [providerItemId, span] of state.collaborationSpans) {
+    try {
+      span.end("partial", { providerItemId, reason: "Codex collaboration operation did not report completion" });
+    } catch {
+      // Trace finalization is best effort and must not change completion behavior.
+    }
+  }
+  state.collaborationSpans.clear();
+}
+
+function normalizeCollaborationItem(value: JsonObject): NormalizedCollaborationItem | undefined {
+  const itemType = normalizeName(value.type);
+  if (itemType !== "collabtoolcall" && itemType !== "collabagenttoolcall") return undefined;
+  const rawOperation = optionalNonemptyString(firstDefined(value, "tool", "operation"));
+  if (rawOperation === undefined) return undefined;
+  const operation = normalizeCollaborationOperation(rawOperation);
+  const providerItemId = optionalNonemptyString(value.id);
+  const senderThreadId = optionalNonemptyString(firstDefined(value, "sender_thread_id", "senderThreadId"));
+  const receiverThreadIds = optionalStringList(firstDefined(value, "receiver_thread_ids", "receiverThreadIds"));
+  const delegationPrompt = optionalPlainString(firstDefined(value, "prompt", "delegation_prompt", "delegationPrompt"));
+  const model = optionalNonemptyString(value.model);
+  const reasoningEffort = optionalJsonValue(firstDefined(value, "reasoning_effort", "reasoningEffort"));
+  const agentStates = optionalJsonObject(firstDefined(value, "agents_states", "agentsStates"));
+  const status = normalizeCollaborationStatus(value.status);
+  return {
+    ...(providerItemId === undefined ? {} : { providerItemId }),
+    operation,
+    ...(operation === "unknown" ? { providerOperation: rawOperation } : {}),
+    ...(senderThreadId === undefined ? {} : { senderThreadId }),
+    ...(receiverThreadIds === undefined ? {} : { receiverThreadIds }),
+    ...(delegationPrompt === undefined ? {} : { delegationPrompt }),
+    ...(model === undefined ? {} : { model }),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    ...(agentStates === undefined ? {} : { agentStates }),
+    ...(status === undefined ? {} : { status }),
+  };
+}
+
+function collaborationItemData(item: NormalizedCollaborationItem): JsonObject {
+  return redactTraceData({
+    provider: "codex",
+    coordinationOperation: true,
+    itemType: "collaboration_operation",
+    providerItemId: item.providerItemId,
+    operation: item.operation,
+    providerOperation: item.providerOperation,
+    senderThreadId: item.senderThreadId,
+    receiverThreadIds: item.receiverThreadIds,
+    delegationPrompt: item.delegationPrompt,
+    model: item.model,
+    reasoningEffort: item.reasoningEffort,
+    agentStates: item.agentStates,
+    status: item.status,
+  }) as JsonObject;
+}
+
+function collaborationNotificationPhase(method: string): "started" | "completed" | undefined {
+  const normalized = normalizeName(method);
+  if (normalized === "itemstarted") return "started";
+  if (normalized === "itemcompleted") return "completed";
+  return undefined;
+}
+
+function collaborationItemLabel(operation: NormalizedCollaborationItem["operation"]): string {
+  return operation === "unknown" ? "Codex collaboration operation" : `Codex ${operation}`;
+}
+
+function normalizeCollaborationOperation(value: string): NormalizedCollaborationItem["operation"] {
+  const normalized = normalizeName(value);
+  if (normalized === "spawnagent") return "spawn_agent";
+  if (normalized === "sendinput") return "send_input";
+  if (normalized === "resumeagent") return "resume_agent";
+  if (normalized === "wait") return "wait";
+  if (normalized === "closeagent") return "close_agent";
+  return "unknown";
+}
+
+function normalizeCollaborationStatus(value: JsonValue | undefined): NormalizedCollaborationItem["status"] | undefined {
+  const normalized = normalizeName(value);
+  if (normalized === "inprogress") return "in_progress";
+  if (normalized === "completed") return "completed";
+  if (normalized === "failed") return "failed";
+  return undefined;
+}
+
 function isRecord(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function firstDefined(value: JsonObject, ...keys: readonly string[]): JsonValue | undefined {
+  for (const key of keys) if (value[key] !== undefined) return value[key];
+  return undefined;
+}
+
+function normalizeName(value: JsonValue | undefined): string {
+  return typeof value === "string" ? value.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() : "";
+}
+
+function optionalNonemptyString(value: JsonValue | undefined): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+function optionalPlainString(value: JsonValue | undefined): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function optionalStringList(value: JsonValue | undefined): readonly string[] | undefined {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : undefined;
+}
+
+function optionalJsonObject(value: JsonValue | undefined): JsonObject | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+function optionalJsonValue(value: JsonValue | undefined): JsonValue | undefined {
+  return value;
 }
 
 function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedCodexConfiguration {
