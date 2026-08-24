@@ -34,7 +34,9 @@ display name is optional; a local project path is never part of this contract.
 
 A turn contains its export-local identity, durable sequence and timestamp, user-facing interaction
 text, origin, and completion receipt. `completion.status` is exactly one of the current product
-states: `not_started`, `running`, `submitted`, `accepted`, or `failed`.
+states: `not_started`, `running`, `submitted`, `waiting_for_approval`, `accepted`, `failed`, or
+`stopped`. Approval requests and resolutions remain outside the V1 header-and-turn scope; these
+statuses preserve the durable turn state without making imported approvals actionable.
 
 An ordinary turn has `origin: {"kind":"user"}`. An action-created turn identifies an exact earlier
 turn and an `invoke` action within that turn:

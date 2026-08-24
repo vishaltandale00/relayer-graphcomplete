@@ -1,3 +1,4 @@
+use crate::approval::{ApprovalDecisionSubmission, ApprovalRequest, ApprovalResolution};
 use crate::{
     permissions::PermissionProfile,
     product::{
@@ -54,6 +55,7 @@ pub(crate) struct CompleteInteraction<'a> {
     pub(crate) project_id: Option<i64>,
     pub(crate) product_interaction_id: i64,
     pub(crate) thread_id: i64,
+    pub(crate) interaction_id: i64,
     pub(crate) text: &'a str,
     pub(crate) working_directory: &'a str,
     pub(crate) harness_configuration_name: &'a str,
@@ -79,6 +81,41 @@ pub(crate) struct RuntimeAction {
     pub(crate) kind: String,
     pub(crate) interaction_text: Option<String>,
     pub(crate) state: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CancelCompletionResponse {
+    cancelled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ApprovalEventSnapshot {
+    pub(crate) harness_session_id: String,
+    pub(crate) latest_sequence: u64,
+    pub(crate) pending_requests: Vec<ApprovalRequest>,
+    pub(crate) events: Vec<ApprovalEvent>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum ApprovalEvent {
+    Requested {
+        sequence: u64,
+        request: ApprovalRequest,
+    },
+    Resolved {
+        sequence: u64,
+        resolution: ApprovalResolution,
+    },
+}
+
+impl ApprovalEvent {
+    pub(crate) fn sequence(&self) -> u64 {
+        match self {
+            Self::Requested { sequence, .. } | Self::Resolved { sequence, .. } => *sequence,
+        }
+    }
 }
 
 impl RuntimeClient {
@@ -275,6 +312,7 @@ impl RuntimeClient {
                 )
                 .await?;
             let mut complete_body = serde_json::json!({
+                "interactionId": command.interaction_id,
                 "graph": graph,
                 "traceContext": { "productInteractionId": command.product_interaction_id },
             });
@@ -330,6 +368,62 @@ impl RuntimeClient {
             }),
             output: completed.output,
         })
+    }
+
+    pub(crate) async fn approval_events(
+        &self,
+        thread_id: i64,
+        after_sequence: u64,
+    ) -> Result<ApprovalEventSnapshot, RuntimeError> {
+        let mut url = self
+            .harness_url
+            .join(&format!("sessions/{thread_id}/approval-events"))?;
+        url.query_pairs_mut()
+            .append_pair("after", &after_sequence.to_string());
+        let response = self
+            .client
+            .get(url)
+            .bearer_auth(&self.harness_control_token)
+            .send()
+            .await?;
+        let value = response_json(response, StatusCode::OK).await?;
+        Ok(serde_json::from_value(value)?)
+    }
+
+    pub(crate) async fn cancel_completion(&self, thread_id: i64) -> Result<bool, RuntimeError> {
+        let response: CancelCompletionResponse = self
+            .post(
+                self.harness_url
+                    .join(&format!("sessions/{thread_id}/cancel"))?,
+                &serde_json::json!({}),
+                &self.harness_control_token,
+                StatusCode::OK,
+            )
+            .await?;
+        Ok(response.cancelled)
+    }
+
+    pub(crate) async fn decide_approval(
+        &self,
+        thread_id: i64,
+        request_id: &str,
+        submission: &ApprovalDecisionSubmission,
+    ) -> Result<ApprovalResolution, RuntimeError> {
+        let mut url = self.harness_url.join("sessions/")?;
+        url.path_segments_mut()
+            .map_err(|_| RuntimeError::Configuration("invalid harness URL".into()))?
+            .pop_if_empty()
+            .push(&thread_id.to_string())
+            .push("approvals")
+            .push(request_id)
+            .push("decision");
+        self.post(
+            url,
+            &serde_json::to_value(submission)?,
+            &self.harness_control_token,
+            StatusCode::OK,
+        )
+        .await
     }
 
     pub(crate) async fn get_layer(
@@ -606,7 +700,7 @@ mod tests {
         http::{HeaderMap, StatusCode},
         routing,
     };
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::{
         fs,
         path::Path,
@@ -735,6 +829,7 @@ mod tests {
                 project_id: None,
                 product_interaction_id: 1,
                 thread_id: 1,
+                interaction_id: 7,
                 text: "question",
                 working_directory: root.to_str().unwrap(),
                 harness_configuration_name: "test",
@@ -783,9 +878,22 @@ mod tests {
             )
             .route(
                 "/sessions/1/complete",
-                routing::post(|headers: HeaderMap| async move {
+                routing::post(|headers: HeaderMap, Json(body): Json<Value>| async move {
                     assert_eq!(headers["authorization"], "Bearer harness-control");
+                    assert_eq!(body["interactionId"], 7);
+                    assert_eq!(body["graph"]["nodeId"], 41);
                     Json(json!({ "output": { "nodeId": 41 } }))
+                }),
+            )
+            .route(
+                "/sessions/1/approval-events",
+                routing::get(|| async {
+                    Json(json!({
+                        "harnessSessionId": "session-1",
+                        "latestSequence": 0,
+                        "pendingRequests": [],
+                        "events": []
+                    }))
                 }),
             );
         let (graph_url, graph_task) = serve(graph).await;
@@ -840,6 +948,7 @@ mod tests {
                 project_id: None,
                 product_interaction_id: 1,
                 thread_id: 1,
+                interaction_id: 7,
                 text: "question",
                 working_directory: root.to_str().unwrap(),
                 harness_configuration_name: "test",

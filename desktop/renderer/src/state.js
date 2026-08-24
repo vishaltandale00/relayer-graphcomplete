@@ -9,6 +9,8 @@ export const appState = {
   interactions: [],
   actionInvocations: [],
   pendingActionInvocations: [],
+  approvals: [],
+  pendingApprovalDecisions: [],
   permissionProfiles: [],
   defaultPermissionProfileId: null,
   modelSettings: null,

@@ -140,6 +140,7 @@ export function workspaceModeCapabilities(mode) {
       canCompose: true,
       canInvokeMutatingActions: true,
       canExportConversation: true,
+      canResolveApprovals: true,
     };
   }
   if (mode === "review") {
@@ -148,6 +149,7 @@ export function workspaceModeCapabilities(mode) {
       canCompose: false,
       canInvokeMutatingActions: false,
       canExportConversation: false,
+      canResolveApprovals: false,
     };
   }
   throw new Error(`Unknown product workspace mode: ${mode}`);
@@ -165,6 +167,6 @@ export function shouldPollThreadInteractions(thread, interactions) {
   if (!thread || thread.imported === true) return false;
   return (interactions || []).some((interaction) => (
     String(interaction.threadId) === String(thread.id)
-    && ["not_started", "running", "submitted"].includes(interaction.completionStatus)
+    && ["not_started", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
   ));
 }

@@ -51,6 +51,20 @@ impl ApiError {
         )
     }
 
+    pub(crate) fn not_found(message: impl Into<String>) -> Self {
+        Self(
+            StatusCode::NOT_FOUND,
+            json!({ "code": "not_found", "error": message.into() }),
+        )
+    }
+
+    pub(crate) fn conflict(code: &str, message: impl Into<String>) -> Self {
+        Self(
+            StatusCode::CONFLICT,
+            json!({ "code": code, "error": message.into() }),
+        )
+    }
+
     pub(crate) fn message(&self) -> &str {
         self.1
             .get("error")
@@ -61,7 +75,12 @@ impl ApiError {
 
 impl From<RuntimeError> for ApiError {
     fn from(error: RuntimeError) -> Self {
-        Self::internal(&error.to_string())
+        match error {
+            RuntimeError::Remote { status: 400, body } => Self(StatusCode::BAD_REQUEST, body),
+            RuntimeError::Remote { status: 404, body } => Self(StatusCode::NOT_FOUND, body),
+            RuntimeError::Remote { status: 409, body } => Self(StatusCode::CONFLICT, body),
+            other => Self::internal(&other.to_string()),
+        }
     }
 }
 

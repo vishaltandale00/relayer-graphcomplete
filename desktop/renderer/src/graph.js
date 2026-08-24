@@ -54,6 +54,7 @@ function workspace() {
     },
     onNavigateLayer: (layerId, navigation) => import("./threads.js").then(({ navigateLayer }) => navigateLayer(layerId, navigation)),
     onInvokeAction: (action) => import("./threads.js").then(({ invokeAction }) => invokeAction(action)),
+    onDecideApproval: (requestId, decision) => import("./threads.js").then(({ decideApproval }) => decideApproval(requestId, decision)),
   });
   return productWorkspace;
 }

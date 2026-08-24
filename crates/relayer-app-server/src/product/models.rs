@@ -1,4 +1,5 @@
 use super::{InteractionId, InteractionModelSelection, ProjectId, ThreadId};
+use crate::approval::ApprovalReceipt;
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +79,7 @@ pub(crate) struct ProductState {
     pub(crate) threads: Vec<ThreadView>,
     pub(crate) interactions: Vec<Interaction>,
     pub(crate) action_invocations: Vec<ActionInvocation>,
+    pub(crate) approvals: Vec<ApprovalReceipt>,
     pub(crate) capabilities: ProductCapabilities,
 }
 

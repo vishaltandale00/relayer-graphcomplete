@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "capturedAt": "2026-08-21T22:48:51.982Z",
+  "environment": {
+    "target": "macos-arm64",
+    "host": "sat12-dp150-2dae292e-158c-4fb2-8eb5-06f13f12b7bc-BEA84DC35C65",
+    "architecture": "arm64",
+    "os": "macOS 15.7.7"
+  },
+  "seed": {
+    "version": "0.2.12",
+    "sourceCommit": "a1ca4c76d1dae8fa1d4d2590d23401d7dff2874c",
+    "processId": 12701
+  },
+  "target": {
+    "version": "0.2.13",
+    "sourceCommit": "4bef0e29e295964eb700b8a67ff55696c0c9f238",
+    "workflowRunId": "32533013955",
+    "artifactSha256": {
+      "Relayer-0.2.13-mac-arm64.dmg": "47a19672d9a5665fc2a7a52275559f34d5354f11c2b25b38a8e55198e7c358f7",
+      "Relayer-0.2.13-mac-arm64.zip": "b995164fbd7eec4e224e79e8f4d6bf11d2f4dd032eaec3312d08bc49afbcb18b"
+    }
+  },
+  "productFlow": [
+    {
+      "phase": "idle",
+      "version": "0.2.12",
+      "channel": "preview",
+      "error": null
+    },
+    {
+      "phase": "available",
+      "version": "0.2.12",
+      "availableVersion": "0.2.13",
+      "channel": "preview",
+      "error": null
+    },
+    {
+      "phase": "downloading",
+      "version": "0.2.12",
+      "availableVersion": "0.2.13",
+      "channel": "preview",
+      "displayedPercentages": [
+        46,
+        88,
+        99
+      ],
+      "error": null
+    },
+    {
+      "phase": "ready",
+      "version": "0.2.12",
+      "availableVersion": "0.2.13",
+      "channel": "preview",
+      "error": null
+    },
+    {
+      "phase": "installed-and-relaunched",
+      "version": "0.2.13",
+      "channel": "preview",
+      "error": null
+    }
+  ],
+  "trace": {
+    "file": "macos-arm64-preview-update.jsonl",
+    "sha256": "2973234c8a59384e8f06f0b398e5e918b594db89847bde2f1c935e312a01b7a7",
+    "records": 15
+  },
+  "postUpdate": {
+    "installedVersion": "0.2.13",
+    "running": true,
+    "codeSignatureVerified": true,
+    "platformAcceptanceVerified": true,
+    "processId": 13036,
+    "channel": "preview",
+    "updateStatus": "idle"
+  },
+  "screenshots": {
+    "firstInstall": {
+      "file": "macos-arm64-target-first-install.png",
+      "sha256": "b9f985783ba928a29e490e293649a8787d8655816919397a66663fdc6d4e278a"
+    },
+    "available": {
+      "file": "macos-arm64-preview-available.png",
+      "sha256": "789bddfb1b1deb9c314e39e20ec4c61dc4de507b2efc0054c7a06104a2bb8ad4"
+    },
+    "ready": {
+      "file": "macos-arm64-preview-ready.png",
+      "sha256": "1129f152607593e690f31479421a19bc7a2aeb6089867d8b767cd8125cc83587"
+    },
+    "installed": {
+      "file": "macos-arm64-preview-installed.png",
+      "sha256": "9e4fcf59596487b076acaf8ae9b3d59574e345185b1b3b744d60ee8f6a6a1282"
+    }
+  }
+}

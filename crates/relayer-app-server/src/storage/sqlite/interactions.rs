@@ -183,7 +183,7 @@ impl SqliteProductStore {
         &self,
         completion: AcceptedInteractionCompletion<'_>,
     ) -> Result<(), StorageError> {
-        sqlx::query("UPDATE interactions SET graph_node_id=?1,completion_status='accepted',harness_configuration_name=?2,harness_configuration_digest=?3,effective_execution_digest=?4,effective_permission_receipt_json=?5,completion_output_json=?6,completion_error=NULL WHERE id=?7 AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)")
+        let result = sqlx::query("UPDATE interactions SET graph_node_id=?1,completion_status='accepted',harness_configuration_name=?2,harness_configuration_digest=?3,effective_execution_digest=?4,effective_permission_receipt_json=?5,completion_output_json=?6,completion_error=NULL WHERE id=?7 AND completion_status='running' AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)")
             .bind(completion.graph_node_id)
             .bind(completion.harness_configuration_name)
             .bind(completion.harness_configuration_digest)
@@ -193,6 +193,19 @@ impl SqliteProductStore {
             .bind(completion.interaction_id.value())
             .execute(&self.pool)
             .await?;
+        if result.rows_affected() != 1 {
+            let imported: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM interactions JOIN threads ON threads.id=interactions.thread_id WHERE interactions.id=?1 AND threads.conversation_import_id IS NOT NULL)")
+                .bind(completion.interaction_id.value())
+                .fetch_one(&self.pool)
+                .await?;
+            if imported {
+                return Ok(());
+            }
+            return Err(StorageError::LifecycleConflict(format!(
+                "interaction {} cannot accept completion from its current lifecycle state",
+                completion.interaction_id
+            )));
+        }
         Ok(())
     }
 
@@ -202,7 +215,7 @@ impl SqliteProductStore {
         harness_configuration_name: &str,
         error: &str,
     ) -> Result<(), StorageError> {
-        sqlx::query("UPDATE interactions SET completion_status='failed',harness_configuration_name=?1,completion_error=?2 WHERE id=?3 AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)")
+        sqlx::query("UPDATE interactions SET completion_status='failed',harness_configuration_name=?1,completion_error=?2 WHERE id=?3 AND completion_status IN ('running','waiting_for_approval') AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)")
             .bind(harness_configuration_name)
             .bind(error)
             .bind(interaction_id.value())

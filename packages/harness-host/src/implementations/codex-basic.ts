@@ -1,14 +1,18 @@
-import { Codex, type ApprovalMode, type CodexOptions, type ModelReasoningEffort, type SandboxMode, type ThreadEvent, type ThreadItem, type ThreadOptions, type WebSearchMode } from "@openai/codex-sdk";
+import type { ApprovalMode, ModelReasoningEffort, SandboxMode, WebSearchMode } from "@openai/codex-sdk";
 import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relayer/graph-client";
 import { redactTraceData } from "../trace.js";
-import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState, HarnessTraceSpan, HarnessTraceSupport, JsonObject } from "../types.js";
+import {
+  runCodexAppServerTurn,
+  type CodexAppServerSpawn,
+  type CodexAppServerTurnOptions,
+} from "./codex-app-server.js";
+import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState, HarnessTraceSupport, JsonObject } from "../types.js";
 
 export const CODEX_BASIC_KEY = "codex.basic";
 
-type CodexThread = ReturnType<Codex["startThread"]>;
-
 export interface CodexBasicDependencies {
-  readonly createCodex?: (environment: Record<string, string>, codexPathOverride: string | undefined, config: CodexConfiguration) => Codex;
+  readonly runAppServerTurn?: (options: CodexAppServerTurnOptions) => ReturnType<typeof runCodexAppServerTurn>;
+  readonly spawnProcess?: CodexAppServerSpawn;
   readonly clientModuleUrl?: string;
   readonly codexPathOverride?: string;
 }
@@ -24,26 +28,27 @@ interface CodexBasicConfiguration {
   readonly additionalDirectories?: readonly string[];
 }
 
-type CodexConfiguration = NonNullable<CodexOptions["config"]>;
-
 interface ResolvedCodexConfiguration {
-  readonly threadOptions: CodexBasicConfiguration;
-  readonly codexConfig: CodexConfiguration;
+  readonly settings: CodexBasicConfiguration;
+  readonly permission: ResolvedCodexPermission;
   readonly promptProfile?: "layered-navigation-v1";
+}
+
+interface ResolvedCodexPermission {
+  readonly sandboxMode: SandboxMode;
+  readonly approvalPolicy: ApprovalMode;
+  readonly approvalsReviewer?: "user" | "auto_review";
+  readonly networkAccessEnabled?: boolean;
 }
 
 export class CodexBasicHarness implements Harness {
   private readonly clientModuleUrl: string;
-  private readonly threadOptions: CodexBasicConfiguration;
-  private readonly codexConfig: CodexConfiguration;
-  private readonly promptProfile: ResolvedCodexConfiguration["promptProfile"];
+  private readonly resolved: ResolvedCodexConfiguration;
   private codexThreadId: string | undefined;
 
   constructor(private readonly context: HarnessFactoryContext, private readonly dependencies: CodexBasicDependencies = {}) {
     const resolved = parseCodexBasicConfiguration(context);
-    this.threadOptions = resolved.threadOptions;
-    this.codexConfig = resolved.codexConfig;
-    this.promptProfile = resolved.promptProfile;
+    this.resolved = resolved;
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
     const codexThreadId = context.savedState?.codexThreadId;
     this.codexThreadId = typeof codexThreadId === "string" ? codexThreadId : undefined;
@@ -52,20 +57,26 @@ export class CodexBasicHarness implements Harness {
   async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
     const model = this.selectedModel(context);
     const capability = context.graph.acquireCapability();
-    const thread = this.openThread(this.createCodex(capability), model);
-    try {
-      const prompt = this.prompt(context.inputGraph);
-      context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
-      if (typeof thread.runStreamed !== "function") {
-        await thread.run(prompt, signal === undefined ? {} : { signal });
-        return;
-      }
-      const streamed = await thread.runStreamed(prompt, signal === undefined ? {} : { signal });
-      const spans = new Map<string, HarnessTraceSpan>();
-      for await (const event of streamed.events) traceCodexEvent(context, event, spans);
-    } finally {
-      this.codexThreadId = thread.id ?? this.codexThreadId;
-    }
+    const environment = this.graphEnvironment(capability);
+    const sandboxPolicy = this.sandboxPolicy();
+    const run = this.dependencies.runAppServerTurn ?? runCodexAppServerTurn;
+    const prompt = this.prompt(context.inputGraph);
+    context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
+    await run({
+      environment,
+      ...(this.dependencies.codexPathOverride === undefined ? {} : { codexPathOverride: this.dependencies.codexPathOverride }),
+      ...(this.codexThreadId === undefined ? {} : { savedThreadId: this.codexThreadId }),
+      threadParams: this.threadParams(model),
+      turnParams: this.turnParams(sandboxPolicy, model),
+      prompt,
+      approvals: context.approvals,
+      workingDirectory: this.context.workingDirectory,
+      sandboxPolicy,
+      ...(signal === undefined ? {} : { signal }),
+      ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
+      onThreadId: (threadId) => { this.codexThreadId = threadId; },
+      onNotification: (method, params) => traceCodexAppServerNotification(context, method, params),
+    });
   }
 
   traceSupport(): HarnessTraceSupport {
@@ -85,41 +96,67 @@ export class CodexBasicHarness implements Harness {
     return this.codexThreadId === undefined ? {} : { codexThreadId: this.codexThreadId };
   }
 
-  private createCodex(graph: GraphCapability): Codex {
+  private graphEnvironment(graph: GraphCapability): Record<string, string> {
     const environment = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
     environment.RELAYER_GRAPH_URL = graph.url;
     environment.RELAYER_GRAPH_TOKEN = graph.token;
     environment.RELAYER_NODE_ID = String(graph.nodeId);
-    return this.dependencies.createCodex?.(environment, this.dependencies.codexPathOverride, this.codexConfig) ?? new Codex({
-      env: environment,
-      config: this.codexConfig,
-      ...(this.dependencies.codexPathOverride === undefined ? {} : {
-        codexPathOverride: this.dependencies.codexPathOverride,
-      }),
-    });
+    return environment;
   }
 
   private selectedModel(context: HarnessRunContext): string | undefined {
-    if (context.model === undefined) return this.threadOptions.model;
+    if (context.model === undefined) return this.resolved.settings.model;
     if (context.model.providerId !== "codex") {
       throw new Error(`codex.basic cannot run provider ${context.model.providerId}`);
     }
     return context.model.modelId;
   }
 
-  private openThread(codex: Codex, model: string | undefined): CodexThread {
-    const { additionalDirectories, ...configuredOptions } = this.threadOptions;
-    const options: ThreadOptions = {
-      workingDirectory: this.context.workingDirectory,
-      ...configuredOptions,
+  private threadParams(model: string | undefined): JsonObject {
+    const { settings, permission } = this.resolved;
+    const config: Record<string, JsonObject[keyof JsonObject]> = {};
+    if (settings.skipGitRepoCheck !== undefined) config.skip_git_repo_check = settings.skipGitRepoCheck;
+    if (settings.webSearchMode !== undefined) config.web_search = settings.webSearchMode;
+    return {
+      cwd: this.context.workingDirectory,
+      approvalPolicy: permission.approvalPolicy,
+      sandbox: permission.sandboxMode,
+      ...(permission.approvalsReviewer === undefined ? {} : { approvalsReviewer: permission.approvalsReviewer }),
       ...(model === undefined ? {} : { model }),
-      ...(additionalDirectories === undefined ? {} : { additionalDirectories: [...additionalDirectories] }),
+      ...(Object.keys(config).length === 0 ? {} : { config }),
+      serviceName: "relayer_graphcomplete",
     };
-    return this.codexThreadId === undefined ? codex.startThread(options) : codex.resumeThread(this.codexThreadId, options);
+  }
+
+  private turnParams(sandboxPolicy: JsonObject, model: string | undefined): JsonObject {
+    const { settings, permission } = this.resolved;
+    return {
+      cwd: this.context.workingDirectory,
+      approvalPolicy: permission.approvalPolicy,
+      ...(permission.approvalsReviewer === undefined ? {} : { approvalsReviewer: permission.approvalsReviewer }),
+      sandboxPolicy,
+      ...(model === undefined ? {} : { model }),
+      ...(settings.modelReasoningEffort === undefined ? {} : { effort: settings.modelReasoningEffort }),
+    };
+  }
+
+  private sandboxPolicy(): JsonObject {
+    const { settings, permission } = this.resolved;
+    if (permission.sandboxMode === "danger-full-access") return { type: "dangerFullAccess" };
+    if (permission.sandboxMode === "read-only") {
+      return { type: "readOnly", networkAccess: permission.networkAccessEnabled ?? false };
+    }
+    return {
+      type: "workspaceWrite",
+      writableRoots: [this.context.workingDirectory, ...(settings.additionalDirectories ?? [])],
+      networkAccess: permission.networkAccessEnabled ?? false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+    };
   }
 
   private prompt(interactionNode: GraphNode): string {
-    if (this.promptProfile === "layered-navigation-v1") {
+    if (this.resolved.promptProfile === "layered-navigation-v1") {
       return this.layeredNavigationPrompt(interactionNode);
     }
     return `You are the basic Relayer graph harness. Answer the current user interaction by authoring and accepting a useful graph layer.
@@ -195,89 +232,42 @@ The graph service enforces exact provenance, target visibility, layer size, expa
   }
 }
 
-function traceCodexEvent(context: HarnessRunContext, event: ThreadEvent, spans: Map<string, HarnessTraceSpan>): void {
-  const providerEventId = providerItemId(event);
+function traceCodexAppServerNotification(context: HarnessRunContext, method: string, params: unknown): void {
+  const data = redactTraceData(params) as JsonObject;
+  const item = isRecord(data.item) ? data.item : undefined;
+  const providerEventId = typeof item?.id === "string" ? item.id : undefined;
   context.trace.emit({
     type: "provider.event",
     ...(providerEventId === undefined ? {} : { providerEventId }),
-    data: { provider: "codex", event: redactTraceData(event) },
+    data: { provider: "codex", method, params: data },
   });
-  if (event.type === "turn.started") {
-    spans.set("turn", context.trace.openSpan({ name: "Codex model turn", kind: "model" }));
+  if (method === "turn/started") {
     context.trace.emit({ type: "model.call.started", data: { provider: "codex" } });
     return;
   }
-  if (event.type === "turn.completed") {
-    context.trace.emit({ type: "usage", data: { provider: "codex", ...event.usage } });
-    context.trace.emit({ type: "model.call.completed", data: { provider: "codex", status: "completed" } });
-    spans.get("turn")?.end("completed");
-    spans.delete("turn");
+  if (method === "turn/completed") {
+    const turn = isRecord(data.turn) ? data.turn : {};
+    const status = turn.status === "completed" ? "completed" : "failed";
+    const usage = isRecord(turn.usage) ? turn.usage : isRecord(data.usage) ? data.usage : undefined;
+    if (usage !== undefined) context.trace.emit({ type: "usage", data: { provider: "codex", ...usage } });
+    context.trace.emit({ type: "model.call.completed", data: { provider: "codex", status } });
     return;
   }
-  if (event.type === "turn.failed") {
-    context.trace.emit({ type: "model.call.completed", data: { provider: "codex", status: "failed", error: event.error.message } });
-    spans.get("turn")?.end("failed", { error: event.error.message });
-    spans.delete("turn");
+  if (method === "error") {
+    const error = isRecord(data.error) ? data.error : {};
+    context.trace.emit({ type: "error", data: { provider: "codex", message: String(error.message ?? "Codex turn failed") } });
     return;
   }
-  if (event.type === "error") {
-    context.trace.emit({ type: "error", data: { provider: "codex", message: event.message } });
-    return;
-  }
-  if (event.type === "item.started") traceCodexItemStarted(context, event.item, spans);
-  if (event.type === "item.completed") traceCodexItemCompleted(context, event.item, spans);
-}
-
-function traceCodexItemStarted(context: HarnessRunContext, item: ThreadItem, spans: Map<string, HarnessTraceSpan>): void {
-  if (!isCodexToolItem(item)) return;
-  const span = context.trace.openSpan({ name: codexItemLabel(item), kind: "tool", providerSpanId: item.id });
-  spans.set(item.id, span);
-  span.emit({ type: "tool.call.started", data: codexItemData(item) });
-}
-
-function traceCodexItemCompleted(context: HarnessRunContext, item: ThreadItem, spans: Map<string, HarnessTraceSpan>): void {
-  if (item.type === "agent_message") {
+  if (method !== "item/completed" || item === undefined) return;
+  if (item.type === "agentMessage" && typeof item.text === "string") {
     context.trace.emit({ type: "message", data: { role: "assistant", text: item.text } });
-    return;
-  }
-  if (item.type === "reasoning") {
+  } else if (item.type === "reasoning" && typeof item.text === "string") {
     context.trace.emit({ type: "reasoning.summary", data: { text: item.text } });
-    return;
   }
-  if (item.type === "error") {
-    context.trace.emit({ type: "error", data: { message: item.message } });
-    return;
-  }
-  if (!isCodexToolItem(item)) return;
-  const span = spans.get(item.id) ?? context.trace.openSpan({ name: codexItemLabel(item), kind: "tool", providerSpanId: item.id });
-  const failed = ("status" in item && item.status === "failed") || (item.type === "mcp_tool_call" && item.error !== undefined);
-  span.emit({ type: "tool.call.completed", data: { ...codexItemData(item), status: failed ? "failed" : "completed" } });
-  span.end(failed ? "failed" : "completed");
-  spans.delete(item.id);
 }
 
-function isCodexToolItem(item: ThreadItem): boolean {
-  return item.type === "command_execution" || item.type === "file_change" || item.type === "mcp_tool_call" || item.type === "web_search";
-}
-
-function codexItemLabel(item: ThreadItem): string {
-  if (item.type === "command_execution") return "Command execution";
-  if (item.type === "file_change") return "File change";
-  if (item.type === "mcp_tool_call") return `${item.server}.${item.tool}`;
-  if (item.type === "web_search") return "Web search";
-  return item.type;
-}
-
-function codexItemData(item: ThreadItem): JsonObject {
-  if (item.type === "command_execution") return redactTraceData({ itemType: item.type, command: item.command, output: item.aggregated_output, exitCode: item.exit_code ?? null }) as JsonObject;
-  if (item.type === "file_change") return redactTraceData({ itemType: item.type, changes: item.changes }) as JsonObject;
-  if (item.type === "mcp_tool_call") return redactTraceData({ itemType: item.type, server: item.server, tool: item.tool, arguments: item.arguments, result: item.result, error: item.error }) as JsonObject;
-  if (item.type === "web_search") return { itemType: item.type, query: item.query };
-  return { itemType: item.type };
-}
-
-function providerItemId(event: ThreadEvent): string | undefined {
-  return "item" in event ? event.item.id : event.type === "thread.started" ? event.thread_id : undefined;
+function isRecord(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedCodexConfiguration {
@@ -302,27 +292,19 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
   const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);
 
   return {
-    threadOptions: {
+    settings: {
       ...(model === undefined ? {} : { model }),
       ...(modelReasoningEffort === undefined ? {} : { modelReasoningEffort }),
-      sandboxMode: permission.sandboxMode,
-      approvalPolicy: permission.approvalPolicy,
-      ...(permission.networkAccessEnabled === undefined ? {} : { networkAccessEnabled: permission.networkAccessEnabled }),
       ...(webSearchMode === undefined ? {} : { webSearchMode }),
       ...(skipGitRepoCheck === undefined ? {} : { skipGitRepoCheck }),
       ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
     },
-    codexConfig: permission.approvalsReviewer === undefined ? {} : { approvals_reviewer: permission.approvalsReviewer },
+    permission,
     ...(promptProfile === undefined ? {} : { promptProfile }),
   };
 }
 
-function parseCodexPermissionBinding(profileId: string, binding: JsonObject): {
-  readonly sandboxMode: SandboxMode;
-  readonly approvalPolicy: ApprovalMode;
-  readonly approvalsReviewer?: "user" | "auto_review";
-  readonly networkAccessEnabled?: boolean;
-} {
+function parseCodexPermissionBinding(profileId: string, binding: JsonObject): ResolvedCodexPermission {
   const allowed = new Set(["sandboxMode", "approvalPolicy", "approvalsReviewer", "networkAccessEnabled"]);
   const unknown = Object.keys(binding).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new Error(`Unknown codex.basic permission binding field: ${unknown.join(", ")}`);

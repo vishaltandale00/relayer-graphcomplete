@@ -268,11 +268,16 @@ fn requires_the_exact_ordered_header_inventory() {
 
 #[test]
 fn preserves_actual_completion_status_without_inventing_acceptance() {
-    for status in [
-        ExportCompletionStatus::NotStarted,
-        ExportCompletionStatus::Running,
-        ExportCompletionStatus::Submitted,
-        ExportCompletionStatus::Failed,
+    for (status, wire_name) in [
+        (ExportCompletionStatus::NotStarted, "not_started"),
+        (ExportCompletionStatus::Running, "running"),
+        (ExportCompletionStatus::Submitted, "submitted"),
+        (
+            ExportCompletionStatus::WaitingForApproval,
+            "waiting_for_approval",
+        ),
+        (ExportCompletionStatus::Failed, "failed"),
+        (ExportCompletionStatus::Stopped, "stopped"),
     ] {
         let mut fixture = records();
         let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
@@ -284,6 +289,7 @@ fn preserves_actual_completion_status_without_inventing_acceptance() {
             validate_export_records(&fixture).is_ok(),
             "status {status:?}"
         );
+        assert_eq!(serde_json::to_value(status).unwrap(), wire_name);
     }
 
     let mut accepted_without_view = records();

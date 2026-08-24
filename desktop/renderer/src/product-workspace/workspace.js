@@ -19,6 +19,16 @@ import { createRelayerIcon } from "./icons.js";
 import { createGraphSimulationController } from "./graph-simulation.js";
 import { renderMarkdown } from "./markdown.js";
 import { productWorkspaceMarkup } from "./view.js";
+import {
+  approvalActionPresentation,
+  approvalDockMode,
+  approvalQueueKeyIntent,
+  approvalQueueTarget,
+  approvalResolutionLabel,
+  pendingApprovalsForThread,
+  resolvedApprovalHistoryForThread,
+  selectedPendingApproval,
+} from "../approval-model.js";
 
 function hash(value) {
   let result = 0;
@@ -38,7 +48,12 @@ const GRAPH_NODE_HALF_WIDTH = 82;
 const GRAPH_NODE_TOP = 28;
 const GRAPH_NODE_BOTTOM = 72;
 const GRAPH_FIT_PADDING = 48;
-const PENDING_COMPLETION_STATUSES = new Set(["not_started", "running", "submitted"]);
+const PENDING_COMPLETION_STATUSES = new Set([
+  "not_started",
+  "running",
+  "submitted",
+  "waiting_for_approval",
+]);
 
 export function graphNodeIdentitySet(nodes) {
   return new Set((nodes || []).map((node) => String(node.id)));
@@ -147,6 +162,31 @@ export function shouldAutoFitSettledGraph(
   return autoFitViewKey === currentViewKey && autoFitRevision === currentRevision;
 }
 
+export function shouldFitInspectorOpen(previousOpen, nextOpen, viewportWidth) {
+  return previousOpen === false && nextOpen === true && viewportWidth > 760;
+}
+
+export function shouldFitInspectorDock(previousOverlay, nextOverlay, inspectorOpen) {
+  return inspectorOpen && previousOverlay && !nextOverlay;
+}
+
+export function shouldActivateGraphNodeAfterPointerGesture(moved) {
+  return !moved;
+}
+
+export function inspectorFitRequestIsCurrent(request, {
+  cameraRevision,
+  graphViewKey,
+  inspectorOpen,
+  viewportWidth,
+}) {
+  return request !== null
+    && request.graphViewKey === graphViewKey
+    && request.cameraRevision === cameraRevision
+    && inspectorOpen
+    && viewportWidth > 760;
+}
+
 export function graphEdgeSegment(source, target, radius = GRAPH_NODE_ICON_RADIUS) {
   const dx = target.x - source.x;
   const dy = target.y - source.y;
@@ -178,6 +218,9 @@ export function graphTurnNavigationDelta(event, graphFocused) {
 export { workspaceTurns } from "./model.js";
 
 export function turnStatusPresentation(status) {
+  if (status === "waiting_for_approval") {
+    return { kind: "approval", label: "Needs approval" };
+  }
   if (["not_started", "running", "submitted"].includes(status)) {
     return { kind: "running", label: status === "not_started" ? "Waiting" : "Running" };
   }
@@ -278,6 +321,26 @@ export function composerDisabledForState(status, canCompose = true) {
   return !canCompose || PENDING_COMPLETION_STATUSES.has(status);
 }
 
+export function composerFocusRestoration(
+  pendingThreadId,
+  { activeWasInside, dockThreadId, threadId, canCompose, promptDisabled },
+) {
+  const currentThreadId = String(threadId);
+  let nextThreadId = pendingThreadId;
+  if (activeWasInside && String(dockThreadId) === currentThreadId) {
+    nextThreadId = currentThreadId;
+  } else if (String(dockThreadId) !== currentThreadId) {
+    nextThreadId = null;
+  }
+  const shouldFocus = String(nextThreadId) === currentThreadId
+    && canCompose
+    && !promptDisabled;
+  return {
+    pendingThreadId: shouldFocus ? null : nextThreadId,
+    shouldFocus,
+  };
+}
+
 const ACTION_VARIANTS = new Set(["chip", "pill", "wide", "card"]);
 
 export function actionPresentation(action) {
@@ -343,6 +406,7 @@ export function createProductWorkspace({
   onOpenSettings = () => {},
   onNavigateLayer = async () => {},
   onInvokeAction = async () => {},
+  onDecideApproval = async () => {},
 }) {
   const capabilities = workspaceModeCapabilities(mode);
   const graphSimulation = createGraphSimulationController();
@@ -356,8 +420,14 @@ export function createProductWorkspace({
   let pinching = null;
   let camera = { x: 0, y: 0, zoom: 1 };
   let cameraRevision = 0;
+  let inspectorFitRequest = null;
+  let inspectorFitFrame = null;
   let turnPopoverOpen = false;
   let exportPending = false;
+  const approvalSelections = new Map();
+  const approvalErrors = new Map();
+  const approvalDecisionsInFlight = new Set();
+  let restoreComposerFocusThreadId = null;
   const graphViewCache = new Map();
   const activeTouchPointers = new Map();
 
@@ -398,7 +468,52 @@ export function createProductWorkspace({
       renderExportControl();
     }
   };
+  const graphStage = $("#graphStage");
+  const graphDocument = graphStage.ownerDocument;
+  const graphWindow = graphDocument.defaultView;
+  const narrowInspectorMedia = graphWindow?.matchMedia?.("(max-width: 760px)");
+  let inspectorUsesOverlay = narrowInspectorMedia?.matches
+    ?? (graphWindow?.innerWidth ?? 0) <= 760;
+  const cancelInspectorFit = () => {
+    if (inspectorFitFrame !== null) {
+      graphDocument.defaultView?.cancelAnimationFrame?.(inspectorFitFrame);
+      inspectorFitFrame = null;
+    }
+    inspectorFitRequest = null;
+  };
+  const scheduleInspectorFit = () => {
+    cancelInspectorFit();
+    const request = { graphViewKey, cameraRevision };
+    inspectorFitRequest = request;
+    inspectorFitFrame = graphWindow?.requestAnimationFrame?.(() => {
+      inspectorFitFrame = null;
+      if (!inspectorFitRequestIsCurrent(request, {
+        cameraRevision,
+        graphViewKey,
+        inspectorOpen: !$("#inspector").classList.contains("hidden"),
+        viewportWidth: graphWindow?.innerWidth ?? 0,
+      })) {
+        if (inspectorFitRequest === request) inspectorFitRequest = null;
+        return;
+      }
+      updateCamera(fitGraphCamera(graphNodes, graphStage.getBoundingClientRect()), false);
+      if (graphLayoutSettled) inspectorFitRequest = null;
+    }) ?? null;
+  };
+  const handleInspectorLayoutChange = (event) => {
+    const previouslyUsedOverlay = inspectorUsesOverlay;
+    inspectorUsesOverlay = event.matches;
+    const inspectorOpen = !$("#inspector").classList.contains("hidden");
+    const shouldFit = shouldFitInspectorDock(
+      previouslyUsedOverlay,
+      event.matches,
+      inspectorOpen,
+    );
+    if (shouldFit) scheduleInspectorFit();
+  };
+  narrowInspectorMedia?.addEventListener?.("change", handleInspectorLayoutChange);
   $("#closeInspector").onclick = () => {
+    cancelInspectorFit();
     selection.selectedNodeId = null;
     onSelectionChange(null);
     $("#inspector").classList.add("hidden");
@@ -425,8 +540,6 @@ export function createProductWorkspace({
     closeTurnPopover();
     onSelectTurn(1);
   };
-  const graphStage = $("#graphStage");
-  const graphDocument = graphStage.ownerDocument;
   const closeTurnPopover = () => {
     turnPopoverOpen = false;
     $("#turnPopover").classList.add("hidden");
@@ -479,7 +592,10 @@ export function createProductWorkspace({
 
   function updateCamera(nextCamera, manual = true) {
     camera = nextCamera;
-    if (manual) cameraRevision += 1;
+    if (manual) {
+      cancelInspectorFit();
+      cameraRevision += 1;
+    }
     drawGraph();
   }
 
@@ -545,6 +661,7 @@ export function createProductWorkspace({
       return;
     }
     if (!panning || panning.pointerId !== event.pointerId) return;
+    cancelInspectorFit();
     camera.x = panning.startCameraX + event.clientX - panning.startClientX;
     camera.y = panning.startCameraY + event.clientY - panning.startClientY;
     cameraRevision += 1;
@@ -623,6 +740,57 @@ export function createProductWorkspace({
     }
   };
   syncComposer();
+
+  const approvalDock = $("#approvalDock");
+  const selectApproval = (intent) => {
+    const state = getState();
+    const thread = getThread();
+    const pending = pendingApprovalsForThread(state, thread);
+    const current = approvalSelections.get(String(thread?.id));
+    const target = approvalQueueTarget(pending, current, intent);
+    if (target == null) return;
+    approvalSelections.set(String(thread.id), String(target));
+    renderApprovalDock(state, thread);
+  };
+  $("#previousApproval").onclick = () => selectApproval(-1);
+  $("#nextApproval").onclick = () => selectApproval(1);
+  approvalDock.onkeydown = (event) => {
+    const intent = approvalQueueKeyIntent(event, graphDocument.activeElement === approvalDock);
+    if (intent === null) return;
+    event.preventDefault();
+    selectApproval(intent);
+  };
+  const decideSelectedApproval = async (decision) => {
+    const state = getState();
+    const thread = getThread();
+    const pending = pendingApprovalsForThread(state, thread);
+    const selected = selectedPendingApproval(
+      pending,
+      approvalSelections.get(String(thread?.id)),
+    );
+    const requestId = selected?.request.requestId;
+    if (!capabilities.canResolveApprovals || requestId == null) return;
+    const key = String(requestId);
+    if (approvalDecisionsInFlight.has(key)) return;
+    approvalDecisionsInFlight.add(key);
+    approvalErrors.delete(key);
+    renderApprovalDock(state, thread);
+    try {
+      await onDecideApproval(requestId, decision);
+    } catch (error) {
+      if (String(getThread()?.id) === String(thread.id)) {
+        approvalErrors.set(key, error?.message || "Approval decision failed.");
+      }
+    } finally {
+      approvalDecisionsInFlight.delete(key);
+      if (String(getThread()?.id) === String(thread.id)) {
+        renderApprovalDock(getState(), getThread());
+      }
+    }
+  };
+  $("#denyApproval").onclick = () => decideSelectedApproval("deny");
+  $("#approveOnce").onclick = () => decideSelectedApproval("approve_once");
+  $("#approveAlways").onclick = () => decideSelectedApproval("approve_always");
 
   function applyMode() {
     threadView.dataset.workspaceMode = mode;
@@ -760,9 +928,13 @@ export function createProductWorkspace({
       : "";
     identity.classList.toggle("hidden", !identityLabels);
     renderRunState(state, thread);
+    renderApprovalDock(state, thread);
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
       selectNode(state, selection.selectedNodeId, { notify: false });
+    } else if (!$("#inspector").classList.contains("hidden")) {
+      cancelInspectorFit();
+      $("#inspector").classList.add("hidden");
     }
     renderBreadcrumb(state, thread);
   }
@@ -809,14 +981,118 @@ export function createProductWorkspace({
 
   function renderRunState(state, thread) {
     const status = state.status || "idle";
-    const { pending, display } = runStatePresentation(status, { imported: thread?.imported === true });
+    const presentation = runStatePresentation(status, { imported: thread?.imported === true });
+    const { pending } = presentation;
+    const needsApproval = pendingApprovalsForThread(state, getThread()).length > 0;
+    const display = needsApproval ? "Needs approval"
+      : presentation.display;
     const runState = $("#runState");
-    runState.className = `run-state ${pending ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
-    runState.setAttribute("aria-label", pending ? "Waiting for graph" : display);
+    runState.className = `run-state ${needsApproval ? "approval" : pending ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
+    runState.setAttribute("aria-label", needsApproval ? "Waiting for user approval" : pending ? "Waiting for graph" : display);
     runState.querySelector("span").textContent = display;
     prompt.disabled = composerDisabledForState(status, capabilities.canCompose);
     modelPicker?.setDisabled(prompt.disabled);
     syncComposer();
+  }
+
+  function renderApprovalDock(state, thread) {
+    const pending = pendingApprovalsForThread(state, thread);
+    const threadKey = String(thread?.id);
+    const priorRequestId = approvalSelections.get(threadKey);
+    const selected = selectedPendingApproval(pending, priorRequestId);
+    const activeWasInside = approvalDock.contains(graphDocument.activeElement);
+    const wasHidden = approvalDock.classList.contains("hidden");
+    const wasHistoryOnly = approvalDock.classList.contains("history-only");
+    const history = resolvedApprovalHistoryForThread(state, thread);
+    const dockMode = approvalDockMode(pending, history);
+    const renderHistory = () => {
+      $("#approvalHistory").classList.toggle("hidden", history.length === 0);
+      $("#approvalHistorySummary").textContent = `Approval history (${history.length})`;
+      $("#approvalHistoryList").replaceChildren(...history.map((receipt) => {
+        const item = graphDocument.createElement("li");
+        item.textContent = `${receipt.request.title} — ${approvalResolutionLabel(receipt)}`;
+        return item;
+      }));
+    };
+    if (!selected) {
+      approvalSelections.delete(threadKey);
+      const focus = composerFocusRestoration(restoreComposerFocusThreadId, {
+        activeWasInside,
+        dockThreadId: approvalDock.dataset.threadId,
+        threadId: threadKey,
+        canCompose: capabilities.canCompose,
+        promptDisabled: prompt.disabled,
+      });
+      restoreComposerFocusThreadId = focus.pendingThreadId;
+      approvalDock.classList.toggle("hidden", dockMode === "hidden");
+      approvalDock.classList.toggle("history-only", dockMode === "history");
+      approvalDock.removeAttribute("aria-busy");
+      approvalDock.dataset.threadId = threadKey;
+      $("#threadComposer").classList.remove("hidden");
+      if (dockMode === "history") {
+        approvalDock.setAttribute("aria-describedby", "approvalHistorySummary");
+        $("#approvalStatusIcon").textContent = "✓";
+        $("#approvalEyebrow").textContent = "Resolved";
+        $("#approvalTitle").textContent = "Approval history";
+        $("#approvalQueueControls").classList.add("hidden");
+        $("#approvalReason").classList.add("hidden");
+        $(".approval-action-summary").classList.add("hidden");
+        $(".approval-metadata").classList.add("hidden");
+        $("#approvalError").classList.add("hidden");
+        $(".approval-actions").classList.add("hidden");
+        renderHistory();
+      }
+      if (focus.shouldFocus) {
+        prompt.focus({ preventScroll: true });
+      }
+      return;
+    }
+    const request = selected.request;
+    const requestId = String(request.requestId);
+    const selectedDisappeared = priorRequestId != null
+      && !pending.some((receipt) => String(receipt.request.requestId) === String(priorRequestId));
+    approvalSelections.set(threadKey, requestId);
+    approvalDock.classList.remove("hidden");
+    approvalDock.classList.remove("history-only");
+    approvalDock.setAttribute(
+      "aria-describedby",
+      "approvalReason approvalActionValue approvalScopeDescription",
+    );
+    approvalDock.dataset.threadId = threadKey;
+    $("#threadComposer").classList.add("hidden");
+    approvalDock.dataset.requestId = requestId;
+    $("#approvalStatusIcon").textContent = "!";
+    $("#approvalEyebrow").textContent = "Needs approval";
+    $("#approvalTitle").textContent = request.title;
+    $("#approvalReason").classList.remove("hidden");
+    $("#approvalReason").textContent = request.reason;
+    $(".approval-action-summary").classList.remove("hidden");
+    $(".approval-metadata").classList.remove("hidden");
+    $(".approval-actions").classList.remove("hidden");
+    $("#approvalScopeDescription").textContent = request.scopeDescription;
+    const action = approvalActionPresentation(request.action);
+    $("#approvalActionLabel").textContent = action.label;
+    $("#approvalActionValue").textContent = action.value;
+    $("#approvalWorkingDirectoryRow").classList.toggle("hidden", !action.workingDirectory);
+    $("#approvalWorkingDirectory").textContent = action.workingDirectory || "";
+    $("#approvalAffectedFilesRow").classList.toggle("hidden", action.affectedFiles.length === 0);
+    $("#approvalAffectedFiles").textContent = action.affectedFiles.join(", ");
+    const index = pending.findIndex((receipt) => String(receipt.request.requestId) === requestId);
+    $("#approvalQueuePosition").textContent = `${index + 1} of ${pending.length}`;
+    $("#approvalQueueControls").classList.toggle("hidden", pending.length < 2);
+    renderHistory();
+    const error = approvalErrors.get(requestId);
+    $("#approvalError").classList.toggle("hidden", !error);
+    $("#approvalError").textContent = error || "";
+    const decisionPending = approvalDecisionsInFlight.has(requestId)
+      || state.pendingApprovalDecisions?.some((id) => String(id) === requestId);
+    approvalDock.setAttribute("aria-busy", String(decisionPending));
+    for (const selector of ["#denyApproval", "#approveOnce", "#approveAlways"]) {
+      $(selector).disabled = decisionPending || !capabilities.canResolveApprovals;
+    }
+    if (wasHidden || wasHistoryOnly || selectedDisappeared) {
+      approvalDock.focus({ preventScroll: true });
+    }
   }
 
   function renderGraph(state, thread) {
@@ -824,6 +1100,8 @@ export function createProductWorkspace({
     const nextViewKey = graphCameraViewKey(state, thread, responseNodes);
     const enteringView = nextViewKey !== graphViewKey;
     if (enteringView) {
+      cancelInspectorFit();
+      $("#inspector").classList.add("hidden");
       saveGraphView();
       graphSimulation.cancel();
     }
@@ -892,6 +1170,7 @@ export function createProductWorkspace({
     $("#nodeLayer").innerHTML = graphNodes.map((node) => `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}" data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}"><div class="glyph"></div><div class="copy"><b>${escapeHtml(node.title)}</b></div></div>`).join("");
     $$('[data-node]').forEach((element) => {
       const authoredNode = graphNodes.find((candidate) => String(candidate.id) === element.dataset.node);
+      let suppressClickAfterDrag = false;
       element.querySelector(".glyph").replaceChildren(createRelayerIcon(
         authoredNode?.icon || authoredNode?.metadata?.relayer?.icon,
         { class: "relayer-node-icon" },
@@ -902,7 +1181,13 @@ export function createProductWorkspace({
           element.offsetHeight,
         );
       }
-      element.onclick = () => selectNode(state, element.dataset.node);
+      element.onclick = () => {
+        if (!shouldActivateGraphNodeAfterPointerGesture(suppressClickAfterDrag)) {
+          suppressClickAfterDrag = false;
+          return;
+        }
+        selectNode(state, element.dataset.node);
+      };
       element.onkeydown = (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
@@ -940,9 +1225,14 @@ export function createProductWorkspace({
         if (dragging.moved) dragging.node.pinned = true;
         drawGraph();
       };
-      const finishDrag = () => { dragging = null; };
-      element.onpointerup = finishDrag;
-      element.onpointercancel = finishDrag;
+      element.onpointerup = () => {
+        suppressClickAfterDrag = Boolean(dragging?.moved);
+        if (suppressClickAfterDrag) {
+          graphWindow?.setTimeout?.(() => { suppressClickAfterDrag = false; }, 0);
+        }
+        dragging = null;
+      };
+      element.onpointercancel = () => { dragging = null; };
     });
     if (enteringView && !ids.has(String(selection.selectedNodeId))) {
       selection.selectedNodeId = null;
@@ -977,7 +1267,14 @@ export function createProductWorkspace({
         autoFitRevision,
         cameraRevision,
       )) {
-        updateCamera(fitGraphCamera(graphNodes, bounds), false);
+        const fitBounds = inspectorFitRequestIsCurrent(inspectorFitRequest, {
+          cameraRevision,
+          graphViewKey,
+          inspectorOpen: !$("#inspector").classList.contains("hidden"),
+          viewportWidth: graphDocument.defaultView?.innerWidth ?? 0,
+        }) ? graphStage.getBoundingClientRect() : bounds;
+        updateCamera(fitGraphCamera(graphNodes, fitBounds), false);
+        inspectorFitRequest = null;
       } else {
         saveGraphView();
       }
@@ -1084,7 +1381,15 @@ export function createProductWorkspace({
     const node = state.nodes.find((item) => String(item.id) === String(id));
     if (!node) return;
     if (notify) onSelectionChange(node.id);
-    $("#inspector").classList.remove("hidden");
+    const inspector = $("#inspector");
+    const wasOpen = !inspector.classList.contains("hidden");
+    inspectorUsesOverlay = narrowInspectorMedia?.matches
+      ?? (graphWindow?.innerWidth ?? 0) <= 760;
+    inspector.classList.remove("hidden");
+    const viewportWidth = graphDocument.defaultView?.innerWidth ?? 0;
+    if (shouldFitInspectorOpen(wasOpen, true, viewportWidth)) {
+      scheduleInspectorFit();
+    }
     $("#detailIcon").replaceChildren(createRelayerIcon(
       node.icon || node.metadata?.relayer?.icon,
       { class: "relayer-detail-icon" },
@@ -1154,10 +1459,12 @@ export function createProductWorkspace({
 
   function dispose() {
     modelPicker?.dispose();
+    cancelInspectorFit();
     graphSimulation.cancel();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     graphDocument.removeEventListener("pointerdown", closeTurnPopoverFromOutside, true);
     graphDocument.removeEventListener("keydown", closeTurnPopoverOnEscape, true);
+    narrowInspectorMedia?.removeEventListener?.("change", handleInspectorLayoutChange);
     dragging = null;
     panning = null;
     pinching = null;

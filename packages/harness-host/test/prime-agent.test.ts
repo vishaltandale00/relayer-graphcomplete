@@ -255,6 +255,7 @@ function runContext(nodeId: number, token: string, trace: HarnessTraceSink = cre
       interactionNodeId: nodeId,
       acquireCapability: () => ({ url: "http://127.0.0.1:43123", token, nodeId }),
     },
+    approvals: { request: async () => { throw new Error("unused approval channel"); } },
     trace,
   };
 }

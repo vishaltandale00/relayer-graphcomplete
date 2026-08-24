@@ -144,6 +144,7 @@ export async function resolveNavigationPresentation(entry, {
     thread,
     interactions,
     actionInvocations: Array.isArray(detail.actionInvocations) ? detail.actionInvocations : [],
+    approvals: Array.isArray(detail.approvals) ? detail.approvals : [],
     interaction,
     layer,
     layerPath,

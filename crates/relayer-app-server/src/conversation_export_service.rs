@@ -426,8 +426,10 @@ fn completion_status(value: &str) -> Result<ExportCompletionStatus, Conversation
         "not_started" => Ok(ExportCompletionStatus::NotStarted),
         "running" => Ok(ExportCompletionStatus::Running),
         "submitted" => Ok(ExportCompletionStatus::Submitted),
+        "waiting_for_approval" => Ok(ExportCompletionStatus::WaitingForApproval),
         "accepted" => Ok(ExportCompletionStatus::Accepted),
         "failed" => Ok(ExportCompletionStatus::Failed),
+        "stopped" => Ok(ExportCompletionStatus::Stopped),
         other => Err(ConversationExportBuildError::Invalid(format!(
             "unknown completion status {other}"
         ))),
@@ -512,4 +514,22 @@ fn next_id(ids: &mut HashMap<i64, String>, raw: i64, kind: &str) -> String {
     let id = format!("{kind}:{}", ids.len() + 1);
     ids.insert(raw, id.clone());
     id
+}
+
+#[cfg(test)]
+mod tests {
+    use super::completion_status;
+    use crate::conversation_export::ExportCompletionStatus;
+
+    #[test]
+    fn exports_approval_lifecycle_completion_statuses() {
+        assert_eq!(
+            completion_status("waiting_for_approval").unwrap(),
+            ExportCompletionStatus::WaitingForApproval
+        );
+        assert_eq!(
+            completion_status("stopped").unwrap(),
+            ExportCompletionStatus::Stopped
+        );
+    }
 }

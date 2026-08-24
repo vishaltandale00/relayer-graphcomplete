@@ -128,6 +128,28 @@ const PRODUCT_MODEL_PREFERENCE_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("default_provider_id", "TEXT", true, 0),
     ("defaults_modified", "INTEGER", true, 0),
 ];
+const APPROVAL_REQUEST_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("request_id", "TEXT", true, 1),
+    ("interaction_id", "INTEGER", true, 0),
+    ("complete_call_id", "TEXT", true, 0),
+    ("harness_session_id", "TEXT", true, 0),
+    ("title", "TEXT", true, 0),
+    ("reason", "TEXT", true, 0),
+    ("action_json", "TEXT", true, 0),
+    ("scope_keys_json", "TEXT", true, 0),
+    ("scope_description", "TEXT", true, 0),
+    ("created_at", "TEXT", true, 0),
+    ("expires_at", "TEXT", false, 0),
+];
+const APPROVAL_RESOLUTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("request_id", "TEXT", true, 1),
+    ("outcome", "TEXT", true, 0),
+    ("actor", "TEXT", true, 0),
+    ("decision", "TEXT", false, 0),
+    ("rationale", "TEXT", false, 0),
+    ("source_request_id", "TEXT", false, 0),
+    ("resolved_at", "TEXT", true, 0),
+];
 
 pub(super) async fn validate_existing_or_empty(pool: &SqlitePool) -> Result<(), StorageError> {
     let table_count: i64 = sqlx::query_scalar(
@@ -176,6 +198,8 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         PRODUCT_MODEL_PREFERENCE_COLUMNS,
     )
     .await?;
+    validate_columns(pool, "approval_requests", APPROVAL_REQUEST_COLUMNS).await?;
+    validate_columns(pool, "approval_resolutions", APPROVAL_RESOLUTION_COLUMNS).await?;
     validate_index(pool, "projects", &["path"], true).await?;
     validate_index(pool, "interactions", &["thread_id", "sequence"], true).await?;
     validate_index(pool, "threads", &["conversation_import_id"], false).await?;
@@ -227,6 +251,13 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         true,
     )
     .await?;
+    validate_index(
+        pool,
+        "approval_requests",
+        &["interaction_id", "created_at"],
+        false,
+    )
+    .await?;
     validate_foreign_key(pool, "threads", "project_id", "projects", "id", "SET NULL").await?;
     validate_foreign_key(
         pool,
@@ -275,10 +306,28 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     .await?;
     validate_foreign_key(
         pool,
+        "approval_requests",
+        "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
         "harness_provider_compatibility",
         "harness_configuration_name",
         "product_harnesses",
         "configuration_name",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "approval_resolutions",
+        "request_id",
+        "approval_requests",
+        "request_id",
         "CASCADE",
     )
     .await?;
@@ -399,6 +448,16 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         ));
     }
     super::catalog::validate_catalog_rows(pool).await?;
+    let invalid_approval_resolution: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM approval_resolutions WHERE outcome NOT IN ('approved','denied','cancelled','expired','aborted') OR actor NOT IN ('user','session_grant','harness','host') OR (decision IS NOT NULL AND decision NOT IN ('approve_once','approve_always','deny')) OR (outcome='approved' AND (decision IS NULL OR decision NOT IN ('approve_once','approve_always'))) OR (outcome='denied' AND (decision IS NULL OR decision!='deny')) OR (outcome IN ('cancelled','expired','aborted') AND decision IS NOT NULL) OR (actor='user' AND (outcome NOT IN ('approved','denied') OR source_request_id IS NOT NULL)) OR (actor='session_grant' AND (outcome!='approved' OR decision IS NULL OR decision!='approve_once' OR source_request_id IS NULL)) OR (actor IN ('harness','host') AND (outcome IN ('approved','denied') OR source_request_id IS NOT NULL)))",
+    )
+    .fetch_one(pool)
+    .await?;
+    if invalid_approval_resolution {
+        return Err(incompatible(
+            "stored approval resolution contains an unsupported product value",
+        ));
+    }
     Ok(())
 }
 

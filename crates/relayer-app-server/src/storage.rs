@@ -1,8 +1,12 @@
 mod sqlite;
 
 use crate::conversation_export::ConversationExportHeader;
-use crate::product::{
-    ActionInvocation, Interaction, InteractionModelSelection, Project, ProjectId, Thread, ThreadId,
+use crate::{
+    approval::ApprovalReceipt,
+    product::{
+        ActionInvocation, Interaction, InteractionModelSelection, Project, ProjectId, Thread,
+        ThreadId,
+    },
 };
 pub(crate) use sqlite::SqliteProductStore;
 use thiserror::Error;
@@ -13,6 +17,7 @@ pub(crate) struct ProductStateSnapshot {
     pub(crate) selected_thread_id: Option<ThreadId>,
     pub(crate) interactions: Vec<Interaction>,
     pub(crate) action_invocations: Vec<ActionInvocation>,
+    pub(crate) approvals: Vec<ApprovalReceipt>,
 }
 
 pub(crate) struct ThreadSnapshot {
@@ -20,6 +25,7 @@ pub(crate) struct ThreadSnapshot {
     pub(crate) project: Option<Project>,
     pub(crate) interactions: Vec<Interaction>,
     pub(crate) action_invocations: Vec<ActionInvocation>,
+    pub(crate) approvals: Vec<ApprovalReceipt>,
 }
 
 pub(crate) struct NewThreadRecord<'a> {
@@ -86,4 +92,8 @@ pub(crate) enum StorageError {
     Serialization(String),
     #[error("product catalog is invalid: {0}")]
     Catalog(#[from] crate::product::CatalogError),
+    #[error("stored approval conflicts with an existing durable record: {0}")]
+    ApprovalConflict(String),
+    #[error("product lifecycle transition was rejected: {0}")]
+    LifecycleConflict(String),
 }

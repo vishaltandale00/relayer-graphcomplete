@@ -96,8 +96,10 @@ pub enum ExportCompletionStatus {
     NotStarted,
     Running,
     Submitted,
+    WaitingForApproval,
     Accepted,
     Failed,
+    Stopped,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

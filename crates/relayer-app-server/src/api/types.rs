@@ -1,3 +1,4 @@
+use crate::approval::ApprovalReceipt;
 use crate::product::{
     ActionInvocation, Interaction, InteractionModelSelection, ProductCapabilities, ProductState,
     Project, Thread, ThreadDetail, ThreadView,
@@ -168,6 +169,7 @@ pub(crate) struct ProductStateResponse {
     threads: Vec<ThreadViewResponse>,
     interactions: Vec<InteractionResponse>,
     action_invocations: Vec<ActionInvocationResponse>,
+    approvals: Vec<ApprovalReceipt>,
     capabilities: CapabilitiesResponse,
 }
 
@@ -182,6 +184,7 @@ impl From<ProductState> for ProductStateResponse {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            approvals: state.approvals,
             capabilities: state.capabilities.into(),
         }
     }
@@ -193,6 +196,7 @@ pub(crate) struct ThreadDetailResponse {
     thread: ThreadResponse,
     interactions: Vec<InteractionResponse>,
     action_invocations: Vec<ActionInvocationResponse>,
+    approvals: Vec<ApprovalReceipt>,
 }
 
 impl From<ThreadDetail> for ThreadDetailResponse {
@@ -205,6 +209,7 @@ impl From<ThreadDetail> for ThreadDetailResponse {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            approvals: detail.approvals,
         }
     }
 }

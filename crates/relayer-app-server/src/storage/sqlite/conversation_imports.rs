@@ -234,8 +234,10 @@ fn completion_status(status: ExportCompletionStatus) -> &'static str {
         ExportCompletionStatus::NotStarted => "not_started",
         ExportCompletionStatus::Running => "running",
         ExportCompletionStatus::Submitted => "submitted",
+        ExportCompletionStatus::WaitingForApproval => "waiting_for_approval",
         ExportCompletionStatus::Accepted => "accepted",
         ExportCompletionStatus::Failed => "failed",
+        ExportCompletionStatus::Stopped => "stopped",
     }
 }
 
@@ -244,10 +246,29 @@ fn parse_completion_status(value: &str) -> Result<ExportCompletionStatus, Storag
         "not_started" => Ok(ExportCompletionStatus::NotStarted),
         "running" => Ok(ExportCompletionStatus::Running),
         "submitted" => Ok(ExportCompletionStatus::Submitted),
+        "waiting_for_approval" => Ok(ExportCompletionStatus::WaitingForApproval),
         "accepted" => Ok(ExportCompletionStatus::Accepted),
         "failed" => Ok(ExportCompletionStatus::Failed),
+        "stopped" => Ok(ExportCompletionStatus::Stopped),
         other => Err(StorageError::Serialization(format!(
             "stored import completion status is invalid: {other}"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{completion_status, parse_completion_status};
+    use crate::conversation_export::ExportCompletionStatus;
+
+    #[test]
+    fn imported_approval_lifecycle_statuses_round_trip() {
+        for status in [
+            ExportCompletionStatus::WaitingForApproval,
+            ExportCompletionStatus::Stopped,
+        ] {
+            let stored = completion_status(status);
+            assert_eq!(parse_completion_status(stored).unwrap(), status);
+        }
     }
 }

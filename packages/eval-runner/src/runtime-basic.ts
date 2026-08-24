@@ -102,7 +102,10 @@ export async function runBasicRuntimeEval(options: {
       capabilities.push(capability);
       const complete = await completeWithCapabilityCleanup(async () => {
         await requestJson(`${runningHarnessHost.url}/sessions`, harnessControlToken, { threadId, configuration, permissionProfileId, workingDirectory }, 201);
-        return requestJson<{ output: CompletionOutput }>(`${runningHarnessHost.url}/sessions/${threadId}/complete`, harnessControlToken, { graph: capability });
+        return requestJson<{ output: CompletionOutput }>(`${runningHarnessHost.url}/sessions/${threadId}/complete`, harnessControlToken, {
+          interactionId: interaction.node.id,
+          graph: capability,
+        });
       }, capability, graphControlToken);
       const checks = checkBasicOutput(complete.output, interaction.node.id);
       const deterministicPassed = checks.every((check) => check.passed);

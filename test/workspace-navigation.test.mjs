@@ -33,6 +33,7 @@ function fixture() {
     thread: { id: 7, title: "Navigation history" },
     interactions: [{ id: 1, threadId: 7 }, interaction],
     actionInvocations: [{ sourceInteractionId: 1, actionId: 9 }],
+    approvals: [{ request: { requestId: "approval-1" } }],
   };
   return { child, detail, interaction, root };
 }
@@ -115,6 +116,7 @@ describe("workspace navigation presentation", () => {
     expect(first.layerPath.map(({ label }) => label)).toEqual(["Response", "Architecture"]);
     expect(first.entry.selectedNodeId).toBe("11");
     expect(first.actionInvocations).toEqual(detail.actionInvocations);
+    expect(first.approvals).toEqual(detail.approvals);
     expect(second.layer).toBe(child);
     expect(loadThread).toHaveBeenCalledTimes(2);
     expect(loadLayer).toHaveBeenCalledTimes(1);

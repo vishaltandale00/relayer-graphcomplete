@@ -6,6 +6,7 @@ use super::{
     UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand, ValidateModelSelectionCommand,
     validate_family,
 };
+use crate::approval::{ApprovalReceipt, ApprovalRequest, ApprovalResolution};
 use crate::storage::{
     ActionInvocationInsertOutcome, ConversationImportRecord, NewConversationImport,
     NewThreadRecord, SqliteProductStore, StagedConversationImport, StorageError,
@@ -51,6 +52,7 @@ pub(crate) struct ThreadDetail {
     pub(crate) project: Option<Project>,
     pub(crate) interactions: Vec<Interaction>,
     pub(crate) action_invocations: Vec<ActionInvocation>,
+    pub(crate) approvals: Vec<ApprovalReceipt>,
 }
 
 pub(crate) struct InvokeActionOutcome {
@@ -396,6 +398,7 @@ impl ProductService {
             threads,
             interactions: snapshot.interactions,
             action_invocations: snapshot.action_invocations,
+            approvals: snapshot.approvals,
             capabilities: self.capabilities(),
         })
     }
@@ -517,6 +520,7 @@ impl ProductService {
             project: snapshot.project,
             interactions: snapshot.interactions,
             action_invocations: snapshot.action_invocations,
+            approvals: snapshot.approvals,
         })
     }
 
@@ -805,6 +809,48 @@ impl ProductService {
             ));
         }
         Ok(())
+    }
+
+    pub(crate) async fn get_approval(
+        &self,
+        request_id: &str,
+    ) -> Result<ApprovalReceipt, ProductError> {
+        self.storage
+            .get_approval(request_id)
+            .await?
+            .ok_or_else(|| ProductError::NotFound(format!("approval request {request_id}")))
+    }
+
+    pub(crate) async fn record_approval_request(
+        &self,
+        request: &ApprovalRequest,
+    ) -> Result<ApprovalReceipt, ProductError> {
+        self.storage
+            .record_approval_request(request)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn record_approval_resolution(
+        &self,
+        resolution: &ApprovalResolution,
+        harness_live: bool,
+    ) -> Result<ApprovalReceipt, ProductError> {
+        self.storage
+            .record_approval_resolution(resolution, harness_live)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn abort_pending_approvals(
+        &self,
+        interaction_id: Option<InteractionId>,
+        rationale: &str,
+    ) -> Result<u64, ProductError> {
+        self.storage
+            .abort_pending_approvals(interaction_id, rationale, &now())
+            .await
+            .map_err(Into::into)
     }
 
     pub(crate) async fn project_path(&self, project_id: ProjectId) -> Result<String, ProductError> {

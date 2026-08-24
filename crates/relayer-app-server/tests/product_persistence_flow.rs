@@ -17,13 +17,14 @@ use relayer_graph_server::ServerState as GraphServerState;
 use serde_json::{Value, json};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{
+    collections::HashMap,
     fs,
     io::{BufRead, BufReader, Write},
     path::Path,
     process::{Command, Stdio},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering},
     },
     thread,
     time::Duration,
@@ -232,7 +233,6 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
     ));
     let (graph_url, graph_task) = serve_test_app(graph).await;
     let (harness_url, harness_task) = serve_test_app(Router::new()).await;
-
     let catalog = root.join("catalog.json");
     fs::write(
         &catalog,
@@ -460,6 +460,543 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
 }
 
 #[tokio::test]
+async fn approval_wait_is_durable_and_the_product_decision_resumes_the_same_completion() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-approval-api-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion": 1,
+            "configurations": [{
+                "configuration": {
+                    "schemaVersion": 1,
+                    "name": "codex-basic",
+                    "implementation": "test",
+                    "implementationVersion": 1,
+                    "permissionBindings": { "ask": {} },
+                    "settings": {}
+                },
+                "digest": "sha256:test"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let next_graph_node_id = Arc::new(AtomicI64::new(41));
+    let graph_node_id = next_graph_node_id.clone();
+    let graph = Router::new()
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(move || {
+                let node_id = graph_node_id.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    axum::Json(json!({ "node": { "id": node_id }, "graphToken": "turn" }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::delete(|| async { axum::Json(json!({ "revoked": true })) }),
+        );
+    let interaction_id = Arc::new(AtomicI64::new(0));
+    let event_interaction_id = Arc::new(AtomicI64::new(0));
+    let decided = Arc::new(AtomicBool::new(false));
+    let completion_active = Arc::new(AtomicBool::new(false));
+    let event_epoch_reset = Arc::new(AtomicBool::new(false));
+    let decision_notify = Arc::new(tokio::sync::Notify::new());
+    let complete_interaction_id = interaction_id.clone();
+    let complete_decided = decided.clone();
+    let complete_notify = decision_notify.clone();
+    let complete_event_interaction_id = event_interaction_id.clone();
+    let complete_active = completion_active.clone();
+    let events_interaction_id = event_interaction_id.clone();
+    let events_decided = decided.clone();
+    let events_completion_active = completion_active.clone();
+    let events_epoch_reset = event_epoch_reset.clone();
+    let decision_interaction_id = interaction_id.clone();
+    let decision_decided = decided.clone();
+    let decision_signal = decision_notify.clone();
+    let harness = Router::new()
+        .route(
+            "/sessions",
+            axum::routing::post(|| async { (StatusCode::CREATED, axum::Json(json!({}))) }),
+        )
+        .route(
+            "/sessions/{id}/complete",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let complete_interaction_id = complete_interaction_id.clone();
+                let complete_decided = complete_decided.clone();
+                let complete_notify = complete_notify.clone();
+                let event_interaction_id = complete_event_interaction_id.clone();
+                let completion_active = complete_active.clone();
+                async move {
+                    let interaction_id = body["interactionId"].as_i64().unwrap();
+                    let graph_node_id = body["graph"]["nodeId"].as_i64().unwrap();
+                    complete_interaction_id.store(interaction_id, Ordering::SeqCst);
+                    let _ = event_interaction_id.compare_exchange(
+                        0,
+                        interaction_id,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    );
+                    completion_active.store(true, Ordering::SeqCst);
+                    while !complete_decided.load(Ordering::SeqCst) {
+                        complete_notify.notified().await;
+                    }
+                    completion_active.store(false, Ordering::SeqCst);
+                    axum::Json(json!({
+                        "output": {
+                            "nodeId": graph_node_id,
+                            "rootLayer": { "layer": { "id": 1 }, "nodes": [], "edges": [], "actions": [] }
+                        }
+                    }))
+                }
+            }),
+        )
+        .route(
+            "/sessions/{id}/approval-events",
+            axum::routing::get(move |axum::extract::Query(query): axum::extract::Query<HashMap<String, String>>| {
+                let interaction_id = events_interaction_id.load(Ordering::SeqCst);
+                let is_decided = events_decided.load(Ordering::SeqCst);
+                let completion_active = events_completion_active.load(Ordering::SeqCst);
+                let epoch_reset = events_epoch_reset.clone();
+                async move {
+                    let after = query.get("after").and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
+                    if epoch_reset.load(Ordering::SeqCst) {
+                        return axum::Json(json!({
+                            "harnessSessionId": "session-1",
+                            "latestSequence": 0,
+                            "pendingRequests": [],
+                            "events": []
+                        }));
+                    }
+                    let correlation = json!({
+                        "threadId": 1,
+                        "interactionId": interaction_id,
+                        "completeCallId": "complete-1",
+                        "harnessSessionId": "session-1"
+                    });
+                    let request = json!({
+                        "requestId": "request-1",
+                        "correlation": correlation,
+                        "title": "Run tests",
+                        "reason": "The harness needs to run tests.",
+                        "action": { "kind": "command", "command": "npm test", "workingDirectory": "/workspace" },
+                        "scopeKeys": ["command:npm test", "cwd:/workspace"],
+                        "scopeDescription": "Run npm test in /workspace",
+                        "createdAt": "2026-08-20T12:00:00Z"
+                    });
+                    let resolution = json!({
+                        "requestId": "request-1",
+                        "correlation": correlation,
+                        "outcome": "approved",
+                        "actor": "user",
+                        "resolvedAt": "2026-08-20T12:01:00Z",
+                        "decision": "approve_once"
+                    });
+                    let mut events = Vec::new();
+                    if interaction_id > 0 && after < 1 {
+                        events.push(json!({ "sequence": 1, "type": "requested", "request": request }));
+                    }
+                    if interaction_id > 0 && is_decided && after < 2 {
+                        events.push(json!({ "sequence": 2, "type": "resolved", "resolution": resolution }));
+                    }
+                    let snapshot = axum::Json(json!({
+                        "harnessSessionId": "session-1",
+                        "latestSequence": if interaction_id == 0 { 0 } else if is_decided { 2 } else { 1 },
+                        "pendingRequests": if interaction_id > 0 && !is_decided { vec![request] } else { Vec::<Value>::new() },
+                        "events": events
+                    }));
+                    if is_decided && !completion_active && after == 2 {
+                        epoch_reset.store(true, Ordering::SeqCst);
+                    }
+                    snapshot
+                }
+            }),
+        )
+        .route(
+            "/sessions/{id}/approvals/{request_id}/decision",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let interaction_id = decision_interaction_id.load(Ordering::SeqCst);
+                let decided = decision_decided.clone();
+                let notify = decision_signal.clone();
+                async move {
+                    assert_eq!(body, json!({ "decision": "approve_once" }));
+                    decided.store(true, Ordering::SeqCst);
+                    notify.notify_waiters();
+                    axum::Json(json!({
+                        "requestId": "request-1",
+                        "correlation": {
+                            "threadId": 1,
+                            "interactionId": interaction_id,
+                            "completeCallId": "complete-1",
+                            "harnessSessionId": "session-1"
+                        },
+                        "outcome": "approved",
+                        "actor": "user",
+                        "resolvedAt": "2026-08-20T12:01:00Z",
+                        "decision": "approve_once"
+                    }))
+                }
+            }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(harness).await;
+    let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+
+    let created = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({
+                    "initialMessage": "Please run the test suite",
+                    "permissionProfileId": "ask"
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = created["id"].as_i64().unwrap();
+    let product_interaction_id = created["rootInteractionId"].as_i64().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let state = response_json(
+            app.clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        if state["interactions"][0]["completionStatus"] == "waiting_for_approval" {
+            assert_eq!(state["approvals"].as_array().unwrap().len(), 1);
+            assert!(
+                state["approvals"][0]["request"]["correlation"]
+                    .get("providerItemId")
+                    .is_none()
+            );
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let decision_uri = format!(
+        "/api/threads/{thread_id}/interactions/{product_interaction_id}/approvals/request-1/decision"
+    );
+    let decision_response = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &decision_uri,
+            Some(json!({ "decision": "approve_once" })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(decision_response.status(), StatusCode::OK);
+    let receipt = response_json(decision_response).await;
+    assert_eq!(receipt["approval"]["resolution"]["outcome"], "approved");
+
+    loop {
+        let state = response_json(
+            app.clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        if state["interactions"][0]["completionStatus"] == "accepted" {
+            assert_eq!(
+                state["approvals"][0]["resolution"]["decision"],
+                "approve_once"
+            );
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let duplicate = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &decision_uri,
+            Some(json!({ "decision": "approve_once" })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+    assert!(event_epoch_reset.load(Ordering::SeqCst));
+
+    let second = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                &format!("/api/threads/{thread_id}/interactions"),
+                Some(json!({ "text": "Continue after the approved command" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let second_interaction_id = second["id"].as_i64().unwrap();
+    loop {
+        let state = response_json(
+            app.clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let second = state["interactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|interaction| interaction["id"] == second_interaction_id)
+            .unwrap();
+        if second["completionStatus"] == "accepted" {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    drop(app);
+    graph_task.abort();
+    harness_task.abort();
+    let reopened = open_app(&database, &root).await;
+    let restored = response_json(
+        reopened
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        restored["approvals"][0]["resolution"]["outcome"],
+        "approved"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn malformed_approval_reconciliation_cancels_and_fails_the_completion() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-approval-reconciliation-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion": 1,
+            "configurations": [{
+                "configuration": {
+                    "schemaVersion": 1,
+                    "name": "codex-basic",
+                    "implementation": "test",
+                    "implementationVersion": 1,
+                    "permissionBindings": { "ask": {} },
+                    "settings": {}
+                },
+                "digest": "sha256:test"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let revoked = Arc::new(AtomicBool::new(false));
+    let revoke_signal = revoked.clone();
+    let graph = Router::new()
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(|| async {
+                axum::Json(json!({ "node": { "id": 41 }, "graphToken": "turn" }))
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::delete(move || {
+                let revoked = revoke_signal.clone();
+                async move {
+                    revoked.store(true, Ordering::SeqCst);
+                    axum::Json(json!({ "revoked": true }))
+                }
+            }),
+        );
+    let interaction_id = Arc::new(AtomicI64::new(0));
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancellation = Arc::new(tokio::sync::Notify::new());
+    let complete_interaction_id = interaction_id.clone();
+    let complete_cancelled = cancelled.clone();
+    let complete_cancellation = cancellation.clone();
+    let events_interaction_id = interaction_id.clone();
+    let cancel_cancelled = cancelled.clone();
+    let cancel_cancellation = cancellation.clone();
+    let harness = Router::new()
+        .route(
+            "/sessions",
+            axum::routing::post(|| async { (StatusCode::CREATED, axum::Json(json!({}))) }),
+        )
+        .route(
+            "/sessions/{id}/complete",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let interaction_id = complete_interaction_id.clone();
+                let cancelled = complete_cancelled.clone();
+                let cancellation = complete_cancellation.clone();
+                async move {
+                    interaction_id.store(body["interactionId"].as_i64().unwrap(), Ordering::SeqCst);
+                    while !cancelled.load(Ordering::SeqCst) {
+                        cancellation.notified().await;
+                    }
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        axum::Json(json!({ "error": "cancelled" })),
+                    )
+                }
+            }),
+        )
+        .route(
+            "/sessions/{id}/cancel",
+            axum::routing::post(move || {
+                let cancelled = cancel_cancelled.clone();
+                let cancellation = cancel_cancellation.clone();
+                async move {
+                    cancelled.store(true, Ordering::SeqCst);
+                    cancellation.notify_waiters();
+                    axum::Json(json!({ "cancelled": true }))
+                }
+            }),
+        )
+        .route(
+            "/sessions/{id}/approval-events",
+            axum::routing::get(move || {
+                let interaction_id = events_interaction_id.load(Ordering::SeqCst);
+                async move {
+                    if interaction_id == 0 {
+                        return axum::Json(json!({
+                            "harnessSessionId": "session-1",
+                            "latestSequence": 0,
+                            "pendingRequests": [],
+                            "events": []
+                        }));
+                    }
+                    let request = json!({
+                        "requestId": "request-1",
+                        "correlation": {
+                            "threadId": 1,
+                            "interactionId": interaction_id,
+                            "completeCallId": "complete-1",
+                            "harnessSessionId": "session-1"
+                        },
+                        "title": "Run tests",
+                        "reason": "The harness needs approval.",
+                        "action": { "kind": "command", "command": "npm test", "workingDirectory": "/workspace" },
+                        "scopeKeys": ["command:npm test"],
+                        "scopeDescription": "Run npm test",
+                        "createdAt": "2026-08-20T12:00:00Z"
+                    });
+                    axum::Json(json!({
+                        "harnessSessionId": "session-1",
+                        "latestSequence": 2,
+                        "pendingRequests": [request.clone()],
+                        "events": [{ "sequence": 2, "type": "requested", "request": request }]
+                    }))
+                }
+            }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(harness).await;
+    let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let created = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({
+                    "initialMessage": "Please run tests",
+                    "permissionProfileId": "ask"
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = created["id"].as_i64().unwrap();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let state = response_json(
+            app.clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        if state["interactions"][0]["completionStatus"] == "failed" {
+            assert!(
+                state["interactions"][0]["completionError"]
+                    .as_str()
+                    .unwrap()
+                    .contains("event sequence jumped")
+            );
+            assert!(state["approvals"].as_array().unwrap().is_empty());
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(cancelled.load(Ordering::SeqCst));
+    assert!(revoked.load(Ordering::SeqCst));
+    graph_task.abort();
+    harness_task.abort();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn action_invocation_api_is_idempotent_and_survives_restart() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -583,6 +1120,17 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
                     }))
                 }
             }),
+        )
+        .route(
+            "/sessions/{id}/approval-events",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "harnessSessionId": "session-1",
+                    "latestSequence": 0,
+                    "pendingRequests": [],
+                    "events": []
+                }))
+            }),
         );
     let (graph_url, graph_task) = serve_test_app(graph).await;
     let (harness_url, harness_task) = serve_test_app(harness).await;
@@ -609,7 +1157,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     .unwrap();
 
     let (app, provider_refreshes) =
-        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url, false)
+            .await;
     let rejected = app
         .clone()
         .oneshot(api_request(
@@ -955,7 +1504,8 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
     )
     .unwrap();
     let (app, provider_refreshes) =
-        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url, false)
+            .await;
     let full_only_permissions = response_json(
         app.clone()
             .oneshot(api_request(
@@ -1790,7 +2340,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 6);
+    assert_eq!(applied_migrations, 7);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -1937,9 +2487,16 @@ async fn open_app_with_runtime(
     graph_url: &str,
     harness_url: &str,
 ) -> Router {
-    open_app_with_runtime_observed(database, web_directory, catalog, graph_url, harness_url)
-        .await
-        .0
+    open_app_with_runtime_observed(
+        database,
+        web_directory,
+        catalog,
+        graph_url,
+        harness_url,
+        true,
+    )
+    .await
+    .0
 }
 
 struct ProviderRefreshProbe {
@@ -1953,6 +2510,7 @@ async fn open_app_with_runtime_observed(
     catalog: &Path,
     graph_url: &str,
     harness_url: &str,
+    allow_harness_override: bool,
 ) -> (Router, ProviderRefreshProbe) {
     let provider_refreshes = Arc::new(AtomicUsize::new(0));
     let observed_refreshes = provider_refreshes.clone();
@@ -1989,7 +2547,7 @@ async fn open_app_with_runtime_observed(
             harness_control_token: "harness-control".to_owned(),
             harness_configurations: catalog.to_owned(),
             default_harness_configuration: "codex-basic".to_owned(),
-            allow_harness_override: false,
+            allow_harness_override,
             standalone_workspaces_directory: web_directory.join("workspaces"),
         }),
         allow_conversation_import: false,

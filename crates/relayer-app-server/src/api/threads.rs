@@ -8,12 +8,18 @@ use super::{
     },
 };
 use crate::{
+    approval::{
+        ApprovalActor, ApprovalCorrelation, ApprovalDecision, ApprovalDecisionSubmission,
+        ApprovalOutcome, ApprovalReceipt, ApprovalRequest, ApprovalResolution,
+    },
     product::{
         AcceptedInteractionCompletion, CreateThreadCommand, Interaction, InteractionId,
         InteractionModelSelection, InvokeActionOutcome, ModelFamilyId, ProjectId, ProviderId,
         Thread, ThreadId, ThreadView,
     },
-    runtime::{CompleteInteraction, RuntimeError},
+    runtime::{
+        ApprovalEvent, ApprovalEventSnapshot, CompleteInteraction, RuntimeCompletion, RuntimeError,
+    },
 };
 use axum::{
     Json,
@@ -68,6 +74,82 @@ pub(super) struct InvokeActionResponse {
     invocation: ActionInvocationResponse,
     interaction: InteractionResponse,
     created: bool,
+}
+
+#[derive(Serialize)]
+pub(super) struct ApprovalDecisionResponse {
+    approval: ApprovalReceipt,
+}
+
+pub(super) async fn decide_approval(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, interaction_id, request_id)): Path<(i64, i64, String)>,
+    Json(submission): Json<ApprovalDecisionSubmission>,
+) -> Result<Json<ApprovalDecisionResponse>, ApiError> {
+    authorize_write(&state, &headers)?;
+    let thread_id = ThreadId::try_from(thread_id)?;
+    let interaction_id = InteractionId::try_from(interaction_id)?;
+    let interaction = state.product.get_interaction(interaction_id).await?;
+    if interaction.thread_id != thread_id {
+        return Err(ApiError::invalid(
+            "interaction does not belong to this thread",
+        ));
+    }
+    let stored = state.product.get_approval(&request_id).await?;
+    if stored.request.correlation.thread_id != thread_id.value()
+        || stored.request.correlation.interaction_id != interaction_id.value()
+    {
+        return Err(ApiError::not_found(
+            "approval request does not belong to this interaction",
+        ));
+    }
+    if stored.resolution.is_some() {
+        return Err(ApiError::conflict(
+            "approval_already_resolved",
+            "approval request already has a terminal resolution",
+        ));
+    }
+    if interaction.completion_status != "waiting_for_approval" {
+        return Err(ApiError::conflict(
+            "approval_not_actionable",
+            "interaction is not waiting for approval",
+        ));
+    }
+    let runtime = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
+    let _reservation = {
+        let mut decisions = state
+            .approval_decisions
+            .lock()
+            .expect("approval decision lock poisoned");
+        if decisions.contains_key(&request_id) {
+            return Err(ApiError::conflict(
+                "approval_decision_in_flight",
+                "approval request already has a decision in flight",
+            ));
+        }
+        decisions.insert(request_id.clone(), submission.decision);
+        ApprovalDecisionReservation {
+            decisions: state.approval_decisions.clone(),
+            request_id: request_id.clone(),
+        }
+    };
+    async {
+        let resolution = runtime
+            .decide_approval(thread_id.value(), &request_id, &submission)
+            .await?;
+        validate_decision_resolution(&stored.request, submission.decision, &resolution)
+            .map_err(|error| ApiError::internal(&error))?;
+        let approval = state
+            .product
+            .record_approval_resolution(&resolution, true)
+            .await?;
+        Ok(Json(ApprovalDecisionResponse { approval }))
+    }
+    .await
 }
 
 pub(super) async fn list(
@@ -651,29 +733,141 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
         .await;
         return;
     }
-    match runtime
-        .complete(CompleteInteraction {
-            project_id: thread.project_id.map(ProjectId::value),
-            product_interaction_id: interaction.id.value(),
-            thread_id: thread.id.value(),
-            text: &interaction.text,
-            working_directory: &working_directory,
-            harness_configuration_name: &thread.harness_configuration_name,
-            permission_profile: match state
-                .permission_catalog
-                .profile(&thread.permission_profile_id)
-            {
-                Ok(profile) => profile,
-                Err(error) => {
-                    record_background_failure(&state, &thread, &interaction, error.to_string())
-                        .await;
-                    return;
+    let permission_profile = match state
+        .permission_catalog
+        .profile(&thread.permission_profile_id)
+    {
+        Ok(profile) => profile,
+        Err(error) => {
+            record_background_failure(&state, &thread, &interaction, error.to_string()).await;
+            return;
+        }
+    };
+    let completion = runtime.complete(CompleteInteraction {
+        project_id: thread.project_id.map(ProjectId::value),
+        product_interaction_id: interaction.id.value(),
+        thread_id: thread.id.value(),
+        interaction_id: interaction.id.value(),
+        text: &interaction.text,
+        working_directory: &working_directory,
+        harness_configuration_name: &thread.harness_configuration_name,
+        permission_profile,
+        model_selection: interaction.model_selection.as_ref(),
+    });
+    tokio::pin!(completion);
+    let mut cursor = 0;
+    let mut harness_session_id = None;
+    let mut complete_call_id = None;
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let completion_result: Result<RuntimeCompletion, String> = loop {
+        tokio::select! {
+            result = &mut completion => {
+                match runtime.approval_events(thread.id.value(), cursor).await {
+                    Ok(snapshot) => {
+                        if let Err(error) = persist_approval_snapshot(
+                            &state,
+                            thread.id,
+                            interaction.id,
+                            &mut cursor,
+                            &mut harness_session_id,
+                            &mut complete_call_id,
+                            snapshot,
+                        ).await {
+                            break Err(error);
+                        }
+                        let acknowledgement = match runtime
+                            .approval_events(thread.id.value(), cursor)
+                            .await
+                        {
+                            Ok(snapshot) => snapshot,
+                            Err(error) => break Err(format!(
+                                "could not acknowledge final approval event cursor: {error}"
+                            )),
+                        };
+                        match final_approval_acknowledgement(cursor, &acknowledgement) {
+                            Ok(true) => {
+                                if let Err(error) = persist_approval_snapshot(
+                                    &state,
+                                    thread.id,
+                                    interaction.id,
+                                    &mut cursor,
+                                    &mut harness_session_id,
+                                    &mut complete_call_id,
+                                    acknowledgement,
+                                ).await {
+                                    break Err(error);
+                                }
+                            }
+                            Ok(false) => {}
+                            Err(error) => break Err(error),
+                        }
+                    }
+                    Err(RuntimeError::Remote { status: 404, .. }) if harness_session_id.is_none() => {}
+                    Err(error) => break Err(format!(
+                        "could not perform final approval reconciliation: {error}"
+                    )),
                 }
-            },
-            model_selection: interaction.model_selection.as_ref(),
-        })
+                break result.map_err(|error| error.to_string());
+            }
+            _ = interval.tick() => {
+                match runtime.approval_events(thread.id.value(), cursor).await {
+                    Ok(snapshot) => {
+                        if let Err(error) = persist_approval_snapshot(
+                            &state,
+                            thread.id,
+                            interaction.id,
+                            &mut cursor,
+                            &mut harness_session_id,
+                            &mut complete_call_id,
+                            snapshot,
+                        ).await {
+                            let cancellation = runtime.cancel_completion(thread.id.value()).await;
+                            let cleanup = tokio::time::timeout(
+                                std::time::Duration::from_secs(2),
+                                &mut completion,
+                            ).await;
+                            let mut message = format!(
+                                "could not reconcile approval events for thread {}: {error}",
+                                thread.id
+                            );
+                            if let Err(cancel_error) = cancellation {
+                                message.push_str(&format!("; cancellation failed: {cancel_error}"));
+                            }
+                            if cleanup.is_err() {
+                                message.push_str("; runtime cleanup timed out");
+                            }
+                            break Err(message);
+                        }
+                    }
+                    Err(RuntimeError::Remote { status: 404, .. }) if harness_session_id.is_none() => {}
+                    Err(error) => {
+                        eprintln!("could not poll approval events for thread {}: {error}", thread.id);
+                    }
+                }
+            }
+        }
+    };
+    let aborted = match state
+        .product
+        .abort_pending_approvals(
+            Some(interaction.id),
+            "Approval request was aborted because the harness completion ended without a terminal approval event.",
+        )
         .await
     {
+        Ok(count) => count,
+        Err(error) => {
+            record_background_failure(&state, &thread, &interaction, error.to_string()).await;
+            return;
+        }
+    };
+    let completion_result = if aborted > 0 {
+        Err("harness completion ended with unresolved approval requests".into())
+    } else {
+        completion_result
+    };
+    match completion_result {
         Ok(completion) => {
             if completion.permission_profile_id != thread.permission_profile_id {
                 record_background_failure(
@@ -725,6 +919,197 @@ impl TryFrom<ModelSelectionRequest> for InteractionModelSelection {
     }
 }
 
+fn final_approval_acknowledgement(
+    cursor: u64,
+    snapshot: &ApprovalEventSnapshot,
+) -> Result<bool, String> {
+    if !snapshot.events.is_empty() || !snapshot.pending_requests.is_empty() {
+        return Err("harness did not return an empty final approval acknowledgement".into());
+    }
+    if snapshot.latest_sequence == cursor {
+        return Ok(true);
+    }
+    if cursor > 0 && snapshot.latest_sequence == 0 {
+        return Ok(false);
+    }
+    Err("harness did not acknowledge the exact final approval event cursor".into())
+}
+
+async fn persist_approval_snapshot(
+    state: &ApiState,
+    thread_id: ThreadId,
+    interaction_id: InteractionId,
+    cursor: &mut u64,
+    harness_session_id: &mut Option<String>,
+    complete_call_id: &mut Option<String>,
+    snapshot: ApprovalEventSnapshot,
+) -> Result<(), String> {
+    if snapshot.harness_session_id.trim().is_empty() {
+        return Err("harness returned an empty approval session ID".into());
+    }
+    if let Some(previous) = harness_session_id.as_deref()
+        && previous != snapshot.harness_session_id
+    {
+        return Err("harness approval session changed while completion was active".into());
+    }
+    *harness_session_id = Some(snapshot.harness_session_id.clone());
+    for event in snapshot.events {
+        if event.sequence() != *cursor + 1 {
+            return Err(format!(
+                "harness approval event sequence jumped from {} to {}",
+                *cursor,
+                event.sequence()
+            ));
+        }
+        match event {
+            ApprovalEvent::Requested { request, .. } => {
+                validate_approval_correlation(
+                    thread_id,
+                    interaction_id,
+                    &snapshot.harness_session_id,
+                    complete_call_id,
+                    &request.correlation,
+                )?;
+                state
+                    .product
+                    .record_approval_request(&request)
+                    .await
+                    .map_err(|error| error.to_string())?;
+            }
+            ApprovalEvent::Resolved { resolution, .. } => {
+                validate_approval_correlation(
+                    thread_id,
+                    interaction_id,
+                    &snapshot.harness_session_id,
+                    complete_call_id,
+                    &resolution.correlation,
+                )?;
+                validate_event_resolution_authority(state, &resolution).await?;
+                state
+                    .product
+                    .record_approval_resolution(&resolution, true)
+                    .await
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        *cursor += 1;
+    }
+    if snapshot.latest_sequence != *cursor {
+        return Err(format!(
+            "harness approval event snapshot ended at {} but reported latest sequence {}",
+            *cursor, snapshot.latest_sequence
+        ));
+    }
+    for request in snapshot.pending_requests {
+        validate_approval_correlation(
+            thread_id,
+            interaction_id,
+            &snapshot.harness_session_id,
+            complete_call_id,
+            &request.correlation,
+        )?;
+        state
+            .product
+            .record_approval_request(&request)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn validate_approval_correlation(
+    thread_id: ThreadId,
+    interaction_id: InteractionId,
+    snapshot_session_id: &str,
+    complete_call_id: &mut Option<String>,
+    correlation: &ApprovalCorrelation,
+) -> Result<(), String> {
+    if correlation.thread_id != thread_id.value() {
+        return Err("harness approval event belongs to a different thread".into());
+    }
+    if correlation.interaction_id != interaction_id.value() {
+        return Err("harness approval event belongs to a different interaction".into());
+    }
+    if correlation.harness_session_id != snapshot_session_id {
+        return Err("harness approval event belongs to a different live session".into());
+    }
+    if let Some(expected) = complete_call_id.as_deref() {
+        if correlation.complete_call_id != expected {
+            return Err("harness approval event belongs to a different completion call".into());
+        }
+    } else {
+        *complete_call_id = Some(correlation.complete_call_id.clone());
+    }
+    Ok(())
+}
+
+fn validate_decision_resolution(
+    request: &ApprovalRequest,
+    decision: ApprovalDecision,
+    resolution: &ApprovalResolution,
+) -> Result<(), String> {
+    if resolution.request_id != request.request_id || resolution.correlation != request.correlation
+    {
+        return Err("harness returned an approval resolution for a different request".into());
+    }
+    if resolution.actor != ApprovalActor::User || resolution.decision != Some(decision) {
+        return Err("harness approval resolution did not match the user's decision".into());
+    }
+    let expected_outcome = match decision {
+        ApprovalDecision::ApproveOnce | ApprovalDecision::ApproveAlways => {
+            ApprovalOutcome::Approved
+        }
+        ApprovalDecision::Deny => ApprovalOutcome::Denied,
+    };
+    if resolution.outcome != expected_outcome || resolution.source_request_id.is_some() {
+        return Err("harness approval resolution did not match the user's decision".into());
+    }
+    Ok(())
+}
+
+async fn validate_event_resolution_authority(
+    state: &ApiState,
+    resolution: &ApprovalResolution,
+) -> Result<(), String> {
+    if resolution.actor != ApprovalActor::User {
+        return Ok(());
+    }
+    let stored = state
+        .product
+        .get_approval(&resolution.request_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    if stored.resolution.as_ref() == Some(resolution) {
+        return Ok(());
+    }
+    let decision = state
+        .approval_decisions
+        .lock()
+        .expect("approval decision lock poisoned")
+        .get(&resolution.request_id)
+        .copied()
+        .ok_or_else(|| {
+            "harness returned a user approval resolution without a product decision in flight"
+                .to_owned()
+        })?;
+    validate_decision_resolution(&stored.request, decision, resolution)
+}
+
+struct ApprovalDecisionReservation {
+    decisions:
+        std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, ApprovalDecision>>>,
+    request_id: String,
+}
+
+impl Drop for ApprovalDecisionReservation {
+    fn drop(&mut self) {
+        self.decisions
+            .lock()
+            .expect("approval decision lock poisoned")
+            .remove(&self.request_id);
+    }
+}
+
 async fn record_background_failure(
     state: &ApiState,
     thread: &Thread,
@@ -750,6 +1135,7 @@ async fn record_background_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::approval::ApprovalAction;
 
     #[test]
     fn action_invocation_request_errors_include_identifiers_in_the_backend_log() {
@@ -759,5 +1145,137 @@ mod tests {
             action_invocation_request_failure_message(4, 8, 15, &error),
             "action invocation request failed before background completion: thread=4 source_interaction=8 action=15: GraphComplete runtime is unavailable"
         );
+    }
+
+    #[test]
+    fn product_decision_accepts_only_the_exact_user_resolution() {
+        let request = approval_request();
+        let submission = ApprovalDecisionSubmission {
+            decision: ApprovalDecision::Deny,
+            rationale: None,
+        };
+        let exact = ApprovalResolution {
+            request_id: request.request_id.clone(),
+            correlation: request.correlation.clone(),
+            outcome: ApprovalOutcome::Denied,
+            actor: ApprovalActor::User,
+            resolved_at: "2026-08-20T12:01:00Z".into(),
+            decision: Some(ApprovalDecision::Deny),
+            rationale: None,
+            source_request_id: None,
+        };
+        assert!(validate_decision_resolution(&request, submission.decision, &exact).is_ok());
+
+        let widened = ApprovalResolution {
+            outcome: ApprovalOutcome::Approved,
+            decision: Some(ApprovalDecision::ApproveAlways),
+            ..exact.clone()
+        };
+        assert!(validate_decision_resolution(&request, submission.decision, &widened).is_err());
+        let other_request = ApprovalResolution {
+            request_id: "request-2".into(),
+            ..exact.clone()
+        };
+        assert!(
+            validate_decision_resolution(&request, submission.decision, &other_request).is_err()
+        );
+        let grant = ApprovalResolution {
+            outcome: ApprovalOutcome::Approved,
+            actor: ApprovalActor::SessionGrant,
+            decision: Some(ApprovalDecision::Deny),
+            source_request_id: Some("request-0".into()),
+            ..exact
+        };
+        assert!(validate_decision_resolution(&request, submission.decision, &grant).is_err());
+    }
+
+    #[test]
+    fn approval_correlation_is_pinned_to_interaction_session_and_complete_call() {
+        let request = approval_request();
+        let thread_id = ThreadId::try_from(1).unwrap();
+        let interaction_id = InteractionId::try_from(2).unwrap();
+        let mut complete_call_id = None;
+        assert!(
+            validate_approval_correlation(
+                thread_id,
+                interaction_id,
+                "session-1",
+                &mut complete_call_id,
+                &request.correlation,
+            )
+            .is_ok()
+        );
+        assert_eq!(complete_call_id.as_deref(), Some("complete-1"));
+
+        for correlation in [
+            ApprovalCorrelation {
+                interaction_id: 3,
+                ..request.correlation.clone()
+            },
+            ApprovalCorrelation {
+                complete_call_id: "complete-2".into(),
+                ..request.correlation.clone()
+            },
+            ApprovalCorrelation {
+                harness_session_id: "session-2".into(),
+                ..request.correlation.clone()
+            },
+        ] {
+            assert!(
+                validate_approval_correlation(
+                    thread_id,
+                    interaction_id,
+                    "session-1",
+                    &mut complete_call_id,
+                    &correlation,
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn final_ack_accepts_an_exact_cursor_or_an_already_reset_epoch() {
+        let exact = ApprovalEventSnapshot {
+            harness_session_id: "session-1".into(),
+            latest_sequence: 6,
+            pending_requests: Vec::new(),
+            events: Vec::new(),
+        };
+        assert_eq!(final_approval_acknowledgement(6, &exact), Ok(true));
+
+        let reset = ApprovalEventSnapshot {
+            latest_sequence: 0,
+            ..exact.clone()
+        };
+        assert_eq!(final_approval_acknowledgement(6, &reset), Ok(false));
+
+        let stale = ApprovalEventSnapshot {
+            latest_sequence: 5,
+            ..exact
+        };
+        assert!(final_approval_acknowledgement(6, &stale).is_err());
+    }
+
+    fn approval_request() -> ApprovalRequest {
+        ApprovalRequest {
+            request_id: "request-1".into(),
+            correlation: ApprovalCorrelation {
+                thread_id: 1,
+                interaction_id: 2,
+                complete_call_id: "complete-1".into(),
+                harness_session_id: "session-1".into(),
+            },
+            title: "Run tests".into(),
+            reason: "The harness needs approval".into(),
+            action: ApprovalAction::Command {
+                command: "npm test".into(),
+                working_directory: "/workspace".into(),
+            },
+            scope_keys: vec!["command:npm test".into()],
+            scope_description: "Run npm test".into(),
+            created_at: "2026-08-20T12:00:00Z".into(),
+            expires_at: None,
+        }
     }
 }
