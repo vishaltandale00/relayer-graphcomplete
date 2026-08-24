@@ -696,24 +696,6 @@ async fn invoke_action_with_authority(
             "actions can only be invoked from an accepted interaction",
         ));
     }
-    if let Some(outcome) = state
-        .product
-        .get_action_invocation(source_interaction_id, action_id)
-        .await?
-    {
-        if outcome.interaction.completion_status == "not_started" {
-            refresh_provider_catalog(
-                state,
-                outcome
-                    .interaction
-                    .model_selection
-                    .as_ref()
-                    .map(|model| &model.provider_id),
-            )
-            .await?;
-        }
-        return spawn_action_handoff(state.clone(), thread, outcome).await;
-    }
     let graph_node_id = source
         .graph_node_id
         .ok_or_else(|| ApiError::invalid("interaction has no accepted graph"))?;
@@ -740,6 +722,24 @@ async fn invoke_action_with_authority(
         .as_deref()
         .ok_or_else(|| ApiError::invalid("invoke action has no interaction text"))?
         .to_owned();
+    if let Some(outcome) = state
+        .product
+        .get_action_invocation(source_interaction_id, action_id)
+        .await?
+    {
+        if outcome.interaction.completion_status == "not_started" {
+            refresh_provider_catalog(
+                state,
+                outcome
+                    .interaction
+                    .model_selection
+                    .as_ref()
+                    .map(|model| &model.provider_id),
+            )
+            .await?;
+        }
+        return spawn_action_handoff(state.clone(), thread, outcome).await;
+    }
     refresh_provider_catalog(
         state,
         source

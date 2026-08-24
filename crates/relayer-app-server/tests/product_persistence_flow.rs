@@ -1290,6 +1290,20 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     let thread_id = thread["id"].as_i64().unwrap();
     let source_interaction_id = thread["rootInteractionId"].as_i64().unwrap();
     let pool = sqlite_pool(&database).await;
+    let project_id = sqlx::query(
+        "INSERT INTO projects(name,path,created_at,updated_at) VALUES ('Invoke project',?1,'1','1')",
+    )
+    .bind(root.to_string_lossy().as_ref())
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query("UPDATE threads SET project_id=?1 WHERE id=?2")
+        .bind(project_id)
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     sqlx::query(
         "UPDATE interactions SET graph_node_id=101,completion_status='accepted',completion_output_json=?1 WHERE id=?2",
     )
@@ -1325,17 +1339,33 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             .delete(|| async { axum::Json(json!({ "revoked": true })) }),
         )
         .route(
-            "/api/control/interactions/{id}/actions/41",
-            axum::routing::get(|| async {
-                axum::Json(json!({
-                    "action": {
-                        "id": 41,
-                        "kind": "invoke",
-                        "interactionText": "Authored follow-up",
-                        "state": "accepted"
+            "/api/control/interactions/{id}/actions/{action_id}",
+            axum::routing::get(
+                |axum::extract::Path((id, action_id)): axum::extract::Path<(i64, i64)>| async move {
+                    if matches!((id, action_id), (101 | 103, 41) | (101, 43) | (303, 41)) {
+                        return (
+                            StatusCode::OK,
+                            axum::Json(json!({
+                                "action": {
+                                    "id": action_id,
+                                    "kind": "invoke",
+                                    "interactionText": "Authored follow-up",
+                                    "state": "accepted"
+                                }
+                            })),
+                        );
                     }
-                }))
-            }),
+                    (
+                        StatusCode::NOT_FOUND,
+                        axum::Json(json!({
+                            "error": {
+                                "code": "action_not_visible",
+                                "message": "action is not visible from this interaction"
+                            }
+                        })),
+                    )
+                },
+            ),
         )
         .route(
             "/api/control/interactions",
@@ -1582,6 +1612,98 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         })
     );
 
+    let canonical_result_interaction_id = action_state["interactions"][1]["id"].as_i64().unwrap();
+    let pool = sqlite_pool(&database).await;
+    let unrelated_thread_id = sqlx::query("INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES ('Unrelated source',?1,'4','4','codex-basic','auto')")
+        .bind(project_id)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    let unrelated_source_interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_output_json,harness_configuration_name,permission_profile_id) VALUES (?1,1,'Unrelated source','4',102,'accepted',?2,'codex-basic','auto')")
+        .bind(unrelated_thread_id)
+        .bind(json!({
+            "nodeId": 102,
+            "rootLayer": {"layer": {"id": 2}, "nodes": [], "edges": [], "actions": []}
+        }).to_string())
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    let reused_thread_id = sqlx::query("INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES ('Reused source',?1,'5','5','codex-basic','auto')")
+        .bind(project_id)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    let reused_source_interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_output_json,harness_configuration_name,permission_profile_id) VALUES (?1,1,'Reused source','5',103,'accepted',?2,'codex-basic','auto')")
+        .bind(reused_thread_id)
+        .bind(json!({
+            "nodeId": 103,
+            "rootLayer": {"layer": {"id": 3}, "nodes": [], "edges": [], "actions": [{
+                "id": 41, "kind": "invoke", "interactionText": "Authored follow-up",
+                "state": "accepted", "targetLayerId": null
+            }]}
+        }).to_string())
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    pool.close().await;
+
+    let unrelated_uri = format!(
+        "/api/threads/{unrelated_thread_id}/interactions/{unrelated_source_interaction_id}/actions/41/invoke"
+    );
+    let unrelated_terminal = app
+        .clone()
+        .oneshot(api_request("POST", &unrelated_uri, None, true))
+        .await
+        .unwrap();
+    assert_eq!(
+        unrelated_terminal.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 1);
+
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE interactions SET graph_node_id=NULL,completion_status='submitted',completion_output_json=NULL,completion_error='Retry after restart' WHERE id=?1")
+        .bind(canonical_result_interaction_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let unrelated_submitted = app
+        .clone()
+        .oneshot(api_request("POST", &unrelated_uri, None, true))
+        .await
+        .unwrap();
+    assert_eq!(
+        unrelated_submitted.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 1);
+
+    let reused_uri = format!(
+        "/api/threads/{reused_thread_id}/interactions/{reused_source_interaction_id}/actions/41/invoke"
+    );
+    let reused_retry = app
+        .clone()
+        .oneshot(api_request("POST", &reused_uri, None, true))
+        .await
+        .unwrap();
+    assert_eq!(reused_retry.status(), StatusCode::OK);
+    assert_eq!(response_json(reused_retry).await["created"], false);
+    let retried_state = wait_for_interaction_count_and_terminal(&app, thread_id, 2).await;
+    assert_eq!(
+        retried_state["interactions"][1]["id"],
+        canonical_result_interaction_id
+    );
+    assert_eq!(
+        retried_state["interactions"][1]["completionStatus"],
+        "accepted"
+    );
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 2);
+
     let ordinary_unselected = app
         .clone()
         .oneshot(api_request(
@@ -1651,10 +1773,11 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         legacy_state["interactions"][1]["modelSelection"],
         Value::Null
     );
-    assert_eq!(harness_completions.load(Ordering::SeqCst), 2);
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 3);
     assert_eq!(
         observed_models.lock().unwrap().as_slice(),
         [
+            json!({ "providerId": "codex", "modelId": "test-model" }),
             json!({ "providerId": "codex", "modelId": "test-model" }),
             Value::Null,
         ]
@@ -1662,8 +1785,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
 
     // Simulate a request disappearing after its durable one-shot record commits but before the
-    // old handler starts execution. Retrying the saved invocation must claim it exactly once and
-    // must not need the graph server to validate the already-authorized action again.
+    // old handler starts execution. Retrying the saved invocation must validate that the source
+    // still exposes the action, then claim the durable result exactly once.
     let pool = sqlite_pool(&database).await;
     let created_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1729,7 +1852,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         assert!(std::time::Instant::now() < deadline);
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert_eq!(harness_completions.load(Ordering::SeqCst), 3);
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 4);
     let invocation_pairs = {
         let graph_creates = observed_graph_creates.lock().unwrap();
         graph_creates
@@ -1745,7 +1868,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             .collect::<Vec<_>>()
     };
     assert!(
-        (1..=2).contains(
+        (2..=4).contains(
             &invocation_pairs
                 .iter()
                 .filter(|pair| **pair == (101, 41))
@@ -1772,12 +1895,11 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             .iter()
             .all(|pair| matches!(pair, (101, 41) | (303, 41) | (101, 43)))
     );
-    assert_eq!(observed_models.lock().unwrap().len(), 3);
+    assert_eq!(observed_models.lock().unwrap().len(), 4);
     drop(app);
 
     let reopened =
         open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
-    graph_task.abort();
     let replay = reopened
         .oneshot(api_request("POST", &uri, None, true))
         .await
@@ -1787,6 +1909,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     assert_eq!(replay["created"], false);
     assert_eq!(replay["interaction"]["text"], "Authored follow-up");
 
+    graph_task.abort();
     harness_task.abort();
     fs::remove_dir_all(root).unwrap();
 }
