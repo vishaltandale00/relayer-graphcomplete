@@ -1088,7 +1088,9 @@ async fn prepare_and_claim_interaction(
                 return Ok(None);
             }
             Err(
-                error @ (RuntimeError::Http(_) | RuntimeError::Json(_) | RuntimeError::Timeout(_)),
+                error @ (RuntimeError::Http(_)
+                | RuntimeError::ResponseDecode(_)
+                | RuntimeError::Timeout(_)),
             ) if invocation.is_some() => {
                 eprintln!(
                     "preserving submitted invoke interaction {} after graph preparation ended ambiguously: {error}",
@@ -1182,7 +1184,29 @@ async fn prepare_and_claim_interaction(
         return Ok(None);
     }
     if let Err(error) = runtime.activate_prepared(&prepared).await {
+        let retryable = error.is_retryable_startup_failure();
         let cleanup = runtime.discard_prepared(prepared).await;
+        let message = format!(
+            "Graph capability activation failed before execution: {error}{}",
+            cleanup
+                .as_ref()
+                .err()
+                .map(|cleanup| format!("; capability cleanup also failed: {cleanup}"))
+                .unwrap_or_default()
+        );
+        if invocation.is_some()
+            && retryable
+            && state
+                .product
+                .restore_leased_interaction_submitted(interaction.id, &message)
+                .await?
+        {
+            eprintln!(
+                "preserving submitted invoke interaction {} after retryable capability activation failure: {message}",
+                interaction.id
+            );
+            return Ok(None);
+        }
         return Err(match cleanup {
             Ok(()) => error.into(),
             Err(cleanup) => ApiError::internal(&format!(

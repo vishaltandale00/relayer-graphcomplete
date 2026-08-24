@@ -194,6 +194,27 @@ impl SqliteProductStore {
         Ok(result.rows_affected() == 1)
     }
 
+    pub(crate) async fn restore_leased_interaction_submitted(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query(
+            "UPDATE interactions
+             SET completion_status='submitted',completion_error=?1
+             WHERE id=?2 AND completion_status='running'
+               AND EXISTS (
+                 SELECT 1 FROM action_invocations
+                 WHERE result_interaction_id=interactions.id AND graph_lease_required=1
+               )",
+        )
+        .bind(error)
+        .bind(interaction_id.value())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     pub(crate) async fn claim_interaction_preparing(
         &self,
         interaction_id: InteractionId,

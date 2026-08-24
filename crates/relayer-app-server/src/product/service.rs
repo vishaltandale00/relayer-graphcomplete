@@ -763,6 +763,17 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn restore_leased_interaction_submitted(
+        &self,
+        interaction_id: super::InteractionId,
+        error: &str,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .restore_leased_interaction_submitted(interaction_id, error)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn claim_interaction_preparing(
         &self,
         interaction_id: super::InteractionId,

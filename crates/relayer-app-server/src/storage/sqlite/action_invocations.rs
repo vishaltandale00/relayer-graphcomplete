@@ -457,6 +457,30 @@ mod tests {
         assert_eq!(replay_interaction.id, result_ids[0]);
         assert_eq!(replay_interaction.text, "Authored follow-up");
         assert_eq!(replay_interaction.model_selection, Some(model_selection));
+        sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+            .bind(replay_interaction.id.value())
+            .execute(&reopened.pool)
+            .await
+            .unwrap();
+        assert!(
+            reopened
+                .restore_leased_interaction_submitted(
+                    replay_interaction.id,
+                    "retryable capability activation failure",
+                )
+                .await
+                .unwrap()
+        );
+        let restored = reopened
+            .get_interaction(replay_interaction.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(restored.completion_status, "submitted");
+        assert_eq!(
+            restored.completion_error.as_deref(),
+            Some("retryable capability activation failure")
+        );
         assert!(
             reopened
                 .fail_interaction_completion(replay_interaction.id, "codex-basic", "test failure")
