@@ -129,6 +129,34 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).not.toContain("The required order is:");
   });
 
+  it("appends only the native delegation guidance for the multi-agent profile", async () => {
+    const prompts: string[] = [];
+    const createCodex = () => ({
+      startThread: () => ({
+        id: "layered-thread",
+        run: vi.fn(async (prompt: string) => { prompts.push(prompt); }),
+      }),
+    }) as unknown as Codex;
+    const createHarness = (promptProfile: "layered-navigation-v1" | "layered-navigation-multi-agent-v1") => new CodexBasicHarness({
+      threadId: 1,
+      permissionProfileId: "auto",
+      permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
+      workingDirectory: process.cwd(),
+      configuration: {
+        ...codexBasicConfiguration,
+        name: `codex-${promptProfile}`,
+        settings: { ...codexBasicConfiguration.settings, promptProfile },
+      },
+    }, { createCodex });
+
+    await createHarness("layered-navigation-v1").complete(runContext(1, "token"));
+    await createHarness("layered-navigation-multi-agent-v1").complete(runContext(1, "token"));
+
+    const delegationGuidance = "Codex native subagents are available when useful. Subagents may directly author, revise, and submit graph objects using the available graph capability. Use the configured model family as appropriate; coordination remains native to Codex.";
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toBe(`${prompts[0]}\n\n${delegationGuidance}`);
+  });
+
   it("translates the three product profiles without adding a fixture-only profile", async () => {
     const cases = [
       ["ask", { sandbox: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user" }, { type: "workspaceWrite", networkAccess: true }],

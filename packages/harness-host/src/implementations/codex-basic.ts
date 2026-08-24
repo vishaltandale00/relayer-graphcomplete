@@ -31,7 +31,7 @@ interface CodexBasicConfiguration {
 interface ResolvedCodexConfiguration {
   readonly settings: CodexBasicConfiguration;
   readonly permission: ResolvedCodexPermission;
-  readonly promptProfile?: "layered-navigation-v1";
+  readonly promptProfile?: "layered-navigation-v1" | "layered-navigation-multi-agent-v1";
 }
 
 interface ResolvedCodexPermission {
@@ -158,6 +158,11 @@ export class CodexBasicHarness implements Harness {
   private prompt(interactionNode: GraphNode): string {
     if (this.resolved.promptProfile === "layered-navigation-v1") {
       return this.layeredNavigationPrompt(interactionNode);
+    }
+    if (this.resolved.promptProfile === "layered-navigation-multi-agent-v1") {
+      return `${this.layeredNavigationPrompt(interactionNode)}
+
+Codex native subagents are available when useful. Subagents may directly author, revise, and submit graph objects using the available graph capability. Use the configured model family as appropriate; coordination remains native to Codex.`;
     }
     return `You are the basic Relayer graph harness. Answer the current user interaction by authoring and accepting a useful graph layer.
 
@@ -294,7 +299,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
   const webSearchMode = optionalEnum(configuration.webSearchMode, ["disabled", "cached", "live"] as const, "webSearchMode");
   const skipGitRepoCheck = optionalBoolean(configuration.skipGitRepoCheck, "skipGitRepoCheck");
   const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
-  const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1"] as const, "promptProfile");
+  const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1", "layered-navigation-multi-agent-v1"] as const, "promptProfile");
   const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);
 
   return {
