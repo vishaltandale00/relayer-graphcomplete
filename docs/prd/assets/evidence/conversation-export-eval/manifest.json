@@ -1,22 +1,22 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-08-24T17:02:54.026Z",
-  "sourceCommit": "78e9485655f34a881213c7832e5a896ab60d0a86",
-  "workingTreeDirty": true,
+  "capturedAt": "2026-08-24T17:22:36.730Z",
+  "sourceCommit": "27da62d85fda969f0d72279b3f6e597d679e5575",
+  "workingTreeDirty": false,
   "command": "RELAYER_CAPTURE_CONVERSATION_EVAL_EVIDENCE=1 electron scripts/capture-conversation-eval-evidence.mjs",
   "paidInferenceCalls": 0,
-  "ownerExportSha256": "sha256:92b78e38b9f492a093b65de4d5fe44904ef5b12195fb96e45cd195f071900d11",
-  "importedSourceSha256": "sha256:92b78e38b9f492a093b65de4d5fe44904ef5b12195fb96e45cd195f071900d11",
+  "ownerExportSha256": "sha256:b7f00d74505c3c6ba8b8c3b08cb79d028a3b401e798008464ad6acc3b28a736a",
+  "importedSourceSha256": "sha256:b7f00d74505c3c6ba8b8c3b08cb79d028a3b401e798008464ad6acc3b28a736a",
   "exactOwnerBytesImported": true,
   "restartReplay": {
-    "runId": "import-8fdda1aa-d006-42bb-bfe1-d6dedaa484bf",
-    "executionId": "execution-8fdda1aa-d006-42bb-bfe1-d6dedaa484bf",
-    "sourceSha256": "sha256:92b78e38b9f492a093b65de4d5fe44904ef5b12195fb96e45cd195f071900d11",
+    "runId": "import-86dc2302-6c8d-414d-8d72-c2279c029a99",
+    "executionId": "execution-86dc2302-6c8d-414d-8d72-c2279c029a99",
+    "sourceSha256": "sha256:b7f00d74505c3c6ba8b8c3b08cb79d028a3b401e798008464ad6acc3b28a736a",
     "status": "passed",
     "judgeProvenance": {
       "kind": "external-conversation-export",
-      "importId": "8fdda1aa-d006-42bb-bfe1-d6dedaa484bf",
-      "sourceSha256": "sha256:92b78e38b9f492a093b65de4d5fe44904ef5b12195fb96e45cd195f071900d11",
+      "importId": "86dc2302-6c8d-414d-8d72-c2279c029a99",
+      "sourceSha256": "sha256:b7f00d74505c3c6ba8b8c3b08cb79d028a3b401e798008464ad6acc3b28a736a",
       "sourceTurnId": "turn:1",
       "producer": {
         "desktopVersion": "development",
@@ -30,21 +30,21 @@
   "screenshots": [
     {
       "file": "ordinary-conversation-export.png",
-      "sha256": "c5aca1a826b9afda3c705754c21b8ad4d06d41e85c1a752df76c74a1d1fa590f",
+      "sha256": "09f44f008d8ad42387857865b209ec3c902f3e1d75d03eed128d6dad77e3dc0c",
       "requirements": [
         "Owner sees enabled Export conversation control in ordinary ProductWorkspace"
       ]
     },
     {
       "file": "eval-dashboard-imported.png",
-      "sha256": "d852f996e63b79a34398288d38313e3cfffe33149fc630060cd3a130994461ea",
+      "sha256": "ba7f3370ad2a1e3d7fdb9b5d35ef13253deb889736cd831b9ae185d69d1134bf",
       "requirements": [
         "Eval dashboard imported the exact owner-saved JSONL as an immutable external conversation"
       ]
     },
     {
       "file": "eval-dashboard-judged.png",
-      "sha256": "3ab03a47ef3ec7ec1493bfd960d6c303a77ce0e531b6cd7e3b83e02627528ca1",
+      "sha256": "6f4231b191c8a535d60b782fd963869965369151d136b83bdb051860b2bffe57",
       "requirements": [
         "Existing deterministic judge completed",
         "Product workspace action remains available"
@@ -52,7 +52,7 @@
     },
     {
       "file": "product-workspace-imported-root.png",
-      "sha256": "9f9b1496ee522110d2f37764667c0a920cc6cf4dd9707495265f19217398b915",
+      "sha256": "0934e78a8bc5c1757a4d70ed633df17c00614f9192903f41040c95c4963a3cc1",
       "requirements": [
         "Production ProductWorkspace renders imported accepted turn",
         "Review mode is read-only",
@@ -61,7 +61,7 @@
     },
     {
       "file": "product-workspace-turn-statuses.png",
-      "sha256": "6265e5881b8286513be50180c194051a2182f2acddc85a6f6a899227ca925959",
+      "sha256": "8091d5e4a32c83abd98a41968c834be987843e5be78324f72167f720bacc2c51",
       "requirements": [
         "Turn picker visibly distinguishes accepted, failed, and unfinished imported turns"
       ]
@@ -77,14 +77,14 @@
     },
     {
       "file": "eval-dashboard-restarted.png",
-      "sha256": "b0577f7265a7fcd0caa0b59d64761342e2331211c27052ccce2e7f588ebc545f",
+      "sha256": "6f4231b191c8a535d60b782fd963869965369151d136b83bdb051860b2bffe57",
       "requirements": [
         "Eval restart replays the same imported source digest and completed deterministic judge"
       ]
     },
     {
       "file": "product-workspace-restarted-reference.png",
-      "sha256": "5ae1f9a4e7375b8a674e219ef7714a8b35b6ecebfa56c5bc99d54623fb31225b",
+      "sha256": "17f9baa452479b3d5f45107954d02833f3119cc07aa4bbb76b42065c024c0304",
       "requirements": [
         "After graph, product, and Eval restart, the same imported execution reopens and reference navigation still works"
       ]
