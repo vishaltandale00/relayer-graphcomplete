@@ -401,13 +401,14 @@ async function run() {
   await reviewWindow.webContents.executeJavaScript(`document.querySelector('#turnPickerButton').click()`);
   await waitFor("turn statuses", reviewWindow, `document.querySelectorAll('.turn-option-status').length === 3`);
   await capture(reviewWindow, "product-workspace-turn-statuses", ["Turn picker visibly distinguishes accepted, failed, and unfinished imported turns"]);
-  await reviewWindow.webContents.executeJavaScript(`document.querySelector('#turnPickerButton').click()`);
+  await reviewWindow.webContents.executeJavaScript(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await waitFor("closed turn picker", reviewWindow, `document.querySelector('#turnPopover')?.classList.contains('hidden') === true`);
   await reviewWindow.webContents.executeJavaScript(`document.querySelector('.graph-node')?.click()`);
   await waitFor("root node action", reviewWindow, `document.querySelector('#detailTitle')?.textContent === 'Imported debugging answer' && Boolean(document.querySelector('[data-action-id]'))`);
   await reviewWindow.webContents.executeJavaScript(`[...document.querySelectorAll('[data-action-id]')].find((button) => button.textContent.includes('shared evidence'))?.click()`);
   await waitFor("reference layer", reviewWindow, `document.querySelector('.graph-node b')?.textContent === 'Shared evidence'`);
   await reviewWindow.webContents.executeJavaScript(`document.querySelector('.graph-node')?.click()`);
-  await waitFor("node detail", reviewWindow, `document.querySelector('#detailTitle')?.textContent === 'Shared evidence'`);
+  await waitFor("node detail", reviewWindow, `document.querySelector('#turnPopover')?.classList.contains('hidden') === true && document.querySelector('#detailTitle')?.textContent === 'Shared evidence'`);
   await capture(reviewWindow, "product-workspace-reference-detail", ["Reference navigation reached shared layer", "Breadcrumb preserves authored path", "Node detail renders in production inspector"]);
 
   const importedRunBeforeRestart = evalService.listRuns()[0];
