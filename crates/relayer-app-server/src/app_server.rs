@@ -215,6 +215,21 @@ impl RelayerAppServer {
                 )
                 .await
                 {
+                    if storage
+                        .invocation_requires_graph_lease(interaction.id)
+                        .await?
+                    {
+                        // A strict invoke is recoverable by its immutable source pair. Leave its
+                        // nonterminal state intact here: the restart recovery passes below will
+                        // abort any stale approval receipt and normalize it to `submitted`, so a
+                        // later restart or re-invocation can resume the same result. Quarantining
+                        // would make the only interaction allowed to consume the lease terminal.
+                        eprintln!(
+                            "preserving interrupted leased action invocation {} after transient startup reconciliation failure: {error}",
+                            interaction.id
+                        );
+                        continue;
+                    }
                     eprintln!(
                         "quarantining interrupted interaction {} after reconciliation failure: {error}",
                         interaction.id

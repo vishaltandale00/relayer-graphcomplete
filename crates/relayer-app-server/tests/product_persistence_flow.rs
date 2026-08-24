@@ -2258,6 +2258,160 @@ async fn interrupted_action_invocation_remains_submitted_for_source_pair_recover
 }
 
 #[tokio::test]
+async fn startup_prepare_transport_failure_preserves_unbound_lease_for_later_restart() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-startup-prepare-retry-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({"initialMessage":"source"})),
+            true,
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let source_id = thread["rootInteractionId"].as_i64().unwrap();
+    let pool = sqlite_pool(&database).await;
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=90,completion_status='accepted' WHERE id=?1",
+    )
+    .bind(source_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let result_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,2,'leased result',?2,'not_started')")
+        .bind(thread_id)
+        .bind(&created_at)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,41,?2,?3,1)")
+        .bind(source_id)
+        .bind(result_id)
+        .bind(&created_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,
+            "configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let creates = Arc::new(AtomicUsize::new(0));
+    let observed_creates = creates.clone();
+    let graph = Router::new()
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let observed_creates = observed_creates.clone();
+                async move {
+                    assert_eq!(
+                        body["invocation"],
+                        json!({"sourceInteractionNodeId":90,"sourceActionId":41})
+                    );
+                    if observed_creates.fetch_add(1, Ordering::SeqCst) < 1 {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+                        )
+                            .into_response();
+                    }
+                    axum::Json(json!({"node":{"id":93},"graphToken":""})).into_response()
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/93",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":93,
+                    "invocation":{"sourceInteractionNodeId":90,"sourceActionId":41}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/93/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::delete(|| async { axum::Json(json!({"revoked":true})) }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+
+    let first_reopen =
+        open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    drop(first_reopen);
+    let pool = sqlite_pool(&database).await;
+    let after_failure: (String, Option<i64>, Option<String>) = sqlx::query_as(
+        "SELECT completion_status,graph_node_id,completion_error FROM interactions WHERE id=?1",
+    )
+    .bind(result_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(after_failure.0, "submitted");
+    assert_eq!(after_failure.1, None);
+    assert!(after_failure.2.unwrap().contains("Invoke the action again"));
+    pool.close().await;
+
+    let second_reopen =
+        open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    drop(second_reopen);
+    let pool = sqlite_pool(&database).await;
+    let after_recovery: (String, Option<i64>, Option<String>) = sqlx::query_as(
+        "SELECT completion_status,graph_node_id,completion_error FROM interactions WHERE id=?1",
+    )
+    .bind(result_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(after_recovery.0, "submitted");
+    assert_eq!(after_recovery.1, Some(93));
+    assert!(!after_recovery.2.unwrap().contains("reconciliation pending"));
+    assert_eq!(creates.load(Ordering::SeqCst), 2);
+    pool.close().await;
+
+    graph_task.abort();
+    harness_task.abort();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn startup_binding_failure_preserves_unbound_invocation_for_next_recovery() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2530,6 +2684,8 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
     let observed_recovery_output_reads = recovery_output_reads.clone();
     let concurrent_recovery_barrier = Arc::new(tokio::sync::Barrier::new(2));
     let observed_recovery_barrier = concurrent_recovery_barrier.clone();
+    let approval_metadata_reads = Arc::new(AtomicUsize::new(0));
+    let observed_approval_metadata_reads = approval_metadata_reads.clone();
     let invalidations = Arc::new(AtomicUsize::new(0));
     let observed_invalidations = invalidations.clone();
     let graph = axum::Router::new()
@@ -2589,11 +2745,22 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         )
         .route(
             "/api/control/interactions/99",
-            axum::routing::get(|| async {
-                axum::Json(json!({
-                    "nodeId":99,
-                    "invocation":{"sourceInteractionNodeId":90,"sourceActionId":46}
-                }))
+            axum::routing::get(move || {
+                let observed_approval_metadata_reads = observed_approval_metadata_reads.clone();
+                async move {
+                    if observed_approval_metadata_reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+                        )
+                            .into_response();
+                    }
+                    axum::Json(json!({
+                        "nodeId":99,
+                        "invocation":{"sourceInteractionNodeId":90,"sourceActionId":46}
+                    }))
+                    .into_response()
+                }
             }),
         )
         .route(
@@ -2620,7 +2787,7 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
                 let observed_recovery_output_reads = observed_recovery_output_reads.clone();
                 let observed_recovery_barrier = observed_recovery_barrier.clone();
                 async move {
-                    if observed_recovery_output_reads.fetch_add(1, Ordering::SeqCst) < 2 {
+                    if observed_recovery_output_reads.fetch_add(1, Ordering::SeqCst) == 0 {
                         return (
                             StatusCode::INTERNAL_SERVER_ERROR,
                             axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
@@ -2721,10 +2888,10 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
     )
     .unwrap();
 
-    let reopened =
+    let first_reopened =
         open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
     let first_state = response_json(
-        reopened
+        first_reopened
             .clone()
             .oneshot(api_request(
                 "GET",
@@ -2742,8 +2909,40 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .iter()
         .find(|interaction| interaction["id"] == result_id)
         .unwrap();
-    assert_eq!(first_recovery["completionStatus"], "failed");
-    assert_eq!(first_recovery["projectionFresh"], false);
+    assert_eq!(first_recovery["completionStatus"], "submitted");
+    assert!(
+        first_recovery["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("Invoke the action again")
+    );
+    let first_strict_approval = first_state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == strict_approval_wait_id)
+        .unwrap();
+    assert_eq!(first_strict_approval["completionStatus"], "submitted");
+    assert_ne!(first_strict_approval["completionStatus"], "failed");
+    let first_strict_resolution = first_state["approvals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|approval| approval["request"]["requestId"] == "strict-restart-approval")
+        .unwrap();
+    assert_eq!(first_strict_resolution["resolution"]["outcome"], "aborted");
+    drop(first_reopened);
+    // Live reconciliation can still quarantine an uncertain result. Preserve the concurrent
+    // compare-and-swap promotion regression independently of startup's strict-lease policy.
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE interactions SET completion_status='failed',completion_error='Canonical reconciliation pending: simulated live uncertainty' WHERE id=?1")
+        .bind(result_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let reopened =
+        open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
     let first_promotion = reopened.clone().oneshot(api_request(
         "GET",
         &format!("/api/state?threadId={thread_id}"),
@@ -2779,6 +2978,7 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
     assert_eq!(concurrent_recovered["completionStatus"], "accepted");
     assert_eq!(concurrent_recovered["completionOutput"], canonical);
     assert!(recovery_output_reads.load(Ordering::SeqCst) >= 2);
+    assert!(approval_metadata_reads.load(Ordering::SeqCst) >= 2);
     let ordinary = state["interactions"]
         .as_array()
         .unwrap()
@@ -2839,13 +3039,12 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .iter()
         .find(|interaction| interaction["id"] == strict_missing_lease_id)
         .unwrap();
-    assert_eq!(strict_missing_lease["completionStatus"], "failed");
-    assert_eq!(strict_missing_lease["projectionFresh"], false);
+    assert_eq!(strict_missing_lease["completionStatus"], "submitted");
     assert!(
         strict_missing_lease["completionError"]
             .as_str()
             .unwrap()
-            .contains("reconciliation pending")
+            .contains("Invoke the action again")
     );
     let legacy_pending = state["interactions"]
         .as_array()
