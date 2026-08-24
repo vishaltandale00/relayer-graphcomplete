@@ -58,3 +58,4 @@ button.breadcrumb-segment:focus-visible{outline:2px solid var(--blue);outline-of
 html[data-theme="light"] .workspace-breadcrumb{background:#fff}
 .model-defaults{margin-bottom:0}.model-settings-divider{height:1px;margin:24px 0;background:var(--line)}.model-families-heading{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:14px}.model-families-heading>#newModelFamily{justify-self:end}.model-families-heading .family-carousel-controls{margin:0}
 @media(max-width:600px){.model-families-heading{grid-template-columns:1fr auto}.model-families-heading .family-carousel-controls{grid-column:1 / -1;grid-row:2}.model-families-heading .current-family-control{flex:1}}
+.interaction-copy-header{display:flex;align-items:center;gap:10px;min-width:0}.interaction-copy-header .turn-picker{align-self:auto;margin-left:auto}

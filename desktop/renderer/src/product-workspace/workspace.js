@@ -162,6 +162,31 @@ export function shouldAutoFitSettledGraph(
   return autoFitViewKey === currentViewKey && autoFitRevision === currentRevision;
 }
 
+export function shouldFitInspectorOpen(previousOpen, nextOpen, viewportWidth) {
+  return previousOpen === false && nextOpen === true && viewportWidth > 760;
+}
+
+export function shouldFitInspectorDock(previousOverlay, nextOverlay, inspectorOpen) {
+  return inspectorOpen && previousOverlay && !nextOverlay;
+}
+
+export function shouldActivateGraphNodeAfterPointerGesture(moved) {
+  return !moved;
+}
+
+export function inspectorFitRequestIsCurrent(request, {
+  cameraRevision,
+  graphViewKey,
+  inspectorOpen,
+  viewportWidth,
+}) {
+  return request !== null
+    && request.graphViewKey === graphViewKey
+    && request.cameraRevision === cameraRevision
+    && inspectorOpen
+    && viewportWidth > 760;
+}
+
 export function graphEdgeSegment(source, target, radius = GRAPH_NODE_ICON_RADIUS) {
   const dx = target.x - source.x;
   const dy = target.y - source.y;
@@ -382,6 +407,8 @@ export function createProductWorkspace({
   let pinching = null;
   let camera = { x: 0, y: 0, zoom: 1 };
   let cameraRevision = 0;
+  let inspectorFitRequest = null;
+  let inspectorFitFrame = null;
   let turnPopoverOpen = false;
   const approvalSelections = new Map();
   const approvalErrors = new Map();
@@ -396,7 +423,52 @@ export function createProductWorkspace({
   const threadView = $("#threadView");
   if (!threadView) throw new Error("Product workspace requires a #threadView host.");
   threadView.innerHTML = productWorkspaceMarkup();
+  const graphStage = $("#graphStage");
+  const graphDocument = graphStage.ownerDocument;
+  const graphWindow = graphDocument.defaultView;
+  const narrowInspectorMedia = graphWindow?.matchMedia?.("(max-width: 760px)");
+  let inspectorUsesOverlay = narrowInspectorMedia?.matches
+    ?? (graphWindow?.innerWidth ?? 0) <= 760;
+  const cancelInspectorFit = () => {
+    if (inspectorFitFrame !== null) {
+      graphDocument.defaultView?.cancelAnimationFrame?.(inspectorFitFrame);
+      inspectorFitFrame = null;
+    }
+    inspectorFitRequest = null;
+  };
+  const scheduleInspectorFit = () => {
+    cancelInspectorFit();
+    const request = { graphViewKey, cameraRevision };
+    inspectorFitRequest = request;
+    inspectorFitFrame = graphWindow?.requestAnimationFrame?.(() => {
+      inspectorFitFrame = null;
+      if (!inspectorFitRequestIsCurrent(request, {
+        cameraRevision,
+        graphViewKey,
+        inspectorOpen: !$("#inspector").classList.contains("hidden"),
+        viewportWidth: graphWindow?.innerWidth ?? 0,
+      })) {
+        if (inspectorFitRequest === request) inspectorFitRequest = null;
+        return;
+      }
+      updateCamera(fitGraphCamera(graphNodes, graphStage.getBoundingClientRect()), false);
+      if (graphLayoutSettled) inspectorFitRequest = null;
+    }) ?? null;
+  };
+  const handleInspectorLayoutChange = (event) => {
+    const previouslyUsedOverlay = inspectorUsesOverlay;
+    inspectorUsesOverlay = event.matches;
+    const inspectorOpen = !$("#inspector").classList.contains("hidden");
+    const shouldFit = shouldFitInspectorDock(
+      previouslyUsedOverlay,
+      event.matches,
+      inspectorOpen,
+    );
+    if (shouldFit) scheduleInspectorFit();
+  };
+  narrowInspectorMedia?.addEventListener?.("change", handleInspectorLayoutChange);
   $("#closeInspector").onclick = () => {
+    cancelInspectorFit();
     selection.selectedNodeId = null;
     onSelectionChange(null);
     $("#inspector").classList.add("hidden");
@@ -423,8 +495,6 @@ export function createProductWorkspace({
     closeTurnPopover();
     onSelectTurn(1);
   };
-  const graphStage = $("#graphStage");
-  const graphDocument = graphStage.ownerDocument;
   const closeTurnPopover = () => {
     turnPopoverOpen = false;
     $("#turnPopover").classList.add("hidden");
@@ -477,7 +547,10 @@ export function createProductWorkspace({
 
   function updateCamera(nextCamera, manual = true) {
     camera = nextCamera;
-    if (manual) cameraRevision += 1;
+    if (manual) {
+      cancelInspectorFit();
+      cameraRevision += 1;
+    }
     drawGraph();
   }
 
@@ -543,6 +616,7 @@ export function createProductWorkspace({
       return;
     }
     if (!panning || panning.pointerId !== event.pointerId) return;
+    cancelInspectorFit();
     camera.x = panning.startCameraX + event.clientX - panning.startClientX;
     camera.y = panning.startCameraY + event.clientY - panning.startClientY;
     cameraRevision += 1;
@@ -811,6 +885,9 @@ export function createProductWorkspace({
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
       selectNode(state, selection.selectedNodeId, { notify: false });
+    } else if (!$("#inspector").classList.contains("hidden")) {
+      cancelInspectorFit();
+      $("#inspector").classList.add("hidden");
     }
     renderBreadcrumb(state, thread);
   }
@@ -978,6 +1055,8 @@ export function createProductWorkspace({
     const nextViewKey = graphCameraViewKey(state, thread, responseNodes);
     const enteringView = nextViewKey !== graphViewKey;
     if (enteringView) {
+      cancelInspectorFit();
+      $("#inspector").classList.add("hidden");
       saveGraphView();
       graphSimulation.cancel();
     }
@@ -1044,6 +1123,7 @@ export function createProductWorkspace({
     $("#nodeLayer").innerHTML = graphNodes.map((node) => `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}" data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}"><div class="glyph"></div><div class="copy"><b>${escapeHtml(node.title)}</b></div></div>`).join("");
     $$('[data-node]').forEach((element) => {
       const authoredNode = graphNodes.find((candidate) => String(candidate.id) === element.dataset.node);
+      let suppressClickAfterDrag = false;
       element.querySelector(".glyph").replaceChildren(createRelayerIcon(
         authoredNode?.icon || authoredNode?.metadata?.relayer?.icon,
         { class: "relayer-node-icon" },
@@ -1054,7 +1134,13 @@ export function createProductWorkspace({
           element.offsetHeight,
         );
       }
-      element.onclick = () => selectNode(state, element.dataset.node);
+      element.onclick = () => {
+        if (!shouldActivateGraphNodeAfterPointerGesture(suppressClickAfterDrag)) {
+          suppressClickAfterDrag = false;
+          return;
+        }
+        selectNode(state, element.dataset.node);
+      };
       element.onkeydown = (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
@@ -1092,9 +1178,14 @@ export function createProductWorkspace({
         if (dragging.moved) dragging.node.pinned = true;
         drawGraph();
       };
-      const finishDrag = () => { dragging = null; };
-      element.onpointerup = finishDrag;
-      element.onpointercancel = finishDrag;
+      element.onpointerup = () => {
+        suppressClickAfterDrag = Boolean(dragging?.moved);
+        if (suppressClickAfterDrag) {
+          graphWindow?.setTimeout?.(() => { suppressClickAfterDrag = false; }, 0);
+        }
+        dragging = null;
+      };
+      element.onpointercancel = () => { dragging = null; };
     });
     if (enteringView && !ids.has(String(selection.selectedNodeId))) {
       selection.selectedNodeId = null;
@@ -1129,7 +1220,14 @@ export function createProductWorkspace({
         autoFitRevision,
         cameraRevision,
       )) {
-        updateCamera(fitGraphCamera(graphNodes, bounds), false);
+        const fitBounds = inspectorFitRequestIsCurrent(inspectorFitRequest, {
+          cameraRevision,
+          graphViewKey,
+          inspectorOpen: !$("#inspector").classList.contains("hidden"),
+          viewportWidth: graphDocument.defaultView?.innerWidth ?? 0,
+        }) ? graphStage.getBoundingClientRect() : bounds;
+        updateCamera(fitGraphCamera(graphNodes, fitBounds), false);
+        inspectorFitRequest = null;
       } else {
         saveGraphView();
       }
@@ -1236,7 +1334,15 @@ export function createProductWorkspace({
     const node = state.nodes.find((item) => String(item.id) === String(id));
     if (!node) return;
     if (notify) onSelectionChange(node.id);
-    $("#inspector").classList.remove("hidden");
+    const inspector = $("#inspector");
+    const wasOpen = !inspector.classList.contains("hidden");
+    inspectorUsesOverlay = narrowInspectorMedia?.matches
+      ?? (graphWindow?.innerWidth ?? 0) <= 760;
+    inspector.classList.remove("hidden");
+    const viewportWidth = graphDocument.defaultView?.innerWidth ?? 0;
+    if (shouldFitInspectorOpen(wasOpen, true, viewportWidth)) {
+      scheduleInspectorFit();
+    }
     $("#detailIcon").replaceChildren(createRelayerIcon(
       node.icon || node.metadata?.relayer?.icon,
       { class: "relayer-detail-icon" },
@@ -1305,10 +1411,12 @@ export function createProductWorkspace({
   }
 
   function dispose() {
+    cancelInspectorFit();
     graphSimulation.cancel();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     graphDocument.removeEventListener("pointerdown", closeTurnPopoverFromOutside, true);
     graphDocument.removeEventListener("keydown", closeTurnPopoverOnEscape, true);
+    narrowInspectorMedia?.removeEventListener?.("change", handleInspectorLayoutChange);
     dragging = null;
     panning = null;
     pinching = null;

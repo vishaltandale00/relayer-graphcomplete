@@ -16,6 +16,8 @@ const screenshotPath = process.env.RELAYER_FIRST_MESSAGE_SCREENSHOT
   || join(repositoryRoot, ".relayer", "evidence", "first-message-enter-smoke.png");
 const evalScreenshotPath = process.env.RELAYER_NAVIGATION_EVAL_SCREENSHOT
   || screenshotPath.replace(/\.png$/i, "-eval.png");
+const evalNarrowScreenshotPath = process.env.RELAYER_NAVIGATION_EVAL_NARROW_SCREENSHOT
+  || screenshotPath.replace(/\.png$/i, "-eval-narrow.png");
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-first-message-app-"));
 const services = [];
 let window;
@@ -68,6 +70,60 @@ async function waitFor(label, check, timeoutMs = 10_000) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 25));
   }
   throw new Error(`Timed out waiting for ${label}.`);
+}
+
+async function graphPresentation(webContents) {
+  return webContents.executeJavaScript(`(() => {
+    const stage = document.querySelector("#graphStage")?.getBoundingClientRect();
+    const inspector = document.querySelector("#inspector")?.getBoundingClientRect();
+    const nodes = [...document.querySelectorAll("[data-node]")].map((node) => {
+      const rect = node.getBoundingClientRect();
+      return { id: node.dataset.node, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    });
+    return {
+      innerWidth: window.innerWidth,
+      inspectorOpen: !document.querySelector("#inspector")?.classList.contains("hidden"),
+      inspector: inspector && { left: inspector.left, right: inspector.right, width: inspector.width },
+      stage: stage && { left: stage.left, right: stage.right, top: stage.top, bottom: stage.bottom, width: stage.width },
+      nodes,
+    };
+  })()`);
+}
+
+async function waitForPaint(webContents) {
+  await webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+}
+
+function nodesAreContained(presentation) {
+  const { stage } = presentation;
+  return Boolean(stage) && presentation.nodes.length > 0 && presentation.nodes.every((node) => (
+    node.left >= stage.left - 1
+    && node.right <= stage.right + 1
+    && node.top >= stage.top - 1
+    && node.bottom <= stage.bottom + 1
+  ));
+}
+
+function nodeRectSignature(presentation) {
+  return presentation.nodes.map(({ id, left, right, top, bottom }) => [
+    id,
+    Math.round(left),
+    Math.round(right),
+    Math.round(top),
+    Math.round(bottom),
+  ]);
+}
+
+async function waitForStableGraph(label, webContents) {
+  let previous = null;
+  let stableSamples = 0;
+  return waitFor(label, async () => {
+    const presentation = await graphPresentation(webContents);
+    const signature = JSON.stringify(nodeRectSignature(presentation));
+    stableSamples = signature === previous ? stableSamples + 1 : 0;
+    previous = signature;
+    return stableSamples >= 3 ? presentation : false;
+  }, 15_000);
 }
 
 async function productRequest(session, path, init = {}) {
@@ -242,6 +298,47 @@ async function run() {
   const navigateAction = latestRoot.actions.find((action) => action.kind === "navigate");
   if (!navigateAction) throw new Error("The deterministic root did not expose a navigate action.");
   await webContents.executeJavaScript(`document.querySelector('[data-node="${navigateAction.sourceNodeId}"]')?.click()`);
+  const productInspectorFit = await waitFor("the Product inspector fit", async () => {
+    const presentation = await graphPresentation(webContents);
+    return presentation.inspectorOpen && nodesAreContained(presentation) ? presentation : false;
+  });
+  const productStableOpen = await waitForStableGraph("the stable Product inspector view", webContents);
+  const productOpenSignature = nodeRectSignature(productStableOpen);
+  await webContents.executeJavaScript(`document.querySelector('[data-node]:not([data-node="${navigateAction.sourceNodeId}"])')?.click()`);
+  await waitFor("the second Product node detail", () => webContents.executeJavaScript(
+    `document.querySelector(".graph-node.selected")?.dataset.node !== "${navigateAction.sourceNodeId}"`,
+  ));
+  const productOpenToOpen = await graphPresentation(webContents);
+  if (JSON.stringify(nodeRectSignature(productOpenToOpen)) !== JSON.stringify(productOpenSignature)) {
+    throw new Error("Selecting another node while the inspector was open changed the Product graph camera.");
+  }
+  await webContents.executeJavaScript(`document.querySelector("#closeInspector")?.click()`);
+  const productAfterClose = await graphPresentation(webContents);
+  if (JSON.stringify(nodeRectSignature(productAfterClose)) !== JSON.stringify(productOpenSignature)) {
+    throw new Error("Closing the inspector changed the Product graph camera.");
+  }
+  const dragPoint = await webContents.executeJavaScript(`(() => {
+    const rect = document.querySelector("[data-node]")?.getBoundingClientRect();
+    return rect ? { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + 23) } : null;
+  })()`);
+  if (!dragPoint) throw new Error("The Product graph did not expose a node to drag.");
+  webContents.sendInputEvent({ type: "mouseDown", ...dragPoint, button: "left", clickCount: 1 });
+  webContents.sendInputEvent({ type: "mouseMove", x: dragPoint.x + 24, y: dragPoint.y + 12 });
+  webContents.sendInputEvent({
+    type: "mouseUp",
+    x: dragPoint.x + 24,
+    y: dragPoint.y + 12,
+    button: "left",
+    clickCount: 1,
+  });
+  await waitForPaint(webContents);
+  const dragSelectionSuppressed = await webContents.executeJavaScript(
+    `document.querySelector("#inspector")?.classList.contains("hidden")`,
+  );
+  if (!dragSelectionSuppressed) {
+    throw new Error("Dragging a Product graph node opened the inspector and refit the camera.");
+  }
+  await webContents.executeJavaScript(`document.querySelector('[data-node="${navigateAction.sourceNodeId}"]')?.click()`);
   await waitFor("the navigate action control", () => webContents.executeJavaScript(
     `Boolean(document.querySelector('[data-action-id="${navigateAction.id}"]'))`,
   ));
@@ -261,6 +358,10 @@ async function run() {
     document.querySelectorAll("#workspaceBreadcrumb .breadcrumb-segment").length === 2
     && !document.querySelector("#inspector")?.classList.contains("hidden")
   ))()`));
+  const restoredInspectorFit = await waitFor("the restored Product inspector fit", async () => {
+    const presentation = await graphPresentation(webContents);
+    return presentation.inspectorOpen && nodesAreContained(presentation) ? presentation : false;
+  });
   await webContents.executeJavaScript(`document.querySelector("#turnPickerButton")?.click()`);
   const productNavigationState = await waitFor("the scrolling turn picker", () => webContents.executeJavaScript(`(() => {
     const popover = document.querySelector("#turnPopover");
@@ -274,6 +375,13 @@ async function run() {
       selectedNodeId: document.querySelector(".graph-node.selected")?.dataset.node || null,
     };
   })()`));
+  productNavigationState.inspectorFit = {
+    initialContained: nodesAreContained(productInspectorFit),
+    restoredContained: nodesAreContained(restoredInspectorFit),
+    openToOpenPreserved: true,
+    closePreserved: true,
+    dragSelectionSuppressed,
+  };
   await mkdir(dirname(screenshotPath), { recursive: true });
   await writeFile(screenshotPath, (await webContents.capturePage()).toPNG());
 
@@ -322,7 +430,55 @@ async function run() {
   await waitFor("the Eval descendant layer", () => evalContents.executeJavaScript(
     `document.querySelectorAll("#workspaceBreadcrumb .breadcrumb-segment").length === 2`,
   ));
-  await evalContents.executeJavaScript(`document.querySelector("[data-node]")?.click(); document.querySelector("#turnPickerButton")?.click()`);
+  await evalContents.executeJavaScript(`document.querySelector("[data-node]")?.click()`);
+  const evalInspectorFit = await waitFor("the Eval inspector fit", async () => {
+    const presentation = await graphPresentation(evalContents);
+    return presentation.inspectorOpen && nodesAreContained(presentation) ? presentation : false;
+  });
+  await mkdir(dirname(evalScreenshotPath), { recursive: true });
+  await writeFile(evalScreenshotPath, (await evalContents.capturePage()).toPNG());
+
+  await evalContents.executeJavaScript(`document.querySelector("#closeInspector")?.click()`);
+  evalWindow.setContentSize(760, 920);
+  const narrowClosed = await waitFor("the exact 760px Eval workspace", async () => {
+    const presentation = await graphPresentation(evalContents);
+    return presentation.innerWidth === 760 && !presentation.inspectorOpen
+      ? presentation
+      : false;
+  });
+  const narrowClosedSignature = nodeRectSignature(await waitForStableGraph(
+    "the stable narrow Eval graph",
+    evalContents,
+  ));
+  await evalContents.executeJavaScript(`document.querySelector("[data-node]")?.click()`);
+  const evalNarrowInspector = await waitFor("the narrow Eval inspector overlay", async () => {
+    const presentation = await graphPresentation(evalContents);
+    return presentation.innerWidth === 760
+      && presentation.inspectorOpen
+      && presentation.inspector?.width > 0
+      && presentation.inspector.left < presentation.innerWidth
+      && presentation.inspector.right <= presentation.innerWidth + 1
+      ? presentation
+      : false;
+  });
+  if (Math.round(evalNarrowInspector.stage.width) !== Math.round(narrowClosed.stage.width)) {
+    throw new Error("The 760px inspector changed the Eval graph-stage width instead of overlaying it.");
+  }
+  if (JSON.stringify(nodeRectSignature(evalNarrowInspector)) !== JSON.stringify(narrowClosedSignature)) {
+    throw new Error("The 760px inspector changed the Eval graph camera.");
+  }
+  await waitForPaint(evalContents);
+  await writeFile(evalNarrowScreenshotPath, (await evalContents.capturePage()).toPNG());
+  evalWindow.setContentSize(1480, 920);
+  const evalRedockedInspector = await waitFor("the redocked Eval inspector fit", async () => {
+    const presentation = await graphPresentation(evalContents);
+    return presentation.innerWidth === 1480
+      && presentation.inspectorOpen
+      && nodesAreContained(presentation)
+      ? presentation
+      : false;
+  });
+  await evalContents.executeJavaScript(`document.querySelector("#turnPickerButton")?.click()`);
   const evalNavigationState = await waitFor("the Eval scrolling turn picker", () => evalContents.executeJavaScript(`(() => {
     const popover = document.querySelector("#turnPopover");
     const rows = [...popover?.querySelectorAll("[data-turn-id]") || []];
@@ -333,10 +489,15 @@ async function run() {
       backEnabled: document.querySelector("#historyBack")?.disabled === false,
       breadcrumbSegments: document.querySelectorAll("#workspaceBreadcrumb .breadcrumb-segment").length,
       readOnlyCopy: document.querySelector("#threadComposer")?.textContent,
+      viewportWidth: window.innerWidth,
     };
   })()`));
-  await mkdir(dirname(evalScreenshotPath), { recursive: true });
-  await writeFile(evalScreenshotPath, (await evalContents.capturePage()).toPNG());
+  evalNavigationState.inspectorFit = {
+    desktopContained: nodesAreContained(evalInspectorFit),
+    narrowOverlayPreservedStage: true,
+    narrowOverlayPreservedCamera: true,
+    redockedContained: nodesAreContained(evalRedockedInspector),
+  };
 
   const result = {
     passed: true,
@@ -348,6 +509,7 @@ async function run() {
     renderedNodes,
     screenshotPath,
     evalScreenshotPath,
+    evalNarrowScreenshotPath,
     productNavigationState,
     evalNavigationState,
   };

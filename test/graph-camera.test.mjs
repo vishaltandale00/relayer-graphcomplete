@@ -13,12 +13,51 @@ import {
   graphNodeLayoutBounds,
   graphScreenPoint,
   graphWorldPoint,
+  inspectorFitRequestIsCurrent,
   recenterGraphCamera,
+  shouldActivateGraphNodeAfterPointerGesture,
   shouldAutoFitSettledGraph,
+  shouldFitInspectorDock,
+  shouldFitInspectorOpen,
   zoomGraphCameraAt,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace graph camera", () => {
+  it("requests an inspector fit only for a desktop closed-to-open transition", () => {
+    expect(shouldFitInspectorOpen(false, true, 761)).toBe(true);
+    expect(shouldFitInspectorOpen(false, true, 760)).toBe(false);
+    expect(shouldFitInspectorOpen(true, true, 1200)).toBe(false);
+    expect(shouldFitInspectorOpen(true, false, 1200)).toBe(false);
+    expect(shouldFitInspectorOpen(false, false, 1200)).toBe(false);
+  });
+
+  it("requests a fit when an open overlay inspector becomes docked", () => {
+    expect(shouldFitInspectorDock(true, false, true)).toBe(true);
+    expect(shouldFitInspectorDock(true, false, false)).toBe(false);
+    expect(shouldFitInspectorDock(false, false, true)).toBe(false);
+    expect(shouldFitInspectorDock(false, true, true)).toBe(false);
+  });
+
+  it("does not activate a graph node from the click generated after dragging it", () => {
+    expect(shouldActivateGraphNodeAfterPointerGesture(false)).toBe(true);
+    expect(shouldActivateGraphNodeAfterPointerGesture(true)).toBe(false);
+  });
+
+  it("invalidates queued inspector fits after camera, view, close, or narrow-layout changes", () => {
+    const request = { graphViewKey: "thread:turn:layer", cameraRevision: 4 };
+    const current = {
+      cameraRevision: 4,
+      graphViewKey: "thread:turn:layer",
+      inspectorOpen: true,
+      viewportWidth: 1200,
+    };
+    expect(inspectorFitRequestIsCurrent(request, current)).toBe(true);
+    expect(inspectorFitRequestIsCurrent(request, { ...current, cameraRevision: 5 })).toBe(false);
+    expect(inspectorFitRequestIsCurrent(request, { ...current, graphViewKey: "other" })).toBe(false);
+    expect(inspectorFitRequestIsCurrent(request, { ...current, inspectorOpen: false })).toBe(false);
+    expect(inspectorFitRequestIsCurrent(request, { ...current, viewportWidth: 760 })).toBe(false);
+  });
+
   it("invalidates a previous view's queued physics frame before it can mutate a restored view", () => {
     const queuedFrames = new Map();
     let nextFrame = 0;

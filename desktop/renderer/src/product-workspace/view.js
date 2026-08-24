@@ -14,14 +14,19 @@ export function productWorkspaceMarkup() {
       <div class="graph-column">
         <div class="interaction-banner" id="interactionBanner">
           <span class="interaction-icon">›_</span>
-          <div class="interaction-copy"><small>Your interaction<span class="interaction-model-identity hidden" id="interactionModelIdentity"></span></small><p id="interactionText"></p></div>
-          <div class="turn-picker" id="turnPicker">
-            <div class="turn-stepper" role="group" aria-label="Turn navigation">
-              <button id="previousTurn" data-review-ref="previous-turn" data-review-kind="turn" disabled title="Previous turn" aria-label="Previous turn">←</button>
-              <button id="turnPickerButton" class="turn-picker-button" type="button" aria-expanded="false" aria-controls="turnPopover" disabled>Turn 0 of 0</button>
-              <button id="nextTurn" data-review-ref="next-turn" data-review-kind="turn" disabled title="Next turn" aria-label="Next turn">→</button>
+          <div class="interaction-copy">
+            <div class="interaction-copy-header">
+              <small>Your interaction<span class="interaction-model-identity hidden" id="interactionModelIdentity"></span></small>
+              <div class="turn-picker" id="turnPicker">
+                <div class="turn-stepper" role="group" aria-label="Turn navigation">
+                  <button id="previousTurn" data-review-ref="previous-turn" data-review-kind="turn" disabled title="Previous turn" aria-label="Previous turn">←</button>
+                  <button id="turnPickerButton" class="turn-picker-button" type="button" aria-expanded="false" aria-controls="turnPopover" disabled>Turn 0 of 0</button>
+                  <button id="nextTurn" data-review-ref="next-turn" data-review-kind="turn" disabled title="Next turn" aria-label="Next turn">→</button>
+                </div>
+                <div class="turn-popover hidden" id="turnPopover" role="group" aria-label="Choose a turn"></div>
+              </div>
             </div>
-            <div class="turn-popover hidden" id="turnPopover" role="group" aria-label="Choose a turn"></div>
+            <p id="interactionText"></p>
           </div>
         </div>
         <nav class="workspace-breadcrumb" id="workspaceBreadcrumb" data-review-capture="breadcrumb" aria-label="Graph layer path"></nav>
