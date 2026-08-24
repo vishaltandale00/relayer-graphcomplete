@@ -2,22 +2,22 @@
 
 ## Ownership boundary
 
-Prime Agent is the execution runtime. GraphComplete is the graph algorithm. Relayer is one product host.
+Relayer is the product host. GraphComplete owns graph semantics and acceptance. A thread-selected harness owns model execution behind a provider-agnostic product contract.
 
 ```text
 Product host
     -> complete(interaction-node pointer)
         -> persistent Node host resolves the thread's selected harness object
         -> selected harness implementation
-            -> Prime Agent root content owner (production target)
-                -> child content owners
-                -> independent self-assess reviewers
-                -> targeted revisers
-            -> or basic Codex reference harness (first eval)
+            -> selected provider adapter and model
+            -> direct execution
+            -> or Prime Agent-owned recursive delegation
         -> graph.submit(interaction node)
         -> accepted resolved root layer or explicit failure
     -> product persistence and activation
 ```
+
+Product records pin stable provider, model, harness-configuration, and permission identifiers. Harness implementations and provider adapters translate those selections into runtime-specific credentials, sessions, and model calls. Prime Agent alone owns recursive delegation. Supporting a new implementation requires an explicit adapter; agnostic does not mean arbitrary runtimes work without integration.
 
 ## Working desktop product path
 
@@ -57,7 +57,7 @@ The desktop New Thread composer loads profile labels, availability, and the defa
 
 ## Shared product and Eval workspace
 
-Relayer and Relayer Eval are separate Electron build targets. Relayer exposes the ordinary product window and a fixed production harness configuration. Relayer Eval exposes a test-run dashboard and enables named harness overrides, but executes each case through the same product app server. A case may create one or more ordinary product threads and interactions.
+Relayer and Relayer Eval are separate Electron build targets. Relayer exposes the ordinary product window and lets each new thread pin an available catalog configuration. Relayer Eval exposes a test-run dashboard and selects named configurations for its matrix, but executes each case through the same product app server. A case may create one or more ordinary product threads and interactions.
 
 Opening one case × harness execution creates a separate review window using the exact production renderer and `ProductWorkspace` component. The review preload supplies only Eval navigation context: the run's cases and product thread IDs for the selected harness. Product graph reads, accepted-layer navigation, turn navigation, layout, and node inspection remain owned by the ordinary product API and workspace. The same app server issues the review window a read-only session capability and rejects writes at the API boundary; workspace review mode also removes composition and mutating controls. See [ADR 0003](decisions/0003-shared-product-eval-workspace.md).
 
@@ -74,7 +74,7 @@ Each product or Eval review window owns one bounded renderer-side navigation his
 7. Prior stable nodes and layers may be referenced across turns rather than duplicated. A reference destination is an accepted boundary, not a request to reaccept historical records.
 8. Draft records remain distinct from atomically accepted completion closures. Accepted layers snapshot their exact node, edge, and action membership so later graph writes cannot rewrite prior output.
 9. A model turn ending is not completion; the root must explicitly submit or stop. Submission validates authored closure, expansion cycles, reference visibility, orphan drafts, and layer size.
-10. Prime Agent owns recursive execution; GraphComplete does not add another scheduler. See [ADR 0005](decisions/0005-layered-navigation-contract.md).
+10. The selected harness owns model execution. Prime Agent owns recursive child scheduling. GraphComplete does not add a model-call or recursive-agent scheduler. See [ADR 0006](decisions/0006-harness-provider-agnostic-product-boundary.md).
 
 ## Target self-assessing policy invariants
 
@@ -91,19 +91,15 @@ The following apply when the optional recursive self-assessment policy is enable
 9. The graph is terminal only when accepted or stopped with a recorded reason.
 10. Budgets limit recursion without converting incomplete work into accepted work.
 
-## Model policy
+## Harness-owned model policy
 
-The initial policy is configurable rather than hard-coded:
+Model selection is a stable product choice resolved against the selected harness's declared provider and model compatibility. Thinking level is a separate choice. Execution must fail clearly when the selected combination is unavailable.
 
-- Luna: primary orchestrator and ordinary content ownership.
-- Terra: difficult revisions and upgrades.
-- Sol: independent self-assessment.
+Prime Agent may define an internal multi-model policy for delegation or review. It may assign different supported models to content ownership, revision, and self-assessment. That policy belongs to its configuration and must not become a Relayer product invariant. Other harnesses execute directly under the current accepted boundary.
 
-Model and thinking level are separate choices. The runtime must fail clearly when the requested model or effort cannot be provided.
+## Harness configurations and evaluation
 
-## Basic Codex reference harness and eval
-
-`codex.basic` proves the harness boundary before the production Prime Agent policy is implemented. A named YAML configuration selects the `codex.basic` implementation, contains that implementation's settings, and supplies its bindings for the three product permission profiles. The host treats settings and bindings as opaque; the selected implementation validates and interprets them. A code-owned implementation map still connects implementation types to executable factories, so adding a Prime Agent configuration does not require adding Prime Agent-specific fields to the host.
+The packaged `codex-basic` and `codex-basic-high` configurations currently select the `codex.basic` implementation. A named YAML configuration selects an implementation, contains that implementation's settings, declares provider/model compatibility, and supplies bindings for the three product permission profiles. The host treats implementation settings and bindings as opaque. A code-owned implementation map connects implementation types to executable factories without adding implementation-specific fields to product records.
 
 Configuration, implementation code, session state, and live authority are deliberately separate:
 
@@ -112,7 +108,7 @@ Configuration, implementation code, session state, and live authority are delibe
 3. The host copies the selected configuration onto the thread and persists the implementation's opaque JSON resume state. For `codex.basic`, that state is only the Codex thread ID.
 4. The current graph URL, token, and interaction node form a per-call graph scope. They are never factory inputs or harness state. The host closes its in-memory scope when the call settles; the calling runtime that minted the capability owns token revocation.
 
-The reference harness uses the TypeScript Codex SDK with the existing local Codex login. It keeps one resumable Codex thread per Relayer thread and asks Codex to execute the TypeScript graph client. The graph is not returned as structured JSON: Codex submits objects to the Rust engine, reacts to repairable validation errors, and ends with `graph.submit(interactionNode)`.
+The current packaged harness uses the TypeScript Codex SDK with the existing local Codex login. It keeps one resumable Codex thread per Relayer thread and asks Codex to execute the TypeScript graph client. The graph is not returned as structured JSON: Codex submits objects to the Rust engine, reacts to repairable validation errors, and ends with `graph.submit(interactionNode)`. The development-only `prime.agent` implementation uses the same host and graph contracts while owning its own recursive runtime policy.
 
 The default and opt-in live evals start from an empty temporary folder and run two interactions through one cached harness object. Each serialized Complete call receives a distinct graph capability while the harness retains its provider-session identity, and the eval runtime revokes that capability after the call settles. The case owns harness-agnostic graph-contract checks. The Eval application waits for each product interaction to reach a terminal state before starting the next turn. A selected judge configuration may add semantic scoring without changing the case:
 
@@ -147,7 +143,7 @@ This runtime slice does not make product metadata writes and graph writes share 
 
 ## Desktop release boundary
 
-Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of Prime Agent and GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates target Apple Silicon and Intel macOS 13 or newer plus Windows x64 and begin at version `0.2.0`.
+Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of any selected harness, provider, or GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates target Apple Silicon and Intel macOS 13 or newer plus Windows x64 and begin at version `0.2.0`.
 
 Release configuration resolves through one fail-closed contract. The contract seals the numeric version, source commit, product identity, target, architecture, signing authority, channel manifest, and exact HTTPS update base into both the application package and its release receipt. macOS targets additionally seal the Apple team and minimum OS; Windows seals the Artifact Signing endpoint, account, profile, and publisher. The updater and publisher consume this contract rather than maintaining parallel identity or channel rules. See [ADR 0002](decisions/0002-desktop-release-contract.md).
 

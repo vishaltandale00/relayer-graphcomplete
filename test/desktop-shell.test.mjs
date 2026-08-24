@@ -167,6 +167,10 @@ describe("desktop skeleton", () => {
     const rendererMain = await readFile(new URL("../desktop/renderer/src/main.js", import.meta.url), "utf8");
     const threads = await readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8");
     const prd = await readFile(new URL("../docs/prd/index.html", import.meta.url), "utf8");
+    const prdTracker = prd.slice(
+      prd.indexOf('<section class="status-tracker"'),
+      prd.indexOf('</section>', prd.indexOf('<section class="status-tracker"')),
+    );
     const prdServer = await readFile(new URL("../docs/prd/server.mjs", import.meta.url), "utf8");
     expect(html).toContain("Connect a provider");
     expect(html).toContain("Codex");
@@ -251,9 +255,11 @@ describe("desktop skeleton", () => {
     expect(rendererMain).not.toContain("/messages");
     expect(rendererMain).not.toContain("/interrupt");
     expect(prd).toContain('src="assets/product-walkthrough.html"');
-    expect(prd).toContain("App-server and persistence delivery checkpoint");
-    expect(prd).toContain('class="requirement-row status-verified"');
-    expect(prd).toContain('class="requirement-row status-open"');
+    expect(prd).toContain("Historical app-server foundation checkpoint");
+    expect(prd).toContain("No capability has complete end-to-end product proof. Nine capabilities are partial, and one is open.");
+    expect(prdTracker).not.toContain('class="requirement-row status-verified"');
+    expect(prdTracker.match(/class="requirement-row status-partial"/g)).toHaveLength(9);
+    expect(prdTracker.match(/class="requirement-row status-open"/g)).toHaveLength(1);
     expect(prd).toContain("APP-001-E1");
     expect(prd).toContain("APP-001-E2");
     expect(prd).toContain("APP-001-E3");

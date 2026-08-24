@@ -1,20 +1,20 @@
 # Relayer GraphComplete
 
-Relayer GraphComplete is an open-source recursive graph-construction system built on [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent).
+Relayer GraphComplete is an open-source, graph-native agent workspace with a harness- and provider-agnostic product contract. Each thread pins a supported execution configuration behind the same GraphComplete boundary.
 
-The canonical future product boundary remains conceptually:
+The canonical external product boundary remains conceptually:
 
 ```ts
 const result = await complete(inputGraph);
 ```
 
-This top-level function is not exported by the first runtime slice yet. `inputGraph` is the pointer to the current user-interaction node. The selected thread harness keeps its working directory and provider session, while each `complete()` call receives a separate graph scope. A root model ending its turn does not mean the graph is complete; the harness must finish with `graph.submit(interactionNode)`.
+The root package does not export this top-level function yet. `inputGraph` points to the current user-interaction node. The selected thread harness keeps its working directory and provider session, while each `complete()` call receives a separate graph scope. A model turn ending does not mean the graph is complete; the harness must finish with `graph.submit(interactionNode)`.
 
-The executable first slice enters through the persistent `HarnessHost` while the app-server integration behind the canonical product boundary remains future work. There is intentionally no second structured-output harness path: accepted product output must come from graph-tool writes and explicit submission.
+The working desktop reaches this boundary through the Rust app server and persistent `HarnessHost`. There is intentionally no second structured-output path: every supported harness produces accepted product output through graph-tool writes and explicit submission.
 
 ## Status
 
-Pre-alpha executable runtime slice. The repository now includes:
+Pre-alpha product and executable runtime. The repository now includes:
 
 - a Rust SQLx/SQLite graph core and async loopback server with interaction-scoped capability tokens;
 - object-based TypeScript and Python clients for nodes, undirected edges, layers, actions, and submission;
@@ -30,10 +30,11 @@ The Node runtime is split into explicit workspace packages: `@relayer/graph-clie
 
 ## Core design
 
-- Prime Agent owns recursive model execution; GraphComplete does not add another scheduler.
+- The selected harness owns model execution. Prime Agent alone owns recursive child scheduling; GraphComplete does not add another scheduler.
 - GraphComplete owns graph records, active-interaction write authority, validation, immutable accepted history, and explicit submission.
 - Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
 - The Node harness host owns live per-thread harness objects and provider-session resume state, not graph rules or product lifecycle.
+- Provider adapters own authentication, model discovery, and provider-specific execution details. Product records use stable provider, model, harness, and permission identifiers.
 
 The implemented basic loop is:
 
@@ -53,7 +54,7 @@ still needs that forked package exposed under its canonical
 `@earendil-works/pi-coding-agent` package name; the PR branch is a monorepo, not
 an installable npm subdirectory.
 
-See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/architecture.md), and [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
+Prime Agent is one optional recursive harness implementation, not the product runtime. See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/architecture.md), [ADR 0006](docs/decisions/0006-harness-provider-agnostic-product-boundary.md), and the adapter-specific [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
 
 ## Run the GraphComplete runtime eval
 
@@ -79,7 +80,7 @@ The CLI resolves configuration files before case execution. Every saved executio
 
 ## Relayer Desktop
 
-Relayer Desktop is an Electron application backed by the Rust graph and product servers, a persistent Node harness host, and SQLite product storage. Each question becomes a canonical graph interaction, runs through the thread's pinned harness, and persists its accepted output for replay in the production graph/chat workspace. Codex provider setup remains an Electron-owned service.
+Relayer Desktop is an Electron application backed by the Rust graph and product servers, a persistent Node harness host, and SQLite product storage. Each question becomes a canonical graph interaction, runs through the thread's pinned harness, and persists its accepted output for replay in the production graph/chat workspace. The current packaged provider adapter uses Codex login; provider-specific setup remains outside the product record contract.
 
 ```sh
 npm install
@@ -107,8 +108,8 @@ The Prime launcher selects `prime-agent-basic`, adds the local Python graph clie
 to every IPython kernel, and uses a separate ignored desktop profile. Prime Agent
 reads its normal local provider credentials. Use
 `npm run desktop:dev:prime -- --configuration prime-agent-deep` to try the deeper
-configuration. The packaged Relayer application remains pinned to its production
-harness configuration.
+configuration. Packaged builds expose only configurations whose implementations
+and provider adapters are included and available; they omit the unpublished Prime Agent options.
 
 Every thread pins a product permission profile before execution. New Thread loads the available Ask for approval, Approve for me, and Full access choices from Rust product policy, selects the product default, and sends that choice through ordinary thread creation. The saved thread shows its pinned profile. The public contract is `ask`, `auto`, or `full`; raw provider sandbox and approval flags remain harness implementation details. Full access is intentionally unrestricted and is not a hard filesystem or network boundary. See [ADR 0004](docs/decisions/0004-product-permission-profiles.md).
 
