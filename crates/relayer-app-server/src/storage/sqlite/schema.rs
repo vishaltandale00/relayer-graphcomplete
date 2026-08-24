@@ -68,6 +68,7 @@ const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("result_interaction_id", "INTEGER", true, 0),
     ("created_at", "TEXT", true, 0),
     ("graph_lease_required", "INTEGER", true, 0),
+    ("authoritative", "INTEGER", true, 0),
 ];
 const MODEL_PROVIDER_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "TEXT", true, 1),
@@ -451,26 +452,22 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     let duplicate_action_invocation: bool = sqlx::query_scalar(
         "SELECT EXISTS(
             SELECT 1
-            FROM action_invocations first
-            JOIN action_invocations second
-              ON second.action_id=first.action_id
-             AND second.result_interaction_id>first.result_interaction_id
-            JOIN interactions first_source ON first_source.id=first.source_interaction_id
-            JOIN threads first_thread ON first_thread.id=first_source.thread_id
-            JOIN interactions second_source ON second_source.id=second.source_interaction_id
-            JOIN threads second_thread ON second_thread.id=second_source.thread_id
-            WHERE (first_thread.project_id IS NOT NULL
-                    AND second_thread.project_id=first_thread.project_id)
-               OR (first_thread.project_id IS NULL
-                    AND second_thread.project_id IS NULL
-                    AND second_thread.id=first_thread.id)
+            FROM action_invocations ai
+            JOIN interactions source ON source.id=ai.source_interaction_id
+            JOIN threads thread ON thread.id=source.thread_id
+            GROUP BY CASE
+                       WHEN thread.project_id IS NOT NULL THEN 'project:' || thread.project_id
+                       ELSE 'thread:' || thread.id
+                     END,
+                     ai.action_id
+            HAVING SUM(ai.authoritative) != 1
         )",
     )
     .fetch_one(pool)
     .await?;
     if duplicate_action_invocation {
         return Err(incompatible(
-            "a node-owned action may have only one invocation result in its project scope",
+            "a node-owned action must have exactly one authoritative invocation result in its project scope",
         ));
     }
     super::catalog::validate_catalog_rows(pool).await?;

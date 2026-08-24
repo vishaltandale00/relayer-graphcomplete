@@ -741,6 +741,16 @@ impl ProductService {
             }))
     }
 
+    pub(crate) async fn action_invocations_for_export(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<ActionInvocation>, ProductError> {
+        self.storage
+            .action_invocations_for_export(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn get_interaction(
         &self,
         interaction_id: super::InteractionId,

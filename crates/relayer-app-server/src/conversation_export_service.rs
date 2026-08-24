@@ -43,6 +43,7 @@ pub(crate) async fn build_conversation_export(
     exported_at: String,
 ) -> Result<Vec<u8>, ConversationExportBuildError> {
     let detail = product.get_thread(thread_id).await?;
+    let export_invocations = product.action_invocations_for_export(thread_id).await?;
     let imported_turns = product.imported_turn_export_records(thread_id).await?;
     let project_path = detail.project.as_ref().map(|project| project.path.as_str());
     let redactor = ProjectPathRedactor::new(project_path);
@@ -59,8 +60,7 @@ pub(crate) async fn build_conversation_export(
     // Thread detail intentionally carries project-visible invocation projections for navigation.
     // A portable conversation export, however, may only encode provenance whose source and result
     // turns are both members of this conversation.
-    let conversation_invocations = detail
-        .action_invocations
+    let conversation_invocations = export_invocations
         .iter()
         .filter(|invocation| {
             interaction_indexes.contains_key(&invocation.source_interaction_id)
@@ -661,8 +661,14 @@ fn next_id(ids: &mut HashMap<i64, String>, raw: i64, kind: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{PortableIds, ProjectPathRedactor, completion_status, export_action};
-    use crate::conversation_export::ExportCompletionStatus;
+    use super::{
+        ImportedExportContext, PortableIds, ProjectPathRedactor, completion_status, export_action,
+        export_turn,
+    };
+    use crate::{
+        conversation_export::{ExportCompletionStatus, ExportTurnOrigin},
+        product::{ActionInvocation, Interaction, InteractionId, ThreadId},
+    };
     use relayer_graph_core::{
         ActionId, ActionKind, ActionVariant, GraphAction, LayerId, NodeId, RecordState,
     };
@@ -707,6 +713,61 @@ mod tests {
         assert_eq!(
             exported.interaction_text.as_deref(),
             Some("Continue from here")
+        );
+    }
+
+    #[test]
+    fn historical_mapping_exports_its_action_origin() {
+        let source_id = InteractionId::from_database(1);
+        let result_id = InteractionId::from_database(2);
+        let interaction = Interaction {
+            id: result_id,
+            thread_id: ThreadId::from_database(1),
+            sequence: 2,
+            text: "Historical result".into(),
+            created_at: "2".into(),
+            graph_node_id: None,
+            completion_status: "failed".into(),
+            harness_configuration_name: None,
+            harness_configuration_digest: None,
+            permission_profile_id: "auto".into(),
+            model_selection: None,
+            effective_execution_digest: None,
+            effective_permission_receipt: None,
+            completion_output: None,
+            completion_error: Some("superseded".into()),
+        };
+        let invocation = ActionInvocation {
+            source_interaction_id: source_id,
+            action_id: 41,
+            result_interaction_id: result_id,
+            created_at: "2".into(),
+            result_completion_status: "failed".into(),
+        };
+        let turn_sequences = [(source_id, 1), (result_id, 2)].into_iter().collect();
+        let mut ids = PortableIds::default();
+        ids.action.insert(41, "action:legacy".into());
+
+        let exported = export_turn(
+            &interaction,
+            None,
+            Some(&invocation),
+            ImportedExportContext {
+                turn: None,
+                turn_sequences: &Default::default(),
+            },
+            &turn_sequences,
+            &mut ids,
+            &ProjectPathRedactor::new(None),
+        )
+        .unwrap();
+
+        assert_eq!(
+            exported.origin,
+            ExportTurnOrigin::Action {
+                source_turn_id: "turn:1".into(),
+                source_action_id: "action:legacy".into(),
+            }
         );
     }
 }

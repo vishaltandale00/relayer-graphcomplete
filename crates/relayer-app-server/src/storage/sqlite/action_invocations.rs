@@ -7,12 +7,20 @@ use crate::storage::{ActionInvocationInsertOutcome, StorageError};
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 
 impl SqliteProductStore {
+    pub(crate) async fn action_invocations_for_export(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<ActionInvocation>, StorageError> {
+        let mut connection = self.pool.acquire().await?;
+        fetch_action_invocations_for_export(&mut connection, thread_id).await
+    }
+
     pub(crate) async fn invocation_graph_source(
         &self,
         result_interaction_id: InteractionId,
     ) -> Result<Option<(i64, i64)>, StorageError> {
         sqlx::query_as(
-            "SELECT source.graph_node_id,ai.action_id FROM action_invocations ai JOIN interactions source ON source.id=ai.source_interaction_id WHERE ai.result_interaction_id=?1 AND source.completion_status='accepted' AND source.graph_node_id IS NOT NULL",
+            "SELECT source.graph_node_id,ai.action_id FROM action_invocations ai JOIN interactions source ON source.id=ai.source_interaction_id WHERE ai.result_interaction_id=?1 AND ai.authoritative=1 AND source.completion_status='accepted' AND source.graph_node_id IS NOT NULL",
         )
         .bind(result_interaction_id.value())
         .fetch_optional(&self.pool)
@@ -25,7 +33,7 @@ impl SqliteProductStore {
         result_interaction_id: InteractionId,
     ) -> Result<bool, StorageError> {
         Ok(sqlx::query_scalar(
-            "SELECT graph_lease_required FROM action_invocations WHERE result_interaction_id=?1",
+            "SELECT graph_lease_required FROM action_invocations WHERE result_interaction_id=?1 AND authoritative=1",
         )
         .bind(result_interaction_id.value())
         .fetch_optional(&self.pool)
@@ -39,7 +47,7 @@ impl SqliteProductStore {
         error: &str,
     ) -> Result<bool, StorageError> {
         let result = sqlx::query(
-            "UPDATE interactions SET completion_error=?1 WHERE id=?2 AND completion_status='failed' AND completion_error LIKE 'Canonical reconciliation pending:%' AND EXISTS (SELECT 1 FROM action_invocations WHERE result_interaction_id=?2 AND graph_lease_required=0)",
+            "UPDATE interactions SET completion_error=?1 WHERE id=?2 AND completion_status='failed' AND completion_error LIKE 'Canonical reconciliation pending:%' AND EXISTS (SELECT 1 FROM action_invocations WHERE result_interaction_id=?2 AND graph_lease_required=0 AND authoritative=1)",
         )
         .bind(error)
         .bind(result_interaction_id.value())
@@ -79,7 +87,7 @@ impl SqliteProductStore {
         result_interaction_id: InteractionId,
     ) -> Result<bool, StorageError> {
         sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM action_invocations ai JOIN interactions source ON source.id=ai.source_interaction_id JOIN interactions result ON result.id=ai.result_interaction_id AND result.thread_id=source.thread_id WHERE result.id=?1 AND result.model_provider_id IS NULL AND result.provider_model_id IS NULL AND result.model_family_id IS NULL AND source.completion_status='accepted' AND source.graph_node_id IS NOT NULL AND source.model_provider_id IS NULL AND source.provider_model_id IS NULL AND source.model_family_id IS NULL)",
+            "SELECT EXISTS(SELECT 1 FROM action_invocations ai JOIN interactions source ON source.id=ai.source_interaction_id JOIN interactions result ON result.id=ai.result_interaction_id AND result.thread_id=source.thread_id WHERE result.id=?1 AND ai.authoritative=1 AND result.model_provider_id IS NULL AND result.provider_model_id IS NULL AND result.model_family_id IS NULL AND source.completion_status='accepted' AND source.graph_node_id IS NOT NULL AND source.model_provider_id IS NULL AND source.provider_model_id IS NULL AND source.model_family_id IS NULL)",
         )
         .bind(result_interaction_id.value())
         .fetch_one(&self.pool)
@@ -93,7 +101,7 @@ impl SqliteProductStore {
         action_id: i64,
     ) -> Result<Option<(ActionInvocation, Interaction)>, StorageError> {
         let mut connection = self.pool.acquire().await?;
-        existing_exact(&mut connection, source_interaction_id, action_id).await
+        existing_for_action_scope(&mut connection, source_interaction_id, action_id).await
     }
 
     pub(crate) async fn recover_interrupted_action_invocations(
@@ -106,16 +114,16 @@ impl SqliteProductStore {
         let result = sqlx::query(
             "UPDATE interactions
              SET completion_status=CASE
-                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1)
+                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1 AND authoritative=1)
                      THEN 'submitted'
                    ELSE 'failed'
                  END,
                  completion_error=CASE
-                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1)
+                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1 AND authoritative=1)
                      THEN ?1
                    ELSE 'Legacy action invocation was interrupted before graph acceptance. Its action remains unresolved.'
                  END
-             WHERE id IN (SELECT result_interaction_id FROM action_invocations)
+             WHERE id IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1)
                AND completion_status IN ('not_started','running','submitted')",
         )
         .bind(error)
@@ -235,7 +243,7 @@ impl SqliteProductStore {
             created_at: timestamp.clone(),
         };
         sqlx::query(
-            "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,?2,?3,?4,1)",
+            "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative) VALUES (?1,?2,?3,?4,1,1)",
         )
         .bind(source_interaction_id.value())
         .bind(action_id)
@@ -274,9 +282,10 @@ pub(super) async fn fetch_action_invocations(
          JOIN interactions result ON result.id=ai.result_interaction_id
          JOIN threads source_thread ON source_thread.id=source.thread_id
          JOIN threads requested_thread ON requested_thread.id=?1
-         WHERE source.thread_id=?1
-            OR (requested_thread.project_id IS NOT NULL
-                AND source_thread.project_id=requested_thread.project_id)
+         WHERE ai.authoritative=1
+           AND (source.thread_id=?1
+             OR (requested_thread.project_id IS NOT NULL
+                AND source_thread.project_id=requested_thread.project_id))
          ORDER BY source_thread.id,source.sequence,ai.action_id",
     )
     .bind(thread_id.value())
@@ -285,25 +294,22 @@ pub(super) async fn fetch_action_invocations(
     rows.iter().map(invocation_from_row).collect()
 }
 
-async fn existing_exact(
+pub(super) async fn fetch_action_invocations_for_export(
     connection: &mut SqliteConnection,
-    source_interaction_id: InteractionId,
-    action_id: i64,
-) -> Result<Option<(ActionInvocation, Interaction)>, StorageError> {
-    let Some(row) = sqlx::query(
+    thread_id: ThreadId,
+) -> Result<Vec<ActionInvocation>, StorageError> {
+    let rows = sqlx::query(
         "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status
          FROM action_invocations ai
+         JOIN interactions source ON source.id=ai.source_interaction_id
          JOIN interactions result ON result.id=ai.result_interaction_id
-         WHERE ai.source_interaction_id=?1 AND ai.action_id=?2",
+         WHERE source.thread_id=?1 AND result.thread_id=?1
+         ORDER BY source.sequence,ai.action_id,ai.created_at,ai.result_interaction_id",
     )
-    .bind(source_interaction_id.value())
-    .bind(action_id)
-    .fetch_optional(&mut *connection)
-    .await?
-    else {
-        return Ok(None);
-    };
-    invocation_with_result(connection, row).await
+    .bind(thread_id.value())
+    .fetch_all(connection)
+    .await?;
+    rows.iter().map(invocation_from_row).collect()
 }
 
 async fn existing_for_action_scope(
@@ -320,6 +326,7 @@ async fn existing_for_action_scope(
          JOIN interactions result ON result.id=ai.result_interaction_id
          JOIN threads existing_thread ON existing_thread.id=existing_source.thread_id
          WHERE requested_source.id=?1
+           AND ai.authoritative=1
            AND (
              (requested_thread.project_id IS NOT NULL
                AND existing_thread.project_id=requested_thread.project_id)

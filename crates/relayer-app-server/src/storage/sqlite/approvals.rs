@@ -224,7 +224,7 @@ impl SqliteProductStore {
              SET completion_status=CASE
                    WHEN ?3 AND EXISTS (
                      SELECT 1 FROM action_invocations
-                     WHERE result_interaction_id=interactions.id AND graph_lease_required=1
+                     WHERE result_interaction_id=interactions.id AND graph_lease_required=1 AND authoritative=1
                    ) THEN 'submitted'
                    ELSE 'failed'
                  END,

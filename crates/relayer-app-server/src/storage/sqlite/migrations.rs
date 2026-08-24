@@ -172,20 +172,31 @@ mod tests {
         pool.close().await;
 
         let reopened = SqliteProductStore::open(&path).await.unwrap();
-        let mappings: Vec<(i64, i64, i64)> = sqlx::query_as(
-            "SELECT source_interaction_id,action_id,result_interaction_id FROM action_invocations",
+        let mappings: Vec<(i64, i64, i64, bool)> = sqlx::query_as(
+            "SELECT source_interaction_id,action_id,result_interaction_id,authoritative FROM action_invocations ORDER BY result_interaction_id",
         )
         .fetch_all(&reopened.pool)
         .await
         .unwrap();
-        assert_eq!(mappings, vec![(1, 41, 2)]);
+        assert_eq!(
+            mappings,
+            vec![(1, 41, 2, false), (3, 41, 4, true), (5, 41, 6, false)]
+        );
         let history: Vec<(i64, String, Option<String>)> = sqlx::query_as(
             "SELECT id,completion_status,completion_error FROM interactions WHERE id IN (2,4,6) ORDER BY id",
         )
         .fetch_all(&reopened.pool)
         .await
         .unwrap();
-        assert_eq!(history[0], (2, "running".into(), None));
+        assert_eq!(history[0].0, 2);
+        assert_eq!(history[0].1, "failed");
+        assert!(
+            history[0]
+                .2
+                .as_deref()
+                .unwrap()
+                .contains("action origin was retained")
+        );
         assert_eq!(history[1], (4, "accepted".into(), None));
         assert_eq!(history[2].0, 6);
         assert_eq!(history[2].1, "failed");
@@ -196,12 +207,47 @@ mod tests {
                 .unwrap()
                 .contains("superseded during graph lease migration")
         );
+        let projected = reopened
+            .get_action_invocation(crate::product::InteractionId::from_database(1), 41)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(projected.0.source_interaction_id.value(), 3);
+        assert_eq!(projected.0.result_interaction_id.value(), 4);
+        let product_projection = reopened
+            .load_thread(crate::product::ThreadId::from_database(1))
+            .await
+            .unwrap();
+        assert_eq!(product_projection.action_invocations.len(), 1);
+        assert_eq!(
+            product_projection.action_invocations[0]
+                .result_interaction_id
+                .value(),
+            4
+        );
+        let first_thread_history = reopened
+            .action_invocations_for_export(crate::product::ThreadId::from_database(1))
+            .await
+            .unwrap();
+        assert_eq!(first_thread_history.len(), 1);
+        assert_eq!(first_thread_history[0].source_interaction_id.value(), 1);
+        assert_eq!(first_thread_history[0].result_interaction_id.value(), 2);
         let interaction_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM interactions")
             .fetch_one(&reopened.pool)
             .await
             .unwrap();
         assert_eq!(interaction_count, 6);
+        sqlx::query("UPDATE action_invocations SET authoritative=1 WHERE result_interaction_id=2")
+            .execute(&reopened.pool)
+            .await
+            .unwrap();
         reopened.pool.close().await;
+        let error = SqliteProductStore::open(&path).await.err().unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains("exactly one authoritative invocation result")
+        );
         std::fs::remove_file(path).unwrap();
     }
 }
