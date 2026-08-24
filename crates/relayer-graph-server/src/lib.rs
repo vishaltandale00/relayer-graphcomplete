@@ -6,9 +6,10 @@ use axum::{
     routing::{get, post},
 };
 use relayer_graph_core::{
-    ActionDraft, ActionId, ActionKind, CompletionOutput, EdgeDraft, GraphDatabase, GraphError,
-    GraphNode, ImportedConversationStage, ImportedTurn, LayerDraft, LayerId, NodeDraft, NodeId,
-    ProjectId, RecordState, ThreadId,
+    ActionDraft, ActionId, ActionKind, CompletionOutput, EdgeDraft, GraphAction, GraphDatabase,
+    GraphError, GraphNode, GraphWriter, ImportedConversationStage, ImportedTurn,
+    InteractionInvocation, LayerDraft, LayerId, NodeDraft, NodeId, ProjectId, RecordState,
+    ThreadId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -39,6 +40,20 @@ pub fn router(state: ServerState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/control/interactions", post(create_interaction))
+        .route("/api/control/interactions/{id}", get(interaction_metadata))
+        .route("/api/control/interactions/{id}/output", get(control_output))
+        .route(
+            "/api/control/interactions/{id}/layers/{layer_id}",
+            get(control_layer),
+        )
+        .route(
+            "/api/control/interactions/{id}/layers/{layer_id}/owner",
+            get(control_layer_owner),
+        )
+        .route(
+            "/api/control/interactions/{id}/actions/{action_id}",
+            get(control_action),
+        )
         .route(
             "/api/control/conversation-imports",
             axum::routing::delete(remove_imported_conversation),
@@ -155,6 +170,14 @@ struct CreateInteractionRequest {
     project_id: Option<ProjectId>,
     thread_id: ThreadId,
     text: String,
+    #[serde(default)]
+    invocation: Option<InteractionInvocation>,
+    #[serde(default = "default_mint_capability")]
+    mint_capability: bool,
+}
+
+fn default_mint_capability() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -172,19 +195,96 @@ async fn create_interaction(
     require_bearer(&headers, &state.control_token)?;
     let interaction = state
         .graph
-        .create_interaction(input.project_id, input.thread_id, &input.text)
+        .create_interaction_with_invocation(
+            input.project_id,
+            input.thread_id,
+            &input.text,
+            input.invocation,
+        )
         .await?;
-    let graph_token = mint_capability(&state, interaction.id)?;
+    let graph_token = input
+        .mint_capability
+        .then(|| mint_capability(&state, interaction.id, None))
+        .transpose()?;
     Ok(Json(CreateInteractionResponse {
         node: interaction,
-        graph_token,
+        graph_token: graph_token.unwrap_or_default(),
     }))
+}
+
+async fn interaction_metadata(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let invocation = state.graph.interaction_invocation(id).await?;
+    Ok(Json(json!({ "nodeId": id, "invocation": invocation })))
+}
+
+async fn control_output(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+) -> Result<Json<CompletionOutput>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let output = state.graph.writer_for_subgraph(id).await?.completion_output().await?
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, json!({"error":{"code":"completion_not_found","message":"This node has no accepted completion output yet."}})))?;
+    Ok(Json(output))
+}
+
+async fn control_layer(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path((id, layer_id)): Path<(NodeId, LayerId)>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let layer = state
+        .graph
+        .writer_for_subgraph(id)
+        .await?
+        .get_layer(layer_id)
+        .await?;
+    Ok(Json(
+        serde_json::to_value(layer).map_err(|error| ApiError::internal(&error.to_string()))?,
+    ))
+}
+
+async fn control_layer_owner(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path((id, layer_id)): Path<(NodeId, LayerId)>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let owner_interaction_node_id = state
+        .graph
+        .writer_for_subgraph(id)
+        .await?
+        .get_layer_owner(layer_id)
+        .await?;
+    Ok(Json(json!({
+        "layerId": layer_id,
+        "ownerInteractionNodeId": owner_interaction_node_id,
+    })))
+}
+
+async fn control_action(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path((id, action_id)): Path<(NodeId, ActionId)>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let writer = state.graph.writer_for_subgraph(id).await?;
+    let action = accepted_action(&writer, action_id).await?;
+    Ok(Json(json!({"action": action})))
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemintCapabilityRequest {
     node_id: NodeId,
+    #[serde(default)]
+    graph_token: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -201,24 +301,44 @@ async fn remint_capability(
     require_bearer(&headers, &state.control_token)?;
     state.graph.writer_for_subgraph(input.node_id).await?;
     Ok(Json(RemintCapabilityResponse {
-        graph_token: mint_capability(&state, input.node_id)?,
+        graph_token: mint_capability(&state, input.node_id, input.graph_token)?,
     }))
 }
 
-fn mint_capability(state: &ServerState, node_id: NodeId) -> Result<String, ApiError> {
-    let graph_token = Uuid::new_v4().to_string();
-    state
+fn mint_capability(
+    state: &ServerState,
+    node_id: NodeId,
+    requested_token: Option<String>,
+) -> Result<String, ApiError> {
+    let graph_token = requested_token.unwrap_or_else(|| Uuid::new_v4().to_string());
+    if graph_token.is_empty() {
+        return Err(ApiError::invalid("graphToken must be non-empty"));
+    }
+    let mut sessions = state
         .sessions
         .lock()
-        .map_err(|_| ApiError::internal("session lock poisoned"))?
-        .insert(graph_token.clone(), node_id);
+        .map_err(|_| ApiError::internal("session lock poisoned"))?;
+    if let Some(active_node_id) = sessions.get(&graph_token) {
+        if *active_node_id != node_id {
+            return Err(ApiError::conflict(
+                "capability_token_conflict",
+                "graphToken is already bound to a different interaction",
+            ));
+        }
+        return Ok(graph_token);
+    }
+    sessions.retain(|_, active_node_id| *active_node_id != node_id);
+    sessions.insert(graph_token.clone(), node_id);
     Ok(graph_token)
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RevokeCapabilityRequest {
-    graph_token: String,
+    #[serde(default)]
+    graph_token: Option<String>,
+    #[serde(default)]
+    node_id: Option<NodeId>,
 }
 
 async fn revoke_capability(
@@ -227,13 +347,26 @@ async fn revoke_capability(
     Json(input): Json<RevokeCapabilityRequest>,
 ) -> Result<Json<Value>, ApiError> {
     require_bearer(&headers, &state.control_token)?;
-    let revoked = state
+    let mut sessions = state
         .sessions
         .lock()
-        .map_err(|_| ApiError::internal("session lock poisoned"))?
-        .remove(&input.graph_token)
-        .is_some();
-    Ok(Json(json!({"revoked": revoked})))
+        .map_err(|_| ApiError::internal("session lock poisoned"))?;
+    let revoked = match (input.graph_token, input.node_id) {
+        (Some(graph_token), None) => sessions.remove(&graph_token).is_some() as usize,
+        (None, Some(node_id)) => {
+            let before = sessions.len();
+            sessions.retain(|_, active_node_id| *active_node_id != node_id);
+            before - sessions.len()
+        }
+        _ => {
+            return Err(ApiError::invalid(
+                "provide exactly one of graphToken or nodeId",
+            ));
+        }
+    };
+    Ok(Json(
+        json!({"revoked": revoked > 0, "revokedCount": revoked}),
+    ))
 }
 
 async fn submit_node(
@@ -341,6 +474,11 @@ async fn get_action(
 ) -> Result<Json<Value>, ApiError> {
     let node_id = session(&state, &headers)?;
     let writer = state.graph.writer_for_subgraph(node_id).await?;
+    let action = accepted_action(&writer, id).await?;
+    Ok(Json(json!({"action": action})))
+}
+
+async fn accepted_action(writer: &GraphWriter, id: ActionId) -> Result<GraphAction, ApiError> {
     let output = writer.completion_output().await?.ok_or_else(|| {
         ApiError(
             StatusCode::NOT_FOUND,
@@ -355,7 +493,7 @@ async fn get_action(
         }
         for action in layer.actions {
             if action.id == id && action.state == RecordState::Accepted {
-                return Ok(Json(json!({"action": action})));
+                return Ok(action);
             }
             if action.kind == ActionKind::Navigate
                 && action.state == RecordState::Accepted
@@ -455,6 +593,20 @@ fn session(state: &ServerState, headers: &HeaderMap) -> Result<NodeId, ApiError>
 
 pub struct ApiError(StatusCode, Value);
 impl ApiError {
+    fn invalid(message: &str) -> Self {
+        Self(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            json!({"error":{"code":"invalid_request","message":message}}),
+        )
+    }
+
+    fn conflict(code: &str, message: &str) -> Self {
+        Self(
+            StatusCode::CONFLICT,
+            json!({"error":{"code":code,"message":message}}),
+        )
+    }
+
     fn internal(message: &str) -> Self {
         Self(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -553,6 +705,7 @@ mod tests {
         let turn = serde_json::to_vec(&ImportedTurn {
             source_turn_id: "turn:1".into(),
             text: "Failed turn".into(),
+            invoke_origin: None,
             accepted_view: None,
         })
         .unwrap();
@@ -629,6 +782,7 @@ mod tests {
         let body: CreateInteractionResponse = serde_json::from_slice(&bytes).unwrap();
         assert!(!body.graph_token.is_empty());
         assert!(body.node.id.value() > 0);
+        assert_eq!(body.node.leased_action_id, None);
 
         let node_id = state
             .sessions
@@ -638,6 +792,371 @@ mod tests {
             .unwrap()
             .to_owned();
         assert_eq!(node_id, body.node.id);
+    }
+
+    #[tokio::test]
+    async fn product_can_bind_before_mint_and_invalidate_a_crash_surviving_node_token() {
+        let state = ServerState::new(GraphDatabase::in_memory().await.unwrap(), "control");
+        let app = router(state.clone());
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/interactions")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(
+                        r#"{"threadId":73,"text":"hello","mintCapability":false}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let created: CreateInteractionResponse =
+            serde_json::from_slice(&to_bytes(created.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert!(created.graph_token.is_empty());
+        assert!(state.sessions.lock().unwrap().is_empty());
+
+        let token = "product-chosen-crash-token";
+        let minted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/capabilities")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(format!(
+                        r#"{{"nodeId":{},"graphToken":"{token}"}}"#,
+                        created.node.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(minted.status(), StatusCode::OK);
+
+        let repeated = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/capabilities")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(format!(
+                        r#"{{"nodeId":{},"graphToken":"{token}"}}"#,
+                        created.node.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(repeated.status(), StatusCode::OK);
+
+        let second = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/interactions")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(
+                        r#"{"threadId":74,"text":"second","mintCapability":false}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let second: CreateInteractionResponse =
+            serde_json::from_slice(&to_bytes(second.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        let conflict = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/capabilities")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(format!(
+                        r#"{{"nodeId":{},"graphToken":"{token}"}}"#,
+                        second.node.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(conflict.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            state.sessions.lock().unwrap().get(token),
+            Some(&created.node.id)
+        );
+
+        let invalidated = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/control/capabilities")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(format!(
+                        r#"{{"nodeId":{}}}"#,
+                        created.node.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalidated.status(), StatusCode::OK);
+        let rejected = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/graph/nodes/{}", created.node.id.value()))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn control_issues_and_replays_typed_invocation_leases_with_derived_neighbors() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let source_interaction = graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "Source")
+            .await
+            .unwrap();
+        let writer = graph
+            .writer_for_subgraph(source_interaction.id)
+            .await
+            .unwrap();
+        let source = writer
+            .submit_node(&NodeDraft {
+                client_key: "source".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Source".into(),
+                detail: "Accepted source".into(),
+            })
+            .await
+            .unwrap();
+        let layer = writer
+            .submit_layer(&LayerDraft {
+                client_key: "root".into(),
+                nodes: vec![source.id],
+                edges: vec![],
+                size_justification: None,
+            })
+            .await
+            .unwrap();
+        let invoke = writer
+            .add_action(&ActionDraft {
+                client_key: "continue".into(),
+                source_node_id: source.id,
+                source_layer_id: Some(layer.id),
+                kind: ActionKind::Invoke,
+                relation: None,
+                label: "Continue".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: None,
+                interaction_text: Some("Continue".into()),
+            })
+            .await
+            .unwrap();
+        writer
+            .add_action(&ActionDraft {
+                client_key: "response".into(),
+                source_node_id: source_interaction.id,
+                source_layer_id: None,
+                kind: ActionKind::Navigate,
+                relation: Some(relayer_graph_core::NavigateRelation::Expand),
+                label: "Response".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: Some(layer.id),
+                interaction_text: None,
+            })
+            .await
+            .unwrap();
+        writer.complete(source_interaction.id).await.unwrap();
+
+        let app = router(ServerState::new(graph.clone(), "control"));
+        let request_body = format!(
+            r#"{{"projectId":41,"threadId":74,"text":"Result","invocation":{{"sourceInteractionNodeId":{},"sourceActionId":{}}}}}"#,
+            source_interaction.id.value(),
+            invoke.id.value()
+        );
+        let create = |body: String| {
+            Request::builder()
+                .method("POST")
+                .uri("/api/control/interactions")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer control")
+                .body(Body::from(body))
+                .unwrap()
+        };
+        let first = app
+            .clone()
+            .oneshot(create(request_body.clone()))
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let first: CreateInteractionResponse =
+            serde_json::from_slice(&to_bytes(first.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(first.node.leased_action_id, Some(invoke.id));
+
+        let replay = app.clone().oneshot(create(request_body)).await.unwrap();
+        assert_eq!(replay.status(), StatusCode::OK);
+        let replay: CreateInteractionResponse =
+            serde_json::from_slice(&to_bytes(replay.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(replay.node, first.node);
+
+        let stale = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/graph/nodes/{}/neighbors",
+                        first.node.id.value()
+                    ))
+                    .header("authorization", format!("Bearer {}", first.graph_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stale.status(), StatusCode::UNAUTHORIZED);
+
+        let neighbors = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/graph/nodes/{}/neighbors",
+                        first.node.id.value()
+                    ))
+                    .header("authorization", format!("Bearer {}", replay.graph_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(neighbors.status(), StatusCode::OK);
+        let neighbors: Value =
+            serde_json::from_slice(&to_bytes(neighbors.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(neighbors["nodes"][0]["id"], source.id.value());
+
+        let result_writer = graph.writer_for_subgraph(first.node.id).await.unwrap();
+        let result_node = result_writer
+            .submit_node(&NodeDraft {
+                client_key: "result".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Result".into(),
+                detail: "Accepted result".into(),
+            })
+            .await
+            .unwrap();
+        let result_layer = result_writer
+            .submit_layer(&LayerDraft {
+                client_key: "result-root".into(),
+                nodes: vec![result_node.id],
+                edges: vec![],
+                size_justification: None,
+            })
+            .await
+            .unwrap();
+        result_writer
+            .add_action(&ActionDraft {
+                client_key: "response".into(),
+                source_node_id: first.node.id,
+                source_layer_id: None,
+                kind: ActionKind::Navigate,
+                relation: Some(relayer_graph_core::NavigateRelation::Expand),
+                label: "Response".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: Some(result_layer.id),
+                interaction_text: None,
+            })
+            .await
+            .unwrap();
+        let submitted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/submit")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {}", replay.graph_token))
+                    .body(Body::from(format!(
+                        r#"{{"nodeId":{}}}"#,
+                        first.node.id.value()
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(submitted.status(), StatusCode::OK);
+        let submitted: CompletionOutput =
+            serde_json::from_slice(&to_bytes(submitted.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(submitted.root_layer.layer.id, result_layer.id);
+        let resolved = writer.completion_output().await.unwrap().unwrap();
+        assert_eq!(
+            resolved
+                .root_layer
+                .actions
+                .iter()
+                .find(|action| action.id == invoke.id)
+                .unwrap()
+                .target_layer_id,
+            Some(result_layer.id)
+        );
+        let owner = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/control/interactions/{}/layers/{}/owner",
+                        source_interaction.id.value(),
+                        result_layer.id.value()
+                    ))
+                    .header("authorization", "Bearer control")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(owner.status(), StatusCode::OK);
+        let owner: Value =
+            serde_json::from_slice(&to_bytes(owner.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(owner["layerId"], result_layer.id.value());
+        assert_eq!(owner["ownerInteractionNodeId"], first.node.id.value());
+
+        let invalid = app
+            .oneshot(create(format!(
+                r#"{{"projectId":41,"threadId":74,"text":"Result","invocation":{{"sourceInteractionNodeId":{},"sourceActionId":0}}}}"#,
+                source_interaction.id.value()
+            )))
+            .await
+            .unwrap();
+        assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[tokio::test]
@@ -817,7 +1336,7 @@ mod tests {
             .await
             .unwrap();
         let state = ServerState::new(graph, "control");
-        let graph_token = mint_capability(&state, interaction.id).ok().unwrap();
+        let graph_token = mint_capability(&state, interaction.id, None).ok().unwrap();
         let app = router(state);
 
         let older = app
@@ -929,7 +1448,7 @@ mod tests {
         writer.complete(interaction.id).await.unwrap();
 
         let state = ServerState::new(graph, "control");
-        let graph_token = mint_capability(&state, interaction.id).ok().unwrap();
+        let graph_token = mint_capability(&state, interaction.id, None).ok().unwrap();
         let app = router(state);
         let readable = app
             .clone()

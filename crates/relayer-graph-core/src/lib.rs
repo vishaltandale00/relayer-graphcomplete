@@ -7,8 +7,9 @@ pub use graph::{
     AcceptedGraphClosure, ActionDraft, ActionId, ActionKind, ActionVariant, CompletionOutput,
     EdgeDraft, EdgeId, GraphAction, GraphDatabase, GraphEdge, GraphLayer, GraphNode, GraphWriter,
     ImportedAcceptedView, ImportedAction, ImportedConversation, ImportedConversationReceipt,
-    ImportedConversationStage, ImportedEdge, ImportedLayer, ImportedNode, ImportedResolvedLayer,
-    ImportedTurn, ImportedTurnReceipt, LayerDraft, LayerId, NavigateRelation, NodeDraft, NodeId,
-    ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState, ResolvedLayer, ThreadId,
-    is_supported_icon, normalize_icon_name, resolve_icon_name,
+    ImportedConversationStage, ImportedEdge, ImportedInvokeOrigin, ImportedLayer, ImportedNode,
+    ImportedResolvedLayer, ImportedTurn, ImportedTurnReceipt, InteractionInvocation, LayerDraft,
+    LayerId, NavigateRelation, NodeDraft, NodeId, ProjectId, RELAYER_ICON_ALIASES,
+    RELAYER_ICON_NAMES, RecordState, ResolvedLayer, ThreadId, is_supported_icon,
+    normalize_icon_name, resolve_icon_name,
 };

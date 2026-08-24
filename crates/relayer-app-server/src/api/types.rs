@@ -77,6 +77,7 @@ pub(crate) struct InteractionResponse {
     effective_permission_receipt: Option<serde_json::Value>,
     completion_output: Option<serde_json::Value>,
     completion_error: Option<String>,
+    projection_fresh: bool,
 }
 
 impl From<Interaction> for InteractionResponse {
@@ -97,7 +98,14 @@ impl From<Interaction> for InteractionResponse {
             effective_permission_receipt: interaction.effective_permission_receipt,
             completion_output: interaction.completion_output,
             completion_error: interaction.completion_error,
+            projection_fresh: true,
         }
+    }
+}
+
+impl InteractionResponse {
+    pub(crate) fn mark_projection_stale(&mut self) {
+        self.projection_fresh = false;
     }
 }
 
@@ -107,6 +115,7 @@ pub(crate) struct ActionInvocationResponse {
     pub(super) source_interaction_id: i64,
     pub(super) action_id: i64,
     pub(super) result_interaction_id: i64,
+    pub(super) result_completion_status: String,
     pub(super) created_at: String,
 }
 
@@ -116,6 +125,7 @@ impl From<ActionInvocation> for ActionInvocationResponse {
             source_interaction_id: invocation.source_interaction_id.value(),
             action_id: invocation.action_id,
             result_interaction_id: invocation.result_interaction_id.value(),
+            result_completion_status: invocation.result_completion_status,
             created_at: invocation.created_at,
         }
     }
@@ -190,6 +200,16 @@ impl From<ProductState> for ProductStateResponse {
     }
 }
 
+impl ProductStateResponse {
+    pub(crate) fn mark_stale_interactions(&mut self, stale: &std::collections::HashSet<i64>) {
+        for interaction in &mut self.interactions {
+            if stale.contains(&interaction.id) {
+                interaction.mark_projection_stale();
+            }
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ThreadDetailResponse {
@@ -210,6 +230,16 @@ impl From<ThreadDetail> for ThreadDetailResponse {
                 .map(Into::into)
                 .collect(),
             approvals: detail.approvals,
+        }
+    }
+}
+
+impl ThreadDetailResponse {
+    pub(crate) fn mark_stale_interactions(&mut self, stale: &std::collections::HashSet<i64>) {
+        for interaction in &mut self.interactions {
+            if stale.contains(&interaction.id) {
+                interaction.mark_projection_stale();
+            }
         }
     }
 }

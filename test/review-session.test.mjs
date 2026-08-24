@@ -268,6 +268,49 @@ describe("ReviewSession", () => {
     ]);
   });
 
+  it("treats a resolved invoke as Eval navigation when it changes interaction at the same layer id", async () => {
+    let state = reviewState({
+      controls: [{
+        elementRef: "action-action-4",
+        name: "Open completed result",
+        role: "button",
+        disabled: false,
+        kind: "navigate-action",
+        actionId: "action-4",
+      }],
+    });
+    const electron = fakeElectron({
+      snapshot: async () => state,
+      activate: async () => {
+        state = reviewState({
+          threadId: "thread-2",
+          turnId: "turn-2",
+          layerId: "layer-1",
+          activatedActionId: "action-4",
+        });
+        return state;
+      },
+    });
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: "/unused",
+      ipc: electron.ipc,
+      commandTimeoutMs: 100,
+    });
+    await session.open();
+
+    await expect(session.interact({
+      elementRef: "action-action-4",
+      activate: true,
+    })).resolves.toMatchObject({
+      ok: true,
+      state: { turnId: "turn-2", layerId: "layer-1" },
+    });
+    expect(session.trace().at(-1).state.threadId).toBe("thread-2");
+  });
+
   it("rejects a history command whose returned state is not the committed visible state", async () => {
     const state = reviewState();
     const electron = fakeElectron({

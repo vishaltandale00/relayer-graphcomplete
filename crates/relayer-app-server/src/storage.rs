@@ -1,6 +1,8 @@
 mod sqlite;
 
-use crate::conversation_export::ConversationExportHeader;
+use crate::conversation_export::{
+    ConversationExportHeader, ConversationExportTurn, ExportTurnOrigin,
+};
 use crate::{
     approval::ApprovalReceipt,
     product::{
@@ -74,6 +76,13 @@ pub(crate) struct ConversationImportRecord {
     pub(crate) turns: Vec<(String, crate::product::InteractionId, Option<i64>, String)>,
 }
 
+pub(crate) struct ImportedTurnExportRecord {
+    pub(crate) interaction_id: crate::product::InteractionId,
+    pub(crate) source_turn_id: String,
+    pub(crate) origin: ExportTurnOrigin,
+    pub(crate) turn: ConversationExportTurn,
+}
+
 pub(crate) struct NewConversationImport<'a> {
     pub(crate) id: &'a str,
     pub(crate) source_sha256: &'a str,
@@ -94,6 +103,4 @@ pub(crate) enum StorageError {
     Catalog(#[from] crate::product::CatalogError),
     #[error("stored approval conflicts with an existing durable record: {0}")]
     ApprovalConflict(String),
-    #[error("product lifecycle transition was rejected: {0}")]
-    LifecycleConflict(String),
 }

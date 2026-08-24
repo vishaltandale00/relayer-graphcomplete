@@ -48,6 +48,7 @@ pub(crate) struct ActionInvocation {
     pub(crate) source_interaction_id: InteractionId,
     pub(crate) action_id: i64,
     pub(crate) result_interaction_id: InteractionId,
+    pub(crate) result_completion_status: String,
     pub(crate) created_at: String,
 }
 

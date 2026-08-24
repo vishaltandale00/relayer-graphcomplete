@@ -40,6 +40,23 @@ describe("agent-facing graph objects", () => {
     expect(requests[0]).toMatchObject({ variant: "pill", icon: null, description: null });
   });
 
+  it("exposes nullable interaction lease identity on node reads", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      nodes: [{
+        id: 10,
+        leasedActionId: 42,
+        kind: "user-interaction",
+        icon: "user",
+        title: "Result",
+        detail: "Result",
+        state: "accepted",
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 10 });
+    const [source] = await graph.getNeighbors(10);
+    expect(source?.leasedActionId).toBe(42);
+  });
+
   it("serializes card presentation as canonical action data", async () => {
     let request: Record<string, unknown> | undefined;
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {

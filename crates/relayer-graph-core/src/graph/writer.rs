@@ -310,6 +310,20 @@ impl GraphWriter {
         layers::resolve(&mut connection, &self.scope, id, false).await
     }
 
+    pub async fn get_layer_owner(&self, id: LayerId) -> Result<NodeId, GraphError> {
+        let mut connection = self.database.storage.acquire().await?;
+        let record = LayerTable::new(&mut connection)
+            .record(&self.scope, id)
+            .await?
+            .ok_or_else(|| GraphError::NotFound(format!("layer {id}")))?;
+        if record.layer.state != RecordState::Accepted && record.owner != self.scope.root_node_id {
+            return Err(GraphError::Forbidden(format!(
+                "layer {id} is not readable by this interaction"
+            )));
+        }
+        Ok(record.owner)
+    }
+
     pub async fn completion_output(&self) -> Result<Option<CompletionOutput>, GraphError> {
         completion::read_output(&self.database, &self.scope).await
     }

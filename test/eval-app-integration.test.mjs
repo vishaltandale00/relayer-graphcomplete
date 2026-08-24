@@ -186,6 +186,13 @@ describe("Relayer Eval application service", () => {
         relation: "expand",
         label: "See queue behavior",
       }),
+      expect.objectContaining({
+        sourceNodeId: layer.nodes[2].id,
+        sourceLayerId: layer.layer.id,
+        kind: "invoke",
+        targetLayerId: null,
+        label: "Plan the next improvement",
+      }),
     ]);
     const childLayer = await productRequest(
       productSession,

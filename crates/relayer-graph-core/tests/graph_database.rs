@@ -1,4 +1,5 @@
 use relayer_graph_core::*;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 fn project(value: i64) -> ProjectId {
     ProjectId::new(value).unwrap()
@@ -27,6 +28,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
         turns: vec![ImportedTurn {
             source_turn_id: "turn-1".into(),
             text: "Explain the queue".into(),
+            invoke_origin: None,
             accepted_view: Some(ImportedAcceptedView {
                 interaction_node_id: interaction_node_id.into(),
                 root_action: ImportedAction {
@@ -64,6 +66,108 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
     }
 }
 
+fn imported_invoke_conversation() -> ImportedConversation {
+    let source = ImportedTurn {
+        source_turn_id: "turn-1".into(),
+        text: "Choose a path".into(),
+        invoke_origin: None,
+        accepted_view: Some(ImportedAcceptedView {
+            interaction_node_id: "interaction-1".into(),
+            root_action: ImportedAction {
+                id: "root-action-1".into(),
+                source_node_id: "interaction-1".into(),
+                source_layer_id: None,
+                kind: "navigate".into(),
+                relation: Some("expand".into()),
+                label: "Response".into(),
+                variant: "pill".into(),
+                icon: None,
+                description: None,
+                target_layer_id: Some("layer-1".into()),
+                interaction_text: None,
+            },
+            root_layer_id: "layer-1".into(),
+            layers: vec![ImportedResolvedLayer {
+                layer: ImportedLayer {
+                    id: "layer-1".into(),
+                    nodes: vec!["node-1".into()],
+                    edges: vec![],
+                },
+                nodes: vec![ImportedNode {
+                    id: "node-1".into(),
+                    kind: "concept".into(),
+                    icon: "box".into(),
+                    title: "Path".into(),
+                    detail: "Invoke this path".into(),
+                }],
+                edges: vec![],
+                actions: vec![ImportedAction {
+                    id: "invoke-action-1".into(),
+                    source_node_id: "node-1".into(),
+                    source_layer_id: Some("layer-1".into()),
+                    kind: "invoke".into(),
+                    relation: None,
+                    label: "Continue".into(),
+                    variant: "pill".into(),
+                    icon: None,
+                    description: None,
+                    target_layer_id: None,
+                    interaction_text: Some("Continue this path".into()),
+                }],
+            }],
+        }),
+    };
+    let destination = ImportedTurn {
+        source_turn_id: "turn-2".into(),
+        text: "Continue this path".into(),
+        invoke_origin: Some(ImportedInvokeOrigin {
+            source_turn_id: "turn-1".into(),
+            source_action_id: "invoke-action-1".into(),
+        }),
+        accepted_view: Some(ImportedAcceptedView {
+            interaction_node_id: "interaction-2".into(),
+            root_action: ImportedAction {
+                id: "root-action-2".into(),
+                source_node_id: "interaction-2".into(),
+                source_layer_id: None,
+                kind: "navigate".into(),
+                relation: Some("expand".into()),
+                label: "Response".into(),
+                variant: "pill".into(),
+                icon: None,
+                description: None,
+                target_layer_id: Some("layer-2".into()),
+                interaction_text: None,
+            },
+            root_layer_id: "layer-2".into(),
+            layers: vec![ImportedResolvedLayer {
+                layer: ImportedLayer {
+                    id: "layer-2".into(),
+                    nodes: vec!["node-2".into()],
+                    edges: vec![],
+                },
+                nodes: vec![ImportedNode {
+                    id: "node-2".into(),
+                    kind: "concept".into(),
+                    icon: "box".into(),
+                    title: "Destination".into(),
+                    detail: "Imported result".into(),
+                }],
+                edges: vec![],
+                actions: vec![],
+            }],
+        }),
+    };
+    ImportedConversation {
+        import_id: "import-invoke".into(),
+        source_sha256: "sha256:invoke".into(),
+        project_id: None,
+        thread_id: thread(9002),
+        created_at: "2026-08-24T00:00:00Z".into(),
+        turns: vec![source, destination],
+    }
+}
+
 #[tokio::test]
 async fn imported_conversation_is_materialized_read_only_and_removable() {
     let database = GraphDatabase::in_memory().await.unwrap();
@@ -97,6 +201,43 @@ async fn imported_conversation_is_materialized_read_only_and_removable() {
             .writer_for_subgraph(NodeId::new(turn.graph_node_id.unwrap()).unwrap())
             .await
             .is_err()
+    );
+}
+
+#[tokio::test]
+async fn imported_action_origin_reconstructs_resolved_invoke_navigation() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let receipt = database
+        .import_accepted_conversation(&imported_invoke_conversation())
+        .await
+        .unwrap();
+    let source = &receipt.turns[0];
+    let destination = &receipt.turns[1];
+    let source_writer = database
+        .writer_for_subgraph(NodeId::new(source.graph_node_id.unwrap()).unwrap())
+        .await
+        .unwrap();
+    let source_layer = source_writer
+        .get_layer(LayerId::new(source.root_layer_id.unwrap()).unwrap())
+        .await
+        .unwrap();
+    let invoke = source_layer
+        .actions
+        .iter()
+        .find(|action| action.kind == ActionKind::Invoke)
+        .unwrap();
+
+    assert_eq!(
+        invoke.target_layer_id.map(LayerId::value),
+        destination.root_layer_id
+    );
+    assert_eq!(
+        source_writer
+            .get_layer_owner(invoke.target_layer_id.unwrap())
+            .await
+            .unwrap()
+            .value(),
+        destination.graph_node_id.unwrap()
     );
 }
 
@@ -163,6 +304,34 @@ async fn root_expand(
         })
         .await
         .unwrap()
+}
+
+async fn accepted_invoke(
+    database: &GraphDatabase,
+    interaction: &GraphNode,
+) -> (GraphNode, GraphAction) {
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let source = node(&writer, "invoke-source").await;
+    let layer = single_node_layer(&writer, "invoke-layer", &source).await;
+    let action = writer
+        .add_action(&ActionDraft {
+            client_key: "invoke".into(),
+            source_node_id: source.id,
+            source_layer_id: Some(layer.id),
+            kind: ActionKind::Invoke,
+            relation: None,
+            label: "Continue".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: Some("Continue this answer".into()),
+        })
+        .await
+        .unwrap();
+    root_expand(&writer, interaction, &layer).await;
+    writer.complete(interaction.id).await.unwrap();
+    (source, action)
 }
 
 async fn navigate(
@@ -976,6 +1145,36 @@ async fn invoke_actions_reject_whitespace_only_interaction_text() {
 }
 
 #[tokio::test]
+async fn invoke_actions_cannot_author_resolution_targets() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let source = node(&writer, "source-with-target").await;
+    let layer = single_node_layer(&writer, "source-with-target-layer", &source).await;
+    let error = writer
+        .add_action(&ActionDraft {
+            client_key: "forged-resolution".into(),
+            source_node_id: source.id,
+            source_layer_id: Some(layer.id),
+            kind: ActionKind::Invoke,
+            relation: None,
+            label: "Continue".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(layer.id),
+            interaction_text: Some("Continue".into()),
+        })
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        GraphError::ValidationIssues { ref issues, .. }
+            if issues.iter().any(|issue| issue.code == "unexpected_target_layer")
+    ));
+}
+
+#[tokio::test]
 async fn action_presentation_grammar_round_trips_in_authored_order() {
     let (database, interaction) = setup(Some(project(1)), thread(1)).await;
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
@@ -1345,4 +1544,454 @@ async fn different_threads_can_write_through_the_same_pool() {
 
     assert_eq!(first_result.unwrap().title, "First");
     assert_eq!(second_result.unwrap().title, "Second");
+}
+
+#[tokio::test]
+async fn ordinary_and_leased_interactions_expose_immutable_lease_identity() {
+    let (database, source_interaction) = setup(Some(project(1)), thread(1)).await;
+    assert_eq!(source_interaction.leased_action_id, None);
+    let (source_node, invoke) = accepted_invoke(&database, &source_interaction).await;
+    let invocation = InteractionInvocation {
+        source_interaction_node_id: source_interaction.id,
+        source_action_id: invoke.id,
+    };
+
+    let leased = database
+        .create_interaction_with_invocation(
+            Some(project(1)),
+            thread(2),
+            "Continue this answer",
+            Some(invocation),
+        )
+        .await
+        .unwrap();
+    let retry = database
+        .create_interaction_with_invocation(
+            Some(project(1)),
+            thread(2),
+            "This retry body is not allowed to mutate the result",
+            Some(invocation),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(leased, retry);
+    assert_eq!(leased.leased_action_id, Some(invoke.id));
+    assert_eq!(leased.title, "Continue this answer");
+    let neighbors = database
+        .writer_for_subgraph(leased.id)
+        .await
+        .unwrap()
+        .neighbors(leased.id)
+        .await
+        .unwrap();
+    assert_eq!(neighbors.len(), 1);
+    assert_eq!(neighbors[0].id, source_node.id);
+    assert_eq!(neighbors[0].state, RecordState::Accepted);
+    assert!(
+        database
+            .writer_for_subgraph(source_interaction.id)
+            .await
+            .unwrap()
+            .neighbors(source_node.id)
+            .await
+            .unwrap()
+            .iter()
+            .all(|node| node.id != leased.id)
+    );
+}
+
+#[tokio::test]
+async fn lease_issuance_rejects_invalid_authority_kind_and_scope() {
+    let (database, source_interaction) = setup(Some(project(1)), thread(1)).await;
+    let source_writer = database
+        .writer_for_subgraph(source_interaction.id)
+        .await
+        .unwrap();
+    let draft_source = node(&source_writer, "draft-source").await;
+    let draft_layer = single_node_layer(&source_writer, "draft-layer", &draft_source).await;
+    let draft_invoke = source_writer
+        .add_action(&ActionDraft {
+            client_key: "draft-invoke".into(),
+            source_node_id: draft_source.id,
+            source_layer_id: Some(draft_layer.id),
+            kind: ActionKind::Invoke,
+            relation: None,
+            label: "Continue".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: Some("Continue".into()),
+        })
+        .await
+        .unwrap();
+    let no_completion = database
+        .create_interaction_with_invocation(
+            Some(project(1)),
+            thread(2),
+            "Invalid",
+            Some(InteractionInvocation {
+                source_interaction_node_id: source_interaction.id,
+                source_action_id: draft_invoke.id,
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        no_completion,
+        GraphError::Validation {
+            code: "invalid_invocation_source",
+            ..
+        }
+    ));
+
+    root_expand(&source_writer, &source_interaction, &draft_layer).await;
+    source_writer.complete(source_interaction.id).await.unwrap();
+    let wrong_scope = database
+        .create_interaction_with_invocation(
+            Some(project(2)),
+            thread(2),
+            "Invalid",
+            Some(InteractionInvocation {
+                source_interaction_node_id: source_interaction.id,
+                source_action_id: draft_invoke.id,
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        wrong_scope,
+        GraphError::Validation {
+            code: "incompatible_invocation_scope",
+            ..
+        }
+    ));
+
+    let non_invoke = source_writer
+        .completion_output()
+        .await
+        .unwrap()
+        .unwrap()
+        .root_action;
+    let wrong_kind = database
+        .create_interaction_with_invocation(
+            Some(project(1)),
+            thread(2),
+            "Invalid",
+            Some(InteractionInvocation {
+                source_interaction_node_id: source_interaction.id,
+                source_action_id: non_invoke.id,
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        wrong_kind,
+        GraphError::Validation {
+            code: "action_not_in_source_completion" | "invalid_invocation_action",
+            ..
+        }
+    ));
+
+    let other_interaction = database
+        .create_interaction(Some(project(1)), thread(3), "Other completion")
+        .await
+        .unwrap();
+    let (_, other_invoke) = accepted_invoke(&database, &other_interaction).await;
+    let mismatched = database
+        .create_interaction_with_invocation(
+            Some(project(1)),
+            thread(4),
+            "Invalid",
+            Some(InteractionInvocation {
+                source_interaction_node_id: source_interaction.id,
+                source_action_id: other_invoke.id,
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        mismatched,
+        GraphError::Validation {
+            code: "action_not_in_source_completion",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn reused_action_snapshot_leases_once_concurrently_and_replays_after_reopen() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    let source_interaction = database
+        .create_interaction(Some(project(1)), thread(1), "Source")
+        .await
+        .unwrap();
+    let (source_node, invoke) = accepted_invoke(&database, &source_interaction).await;
+    let reused_interaction = database
+        .create_interaction(Some(project(1)), thread(2), "Reuse the accepted source")
+        .await
+        .unwrap();
+    let reused_writer = database
+        .writer_for_subgraph(reused_interaction.id)
+        .await
+        .unwrap();
+    let reused_layer = single_node_layer(&reused_writer, "reused-root", &source_node).await;
+    root_expand(&reused_writer, &reused_interaction, &reused_layer).await;
+    let reused_output = reused_writer.complete(reused_interaction.id).await.unwrap();
+    assert!(
+        reused_output
+            .root_layer
+            .actions
+            .iter()
+            .any(|action| action.id == invoke.id)
+    );
+    let invocation = InteractionInvocation {
+        source_interaction_node_id: reused_interaction.id,
+        source_action_id: invoke.id,
+    };
+    let first_database = database.clone();
+    let second_database = database.clone();
+    let (first, second) = tokio::join!(
+        first_database.create_interaction_with_invocation(
+            Some(project(1)),
+            thread(3),
+            "Result",
+            Some(invocation),
+        ),
+        second_database.create_interaction_with_invocation(
+            Some(project(1)),
+            thread(3),
+            "Result",
+            Some(invocation),
+        )
+    );
+    let leased = first.unwrap();
+    assert_eq!(second.unwrap().id, leased.id);
+
+    let different_source = database
+        .create_interaction_with_invocation(
+            Some(project(1)),
+            thread(3),
+            "Result",
+            Some(InteractionInvocation {
+                source_interaction_node_id: source_interaction.id,
+                source_action_id: invoke.id,
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        different_source,
+        GraphError::Validation {
+            code: "invocation_action_already_leased",
+            ..
+        }
+    ));
+    database.close().await;
+
+    let reopened = GraphDatabase::open(file.path()).await.unwrap();
+    let replay = reopened
+        .create_interaction_with_invocation(Some(project(1)), thread(3), "Result", Some(invocation))
+        .await
+        .unwrap();
+    assert_eq!(replay.id, leased.id);
+    assert_eq!(replay.leased_action_id, Some(invoke.id));
+    let neighbors = reopened
+        .writer_for_subgraph(replay.id)
+        .await
+        .unwrap()
+        .neighbors(replay.id)
+        .await
+        .unwrap();
+    assert_eq!(neighbors.len(), 1);
+    assert_eq!(neighbors[0].id, source_node.id);
+    assert_eq!(neighbors[0].state, RecordState::Accepted);
+}
+
+#[tokio::test]
+async fn leased_completion_atomically_resolves_invoke_once_and_survives_reopen() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    let source_interaction = database
+        .create_interaction(Some(project(1)), thread(1), "Source")
+        .await
+        .unwrap();
+    let (source_node, unresolved) = accepted_invoke(&database, &source_interaction).await;
+    let reused_interaction = database
+        .create_interaction(Some(project(1)), thread(3), "Reuse")
+        .await
+        .unwrap();
+    let reused_writer = database
+        .writer_for_subgraph(reused_interaction.id)
+        .await
+        .unwrap();
+    let reused_layer = single_node_layer(&reused_writer, "reused-root", &source_node).await;
+    root_expand(&reused_writer, &reused_interaction, &reused_layer).await;
+    reused_writer.complete(reused_interaction.id).await.unwrap();
+    let leased = database
+        .create_interaction_with_invocation(
+            Some(project(1)),
+            thread(2),
+            "Result",
+            Some(InteractionInvocation {
+                source_interaction_node_id: source_interaction.id,
+                source_action_id: unresolved.id,
+            }),
+        )
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(leased.id).await.unwrap();
+    let answer = node(&writer, "result-answer").await;
+    let root_layer = single_node_layer(&writer, "result-root", &answer).await;
+    root_expand(&writer, &leased, &root_layer).await;
+
+    let first_writer = database.writer_for_subgraph(leased.id).await.unwrap();
+    let second_writer = database.writer_for_subgraph(leased.id).await.unwrap();
+    let (first, second) = tokio::join!(
+        first_writer.complete(leased.id),
+        second_writer.complete(leased.id)
+    );
+    let output = first.unwrap();
+    assert_eq!(second.unwrap(), output);
+    assert_eq!(output.root_layer.layer.id, root_layer.id);
+
+    let source_output = database
+        .writer_for_subgraph(source_interaction.id)
+        .await
+        .unwrap()
+        .completion_output()
+        .await
+        .unwrap()
+        .unwrap();
+    let resolved = source_output
+        .root_layer
+        .actions
+        .iter()
+        .find(|action| action.id == unresolved.id)
+        .unwrap();
+    assert_eq!(resolved.kind, ActionKind::Invoke);
+    assert_eq!(resolved.relation, None);
+    assert_eq!(resolved.source_node_id, source_node.id);
+    assert_eq!(resolved.source_layer_id, unresolved.source_layer_id);
+    assert_eq!(resolved.label, unresolved.label);
+    assert_eq!(resolved.variant, unresolved.variant);
+    assert_eq!(resolved.icon, unresolved.icon);
+    assert_eq!(resolved.description, unresolved.description);
+    assert_eq!(resolved.interaction_text, unresolved.interaction_text);
+    assert_eq!(resolved.target_layer_id, Some(root_layer.id));
+    assert_eq!(resolved.state, RecordState::Accepted);
+    let reused_output = reused_writer.completion_output().await.unwrap().unwrap();
+    assert_eq!(
+        reused_output
+            .root_layer
+            .actions
+            .iter()
+            .find(|action| action.id == unresolved.id)
+            .unwrap()
+            .target_layer_id,
+        Some(root_layer.id)
+    );
+
+    drop(writer);
+    drop(first_writer);
+    drop(second_writer);
+    drop(reused_writer);
+    database.close().await;
+    let reopened = GraphDatabase::open(file.path()).await.unwrap();
+    let replay = reopened
+        .writer_for_subgraph(leased.id)
+        .await
+        .unwrap()
+        .complete(leased.id)
+        .await
+        .unwrap();
+    assert_eq!(replay, output);
+    let reopened_source = reopened
+        .writer_for_subgraph(source_interaction.id)
+        .await
+        .unwrap()
+        .completion_output()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        reopened_source
+            .root_layer
+            .actions
+            .iter()
+            .find(|action| action.id == unresolved.id)
+            .unwrap()
+            .target_layer_id,
+        Some(root_layer.id)
+    );
+}
+
+#[tokio::test]
+async fn leased_completion_storage_failure_rolls_back_closure_and_resolution() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    let source_interaction = database
+        .create_interaction(Some(project(1)), thread(1), "Source")
+        .await
+        .unwrap();
+    let (_, invoke) = accepted_invoke(&database, &source_interaction).await;
+    let leased = database
+        .create_interaction_with_invocation(
+            Some(project(1)),
+            thread(2),
+            "Result",
+            Some(InteractionInvocation {
+                source_interaction_node_id: source_interaction.id,
+                source_action_id: invoke.id,
+            }),
+        )
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(leased.id).await.unwrap();
+    let answer = node(&writer, "rollback-answer").await;
+    let root_layer = single_node_layer(&writer, "rollback-root", &answer).await;
+    root_expand(&writer, &leased, &root_layer).await;
+
+    let fixture = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(file.path())
+                .foreign_keys(true),
+        )
+        .await
+        .unwrap();
+    sqlx::query(&format!(
+        "CREATE TRIGGER reject_result_completion BEFORE INSERT ON completions WHEN NEW.interaction_node_id={} BEGIN SELECT RAISE(ABORT, 'forced completion failure'); END",
+        leased.id.value()
+    ))
+    .execute(&fixture)
+    .await
+    .unwrap();
+
+    assert!(writer.complete(leased.id).await.is_err());
+    assert!(writer.completion_output().await.unwrap().is_none());
+    let draft_layer = writer.get_layer(root_layer.id).await.unwrap();
+    assert_eq!(draft_layer.layer.state, RecordState::Draft);
+    assert_eq!(draft_layer.nodes[0].state, RecordState::Draft);
+    let source_output = database
+        .writer_for_subgraph(source_interaction.id)
+        .await
+        .unwrap()
+        .completion_output()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        source_output
+            .root_layer
+            .actions
+            .iter()
+            .find(|action| action.id == invoke.id)
+            .unwrap()
+            .target_layer_id,
+        None
+    );
 }

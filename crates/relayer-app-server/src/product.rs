@@ -43,6 +43,7 @@ pub(crate) use service::AcceptedInteractionCompletion;
 pub(crate) use service::CreateProjectCommand;
 pub(crate) use service::CreateThreadCommand;
 pub(crate) use service::InvokeActionOutcome;
+pub(crate) use service::PreparedInteractionBinding;
 pub(crate) use service::ProductError;
 pub(crate) use service::ProductService;
 pub(crate) use service::ThreadDetail;

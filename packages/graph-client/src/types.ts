@@ -5,6 +5,7 @@ export type RecordState = "draft" | "accepted" | "stopped";
 
 export interface GraphNode {
   readonly id: GraphId;
+  readonly leasedActionId?: GraphId | null;
   readonly kind: string;
   readonly icon: string;
   readonly title: string;

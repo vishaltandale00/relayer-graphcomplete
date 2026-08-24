@@ -67,6 +67,8 @@ const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("action_id", "INTEGER", true, 2),
     ("result_interaction_id", "INTEGER", true, 0),
     ("created_at", "TEXT", true, 0),
+    ("graph_lease_required", "INTEGER", true, 0),
+    ("authoritative", "INTEGER", true, 0),
 ];
 const MODEL_PROVIDER_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "TEXT", true, 1),
@@ -445,6 +447,27 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     if cross_thread_invocation {
         return Err(incompatible(
             "action invocation source and result must belong to the same thread",
+        ));
+    }
+    let duplicate_action_invocation: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1
+            FROM action_invocations ai
+            JOIN interactions source ON source.id=ai.source_interaction_id
+            JOIN threads thread ON thread.id=source.thread_id
+            GROUP BY CASE
+                       WHEN thread.project_id IS NOT NULL THEN 'project:' || thread.project_id
+                       ELSE 'thread:' || thread.id
+                     END,
+                     ai.action_id
+            HAVING SUM(ai.authoritative) != 1
+        )",
+    )
+    .fetch_one(pool)
+    .await?;
+    if duplicate_action_invocation {
+        return Err(incompatible(
+            "a node-owned action must have exactly one authoritative invocation result in its project scope",
         ));
     }
     super::catalog::validate_catalog_rows(pool).await?;

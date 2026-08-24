@@ -2,6 +2,7 @@ use axum::{
     Router,
     body::{Body, to_bytes},
     http::{Request, Response, StatusCode},
+    response::IntoResponse,
 };
 use relayer_app_server::conversation_export::{
     ConversationExportRecord, ExportCompletionStatus, ExportTurnOrigin, decode_export_jsonl,
@@ -19,7 +20,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{
     collections::HashMap,
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     path::Path,
     process::{Command, Stdio},
     sync::{
@@ -31,6 +32,185 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tower::ServiceExt;
+
+#[tokio::test]
+async fn resolved_invoke_destination_is_readable_cross_thread_in_review_mode() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-resolved-invoke-navigation-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    drop(open_app(&database, &root).await);
+
+    let pool = sqlite_pool(&database).await;
+    let project_id = sqlx::query(
+        "INSERT INTO projects(name,path,created_at,updated_at) VALUES ('Project',?1,'1','1')",
+    )
+    .bind(root.to_string_lossy().as_ref())
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    let source_thread_id = sqlx::query("INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES ('Source',?1,'1','1','codex-basic','auto')")
+        .bind(project_id).execute(&pool).await.unwrap().last_insert_rowid();
+    let result_thread_id = sqlx::query("INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES ('Result',?1,'2','2','codex-basic','auto')")
+        .bind(project_id).execute(&pool).await.unwrap().last_insert_rowid();
+    let stale_source = json!({
+        "nodeId": 90,
+        "rootLayer": {
+            "layer": {"id": 500}, "nodes": [], "edges": [],
+            "actions": [{"id": 41, "sourceNodeId": 7, "kind": "invoke", "targetLayerId": null, "state": "accepted"}]
+        }
+    });
+    let source_interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_output_json,permission_profile_id) VALUES (?1,1,'Source','1',90,'accepted',?2,'auto')")
+        .bind(source_thread_id).bind(stale_source.to_string()).execute(&pool).await.unwrap().last_insert_rowid();
+    let reused_source_interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_output_json,permission_profile_id) VALUES (?1,1,'Reused source','2',92,'accepted',?2,'auto')")
+        .bind(result_thread_id).bind(stale_source.to_string()).execute(&pool).await.unwrap().last_insert_rowid();
+    let result_output = json!({
+        "nodeId": 91,
+        "rootLayer": {"layer": {"id": 501}, "nodes": [], "edges": [], "actions": []}
+    });
+    let result_interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_output_json,completion_error,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,2,'Result','3',91,'failed',?2,'Canonical reconciliation pending: transient persistence failure','codex-basic','sha256:test','auto','sha256:execution',?3)")
+        .bind(result_thread_id).bind(result_output.to_string())
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap().last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,41,?2,'3')")
+        .bind(reused_source_interaction_id).bind(result_interaction_id).execute(&pool).await.unwrap();
+    pool.close().await;
+
+    let canonical_source = json!({
+        "nodeId": 90,
+        "rootLayer": {
+            "layer": {"id": 500}, "nodes": [], "edges": [],
+            "actions": [{"id": 41, "sourceNodeId": 7, "kind": "invoke", "targetLayerId": 501, "state": "accepted"}]
+        }
+    });
+    let graph = axum::Router::new()
+        .route(
+            "/api/control/interactions/90/actions/41",
+            axum::routing::get(|| async {
+                axum::Json(json!({"action": {
+                    "id": 41, "kind": "invoke", "interactionText": "Continue",
+                    "targetLayerId": 501, "state": "accepted"
+                }}))
+            }),
+        )
+        .route(
+            "/api/control/interactions/90/layers/501/owner",
+            axum::routing::get(|| async {
+                axum::Json(json!({"layerId": 501, "ownerInteractionNodeId": 91}))
+            }),
+        )
+        .route(
+            "/api/control/interactions/90/output",
+            axum::routing::get(move || {
+                let canonical_source = canonical_source.clone();
+                async move { axum::Json(canonical_source) }
+            }),
+        )
+        .route(
+            "/api/control/interactions/91/output",
+            axum::routing::get(move || {
+                let result_output = result_output.clone();
+                async move { axum::Json(result_output) }
+            }),
+        )
+        .route(
+            "/api/control/interactions/91",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":91,
+                    "invocation":{"sourceInteractionNodeId":92,"sourceActionId":41}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::delete(|| async { axum::Json(json!({"revoked":true})) }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(axum::Router::new()).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion": 1,
+            "configurations": [{
+                "configuration": {
+                    "schemaVersion": 1, "name": "codex-basic", "implementation": "test",
+                    "implementationVersion": 1, "permissionBindings": {"auto": {}}, "settings": {}
+                },
+                "digest": "sha256:test"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+
+    let destination = app
+        .clone()
+        .oneshot(api_request_with_token(
+            "GET",
+            &format!(
+                "/api/threads/{source_thread_id}/interactions/{source_interaction_id}/actions/41/destination"
+            ),
+            None,
+            "review",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(destination.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(destination).await,
+        json!({
+            "actionId": 41, "actionKind": "invoke", "targetLayerId": 501,
+            "threadId": result_thread_id, "interactionId": result_interaction_id,
+            "rootLayerId": 501
+        })
+    );
+
+    let state = response_json(
+        app.clone()
+            .oneshot(api_request_with_token(
+                "GET",
+                &format!("/api/state?threadId={source_thread_id}"),
+                None,
+                "review",
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        state["interactions"][0]["completionOutput"]["rootLayer"]["actions"][0],
+        json!({"id": 41, "sourceNodeId": 7, "kind": "invoke", "targetLayerId": 501, "state": "accepted"})
+    );
+    let interactions = response_json(
+        app.oneshot(api_request_with_token(
+            "GET",
+            &format!("/api/threads/{source_thread_id}/interactions"),
+            None,
+            "review",
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        interactions["interactions"][0]["completionOutput"]["rootLayer"]["actions"][0]["targetLayerId"],
+        501
+    );
+
+    graph_task.abort();
+    harness_task.abort();
+    let _ = fs::remove_dir_all(root);
+}
 
 #[tokio::test]
 async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_authority() {
@@ -309,7 +489,30 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
         .execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name,permission_profile_id) VALUES (3,1,3,'Still running','3','running','codex-basic','auto')")
         .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO threads(id,title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (2,'Other conversation',1,'4','5','codex-basic','auto')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name,permission_profile_id) VALUES (10,2,1,'Other source','4','failed','codex-basic','auto')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name,permission_profile_id) VALUES (11,2,2,'Other result','5','failed','codex-basic','auto')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (10,999,11,'5')")
+        .execute(&pool).await.unwrap();
     pool.close().await;
+
+    let workspace_state = response_json(
+        app.clone()
+            .oneshot(api_request("GET", "/api/state?threadId=1", None, true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        workspace_state["actionInvocations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 
     let response = app
         .clone()
@@ -499,13 +702,31 @@ async fn approval_wait_is_durable_and_the_product_decision_resumes_the_same_comp
             axum::routing::post(move || {
                 let node_id = graph_node_id.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    axum::Json(json!({ "node": { "id": node_id }, "graphToken": "turn" }))
+                    axum::Json(json!({ "node": { "id": node_id }, "graphToken": "" }))
                 }
             }),
         )
         .route(
             "/api/control/capabilities",
-            axum::routing::delete(|| async { axum::Json(json!({ "revoked": true })) }),
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({ "graphToken": body["graphToken"] }))
+            })
+            .delete(|| async { axum::Json(json!({ "revoked": true })) }),
+        )
+        .route(
+            "/api/control/interactions/{id}",
+            axum::routing::get(|axum::extract::Path(id): axum::extract::Path<i64>| async move {
+                axum::Json(json!({ "nodeId": id, "invocation": null }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/{id}/output",
+            axum::routing::get(|axum::extract::Path(id): axum::extract::Path<i64>| async move {
+                axum::Json(json!({
+                    "nodeId": id,
+                    "rootLayer": { "layer": { "id": 1 }, "nodes": [], "edges": [], "actions": [] }
+                }))
+            }),
         );
     let interaction_id = Arc::new(AtomicI64::new(0));
     let event_interaction_id = Arc::new(AtomicI64::new(0));
@@ -651,7 +872,9 @@ async fn approval_wait_is_durable_and_the_product_decision_resumes_the_same_comp
         );
     let (graph_url, graph_task) = serve_test_app(graph).await;
     let (harness_url, harness_task) = serve_test_app(harness).await;
-    let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let app =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
 
     let created = response_json(
         app.clone()
@@ -848,18 +1071,29 @@ async fn malformed_approval_reconciliation_cancels_and_fails_the_completion() {
         .route(
             "/api/control/interactions",
             axum::routing::post(|| async {
-                axum::Json(json!({ "node": { "id": 41 }, "graphToken": "turn" }))
+                axum::Json(json!({ "node": { "id": 41 }, "graphToken": "" }))
             }),
         )
         .route(
             "/api/control/capabilities",
-            axum::routing::delete(move || {
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({ "graphToken": body["graphToken"] }))
+            })
+            .delete(move || {
                 let revoked = revoke_signal.clone();
                 async move {
                     revoked.store(true, Ordering::SeqCst);
                     axum::Json(json!({ "revoked": true }))
                 }
             }),
+        )
+        .route(
+            "/api/control/interactions/{id}",
+            axum::routing::get(
+                |axum::extract::Path(id): axum::extract::Path<i64>| async move {
+                    axum::Json(json!({ "nodeId": id, "invocation": null }))
+                },
+            ),
         );
     let interaction_id = Arc::new(AtomicI64::new(0));
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -944,7 +1178,9 @@ async fn malformed_approval_reconciliation_cancels_and_fails_the_completion() {
         );
     let (graph_url, graph_task) = serve_test_app(graph).await;
     let (harness_url, harness_task) = serve_test_app(harness).await;
-    let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let app =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
     let created = response_json(
         app.clone()
             .oneshot(api_request(
@@ -1054,9 +1290,30 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     let thread_id = thread["id"].as_i64().unwrap();
     let source_interaction_id = thread["rootInteractionId"].as_i64().unwrap();
     let pool = sqlite_pool(&database).await;
-    sqlx::query(
-        "UPDATE interactions SET graph_node_id=101,completion_status='accepted' WHERE id=?1",
+    let project_id = sqlx::query(
+        "INSERT INTO projects(name,path,created_at,updated_at) VALUES ('Invoke project',?1,'1','1')",
     )
+    .bind(root.to_string_lossy().as_ref())
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query("UPDATE threads SET project_id=?1 WHERE id=?2")
+        .bind(project_id)
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=101,completion_status='accepted',completion_output_json=?1 WHERE id=?2",
+    )
+    .bind(json!({
+        "nodeId":101,
+        "rootLayer":{"layer":{"id":1},"nodes":[],"edges":[],"actions":[{
+            "id":41,"kind":"invoke","interactionText":"Authored follow-up",
+            "state":"accepted","targetLayerId":null
+        }]}
+    }).to_string())
     .bind(source_interaction_id)
     .execute(&pool)
     .await
@@ -1065,32 +1322,113 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
 
     let graph_interactions = Arc::new(AtomicUsize::new(202));
     let graph_interaction_counter = graph_interactions.clone();
+    let observed_graph_creates = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let graph_create_bodies = observed_graph_creates.clone();
+    let graph_metadata = Arc::new(Mutex::new(HashMap::<usize, Value>::new()));
+    let created_graph_metadata = graph_metadata.clone();
+    let graph_nodes_by_pair = Arc::new(Mutex::new(HashMap::<(i64, i64), usize>::new()));
+    let created_graph_nodes_by_pair = graph_nodes_by_pair.clone();
+    let projection_reads = Arc::new(AtomicUsize::new(0));
+    let observed_projection_reads = projection_reads.clone();
     let graph = axum::Router::new()
         .route(
             "/api/control/capabilities",
-            axum::routing::post(|| async { axum::Json(json!({ "graphToken": "graph" })) })
-                .delete(|| async { axum::Json(json!({ "revoked": true })) }),
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({ "graphToken": body["graphToken"] }))
+            })
+            .delete(|| async { axum::Json(json!({ "revoked": true })) }),
         )
         .route(
-            "/api/graph/actions/41",
-            axum::routing::get(|| async {
-                axum::Json(json!({
-                    "action": {
-                        "id": 41,
-                        "kind": "invoke",
-                        "interactionText": "Authored follow-up",
-                        "state": "accepted"
+            "/api/control/interactions/{id}/actions/{action_id}",
+            axum::routing::get(
+                |axum::extract::Path((id, action_id)): axum::extract::Path<(i64, i64)>| async move {
+                    if matches!((id, action_id), (101 | 103, 41) | (101, 43) | (303, 41)) {
+                        return (
+                            StatusCode::OK,
+                            axum::Json(json!({
+                                "action": {
+                                    "id": action_id,
+                                    "kind": "invoke",
+                                    "interactionText": "Authored follow-up",
+                                    "state": "accepted"
+                                }
+                            })),
+                        );
                     }
-                }))
-            }),
+                    (
+                        StatusCode::NOT_FOUND,
+                        axum::Json(json!({
+                            "error": {
+                                "code": "action_not_visible",
+                                "message": "action is not visible from this interaction"
+                            }
+                        })),
+                    )
+                },
+            ),
         )
         .route(
             "/api/control/interactions",
-            axum::routing::post(move || {
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let graph_interaction_counter = graph_interaction_counter.clone();
+                let graph_create_bodies = graph_create_bodies.clone();
+                let created_graph_metadata = created_graph_metadata.clone();
+                let created_graph_nodes_by_pair = created_graph_nodes_by_pair.clone();
                 async move {
-                    let node_id = graph_interaction_counter.fetch_add(1, Ordering::SeqCst);
-                    axum::Json(json!({ "node": { "id": node_id }, "graphToken": "next" }))
+                    let invocation = body["invocation"].clone();
+                    graph_create_bodies.lock().unwrap().push(body);
+                    let pair = (
+                        invocation["sourceInteractionNodeId"].as_i64().unwrap(),
+                        invocation["sourceActionId"].as_i64().unwrap(),
+                    );
+                    let node_id = *created_graph_nodes_by_pair
+                        .lock()
+                        .unwrap()
+                        .entry(pair)
+                        .or_insert_with(|| {
+                            graph_interaction_counter.fetch_add(1, Ordering::SeqCst)
+                        });
+                    created_graph_metadata
+                        .lock()
+                        .unwrap()
+                        .insert(node_id, invocation);
+                    axum::Json(json!({ "node": { "id": node_id }, "graphToken": "" }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/{id}",
+            axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<usize>| {
+                let graph_metadata = graph_metadata.clone();
+                async move {
+                    axum::Json(json!({
+                        "nodeId": id,
+                        "invocation": graph_metadata.lock().unwrap().get(&id).cloned()
+                    }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/101/output",
+            axum::routing::get(move || {
+                let observed_projection_reads = observed_projection_reads.clone();
+                async move {
+                    if observed_projection_reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+                        );
+                    }
+                    (
+                        StatusCode::OK,
+                        axum::Json(json!({
+                            "nodeId":101,
+                            "rootLayer":{"layer":{"id":1},"nodes":[],"edges":[],"actions":[{
+                                "id":41,"kind":"invoke","interactionText":"Authored follow-up",
+                                "state":"accepted","targetLayerId":null
+                            }]}
+                        })),
+                    )
                 }
             }),
         );
@@ -1098,6 +1436,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     let completion_counter = harness_completions.clone();
     let observed_models = Arc::new(Mutex::new(Vec::<Value>::new()));
     let harness_models = observed_models.clone();
+    let product_database = database.clone();
     let harness = axum::Router::new()
         .route(
             "/sessions",
@@ -1108,10 +1447,23 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let completion_counter = completion_counter.clone();
                 let harness_models = harness_models.clone();
+                let product_database = product_database.clone();
                 async move {
+                    let pool = sqlite_pool(&product_database).await;
+                    let prepared: (Option<i64>, String, Option<String>, Option<String>, Option<String>) =
+                        sqlx::query_as("SELECT graph_node_id,completion_status,harness_configuration_digest,effective_execution_digest,effective_permission_receipt_json FROM interactions WHERE id=?1")
+                            .bind(body["traceContext"]["productInteractionId"].as_i64().unwrap())
+                            .fetch_one(&pool).await.unwrap();
+                    pool.close().await;
+                    assert_eq!(prepared.0, body["graph"]["nodeId"].as_i64());
+                    assert_eq!(prepared.1, "running");
+                    assert!(prepared.2.is_some() && prepared.3.is_some() && prepared.4.is_some());
+                    assert!(!prepared.4.as_deref().unwrap().contains(
+                        body["graph"]["token"].as_str().unwrap()
+                    ));
                     harness_models.lock().unwrap().push(body["model"].clone());
-                    let completion_number = completion_counter.fetch_add(1, Ordering::SeqCst);
-                    let node_id = 202 + completion_number;
+                    completion_counter.fetch_add(1, Ordering::SeqCst);
+                    let node_id = body["graph"]["nodeId"].as_i64().unwrap();
                     axum::Json(json!({
                         "output": {
                             "nodeId": node_id,
@@ -1119,17 +1471,6 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
                         }
                     }))
                 }
-            }),
-        )
-        .route(
-            "/sessions/{id}/approval-events",
-            axum::routing::get(|| async {
-                axum::Json(json!({
-                    "harnessSessionId": "session-1",
-                    "latestSequence": 0,
-                    "pendingRequests": [],
-                    "events": []
-                }))
             }),
         );
     let (graph_url, graph_task) = serve_test_app(graph).await;
@@ -1157,8 +1498,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     .unwrap();
 
     let (app, provider_refreshes) =
-        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url, false)
-            .await;
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
     let rejected = app
         .clone()
         .oneshot(api_request(
@@ -1186,7 +1526,40 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             .count(),
         1
     );
-    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
+    assert!((1..=2).contains(&provider_refreshes.calls.load(Ordering::SeqCst)));
+
+    let first_projection = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        first_projection["interactions"][0]["projectionFresh"],
+        false
+    );
+    let refreshed_projection = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        refreshed_projection["interactions"][0]["projectionFresh"],
+        true
+    );
 
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     loop {
@@ -1203,6 +1576,10 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         let state = response_json(state).await;
         assert_eq!(state["actionInvocations"].as_array().unwrap().len(), 1);
         assert_eq!(state["interactions"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            state["actionInvocations"][0]["resultCompletionStatus"],
+            state["interactions"][1]["completionStatus"]
+        );
         if state["interactions"][1]["completionStatus"] == "accepted" {
             break;
         }
@@ -1235,6 +1612,98 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         })
     );
 
+    let canonical_result_interaction_id = action_state["interactions"][1]["id"].as_i64().unwrap();
+    let pool = sqlite_pool(&database).await;
+    let unrelated_thread_id = sqlx::query("INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES ('Unrelated source',?1,'4','4','codex-basic','auto')")
+        .bind(project_id)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    let unrelated_source_interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_output_json,harness_configuration_name,permission_profile_id) VALUES (?1,1,'Unrelated source','4',102,'accepted',?2,'codex-basic','auto')")
+        .bind(unrelated_thread_id)
+        .bind(json!({
+            "nodeId": 102,
+            "rootLayer": {"layer": {"id": 2}, "nodes": [], "edges": [], "actions": []}
+        }).to_string())
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    let reused_thread_id = sqlx::query("INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES ('Reused source',?1,'5','5','codex-basic','auto')")
+        .bind(project_id)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    let reused_source_interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_output_json,harness_configuration_name,permission_profile_id) VALUES (?1,1,'Reused source','5',103,'accepted',?2,'codex-basic','auto')")
+        .bind(reused_thread_id)
+        .bind(json!({
+            "nodeId": 103,
+            "rootLayer": {"layer": {"id": 3}, "nodes": [], "edges": [], "actions": [{
+                "id": 41, "kind": "invoke", "interactionText": "Authored follow-up",
+                "state": "accepted", "targetLayerId": null
+            }]}
+        }).to_string())
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    pool.close().await;
+
+    let unrelated_uri = format!(
+        "/api/threads/{unrelated_thread_id}/interactions/{unrelated_source_interaction_id}/actions/41/invoke"
+    );
+    let unrelated_terminal = app
+        .clone()
+        .oneshot(api_request("POST", &unrelated_uri, None, true))
+        .await
+        .unwrap();
+    assert_eq!(
+        unrelated_terminal.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 1);
+
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE interactions SET graph_node_id=NULL,completion_status='submitted',completion_output_json=NULL,completion_error='Retry after restart' WHERE id=?1")
+        .bind(canonical_result_interaction_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let unrelated_submitted = app
+        .clone()
+        .oneshot(api_request("POST", &unrelated_uri, None, true))
+        .await
+        .unwrap();
+    assert_eq!(
+        unrelated_submitted.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 1);
+
+    let reused_uri = format!(
+        "/api/threads/{reused_thread_id}/interactions/{reused_source_interaction_id}/actions/41/invoke"
+    );
+    let reused_retry = app
+        .clone()
+        .oneshot(api_request("POST", &reused_uri, None, true))
+        .await
+        .unwrap();
+    assert_eq!(reused_retry.status(), StatusCode::OK);
+    assert_eq!(response_json(reused_retry).await["created"], false);
+    let retried_state = wait_for_interaction_count_and_terminal(&app, thread_id, 2).await;
+    assert_eq!(
+        retried_state["interactions"][1]["id"],
+        canonical_result_interaction_id
+    );
+    assert_eq!(
+        retried_state["interactions"][1]["completionStatus"],
+        "accepted"
+    );
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 2);
+
     let ordinary_unselected = app
         .clone()
         .oneshot(api_request(
@@ -1257,7 +1726,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         response_json(ordinary_unselected).await["code"],
         "model_selection_required"
     );
-    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
+    assert!((1..=2).contains(&provider_refreshes.calls.load(Ordering::SeqCst)));
 
     // A pre-selector accepted interaction has no model columns, but its thread already pins the
     // only harness configuration ordinary Product execution may use.
@@ -1304,10 +1773,11 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         legacy_state["interactions"][1]["modelSelection"],
         Value::Null
     );
-    assert_eq!(harness_completions.load(Ordering::SeqCst), 2);
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 3);
     assert_eq!(
         observed_models.lock().unwrap().as_slice(),
         [
+            json!({ "providerId": "codex", "modelId": "test-model" }),
             json!({ "providerId": "codex", "modelId": "test-model" }),
             Value::Null,
         ]
@@ -1315,8 +1785,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
 
     // Simulate a request disappearing after its durable one-shot record commits but before the
-    // old handler starts execution. Retrying the saved invocation must claim it exactly once and
-    // must not need the graph server to validate the already-authorized action again.
+    // old handler starts execution. Retrying the saved invocation must validate that the source
+    // still exposes the action, then claim the durable result exactly once.
     let pool = sqlite_pool(&database).await;
     let created_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1382,13 +1852,54 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         assert!(std::time::Instant::now() < deadline);
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert_eq!(harness_completions.load(Ordering::SeqCst), 3);
-    assert_eq!(observed_models.lock().unwrap().len(), 3);
+    assert_eq!(harness_completions.load(Ordering::SeqCst), 4);
+    let invocation_pairs = {
+        let graph_creates = observed_graph_creates.lock().unwrap();
+        graph_creates
+            .iter()
+            .map(|create| {
+                (
+                    create["invocation"]["sourceInteractionNodeId"]
+                        .as_i64()
+                        .unwrap(),
+                    create["invocation"]["sourceActionId"].as_i64().unwrap(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        (2..=4).contains(
+            &invocation_pairs
+                .iter()
+                .filter(|pair| **pair == (101, 41))
+                .count()
+        )
+    );
+    assert_eq!(
+        invocation_pairs
+            .iter()
+            .filter(|pair| **pair == (303, 41))
+            .count(),
+        1
+    );
+    assert!(
+        (1..=2).contains(
+            &invocation_pairs
+                .iter()
+                .filter(|pair| **pair == (101, 43))
+                .count()
+        )
+    );
+    assert!(
+        invocation_pairs
+            .iter()
+            .all(|pair| matches!(pair, (101, 41) | (303, 41) | (101, 43)))
+    );
+    assert_eq!(observed_models.lock().unwrap().len(), 4);
     drop(app);
 
     let reopened =
         open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
-    graph_task.abort();
     let replay = reopened
         .oneshot(api_request("POST", &uri, None, true))
         .await
@@ -1398,6 +1909,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     assert_eq!(replay["created"], false);
     assert_eq!(replay["interaction"]["text"], "Authored follow-up");
 
+    graph_task.abort();
     harness_task.abort();
     fs::remove_dir_all(root).unwrap();
 }
@@ -1417,23 +1929,58 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
 
     let graph_node_ids = Arc::new(AtomicUsize::new(700));
     let next_graph_node_id = graph_node_ids.clone();
+    let output_reads = Arc::new(AtomicUsize::new(0));
+    let observed_output_reads = output_reads.clone();
     let graph = axum::Router::new()
         .route(
             "/api/control/interactions",
-            axum::routing::post(move || {
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let next_graph_node_id = next_graph_node_id.clone();
                 async move {
+                    if body["text"] == "ordinary create response loss" {
+                        return (StatusCode::OK, "truncated create response").into_response();
+                    }
                     let node_id = next_graph_node_id.fetch_add(1, Ordering::SeqCst);
                     axum::Json(json!({
                         "node": { "id": node_id },
-                        "graphToken": format!("graph-{node_id}")
+                        "graphToken": ""
                     }))
+                    .into_response()
                 }
             }),
         )
         .route(
             "/api/control/capabilities",
-            axum::routing::delete(|| async { axum::Json(json!({ "revoked": true })) }),
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({ "graphToken": body["graphToken"] }))
+            })
+            .delete(|| async { axum::Json(json!({ "revoked": true })) }),
+        )
+        .route(
+            "/api/control/interactions/{id}",
+            axum::routing::get(
+                |axum::extract::Path(id): axum::extract::Path<usize>| async move {
+                    axum::Json(json!({ "nodeId": id, "invocation": null }))
+                },
+            ),
+        )
+        .route(
+            "/api/control/interactions/{id}/output",
+            axum::routing::get(move || {
+                let observed_output_reads = observed_output_reads.clone();
+                async move {
+                    if observed_output_reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+                        );
+                    }
+                    (
+                        StatusCode::NOT_FOUND,
+                        axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                    )
+                }
+            }),
         );
     let observed_models = Arc::new(Mutex::new(Vec::<Value>::new()));
     let harness_models = observed_models.clone();
@@ -1504,8 +2051,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
     )
     .unwrap();
     let (app, provider_refreshes) =
-        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url, false)
-            .await;
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
     let full_only_permissions = response_json(
         app.clone()
             .oneshot(api_request(
@@ -1712,6 +2258,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         interactions[2]["effectiveExecutionDigest"]
     );
     assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 7);
+    assert_eq!(output_reads.load(Ordering::SeqCst), 2);
     assert_eq!(
         observed_models.lock().unwrap().as_slice(),
         [
@@ -1722,13 +2269,28 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         ]
     );
 
+    let lost_create = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({ "text": "ordinary create response loss" })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(lost_create.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let recovered = wait_for_interaction_count_and_terminal(&app, thread_id, 5).await;
+    assert_eq!(recovered["interactions"][4]["completionStatus"], "failed");
+    assert!(recovered["interactions"][4]["graphNodeId"].is_null());
+
     graph_task.abort();
     harness_task.abort();
     fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]
-async fn interrupted_action_invocation_becomes_failed_on_restart() {
+async fn interrupted_action_invocation_remains_submitted_for_source_pair_recovery() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -1773,7 +2335,7 @@ async fn interrupted_action_invocation_becomes_failed_on_restart() {
     .unwrap();
     let result_interaction_id = result.last_insert_rowid();
     sqlx::query(
-        "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,41,?2,?3)",
+        "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,41,?2,?3,1)",
     )
     .bind(source_interaction_id)
     .bind(result_interaction_id)
@@ -1784,6 +2346,16 @@ async fn interrupted_action_invocation_becomes_failed_on_restart() {
     pool.close().await;
 
     let reopened = open_app(&database, &root).await;
+    let pool = sqlite_pool(&database).await;
+    let (startup_status, startup_error): (String, String) =
+        sqlx::query_as("SELECT completion_status,completion_error FROM interactions WHERE id=?1")
+            .bind(result_interaction_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(startup_status, "submitted");
+    assert!(startup_error.contains("Invoke the action again"));
+    pool.close().await;
     let state = response_json(
         reopened
             .oneshot(api_request(
@@ -1802,14 +2374,859 @@ async fn interrupted_action_invocation_becomes_failed_on_restart() {
         .iter()
         .find(|interaction| interaction["id"] == result_interaction_id)
         .unwrap();
-    assert_eq!(recovered["completionStatus"], "failed");
+    assert_eq!(recovered["completionStatus"], "submitted");
+    assert_eq!(recovered["graphNodeId"], serde_json::Value::Null);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn startup_malformed_create_response_preserves_unbound_lease_for_later_restart() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-startup-prepare-retry-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({"initialMessage":"source"})),
+            true,
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let source_id = thread["rootInteractionId"].as_i64().unwrap();
+    let pool = sqlite_pool(&database).await;
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=90,completion_status='accepted' WHERE id=?1",
+    )
+    .bind(source_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let result_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,2,'leased result',?2,'not_started')")
+        .bind(thread_id)
+        .bind(&created_at)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,41,?2,?3,1)")
+        .bind(source_id)
+        .bind(result_id)
+        .bind(&created_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,
+            "configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let creates = Arc::new(AtomicUsize::new(0));
+    let observed_creates = creates.clone();
+    let graph = Router::new()
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let observed_creates = observed_creates.clone();
+                async move {
+                    assert_eq!(
+                        body["invocation"],
+                        json!({"sourceInteractionNodeId":90,"sourceActionId":41})
+                    );
+                    if observed_creates.fetch_add(1, Ordering::SeqCst) < 4 {
+                        return (StatusCode::OK, "truncated successful response").into_response();
+                    }
+                    axum::Json(json!({"node":{"id":93},"graphToken":""})).into_response()
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/93",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":93,
+                    "invocation":{"sourceInteractionNodeId":90,"sourceActionId":41}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/93/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::delete(|| async { axum::Json(json!({"revoked":true})) }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+
+    let first_reopen =
+        open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    drop(first_reopen);
+    let pool = sqlite_pool(&database).await;
+    let after_failure: (String, Option<i64>, Option<String>) = sqlx::query_as(
+        "SELECT completion_status,graph_node_id,completion_error FROM interactions WHERE id=?1",
+    )
+    .bind(result_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(after_failure.0, "submitted");
+    assert_eq!(after_failure.1, None);
+    assert!(after_failure.2.unwrap().contains("Invoke the action again"));
+    pool.close().await;
+
+    let second_reopen =
+        open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    drop(second_reopen);
+    let pool = sqlite_pool(&database).await;
+    let after_recovery: (String, Option<i64>, Option<String>) = sqlx::query_as(
+        "SELECT completion_status,graph_node_id,completion_error FROM interactions WHERE id=?1",
+    )
+    .bind(result_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(after_recovery.0, "submitted");
+    assert_eq!(after_recovery.1, Some(93));
+    assert!(!after_recovery.2.unwrap().contains("reconciliation pending"));
+    assert_eq!(creates.load(Ordering::SeqCst), 5);
+    pool.close().await;
+
+    graph_task.abort();
+    harness_task.abort();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn startup_binding_failure_preserves_unbound_invocation_for_next_recovery() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-startup-binding-retry-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({"initialMessage":"source"})),
+            true,
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let source_id = thread["rootInteractionId"].as_i64().unwrap();
+    let pool = sqlite_pool(&database).await;
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=90,completion_status='accepted' WHERE id=?1",
+    )
+    .bind(source_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let result_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,2,'leased result',?2,'not_started')")
+        .bind(thread_id)
+        .bind(&created_at)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,41,?2,?3,1)")
+        .bind(source_id)
+        .bind(result_id)
+        .bind(&created_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(&format!(
+        "CREATE TRIGGER fail_startup_bind BEFORE UPDATE OF graph_node_id ON interactions WHEN OLD.id={result_id} AND NEW.graph_node_id IS NOT NULL BEGIN SELECT RAISE(FAIL, 'simulated transient bind failure'); END"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,
+            "configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let creates = Arc::new(AtomicUsize::new(0));
+    let observed_creates = creates.clone();
+    let graph = Router::new()
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let observed_creates = observed_creates.clone();
+                async move {
+                    observed_creates.fetch_add(1, Ordering::SeqCst);
+                    assert_eq!(
+                        body["invocation"],
+                        json!({"sourceInteractionNodeId":90,"sourceActionId":41})
+                    );
+                    axum::Json(json!({"node":{"id":93},"graphToken":""}))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/93",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":93,
+                    "invocation":{"sourceInteractionNodeId":90,"sourceActionId":41}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/93/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::delete(|| async { axum::Json(json!({"revoked":true})) }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+
+    let first_reopen =
+        open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    drop(first_reopen);
+    let pool = sqlite_pool(&database).await;
+    let after_failure: (String, Option<i64>) =
+        sqlx::query_as("SELECT completion_status,graph_node_id FROM interactions WHERE id=?1")
+            .bind(result_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(after_failure, ("submitted".into(), None));
+    sqlx::query("DROP TRIGGER fail_startup_bind")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let second_reopen =
+        open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    drop(second_reopen);
+    let pool = sqlite_pool(&database).await;
+    let after_recovery: (String, Option<i64>) =
+        sqlx::query_as("SELECT completion_status,graph_node_id FROM interactions WHERE id=?1")
+            .bind(result_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(after_recovery, ("submitted".into(), Some(93)));
+    assert_eq!(creates.load(Ordering::SeqCst), 2);
+    pool.close().await;
+
+    graph_task.abort();
+    harness_task.abort();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-recover-accepted-invoke-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({"initialMessage":"source"})),
+            true,
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let source_id = thread["rootInteractionId"].as_i64().unwrap();
+    let pool = sqlite_pool(&database).await;
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=90,completion_status='accepted' WHERE id=?1",
+    )
+    .bind(source_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let result = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,2,'leased result',?2,91,'running','codex-basic','sha256:test','auto','sha256:execution',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let result_id = result.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,41,?2,?3,1)")
+        .bind(source_id).bind(result_id).bind(&created_at).execute(&pool).await.unwrap();
+    let ordinary = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,3,'ordinary result',?2,92,'running','codex-basic','sha256:test','auto','sha256:ordinary',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let ordinary_id = ordinary.last_insert_rowid();
+    let unbound = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,4,'lost create response',?2,'not_started','auto')")
+        .bind(thread_id).bind(&created_at).execute(&pool).await.unwrap();
+    let unbound_id = unbound.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,42,?2,?3,1)")
+        .bind(source_id).bind(unbound_id).bind(&created_at).execute(&pool).await.unwrap();
+    let corrupt = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,5,'corrupt binding',?2,94,'running','codex-basic','sha256:test','auto','sha256:corrupt',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let corrupt_id = corrupt.last_insert_rowid();
+    let approval_wait = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,6,'accepted while approval response was in flight',?2,95,'waiting_for_approval','codex-basic','sha256:test','ask','sha256:approval',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"ask","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let approval_wait_id = approval_wait.last_insert_rowid();
+    sqlx::query("INSERT INTO approval_requests(request_id,interaction_id,complete_call_id,harness_session_id,title,reason,action_json,scope_keys_json,scope_description,created_at,expires_at) VALUES ('restart-approval',?1,'call-1','session-1','Run command','Needed','{\"kind\":\"command\",\"command\":\"npm test\",\"workingDirectory\":\"/workspace\"}','[]','test scope',?2,NULL)")
+        .bind(approval_wait_id).bind(&created_at).execute(&pool).await.unwrap();
+    // Rows migrated from the pre-lease schema default to graph_lease_required=0. Their graph
+    // interaction metadata legitimately has no invocation provenance, but canonical acceptance
+    // must still terminate recovery rather than remain quarantined forever.
+    let legacy_unleased = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,7,'legacy unleased result',?2,96,'running','codex-basic','sha256:test','auto','sha256:legacy',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let legacy_unleased_id = legacy_unleased.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,43,?2,?3)")
+        .bind(source_id).bind(legacy_unleased_id).bind(&created_at).execute(&pool).await.unwrap();
+    let strict_missing_lease = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,8,'strict missing lease result',?2,97,'running','codex-basic','sha256:test','auto','sha256:strict',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let strict_missing_lease_id = strict_missing_lease.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,44,?2,?3,1)")
+        .bind(source_id).bind(strict_missing_lease_id).bind(&created_at).execute(&pool).await.unwrap();
+    let legacy_pending = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,completion_error,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,9,'legacy pending result',?2,98,'failed','Canonical reconciliation pending: pre-lease provenance mismatch','codex-basic','sha256:test','auto','sha256:legacy-pending',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let legacy_pending_id = legacy_pending.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,45,?2,?3)")
+        .bind(source_id).bind(legacy_pending_id).bind(&created_at).execute(&pool).await.unwrap();
+    let strict_approval_wait = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,10,'strict leased approval wait',?2,99,'waiting_for_approval','codex-basic','sha256:test','ask','sha256:strict-approval',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"ask","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let strict_approval_wait_id = strict_approval_wait.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,46,?2,?3,1)")
+        .bind(source_id).bind(strict_approval_wait_id).bind(&created_at).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO approval_requests(request_id,interaction_id,complete_call_id,harness_session_id,title,reason,action_json,scope_keys_json,scope_description,created_at,expires_at) VALUES ('strict-restart-approval',?1,'call-strict','session-strict','Run command','Needed','{\"kind\":\"command\",\"command\":\"npm test\",\"workingDirectory\":\"/workspace\"}','[]','test scope',?2,NULL)")
+        .bind(strict_approval_wait_id).bind(&created_at).execute(&pool).await.unwrap();
+    let legacy_approval_wait = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,11,'legacy approval wait',?2,100,'waiting_for_approval','codex-basic','sha256:test','ask','sha256:legacy-approval',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"ask","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let legacy_approval_wait_id = legacy_approval_wait.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,47,?2,?3)")
+        .bind(source_id).bind(legacy_approval_wait_id).bind(&created_at).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO approval_requests(request_id,interaction_id,complete_call_id,harness_session_id,title,reason,action_json,scope_keys_json,scope_description,created_at,expires_at) VALUES ('legacy-restart-approval',?1,'call-legacy','session-legacy','Run command','Needed','{\"kind\":\"command\",\"command\":\"npm test\",\"workingDirectory\":\"/workspace\"}','[]','test scope',?2,NULL)")
+        .bind(legacy_approval_wait_id).bind(&created_at).execute(&pool).await.unwrap();
+    pool.close().await;
+
+    let canonical = json!({
+        "nodeId": 91,
+        "rootLayer": {"layer":{"id":501},"nodes":[],"edges":[],"actions":[]}
+    });
+    let graph_output = canonical.clone();
+    let recovery_output_reads = Arc::new(AtomicUsize::new(0));
+    let observed_recovery_output_reads = recovery_output_reads.clone();
+    let concurrent_recovery_barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let observed_recovery_barrier = concurrent_recovery_barrier.clone();
+    let approval_metadata_reads = Arc::new(AtomicUsize::new(0));
+    let observed_approval_metadata_reads = approval_metadata_reads.clone();
+    let invalidations = Arc::new(AtomicUsize::new(0));
+    let observed_invalidations = invalidations.clone();
+    let graph = axum::Router::new()
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                assert_eq!(
+                    body["invocation"],
+                    json!({
+                        "sourceInteractionNodeId":90,"sourceActionId":42
+                    })
+                );
+                axum::Json(json!({"node":{"id":93},"graphToken":""}))
+            }),
+        )
+        .route(
+            "/api/control/interactions/91",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":91,
+                    "invocation":{"sourceInteractionNodeId":90,"sourceActionId":41}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/92",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":92,"invocation":null})) }),
+        )
+        .route(
+            "/api/control/interactions/93",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":93,
+                    "invocation":{"sourceInteractionNodeId":90,"sourceActionId":42}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/94",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":999,"invocation":null})) }),
+        )
+        .route(
+            "/api/control/interactions/95",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":95,"invocation":null})) }),
+        )
+        .route(
+            "/api/control/interactions/96",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":96,"invocation":null})) }),
+        )
+        .route(
+            "/api/control/interactions/97",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":97,"invocation":null})) }),
+        )
+        .route(
+            "/api/control/interactions/98",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":98,"invocation":null})) }),
+        )
+        .route(
+            "/api/control/interactions/99",
+            axum::routing::get(move || {
+                let observed_approval_metadata_reads = observed_approval_metadata_reads.clone();
+                async move {
+                    if observed_approval_metadata_reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+                        )
+                            .into_response();
+                    }
+                    axum::Json(json!({
+                        "nodeId":99,
+                        "invocation":{"sourceInteractionNodeId":90,"sourceActionId":46}
+                    }))
+                    .into_response()
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/100",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":100,"invocation":null})) }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({"graphToken":body["graphToken"]}))
+            })
+            .delete(move || {
+                let observed_invalidations = observed_invalidations.clone();
+                async move {
+                    observed_invalidations.fetch_add(1, Ordering::SeqCst);
+                    axum::Json(json!({"revoked":true}))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/91/output",
+            axum::routing::get(move || {
+                let graph_output = graph_output.clone();
+                let observed_recovery_output_reads = observed_recovery_output_reads.clone();
+                let observed_recovery_barrier = observed_recovery_barrier.clone();
+                async move {
+                    if observed_recovery_output_reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+                        );
+                    }
+                    observed_recovery_barrier.wait().await;
+                    (StatusCode::OK, axum::Json(graph_output))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/92/output",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":92,
+                    "rootLayer":{"layer":{"id":502},"nodes":[],"edges":[],"actions":[]}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/93/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        )
+        .route(
+            "/api/control/interactions/95/output",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":95,
+                    "rootLayer":{"layer":{"id":505},"nodes":[],"edges":[],"actions":[]}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/96/output",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":96,
+                    "rootLayer":{"layer":{"id":506},"nodes":[],"edges":[],"actions":[]}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/97/output",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":97,
+                    "rootLayer":{"layer":{"id":507},"nodes":[],"edges":[],"actions":[]}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/98/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        )
+        .route(
+            "/api/control/interactions/99/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        )
+        .route(
+            "/api/control/interactions/100/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        );
+    let harness = axum::Router::new();
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(harness).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,
+            "configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"ask":{},"auto":{},"full":{}},
+                "settings":{}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let first_reopened =
+        open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let first_state = response_json(
+        first_reopened
+            .clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let first_recovery = first_state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == result_id)
+        .unwrap();
+    assert_eq!(first_recovery["completionStatus"], "submitted");
     assert!(
-        recovered["completionError"]
+        first_recovery["completionError"]
             .as_str()
             .unwrap()
-            .contains("temporary one-shot UX")
+            .contains("Invoke the action again")
     );
-
+    let first_strict_approval = first_state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == strict_approval_wait_id)
+        .unwrap();
+    assert_eq!(first_strict_approval["completionStatus"], "submitted");
+    assert_ne!(first_strict_approval["completionStatus"], "failed");
+    let first_strict_resolution = first_state["approvals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|approval| approval["request"]["requestId"] == "strict-restart-approval")
+        .unwrap();
+    assert_eq!(first_strict_resolution["resolution"]["outcome"], "aborted");
+    drop(first_reopened);
+    // Live reconciliation can still quarantine an uncertain result. Preserve the concurrent
+    // compare-and-swap promotion regression independently of startup's strict-lease policy.
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE interactions SET completion_status='failed',completion_error='Canonical reconciliation pending: simulated live uncertainty' WHERE id=?1")
+        .bind(result_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let reopened =
+        open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let first_promotion = reopened.clone().oneshot(api_request(
+        "GET",
+        &format!("/api/state?threadId={thread_id}"),
+        None,
+        true,
+    ));
+    let second_promotion = reopened.oneshot(api_request(
+        "GET",
+        &format!("/api/state?threadId={thread_id}"),
+        None,
+        true,
+    ));
+    let (first_promotion, second_promotion) = tokio::join!(first_promotion, second_promotion);
+    let state = response_json(first_promotion.unwrap()).await;
+    let concurrent_state = response_json(second_promotion.unwrap()).await;
+    let recovered = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == result_id)
+        .unwrap();
+    assert_eq!(recovered["completionStatus"], "accepted");
+    assert_eq!(recovered["graphNodeId"], 91);
+    assert_eq!(recovered["harnessConfigurationDigest"], "sha256:test");
+    assert_eq!(recovered["effectiveExecutionDigest"], "sha256:execution");
+    assert_eq!(recovered["completionOutput"], canonical);
+    let concurrent_recovered = concurrent_state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == result_id)
+        .unwrap();
+    assert_eq!(concurrent_recovered["completionStatus"], "accepted");
+    assert_eq!(concurrent_recovered["completionOutput"], canonical);
+    assert!(recovery_output_reads.load(Ordering::SeqCst) >= 2);
+    assert!(approval_metadata_reads.load(Ordering::SeqCst) >= 2);
+    let ordinary = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == ordinary_id)
+        .unwrap();
+    assert_eq!(ordinary["completionStatus"], "accepted");
+    assert_eq!(ordinary["graphNodeId"], 92);
+    assert_eq!(ordinary["effectiveExecutionDigest"], "sha256:ordinary");
+    let unbound = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == unbound_id)
+        .unwrap();
+    assert_eq!(unbound["graphNodeId"], 93);
+    assert_eq!(unbound["completionStatus"], "submitted");
+    assert!(
+        unbound["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("Invoke the action again")
+    );
+    let corrupt = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == corrupt_id)
+        .unwrap();
+    assert_eq!(corrupt["completionStatus"], "failed");
+    assert_eq!(corrupt["projectionFresh"], false);
+    assert!(
+        corrupt["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("reconciliation pending")
+    );
+    let approval_wait = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == approval_wait_id)
+        .unwrap();
+    assert_eq!(approval_wait["completionStatus"], "accepted");
+    assert_eq!(approval_wait["completionOutput"]["nodeId"], 95);
+    let legacy_unleased = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == legacy_unleased_id)
+        .unwrap();
+    assert_eq!(legacy_unleased["completionStatus"], "accepted");
+    assert_eq!(legacy_unleased["completionOutput"]["nodeId"], 96);
+    assert_ne!(legacy_unleased["projectionFresh"], false);
+    let strict_missing_lease = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == strict_missing_lease_id)
+        .unwrap();
+    assert_eq!(strict_missing_lease["completionStatus"], "failed");
+    assert_eq!(strict_missing_lease["projectionFresh"], false);
+    assert!(
+        strict_missing_lease["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("reconciliation pending")
+    );
+    let legacy_pending = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == legacy_pending_id)
+        .unwrap();
+    assert_eq!(legacy_pending["completionStatus"], "failed");
+    assert_ne!(legacy_pending["projectionFresh"], false);
+    assert!(
+        legacy_pending["completionError"]
+            .as_str()
+            .unwrap()
+            .starts_with("Legacy action invocation ended")
+    );
+    let strict_approval_wait = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == strict_approval_wait_id)
+        .unwrap();
+    assert_eq!(strict_approval_wait["completionStatus"], "submitted");
+    assert_eq!(strict_approval_wait["graphNodeId"], 99);
+    assert!(
+        strict_approval_wait["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("Invoke the action again")
+    );
+    let legacy_approval_wait = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == legacy_approval_wait_id)
+        .unwrap();
+    assert_eq!(legacy_approval_wait["completionStatus"], "failed");
+    assert_eq!(legacy_approval_wait["graphNodeId"], 100);
+    assert!(
+        legacy_approval_wait["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("harness session ended")
+    );
+    let approval = state["approvals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|approval| approval["request"]["requestId"] == "restart-approval")
+        .unwrap();
+    assert_eq!(approval["resolution"]["outcome"], "aborted");
+    for request_id in ["strict-restart-approval", "legacy-restart-approval"] {
+        let approval = state["approvals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|approval| approval["request"]["requestId"] == request_id)
+            .unwrap();
+        assert_eq!(approval["resolution"]["outcome"], "aborted");
+    }
+    assert!(invalidations.load(Ordering::SeqCst) >= 7);
+    graph_task.abort();
+    harness_task.abort();
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -1960,6 +3377,17 @@ fn exits_when_desktop_control_pipe_closes() {
     BufReader::new(child.stdout.take().unwrap())
         .read_line(&mut ready_line)
         .unwrap();
+    if ready_line.is_empty() {
+        let status = child.wait().unwrap();
+        let mut stderr = String::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .unwrap();
+        panic!("Relayer app server exited before readiness ({status}): {stderr}");
+    }
     assert_eq!(
         serde_json::from_str::<Value>(&ready_line).unwrap()["ready"],
         true
@@ -2340,7 +3768,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 7);
+    assert_eq!(applied_migrations, 9);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -2410,7 +3838,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
         "DROP TABLE threads",
         "DROP TABLE projects",
         "CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,path TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
-        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto',conversation_import_id TEXT REFERENCES conversation_imports(id))",
+        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto',conversation_import_id TEXT)",
         "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL,graph_node_id INTEGER,completion_status TEXT NOT NULL DEFAULT 'not_started',harness_configuration_name TEXT,harness_configuration_digest TEXT,completion_output_json TEXT,completion_error TEXT,permission_profile_id TEXT NOT NULL DEFAULT 'auto',effective_execution_digest TEXT,effective_permission_receipt_json TEXT,model_provider_id TEXT,provider_model_id TEXT,model_family_id INTEGER)",
         "CREATE UNIQUE INDEX projects_path_partial ON projects(path) WHERE id > 0",
         "CREATE UNIQUE INDEX interactions_sequence_partial ON interactions(thread_id,sequence) WHERE id > 0",
@@ -2487,7 +3915,19 @@ async fn open_app_with_runtime(
     graph_url: &str,
     harness_url: &str,
 ) -> Router {
-    open_app_with_runtime_observed(
+    open_app_with_runtime_observed(database, web_directory, catalog, graph_url, harness_url)
+        .await
+        .0
+}
+
+async fn open_app_with_runtime_allow_override(
+    database: &Path,
+    web_directory: &Path,
+    catalog: &Path,
+    graph_url: &str,
+    harness_url: &str,
+) -> Router {
+    open_app_with_runtime_observed_with_override(
         database,
         web_directory,
         catalog,
@@ -2505,6 +3945,24 @@ struct ProviderRefreshProbe {
 }
 
 async fn open_app_with_runtime_observed(
+    database: &Path,
+    web_directory: &Path,
+    catalog: &Path,
+    graph_url: &str,
+    harness_url: &str,
+) -> (Router, ProviderRefreshProbe) {
+    open_app_with_runtime_observed_with_override(
+        database,
+        web_directory,
+        catalog,
+        graph_url,
+        harness_url,
+        false,
+    )
+    .await
+}
+
+async fn open_app_with_runtime_observed_with_override(
     database: &Path,
     web_directory: &Path,
     catalog: &Path,

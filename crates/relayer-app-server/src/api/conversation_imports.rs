@@ -251,9 +251,11 @@ mod tests {
     use crate::{
         conversation_export::{
             ConversationExportHeader, ConversationExportRecord, ConversationExportTurn,
-            EXPORT_VERSION_V1, ExportCompletionReceipt, ExportCompletionStatus, ExportConversation,
-            ExportProducer, ExportTurnManifestEntry, ExportTurnOrigin, MAX_EXPORT_BYTES,
-            MAX_JSONL_LINE_BYTES,
+            EXPORT_VERSION_V1, ExportAcceptedView, ExportAction, ExportActionKind,
+            ExportActionVariant, ExportCompletionReceipt, ExportCompletionStatus,
+            ExportConversation, ExportLayer, ExportNavigateRelation, ExportNode, ExportProducer,
+            ExportRecordState, ExportResolvedLayer, ExportTurnManifestEntry, ExportTurnOrigin,
+            MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES, decode_export_jsonl,
         },
         product::ProductService,
         runtime::RuntimeClient,
@@ -312,6 +314,170 @@ mod tests {
             bytes.push(b'\n');
         }
         bytes
+    }
+
+    fn accepted_receipt() -> ExportCompletionReceipt {
+        ExportCompletionReceipt {
+            status: ExportCompletionStatus::Accepted,
+            harness_configuration_name: Some("codex-basic".into()),
+            harness_configuration_digest: None,
+            model_selection: None,
+            permission_profile_id: "auto".into(),
+            effective_execution_digest: None,
+            effective_permission_receipt: None,
+            error: None,
+        }
+    }
+
+    fn export_action(
+        id: &str,
+        source_node_id: &str,
+        source_layer_id: Option<&str>,
+        kind: ExportActionKind,
+        target_layer_id: Option<&str>,
+    ) -> ExportAction {
+        ExportAction {
+            id: id.into(),
+            source_node_id: source_node_id.into(),
+            source_layer_id: source_layer_id.map(Into::into),
+            kind,
+            relation: (kind == ExportActionKind::Navigate)
+                .then_some(ExportNavigateRelation::Expand),
+            label: if kind == ExportActionKind::Invoke {
+                "Continue"
+            } else {
+                "Response"
+            }
+            .into(),
+            variant: ExportActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: target_layer_id.map(Into::into),
+            interaction_text: (kind == ExportActionKind::Invoke)
+                .then_some("Continue this path".into()),
+            state: ExportRecordState::Accepted,
+        }
+    }
+
+    fn export_layer(
+        layer_id: &str,
+        node_id: &str,
+        title: &str,
+        actions: Vec<ExportAction>,
+    ) -> ExportResolvedLayer {
+        ExportResolvedLayer {
+            layer: ExportLayer {
+                id: layer_id.into(),
+                nodes: vec![node_id.into()],
+                edges: vec![],
+                state: ExportRecordState::Accepted,
+            },
+            nodes: vec![ExportNode {
+                id: node_id.into(),
+                kind: "concept".into(),
+                icon: "file".into(),
+                title: title.into(),
+                detail: format!("Accepted detail for {title}"),
+                state: ExportRecordState::Accepted,
+            }],
+            edges: vec![],
+            actions,
+        }
+    }
+
+    fn resolved_invoke_records() -> Vec<ConversationExportRecord> {
+        let source_layer_id = "layer:source";
+        let destination_layer_id = "layer:destination";
+        let invoke = export_action(
+            "action:invoke",
+            "node:source",
+            Some(source_layer_id),
+            ExportActionKind::Invoke,
+            None,
+        );
+        vec![
+            ConversationExportRecord::Header(Box::new(ConversationExportHeader {
+                export_version: EXPORT_VERSION_V1,
+                exported_at: "1770000000000".into(),
+                producer: ExportProducer {
+                    desktop_version: "0.2.12".into(),
+                    build_commit: "test-commit".into(),
+                    platform: "darwin".into(),
+                    architecture: "arm64".into(),
+                },
+                conversation: ExportConversation {
+                    id: "conversation:resolved-invoke".into(),
+                    title: "Resolved invoke import".into(),
+                    created_at: "1769000000000".into(),
+                    project_name: None,
+                    harness_configuration_name: "codex-basic".into(),
+                    permission_profile_id: "auto".into(),
+                },
+                turns: vec![
+                    ExportTurnManifestEntry {
+                        id: "turn:1".into(),
+                        sequence: 1,
+                    },
+                    ExportTurnManifestEntry {
+                        id: "turn:2".into(),
+                        sequence: 2,
+                    },
+                ],
+            })),
+            ConversationExportRecord::Turn(Box::new(ConversationExportTurn {
+                id: "turn:1".into(),
+                sequence: 1,
+                created_at: "1769000001000".into(),
+                text: "Choose a path".into(),
+                origin: ExportTurnOrigin::User,
+                completion: accepted_receipt(),
+                accepted_view: Some(ExportAcceptedView {
+                    interaction_node_id: "node:interaction-1".into(),
+                    root_action: export_action(
+                        "action:root-1",
+                        "node:interaction-1",
+                        None,
+                        ExportActionKind::Navigate,
+                        Some(source_layer_id),
+                    ),
+                    root_layer_id: source_layer_id.into(),
+                    layers: vec![export_layer(
+                        source_layer_id,
+                        "node:source",
+                        "Source",
+                        vec![invoke],
+                    )],
+                }),
+            })),
+            ConversationExportRecord::Turn(Box::new(ConversationExportTurn {
+                id: "turn:2".into(),
+                sequence: 2,
+                created_at: "1769000002000".into(),
+                text: "Continue this path".into(),
+                origin: ExportTurnOrigin::Action {
+                    source_turn_id: "turn:1".into(),
+                    source_action_id: "action:invoke".into(),
+                },
+                completion: accepted_receipt(),
+                accepted_view: Some(ExportAcceptedView {
+                    interaction_node_id: "node:interaction-2".into(),
+                    root_action: export_action(
+                        "action:root-2",
+                        "node:interaction-2",
+                        None,
+                        ExportActionKind::Navigate,
+                        Some(destination_layer_id),
+                    ),
+                    root_layer_id: destination_layer_id.into(),
+                    layers: vec![export_layer(
+                        destination_layer_id,
+                        "node:destination",
+                        "Destination",
+                        vec![],
+                    )],
+                }),
+            })),
+        ]
     }
 
     async fn product() -> (tempfile::TempDir, ProductService) {
@@ -423,6 +589,16 @@ mod tests {
         Request::builder()
             .method(method)
             .uri("/api/internal/conversation-imports")
+            .header("content-type", "application/json")
+            .header("cookie", format!("relayer_control={cookie}"))
+            .body(body.into())
+            .unwrap()
+    }
+
+    fn request_uri(method: &str, uri: &str, cookie: &str, body: impl Into<Body>) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
             .header("content-type", "application/json")
             .header("cookie", format!("relayer_control={cookie}"))
             .body(body.into())
@@ -562,6 +738,185 @@ mod tests {
             assert_eq!(response_json(response).await["code"], "forbidden");
         }
         disabled_graph.abort();
+    }
+
+    #[tokio::test]
+    async fn export_shape_imports_as_resolved_read_only_invoke_destination() {
+        let records = resolved_invoke_records();
+        let ConversationExportRecord::Turn(source_turn) = &records[1] else {
+            unreachable!()
+        };
+        let authored_invoke = &source_turn.accepted_view.as_ref().unwrap().layers[0].actions[0];
+        assert_eq!(authored_invoke.kind, ExportActionKind::Invoke);
+        assert!(authored_invoke.target_layer_id.is_none());
+
+        let (_directory, app, _store, graph_task) = app(true).await;
+        let staged = app
+            .clone()
+            .oneshot(request("POST", "write-token", Body::from(jsonl(&records))))
+            .await
+            .unwrap();
+        assert_eq!(staged.status(), StatusCode::OK);
+        let staged = response_json(staged).await;
+        let published = app
+            .clone()
+            .oneshot(request(
+                "PUT",
+                "write-token",
+                Body::from(serde_json::json!({"importId": staged["importId"]}).to_string()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(published.status(), StatusCode::OK);
+        let published = response_json(published).await;
+        let thread_id = published["threadId"].as_i64().unwrap();
+        let source_interaction_id = published["turns"][0]["interactionId"].as_i64().unwrap();
+        let destination_interaction_id = published["turns"][1]["interactionId"].as_i64().unwrap();
+        let destination_root_layer_id = published["turns"][1]["rootLayerId"].as_i64().unwrap();
+
+        let thread = app
+            .clone()
+            .oneshot(request_uri(
+                "GET",
+                &format!("/api/threads/{thread_id}"),
+                "read-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(thread.status(), StatusCode::OK);
+        let thread = response_json(thread).await;
+        let invoke = thread["interactions"][0]["completionOutput"]["rootLayer"]["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|action| action["kind"] == "invoke")
+            .unwrap();
+        let action_id = invoke["id"].as_i64().unwrap();
+        assert_eq!(
+            invoke["targetLayerId"].as_i64(),
+            Some(destination_root_layer_id)
+        );
+
+        let destination = app
+            .clone()
+            .oneshot(request_uri(
+                "GET",
+                &format!(
+                    "/api/threads/{thread_id}/interactions/{source_interaction_id}/actions/{action_id}/destination"
+                ),
+                "read-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(destination.status(), StatusCode::OK);
+        let destination = response_json(destination).await;
+        assert_eq!(destination["interactionId"], destination_interaction_id);
+        assert_eq!(destination["rootLayerId"], destination_root_layer_id);
+        assert_eq!(destination["targetLayerId"], destination_root_layer_id);
+
+        let reexported = app
+            .clone()
+            .oneshot(request_uri(
+                "GET",
+                &format!("/api/threads/{thread_id}/export"),
+                "write-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reexported.status(), StatusCode::OK);
+        let reexported_bytes = to_bytes(reexported.into_body(), MAX_EXPORT_BYTES)
+            .await
+            .unwrap();
+        let reexported_records = decode_export_jsonl(&reexported_bytes).unwrap();
+        let ConversationExportRecord::Turn(reexported_source) = &reexported_records[1] else {
+            unreachable!()
+        };
+        let reexported_invoke = reexported_source
+            .accepted_view
+            .as_ref()
+            .unwrap()
+            .layers
+            .iter()
+            .flat_map(|layer| &layer.actions)
+            .find(|action| action.kind == ExportActionKind::Invoke)
+            .unwrap();
+        let ConversationExportRecord::Turn(reexported_destination) = &reexported_records[2] else {
+            unreachable!()
+        };
+        assert_eq!(reexported_invoke.id, "action:invoke");
+        assert_eq!(reexported_invoke.target_layer_id, None);
+        assert_eq!(
+            reexported_destination.origin,
+            ExportTurnOrigin::Action {
+                source_turn_id: reexported_source.id.clone(),
+                source_action_id: reexported_invoke.id.clone(),
+            }
+        );
+
+        let restaged = app
+            .clone()
+            .oneshot(request("POST", "write-token", Body::from(reexported_bytes)))
+            .await
+            .unwrap();
+        assert_eq!(restaged.status(), StatusCode::OK);
+        let restaged = response_json(restaged).await;
+        let republished = app
+            .clone()
+            .oneshot(request(
+                "PUT",
+                "write-token",
+                Body::from(serde_json::json!({"importId":restaged["importId"]}).to_string()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(republished.status(), StatusCode::OK);
+        let republished = response_json(republished).await;
+        let round_trip_thread_id = republished["threadId"].as_i64().unwrap();
+        let round_trip_source_id = republished["turns"][0]["interactionId"].as_i64().unwrap();
+        let round_trip_destination_id = republished["turns"][1]["interactionId"].as_i64().unwrap();
+        let round_trip_thread = app
+            .clone()
+            .oneshot(request_uri(
+                "GET",
+                &format!("/api/threads/{round_trip_thread_id}"),
+                "read-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(round_trip_thread.status(), StatusCode::OK);
+        let round_trip_thread = response_json(round_trip_thread).await;
+        let round_trip_invoke =
+            round_trip_thread["interactions"][0]["completionOutput"]["rootLayer"]["actions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|action| action["kind"] == "invoke")
+                .unwrap();
+        let round_trip_action_id = round_trip_invoke["id"].as_i64().unwrap();
+        let round_trip_target = round_trip_invoke["targetLayerId"].as_i64().unwrap();
+        let round_trip_destination = app
+            .oneshot(request_uri(
+                "GET",
+                &format!(
+                    "/api/threads/{round_trip_thread_id}/interactions/{round_trip_source_id}/actions/{round_trip_action_id}/destination"
+                ),
+                "read-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(round_trip_destination.status(), StatusCode::OK);
+        let round_trip_destination = response_json(round_trip_destination).await;
+        assert_eq!(
+            round_trip_destination["interactionId"],
+            round_trip_destination_id
+        );
+        assert_eq!(round_trip_destination["targetLayerId"], round_trip_target);
+        graph_task.abort();
     }
 
     #[tokio::test]

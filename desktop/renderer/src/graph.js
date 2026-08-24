@@ -53,6 +53,7 @@ function workspace() {
       document.querySelector("#settingsButton")?.click();
     },
     onNavigateLayer: (layerId, navigation) => import("./threads.js").then(({ navigateLayer }) => navigateLayer(layerId, navigation)),
+    onNavigateResolvedInvoke: (action) => import("./threads.js").then(({ navigateResolvedInvoke }) => navigateResolvedInvoke(action)),
     onInvokeAction: (action) => import("./threads.js").then(({ invokeAction }) => invokeAction(action)),
     onDecideApproval: (requestId, decision) => import("./threads.js").then(({ decideApproval }) => decideApproval(requestId, decision)),
   });
