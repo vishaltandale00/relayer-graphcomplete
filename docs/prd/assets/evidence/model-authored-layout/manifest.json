@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "capturedFromCommit": "8501cfa10d7528978805476d36dd35e3150adfa3",
-  "capturedAt": "2026-08-24T15:24:23-04:00",
+  "capturedFromCommit": "5f09e5f5642762d7e76bf9f8d106fed79815f775",
+  "capturedAt": "2026-08-24T15:34:58-04:00",
   "harness": "fixture-task-system",
   "inferenceCalls": 0,
   "command": "npm run test:desktop:first-message",
@@ -27,7 +27,7 @@
   "files": [
     {
       "path": "product-root-inspector.png",
-      "sha256": "98e51ca380a8ff5d3ec9d4807b4fa80322e67672c04f9a00f320f32145360e3d",
+      "sha256": "5e02f94f6d58dad730529636b88a0c6cd714ad2319c852ff22498a40abf433e5",
       "pixelWidth": 2840,
       "pixelHeight": 1800,
       "surface": "product",
