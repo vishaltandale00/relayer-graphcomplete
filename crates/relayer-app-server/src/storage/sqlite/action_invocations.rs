@@ -252,6 +252,7 @@ impl SqliteProductStore {
             source_interaction_id,
             action_id,
             result_interaction_id: interaction.id,
+            result_completion_status: interaction.completion_status.clone(),
             created_at: timestamp,
         };
         transaction.commit().await?;
@@ -267,9 +268,10 @@ pub(super) async fn fetch_action_invocations(
     thread_id: ThreadId,
 ) -> Result<Vec<ActionInvocation>, StorageError> {
     let rows = sqlx::query(
-        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at
+        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status
          FROM action_invocations ai
          JOIN interactions source ON source.id=ai.source_interaction_id
+         JOIN interactions result ON result.id=ai.result_interaction_id
          JOIN threads source_thread ON source_thread.id=source.thread_id
          JOIN threads requested_thread ON requested_thread.id=?1
          WHERE source.thread_id=?1
@@ -289,7 +291,10 @@ async fn existing_exact(
     action_id: i64,
 ) -> Result<Option<(ActionInvocation, Interaction)>, StorageError> {
     let Some(row) = sqlx::query(
-        "SELECT source_interaction_id,action_id,result_interaction_id,created_at FROM action_invocations WHERE source_interaction_id=?1 AND action_id=?2",
+        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status
+         FROM action_invocations ai
+         JOIN interactions result ON result.id=ai.result_interaction_id
+         WHERE ai.source_interaction_id=?1 AND ai.action_id=?2",
     )
     .bind(source_interaction_id.value())
     .bind(action_id)
@@ -307,11 +312,12 @@ async fn existing_for_action_scope(
     action_id: i64,
 ) -> Result<Option<(ActionInvocation, Interaction)>, StorageError> {
     let Some(row) = sqlx::query(
-        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at
+        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status
          FROM interactions requested_source
          JOIN threads requested_thread ON requested_thread.id=requested_source.thread_id
          JOIN action_invocations ai ON ai.action_id=?2
          JOIN interactions existing_source ON existing_source.id=ai.source_interaction_id
+         JOIN interactions result ON result.id=ai.result_interaction_id
          JOIN threads existing_thread ON existing_thread.id=existing_source.thread_id
          WHERE requested_source.id=?1
            AND (
@@ -356,6 +362,7 @@ fn invocation_from_row(row: &SqliteRow) -> Result<ActionInvocation, StorageError
         action_id: row.try_get(1)?,
         result_interaction_id: InteractionId::from_database(row.try_get(2)?),
         created_at: row.try_get(3)?,
+        result_completion_status: row.try_get(4)?,
     })
 }
 

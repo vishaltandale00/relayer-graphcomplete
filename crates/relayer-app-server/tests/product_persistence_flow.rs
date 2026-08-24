@@ -1546,6 +1546,10 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         let state = response_json(state).await;
         assert_eq!(state["actionInvocations"].as_array().unwrap().len(), 1);
         assert_eq!(state["interactions"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            state["actionInvocations"][0]["resultCompletionStatus"],
+            state["interactions"][1]["completionStatus"]
+        );
         if state["interactions"][1]["completionStatus"] == "accepted" {
             break;
         }
@@ -2254,6 +2258,158 @@ async fn interrupted_action_invocation_remains_submitted_for_source_pair_recover
 }
 
 #[tokio::test]
+async fn startup_binding_failure_preserves_unbound_invocation_for_next_recovery() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-startup-binding-retry-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({"initialMessage":"source"})),
+            true,
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let source_id = thread["rootInteractionId"].as_i64().unwrap();
+    let pool = sqlite_pool(&database).await;
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=90,completion_status='accepted' WHERE id=?1",
+    )
+    .bind(source_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let result_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,2,'leased result',?2,'not_started')")
+        .bind(thread_id)
+        .bind(&created_at)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,41,?2,?3,1)")
+        .bind(source_id)
+        .bind(result_id)
+        .bind(&created_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(&format!(
+        "CREATE TRIGGER fail_startup_bind BEFORE UPDATE OF graph_node_id ON interactions WHEN OLD.id={result_id} AND NEW.graph_node_id IS NOT NULL BEGIN SELECT RAISE(FAIL, 'simulated transient bind failure'); END"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,
+            "configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let creates = Arc::new(AtomicUsize::new(0));
+    let observed_creates = creates.clone();
+    let graph = Router::new()
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let observed_creates = observed_creates.clone();
+                async move {
+                    observed_creates.fetch_add(1, Ordering::SeqCst);
+                    assert_eq!(
+                        body["invocation"],
+                        json!({"sourceInteractionNodeId":90,"sourceActionId":41})
+                    );
+                    axum::Json(json!({"node":{"id":93},"graphToken":""}))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/93",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":93,
+                    "invocation":{"sourceInteractionNodeId":90,"sourceActionId":41}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/93/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::delete(|| async { axum::Json(json!({"revoked":true})) }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+
+    let first_reopen =
+        open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    drop(first_reopen);
+    let pool = sqlite_pool(&database).await;
+    let after_failure: (String, Option<i64>) =
+        sqlx::query_as("SELECT completion_status,graph_node_id FROM interactions WHERE id=?1")
+            .bind(result_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(after_failure, ("submitted".into(), None));
+    sqlx::query("DROP TRIGGER fail_startup_bind")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let second_reopen =
+        open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    drop(second_reopen);
+    let pool = sqlite_pool(&database).await;
+    let after_recovery: (String, Option<i64>) =
+        sqlx::query_as("SELECT completion_status,graph_node_id FROM interactions WHERE id=?1")
+            .bind(result_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(after_recovery, ("submitted".into(), Some(93)));
+    assert_eq!(creates.load(Ordering::SeqCst), 2);
+    pool.close().await;
+
+    graph_task.abort();
+    harness_task.abort();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2345,6 +2501,24 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
     let legacy_pending_id = legacy_pending.last_insert_rowid();
     sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,45,?2,?3)")
         .bind(source_id).bind(legacy_pending_id).bind(&created_at).execute(&pool).await.unwrap();
+    let strict_approval_wait = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,10,'strict leased approval wait',?2,99,'waiting_for_approval','codex-basic','sha256:test','ask','sha256:strict-approval',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"ask","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let strict_approval_wait_id = strict_approval_wait.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,46,?2,?3,1)")
+        .bind(source_id).bind(strict_approval_wait_id).bind(&created_at).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO approval_requests(request_id,interaction_id,complete_call_id,harness_session_id,title,reason,action_json,scope_keys_json,scope_description,created_at,expires_at) VALUES ('strict-restart-approval',?1,'call-strict','session-strict','Run command','Needed','{\"kind\":\"command\",\"command\":\"npm test\",\"workingDirectory\":\"/workspace\"}','[]','test scope',?2,NULL)")
+        .bind(strict_approval_wait_id).bind(&created_at).execute(&pool).await.unwrap();
+    let legacy_approval_wait = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,11,'legacy approval wait',?2,100,'waiting_for_approval','codex-basic','sha256:test','ask','sha256:legacy-approval',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"ask","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let legacy_approval_wait_id = legacy_approval_wait.last_insert_rowid();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (?1,47,?2,?3)")
+        .bind(source_id).bind(legacy_approval_wait_id).bind(&created_at).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO approval_requests(request_id,interaction_id,complete_call_id,harness_session_id,title,reason,action_json,scope_keys_json,scope_description,created_at,expires_at) VALUES ('legacy-restart-approval',?1,'call-legacy','session-legacy','Run command','Needed','{\"kind\":\"command\",\"command\":\"npm test\",\"workingDirectory\":\"/workspace\"}','[]','test scope',?2,NULL)")
+        .bind(legacy_approval_wait_id).bind(&created_at).execute(&pool).await.unwrap();
     pool.close().await;
 
     let canonical = json!({
@@ -2412,6 +2586,19 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .route(
             "/api/control/interactions/98",
             axum::routing::get(|| async { axum::Json(json!({"nodeId":98,"invocation":null})) }),
+        )
+        .route(
+            "/api/control/interactions/99",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":99,
+                    "invocation":{"sourceInteractionNodeId":90,"sourceActionId":46}
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/100",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":100,"invocation":null})) }),
         )
         .route(
             "/api/control/capabilities",
@@ -2491,6 +2678,24 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         )
         .route(
             "/api/control/interactions/98/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        )
+        .route(
+            "/api/control/interactions/99/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        )
+        .route(
+            "/api/control/interactions/100/output",
             axum::routing::get(|| async {
                 (
                     StatusCode::NOT_FOUND,
@@ -2656,6 +2861,34 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
             .unwrap()
             .starts_with("Legacy action invocation ended")
     );
+    let strict_approval_wait = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == strict_approval_wait_id)
+        .unwrap();
+    assert_eq!(strict_approval_wait["completionStatus"], "submitted");
+    assert_eq!(strict_approval_wait["graphNodeId"], 99);
+    assert!(
+        strict_approval_wait["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("Invoke the action again")
+    );
+    let legacy_approval_wait = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == legacy_approval_wait_id)
+        .unwrap();
+    assert_eq!(legacy_approval_wait["completionStatus"], "failed");
+    assert_eq!(legacy_approval_wait["graphNodeId"], 100);
+    assert!(
+        legacy_approval_wait["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("harness session ended")
+    );
     let approval = state["approvals"]
         .as_array()
         .unwrap()
@@ -2663,6 +2896,15 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .find(|approval| approval["request"]["requestId"] == "restart-approval")
         .unwrap();
     assert_eq!(approval["resolution"]["outcome"], "aborted");
+    for request_id in ["strict-restart-approval", "legacy-restart-approval"] {
+        let approval = state["approvals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|approval| approval["request"]["requestId"] == request_id)
+            .unwrap();
+        assert_eq!(approval["resolution"]["outcome"], "aborted");
+    }
     assert!(invalidations.load(Ordering::SeqCst) >= 7);
     graph_task.abort();
     harness_task.abort();

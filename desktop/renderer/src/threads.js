@@ -145,6 +145,34 @@ function layerContainsUnresolvedInvokedAction(layer, invocations = appState.acti
   )) ?? false;
 }
 
+const NONTERMINAL_INVOCATION_STATUSES = new Set([
+  "not_started",
+  "running",
+  "submitted",
+  "waiting_for_approval",
+]);
+
+function layerContainsPendingInvokedAction(layer, invocations = appState.actionInvocations) {
+  return layerContainsUnresolvedInvokedAction(
+    layer,
+    invocations.filter(({ resultCompletionStatus }) => (
+      resultCompletionStatus == null
+      || NONTERMINAL_INVOCATION_STATUSES.has(resultCompletionStatus)
+    )),
+  );
+}
+
+function layerContainsRefreshableInvokedAction(layer, invocations = appState.actionInvocations) {
+  return layerContainsUnresolvedInvokedAction(
+    layer,
+    invocations.filter(({ resultCompletionStatus }) => (
+      resultCompletionStatus == null
+      || resultCompletionStatus === "accepted"
+      || NONTERMINAL_INVOCATION_STATUSES.has(resultCompletionStatus)
+    )),
+  );
+}
+
 function invalidateResolvedInvokeLayerCache(invocations) {
   for (const identity of acceptedLayerCache.identities()) {
     const layer = acceptedLayerCache.get(identity);
@@ -183,7 +211,7 @@ function schedulePendingRefresh(threadId, { force = false } = {}) {
     String(interaction.threadId) === String(threadId)
     && interaction.projectionFresh === false
   ))
-    || layerContainsUnresolvedInvokedAction(
+    || layerContainsPendingInvokedAction(
       appState.visibleLayer,
       appState.actionInvocations,
     );
@@ -239,7 +267,7 @@ export async function refreshState(
   if (
     selected
     && visibleLayerId != null
-    && layerContainsUnresolvedInvokedAction(refreshedVisibleLayer, nextActionInvocations)
+    && layerContainsRefreshableInvokedAction(refreshedVisibleLayer, nextActionInvocations)
   ) {
     const identity = {
       threadId: nextThreadId,

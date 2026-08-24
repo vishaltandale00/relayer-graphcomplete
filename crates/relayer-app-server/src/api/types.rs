@@ -115,6 +115,7 @@ pub(crate) struct ActionInvocationResponse {
     pub(super) source_interaction_id: i64,
     pub(super) action_id: i64,
     pub(super) result_interaction_id: i64,
+    pub(super) result_completion_status: String,
     pub(super) created_at: String,
 }
 
@@ -124,6 +125,7 @@ impl From<ActionInvocation> for ActionInvocationResponse {
             source_interaction_id: invocation.source_interaction_id.value(),
             action_id: invocation.action_id,
             result_interaction_id: invocation.result_interaction_id.value(),
+            result_completion_status: invocation.result_completion_status,
             created_at: invocation.created_at,
         }
     }

@@ -437,15 +437,25 @@ describe("workspace navigation integration", () => {
       const resolvedRoot = rootLayer(101, 11);
       resolvedRoot.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: 303 }];
       const source = interaction(1, 10, staleRoot);
-      const state = productState([{ id: 10, title: "Reused source" }], [source]);
-      state.actionInvocations = [{
+      const running = productState([{ id: 10, title: "Reused source" }], [source]);
+      running.actionInvocations = [{
         sourceInteractionId: 99,
         actionId: 777,
         resultInteractionId: 100,
+        resultCompletionStatus: "running",
       }];
+      const resolved = productState([{ id: 10, title: "Reused source" }], [source]);
+      resolved.actionInvocations = [{
+        ...running.actionInvocations[0],
+        resultCompletionStatus: "accepted",
+      }];
+      let stateReads = 0;
       let layerReads = 0;
       requestImplementation = vi.fn(async (path) => {
-        if (path.startsWith("/api/state?threadId=10")) return state;
+        if (path.startsWith("/api/state?threadId=10")) {
+          stateReads += 1;
+          return stateReads === 1 ? running : resolved;
+        }
         if (path.endsWith("/layers/101")) {
           layerReads += 1;
           return layerReads === 1 ? staleRoot : resolvedRoot;
@@ -466,11 +476,46 @@ describe("workspace navigation integration", () => {
         kind: "invoke",
         targetLayerId: 303,
       });
+      expect(controller.appState.actionInvocations[0].resultCompletionStatus).toBe("accepted");
+      expect(stateReads).toBe(2);
       expect(layerReads).toBe(2);
     } finally {
       vi.useRealTimers();
     }
   });
+
+  it.each(["failed", "stopped"])(
+    "does not poll an unresolved shared action after its remote result is %s",
+    async (resultCompletionStatus) => {
+      vi.useFakeTimers();
+      try {
+        const staleRoot = rootLayer(101, 11);
+        staleRoot.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: null }];
+        const source = interaction(1, 10, staleRoot);
+        const state = productState([{ id: 10, title: "Reused source" }], [source]);
+        state.actionInvocations = [{
+          sourceInteractionId: 99,
+          actionId: 777,
+          resultInteractionId: 100,
+          resultCompletionStatus,
+        }];
+        requestImplementation = vi.fn(async (path) => {
+          if (path.startsWith("/api/state?threadId=10")) return state;
+          throw new Error(`Unexpected request: ${path}`);
+        });
+        const controller = await loadModules();
+
+        await controller.loadThread(10);
+        await vi.advanceTimersByTimeAsync(1_500);
+
+        expect(requestImplementation).toHaveBeenCalledTimes(1);
+        expect(controller.appState.actionInvocations).toEqual(state.actionInvocations);
+        expect(controller.appState.visibleLayer.actions[0].targetLayerId).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("retries a one-shot canonical root failure after the result is already terminal", async () => {
     vi.useFakeTimers();

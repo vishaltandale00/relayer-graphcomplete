@@ -60,7 +60,7 @@ async fn reconcile_interrupted_interaction(
                 }),
             })
             .await?;
-        let bound = storage
+        let bound = match storage
             .bind_prepared_interaction(PreparedInteractionBinding {
                 interaction_id: interaction.id,
                 graph_node_id: prepared.graph_node_id,
@@ -69,7 +69,22 @@ async fn reconcile_interrupted_interaction(
                 effective_execution_digest: &prepared.effective_execution_digest,
                 effective_permission_receipt: &prepared.effective_permission_receipt,
             })
-            .await?;
+            .await
+        {
+            Ok(bound) => bound,
+            Err(error) => {
+                let cleanup = runtime.discard_prepared(prepared).await;
+                eprintln!(
+                    "preserving submitted invoke interaction {} for idempotent source-pair recovery after startup binding failed: {error}{}",
+                    interaction.id,
+                    cleanup
+                        .err()
+                        .map(|cleanup| format!("; capability cleanup also failed: {cleanup}"))
+                        .unwrap_or_default()
+                );
+                return Ok(());
+            }
+        };
         if !bound {
             anyhow::bail!("could not recover graph binding for {}", interaction.id);
         }
@@ -227,8 +242,7 @@ impl RelayerAppServer {
         // harness session. A completion may have been accepted after the last product write; in
         // that case graph authority wins while the stale approval is still durably closed below.
         let interrupted_approvals = storage
-            .abort_pending_approvals(
-                None,
+            .abort_pending_approvals_on_restart(
                 "Approval request was aborted because its harness session ended when Relayer stopped.",
                 &startup_timestamp(),
             )
