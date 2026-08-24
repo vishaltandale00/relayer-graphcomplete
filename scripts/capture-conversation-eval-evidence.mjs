@@ -151,8 +151,10 @@ async function createOrdinaryExport() {
   ordinaryWindow.show();
   await waitFor("ordinary conversation sidebar", ordinaryWindow, `Boolean(document.querySelector('[data-thread="${thread.id}"]'))`);
   await ordinaryWindow.webContents.executeJavaScript(`document.querySelector('[data-thread="${thread.id}"]')?.click()`);
-  await waitFor("ordinary export control", ordinaryWindow, `Boolean(document.querySelector('#exportConversation:not(.hidden):not(:disabled)'))`);
-  await capture(ordinaryWindow, "ordinary-conversation-export", ["Owner sees enabled Export conversation control in ordinary ProductWorkspace"]);
+  await waitFor("ordinary conversation settings", ordinaryWindow, `Boolean(document.querySelector('#conversationSettingsButton:not(.hidden):not(:disabled)'))`);
+  await ordinaryWindow.webContents.executeJavaScript(`document.querySelector('#conversationSettingsButton').click()`);
+  await waitFor("ordinary export menu item", ordinaryWindow, `Boolean(document.querySelector('#conversationSettingsMenu:not(.hidden) #exportConversation:not(.hidden):not(:disabled)'))`);
+  await capture(ordinaryWindow, "ordinary-conversation-export", ["Owner opens Conversation settings and sees the enabled Export conversation menu item"]);
   await ordinaryWindow.webContents.executeJavaScript(`document.querySelector('#exportConversation').click()`);
   const exportDeadline = Date.now() + 10_000;
   while (Date.now() < exportDeadline) {

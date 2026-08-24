@@ -231,18 +231,6 @@ export function turnStatusPresentation(status) {
   return { kind: "unknown", label: status ? String(status).replaceAll("_", " ") : "Unknown" };
 }
 
-export function runStatePresentation(status, { imported = false } = {}) {
-  const pending = PENDING_COMPLETION_STATUSES.has(status);
-  if (imported && pending) return { pending: false, display: "Unfinished snapshot" };
-  return {
-    pending,
-    display: status === "accepted" ? "Complete"
-      : pending ? "…"
-        : status === "idle" ? "Ready"
-          : status[0].toUpperCase() + status.slice(1),
-  };
-}
-
 export function turnSelectionIntent(turns, currentInteractionId, targetInteractionId) {
   const currentIndex = turns.findIndex((turn) => (
     String(turn.id) === String(currentInteractionId)
@@ -423,6 +411,7 @@ export function createProductWorkspace({
   let inspectorFitRequest = null;
   let inspectorFitFrame = null;
   let turnPopoverOpen = false;
+  let settingsMenuOpen = false;
   let exportPending = false;
   const approvalSelections = new Map();
   const approvalErrors = new Map();
@@ -437,14 +426,38 @@ export function createProductWorkspace({
   const threadView = $("#threadView");
   if (!threadView) throw new Error("Product workspace requires a #threadView host.");
   threadView.innerHTML = productWorkspaceMarkup();
+  const settingsControl = $("#conversationSettings");
+  const settingsButton = $("#conversationSettingsButton");
+  const settingsMenu = $("#conversationSettingsMenu");
   const exportButton = $("#exportConversation");
+  const closeSettingsMenu = ({ restoreFocus = false } = {}) => {
+    settingsMenuOpen = false;
+    settingsMenu.classList.add("hidden");
+    settingsButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus) settingsButton.focus();
+  };
+  const openSettingsMenu = () => {
+    if (settingsButton.disabled) return;
+    settingsMenuOpen = true;
+    settingsMenu.classList.remove("hidden");
+    settingsButton.setAttribute("aria-expanded", "true");
+    exportButton.focus();
+  };
   const renderExportControl = (thread = getThread()) => {
     const available = capabilities.canExportConversation
       && typeof onExportConversation === "function";
+    settingsControl.classList.toggle("hidden", !available);
     exportButton.classList.toggle("hidden", !available);
     exportButton.disabled = !available || exportPending || thread?.id == null;
+    settingsButton.disabled = !available || exportPending;
+    settingsButton.setAttribute("aria-busy", String(exportPending));
     exportButton.setAttribute("aria-busy", String(exportPending));
     exportButton.textContent = exportPending ? "Exporting…" : "Export conversation…";
+    if (!available) closeSettingsMenu();
+  };
+  settingsButton.onclick = () => {
+    if (settingsMenuOpen) closeSettingsMenu();
+    else openSettingsMenu();
   };
   exportButton.onclick = async () => {
     const thread = getThread();
@@ -454,6 +467,7 @@ export function createProductWorkspace({
       || thread?.id == null
       || typeof onExportConversation !== "function"
     ) return;
+    closeSettingsMenu();
     exportPending = true;
     renderExportControl(thread);
     try {
@@ -471,6 +485,15 @@ export function createProductWorkspace({
   const graphStage = $("#graphStage");
   const graphDocument = graphStage.ownerDocument;
   const graphWindow = graphDocument.defaultView;
+  const closeSettingsMenuFromOutside = (event) => {
+    if (settingsMenuOpen && !settingsControl.contains(event.target)) closeSettingsMenu();
+  };
+  const closeSettingsMenuOnEscape = (event) => {
+    if (event.key !== "Escape" || !settingsMenuOpen) return;
+    closeSettingsMenu({ restoreFocus: true });
+  };
+  graphDocument.addEventListener("pointerdown", closeSettingsMenuFromOutside, true);
+  graphDocument.addEventListener("keydown", closeSettingsMenuOnEscape, true);
   const narrowInspectorMedia = graphWindow?.matchMedia?.("(max-width: 760px)");
   let inspectorUsesOverlay = narrowInspectorMedia?.matches
     ?? (graphWindow?.innerWidth ?? 0) <= 760;
@@ -927,7 +950,7 @@ export function createProductWorkspace({
       ? `${identityLabels.provider}: ${identityLabels.model}`
       : "";
     identity.classList.toggle("hidden", !identityLabels);
-    renderRunState(state, thread);
+    renderInteractionState(state);
     renderApprovalDock(state, thread);
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
@@ -979,17 +1002,8 @@ export function createProductWorkspace({
     breadcrumb.scrollLeft = breadcrumb.scrollWidth;
   }
 
-  function renderRunState(state, thread) {
+  function renderInteractionState(state) {
     const status = state.status || "idle";
-    const presentation = runStatePresentation(status, { imported: thread?.imported === true });
-    const { pending } = presentation;
-    const needsApproval = pendingApprovalsForThread(state, getThread()).length > 0;
-    const display = needsApproval ? "Needs approval"
-      : presentation.display;
-    const runState = $("#runState");
-    runState.className = `run-state ${needsApproval ? "approval" : pending ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
-    runState.setAttribute("aria-label", needsApproval ? "Waiting for user approval" : pending ? "Waiting for graph" : display);
-    runState.querySelector("span").textContent = display;
     prompt.disabled = composerDisabledForState(status, capabilities.canCompose);
     modelPicker?.setDisabled(prompt.disabled);
     syncComposer();
@@ -1463,7 +1477,9 @@ export function createProductWorkspace({
     graphSimulation.cancel();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     graphDocument.removeEventListener("pointerdown", closeTurnPopoverFromOutside, true);
+    graphDocument.removeEventListener("pointerdown", closeSettingsMenuFromOutside, true);
     graphDocument.removeEventListener("keydown", closeTurnPopoverOnEscape, true);
+    graphDocument.removeEventListener("keydown", closeSettingsMenuOnEscape, true);
     narrowInspectorMedia?.removeEventListener?.("change", handleInspectorLayoutChange);
     dragging = null;
     panning = null;

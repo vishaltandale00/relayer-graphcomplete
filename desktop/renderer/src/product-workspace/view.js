@@ -9,8 +9,12 @@ export function productWorkspaceMarkup() {
       </nav>
       <div><h2 id="threadTitle">New thread</h2><p id="threadScope">No folder</p></div>
       <div class="thread-header-actions">
-        <button class="conversation-export hidden" id="exportConversation" type="button" data-review-ref="export-conversation" data-review-kind="conversation-export" title="Export conversation as JSONL" aria-label="Export conversation as JSONL">Export conversation…</button>
-        <div class="run-state" id="runState"><i></i><span>Ready</span></div>
+        <div class="conversation-settings hidden" id="conversationSettings">
+          <button class="conversation-settings-button" id="conversationSettingsButton" type="button" title="Conversation settings" aria-label="Conversation settings" aria-expanded="false" aria-controls="conversationSettingsMenu">•••</button>
+          <div class="conversation-settings-menu hidden" id="conversationSettingsMenu" role="menu" aria-label="Conversation settings">
+            <button class="conversation-export" id="exportConversation" type="button" role="menuitem" data-review-ref="export-conversation" data-review-kind="conversation-export">Export conversation…</button>
+          </div>
+        </div>
       </div>
     </header>
     <div class="thread-workspace" data-review-capture="workspace" role="region" aria-label="Thread workspace">

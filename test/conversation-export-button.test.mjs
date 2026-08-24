@@ -11,34 +11,56 @@ function deferred() {
 }
 
 function captureExportHandler({ mode = "interactive", getThread, onExportConversation }) {
-  const classes = new Set();
-  const attributes = new Map();
-  const button = {
-    disabled: false,
-    textContent: "",
-    classList: {
-      add: (...names) => names.forEach((name) => classes.add(name)),
-      remove: (...names) => names.forEach((name) => classes.delete(name)),
-      contains: (name) => classes.has(name),
-      toggle: (name, force) => {
-        if (force) classes.add(name);
-        else classes.delete(name);
+  const element = (initialClasses = []) => {
+    const classes = new Set(initialClasses);
+    const attributes = new Map();
+    return {
+      disabled: false,
+      textContent: "",
+      focus: vi.fn(),
+      classList: {
+        add: (...names) => names.forEach((name) => classes.add(name)),
+        remove: (...names) => names.forEach((name) => classes.delete(name)),
+        contains: (name) => classes.has(name),
+        toggle: (name, force) => {
+          if (force) classes.add(name);
+          else classes.delete(name);
+        },
       },
-    },
-    setAttribute: (name, value) => attributes.set(name, String(value)),
-    getAttribute: (name) => attributes.get(name) ?? null,
+      setAttribute: (name, value) => attributes.set(name, String(value)),
+      getAttribute: (name) => attributes.get(name) ?? null,
+      classes,
+    };
   };
+  const button = element();
+  const settingsButton = element();
+  const settingsMenu = element(["hidden"]);
+  const settingsControl = element(["hidden"]);
+  settingsControl.contains = (target) => [settingsControl, settingsButton, settingsMenu, button].includes(target);
+  const listeners = new Map();
+  const graphDocument = {
+    defaultView: { innerWidth: 1200 },
+    addEventListener: (name, handler) => listeners.set(name, handler),
+  };
+  const graphStage = { ownerDocument: graphDocument };
   const threadView = {
+    dataset: {},
     set innerHTML(markup) {
-      if (markup.includes('class="conversation-export hidden"')) classes.add("hidden");
+      expect(markup).toContain('id="conversationSettingsButton"');
+      expect(markup).toContain('id="conversationSettingsMenu"');
     },
   };
   const root = {
     querySelector(selector) {
       if (selector === "#threadView") return threadView;
+      if (selector === "#conversationSettings") return settingsControl;
+      if (selector === "#conversationSettingsButton") return settingsButton;
+      if (selector === "#conversationSettingsMenu") return settingsMenu;
       if (selector === "#exportConversation") return button;
+      if (selector === "#graphStage") return graphStage;
       return null;
     },
+    querySelectorAll: () => [],
   };
 
   expect(() => createProductWorkspace({
@@ -52,7 +74,15 @@ function captureExportHandler({ mode = "interactive", getThread, onExportConvers
     onExportConversation,
   })).toThrow();
   expect(button.onclick).toBeTypeOf("function");
-  return { button, classes };
+  expect(settingsButton.onclick).toBeTypeOf("function");
+  return {
+    button,
+    classes: button.classes,
+    settingsButton,
+    settingsControl,
+    settingsMenu,
+    listeners,
+  };
 }
 
 function installToast() {
@@ -80,11 +110,14 @@ describe("conversation export product control", () => {
     const completion = deferred();
     const selectedThread = { id: 41 };
     const onExportConversation = vi.fn(() => completion.promise);
-    const { button, classes } = captureExportHandler({
+    const { button, classes, settingsButton, settingsMenu } = captureExportHandler({
       getThread: () => selectedThread,
       onExportConversation,
     });
 
+    settingsButton.onclick();
+    expect(settingsButton.getAttribute("aria-expanded")).toBe("true");
+    expect(settingsMenu.classes.has("hidden")).toBe(false);
     const first = button.onclick();
     const second = button.onclick();
     expect(onExportConversation).toHaveBeenCalledTimes(1);
@@ -93,6 +126,8 @@ describe("conversation export product control", () => {
     expect(button.getAttribute("aria-busy")).toBe("true");
     expect(button.textContent).toBe("Exporting…");
     expect(classes.has("hidden")).toBe(false);
+    expect(settingsButton.getAttribute("aria-expanded")).toBe("false");
+    expect(settingsMenu.classes.has("hidden")).toBe(true);
 
     completion.resolve({ status: "saved" });
     await Promise.all([first, second]);
@@ -122,18 +157,34 @@ describe("conversation export product control", () => {
     expect(button.getAttribute("aria-busy")).toBe("false");
   });
 
+  it("dismisses conversation settings from Escape or an outside pointer", () => {
+    const { settingsButton, settingsMenu, listeners } = captureExportHandler({
+      getThread: () => ({ id: 12 }),
+      onExportConversation: vi.fn(async () => ({ status: "saved" })),
+    });
+
+    settingsButton.onclick();
+    listeners.get("keydown")({ key: "Escape" });
+    expect(settingsMenu.classes.has("hidden")).toBe(true);
+    expect(settingsButton.focus).toHaveBeenCalledOnce();
+
+    settingsButton.onclick();
+    listeners.get("pointerdown")({ target: {} });
+    expect(settingsMenu.classes.has("hidden")).toBe(true);
+    expect(settingsButton.getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("remains hidden and inert in review mode even if an export callback is supplied", async () => {
     installToast();
     const onExportConversation = vi.fn(async () => ({ status: "saved" }));
-    const { button, classes } = captureExportHandler({
+    const { button, settingsControl } = captureExportHandler({
       mode: "review",
       getThread: () => ({ id: 19 }),
       onExportConversation,
     });
 
-    expect(classes.has("hidden")).toBe(true);
+    expect(settingsControl.classes.has("hidden")).toBe(true);
     await button.onclick();
-    expect(classes.has("hidden")).toBe(true);
     expect(onExportConversation).not.toHaveBeenCalled();
   });
 });

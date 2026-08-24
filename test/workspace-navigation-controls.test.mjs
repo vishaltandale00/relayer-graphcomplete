@@ -10,7 +10,6 @@ import {
   graphNodeIdentitySet,
   focusedTurnIdForRerender,
   historyNavigationPresentation,
-  runStatePresentation,
   turnSelectionIntent,
   turnReviewKind,
   turnStatusPresentation,
@@ -36,8 +35,12 @@ describe("product workspace navigation controls", () => {
 
     expect(markup.indexOf('id="historyBack"')).toBeLessThan(headerEnd);
     expect(markup.indexOf('id="historyForward"')).toBeLessThan(headerEnd);
+    expect(markup.indexOf('id="conversationSettingsButton"')).toBeLessThan(headerEnd);
+    expect(markup).toContain('aria-label="Conversation settings"');
+    expect(markup).not.toContain('id="runState"');
     expect(markup.indexOf('id="exportConversation"')).toBeLessThan(headerEnd);
-    expect(markup).toContain('type="button" data-review-ref="export-conversation"');
+    expect(markup.indexOf('id="exportConversation"')).toBeGreaterThan(markup.indexOf('id="conversationSettingsMenu"'));
+    expect(markup).toContain('data-review-ref="export-conversation"');
     expect(markup.indexOf('id="previousTurn"')).toBeGreaterThan(bannerStart);
     expect(markup.indexOf('id="nextTurn"')).toBeGreaterThan(bannerStart);
     expect(markup).toContain('id="turnPickerButton"');
@@ -106,14 +109,6 @@ describe("product workspace navigation controls", () => {
     const interactions = [{ id: 1, threadId: 4, completionStatus: "running" }];
     expect(shouldPollThreadInteractions({ id: 4, imported: true }, interactions)).toBe(false);
     expect(shouldPollThreadInteractions({ id: 4, imported: false }, interactions)).toBe(true);
-    expect(runStatePresentation("running", { imported: true })).toEqual({
-      pending: false,
-      display: "Unfinished snapshot",
-    });
-    expect(runStatePresentation("running", { imported: false })).toEqual({
-      pending: true,
-      display: "…",
-    });
   });
 
   it("makes the current turn a no-op while direct jumps preserve stable identity", () => {

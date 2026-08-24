@@ -2309,8 +2309,11 @@ describe("desktop skeleton", () => {
     expect(productShell).not.toContain('id="graphStage"');
     expect(productWorkspaceMarkup()).toContain('id="graphStage"');
     expect(productWorkspaceMarkup()).toContain('id="closeInspector"');
+    expect(productWorkspaceMarkup()).toContain('id="conversationSettingsButton"');
+    expect(productWorkspaceMarkup()).toContain('aria-label="Conversation settings"');
+    expect(productWorkspaceMarkup()).not.toContain('id="runState"');
     expect(productWorkspaceMarkup()).toContain('id="exportConversation"');
-    expect(productWorkspaceMarkup()).toContain('aria-label="Export conversation as JSONL"');
+    expect(productWorkspaceMarkup()).toContain('role="menuitem"');
     expect(productWorkspaceMarkup()).toContain('data-review-ref="export-conversation"');
     expect(workspaceModeCapabilities("interactive")).toEqual({
       canNavigate: true,
