@@ -106,6 +106,7 @@ mod tests {
             include_str!("migrations/0001_graph_schema.sql"),
             include_str!("migrations/0002_action_presentation.sql"),
             include_str!("migrations/0003_navigation_relations.sql"),
+            include_str!("migrations/0004_imported_conversations.sql"),
         ] {
             sqlx::raw_sql(migration)
                 .execute(&mut connection)
@@ -129,7 +130,7 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::raw_sql(include_str!("migrations/0004_layer_layout.sql"))
+        sqlx::raw_sql(include_str!("migrations/0005_layer_layout.sql"))
             .execute(&mut connection)
             .await
             .unwrap();

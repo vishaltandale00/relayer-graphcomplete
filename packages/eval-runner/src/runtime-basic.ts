@@ -158,16 +158,21 @@ export async function runBasicRuntimeEval(options: {
   }
 }
 
-export function checkBasicOutput(output: CompletionOutput, expectedInteractionNodeId = output.nodeId): EvalCheck[] {
+export function checkBasicOutput(
+  output: CompletionOutput,
+  expectedInteractionNodeId = output.nodeId,
+  options: { allowLegacyLayout?: boolean } = {},
+): EvalCheck[] {
   const layer = output.rootLayer;
   const declaredNodeIds = layer.layer.nodes;
   const resolvedNodeIds = layer.nodes.map((node) => node.id);
   const declaredEdgeIds = layer.layer.edges;
   const resolvedEdgeIds = layer.edges.map((edge) => edge.id);
   const nodeIds = new Set(layer.nodes.map((node) => node.id));
-  const placements = layer.layer.layout?.placements ?? [];
+  const layout = layer.layer.layout;
+  const placements = layout?.placements ?? [];
   const placementIds = new Set(placements.map((placement) => placement.nodeId));
-  const layoutComplete = layer.layer.layout?.version === 1
+  const layoutComplete = layout?.version === 1
     && placements.length === nodeIds.size
     && placementIds.size === nodeIds.size
     && [...nodeIds].every((id) => placementIds.has(id))
@@ -183,7 +188,13 @@ export function checkBasicOutput(output: CompletionOutput, expectedInteractionNo
     { name: "interaction-output", passed: output.nodeId === expectedInteractionNodeId && output.rootAction.sourceNodeId === expectedInteractionNodeId, detail: "Completion output and response action belong to the requested interaction." },
     { name: "accepted-closure", passed: output.rootAction.state === "accepted" && layer.layer.state === "accepted" && layer.nodes.every((node) => node.state === "accepted") && layer.edges.every((edge) => edge.state === "accepted") && layer.actions.every((action) => action.state === "accepted"), detail: "The response action and complete visible closure are accepted." },
     { name: "resolved-membership", passed: arraysEqual(declaredNodeIds, resolvedNodeIds) && arraysEqual(declaredEdgeIds, resolvedEdgeIds), detail: "Resolved records exactly match the accepted layer references." },
-    { name: "authored-layout", passed: layoutComplete, detail: "The accepted layer has one finite normalized v1 placement per visible node." },
+    {
+      name: "authored-layout",
+      passed: layoutComplete || (options.allowLegacyLayout === true && layout == null),
+      detail: layout == null && options.allowLegacyLayout === true
+        ? "The accepted legacy layer has no authored layout and remains compatible."
+        : "The accepted layer has one finite normalized v1 placement per visible node.",
+    },
     { name: "response-action", passed: output.rootAction.kind === "navigate" && output.rootAction.relation === "expand" && output.rootAction.sourceLayerId == null && output.rootAction.targetLayerId === layer.layer.id, detail: "Interaction has one accepted root expansion action." },
     { name: "visible-layer", passed: layer.nodes.length >= 1 && layer.nodes.length <= 8 && layer.nodes.every((node) => node.icon.trim() && node.title.trim() && node.detail.trim()), detail: `${layer.nodes.length} complete visible nodes.` },
     { name: "exact-edges", passed: layer.edges.every((edge) => edge.endpoints[0] !== edge.endpoints[1] && nodeIds.has(edge.endpoints[0]) && nodeIds.has(edge.endpoints[1])), detail: `${layer.edges.length} visible undirected edges stay inside the layer.` },

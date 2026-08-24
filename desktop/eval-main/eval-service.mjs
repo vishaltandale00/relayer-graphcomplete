@@ -545,7 +545,11 @@ export class EvalService {
         if (!turn.judgeEligible) continue;
 
         const prefix = `turn-${interaction.sequence}`;
-        const turnChecks = checkBasicOutput(interaction.completionOutput, interaction.graphNodeId).map((check) => ({
+        const turnChecks = checkBasicOutput(
+          interaction.completionOutput,
+          interaction.graphNodeId,
+          { allowLegacyLayout: true },
+        ).map((check) => ({
           ...check,
           name: `${prefix}:${check.name}`,
         }));

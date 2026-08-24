@@ -21,7 +21,7 @@ pub struct CompletionOutput {
     pub root_layer: ResolvedLayer,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcceptedGraphClosure {
     pub node_id: NodeId,

@@ -2,7 +2,13 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { LayerObject, NodeObject, RelayerGraphClient } from "@relayer/graph-client";
+import {
+  LayerLayoutObject,
+  LayerObject,
+  NodeObject,
+  NodePlacementObject,
+  RelayerGraphClient,
+} from "@relayer/graph-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EvalService } from "../desktop/eval-main/eval-service.mjs";
@@ -303,6 +309,9 @@ describe("conversation export to Eval end to end", () => {
 });
 
 function complexConversationFactory(projectPath) {
+  const centeredLayout = (node) => new LayerLayoutObject([
+    new NodePlacementObject(node, 0.5, 0.5),
+  ]);
   return () => ({
     traceSupport: () => ({
       prompt: "none", messages: "none", reasoningSummaries: "none", modelCalls: "none",
@@ -319,7 +328,7 @@ function complexConversationFactory(projectPath) {
       if (context.inputGraph.detail === "Explain the imported-safe follow-up") {
         const followup = new NodeObject("info", "Action-created follow-up", "The invoke action created this accepted turn.", "concept", "followup");
         await graph.submitNode(followup);
-        const layer = new LayerObject([followup], [], "followup-layer");
+        const layer = new LayerObject([followup], [], centeredLayout(followup), "followup-layer");
         await graph.submitLayer(layer);
         await graph.addAction(context.inputGraph.id, { kind: "navigate", relation: "expand", label: "Response", target: layer, clientKey: "followup-root" });
         await graph.submit(context.inputGraph.id);
@@ -331,11 +340,11 @@ function complexConversationFactory(projectPath) {
       const sharedNode = new NodeObject("info", "Shared reference", "Referenced from root and expansion.", "evidence", "shared");
       const cycleNode = new NodeObject("info", "Reference cycle", "References the shared layer again.", "evidence", "cycle");
       for (const node of [rootNode, expandedNode, nestedNode, sharedNode, cycleNode]) await graph.submitNode(node);
-      const root = new LayerObject([rootNode], [], "root-layer");
-      const expanded = new LayerObject([expandedNode], [], "expanded-layer");
-      const nested = new LayerObject([nestedNode], [], "nested-layer");
-      const shared = new LayerObject([sharedNode], [], "shared-layer");
-      const cycle = new LayerObject([cycleNode], [], "cycle-layer");
+      const root = new LayerObject([rootNode], [], centeredLayout(rootNode), "root-layer");
+      const expanded = new LayerObject([expandedNode], [], centeredLayout(expandedNode), "expanded-layer");
+      const nested = new LayerObject([nestedNode], [], centeredLayout(nestedNode), "nested-layer");
+      const shared = new LayerObject([sharedNode], [], centeredLayout(sharedNode), "shared-layer");
+      const cycle = new LayerObject([cycleNode], [], centeredLayout(cycleNode), "cycle-layer");
       for (const layer of [root, expanded, nested, shared, cycle]) await graph.submitLayer(layer);
       await graph.addAction(rootNode, { kind: "navigate", relation: "expand", sourceLayer: root, label: "Expand", target: expanded, clientKey: "root-expand" });
       await graph.addAction(expandedNode, { kind: "navigate", relation: "expand", sourceLayer: expanded, label: "Expand again", target: nested, clientKey: "nested-expand" });

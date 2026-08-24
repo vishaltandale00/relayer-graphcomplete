@@ -10,8 +10,9 @@ use relayer_app_server::{
     CONTROL_COOKIE, RelayerAppServer, RelayerAppServerConfig, RelayerRuntimeConfig,
 };
 use relayer_graph_core::{
-    ActionDraft, ActionKind, ActionVariant, GraphDatabase, LayerDraft, NavigateRelation, NodeDraft,
-    ProjectId as GraphProjectId, ThreadId as GraphThreadId,
+    ActionDraft, ActionKind, ActionVariant, GraphDatabase, LayerDraft, LayerLayout,
+    NavigateRelation, NodeDraft, NodeId, NodePlacement, ProjectId as GraphProjectId,
+    ThreadId as GraphThreadId,
 };
 use relayer_graph_server::ServerState as GraphServerState;
 use serde_json::{Value, json};
@@ -31,6 +32,14 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tower::ServiceExt;
+
+fn authored_layout(node_id: NodeId) -> Option<LayerLayout> {
+    Some(LayerLayout::v1(vec![NodePlacement {
+        node_id,
+        x: 0.5,
+        y: 0.5,
+    }]))
+}
 
 #[tokio::test]
 async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_authority() {
@@ -104,6 +113,7 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
             client_key: "root".into(),
             nodes: vec![answer.id],
             edges: vec![],
+            layout: authored_layout(answer.id),
             size_justification: None,
         })
         .await
@@ -113,6 +123,7 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
             client_key: "nested".into(),
             nodes: vec![nested_node.id],
             edges: vec![],
+            layout: authored_layout(nested_node.id),
             size_justification: None,
         })
         .await
@@ -122,6 +133,7 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
             client_key: "reference-a".into(),
             nodes: vec![reference_a_node.id],
             edges: vec![],
+            layout: authored_layout(reference_a_node.id),
             size_justification: None,
         })
         .await
@@ -131,6 +143,7 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
             client_key: "reference-b".into(),
             nodes: vec![reference_b_node.id],
             edges: vec![],
+            layout: authored_layout(reference_b_node.id),
             size_justification: None,
         })
         .await
