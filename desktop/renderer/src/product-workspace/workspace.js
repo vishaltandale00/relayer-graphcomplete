@@ -1,5 +1,5 @@
 import { escapeHtml, toast } from "../ui.js";
-import { actionWasInvoked } from "../action-invocation-state.js";
+import { actionCanRetry, actionWasInvoked } from "../action-invocation-state.js";
 import { setControlActivationCompletion } from "../control-activation.js";
 import {
   createModelPicker,
@@ -345,15 +345,18 @@ export function actionPresentation(action) {
 
 export function actionActivationPresentation(
   action,
-  { invoked = false, canInvokeMutatingActions = false } = {},
+  { invoked = false, retryable = false, canInvokeMutatingActions = false } = {},
 ) {
   const layerNavigation = action?.kind === "navigate" && action.targetLayerId != null;
   const resolvedInvoke = action?.kind === "invoke" && action.targetLayerId != null;
   const navigational = layerNavigation || resolvedInvoke;
+  const retryableInvoke = action?.kind === "invoke" && !navigational && retryable;
   return Object.freeze({
     layerNavigation,
     resolvedInvoke,
     navigational,
+    retryableInvoke,
+    label: retryableInvoke ? `Retry ${actionPresentation(action).label}` : actionPresentation(action).label,
     disabled: navigational ? false : invoked || !canInvokeMutatingActions,
   });
 }
@@ -1473,12 +1476,16 @@ export function createProductWorkspace({
         state.currentInteractionId,
         action.id,
       );
+      const retryable = actionCanRetry(state.actionInvocations, action.id);
       const activation = actionActivationPresentation(action, {
         invoked,
+        retryable,
         canInvokeMutatingActions: capabilities.canInvokeMutatingActions,
       });
+      button.querySelector(".action-label").textContent = activation.label;
       button.disabled = activation.disabled;
       button.classList.toggle("invoked", invoked);
+      button.classList.toggle("retryable", activation.retryableInvoke);
       button.onclick = async () => {
         if (activation.navigational) {
           button.disabled = true;

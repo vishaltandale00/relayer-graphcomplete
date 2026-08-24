@@ -484,6 +484,63 @@ describe("workspace navigation integration", () => {
     }
   });
 
+  it("retries a project-visible submitted invocation through the same source action", async () => {
+    vi.useFakeTimers();
+    try {
+      const root = rootLayer(101, 11);
+      const action = {
+        id: 777,
+        kind: "invoke",
+        sourceNodeId: 11,
+        targetLayerId: null,
+        interactionText: "Resume the leased result",
+      };
+      root.actions = [action];
+      const source = interaction(1, 10, root);
+      const submitted = productState([{ id: 10, title: "Recovery source" }], [source]);
+      submitted.actionInvocations = [{
+        sourceInteractionId: 99,
+        actionId: 777,
+        resultInteractionId: 100,
+        resultCompletionStatus: "submitted",
+      }];
+      const running = productState([{ id: 10, title: "Recovery source" }], [source]);
+      running.actionInvocations = [{
+        ...submitted.actionInvocations[0],
+        resultCompletionStatus: "running",
+      }];
+      let retried = false;
+      requestImplementation = vi.fn(async (path, options) => {
+        if (path.startsWith("/api/state?threadId=10")) return retried ? running : submitted;
+        if (path.endsWith("/layers/101")) return root;
+        if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
+          expect(options).toEqual({ method: "POST" });
+          retried = true;
+          return {
+            created: false,
+            invocation: running.actionInvocations[0],
+            interaction: { id: 100, threadId: 20, completionStatus: "running" },
+          };
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const controller = await loadModules();
+
+      await controller.loadThread(10);
+      await controller.invokeAction(action);
+
+      expect(retried).toBe(true);
+      expect(requestImplementation).toHaveBeenCalledWith(
+        "/api/threads/10/interactions/1/actions/777/invoke",
+        { method: "POST" },
+      );
+      expect(controller.appState.actionInvocations[0].resultCompletionStatus).toBe("running");
+      expect(controller.viewState).toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(["failed", "stopped"])(
     "does not poll an unresolved shared action after its remote result is %s",
     async (resultCompletionStatus) => {

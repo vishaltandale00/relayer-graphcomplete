@@ -56,6 +56,16 @@ describe("workspace action presentation grammar", () => {
       invoked: true,
       canInvokeMutatingActions: true,
     })).toMatchObject({ resolvedInvoke: false, navigational: false, disabled: true });
+    expect(actionActivationPresentation({ ...unresolved, label: "Continue" }, {
+      retryable: true,
+      canInvokeMutatingActions: true,
+    })).toMatchObject({
+      resolvedInvoke: false,
+      navigational: false,
+      retryableInvoke: true,
+      label: "Retry Continue",
+      disabled: false,
+    });
     expect(actionActivationPresentation(resolved, {
       invoked: true,
       canInvokeMutatingActions: false,

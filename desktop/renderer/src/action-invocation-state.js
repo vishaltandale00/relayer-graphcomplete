@@ -8,9 +8,17 @@ export function actionWasInvoked(
 ) {
   return invocations.some((invocation) => (
     String(invocation.actionId) === String(actionId)
+    && invocation.resultCompletionStatus !== "submitted"
   )) || pendingInvocations.some((invocation) => (
     String(invocation.sourceInteractionId) === String(sourceInteractionId)
     && String(invocation.actionId) === String(actionId)
+  ));
+}
+
+export function actionCanRetry(invocations = [], actionId) {
+  return invocations.some((invocation) => (
+    String(invocation.actionId) === String(actionId)
+    && invocation.resultCompletionStatus === "submitted"
   ));
 }
 
