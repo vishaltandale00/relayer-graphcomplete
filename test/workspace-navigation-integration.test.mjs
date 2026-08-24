@@ -238,6 +238,54 @@ describe("workspace navigation integration", () => {
     expect(controller.viewState).toMatchObject({ currentThreadId: 30, currentInteractionId: 3 });
   });
 
+  it("does not apply a resolved invoke destination after a newer node selection wins", async () => {
+    const sourceLayer = rootLayer(101, 11);
+    sourceLayer.nodes.push({ id: 12, title: "Node 12" });
+    const action = { id: 501, kind: "invoke", sourceNodeId: 11, targetLayerId: 201 };
+    sourceLayer.actions = [action];
+    const source = interaction(1, 10, sourceLayer);
+    const destination = interaction(2, 20, rootLayer(201, 21));
+    const destinationRead = deferred();
+    requestImplementation = vi.fn(async (path) => {
+      if (path.startsWith("/api/state?threadId=10")) {
+        return productState([{ id: 10, title: "Source" }, { id: 20, title: "Result" }], [source]);
+      }
+      if (path.endsWith("/actions/501/destination")) return destinationRead.promise;
+      if (path === "/api/threads/20") {
+        return {
+          thread: { id: 20, title: "Result" },
+          interactions: [destination],
+          actionInvocations: [],
+        };
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(10);
+    controller.replaceCurrentSelection(11);
+
+    const pending = controller.navigateResolvedInvoke(action);
+    expect(controller.getNavigationHistory().pendingResolvedInvokeNavigation).toBe(true);
+    controller.replaceCurrentSelection(12);
+    expect(controller.getNavigationHistory().pendingResolvedInvokeNavigation).toBe(false);
+    destinationRead.resolve({
+      actionId: 501,
+      actionKind: "invoke",
+      targetLayerId: 201,
+      threadId: 20,
+      interactionId: 2,
+      rootLayerId: 201,
+    });
+
+    await expect(pending).resolves.toBe(false);
+    expect(controller.viewState).toMatchObject({
+      currentThreadId: 10,
+      currentInteractionId: 1,
+      selectedNodeId: 12,
+    });
+    expect(requestImplementation).not.toHaveBeenCalledWith("/api/threads/20");
+  });
+
   it("lets a newer Back intent cancel a pending resolved invoke navigation", async () => {
     const previous = interaction(1, 5, rootLayer(51, 6));
     const sourceLayer = rootLayer(101, 11);

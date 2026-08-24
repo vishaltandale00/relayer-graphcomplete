@@ -22,7 +22,7 @@ impl SqliteProductStore {
 
     pub(crate) async fn interrupted_interactions(&self) -> Result<Vec<Interaction>, StorageError> {
         let rows = sqlx::query(
-            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id FROM interactions i WHERE i.completion_status IN ('not_started','running','submitted') ORDER BY i.id",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id FROM interactions i WHERE i.completion_status IN ('not_started','running','submitted','waiting_for_approval') ORDER BY i.id",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -38,7 +38,7 @@ impl SqliteProductStore {
     ) -> Result<bool, StorageError> {
         let output = serde_json::to_string(output)
             .map_err(|error| StorageError::Serialization(error.to_string()))?;
-        let result = sqlx::query("UPDATE interactions SET completion_status='accepted',completion_output_json=?1,completion_error=NULL WHERE id=?2 AND graph_node_id IS NOT NULL AND harness_configuration_name IS NOT NULL AND harness_configuration_digest IS NOT NULL AND effective_execution_digest IS NOT NULL AND effective_permission_receipt_json IS NOT NULL AND (completion_status IN ('not_started','running','submitted') OR (completion_status='failed' AND completion_error LIKE 'Canonical reconciliation pending:%'))")
+        let result = sqlx::query("UPDATE interactions SET completion_status='accepted',completion_output_json=?1,completion_error=NULL WHERE id=?2 AND graph_node_id IS NOT NULL AND harness_configuration_name IS NOT NULL AND harness_configuration_digest IS NOT NULL AND effective_execution_digest IS NOT NULL AND effective_permission_receipt_json IS NOT NULL AND (completion_status IN ('not_started','running','submitted','waiting_for_approval') OR (completion_status='failed' AND completion_error LIKE 'Canonical reconciliation pending:%'))")
             .bind(output)
             .bind(interaction_id.value())
             .execute(&self.pool)

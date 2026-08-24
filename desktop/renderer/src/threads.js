@@ -560,6 +560,12 @@ export function getNavigationHistory() {
 
 export function replaceCurrentSelection(selectedNodeId) {
   viewState.selectedNodeId = selectedNodeId ?? null;
+  // Selecting a node is a newer presentation intent than an invoke destination
+  // already being resolved. Selection is intentionally not part of the
+  // navigation location key, so explicitly invalidate that async request while
+  // leaving background refresh and layer navigation untouched.
+  resolvedInvokeNavigationGate.invalidate();
+  pendingResolvedInvokeNavigation = false;
   supersedePendingHistory();
   if (!navigationHistory.current) {
     recordCurrentNavigation();

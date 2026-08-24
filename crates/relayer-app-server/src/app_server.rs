@@ -161,18 +161,6 @@ impl RelayerAppServer {
         }
         let permission_catalog = PermissionCatalog::load(&config.permission_catalog).await?;
         let storage = SqliteProductStore::open(&config.database_path).await?;
-        let interrupted_approvals = storage
-            .abort_pending_approvals(
-                None,
-                "Approval request was aborted because its harness session ended when Relayer stopped.",
-                &startup_timestamp(),
-            )
-            .await?;
-        if interrupted_approvals > 0 {
-            eprintln!(
-                "marked {interrupted_approvals} interrupted approval request(s) aborted during backend startup"
-            );
-        }
         let runtime = match &config.runtime {
             Some(runtime) => Some(
                 RuntimeClient::open(
@@ -227,6 +215,21 @@ impl RelayerAppServer {
                         .await?;
                 }
             }
+        }
+        // Reconcile canonical graph acceptance before aborting approvals left open by the dead
+        // harness session. A completion may have been accepted after the last product write; in
+        // that case graph authority wins while the stale approval is still durably closed below.
+        let interrupted_approvals = storage
+            .abort_pending_approvals(
+                None,
+                "Approval request was aborted because its harness session ended when Relayer stopped.",
+                &startup_timestamp(),
+            )
+            .await?;
+        if interrupted_approvals > 0 {
+            eprintln!(
+                "marked {interrupted_approvals} interrupted approval request(s) aborted during backend startup"
+            );
         }
         let interrupted = storage
             .recover_interrupted_action_invocations(

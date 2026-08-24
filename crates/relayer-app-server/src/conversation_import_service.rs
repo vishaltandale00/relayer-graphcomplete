@@ -1,6 +1,7 @@
 use relayer_graph_core::{
     ImportedAcceptedView, ImportedAction, ImportedConversationReceipt, ImportedConversationStage,
-    ImportedEdge, ImportedLayer, ImportedNode, ImportedResolvedLayer, ImportedTurn,
+    ImportedEdge, ImportedInvokeOrigin, ImportedLayer, ImportedNode, ImportedResolvedLayer,
+    ImportedTurn,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -352,9 +353,20 @@ fn materialized_receipt(
 }
 
 fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
+    let invoke_origin = match turn.origin {
+        crate::conversation_export::ExportTurnOrigin::User => None,
+        crate::conversation_export::ExportTurnOrigin::Action {
+            source_turn_id,
+            source_action_id,
+        } => Some(ImportedInvokeOrigin {
+            source_turn_id,
+            source_action_id,
+        }),
+    };
     ImportedTurn {
         source_turn_id: turn.id,
         text: turn.text,
+        invoke_origin,
         accepted_view: turn.accepted_view.map(|view| ImportedAcceptedView {
             interaction_node_id: view.interaction_node_id,
             root_action: import_action(view.root_action),

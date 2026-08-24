@@ -28,6 +28,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
         turns: vec![ImportedTurn {
             source_turn_id: "turn-1".into(),
             text: "Explain the queue".into(),
+            invoke_origin: None,
             accepted_view: Some(ImportedAcceptedView {
                 interaction_node_id: interaction_node_id.into(),
                 root_action: ImportedAction {
@@ -65,6 +66,108 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
     }
 }
 
+fn imported_invoke_conversation() -> ImportedConversation {
+    let source = ImportedTurn {
+        source_turn_id: "turn-1".into(),
+        text: "Choose a path".into(),
+        invoke_origin: None,
+        accepted_view: Some(ImportedAcceptedView {
+            interaction_node_id: "interaction-1".into(),
+            root_action: ImportedAction {
+                id: "root-action-1".into(),
+                source_node_id: "interaction-1".into(),
+                source_layer_id: None,
+                kind: "navigate".into(),
+                relation: Some("expand".into()),
+                label: "Response".into(),
+                variant: "pill".into(),
+                icon: None,
+                description: None,
+                target_layer_id: Some("layer-1".into()),
+                interaction_text: None,
+            },
+            root_layer_id: "layer-1".into(),
+            layers: vec![ImportedResolvedLayer {
+                layer: ImportedLayer {
+                    id: "layer-1".into(),
+                    nodes: vec!["node-1".into()],
+                    edges: vec![],
+                },
+                nodes: vec![ImportedNode {
+                    id: "node-1".into(),
+                    kind: "concept".into(),
+                    icon: "box".into(),
+                    title: "Path".into(),
+                    detail: "Invoke this path".into(),
+                }],
+                edges: vec![],
+                actions: vec![ImportedAction {
+                    id: "invoke-action-1".into(),
+                    source_node_id: "node-1".into(),
+                    source_layer_id: Some("layer-1".into()),
+                    kind: "invoke".into(),
+                    relation: None,
+                    label: "Continue".into(),
+                    variant: "pill".into(),
+                    icon: None,
+                    description: None,
+                    target_layer_id: None,
+                    interaction_text: Some("Continue this path".into()),
+                }],
+            }],
+        }),
+    };
+    let destination = ImportedTurn {
+        source_turn_id: "turn-2".into(),
+        text: "Continue this path".into(),
+        invoke_origin: Some(ImportedInvokeOrigin {
+            source_turn_id: "turn-1".into(),
+            source_action_id: "invoke-action-1".into(),
+        }),
+        accepted_view: Some(ImportedAcceptedView {
+            interaction_node_id: "interaction-2".into(),
+            root_action: ImportedAction {
+                id: "root-action-2".into(),
+                source_node_id: "interaction-2".into(),
+                source_layer_id: None,
+                kind: "navigate".into(),
+                relation: Some("expand".into()),
+                label: "Response".into(),
+                variant: "pill".into(),
+                icon: None,
+                description: None,
+                target_layer_id: Some("layer-2".into()),
+                interaction_text: None,
+            },
+            root_layer_id: "layer-2".into(),
+            layers: vec![ImportedResolvedLayer {
+                layer: ImportedLayer {
+                    id: "layer-2".into(),
+                    nodes: vec!["node-2".into()],
+                    edges: vec![],
+                },
+                nodes: vec![ImportedNode {
+                    id: "node-2".into(),
+                    kind: "concept".into(),
+                    icon: "box".into(),
+                    title: "Destination".into(),
+                    detail: "Imported result".into(),
+                }],
+                edges: vec![],
+                actions: vec![],
+            }],
+        }),
+    };
+    ImportedConversation {
+        import_id: "import-invoke".into(),
+        source_sha256: "sha256:invoke".into(),
+        project_id: None,
+        thread_id: thread(9002),
+        created_at: "2026-08-24T00:00:00Z".into(),
+        turns: vec![source, destination],
+    }
+}
+
 #[tokio::test]
 async fn imported_conversation_is_materialized_read_only_and_removable() {
     let database = GraphDatabase::in_memory().await.unwrap();
@@ -98,6 +201,43 @@ async fn imported_conversation_is_materialized_read_only_and_removable() {
             .writer_for_subgraph(NodeId::new(turn.graph_node_id.unwrap()).unwrap())
             .await
             .is_err()
+    );
+}
+
+#[tokio::test]
+async fn imported_action_origin_reconstructs_resolved_invoke_navigation() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let receipt = database
+        .import_accepted_conversation(&imported_invoke_conversation())
+        .await
+        .unwrap();
+    let source = &receipt.turns[0];
+    let destination = &receipt.turns[1];
+    let source_writer = database
+        .writer_for_subgraph(NodeId::new(source.graph_node_id.unwrap()).unwrap())
+        .await
+        .unwrap();
+    let source_layer = source_writer
+        .get_layer(LayerId::new(source.root_layer_id.unwrap()).unwrap())
+        .await
+        .unwrap();
+    let invoke = source_layer
+        .actions
+        .iter()
+        .find(|action| action.kind == ActionKind::Invoke)
+        .unwrap();
+
+    assert_eq!(
+        invoke.target_layer_id.map(LayerId::value),
+        destination.root_layer_id
+    );
+    assert_eq!(
+        source_writer
+            .get_layer_owner(invoke.target_layer_id.unwrap())
+            .await
+            .unwrap()
+            .value(),
+        destination.graph_node_id.unwrap()
     );
 }
 

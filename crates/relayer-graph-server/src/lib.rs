@@ -705,6 +705,7 @@ mod tests {
         let turn = serde_json::to_vec(&ImportedTurn {
             source_turn_id: "turn:1".into(),
             text: "Failed turn".into(),
+            invoke_origin: None,
             accepted_view: None,
         })
         .unwrap();

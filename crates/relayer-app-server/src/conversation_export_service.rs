@@ -49,9 +49,26 @@ pub(crate) async fn build_conversation_export(
         .project
         .as_ref()
         .map(|project| redactor.text(&project.name));
-    let invocations = detail
+    let interaction_indexes = detail
+        .interactions
+        .iter()
+        .enumerate()
+        .map(|(index, interaction)| (interaction.id, index))
+        .collect::<HashMap<_, _>>();
+    // Thread detail intentionally carries project-visible invocation projections for navigation.
+    // A portable conversation export, however, may only encode provenance whose source and result
+    // turns are both members of this conversation.
+    let conversation_invocations = detail
         .action_invocations
         .iter()
+        .filter(|invocation| {
+            interaction_indexes.contains_key(&invocation.source_interaction_id)
+                && interaction_indexes.contains_key(&invocation.result_interaction_id)
+        })
+        .collect::<Vec<_>>();
+    let invocations = conversation_invocations
+        .iter()
+        .copied()
         .map(|invocation| (invocation.result_interaction_id, invocation))
         .collect::<HashMap<_, _>>();
     let turn_sequences = detail
@@ -82,13 +99,7 @@ pub(crate) async fn build_conversation_export(
         };
         closures.push(closure);
     }
-    let interaction_indexes = detail
-        .interactions
-        .iter()
-        .enumerate()
-        .map(|(index, interaction)| (interaction.id, index))
-        .collect::<HashMap<_, _>>();
-    for invocation in &detail.action_invocations {
+    for invocation in conversation_invocations {
         let source_index = *interaction_indexes
             .get(&invocation.source_interaction_id)
             .ok_or_else(|| {

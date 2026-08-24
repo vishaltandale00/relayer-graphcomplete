@@ -489,7 +489,30 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
         .execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name,permission_profile_id) VALUES (3,1,3,'Still running','3','running','codex-basic','auto')")
         .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO threads(id,title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (2,'Other conversation',1,'4','5','codex-basic','auto')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name,permission_profile_id) VALUES (10,2,1,'Other source','4','failed','codex-basic','auto')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name,permission_profile_id) VALUES (11,2,2,'Other result','5','failed','codex-basic','auto')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (10,999,11,'5')")
+        .execute(&pool).await.unwrap();
     pool.close().await;
+
+    let workspace_state = response_json(
+        app.clone()
+            .oneshot(api_request("GET", "/api/state?threadId=1", None, true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        workspace_state["actionInvocations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 
     let response = app
         .clone()
@@ -2295,6 +2318,13 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .bind(json!({"schemaVersion":1,"permissionProfileId":"auto","bindingPresent":true}).to_string())
         .execute(&pool).await.unwrap();
     let corrupt_id = corrupt.last_insert_rowid();
+    let approval_wait = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,6,'accepted while approval response was in flight',?2,95,'waiting_for_approval','codex-basic','sha256:test','ask','sha256:approval',?3)")
+        .bind(thread_id).bind(&created_at)
+        .bind(json!({"schemaVersion":1,"permissionProfileId":"ask","bindingPresent":true}).to_string())
+        .execute(&pool).await.unwrap();
+    let approval_wait_id = approval_wait.last_insert_rowid();
+    sqlx::query("INSERT INTO approval_requests(request_id,interaction_id,complete_call_id,harness_session_id,title,reason,action_json,scope_keys_json,scope_description,created_at,expires_at) VALUES ('restart-approval',?1,'call-1','session-1','Run command','Needed','{\"kind\":\"command\",\"command\":\"npm test\",\"workingDirectory\":\"/workspace\"}','[]','test scope',?2,NULL)")
+        .bind(approval_wait_id).bind(&created_at).execute(&pool).await.unwrap();
     pool.close().await;
 
     let canonical = json!({
@@ -2348,6 +2378,10 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
             axum::routing::get(|| async { axum::Json(json!({"nodeId":999,"invocation":null})) }),
         )
         .route(
+            "/api/control/interactions/95",
+            axum::routing::get(|| async { axum::Json(json!({"nodeId":95,"invocation":null})) }),
+        )
+        .route(
             "/api/control/capabilities",
             axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
                 axum::Json(json!({"graphToken":body["graphToken"]}))
@@ -2394,6 +2428,15 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
                     StatusCode::NOT_FOUND,
                     axum::Json(json!({"error":{"code":"completion_not_found"}})),
                 )
+            }),
+        )
+        .route(
+            "/api/control/interactions/95/output",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":95,
+                    "rootLayer":{"layer":{"id":505},"nodes":[],"edges":[],"actions":[]}
+                }))
             }),
         );
     let harness = axum::Router::new();
@@ -2509,6 +2552,21 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
             .unwrap()
             .contains("reconciliation pending")
     );
+    let approval_wait = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == approval_wait_id)
+        .unwrap();
+    assert_eq!(approval_wait["completionStatus"], "accepted");
+    assert_eq!(approval_wait["completionOutput"]["nodeId"], 95);
+    let approval = state["approvals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|approval| approval["request"]["requestId"] == "restart-approval")
+        .unwrap();
+    assert_eq!(approval["resolution"]["outcome"], "aborted");
     assert!(invalidations.load(Ordering::SeqCst) >= 4);
     graph_task.abort();
     harness_task.abort();
