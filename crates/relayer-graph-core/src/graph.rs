@@ -9,8 +9,8 @@ pub use completion::{AcceptedGraphClosure, CompletionOutput};
 pub use database::GraphDatabase;
 pub use import::{
     ImportedAcceptedView, ImportedAction, ImportedConversation, ImportedConversationReceipt,
-    ImportedConversationStage, ImportedEdge, ImportedLayer, ImportedNode, ImportedResolvedLayer,
-    ImportedTurn, ImportedTurnReceipt,
+    ImportedConversationStage, ImportedEdge, ImportedLayer, ImportedLayerLayout, ImportedNode,
+    ImportedNodePlacement, ImportedResolvedLayer, ImportedTurn, ImportedTurnReceipt,
 };
 pub use model::{
     ActionDraft, ActionId, ActionKind, ActionVariant, EdgeDraft, EdgeId, GraphAction, GraphEdge,

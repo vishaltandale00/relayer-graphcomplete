@@ -367,6 +367,20 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                         id: resolved.layer.id,
                         nodes: resolved.layer.nodes,
                         edges: resolved.layer.edges,
+                        layout: resolved.layer.layout.map(|layout| {
+                            relayer_graph_core::ImportedLayerLayout {
+                                version: layout.version,
+                                placements: layout
+                                    .placements
+                                    .into_iter()
+                                    .map(|placement| relayer_graph_core::ImportedNodePlacement {
+                                        node_id: placement.node_id,
+                                        x: placement.x,
+                                        y: placement.y,
+                                    })
+                                    .collect(),
+                            }
+                        }),
                     },
                     nodes: resolved
                         .nodes

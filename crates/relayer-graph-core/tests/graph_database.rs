@@ -68,6 +68,14 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                         id: "layer-1".into(),
                         nodes: vec!["node-1".into()],
                         edges: vec![],
+                        layout: Some(ImportedLayerLayout {
+                            version: 1,
+                            placements: vec![ImportedNodePlacement {
+                                node_id: "node-1".into(),
+                                x: 0.25,
+                                y: 0.75,
+                            }],
+                        }),
                     },
                     nodes: vec![ImportedNode {
                         id: "node-1".into(),
@@ -91,6 +99,18 @@ async fn imported_conversation_is_materialized_read_only_and_removable() {
     let receipt = database.import_accepted_conversation(&input).await.unwrap();
     let turn = &receipt.turns[0];
     assert!(turn.output.is_some());
+    let layout = turn
+        .output
+        .as_ref()
+        .unwrap()
+        .root_layer
+        .layer
+        .layout
+        .as_ref()
+        .unwrap();
+    assert_eq!(layout.version, 1);
+    assert_eq!(layout.placements()[0].x, 0.25);
+    assert_eq!(layout.placements()[0].y, 0.75);
 
     let writer = database
         .writer_for_subgraph(NodeId::new(turn.graph_node_id.unwrap()).unwrap())

@@ -10,10 +10,10 @@ use crate::{
         ConversationExportHeader, ConversationExportRecord, ConversationExportTurn,
         EXPORT_VERSION_V1, ExportAcceptedView, ExportAction, ExportActionKind, ExportActionVariant,
         ExportCompletionReceipt, ExportCompletionStatus, ExportConversation, ExportEdge,
-        ExportLayer, ExportModelSelection, ExportNavigateRelation, ExportNode,
-        ExportPermissionReceipt, ExportProducer, ExportRecordState, ExportResolvedLayer,
-        ExportTurnManifestEntry, ExportTurnOrigin, MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES,
-        validate_export_records,
+        ExportLayer, ExportLayerLayout, ExportModelSelection, ExportNavigateRelation, ExportNode,
+        ExportNodePlacement, ExportPermissionReceipt, ExportProducer, ExportRecordState,
+        ExportResolvedLayer, ExportTurnManifestEntry, ExportTurnOrigin, MAX_EXPORT_BYTES,
+        MAX_JSONL_LINE_BYTES, validate_export_records,
     },
     product::{
         ActionInvocation, Interaction, InteractionId, ProductError, ProductService, ThreadId,
@@ -326,6 +326,22 @@ fn export_layer(
                 .iter()
                 .map(|id| ids.edge(id.value()))
                 .collect(),
+            layout: resolved
+                .layer
+                .layout
+                .as_ref()
+                .map(|layout| ExportLayerLayout {
+                    version: layout.version,
+                    placements: layout
+                        .placements()
+                        .iter()
+                        .map(|placement| ExportNodePlacement {
+                            node_id: ids.node(placement.node_id.value()),
+                            x: placement.x,
+                            y: placement.y,
+                        })
+                        .collect(),
+                }),
             state: ExportRecordState::Accepted,
         },
         nodes,

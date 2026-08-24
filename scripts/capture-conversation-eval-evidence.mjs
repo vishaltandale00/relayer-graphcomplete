@@ -6,7 +6,13 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { LayerObject, NodeObject, RelayerGraphClient } from "@relayer/graph-client";
+import {
+  LayerLayoutObject,
+  LayerObject,
+  NodeObject,
+  NodePlacementObject,
+  RelayerGraphClient,
+} from "@relayer/graph-client";
 
 import { EvalService } from "../desktop/eval-main/eval-service.mjs";
 import { createConversationExportService } from "../desktop/main/services/conversation-export.mjs";
@@ -74,11 +80,14 @@ function statusFixtureFactory() {
         const sharedNode = new NodeObject("info", "Shared evidence", "A reference destination can be shared without duplicating content.", "concept", "shared");
         const cycleNode = new NodeObject("info", "Reference cycle", "This layer safely links back to the shared evidence layer.", "concept", "cycle");
         for (const node of [rootNode, expandedNode, nestedNode, sharedNode, cycleNode]) await graph.submitNode(node);
-        const root = new LayerObject([rootNode], [], "root-layer");
-        const expanded = new LayerObject([expandedNode], [], "expanded-layer");
-        const nested = new LayerObject([nestedNode], [], "nested-layer");
-        const shared = new LayerObject([sharedNode], [], "shared-layer");
-        const cycle = new LayerObject([cycleNode], [], "cycle-layer");
+        const centeredLayout = (node) => new LayerLayoutObject([
+          new NodePlacementObject(node, 0.5, 0.5),
+        ]);
+        const root = new LayerObject([rootNode], [], centeredLayout(rootNode), "root-layer");
+        const expanded = new LayerObject([expandedNode], [], centeredLayout(expandedNode), "expanded-layer");
+        const nested = new LayerObject([nestedNode], [], centeredLayout(nestedNode), "nested-layer");
+        const shared = new LayerObject([sharedNode], [], centeredLayout(sharedNode), "shared-layer");
+        const cycle = new LayerObject([cycleNode], [], centeredLayout(cycleNode), "cycle-layer");
         for (const layer of [root, expanded, nested, shared, cycle]) await graph.submitLayer(layer);
         await graph.addAction(rootNode, { kind: "navigate", relation: "expand", sourceLayer: root, label: "Expand diagnosis", target: expanded, clientKey: "root-expand" });
         await graph.addAction(expandedNode, { kind: "navigate", relation: "expand", sourceLayer: expanded, label: "Open nested finding", target: nested, clientKey: "nested-expand" });

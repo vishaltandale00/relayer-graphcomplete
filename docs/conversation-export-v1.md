@@ -63,6 +63,11 @@ records have state `accepted`. Layer membership, edge endpoints, action shape, n
 mixed target relations, expansion acyclicity, and complete root reachability are validated without
 model inference.
 
+An authored layer includes its versioned normalized `layout` with exactly one finite `x`/`y`
+placement for every member node. The placement uses portable node IDs. The field is optional only
+for coordinate-free accepted history created before authored layouts existed; importing such a
+legacy file preserves the missing layout and uses the deterministic compatibility renderer.
+
 Non-root actions retain their original `sourceLayerId`. A reused accepted node may expose an action
 authored in an earlier layer that is not otherwise reachable from the current turn; in that case the
 ID is provenance, not a promise that the source layer is embedded. Navigate `targetLayerId` values,
