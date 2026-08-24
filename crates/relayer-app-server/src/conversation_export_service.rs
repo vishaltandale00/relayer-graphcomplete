@@ -401,7 +401,13 @@ fn export_action(
         variant,
         icon: redactor.optional(action.icon.as_deref()),
         description: redactor.optional(action.description.as_deref()),
-        target_layer_id: action.target_layer_id.map(|id| ids.layer(id.value())),
+        // Invoke resolution is a runtime projection. Portable history keeps the authored
+        // invoke shape; the following turn's origin carries the durable provenance link.
+        target_layer_id: if action.kind == ActionKind::Navigate {
+            action.target_layer_id.map(|id| ids.layer(id.value()))
+        } else {
+            None
+        },
         interaction_text: redactor.optional(action.interaction_text.as_deref()),
         state: ExportRecordState::Accepted,
     })
@@ -518,8 +524,11 @@ fn next_id(ids: &mut HashMap<i64, String>, raw: i64, kind: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::completion_status;
+    use super::{PortableIds, ProjectPathRedactor, completion_status, export_action};
     use crate::conversation_export::ExportCompletionStatus;
+    use relayer_graph_core::{
+        ActionId, ActionKind, ActionVariant, GraphAction, LayerId, NodeId, RecordState,
+    };
 
     #[test]
     fn exports_approval_lifecycle_completion_statuses() {
@@ -530,6 +539,37 @@ mod tests {
         assert_eq!(
             completion_status("stopped").unwrap(),
             ExportCompletionStatus::Stopped
+        );
+    }
+
+    #[test]
+    fn resolved_invoke_exports_its_authored_shape() {
+        let action = GraphAction {
+            id: ActionId::new(1).unwrap(),
+            source_node_id: NodeId::new(2).unwrap(),
+            source_layer_id: Some(LayerId::new(3).unwrap()),
+            kind: ActionKind::Invoke,
+            relation: None,
+            label: "Continue".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: Some(LayerId::new(4).unwrap()),
+            interaction_text: Some("Continue from here".into()),
+            state: RecordState::Accepted,
+        };
+
+        let exported = export_action(
+            &action,
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(None),
+        )
+        .unwrap();
+
+        assert!(exported.target_layer_id.is_none());
+        assert_eq!(
+            exported.interaction_text.as_deref(),
+            Some("Continue from here")
         );
     }
 }

@@ -94,6 +94,4 @@ pub(crate) enum StorageError {
     Catalog(#[from] crate::product::CatalogError),
     #[error("stored approval conflicts with an existing durable record: {0}")]
     ApprovalConflict(String),
-    #[error("product lifecycle transition was rejected: {0}")]
-    LifecycleConflict(String),
 }

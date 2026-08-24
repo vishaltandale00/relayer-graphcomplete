@@ -20,7 +20,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{
     collections::HashMap,
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     path::Path,
     process::{Command, Stdio},
     sync::{
@@ -679,13 +679,31 @@ async fn approval_wait_is_durable_and_the_product_decision_resumes_the_same_comp
             axum::routing::post(move || {
                 let node_id = graph_node_id.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    axum::Json(json!({ "node": { "id": node_id }, "graphToken": "turn" }))
+                    axum::Json(json!({ "node": { "id": node_id }, "graphToken": "" }))
                 }
             }),
         )
         .route(
             "/api/control/capabilities",
-            axum::routing::delete(|| async { axum::Json(json!({ "revoked": true })) }),
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({ "graphToken": body["graphToken"] }))
+            })
+            .delete(|| async { axum::Json(json!({ "revoked": true })) }),
+        )
+        .route(
+            "/api/control/interactions/{id}",
+            axum::routing::get(|axum::extract::Path(id): axum::extract::Path<i64>| async move {
+                axum::Json(json!({ "nodeId": id, "invocation": null }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/{id}/output",
+            axum::routing::get(|axum::extract::Path(id): axum::extract::Path<i64>| async move {
+                axum::Json(json!({
+                    "nodeId": id,
+                    "rootLayer": { "layer": { "id": 1 }, "nodes": [], "edges": [], "actions": [] }
+                }))
+            }),
         );
     let interaction_id = Arc::new(AtomicI64::new(0));
     let event_interaction_id = Arc::new(AtomicI64::new(0));
@@ -1030,18 +1048,29 @@ async fn malformed_approval_reconciliation_cancels_and_fails_the_completion() {
         .route(
             "/api/control/interactions",
             axum::routing::post(|| async {
-                axum::Json(json!({ "node": { "id": 41 }, "graphToken": "turn" }))
+                axum::Json(json!({ "node": { "id": 41 }, "graphToken": "" }))
             }),
         )
         .route(
             "/api/control/capabilities",
-            axum::routing::delete(move || {
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({ "graphToken": body["graphToken"] }))
+            })
+            .delete(move || {
                 let revoked = revoke_signal.clone();
                 async move {
                     revoked.store(true, Ordering::SeqCst);
                     axum::Json(json!({ "revoked": true }))
                 }
             }),
+        )
+        .route(
+            "/api/control/interactions/{id}",
+            axum::routing::get(
+                |axum::extract::Path(id): axum::extract::Path<i64>| async move {
+                    axum::Json(json!({ "nodeId": id, "invocation": null }))
+                },
+            ),
         );
     let interaction_id = Arc::new(AtomicI64::new(0));
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -2606,6 +2635,14 @@ fn exits_when_desktop_control_pipe_closes() {
             permissions.to_str().unwrap(),
             "--port",
             "0",
+            "--producer-desktop-version",
+            "test",
+            "--producer-build-commit",
+            "test",
+            "--producer-platform",
+            "test",
+            "--producer-architecture",
+            "test",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -2625,6 +2662,17 @@ fn exits_when_desktop_control_pipe_closes() {
     BufReader::new(child.stdout.take().unwrap())
         .read_line(&mut ready_line)
         .unwrap();
+    if ready_line.is_empty() {
+        let status = child.wait().unwrap();
+        let mut stderr = String::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .unwrap();
+        panic!("Relayer app server exited before readiness ({status}): {stderr}");
+    }
     assert_eq!(
         serde_json::from_str::<Value>(&ready_line).unwrap()["ready"],
         true
@@ -3075,7 +3123,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
         "DROP TABLE threads",
         "DROP TABLE projects",
         "CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,path TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
-        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto')",
+        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto',conversation_import_id TEXT)",
         "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL,graph_node_id INTEGER,completion_status TEXT NOT NULL DEFAULT 'not_started',harness_configuration_name TEXT,harness_configuration_digest TEXT,completion_output_json TEXT,completion_error TEXT,permission_profile_id TEXT NOT NULL DEFAULT 'auto',effective_execution_digest TEXT,effective_permission_receipt_json TEXT,model_provider_id TEXT,provider_model_id TEXT,model_family_id INTEGER)",
         "CREATE UNIQUE INDEX projects_path_partial ON projects(path) WHERE id > 0",
         "CREATE UNIQUE INDEX interactions_sequence_partial ON interactions(thread_id,sequence) WHERE id > 0",

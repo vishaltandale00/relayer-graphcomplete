@@ -1097,6 +1097,7 @@ mod tests {
             project_id: None,
             product_interaction_id: 1,
             thread_id: 1,
+            interaction_id: 1,
             text: "question",
             working_directory: root.to_str().unwrap(),
             harness_configuration_name: "test",
