@@ -40,6 +40,11 @@ describe("product workspace navigation controls", () => {
     expect(markup).toContain('aria-controls="turnPopover"');
     expect(markup).toContain('role="group" aria-label="Choose a turn"');
     expect(markup).toContain('aria-label="Graph layer path"');
+    const copyHeaderStart = markup.indexOf('class="interaction-copy-header"');
+    const promptStart = markup.indexOf('id="interactionText"');
+    expect(markup.indexOf("Your interaction")).toBeGreaterThan(copyHeaderStart);
+    expect(markup.indexOf('id="turnPicker"')).toBeGreaterThan(copyHeaderStart);
+    expect(markup.indexOf('id="turnPicker"')).toBeLessThan(promptStart);
   });
 
   it("disables both history directions while one destination is loading", () => {
@@ -111,6 +116,7 @@ describe("product workspace navigation controls", () => {
     expect(styles).toContain(".turn-popover{position:absolute;");
     expect(styles).toContain("max-height:calc(52px * 3 + 2px);overflow-y:auto");
     expect(styles).toContain(".turn-option{width:100%;height:52px;");
+    expect(styles).toContain(".interaction-copy-header{display:flex;align-items:center;");
   });
 
   it("keeps canonically restored string selections for numeric authored node IDs", () => {
