@@ -2,7 +2,8 @@
 
 These screenshots are opt-in, zero-inference visual evidence for GitHub issue #105. They use the
 real Relayer Eval dashboard, Rust product and graph stores, the conversation importer, and the
-production `ProductWorkspace` renderer in read-only review mode.
+production `ProductWorkspace` renderer in read-only review mode. The optional MP4 walks through
+the owner export, Eval import, and imported ProductWorkspace review surfaces.
 
 Run:
 
@@ -11,8 +12,14 @@ npm run build
 RELAYER_CAPTURE_CONVERSATION_EVAL_EVIDENCE=1 electron scripts/capture-conversation-eval-evidence.mjs
 ```
 
-`manifest.json` records the capture command, zero paid inference calls, screenshot hashes, and the
-visible requirement mapped to each image. Screenshots prove only rendered visible state and
+Record the video as part of the same deterministic capture:
+
+```sh
+RELAYER_CAPTURE_CONVERSATION_EVAL_EVIDENCE=1 RELAYER_RECORD_CONVERSATION_EVAL_VIDEO=1 electron scripts/capture-conversation-eval-evidence.mjs
+```
+
+`manifest.json` records the capture command, zero paid inference calls, screenshot and video
+hashes, and the visible requirement mapped to each image. Visual captures prove rendered state and
 navigation. The deterministic default E2E test proves exact ordinary export bytes, contract and
 exclusion checks, import publication, judging eligibility, process restart, hostile imports, ID
 remapping, and mutation/action rejection. The Electron workflow also restarts graph, product, and

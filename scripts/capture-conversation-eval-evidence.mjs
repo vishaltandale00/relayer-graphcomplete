@@ -220,6 +220,13 @@ async function captureVideoStep(window, caption, targetSelector, duration = 2) {
   const file = join(videoFramesDirectory, `${String(videoFrames.length + 1).padStart(2, "0")}.png`);
   await writeFile(file, (await window.webContents.capturePage()).toPNG());
   videoFrames.push({ file, duration, caption });
+  await window.webContents.executeJavaScript(`(() => {
+    document.querySelector('[data-relayer-video-caption]')?.remove();
+    document.querySelectorAll('[data-relayer-video-highlight]').forEach((element) => {
+      element.style.removeProperty('box-shadow');
+      element.removeAttribute('data-relayer-video-highlight');
+    });
+  })()`);
 }
 
 async function finalizeVideo() {
@@ -238,10 +245,13 @@ async function finalizeVideo() {
     "-r", "30", "-movflags", "+faststart", videoOutputFile,
   ], { cwd: repositoryRoot, stdio: "inherit" });
   const bytes = await readFile(videoOutputFile);
+  const probe = JSON.parse(execFileSync("ffprobe", [
+    "-v", "error", "-show_entries", "format=duration", "-of", "json", videoOutputFile,
+  ], { cwd: repositoryRoot, encoding: "utf8" }));
   return {
     file: "conversation-export-eval.mp4",
     sha256: createHash("sha256").update(bytes).digest("hex"),
-    durationSeconds: videoFrames.reduce((total, frame) => total + frame.duration, 0),
+    durationSeconds: Number(Number(probe.format.duration).toFixed(3)),
     steps: videoFrames.map((frame) => frame.caption),
   };
 }
@@ -492,7 +502,7 @@ async function run() {
     capturedAt: new Date().toISOString(),
     sourceCommit,
     workingTreeDirty,
-    command: `${OPT_IN}=1 electron scripts/capture-conversation-eval-evidence.mjs`,
+    command: `${OPT_IN}=1${videoEnabled ? ` ${VIDEO_OPT_IN}=1` : ""} electron scripts/capture-conversation-eval-evidence.mjs`,
     paidInferenceCalls: 0,
     ownerExportSha256,
     importedSourceSha256: ordinaryImportedRun?.sourceSha256,
