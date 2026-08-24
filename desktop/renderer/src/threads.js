@@ -668,12 +668,21 @@ function applyResolvedPresentation(resolved) {
   const resolvedInteractionIds = new Set(
     resolved.interactions.map((interaction) => String(interaction.id)),
   );
-  appState.actionInvocations = [
+  const actionInvocationsByIdentity = new Map();
+  const invocationIdentity = (invocation) => [
+    invocation.sourceInteractionId,
+    invocation.actionId,
+    invocation.resultInteractionId,
+  ].map(String).join(":");
+  for (const invocation of [
     ...appState.actionInvocations.filter((invocation) => (
       !resolvedInteractionIds.has(String(invocation.sourceInteractionId))
     )),
     ...resolved.actionInvocations,
-  ];
+  ]) {
+    actionInvocationsByIdentity.set(invocationIdentity(invocation), invocation);
+  }
+  appState.actionInvocations = [...actionInvocationsByIdentity.values()];
   appState.approvals = [
     ...appState.approvals.filter((receipt) => (
       String(receipt.request?.correlation?.threadId) !== String(resolved.thread.id)

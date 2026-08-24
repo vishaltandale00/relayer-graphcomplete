@@ -159,6 +159,17 @@ describe("workspace navigation integration", () => {
     const source = interaction(1, 10, sourceLayer);
     const destination = interaction(2, 20, destinationLayer);
     const sourceState = productState([{ id: 10, title: "Source" }, { id: 20, title: "Result" }], [source]);
+    const runningInvocation = {
+      sourceInteractionId: 1,
+      actionId: 501,
+      resultInteractionId: 2,
+      resultCompletionStatus: "running",
+    };
+    const acceptedInvocation = {
+      ...runningInvocation,
+      resultCompletionStatus: "accepted",
+    };
+    sourceState.actionInvocations = [runningInvocation];
     requestImplementation = vi.fn(async (path) => {
       if (path.startsWith("/api/state?threadId=10")) return sourceState;
       if (path === "/api/threads/10/interactions/1/actions/501/destination") {
@@ -175,14 +186,14 @@ describe("workspace navigation integration", () => {
         return {
           thread: { id: 20, title: "Result" },
           interactions: [destination],
-          actionInvocations: [],
+          actionInvocations: [acceptedInvocation],
         };
       }
       if (path === "/api/threads/10") {
         return {
           thread: { id: 10, title: "Source" },
           interactions: [source],
-          actionInvocations: [],
+          actionInvocations: [acceptedInvocation],
         };
       }
       throw new Error(`Unexpected request: ${path}`);
@@ -198,10 +209,22 @@ describe("workspace navigation integration", () => {
     });
     expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([201]);
     expect(controller.getNavigationHistory().canGoBack).toBe(true);
+    expect(controller.appState.actionInvocations).toEqual([acceptedInvocation]);
 
     await controller.navigateHistory("back");
     expect(controller.viewState).toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
     expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([101]);
+    expect(controller.appState.actionInvocations).toEqual([acceptedInvocation]);
+
+    await controller.navigateHistory("forward");
+    expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
+    expect(controller.appState.actionInvocations).toEqual([acceptedInvocation]);
+
+    await controller.navigateHistory("back");
+    await controller.navigateHistory("forward");
+    expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
+    expect(controller.appState.actionInvocations).toHaveLength(1);
+    expect(controller.appState.actionInvocations[0].resultCompletionStatus).toBe("accepted");
   });
 
   it("does not apply a resolved invoke destination after a newer thread selection wins", async () => {
