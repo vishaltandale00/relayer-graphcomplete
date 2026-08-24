@@ -6,6 +6,7 @@ use crate::{
         validate_stable_id,
     },
 };
+use relayer_graph_core::{ImportedConversationReceipt, ImportedConversationStage, ImportedTurn};
 use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -118,6 +119,74 @@ impl ApprovalEvent {
 }
 
 impl RuntimeClient {
+    pub(crate) async fn begin_imported_conversation(
+        &self,
+        input: &ImportedConversationStage,
+    ) -> Result<(), RuntimeError> {
+        let response = self
+            .client
+            .post(
+                self.graph_url
+                    .join("api/control/conversation-import-stages")?,
+            )
+            .bearer_auth(&self.graph_control_token)
+            .json(input)
+            .send()
+            .await?;
+        response_json(response, StatusCode::OK).await?;
+        Ok(())
+    }
+
+    pub(crate) async fn stage_imported_turn(
+        &self,
+        import_id: &str,
+        input: &ImportedTurn,
+    ) -> Result<(), RuntimeError> {
+        let response = self
+            .client
+            .post(self.graph_url.join(&format!(
+                "api/control/conversation-import-stages/{import_id}/turns"
+            ))?)
+            .bearer_auth(&self.graph_control_token)
+            .json(input)
+            .send()
+            .await?;
+        response_json(response, StatusCode::OK).await?;
+        Ok(())
+    }
+
+    pub(crate) async fn finalize_imported_conversation(
+        &self,
+        import_id: &str,
+    ) -> Result<ImportedConversationReceipt, RuntimeError> {
+        let response = self
+            .client
+            .post(self.graph_url.join(&format!(
+                "api/control/conversation-import-stages/{import_id}/finalize"
+            ))?)
+            .bearer_auth(&self.graph_control_token)
+            .send()
+            .await?;
+        Ok(serde_json::from_value(
+            response_json(response, StatusCode::OK).await?,
+        )?)
+    }
+
+    pub(crate) async fn remove_imported_conversation(
+        &self,
+        import_id: &str,
+    ) -> Result<(), RuntimeError> {
+        let response = self
+            .client
+            .delete(self.graph_url.join("api/control/conversation-imports")?)
+            .bearer_auth(&self.graph_control_token)
+            .json(&serde_json::json!({"importId": import_id}))
+            .send()
+            .await?;
+        response_json(response, StatusCode::OK).await?;
+        Ok(())
+    }
+
     pub(crate) async fn open(
         graph_url: &str,
         harness_url: &str,
@@ -373,6 +442,22 @@ impl RuntimeClient {
             .send()
             .await?;
         response_json(response, StatusCode::OK).await
+    }
+
+    pub(crate) async fn accepted_graph_closure(
+        &self,
+        interaction_node_id: i64,
+    ) -> Result<relayer_graph_core::AcceptedGraphClosure, RuntimeError> {
+        let response = self
+            .client
+            .get(self.graph_url.join(&format!(
+                "api/control/interactions/{interaction_node_id}/accepted-closure"
+            ))?)
+            .bearer_auth(&self.graph_control_token)
+            .send()
+            .await?;
+        let value = response_json(response, StatusCode::OK).await?;
+        Ok(serde_json::from_value(value)?)
     }
 
     pub(crate) async fn get_action(

@@ -3,9 +3,17 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, Response, StatusCode},
 };
+use relayer_app_server::conversation_export::{
+    ConversationExportRecord, ExportCompletionStatus, ExportTurnOrigin, decode_export_jsonl,
+};
 use relayer_app_server::{
     CONTROL_COOKIE, RelayerAppServer, RelayerAppServerConfig, RelayerRuntimeConfig,
 };
+use relayer_graph_core::{
+    ActionDraft, ActionKind, ActionVariant, GraphDatabase, LayerDraft, NavigateRelation, NodeDraft,
+    ProjectId as GraphProjectId, ThreadId as GraphThreadId,
+};
+use relayer_graph_server::ServerState as GraphServerState;
 use serde_json::{Value, json};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{
@@ -23,6 +31,433 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tower::ServiceExt;
+
+#[tokio::test]
+async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_authority() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-conversation-export-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let graph_database = GraphDatabase::open(root.join("graph.sqlite3"))
+        .await
+        .unwrap();
+    let graph_interaction = graph_database
+        .create_interaction(
+            Some(GraphProjectId::new(1).unwrap()),
+            GraphThreadId::new(1).unwrap(),
+            "Review /var/folders/project/tokenizer",
+        )
+        .await
+        .unwrap();
+    let writer = graph_database
+        .writer_for_subgraph(graph_interaction.id)
+        .await
+        .unwrap();
+    let answer = writer
+        .submit_node(&NodeDraft {
+            client_key: "answer".into(),
+            kind: "concept /var/folders/project/tokenizer".into(),
+            icon: "file".into(),
+            title: "Finding /var/folders/project/tokenizer".into(),
+            detail: "Accepted durable detail /var/folders/project/tokenizer".into(),
+        })
+        .await
+        .unwrap();
+    let nested_node = writer
+        .submit_node(&NodeDraft {
+            client_key: "nested-node".into(),
+            kind: "concept".into(),
+            icon: "file".into(),
+            title: "Nested".into(),
+            detail: "Nested expansion".into(),
+        })
+        .await
+        .unwrap();
+    let reference_a_node = writer
+        .submit_node(&NodeDraft {
+            client_key: "reference-a-node".into(),
+            kind: "evidence".into(),
+            icon: "link".into(),
+            title: "Reference A".into(),
+            detail: "Shared reference".into(),
+        })
+        .await
+        .unwrap();
+    let reference_b_node = writer
+        .submit_node(&NodeDraft {
+            client_key: "reference-b-node".into(),
+            kind: "evidence".into(),
+            icon: "link".into(),
+            title: "Reference B".into(),
+            detail: "Cyclic reference".into(),
+        })
+        .await
+        .unwrap();
+    let layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "root".into(),
+            nodes: vec![answer.id],
+            edges: vec![],
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    let nested_layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "nested".into(),
+            nodes: vec![nested_node.id],
+            edges: vec![],
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    let reference_a = writer
+        .submit_layer(&LayerDraft {
+            client_key: "reference-a".into(),
+            nodes: vec![reference_a_node.id],
+            edges: vec![],
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    let reference_b = writer
+        .submit_layer(&LayerDraft {
+            client_key: "reference-b".into(),
+            nodes: vec![reference_b_node.id],
+            edges: vec![],
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    let invoked = writer
+        .add_action(&ActionDraft {
+            client_key: "follow-up".into(),
+            source_node_id: answer.id,
+            source_layer_id: Some(layer.id),
+            kind: ActionKind::Invoke,
+            relation: None,
+            label: "Continue /var/folders/project/tokenizer".into(),
+            variant: ActionVariant::Card,
+            icon: Some("terminal".into()),
+            description: Some("Inspect /var/folders/project/tokenizer".into()),
+            target_layer_id: None,
+            interaction_text: Some("Continue from /var/folders/project/tokenizer".into()),
+        })
+        .await
+        .unwrap();
+    for (client_key, label, source_node_id, source_layer_id, target_layer_id, relation) in [
+        (
+            "nested-expand",
+            "Nested details",
+            answer.id,
+            layer.id,
+            nested_layer.id,
+            NavigateRelation::Expand,
+        ),
+        (
+            "shared-reference-root",
+            "Shared reference one",
+            answer.id,
+            layer.id,
+            reference_a.id,
+            NavigateRelation::Reference,
+        ),
+        (
+            "shared-reference-nested",
+            "Shared reference two",
+            nested_node.id,
+            nested_layer.id,
+            reference_a.id,
+            NavigateRelation::Reference,
+        ),
+        (
+            "reference-cycle-forward",
+            "Reference B",
+            reference_a_node.id,
+            reference_a.id,
+            reference_b.id,
+            NavigateRelation::Reference,
+        ),
+        (
+            "reference-cycle-back",
+            "Back to reference A",
+            reference_b_node.id,
+            reference_b.id,
+            reference_a.id,
+            NavigateRelation::Reference,
+        ),
+    ] {
+        writer
+            .add_action(&ActionDraft {
+                client_key: client_key.into(),
+                source_node_id,
+                source_layer_id: Some(source_layer_id),
+                kind: ActionKind::Navigate,
+                relation: Some(relation),
+                label: label.into(),
+                variant: ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: Some(target_layer_id),
+                interaction_text: None,
+            })
+            .await
+            .unwrap();
+    }
+    writer
+        .add_action(&ActionDraft {
+            client_key: "root-action".into(),
+            source_node_id: graph_interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response /var/folders/project/tokenizer".into(),
+            variant: ActionVariant::Card,
+            icon: Some("file".into()),
+            description: Some("Root /var/folders/project/tokenizer".into()),
+            target_layer_id: Some(layer.id),
+            interaction_text: None,
+        })
+        .await
+        .unwrap();
+    writer.complete(graph_interaction.id).await.unwrap();
+    let graph = relayer_graph_server::router(GraphServerState::new(
+        graph_database.clone(),
+        "graph-control",
+    ));
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion": 1,
+            "configurations": [{
+                "configuration": {
+                    "schemaVersion": 1,
+                    "name": "codex-basic",
+                    "implementation": "test",
+                    "implementationVersion": 1,
+                    "permissionBindings": { "ask": {}, "auto": {}, "full": {} },
+                    "settings": {}
+                },
+                "digest": "sha256:test"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let product_database = root.join("product.sqlite3");
+    let app = RelayerAppServer::open(RelayerAppServerConfig {
+        database_path: product_database.clone(),
+        web_directory: root.clone(),
+        permission_catalog: permission_catalog(),
+        control_token: "control".into(),
+        read_only_control_token: Some("review".into()),
+        provider_catalog_refresh_url: None,
+        provider_catalog_refresh_token: None,
+        runtime: Some(RelayerRuntimeConfig {
+            graph_url,
+            harness_url,
+            graph_control_token: "graph-control".into(),
+            harness_control_token: "harness-control".into(),
+            harness_configurations: catalog,
+            default_harness_configuration: "codex-basic".into(),
+            allow_harness_override: true,
+            standalone_workspaces_directory: root.join("workspaces"),
+        }),
+        allow_conversation_import: false,
+        export_producer: relayer_app_server::conversation_export::ExportProducer {
+            desktop_version: "0.2.12".into(),
+            build_commit: "test-commit".into(),
+            platform: "darwin".into(),
+            architecture: "arm64".into(),
+        },
+    })
+    .await
+    .unwrap()
+    .router();
+    let pool = sqlite_pool(&product_database).await;
+    sqlx::query("INSERT INTO projects(id,name,path,created_at,updated_at) VALUES (1,'Tokenizer /var/folders/project/tokenizer','/private/var/folders/project/tokenizer','1','1')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO threads(id,title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (1,'Debug /var/folders/project/tokenizer',1,'1','2','codex-basic','auto')")
+        .execute(&pool).await.unwrap();
+    let receipt = json!({
+        "schemaVersion": 1,
+        "permissionProfileId": "auto",
+        "label": "Approve /var/folders/project/tokenizer",
+        "authority": "bounded /var/folders/project/tokenizer",
+        "reviewer": "automatic /var/folders/project/tokenizer",
+        "bindingPresent": true,
+        "unconfinedHostAccess": false,
+        "disclosure": "May access /var/folders/project/tokenizer"
+    });
+    sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,permission_profile_id,effective_execution_digest,effective_permission_receipt_json) VALUES (1,1,1,'Review /var/folders/project/tokenizer','1',?1,'accepted','codex-basic','sha256:harness','{}','auto','sha256:execution',?2)")
+        .bind(graph_interaction.id.value())
+        .bind(receipt.to_string())
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name,completion_error,permission_profile_id) VALUES (2,1,2,'Continue from /var/folders/project/tokenizer','2','failed','codex-basic','Failed in /var/folders/project/tokenizer','auto')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (1,?1,2,'2')")
+        .bind(invoked.id.value())
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name,permission_profile_id) VALUES (3,1,3,'Still running','3','running','codex-basic','auto')")
+        .execute(&pool).await.unwrap();
+    pool.close().await;
+
+    let response = app
+        .clone()
+        .oneshot(api_request("GET", "/api/threads/1/export", None, true))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["content-type"],
+        "application/x-ndjson; charset=utf-8"
+    );
+    let bytes = to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    assert!(bytes.ends_with(b"\n"));
+    let exported_text = String::from_utf8_lossy(&bytes);
+    assert!(!exported_text.contains("/var/folders/project/tokenizer"));
+    assert!(!exported_text.contains("/private/var/folders/project/tokenizer"));
+    let records = decode_export_jsonl(&bytes).unwrap();
+    assert_eq!(records.len(), 4);
+    let ConversationExportRecord::Header(header) = &records[0] else {
+        panic!("expected header")
+    };
+    assert_eq!(header.conversation.title, "Debug [project-path]");
+    assert_eq!(
+        header.conversation.project_name.as_deref(),
+        Some("Tokenizer [project-path]")
+    );
+    let ConversationExportRecord::Turn(first) = &records[1] else {
+        panic!("expected first turn")
+    };
+    assert_eq!(first.completion.status, ExportCompletionStatus::Accepted);
+    assert_eq!(first.text, "Review [project-path]");
+    let accepted_view = first.accepted_view.as_ref().unwrap();
+    assert_eq!(accepted_view.layers.len(), 4);
+    assert!(accepted_view.root_action.label.contains("[project-path]"));
+    let exported_answer = accepted_view
+        .layers
+        .iter()
+        .flat_map(|resolved| &resolved.nodes)
+        .find(|node| node.title.starts_with("Finding"))
+        .unwrap();
+    assert!(exported_answer.kind.contains("[project-path]"));
+    assert_eq!(exported_answer.icon, "file");
+    assert!(exported_answer.title.contains("[project-path]"));
+    assert!(exported_answer.detail.contains("[project-path]"));
+    let exported_invoke = accepted_view
+        .layers
+        .iter()
+        .flat_map(|resolved| &resolved.actions)
+        .find(|action| {
+            action.kind == relayer_app_server::conversation_export::ExportActionKind::Invoke
+        })
+        .unwrap();
+    assert!(exported_invoke.label.contains("[project-path]"));
+    assert_eq!(exported_invoke.icon.as_deref(), Some("terminal"));
+    assert!(
+        exported_invoke
+            .description
+            .as_deref()
+            .unwrap()
+            .contains("[project-path]")
+    );
+    assert!(
+        exported_invoke
+            .interaction_text
+            .as_deref()
+            .unwrap()
+            .contains("[project-path]")
+    );
+    let receipt = first
+        .completion
+        .effective_permission_receipt
+        .as_ref()
+        .unwrap();
+    assert!(receipt.label.contains("[project-path]"));
+    assert!(receipt.authority.contains("[project-path]"));
+    assert!(receipt.reviewer.contains("[project-path]"));
+    assert!(
+        receipt
+            .disclosure
+            .as_deref()
+            .unwrap()
+            .contains("[project-path]")
+    );
+    let reference_targets = accepted_view
+        .layers
+        .iter()
+        .flat_map(|resolved| &resolved.actions)
+        .filter(|action| {
+            action.relation
+                == Some(relayer_app_server::conversation_export::ExportNavigateRelation::Reference)
+        })
+        .filter_map(|action| action.target_layer_id.as_deref())
+        .collect::<Vec<_>>();
+    assert_eq!(reference_targets.len(), 4);
+    assert!(reference_targets.iter().any(|target| {
+        reference_targets
+            .iter()
+            .filter(|other| *other == target)
+            .count()
+            == 3
+    }));
+    let ConversationExportRecord::Turn(second) = &records[2] else {
+        panic!("expected second turn")
+    };
+    assert_eq!(second.completion.status, ExportCompletionStatus::Failed);
+    assert_eq!(
+        second.completion.error.as_deref(),
+        Some("Failed in [project-path]")
+    );
+    assert!(matches!(second.origin, ExportTurnOrigin::Action { .. }));
+    let ConversationExportRecord::Turn(third) = &records[3] else {
+        panic!("expected third turn")
+    };
+    assert_eq!(third.completion.status, ExportCompletionStatus::Running);
+    assert!(third.accepted_view.is_none());
+
+    let repeated = app
+        .clone()
+        .oneshot(api_request("GET", "/api/threads/1/export", None, true))
+        .await
+        .unwrap();
+    let repeated_bytes = to_bytes(repeated.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    let repeated_records = decode_export_jsonl(&repeated_bytes).unwrap();
+    let ConversationExportRecord::Turn(repeated_first) = &repeated_records[1] else {
+        panic!("expected repeated first turn")
+    };
+    assert_eq!(repeated_first.accepted_view, first.accepted_view);
+
+    let forbidden = app
+        .oneshot(api_request_with_token(
+            "GET",
+            "/api/threads/1/export",
+            None,
+            "review",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+    graph_task.abort();
+    harness_task.abort();
+    graph_database.close().await;
+    fs::remove_dir_all(root).unwrap();
+}
 
 #[tokio::test]
 async fn approval_wait_is_durable_and_the_product_decision_resumes_the_same_completion() {
@@ -1498,6 +1933,14 @@ fn exits_when_desktop_control_pipe_closes() {
             permissions.to_str().unwrap(),
             "--port",
             "0",
+            "--producer-desktop-version",
+            "test",
+            "--producer-build-commit",
+            "test",
+            "--producer-platform",
+            "test",
+            "--producer-architecture",
+            "test",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1897,7 +2340,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 6);
+    assert_eq!(applied_migrations, 7);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -1916,6 +2359,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         provider_catalog_refresh_url: None,
         provider_catalog_refresh_token: None,
         runtime: None,
+        allow_conversation_import: false,
+        export_producer: test_export_producer(),
     })
     .await;
     let error = match incompatible {
@@ -1943,6 +2388,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         provider_catalog_refresh_url: None,
         provider_catalog_refresh_token: None,
         runtime: None,
+        allow_conversation_import: false,
+        export_producer: test_export_producer(),
     })
     .await;
     let rootless_error = match rootless {
@@ -1963,7 +2410,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
         "DROP TABLE threads",
         "DROP TABLE projects",
         "CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,path TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
-        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto')",
+        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto',conversation_import_id TEXT REFERENCES conversation_imports(id))",
         "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL,graph_node_id INTEGER,completion_status TEXT NOT NULL DEFAULT 'not_started',harness_configuration_name TEXT,harness_configuration_digest TEXT,completion_output_json TEXT,completion_error TEXT,permission_profile_id TEXT NOT NULL DEFAULT 'auto',effective_execution_digest TEXT,effective_permission_receipt_json TEXT,model_provider_id TEXT,provider_model_id TEXT,model_family_id INTEGER)",
         "CREATE UNIQUE INDEX projects_path_partial ON projects(path) WHERE id > 0",
         "CREATE UNIQUE INDEX interactions_sequence_partial ON interactions(thread_id,sequence) WHERE id > 0",
@@ -1983,6 +2430,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
         provider_catalog_refresh_url: None,
         provider_catalog_refresh_token: None,
         runtime: None,
+        allow_conversation_import: false,
+        export_producer: test_export_producer(),
     })
     .await;
     let partial_index_error = match partial_index {
@@ -2023,6 +2472,8 @@ async fn open_app(database: &Path, web_directory: &Path) -> Router {
         provider_catalog_refresh_url: None,
         provider_catalog_refresh_token: None,
         runtime: None,
+        allow_conversation_import: false,
+        export_producer: test_export_producer(),
     })
     .await
     .unwrap()
@@ -2099,6 +2550,8 @@ async fn open_app_with_runtime_observed(
             allow_harness_override,
             standalone_workspaces_directory: web_directory.join("workspaces"),
         }),
+        allow_conversation_import: false,
+        export_producer: test_export_producer(),
     })
     .await
     .unwrap()
@@ -2110,6 +2563,15 @@ async fn open_app_with_runtime_observed(
             succeed: refresh_succeeds,
         },
     )
+}
+
+fn test_export_producer() -> relayer_app_server::conversation_export::ExportProducer {
+    relayer_app_server::conversation_export::ExportProducer {
+        desktop_version: "test".into(),
+        build_commit: "test".into(),
+        platform: "test".into(),
+        architecture: "test".into(),
+    }
 }
 
 fn permission_catalog() -> std::path::PathBuf {

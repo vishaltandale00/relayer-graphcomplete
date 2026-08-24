@@ -1,11 +1,17 @@
 mod completion;
 mod database;
+mod import;
 mod interaction_scope;
 mod model;
 mod writer;
 
-pub use completion::CompletionOutput;
+pub use completion::{AcceptedGraphClosure, CompletionOutput};
 pub use database::GraphDatabase;
+pub use import::{
+    ImportedAcceptedView, ImportedAction, ImportedConversation, ImportedConversationReceipt,
+    ImportedConversationStage, ImportedEdge, ImportedLayer, ImportedNode, ImportedResolvedLayer,
+    ImportedTurn, ImportedTurnReceipt,
+};
 pub use model::{
     ActionDraft, ActionId, ActionKind, ActionVariant, EdgeDraft, EdgeId, GraphAction, GraphEdge,
     GraphLayer, GraphNode, LayerDraft, LayerId, NavigateRelation, NodeDraft, NodeId, ProjectId,

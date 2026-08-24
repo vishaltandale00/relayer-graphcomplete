@@ -17,6 +17,106 @@ async fn setup(project_id: Option<ProjectId>, thread_id: ThreadId) -> (GraphData
     (database, interaction)
 }
 
+fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
+    ImportedConversation {
+        import_id: "import-1".into(),
+        source_sha256: "sha256:abc".into(),
+        project_id: None,
+        thread_id: thread(9001),
+        created_at: "2026-08-24T00:00:00Z".into(),
+        turns: vec![ImportedTurn {
+            source_turn_id: "turn-1".into(),
+            text: "Explain the queue".into(),
+            accepted_view: Some(ImportedAcceptedView {
+                interaction_node_id: interaction_node_id.into(),
+                root_action: ImportedAction {
+                    id: "action-1".into(),
+                    source_node_id: interaction_node_id.into(),
+                    source_layer_id: None,
+                    kind: "navigate".into(),
+                    relation: Some("expand".into()),
+                    label: "Response".into(),
+                    variant: "pill".into(),
+                    icon: None,
+                    description: None,
+                    target_layer_id: Some("layer-1".into()),
+                    interaction_text: None,
+                },
+                root_layer_id: "layer-1".into(),
+                layers: vec![ImportedResolvedLayer {
+                    layer: ImportedLayer {
+                        id: "layer-1".into(),
+                        nodes: vec!["node-1".into()],
+                        edges: vec![],
+                    },
+                    nodes: vec![ImportedNode {
+                        id: "node-1".into(),
+                        kind: "concept".into(),
+                        icon: "box".into(),
+                        title: "Queue".into(),
+                        detail: "A queue".into(),
+                    }],
+                    edges: vec![],
+                    actions: vec![],
+                }],
+            }),
+        }],
+    }
+}
+
+#[tokio::test]
+async fn imported_conversation_is_materialized_read_only_and_removable() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let input = imported_conversation("interaction-1");
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+    let turn = &receipt.turns[0];
+    assert!(turn.output.is_some());
+
+    let writer = database
+        .writer_for_subgraph(NodeId::new(turn.graph_node_id.unwrap()).unwrap())
+        .await
+        .unwrap();
+    let error = writer
+        .submit_node(&NodeDraft {
+            client_key: "mutation".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Mutation".into(),
+            detail: "Must not be written".into(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(error, GraphError::Forbidden(_)));
+
+    database
+        .remove_imported_conversation(&input.import_id)
+        .await
+        .unwrap();
+    assert!(
+        database
+            .writer_for_subgraph(NodeId::new(turn.graph_node_id.unwrap()).unwrap())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn imported_cross_role_node_collision_rolls_back_atomically() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let invalid = imported_conversation("node-1");
+    let error = database
+        .import_accepted_conversation(&invalid)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("collides"));
+
+    let valid = imported_conversation("interaction-1");
+    database
+        .import_accepted_conversation(&valid)
+        .await
+        .expect("failed import must not retain its import identity");
+}
+
 async fn node(writer: &GraphWriter, key: &str) -> GraphNode {
     writer
         .submit_node(&NodeDraft {
@@ -543,6 +643,26 @@ async fn reference_layers_can_reference_each_other_in_cycles() {
     .await;
 
     writer.complete(interaction.id).await.unwrap();
+    let closure = database
+        .accepted_graph_closure(interaction.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(closure.root_layer_id, root.id);
+    assert_eq!(closure.layers.len(), 3);
+    assert_eq!(closure.layers[0].layer.id, root.id);
+    assert!(
+        closure
+            .layers
+            .iter()
+            .any(|layer| layer.layer.id == layer_a.id)
+    );
+    assert!(
+        closure
+            .layers
+            .iter()
+            .any(|layer| layer.layer.id == layer_b.id)
+    );
     assert_eq!(
         writer.get_layer(layer_b.id).await.unwrap().layer.state,
         RecordState::Accepted

@@ -20,6 +20,7 @@ import {
   appendLayerPath,
   createLayerNavigationCoordinator,
   layerPathForVisibleLayer,
+  shouldPollThreadInteractions,
   workspaceTurns,
 } from "./product-workspace/model.js";
 import {
@@ -153,10 +154,8 @@ export function cancelNavigationHistory() {
 function schedulePendingRefresh(threadId) {
   clearTimeout(pendingRefreshTimer);
   pendingRefreshTimer = undefined;
-  const hasPendingInteraction = appState.interactions.some((interaction) => (
-    String(interaction.threadId) === String(threadId)
-    && ["not_started", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
-  ));
+  const thread = appState.threads.find((candidate) => String(candidate.id) === String(threadId));
+  const hasPendingInteraction = shouldPollThreadInteractions(thread, appState.interactions);
   if (!threadId || !hasPendingInteraction) return;
   pendingRefreshTimer = setTimeout(() => {
     if (String(viewState.currentThreadId) !== String(threadId)) return;

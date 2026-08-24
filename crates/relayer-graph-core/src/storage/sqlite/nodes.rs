@@ -32,6 +32,7 @@ struct InteractionScopeRow {
     kind: String,
     state: String,
     owner_interaction_id: Option<i64>,
+    imported: i64,
 }
 
 impl<'connection> NodeTable<'connection> {
@@ -68,7 +69,7 @@ impl<'connection> NodeTable<'connection> {
         node_id: NodeId,
     ) -> Result<InteractionScope, GraphError> {
         let row = sqlx::query_as::<_, InteractionScopeRow>(
-            "SELECT project_id,thread_id,kind,state,owner_interaction_id FROM nodes WHERE id=?1",
+            "SELECT n.project_id,n.thread_id,n.kind,n.state,n.owner_interaction_id,EXISTS(SELECT 1 FROM graph_imports gi WHERE gi.thread_id=n.thread_id) AS imported FROM nodes n WHERE n.id=?1",
         )
         .bind(node_id.value())
         .fetch_optional(&mut *self.connection)
@@ -83,6 +84,7 @@ impl<'connection> NodeTable<'connection> {
                     project_id: row.project_id.map(valid_project_id).transpose()?,
                     thread_id: valid_thread_id(row.thread_id)?,
                     root_node_id: node_id,
+                    read_only: row.imported != 0,
                 })
             }
             _ => Err(GraphError::Forbidden(

@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { link, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 import {
   basicEvalCaseId,
@@ -57,12 +60,22 @@ export const evalJudges = Object.freeze([
 const deterministicJudgeId = "deterministic-graph-contract";
 const simulatedUserJudgeId = "simulated-user";
 const simulatedUserJudgeIds = new Set([simulatedUserJudgeId, "simulated-user-sol-high"]);
+const MAX_CONVERSATION_IMPORT_BYTES = 256 * 1024 * 1024;
 
 function copy(value) {
   return structuredClone(value);
 }
 
 function summarize(run) {
+  if (run.kind === "imported-conversation") {
+    const finished = run.executions.filter((execution) => ["passed", "failed", "error"].includes(execution.status));
+    const passed = run.executions.filter((execution) => execution.status === "passed").length;
+    return {
+      passed,
+      total: run.executions.length,
+      byHarness: [{ name: "External conversation", passed, total: run.executions.length, finished: finished.length }],
+    };
+  }
   const byHarness = run.harnessConfigurationNames.map((name) => {
     const executions = run.executions.filter((execution) => execution.harnessConfigurationName === name);
     const finished = executions.filter((execution) => ["passed", "failed", "error"].includes(execution.status));
@@ -86,6 +99,8 @@ export class EvalService {
     acceptedTopologyGrader = gradeAcceptedReviewTopology,
     candidateTraceExporter = null,
     candidateTraceRequired = false,
+    conversationImportEnabled = false,
+    conversationImportMaxBytes = MAX_CONVERSATION_IMPORT_BYTES,
     platform = process.platform,
   }) {
     this.stateFile = stateFile;
@@ -99,6 +114,8 @@ export class EvalService {
     this.acceptedTopologyGrader = acceptedTopologyGrader;
     this.candidateTraceExporter = candidateTraceExporter;
     this.candidateTraceRequired = candidateTraceRequired;
+    this.conversationImportEnabled = conversationImportEnabled;
+    this.conversationImportMaxBytes = conversationImportMaxBytes;
     this.platform = platform;
     this.runs = [];
     this.configurations = new Map();
@@ -108,11 +125,21 @@ export class EvalService {
 
   async open() {
     this.configurations = await loadHarnessConfigurations(this.configurationPaths);
+    await rm(join(dirname(this.stateFile), "import-staging"), { recursive: true, force: true });
     try {
       const persisted = JSON.parse(await readFile(this.stateFile, "utf8"));
       if (persisted?.schemaVersion === 1 && Array.isArray(persisted.runs)) this.runs = persisted.runs;
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
+    }
+    if (this.conversationImportEnabled) {
+      const publishedImports = await this.#productRequest("/api/internal/conversation-imports");
+      for (const receipt of publishedImports.imports || []) {
+        if (!this.runs.some((run) => run.importId === receipt.importId)) {
+          this.runs.unshift(importedRun(receipt, true));
+        }
+      }
+      await this.#reconcilePendingImportDirectories(publishedImports.imports || []);
     }
     for (const run of this.runs) {
       if (run.status === "running" || run.status === "queued") {
@@ -162,6 +189,36 @@ export class EvalService {
     const run = this.runs.find((candidate) => candidate.id === runId);
     if (!run) throw new Error(`Unknown test run: ${runId}`);
     return copy({ ...run, summary: summarize(run) });
+  }
+
+  async judgeImportedConversation(executionId, judgeConfigurationName) {
+    const located = this.#findExecution(executionId);
+    if (located.run.kind !== "imported-conversation" || located.execution.kind !== "imported-conversation") {
+      throw new Error("Only imported conversation executions can use this judge action.");
+    }
+    if (!evalJudges.some((judge) => judge.id === judgeConfigurationName)) {
+      throw new Error("Unknown judge configuration.");
+    }
+    if (simulatedUserJudgeIds.has(judgeConfigurationName) && this.simulatedUserJudgeRunner === null) {
+      throw new Error("Simulated-user judge is not available in this EvalService.");
+    }
+    if (this.running.has(located.run.id)) throw new Error("This imported conversation is already being judged.");
+
+    const operation = this.#judgeImportedExecution({
+      ...located,
+      judgeConfigurationName,
+    }).finally(() => this.running.delete(located.run.id));
+    this.running.set(located.run.id, operation);
+    await operation;
+    return this.getRun(located.run.id);
+  }
+
+  #findExecution(executionId) {
+    for (const run of this.runs) {
+      const execution = run.executions.find((candidate) => candidate.id === executionId);
+      if (execution) return { run, execution };
+    }
+    throw new Error(`Unknown execution: ${executionId}`);
   }
 
   async candidateTraceContext(executionId, interactionId) {
@@ -274,26 +331,171 @@ export class EvalService {
     return this.getRun(id);
   }
 
+  async importConversation(sourcePath) {
+    if (!this.conversationImportEnabled) throw new Error("Conversation import is not enabled.");
+    if (typeof sourcePath !== "string" || !sourcePath) throw new Error("Conversation import requires a JSONL file path.");
+    const stagingDirectory = join(dirname(this.stateFile), "import-staging");
+    const stagedSource = join(stagingDirectory, `${randomUUID()}.jsonl`);
+    await mkdir(stagingDirectory, { recursive: true, mode: 0o700 });
+    await stageBoundedSource(sourcePath, stagedSource, this.conversationImportMaxBytes);
+    let receipt;
+    try {
+      const response = await fetch(new URL("/api/internal/conversation-imports", this.productSession.origin), {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-ndjson",
+          Cookie: `${this.productSession.cookie.name}=${this.productSession.cookie.value}`,
+        },
+        body: createReadStream(stagedSource),
+        duplex: "half",
+      });
+      receipt = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(receipt?.error || `Conversation import failed (${response.status}).`);
+    } catch (error) {
+      await rm(stagedSource, { force: true });
+      throw error;
+    }
+    const run = importedRun({
+      importId: receipt.importId,
+      sourceSha256: receipt.sourceSha256,
+      header: { conversation: { title: receipt.title }, producer: receipt.producer },
+      threadId: receipt.threadId,
+      turns: receipt.turns.map((turn) => ({
+        sourceTurnId: turn.sourceTurnId,
+        interactionId: turn.interactionId,
+        graphNodeId: turn.graphNodeId,
+        completionStatus: turn.completionStatus,
+      })),
+    });
+    const sourceRef = ["runs", encodeURIComponent(run.id), "conversation.jsonl"].join("/");
+    const sourceFile = join(dirname(this.stateFile), ...sourceRef.split("/"));
+    const pendingMarker = join(dirname(sourceFile), "pending-import.json");
+    try {
+      await mkdir(dirname(sourceFile), { recursive: true });
+      await link(stagedSource, sourceFile);
+      await rm(stagedSource, { force: true });
+      run.sourceRef = sourceRef;
+      await this.#writeRunBundle(run);
+      await writeFile(pendingMarker, `${JSON.stringify({ importId: receipt.importId })}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+        flag: "wx",
+      });
+    } catch (error) {
+      await this.#removeStagedImport(receipt.importId).catch(() => undefined);
+      await rm(stagedSource, { force: true });
+      await rm(dirname(sourceFile), { recursive: true, force: true });
+      throw error;
+    }
+    let publish;
+    try {
+      publish = await fetch(new URL("/api/internal/conversation-imports", this.productSession.origin), {
+        method: "PUT",
+        headers: { Accept: "application/json", "Content-Type": "application/json", Cookie: `${this.productSession.cookie.name}=${this.productSession.cookie.value}` },
+        body: JSON.stringify({ importId: receipt.importId }),
+      });
+    } catch (error) {
+      const published = await this.#findPublishedImport(receipt.importId);
+      if (!published) {
+        try {
+          await this.#removeStagedImport(receipt.importId);
+        } catch (cleanupError) {
+          const publishedAfterCleanup = await this.#findPublishedImport(receipt.importId);
+          if (!publishedAfterCleanup) throw cleanupError;
+          publish = new Response(null, { status: 200 });
+        }
+        if (!publish) {
+          await rm(dirname(sourceFile), { recursive: true, force: true });
+          throw error;
+        }
+      } else {
+        publish = new Response(null, { status: 200 });
+      }
+    }
+    if (!publish.ok) {
+      const detail = await publish.json().catch(() => ({}));
+      await this.#removeStagedImport(receipt.importId).catch(() => undefined);
+      await rm(dirname(sourceFile), { recursive: true, force: true });
+      throw new Error(detail?.error || `Conversation publication failed (${publish.status}).`);
+    }
+    await rm(pendingMarker, { force: true });
+    this.runs.unshift(run);
+    await this.#changed();
+    return this.getRun(run.id);
+  }
+
+  async #removeStagedImport(importId) {
+    const response = await fetch(new URL("/api/internal/conversation-imports", this.productSession.origin), {
+      method: "DELETE",
+      headers: { Accept: "application/json", "Content-Type": "application/json", Cookie: `${this.productSession.cookie.name}=${this.productSession.cookie.value}` },
+      body: JSON.stringify({ importId }),
+    });
+    if (!response.ok) throw new Error(`Conversation import cleanup failed (${response.status}).`);
+  }
+
+  async #findPublishedImport(importId) {
+    const value = await this.#productRequest("/api/internal/conversation-imports");
+    return (value.imports || []).find((item) => item.importId === importId) || null;
+  }
+
+  async #reconcilePendingImportDirectories(publishedImports) {
+    const runsDirectory = join(dirname(this.stateFile), "runs");
+    let entries;
+    try {
+      entries = await readdir(runsDirectory, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      throw error;
+    }
+    const publishedIds = new Set(publishedImports.map((item) => item.importId));
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith("import-")) continue;
+      const directory = join(runsDirectory, entry.name);
+      const marker = join(directory, "pending-import.json");
+      let pending;
+      try {
+        pending = JSON.parse(await readFile(marker, "utf8"));
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
+      if (publishedIds.has(pending.importId)) {
+        await rm(marker, { force: true });
+      } else {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  }
+
   reviewContext(executionId) {
     for (const run of this.runs) {
       const selected = run.executions.find((execution) => execution.id === executionId);
       if (!selected) continue;
-      const cases = run.testCaseIds.map((caseId) => {
+      const caseIds = run.kind === "imported-conversation"
+        ? ["external-conversation"]
+        : run.testCaseIds;
+      const cases = caseIds.map((caseId) => {
         const definition = evalCases.find((candidate) => candidate.id === caseId);
-        const execution = run.executions.find((candidate) => (
-          candidate.testCaseId === caseId
-          && candidate.harnessConfigurationName === selected.harnessConfigurationName
-        ));
+        const execution = run.kind === "imported-conversation"
+          ? selected
+          : run.executions.find((candidate) => (
+            candidate.testCaseId === caseId
+            && candidate.harnessConfigurationName === selected.harnessConfigurationName
+          ));
         const threadIds = execution?.threadIds || [];
+        const name = run.kind === "imported-conversation"
+          ? selected.title || run.title || "Imported conversation"
+          : definition?.name || caseId;
         return {
           id: caseId,
-          name: definition?.name || caseId,
+          name,
           executionId: execution?.id || null,
           status: execution?.status || "missing",
           threadIds,
           threads: threadIds.map((threadId, index) => ({
             id: threadId,
-            name: definition?.threads?.[index]?.name || definition?.name || caseId,
+            name: definition?.threads?.[index]?.name || name,
           })),
         };
       });
@@ -301,12 +503,120 @@ export class EvalService {
         runId: run.id,
         harnessConfigurationName: selected.harnessConfigurationName,
         selectedExecutionId: selected.id,
-        selectedCaseId: selected.testCaseId,
+        selectedCaseId: run.kind === "imported-conversation" ? null : selected.testCaseId,
         readOnly: true,
+        origin: copy(selected.origin || run.origin || { kind: "local-eval" }),
         cases,
       });
     }
     throw new Error(`Unknown execution: ${executionId}`);
+  }
+
+  async #judgeImportedExecution({ run, execution, judgeConfigurationName }) {
+    run.status = "judging";
+    run.judgeConfigurationName = judgeConfigurationName;
+    execution.status = "judging";
+    execution.judgeConfiguration = { name: judgeConfigurationName };
+    execution.error = null;
+    await this.#changed();
+
+    try {
+      const threadId = execution.threadIds?.[0];
+      if (threadId == null) throw new Error("Imported execution has no product thread.");
+      const detail = await this.#productRequest(`/api/threads/${encodeURIComponent(threadId)}`);
+      if (detail.thread?.imported !== true) {
+        throw new Error("The product thread is not server-authored imported state.");
+      }
+      const interactions = new Map((detail.interactions || []).map((interaction) => [String(interaction.id), interaction]));
+      const accepted = [];
+      const checks = [];
+      for (const turn of execution.turns) {
+        const interaction = interactions.get(String(turn.interactionId));
+        if (!interaction) throw new Error(`Imported product turn ${turn.interactionId} is missing.`);
+        turn.threadId = detail.thread.id;
+        turn.prompt = interaction.text;
+        turn.rootLayerId = interaction.completionOutput?.rootLayer?.layer?.id ?? null;
+        turn.status = interaction.completionStatus;
+        turn.graphNodeId = interaction.graphNodeId;
+        turn.judgeEligible = interaction.completionStatus === "accepted" && Boolean(interaction.completionOutput);
+        turn.deterministicChecks = [];
+        turn.deterministicPassed = null;
+        turn.deterministicJudge = null;
+        if (!turn.judgeEligible) continue;
+
+        const prefix = `turn-${interaction.sequence}`;
+        const turnChecks = checkBasicOutput(interaction.completionOutput, interaction.graphNodeId).map((check) => ({
+          ...check,
+          name: `${prefix}:${check.name}`,
+        }));
+        try {
+          const topology = await this.acceptedTopologyBuilder({
+            turnId: interaction.id,
+            rootLayerId: interaction.completionOutput.rootLayer.layer.id,
+            loadLayer: (layerId) => this.#productRequest(
+              `/api/threads/${encodeURIComponent(detail.thread.id)}`
+                + `/interactions/${encodeURIComponent(interaction.id)}`
+                + `/layers/${encodeURIComponent(layerId)}`,
+            ),
+          });
+          turnChecks.push(...this.acceptedTopologyGrader(topology).map((check) => ({
+            ...check,
+            name: `${prefix}:${check.name}`,
+          })));
+        } catch (error) {
+          turnChecks.push({
+            name: `${prefix}:graph:accepted-reachable-closure`,
+            passed: false,
+            detail: error instanceof Error ? error.message : String(error),
+          });
+        }
+        turn.deterministicChecks = turnChecks;
+        turn.deterministicPassed = turnChecks.length > 0 && turnChecks.every((check) => check.passed);
+        const provenance = importedJudgeProvenance(run, turn);
+        turn.deterministicJudge = {
+          schemaVersion: 1,
+          judge: deterministicJudgeId,
+          status: "completed",
+          passed: turn.deterministicPassed,
+          completedAt: new Date().toISOString(),
+          provenance,
+          checks: copy(turnChecks),
+        };
+        checks.push(...turnChecks);
+        accepted.push({ thread: detail.thread, interaction, turn, provenance });
+      }
+      if (accepted.length === 0) throw new Error("This imported conversation has no accepted turns eligible for result judging.");
+
+      execution.checks = checks;
+      let passed = accepted.every(({ turn }) => turn.deterministicPassed);
+      if (simulatedUserJudgeIds.has(judgeConfigurationName)) {
+        const eligible = accepted.filter(({ turn }) => turn.deterministicPassed);
+        for (const [index, candidate] of eligible.entries()) {
+          const result = await this.#judgeAcceptedTurn({
+            execution,
+            ...candidate,
+            reviewSequence: { index, count: eligible.length },
+          });
+          if (result.status !== "completed" || result.passed === false) passed = false;
+        }
+        if (eligible.length === 0) passed = false;
+      }
+      execution.passed = passed;
+      execution.status = passed ? "passed" : "failed";
+      run.status = execution.status;
+      run.completedAt = new Date().toISOString();
+      await this.#writeImportedJudgeArtifact(run, execution);
+      await this.#changed();
+    } catch (error) {
+      execution.status = "error";
+      execution.passed = false;
+      execution.error = error instanceof Error ? error.message : String(error);
+      run.status = "error";
+      run.completedAt = new Date().toISOString();
+      await this.#writeImportedJudgeArtifact(run, execution);
+      await this.#changed();
+      throw error;
+    }
   }
 
   async #run(run) {
@@ -578,7 +888,7 @@ export class EvalService {
     return thread;
   }
 
-  async #judgeAcceptedTurn({ execution, thread, interaction, turn, reviewSequence }) {
+  async #judgeAcceptedTurn({ execution, thread, interaction, turn, reviewSequence, provenance = null }) {
     const judgeConfigurationId = execution.judgeConfiguration.name;
     const previousTurnIds = execution.turns
       .filter((candidate) => (
@@ -614,6 +924,7 @@ export class EvalService {
       coverage: null,
       summary: null,
       error: null,
+      ...(provenance === null ? {} : { provenance: copy(provenance) }),
     };
     turn.judgeResults.push(judgeResult);
     await this.#changed();
@@ -647,6 +958,7 @@ export class EvalService {
         },
         rubric: copy(DEFAULT_SIMULATED_USER_RUBRIC),
         judgeConfiguration: copy(execution.judgeConfiguration),
+        ...(provenance === null ? {} : { provenance: copy(provenance) }),
       };
       const output = await invokeSimulatedUserJudge(this.simulatedUserJudgeRunner, context);
       Object.assign(judgeResult, normalizeJudgeOutput(output, judgeResult));
@@ -788,6 +1100,164 @@ export class EvalService {
     }
     run.bundleRef = bundleRef;
   }
+
+  async #writeImportedJudgeArtifact(run, execution) {
+    const artifactId = `judge-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID()}`;
+    const artifactRef = [
+      "runs",
+      encodeURIComponent(run.id),
+      "judges",
+      `${artifactId}.json`,
+    ].join("/");
+    const artifactFile = join(dirname(this.stateFile), ...artifactRef.split("/"));
+    const temporary = `${artifactFile}.${process.pid}.${randomUUID()}.tmp`;
+    const artifact = {
+      schemaVersion: 1,
+      kind: "relayer_imported_conversation_judge",
+      id: artifactId,
+      createdAt: new Date().toISOString(),
+      runId: run.id,
+      executionId: execution.id,
+      judgeConfigurationName: run.judgeConfigurationName,
+      source: {
+        kind: "external-conversation-export",
+        importId: run.importId,
+        sourceSha256: run.sourceSha256,
+        producer: copy(run.producer || {}),
+        sourceRef: run.sourceRef,
+        importBundleRef: run.bundleRef,
+      },
+      execution: copy(execution),
+    };
+    await mkdir(dirname(artifactFile), { recursive: true, mode: 0o700 });
+    try {
+      await writeFile(temporary, `${JSON.stringify(artifact, null, 2)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+        flag: "wx",
+      });
+      await rename(temporary, artifactFile);
+    } finally {
+      await rm(temporary, { force: true });
+    }
+    run.judgeArtifacts ||= [];
+    run.judgeArtifacts.push({
+      id: artifactId,
+      ref: artifactRef,
+      judgeConfigurationName: run.judgeConfigurationName,
+      createdAt: artifact.createdAt,
+    });
+    execution.latestJudgeArtifactRef = artifactRef;
+  }
+}
+
+export async function stageBoundedSource(sourcePath, targetPath, limit, { afterOpen } = {}) {
+  const source = await open(sourcePath, "r");
+  let total = 0;
+  try {
+    const metadata = await source.stat();
+    if (!metadata.isFile() || metadata.size > limit) {
+      throw new Error("Conversation export exceeds the 256 MiB import limit.");
+    }
+    await afterOpen?.(source);
+    const limiter = new Transform({
+      transform(chunk, _encoding, callback) {
+        total += chunk.length;
+        if (total > limit) {
+          callback(new Error("Conversation export exceeds the 256 MiB import limit."));
+        } else {
+          callback(null, chunk);
+        }
+      },
+    });
+    await pipeline(
+      source.createReadStream({ autoClose: false }),
+      limiter,
+      createWriteStream(targetPath, { flags: "wx", mode: 0o600 }),
+    );
+    return total;
+  } catch (error) {
+    await rm(targetPath, { force: true });
+    throw error;
+  } finally {
+    await source.close();
+  }
+}
+
+function importedRun(receipt, recovered = false) {
+  const id = `import-${receipt.importId}`;
+  const executionId = `execution-${receipt.importId}`;
+  const title = receipt.header?.conversation?.title || "Imported conversation";
+  const turns = (receipt.turns || []).map((turn, index) => ({
+    threadId: receipt.threadId,
+    interactionId: turn.interactionId,
+    sourceTurnId: turn.sourceTurnId,
+    turnIndex: index,
+    prompt: null,
+    status: turn.completionStatus,
+    graphNodeId: turn.graphNodeId,
+    rootLayerId: null,
+    deterministicPassed: null,
+    deterministicJudge: null,
+    judgeEligible: turn.completionStatus === "accepted",
+    judgeResults: [],
+    candidateTrace: null,
+  }));
+  return {
+    schemaVersion: 1,
+    kind: "imported-conversation",
+    importId: receipt.importId,
+    sourceSha256: receipt.sourceSha256,
+    producer: copy(receipt.header?.producer || {}),
+    origin: {
+      kind: "external-conversation-export",
+      importId: receipt.importId,
+      sourceSha256: receipt.sourceSha256,
+    },
+    id,
+    title,
+    createdAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
+    bundleRef: recovered ? ["runs", encodeURIComponent(id), "bundle.json"].join("/") : null,
+    sourceRef: recovered ? ["runs", encodeURIComponent(id), "conversation.jsonl"].join("/") : null,
+    status: "imported",
+    testCaseIds: [],
+    harnessConfigurationNames: [],
+    judgeConfigurationName: null,
+    executions: [{
+      kind: "imported-conversation",
+      id: executionId,
+      testRunId: id,
+      testCaseId: "external-conversation",
+      harnessConfigurationName: null,
+      harnessConfiguration: null,
+      harnessConfigurationDigest: null,
+      judgeConfiguration: null,
+      origin: {
+        kind: "external-conversation-export",
+        importId: receipt.importId,
+        sourceSha256: receipt.sourceSha256,
+      },
+      status: "imported",
+      threadIds: [receipt.threadId],
+      turns,
+      checks: [],
+      passed: null,
+      promotable: false,
+      error: null,
+      title,
+    }],
+  };
+}
+
+function importedJudgeProvenance(run, turn) {
+  return {
+    kind: "external-conversation-export",
+    importId: run.importId,
+    sourceSha256: run.sourceSha256,
+    sourceTurnId: turn.sourceTurnId,
+    producer: copy(run.producer || {}),
+  };
 }
 
 function emptyTraceCoverage() {

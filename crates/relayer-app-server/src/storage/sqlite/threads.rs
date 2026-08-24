@@ -7,9 +7,12 @@ const THREAD_COLUMNS: &str = r#"
     SELECT t.id,t.title,t.project_id,t.created_at,t.updated_at,
            t.harness_configuration_name,
            t.permission_profile_id,
-           (SELECT id FROM interactions WHERE thread_id=t.id ORDER BY sequence ASC LIMIT 1)
+           (SELECT id FROM interactions WHERE thread_id=t.id ORDER BY sequence ASC LIMIT 1),
+           t.conversation_import_id IS NOT NULL
     FROM threads t
 "#;
+
+const VISIBLE_THREAD: &str = "(t.conversation_import_id IS NULL OR EXISTS(SELECT 1 FROM conversation_imports ci WHERE ci.id=t.conversation_import_id AND ci.state='published'))";
 
 impl SqliteProductStore {
     pub(crate) async fn list_threads(&self) -> Result<Vec<Thread>, StorageError> {
@@ -71,7 +74,7 @@ pub(super) async fn fetch_threads(
     connection: &mut SqliteConnection,
 ) -> Result<Vec<Thread>, StorageError> {
     let rows = sqlx::query(&format!(
-        "{THREAD_COLUMNS} ORDER BY t.updated_at DESC, t.created_at DESC, t.id DESC"
+        "{THREAD_COLUMNS} WHERE {VISIBLE_THREAD} ORDER BY t.updated_at DESC, t.created_at DESC, t.id DESC"
     ))
     .fetch_all(connection)
     .await?;
@@ -82,13 +85,15 @@ pub(super) async fn fetch_thread(
     connection: &mut SqliteConnection,
     id: ThreadId,
 ) -> Result<Option<Thread>, StorageError> {
-    sqlx::query(&format!("{THREAD_COLUMNS} WHERE t.id=?1"))
-        .bind(id.value())
-        .fetch_optional(connection)
-        .await?
-        .as_ref()
-        .map(thread_from_row)
-        .transpose()
+    sqlx::query(&format!(
+        "{THREAD_COLUMNS} WHERE t.id=?1 AND {VISIBLE_THREAD}"
+    ))
+    .bind(id.value())
+    .fetch_optional(connection)
+    .await?
+    .as_ref()
+    .map(thread_from_row)
+    .transpose()
 }
 
 fn thread_from_row(row: &SqliteRow) -> Result<Thread, StorageError> {
@@ -103,5 +108,6 @@ fn thread_from_row(row: &SqliteRow) -> Result<Thread, StorageError> {
         harness_configuration_name: row.try_get(5)?,
         permission_profile_id: row.try_get(6)?,
         root_interaction_id: InteractionId::from_database(row.try_get(7)?),
+        imported: row.try_get::<i64, _>(8)? != 0,
     })
 }

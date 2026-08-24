@@ -64,7 +64,11 @@ import {
   resolvePermissionSelection,
 } from "../desktop/renderer/src/permission-profile-model.js";
 import { addLocalThread, interactionForThread, responseNodesForThread } from "../desktop/renderer/src/thread-model.js";
-import { workspaceModeCapabilities } from "../desktop/renderer/src/product-workspace/model.js";
+import {
+  productWorkspaceMode,
+  productWorkspaceNeedsRecreation,
+  workspaceModeCapabilities,
+} from "../desktop/renderer/src/product-workspace/model.js";
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
 import { graphEdgeSegment, graphScreenPoint } from "../desktop/renderer/src/product-workspace/workspace.js";
 import { isSafeMarkdownLink } from "../desktop/renderer/src/product-workspace/markdown.js";
@@ -213,6 +217,9 @@ describe("desktop skeleton", () => {
     expect(desktopMain).toContain("providerCatalogRefreshSession: modelCatalogRefreshServer.session");
     expect(desktopPreload).not.toContain("provider-catalog/refresh");
     expect(desktopPreload).not.toContain("providerCatalogRefresh");
+    expect(desktopPreload).toContain('export: (threadId) => ipcRenderer.invoke("relayer:conversation-export", threadId)');
+    expect(desktopPreload).not.toContain("showSaveDialog");
+    expect(desktopIpc).toContain('conversationExporter.save(threadId)');
     expect(desktopMain).toContain("Promise.allSettled");
     expect(desktopMain).toContain("Relayer app server stopped");
     expect(desktopMain).toContain("app.isPackaged");
@@ -353,6 +360,8 @@ describe("desktop skeleton", () => {
     const evalDashboardMain = await readFile(new URL("../desktop/eval-renderer/main.js", import.meta.url), "utf8");
     const evalPreload = await readFile(new URL("../desktop/preload/eval-dashboard.cjs", import.meta.url), "utf8");
     const graphAdapter = await readFile(new URL("../desktop/renderer/src/graph.js", import.meta.url), "utf8");
+    const modelPicker = await readFile(new URL("../desktop/renderer/src/model-picker.js", import.meta.url), "utf8");
+    const productWorkspace = await readFile(new URL("../desktop/renderer/src/product-workspace/workspace.js", import.meta.url), "utf8");
     const navigation = await readFile(new URL("../desktop/renderer/src/navigation.js", import.meta.url), "utf8");
 
     expect(productPackaging).toContain('"!eval-main/**/*"');
@@ -382,15 +391,29 @@ describe("desktop skeleton", () => {
     expect(evalDashboardMain).not.toContain("renderJudgeOutput");
     expect(evalPreload).toContain("openJudgeReview");
     expect(evalPreload).toContain("loadJudgeScreenshot");
+    expect(evalPreload).not.toContain("conversation-export");
     expect(evalMain).toContain('join(evalRendererDirectory, "judge.html")');
-    expect(graphAdapter).toContain('mode: evalReview || query.get("review") === "1" ? "review" : "interactive"');
+    expect(productWorkspaceMode({ thread: { imported: true } })).toBe("review");
+    expect(graphAdapter).toContain("mode: nextMode");
+    expect(graphAdapter).toContain("productWorkspace.dispose()");
+    expect(modelPicker).toContain('removeEventListener("click", outsideClick)');
+    expect(productWorkspace).toContain("modelPicker?.dispose()");
     expect(navigation).toContain("viewState.evalContext.cases");
     expect(workspaceModeCapabilities("review")).toEqual({
       canCompose: false,
       canNavigate: true,
       canInvokeMutatingActions: false,
+      canExportConversation: false,
       canResolveApprovals: false,
     });
+  });
+
+  it("rebuilds workspace authority when server-authored imported state changes", () => {
+    expect(productWorkspaceMode({ thread: { imported: false } })).toBe("interactive");
+    expect(productWorkspaceMode({ thread: { imported: true } })).toBe("review");
+    expect(productWorkspaceNeedsRecreation("interactive", "review")).toBe(true);
+    expect(productWorkspaceNeedsRecreation("review", "interactive")).toBe(true);
+    expect(productWorkspaceNeedsRecreation("review", "review")).toBe(false);
   });
 
   it("coalesces repeated first-thread submissions while creation is pending", async () => {
@@ -517,6 +540,10 @@ describe("desktop skeleton", () => {
         "--web-dir", "/test/renderer",
         "--permission-catalog", "/test/permissions/desktop.json",
         "--port", "0",
+        "--producer-desktop-version", "development",
+        "--producer-build-commit", "development",
+        "--producer-platform", process.platform,
+        "--producer-architecture", process.arch,
         "--read-only-control-token-stdin",
         "--provider-catalog-refresh-url", "http://127.0.0.1:43122",
         "--provider-catalog-refresh-token-stdin",
@@ -543,6 +570,18 @@ describe("desktop skeleton", () => {
       );
       expect(fetch.mock.calls[0][1].headers).not.toHaveProperty("Cookie");
       fetch.mockRestore();
+      const exportBytes = new TextEncoder().encode('{"recordType":"header"}\n');
+      const exportFetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(exportBytes, {
+        headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+      }));
+      expect(await service.exportConversation(7)).toEqual(exportBytes);
+      expect(exportFetch).toHaveBeenCalledWith(
+        new URL("http://127.0.0.1:43123/api/threads/7/export"),
+        expect.objectContaining({
+          headers: { Cookie: `relayer_control=${session.cookie.value}` },
+        }),
+      );
+      exportFetch.mockRestore();
       await service.close();
       expect(child.kill).toHaveBeenCalledWith("SIGTERM");
 
@@ -2270,16 +2309,24 @@ describe("desktop skeleton", () => {
     expect(productShell).not.toContain('id="graphStage"');
     expect(productWorkspaceMarkup()).toContain('id="graphStage"');
     expect(productWorkspaceMarkup()).toContain('id="closeInspector"');
+    expect(productWorkspaceMarkup()).toContain('id="conversationSettingsButton"');
+    expect(productWorkspaceMarkup()).toContain('aria-label="Conversation settings"');
+    expect(productWorkspaceMarkup()).not.toContain('id="runState"');
+    expect(productWorkspaceMarkup()).toContain('id="exportConversation"');
+    expect(productWorkspaceMarkup()).toContain('role="menuitem"');
+    expect(productWorkspaceMarkup()).toContain('data-review-ref="export-conversation"');
     expect(workspaceModeCapabilities("interactive")).toEqual({
       canNavigate: true,
       canCompose: true,
       canInvokeMutatingActions: true,
+      canExportConversation: true,
       canResolveApprovals: true,
     });
     expect(workspaceModeCapabilities("review")).toEqual({
       canNavigate: true,
       canCompose: false,
       canInvokeMutatingActions: false,
+      canExportConversation: false,
       canResolveApprovals: false,
     });
     expect(() => workspaceModeCapabilities("comparison")).toThrow("Unknown product workspace mode");

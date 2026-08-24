@@ -12,12 +12,16 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 reqwest.workspace = true
+relayer-graph-core = { path = "../relayer-graph-core" }
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
 url.workspace = true
+uuid.workspace = true
+http-body-util.workspace = true
 
 [dev-dependencies]
+relayer-graph-server = { path = "../relayer-graph-server" }
 tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }

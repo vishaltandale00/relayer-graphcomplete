@@ -389,6 +389,7 @@ export function createProductWorkspace({
   onSelectTurn = () => {},
   onSelectTurnById,
   onSelectionChange = () => {},
+  onExportConversation = null,
   onSubmitInteraction = async () => {},
   onOpenSettings = () => {},
   onNavigateLayer = async () => {},
@@ -410,6 +411,8 @@ export function createProductWorkspace({
   let inspectorFitRequest = null;
   let inspectorFitFrame = null;
   let turnPopoverOpen = false;
+  let settingsMenuOpen = false;
+  let exportPending = false;
   const approvalSelections = new Map();
   const approvalErrors = new Map();
   const approvalDecisionsInFlight = new Set();
@@ -423,9 +426,74 @@ export function createProductWorkspace({
   const threadView = $("#threadView");
   if (!threadView) throw new Error("Product workspace requires a #threadView host.");
   threadView.innerHTML = productWorkspaceMarkup();
+  const settingsControl = $("#conversationSettings");
+  const settingsButton = $("#conversationSettingsButton");
+  const settingsMenu = $("#conversationSettingsMenu");
+  const exportButton = $("#exportConversation");
+  const closeSettingsMenu = ({ restoreFocus = false } = {}) => {
+    settingsMenuOpen = false;
+    settingsMenu.classList.add("hidden");
+    settingsButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus) settingsButton.focus();
+  };
+  const openSettingsMenu = () => {
+    if (settingsButton.disabled) return;
+    settingsMenuOpen = true;
+    settingsMenu.classList.remove("hidden");
+    settingsButton.setAttribute("aria-expanded", "true");
+    exportButton.focus();
+  };
+  const renderExportControl = (thread = getThread()) => {
+    const available = capabilities.canExportConversation
+      && typeof onExportConversation === "function";
+    settingsControl.classList.toggle("hidden", !available);
+    exportButton.classList.toggle("hidden", !available);
+    exportButton.disabled = !available || exportPending || thread?.id == null;
+    settingsButton.disabled = !available || exportPending;
+    settingsButton.setAttribute("aria-busy", String(exportPending));
+    exportButton.setAttribute("aria-busy", String(exportPending));
+    exportButton.textContent = exportPending ? "Exporting…" : "Export conversation…";
+    if (!available) closeSettingsMenu();
+  };
+  settingsButton.onclick = () => {
+    if (settingsMenuOpen) closeSettingsMenu();
+    else openSettingsMenu();
+  };
+  exportButton.onclick = async () => {
+    const thread = getThread();
+    if (
+      !capabilities.canExportConversation
+      || exportPending
+      || thread?.id == null
+      || typeof onExportConversation !== "function"
+    ) return;
+    closeSettingsMenu();
+    exportPending = true;
+    renderExportControl(thread);
+    try {
+      const result = await onExportConversation(thread.id);
+      if (result?.status === "saved") toast("Conversation exported.");
+      else if (result?.status === "canceled") toast("Export canceled.");
+      else throw new Error("Conversation export returned an unknown status.");
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      exportPending = false;
+      renderExportControl();
+    }
+  };
   const graphStage = $("#graphStage");
   const graphDocument = graphStage.ownerDocument;
   const graphWindow = graphDocument.defaultView;
+  const closeSettingsMenuFromOutside = (event) => {
+    if (settingsMenuOpen && !settingsControl.contains(event.target)) closeSettingsMenu();
+  };
+  const closeSettingsMenuOnEscape = (event) => {
+    if (event.key !== "Escape" || !settingsMenuOpen) return;
+    closeSettingsMenu({ restoreFocus: true });
+  };
+  graphDocument.addEventListener("pointerdown", closeSettingsMenuFromOutside, true);
+  graphDocument.addEventListener("keydown", closeSettingsMenuOnEscape, true);
   const narrowInspectorMedia = graphWindow?.matchMedia?.("(max-width: 760px)");
   let inspectorUsesOverlay = narrowInspectorMedia?.matches
     ?? (graphWindow?.innerWidth ?? 0) <= 760;
@@ -752,6 +820,7 @@ export function createProductWorkspace({
     threadView.dataset.canNavigate = String(capabilities.canNavigate);
     threadView.dataset.canCompose = String(capabilities.canCompose);
     threadView.dataset.canInvokeMutatingActions = String(capabilities.canInvokeMutatingActions);
+    threadView.dataset.canExportConversation = String(capabilities.canExportConversation);
     $("#threadComposer").classList.toggle("disabled-composer", !capabilities.canCompose);
     prompt.classList.toggle("hidden", !capabilities.canCompose);
     send.classList.toggle("hidden", !capabilities.canCompose);
@@ -841,6 +910,7 @@ export function createProductWorkspace({
     }
     applyMode();
     showThread();
+    renderExportControl(thread);
     renderHistoryNavigation();
     $("#threadTitle").textContent = thread.title;
     const project = state.projects.find((item) => String(item.id) === String(thread.projectId));
@@ -880,7 +950,7 @@ export function createProductWorkspace({
       ? `${identityLabels.provider}: ${identityLabels.model}`
       : "";
     identity.classList.toggle("hidden", !identityLabels);
-    renderRunState(state);
+    renderInteractionState(state);
     renderApprovalDock(state, thread);
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
@@ -932,19 +1002,8 @@ export function createProductWorkspace({
     breadcrumb.scrollLeft = breadcrumb.scrollWidth;
   }
 
-  function renderRunState(state) {
+  function renderInteractionState(state) {
     const status = state.status || "idle";
-    const pending = PENDING_COMPLETION_STATUSES.has(status);
-    const needsApproval = pendingApprovalsForThread(state, getThread()).length > 0;
-    const display = needsApproval ? "Needs approval"
-      : status === "accepted" ? "Complete"
-      : pending ? "…"
-        : status === "idle" ? "Ready"
-          : status[0].toUpperCase() + status.slice(1);
-    const runState = $("#runState");
-    runState.className = `run-state ${needsApproval ? "approval" : pending ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
-    runState.setAttribute("aria-label", needsApproval ? "Waiting for user approval" : pending ? "Waiting for graph" : display);
-    runState.querySelector("span").textContent = display;
     prompt.disabled = composerDisabledForState(status, capabilities.canCompose);
     modelPicker?.setDisabled(prompt.disabled);
     syncComposer();
@@ -1070,10 +1129,12 @@ export function createProductWorkspace({
       graphLayoutSettled = false;
       selection.selectedNodeId = null;
       $("#inspector").classList.add("hidden");
-      const pending = PENDING_COMPLETION_STATUSES.has(state.status);
+      const pending = thread?.imported !== true && PENDING_COMPLETION_STATUSES.has(state.status);
       $("#thinkingDots").classList.toggle("hidden", !pending);
       $("#graphEmptyMessage").classList.toggle("hidden", pending);
-      $("#graphEmptyMessage").textContent = state.status === "failed"
+      $("#graphEmptyMessage").textContent = thread?.imported === true && PENDING_COMPLETION_STATUSES.has(state.status)
+        ? "This imported interaction was unfinished and has no accepted graph."
+        : state.status === "failed"
         ? "This interaction failed before producing an accepted graph."
         : "This interaction has no accepted graph yet.";
       return;
@@ -1411,11 +1472,14 @@ export function createProductWorkspace({
   }
 
   function dispose() {
+    modelPicker?.dispose();
     cancelInspectorFit();
     graphSimulation.cancel();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     graphDocument.removeEventListener("pointerdown", closeTurnPopoverFromOutside, true);
+    graphDocument.removeEventListener("pointerdown", closeSettingsMenuFromOutside, true);
     graphDocument.removeEventListener("keydown", closeTurnPopoverOnEscape, true);
+    graphDocument.removeEventListener("keydown", closeSettingsMenuOnEscape, true);
     narrowInspectorMedia?.removeEventListener?.("change", handleInspectorLayoutChange);
     dragging = null;
     panning = null;

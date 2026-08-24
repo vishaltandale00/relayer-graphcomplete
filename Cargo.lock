@@ -1324,6 +1324,9 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "http-body-util",
+ "relayer-graph-core",
+ "relayer-graph-server",
  "reqwest",
  "serde",
  "serde_json",
@@ -1335,6 +1338,7 @@ dependencies = [
  "tower",
  "tower-http",
  "url",
+ "uuid",
 ]
 
 [[package]]
