@@ -1,22 +1,22 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-08-24T17:38:27.487Z",
-  "sourceCommit": "4e3014f953e976180417038f64d14cb5f4e2624b",
+  "capturedAt": "2026-08-24T18:17:11.939Z",
+  "sourceCommit": "fc817d68a118bd00d858fa094306d14a10be06cd",
   "workingTreeDirty": false,
   "command": "RELAYER_CAPTURE_CONVERSATION_EVAL_EVIDENCE=1 electron scripts/capture-conversation-eval-evidence.mjs",
   "paidInferenceCalls": 0,
-  "ownerExportSha256": "sha256:ed56e00f51095f1201dc8d6d8bfcf69e127e93accd4e29c2eb63a6e1c664be89",
-  "importedSourceSha256": "sha256:ed56e00f51095f1201dc8d6d8bfcf69e127e93accd4e29c2eb63a6e1c664be89",
+  "ownerExportSha256": "sha256:b209567d2628c8aa43af3d15a64f2236a3e6af49034e8fc88956ae4c5de9192a",
+  "importedSourceSha256": "sha256:b209567d2628c8aa43af3d15a64f2236a3e6af49034e8fc88956ae4c5de9192a",
   "exactOwnerBytesImported": true,
   "restartReplay": {
-    "runId": "import-22c8b887-7563-46a6-baec-c83c9aea545e",
-    "executionId": "execution-22c8b887-7563-46a6-baec-c83c9aea545e",
-    "sourceSha256": "sha256:ed56e00f51095f1201dc8d6d8bfcf69e127e93accd4e29c2eb63a6e1c664be89",
+    "runId": "import-45a54a7a-84b5-4072-bd7a-dfe385d8e21e",
+    "executionId": "execution-45a54a7a-84b5-4072-bd7a-dfe385d8e21e",
+    "sourceSha256": "sha256:b209567d2628c8aa43af3d15a64f2236a3e6af49034e8fc88956ae4c5de9192a",
     "status": "passed",
     "judgeProvenance": {
       "kind": "external-conversation-export",
-      "importId": "22c8b887-7563-46a6-baec-c83c9aea545e",
-      "sourceSha256": "sha256:ed56e00f51095f1201dc8d6d8bfcf69e127e93accd4e29c2eb63a6e1c664be89",
+      "importId": "45a54a7a-84b5-4072-bd7a-dfe385d8e21e",
+      "sourceSha256": "sha256:b209567d2628c8aa43af3d15a64f2236a3e6af49034e8fc88956ae4c5de9192a",
       "sourceTurnId": "turn:1",
       "producer": {
         "desktopVersion": "development",
@@ -30,21 +30,21 @@
   "screenshots": [
     {
       "file": "ordinary-conversation-export.png",
-      "sha256": "63587f49a0d0a3fa4ef67448490a2518529ce3eda60923e30a3bd5de6c21c731",
+      "sha256": "331f5353f570654ec2ca899663c7a6e6e25f05ac32261dd531b6b784a2431e81",
       "requirements": [
-        "Owner sees enabled Export conversation control in ordinary ProductWorkspace"
+        "Owner opens Conversation settings and sees the enabled Export conversation menu item"
       ]
     },
     {
       "file": "eval-dashboard-imported.png",
-      "sha256": "13686165e5a4174eb38ee231b7013c1a26b92e2f80eb7bc78436f77960d36893",
+      "sha256": "3e384d9895caa378ba66f66b7b3db24bacc964044364caa6d270a4983739ad9f",
       "requirements": [
         "Eval dashboard imported the exact owner-saved JSONL as an immutable external conversation"
       ]
     },
     {
       "file": "eval-dashboard-judged.png",
-      "sha256": "ffe1c23433d88bf641498488551a72cf8f65a16d5a07a41814fba1c868a51852",
+      "sha256": "ea6ebd17dc5f3a237fac3148ed92b41b0d2d1f9bd7d7eb21c48e776930c0c5ec",
       "requirements": [
         "Existing deterministic judge completed",
         "Product workspace action remains available"
@@ -52,7 +52,7 @@
     },
     {
       "file": "product-workspace-imported-root.png",
-      "sha256": "c4081acd8be5d349fa78d956b66fb3ded9d02cc7cb0e4e0823fba2c978de75a3",
+      "sha256": "1627d32711f10f6e8dcba5064fed92ba0d625404adf0a97355b27f8b8a35bb3e",
       "requirements": [
         "Production ProductWorkspace renders imported accepted turn",
         "Review mode is read-only",
@@ -61,14 +61,14 @@
     },
     {
       "file": "product-workspace-turn-statuses.png",
-      "sha256": "91254f4e32e4115bd604c2f1181be06338af3e30f7e606204bfc159ffb7b1e6e",
+      "sha256": "ef0b113f677d371263460e1903fad85be5f4bb5e7af12fb099711a63ee853e30",
       "requirements": [
         "Turn picker visibly distinguishes accepted, failed, and unfinished imported turns"
       ]
     },
     {
       "file": "product-workspace-reference-detail.png",
-      "sha256": "9591f464b4b642d9a076360e92cb3a1d73672e97715658060a4e9ad51073c1c8",
+      "sha256": "2f13346e11dfb19d2aa4a81baa5c0d0810f39cece1d48217a5305926f64b5fc2",
       "requirements": [
         "Reference navigation reached shared layer",
         "Breadcrumb preserves authored path",
@@ -77,14 +77,14 @@
     },
     {
       "file": "eval-dashboard-restarted.png",
-      "sha256": "86a59d3bc1935eb77d32d72f0a9e6798600867707b59726f905b7ca1f103b49d",
+      "sha256": "65ce4bdb0dbe4abbbcb07000d8f82c30e61c5802e5b287b43bc210f5245da100",
       "requirements": [
         "Eval restart replays the same imported source digest and completed deterministic judge"
       ]
     },
     {
       "file": "product-workspace-restarted-reference.png",
-      "sha256": "b491ff5db08b2eeaa18220df94a39c3e12cacf1ea63616e8a3330e785f004f00",
+      "sha256": "5dd2c9fdeb358bacc5347e24e11f1e4a5e8a3bb72cb0be21df1b69efe7f68354",
       "requirements": [
         "After graph, product, and Eval restart, the same imported execution reopens and reference navigation still works"
       ]
