@@ -15,6 +15,9 @@ import {
 } from "@relayer/graph-client";
 
 import { startModelCatalogRefreshServer } from "../desktop/main/models/model-catalog-refresh-server.mjs";
+import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-credential-adapter.mjs";
+import { CodexModelCatalogAdapter } from "../desktop/main/models/codex-model-catalog-adapter.mjs";
+import { toProductCatalogSnapshot } from "../desktop/main/models/model-catalog-adapter.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
@@ -22,9 +25,16 @@ import { createTutorialLifecycle } from "../desktop/main/services/tutorial-lifec
 import { createWindowFactory } from "../desktop/main/window.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
+const liveInference = process.env.RELAYER_TUTORIAL_LIVE_INFERENCE === "1";
 const outputPath = resolve(
   process.env.RELAYER_TUTORIAL_VIDEO
-    || join(repositoryRoot, ".relayer", "evidence", "onboarding-tutorial", "interactive-tutorial.mp4"),
+    || join(
+      repositoryRoot,
+      ".relayer",
+      "evidence",
+      "onboarding-tutorial",
+      liveInference ? "interactive-tutorial-live.mp4" : "interactive-tutorial.mp4",
+    ),
 );
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-tutorial-video-"));
 const ffmpegLogPath = join(dataDirectory, "ffmpeg.log");
@@ -33,7 +43,7 @@ let mainWindow;
 let recorder;
 let exitCode = 1;
 
-app.setName("Relayer Tutorial Proof");
+app.setName(liveInference ? "Relayer Live Tutorial Proof" : "Relayer Tutorial Proof");
 const electronProfileDirectory = join(dataDirectory, "electron-profile");
 mkdirSync(electronProfileDirectory, { recursive: true });
 app.setPath("userData", electronProfileDirectory);
@@ -139,11 +149,11 @@ class TutorialFixtureHarness {
   }
 }
 
-function registerTestIpc(tutorial) {
-  ipcMain.handle("relayer:account-read", () => ({
-    status: "connected",
-    account: { email: "tutorial@relayer.test", planType: "Fixture" },
-  }));
+function registerTestIpc(tutorial, { readAccount = () => ({
+  status: "connected",
+  account: { email: "tutorial@relayer.test", planType: "Fixture" },
+}) } = {}) {
+  ipcMain.handle("relayer:account-read", readAccount);
   ipcMain.handle("relayer:model-catalog-settings-open", () => ({ refreshed: true }));
   ipcMain.handle("relayer:model-catalog-refresh", () => ({ refreshed: true }));
   ipcMain.handle("relayer:appearance-read", () => ({ appearance: "dark" }));
@@ -322,51 +332,87 @@ async function stopRecorder() {
 }
 
 async function run() {
-  const configurationPath = join(dataDirectory, "fixture-tutorial.yaml");
-  await writeFile(configurationPath, [
-    "schemaVersion: 1",
-    "name: fixture-tutorial",
-    "implementation: fixture.tutorial",
-    "implementationVersion: 1",
-    "permissionBindings:",
-    "  ask: {}",
-    "  auto: {}",
-    "  full: {}",
-    "modelCompatibility:",
-    "  - providerId: codex",
-    "settings: {}",
-    "",
-  ].join("\n"));
+  let credentials;
+  let configurationPaths;
+  let additionalImplementations;
+  let defaultHarnessConfiguration;
+  let catalogSnapshot;
+  let discoverLiveCatalog;
+  if (liveInference) {
+    credentials = new CodexCredentialAdapter();
+    services.push(credentials);
+    const catalogAdapter = new CodexModelCatalogAdapter({ credentials });
+    discoverLiveCatalog = async () => {
+      const discoveredCatalog = await catalogAdapter.discover();
+      if (discoveredCatalog.provider.status !== "available") {
+        throw new Error(discoveredCatalog.provider.unavailableReason || "Codex is not connected.");
+      }
+      if (!discoveredCatalog.models.some((model) => (
+        model.visible && model.availability === "available"
+      ))) {
+        throw new Error("The connected Codex account has no available visible model.");
+      }
+      return toProductCatalogSnapshot(discoveredCatalog);
+    };
+    catalogSnapshot = await discoverLiveCatalog();
+    configurationPaths = [join(repositoryRoot, "harnesses", "codex-basic.yaml")];
+    additionalImplementations = {};
+    defaultHarnessConfiguration = "codex-basic";
+  } else {
+    const configurationPath = join(dataDirectory, "fixture-tutorial.yaml");
+    await writeFile(configurationPath, [
+      "schemaVersion: 1",
+      "name: fixture-tutorial",
+      "implementation: fixture.tutorial",
+      "implementationVersion: 1",
+      "permissionBindings:",
+      "  ask: {}",
+      "  auto: {}",
+      "  full: {}",
+      "modelCompatibility:",
+      "  - providerId: codex",
+      "settings: {}",
+      "",
+    ].join("\n"));
+    configurationPaths = [configurationPath];
+    additionalImplementations = { "fixture.tutorial": () => new TutorialFixtureHarness() };
+    defaultHarnessConfiguration = "fixture-tutorial";
+    catalogSnapshot = {
+      providerId: "codex",
+      label: "Codex",
+      connected: true,
+      models: [{
+        id: "fixture-model",
+        label: "Fixture model",
+        order: 0,
+        visible: true,
+        available: true,
+        providerDefault: true,
+        metadata: {},
+      }],
+      systemFamily: { key: "codex", name: "Codex", modelIds: ["fixture-model"] },
+    };
+  }
   const settings = createSettingsStore(dataDirectory);
   const tutorial = createTutorialLifecycle({ settings });
-  registerTestIpc(tutorial);
+  registerTestIpc(tutorial, {
+    readAccount: credentials ? () => credentials.account() : undefined,
+  });
 
   const runtime = new GraphCompleteRuntimeService({
     userDataDirectory: dataDirectory,
     graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
-    configurationPaths: [configurationPath],
-    additionalImplementations: { "fixture.tutorial": () => new TutorialFixtureHarness() },
+    configurationPaths,
+    additionalImplementations,
   });
   services.push(runtime);
   const runtimeSession = await runtime.start();
   let product;
-  const catalogSnapshot = {
-    providerId: "codex",
-    label: "Codex",
-    connected: true,
-    models: [{
-      id: "fixture-model",
-      label: "Fixture model",
-      order: 0,
-      visible: true,
-      available: true,
-      providerDefault: true,
-      metadata: {},
-    }],
-    systemFamily: { key: "codex", name: "Codex", modelIds: ["fixture-model"] },
-  };
   const modelCatalogRefreshServer = await startModelCatalogRefreshServer({
-    refresh: () => product.publishProviderCatalog(catalogSnapshot),
+    refresh: async () => {
+      if (discoverLiveCatalog) catalogSnapshot = await discoverLiveCatalog();
+      return product.publishProviderCatalog(catalogSnapshot);
+    },
   });
   services.push(modelCatalogRefreshServer);
   product = new RelayerAppServerService({
@@ -376,7 +422,7 @@ async function run() {
     permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
     runtimeSession,
     providerCatalogRefreshSession: modelCatalogRefreshServer.session,
-    defaultHarnessConfiguration: "fixture-tutorial",
+    defaultHarnessConfiguration,
   });
   services.push(product);
   const productSession = await product.start();
@@ -426,7 +472,19 @@ async function run() {
     if (state.threads.length !== 1) return false;
     const detail = await productRequest(productSession, `/api/threads/${state.threads[0].id}`);
     return detail.interactions[0]?.completionStatus === "accepted" ? detail : false;
-  }, 20_000);
+  }, liveInference ? 180_000 : 20_000);
+  const initialInteraction = accepted.interactions[0];
+  if (liveInference) {
+    if (accepted.thread.harnessId !== "codex-basic") {
+      throw new Error(`Live tutorial used unexpected harness ${accepted.thread.harnessId}.`);
+    }
+    if (
+      initialInteraction.modelSelection?.providerId !== "codex"
+      || initialInteraction.modelSelection?.modelId === "fixture-model"
+    ) {
+      throw new Error(`Live tutorial has invalid model provenance: ${JSON.stringify(initialInteraction.modelSelection)}`);
+    }
+  }
   const selectMark = await coachmark(webContents, "Select a node");
   if (!selectMark.targetNode) throw new Error("The node-selection coach mark has no visible target.");
   await pause(1_200);
@@ -471,10 +529,11 @@ async function run() {
   const settingsState = await settings.read();
   const result = {
     passed: true,
-    inferenceCalls: 0,
-    harness: "fixture-tutorial",
+    liveInference,
+    harness: accepted.thread.harnessId,
+    modelSelection: initialInteraction.modelSelection,
     threadId: accepted.thread.id,
-    completionStatus: accepted.interactions[0].completionStatus,
+    completionStatus: initialInteraction.completionStatus,
     tutorialStatusAfterReplay: settingsState.tutorial?.status,
     frameCount,
     outputPath,
