@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "passed": true,
+  "capturedAt": "2026-08-25T19:42:27.216Z",
+  "sourceCommit": "37e0e852e499a2ff966c6c7d4fd4ea21b6e3d243",
+  "workingTreeDirty": false,
+  "command": "npm run build && RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE=1 electron scripts/capture-interaction-context-evidence.mjs",
+  "paidInferenceCalls": 0,
+  "runtime": "real Electron BrowserWindow + production renderer + Rust app/graph servers + SQLite",
+  "harness": "fixture-task-system (deterministic zero-inference implementation)",
+  "viewport": {
+    "width": 1480,
+    "height": 920
+  },
+  "thread": {
+    "id": 1,
+    "interactionIds": [
+      1,
+      2,
+      3
+    ],
+    "statuses": [
+      "accepted",
+      "accepted",
+      "accepted"
+    ]
+  },
+  "assertions": {
+    "nodeDetailsOpened": true,
+    "multipleAnnotationsAddedEditedAndOrdered": true,
+    "groupedComposerVisible": true,
+    "messageAndContextSent": true,
+    "historyPillAndPopoverVisible": true,
+    "historicalTargetNodeReopened": true,
+    "annotationOnlyInteractionSent": true,
+    "servicesAndWindowRestarted": true,
+    "persistedContextVisibleAfterRestart": true,
+    "targetNodeReopenedAfterRestart": true
+  },
+  "screenshots": [
+    {
+      "file": "grouped-composer.png",
+      "sha256": "860b3dc60d653706a65efe7f36ccc3be10f58d15c398bf4ead7f5a82eab33bc2"
+    },
+    {
+      "file": "restarted-context.png",
+      "sha256": "4edf8c117da95a9a04a45b73df02e4a5a977e37758f3e754517cc5a3dfb12ee2"
+    }
+  ],
+  "video": {
+    "file": "interaction-context.mp4",
+    "sha256": "f34ebe788608424eef6ab95dccd7da766a74c75989cf5910e69bb61aed3c6055",
+    "durationSeconds": 26.367,
+    "stream": {
+      "codec_name": "h264",
+      "width": 1480,
+      "height": 920,
+      "pix_fmt": "yuv420p",
+      "side_data_list": [
+        {}
+      ]
+    },
+    "playbackDecoded": true,
+    "steps": [
+      "1. Open Node Details for any visible node; the + control connects it to the next interaction",
+      "2. Multiple ordered annotations stay grouped under their connected node above the composer",
+      "3. The turn banner shows one connected-node pill; its popover restores both annotations in order",
+      "4. Clicking the connected node reopens its full Node Details from history",
+      "5. A connected node with a non-empty annotation enables send even when message text is empty",
+      "6. Annotation-only history has no derived message label; the context pill preserves the actual input",
+      "7. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
+      "8. The persisted context still reopens the exact target node after restart"
+    ]
+  }
+}
