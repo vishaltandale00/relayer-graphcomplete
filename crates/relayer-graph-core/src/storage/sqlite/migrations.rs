@@ -224,4 +224,78 @@ mod tests {
         .unwrap_err();
         assert!(duplicate.to_string().contains("UNIQUE constraint failed"));
     }
+
+    #[tokio::test]
+    async fn active_root_guard_preserves_existing_duplicates_and_rejects_new_ones() {
+        let mut connection = SqliteConnection::connect("sqlite::memory:").await.unwrap();
+        for migration in [
+            include_str!("migrations/0001_graph_schema.sql"),
+            include_str!("migrations/0002_action_presentation.sql"),
+            include_str!("migrations/0003_navigation_relations.sql"),
+            include_str!("migrations/0004_imported_conversations.sql"),
+            include_str!("migrations/0005_interaction_action_leases.sql"),
+            include_str!("migrations/0006_layer_layout.sql"),
+        ] {
+            sqlx::raw_sql(migration)
+                .execute(&mut connection)
+                .await
+                .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO nodes(id,project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (1,NULL,1,'user-interaction','user','Question','Question','accepted',NULL,NULL)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        for (id, key) in [(1_i64, "first"), (2, "second")] {
+            sqlx::query(
+                "INSERT INTO actions(id,project_id,thread_id,source_node_id,source_layer_id,kind,relation,label,variant,target_layer_id,interaction_text,state,owner_interaction_id,client_key) VALUES (?1,NULL,1,1,NULL,'navigate','expand','Response','pill',NULL,NULL,'draft',1,?2)",
+            )
+            .bind(id)
+            .bind(key)
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        }
+
+        sqlx::raw_sql(include_str!("migrations/0007_active_root_action_guard.sql"))
+            .execute(&mut connection)
+            .await
+            .unwrap();
+
+        let preserved: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM actions WHERE owner_interaction_id=1 AND source_node_id=1",
+        )
+        .fetch_one(&mut connection)
+        .await
+        .unwrap();
+        assert_eq!(preserved, 2);
+        let rejected = sqlx::query(
+            "INSERT INTO actions(project_id,thread_id,source_node_id,source_layer_id,kind,relation,label,variant,target_layer_id,interaction_text,state,owner_interaction_id,client_key) VALUES (NULL,1,1,NULL,'navigate','expand','Response','pill',NULL,NULL,'draft',1,'third')",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap_err();
+        assert!(rejected.to_string().contains("root_action_already_exists"));
+
+        sqlx::query("UPDATE actions SET state='stopped'")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO actions(project_id,thread_id,source_node_id,source_layer_id,kind,relation,label,variant,target_layer_id,interaction_text,state,owner_interaction_id,client_key) VALUES (NULL,1,1,NULL,'navigate','expand','Response','pill',NULL,NULL,'draft',1,'third')",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        let reactivated = sqlx::query("UPDATE actions SET state='draft' WHERE id=1")
+            .execute(&mut connection)
+            .await
+            .unwrap_err();
+        assert!(
+            reactivated
+                .to_string()
+                .contains("root_action_already_exists")
+        );
+    }
 }

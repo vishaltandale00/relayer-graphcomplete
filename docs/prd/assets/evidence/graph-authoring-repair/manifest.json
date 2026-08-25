@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-25T07:20:54.745Z",
+  "sourceCommit": "589276b8ceb2224e6030a43e4a2e2118205a2064",
+  "workingTreeDirty": false,
+  "command": "RELAYER_CAPTURE_GRAPH_AUTHORING_REPAIR_EVIDENCE=1 RELAYER_RECORD_GRAPH_AUTHORING_REPAIR_VIDEO=1 electron scripts/capture-graph-authoring-repair-evidence.mjs",
+  "paidInferenceCalls": 0,
+  "product": {
+    "renderer": "desktop/renderer ProductWorkspace",
+    "runtime": "real Rust graph server, Rust app server, SQLite stores, and Electron BrowserWindow",
+    "deterministicHarness": "fixture.task-system implementation registered for the evidence run"
+  },
+  "screenshot": {
+    "file": "accepted-replay-safe-graph.png",
+    "sha256": "a10f7cbcc3f60acf0f284ed70cca172a05aabc848ccd5e0ef0b95534f75865e7",
+    "proves": [
+      "Production ProductWorkspace renders the accepted replay-safe root graph"
+    ]
+  },
+  "deterministicArtifact": {
+    "file": "deterministic-artifact.json",
+    "sha256": "62f8ffa5c521645e27fed6637190a40d190482b3da04d920a53dd9d8c234ba3a",
+    "proves": [
+      "Whole-program replay retained the same node, edge, layer, and action IDs",
+      "Orphan submission failed before discard",
+      "A second root client key was rejected without persistence",
+      "Repeated discard returned the same stopped layer",
+      "The discarded layer remained stopped after final graph acceptance"
+    ]
+  },
+  "screenRecording": {
+    "file": "graph-authoring-repair.mp4",
+    "sha256": "054f504bf2f21d9a9ab1d66e08a17014d0582f0eae66f548d52bd991397f54e6",
+    "durationSeconds": 12.9,
+    "capture": "Direct frame recording of the real Electron BrowserWindow at 10 fps",
+    "visibleSteps": [
+      "Accepted root graph renders in production ProductWorkspace",
+      "Root node inspector exposes the authored detail-layer action",
+      "Navigate action opens the accepted detail layer",
+      "Detail node opens in the production inspector",
+      "Breadcrumb returns to the accepted root layer"
+    ]
+  }
+}

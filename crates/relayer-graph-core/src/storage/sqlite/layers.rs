@@ -225,6 +225,61 @@ impl<'connection> LayerTable<'connection> {
         .collect()
     }
 
+    pub(crate) async fn is_reachable_from_root(
+        &mut self,
+        owner: NodeId,
+        target: LayerId,
+    ) -> Result<bool, GraphError> {
+        let reachable = sqlx::query_scalar::<_, i64>(
+            r#"
+            WITH RECURSIVE reachable_layers(id) AS (
+                SELECT root.target_layer_id
+                FROM actions root
+                WHERE root.owner_interaction_id=?1
+                  AND root.source_node_id=?1
+                  AND root.source_layer_id IS NULL
+                  AND root.state='draft'
+                  AND root.kind='navigate'
+                  AND root.target_layer_id IS NOT NULL
+                UNION
+                SELECT child.target_layer_id
+                FROM reachable_layers reachable
+                JOIN actions child ON child.source_layer_id=reachable.id
+                WHERE child.owner_interaction_id=?1
+                  AND child.state='draft'
+                  AND child.kind='navigate'
+                  AND child.target_layer_id IS NOT NULL
+            )
+            SELECT EXISTS(SELECT 1 FROM reachable_layers WHERE id=?2)
+            "#,
+        )
+        .bind(owner.value())
+        .bind(target.value())
+        .fetch_one(&mut *self.connection)
+        .await?;
+        Ok(reachable != 0)
+    }
+
+    pub(crate) async fn stop_owned_draft(
+        &mut self,
+        id: LayerId,
+        owner: NodeId,
+    ) -> Result<(), GraphError> {
+        let result = sqlx::query(
+            "UPDATE layers SET state='stopped' WHERE id=?1 AND owner_interaction_id=?2 AND state='draft'",
+        )
+        .bind(id.value())
+        .bind(owner.value())
+        .execute(&mut *self.connection)
+        .await?;
+        if result.rows_affected() != 1 {
+            return Err(GraphError::Internal(format!(
+                "draft layer {id} changed while it was being discarded"
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) async fn upsert_draft(
         &mut self,
         scope: &InteractionScope,
@@ -250,11 +305,18 @@ impl<'connection> LayerTable<'connection> {
                     .await?;
                 id
             }
-            Some(_) => {
+            Some((_, RecordState::Accepted)) => {
                 return Err(GraphError::validation(
                     "immutable_layer",
                     "layer",
                     "This layer was already accepted. Create a new layer instead of editing history.",
+                ));
+            }
+            Some((_, RecordState::Stopped)) => {
+                return Err(GraphError::validation(
+                    "discarded_layer",
+                    "layer",
+                    "This layer was discarded and cannot be revived. Create a new layer with a new client key instead.",
                 ));
             }
             None => {

@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -1066,6 +1067,55 @@ describe("HarnessHost", () => {
       expect(await response.json()).toEqual({ cancelled: false });
     } finally {
       await running?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("force-closes the listener and active sockets while graceful harness disposal is stalled", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-force-close-"));
+    let running: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
+    let releaseDispose!: () => void;
+    let markDisposeStarted!: () => void;
+    const disposeStarted = new Promise<void>((resolveStarted) => { markDisposeStarted = resolveStarted; });
+    const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
+    try {
+      running = await startHarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          async complete() {},
+          state: emptyState,
+          async dispose() {
+            markDisposeStarted();
+            await disposeGate;
+          },
+        }) },
+      });
+      await running.host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      const address = new URL(running.url);
+      const socket = connect(Number(address.port), address.hostname);
+      await new Promise<void>((resolveConnect, reject) => {
+        socket.once("connect", resolveConnect);
+        socket.once("error", reject);
+      });
+      const socketClosed = new Promise<void>((resolveClose) => socket.once("close", () => resolveClose()));
+      socket.write("POST /sessions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\n\r\n{");
+
+      const closing = running.close();
+      await disposeStarted;
+      running.forceClose();
+      await socketClosed;
+      await expect(fetch(`${running.url}/sessions`, { method: "POST" })).rejects.toThrow();
+      releaseDispose();
+      await closing;
+    } finally {
+      releaseDispose?.();
+      running?.forceClose();
       await rm(directory, { recursive: true, force: true });
     }
   });

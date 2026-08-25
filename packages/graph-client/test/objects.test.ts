@@ -101,6 +101,33 @@ describe("agent-facing graph objects", () => {
     expect(source?.leasedActionId).toBe(42);
   });
 
+  it("discards a submitted layer and refreshes its object reference", async () => {
+    let request: { url: string; method?: string } | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      request = { url, ...(init.method === undefined ? {} : { method: init.method }) };
+      return new Response(JSON.stringify({
+        layer: { id: 30, nodes: [10], edges: [], state: "stopped" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const layer = new LayerObject(
+      [10],
+      [],
+      new LayerLayoutObject([new NodePlacementObject(10, 0.5, 0.5)]),
+      "abandoned",
+    );
+    layer.ref = { id: 30, nodes: [10], edges: [], state: "draft" };
+
+    const stopped = await graph.discardLayer(layer);
+
+    expect(request).toEqual({
+      url: "http://127.0.0.1:1/api/graph/layers/30/discard",
+      method: "POST",
+    });
+    expect(stopped.state).toBe("stopped");
+    expect(layer.ref).toEqual(stopped);
+  });
+
   it("serializes card presentation as canonical action data", async () => {
     let request: Record<string, unknown> | undefined;
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {

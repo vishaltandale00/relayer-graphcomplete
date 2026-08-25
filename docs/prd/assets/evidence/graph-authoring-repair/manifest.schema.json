@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relayer.ai/evidence/graph-authoring-repair-manifest.schema.json",
+  "title": "Graph authoring repair evidence manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "capturedAt",
+    "sourceCommit",
+    "workingTreeDirty",
+    "command",
+    "paidInferenceCalls",
+    "product",
+    "screenshot",
+    "deterministicArtifact"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "capturedAt": { "type": "string", "format": "date-time" },
+    "sourceCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "workingTreeDirty": { "type": "boolean" },
+    "command": { "type": "string" },
+    "paidInferenceCalls": { "const": 0 },
+    "product": {
+      "type": "object",
+      "required": ["renderer", "runtime", "deterministicHarness"],
+      "additionalProperties": { "type": "string" }
+    },
+    "screenshot": { "$ref": "#/$defs/fileEvidence" },
+    "deterministicArtifact": { "$ref": "#/$defs/fileEvidence" },
+    "screenRecording": {
+      "allOf": [
+        { "$ref": "#/$defs/fileEvidence" },
+        {
+          "type": "object",
+          "required": ["durationSeconds", "capture", "visibleSteps"],
+          "properties": {
+            "durationSeconds": { "type": "number", "exclusiveMinimum": 0 },
+            "capture": { "type": "string" },
+            "visibleSteps": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "fileEvidence": {
+      "type": "object",
+      "required": ["file", "sha256"],
+      "properties": {
+        "file": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "proves": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
