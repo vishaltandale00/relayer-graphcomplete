@@ -439,6 +439,240 @@ async fn accept_single_node(
 }
 
 #[tokio::test]
+async fn interaction_context_is_control_authored_ordered_and_excluded_from_completion() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let source = database
+        .create_interaction(Some(project(1)), thread(1), "Source")
+        .await
+        .unwrap();
+    let source_writer = database.writer_for_subgraph(source.id).await.unwrap();
+    let target = node(&source_writer, "accepted-target").await;
+    let source_layer = accept_single_node(&source_writer, source.clone(), target.clone()).await;
+
+    let (interaction, actions) = database
+        .create_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Compare this",
+            &[InteractionContextDraft {
+                target: InteractionContextTarget {
+                    node_id: target.id,
+                    source_interaction_node_id: source.id,
+                    source_layer_id: source_layer.id,
+                },
+                annotations: vec![
+                    "  preserve exact whitespace  ".into(),
+                    "Second\nline".into(),
+                ],
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].type_id, "interaction.context");
+
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let input = writer.interaction_input().await.unwrap();
+    assert_eq!(input.interaction.id, interaction.id);
+    assert_eq!(input.contexts.len(), 1);
+    assert_eq!(input.contexts[0].target_node.id, target.id);
+    assert_eq!(input.contexts[0].target_node.title, target.title);
+    assert_eq!(input.contexts[0].target_node.state, RecordState::Accepted);
+    assert_eq!(
+        input.contexts[0].annotations,
+        ["  preserve exact whitespace  ", "Second\nline"]
+    );
+
+    let answer = node(&writer, "answer").await;
+    let answer_layer = single_node_layer(&writer, "answer-layer", &answer).await;
+    let reserved_key = writer
+        .add_action(&ActionDraft {
+            client_key: "\0interaction.context:0".into(),
+            source_node_id: interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(answer_layer.id),
+            interaction_text: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        reserved_key,
+        GraphError::Validation {
+            code: "reserved_action_client_key",
+            ..
+        }
+    ));
+    writer
+        .add_action(&ActionDraft {
+            client_key: "interaction.context:0".into(),
+            source_node_id: interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(answer_layer.id),
+            interaction_text: None,
+        })
+        .await
+        .expect("context control identity must not consume an LM client key");
+    let output = writer.complete(interaction.id).await.unwrap();
+    assert_eq!(output.root_layer.actions.len(), 0);
+    assert_eq!(writer.interaction_input().await.unwrap().contexts.len(), 1);
+}
+
+#[tokio::test]
+async fn interaction_context_rejects_duplicate_invalid_and_empty_input_atomically() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let source = database
+        .create_interaction(Some(project(1)), thread(1), "Source")
+        .await
+        .unwrap();
+    let source_writer = database.writer_for_subgraph(source.id).await.unwrap();
+    let target = node(&source_writer, "target").await;
+    let source_layer = accept_single_node(&source_writer, source.clone(), target.clone()).await;
+    let other = database
+        .create_interaction(Some(project(1)), thread(3), "Other source")
+        .await
+        .unwrap();
+    let other_writer = database.writer_for_subgraph(other.id).await.unwrap();
+    let other_node = node(&other_writer, "other").await;
+    accept_single_node(&other_writer, other.clone(), other_node).await;
+
+    let occurrence = InteractionContextDraft {
+        target: InteractionContextTarget {
+            node_id: target.id,
+            source_interaction_node_id: source.id,
+            source_layer_id: source_layer.id,
+        },
+        annotations: vec!["Use this".into()],
+    };
+    let duplicate = database
+        .create_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Duplicate",
+            &[occurrence.clone(), occurrence.clone()],
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        duplicate,
+        GraphError::Validation {
+            code: "duplicate_context_target",
+            ..
+        }
+    ));
+
+    let invalid = database
+        .create_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Invalid occurrence",
+            &[InteractionContextDraft {
+                target: InteractionContextTarget {
+                    source_interaction_node_id: other.id,
+                    ..occurrence.target.clone()
+                },
+                annotations: vec!["Use this".into()],
+            }],
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        invalid,
+        GraphError::Validation {
+            code: "invalid_context_occurrence",
+            ..
+        }
+    ));
+
+    let empty = database
+        .create_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "",
+            &[InteractionContextDraft {
+                annotations: vec![],
+                ..occurrence
+            }],
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        empty,
+        GraphError::Validation {
+            code: "missing_interaction_input",
+            ..
+        }
+    ));
+
+    let next = database
+        .create_interaction(Some(project(1)), thread(2), "Next valid interaction")
+        .await
+        .unwrap();
+    assert!(
+        database
+            .writer_for_subgraph(next.id)
+            .await
+            .unwrap()
+            .interaction_input()
+            .await
+            .unwrap()
+            .contexts
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn interaction_context_has_no_eight_target_cap() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut drafts = Vec::new();
+    for index in 0..9 {
+        let source = database
+            .create_interaction(Some(project(1)), thread(10 + index), "Source")
+            .await
+            .unwrap();
+        let writer = database.writer_for_subgraph(source.id).await.unwrap();
+        let target = node(&writer, &format!("target-{index}")).await;
+        let layer = accept_single_node(&writer, source.clone(), target.clone()).await;
+        drafts.push(InteractionContextDraft {
+            target: InteractionContextTarget {
+                node_id: target.id,
+                source_interaction_node_id: source.id,
+                source_layer_id: layer.id,
+            },
+            annotations: vec![],
+        });
+    }
+    let (interaction, actions) = database
+        .create_interaction_with_context(Some(project(1)), thread(99), "Use all", &drafts)
+        .await
+        .unwrap();
+    assert_eq!(actions.len(), 9);
+    assert_eq!(
+        database
+            .writer_for_subgraph(interaction.id)
+            .await
+            .unwrap()
+            .interaction_input()
+            .await
+            .unwrap()
+            .contexts
+            .len(),
+        9
+    );
+}
+
+#[tokio::test]
 async fn root_action_replay_updates_same_key_and_rejects_a_different_key_without_persisting_it() {
     let (database, interaction) = setup(Some(project(1)), thread(1)).await;
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();

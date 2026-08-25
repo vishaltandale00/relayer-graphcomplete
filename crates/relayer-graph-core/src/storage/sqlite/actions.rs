@@ -65,7 +65,7 @@ impl<'connection> ActionTable<'connection> {
     ) -> Result<Vec<ActionRecord>, GraphError> {
         let rows = match (owner, accepted_only) {
             (Some(owner), _) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE source_node_id=?1 AND owner_interaction_id=?2 AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE source_node_id=?1 AND owner_interaction_id=?2 AND type_id!='interaction.context' AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
             )
             .bind(source.value())
             .bind(owner.value())
@@ -74,7 +74,7 @@ impl<'connection> ActionTable<'connection> {
             .fetch_all(&mut *self.connection)
             .await?,
             (None, true) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE source_node_id=?1 AND state='accepted' AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3)) ORDER BY id",
+                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE source_node_id=?1 AND type_id!='interaction.context' AND state='accepted' AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3)) ORDER BY id",
             )
             .bind(source.value())
             .bind(scope.project_id.map(ProjectId::value))
@@ -82,7 +82,7 @@ impl<'connection> ActionTable<'connection> {
             .fetch_all(&mut *self.connection)
             .await?,
             (None, false) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE source_node_id=?1 AND (state='accepted' OR owner_interaction_id=?2) AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE source_node_id=?1 AND type_id!='interaction.context' AND (state='accepted' OR owner_interaction_id=?2) AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
             )
             .bind(source.value())
             .bind(scope.root_node_id.value())
@@ -101,7 +101,7 @@ impl<'connection> ActionTable<'connection> {
         client_key: &str,
     ) -> Result<Option<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE owner_interaction_id=?1 AND source_node_id=?2 AND client_key=?3",
+            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE owner_interaction_id=?1 AND source_node_id=?2 AND client_key=?3 AND type_id!='interaction.context'",
         )
         .bind(owner.value())
         .bind(source.value())
@@ -117,7 +117,7 @@ impl<'connection> ActionTable<'connection> {
         owner: NodeId,
     ) -> Result<Option<RootActionIdentity>, GraphError> {
         let row: Option<(i64, String)> = sqlx::query_as(
-            "SELECT id,client_key FROM actions WHERE owner_interaction_id=?1 AND source_node_id=?1 AND source_layer_id IS NULL AND state IN ('draft','accepted') ORDER BY id LIMIT 1",
+            "SELECT id,client_key FROM actions WHERE owner_interaction_id=?1 AND source_node_id=?1 AND type_id!='interaction.context' AND source_layer_id IS NULL AND state IN ('draft','accepted') ORDER BY id LIMIT 1",
         )
         .bind(owner.value())
         .fetch_optional(&mut *self.connection)
@@ -137,7 +137,7 @@ impl<'connection> ActionTable<'connection> {
         layer: LayerId,
     ) -> Result<Vec<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE owner_interaction_id=?1 AND source_layer_id=?2 AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE owner_interaction_id=?1 AND type_id!='interaction.context' AND source_layer_id=?2 AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
         )
         .bind(scope.root_node_id.value())
         .bind(layer.value())

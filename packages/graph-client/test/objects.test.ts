@@ -101,6 +101,34 @@ describe("agent-facing graph objects", () => {
     expect(source?.leasedActionId).toBe(42);
   });
 
+  it("reads normalized interaction context without authority provenance", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      interaction: { id: 10, kind: "user-interaction", icon: "user", title: "Compare", detail: "Compare", state: "accepted" },
+      contexts: [{
+        id: 51,
+        type: "interaction.context",
+        sourceNodeId: 10,
+        targetNode: { id: 7, kind: "concept", icon: "box", title: "Boundary", detail: "Evidence", state: "accepted" },
+        annotations: ["First", "Second"],
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 10 });
+
+    const input = await graph.getInteractionInput();
+
+    expect(input.contexts[0]).toMatchObject({
+      id: 51,
+      type: "interaction.context",
+      sourceNodeId: 10,
+      targetNode: { id: 7, title: "Boundary" },
+      annotations: ["First", "Second"],
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:1/api/graph/input",
+      expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer token" }) }),
+    );
+  });
+
   it("discards a submitted layer and refreshes its object reference", async () => {
     let request: { url: string; method?: string } | undefined;
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {

@@ -1,10 +1,13 @@
 use std::path::Path;
 
 use crate::{
-    AcceptedGraphClosure, GraphError, GraphNode, GraphWriter, InteractionInvocation, NodeId,
-    ProjectId, ThreadId,
-    graph::model::require_nonempty,
-    storage::{SqliteGraphStore, sqlite::nodes::NodeTable},
+    AcceptedGraphClosure, GraphError, GraphNode, GraphWriter, InteractionContextAction,
+    InteractionContextDraft, InteractionInvocation, NodeId, ProjectId, ThreadId,
+    graph::{InteractionScope, model::require_nonempty},
+    storage::{
+        SqliteGraphStore,
+        sqlite::{contexts::ContextTable, nodes::NodeTable},
+    },
 };
 
 #[derive(Clone)]
@@ -51,6 +54,42 @@ impl GraphDatabase {
         Ok(node)
     }
 
+    pub async fn create_interaction_with_context(
+        &self,
+        project_id: Option<ProjectId>,
+        thread_id: ThreadId,
+        text: &str,
+        contexts: &[InteractionContextDraft],
+    ) -> Result<(GraphNode, Vec<InteractionContextAction>), GraphError> {
+        if text.trim().is_empty()
+            && !contexts
+                .iter()
+                .flat_map(|context| &context.annotations)
+                .any(|annotation| !annotation.trim().is_empty())
+        {
+            return Err(GraphError::validation(
+                "missing_interaction_input",
+                "text",
+                "An interaction needs non-whitespace message text or at least one non-whitespace context annotation.",
+            ));
+        }
+        let mut transaction = self.storage.begin_write().await?;
+        let node = NodeTable::new(&mut transaction)
+            .insert_interaction(project_id, thread_id, text, None)
+            .await?;
+        let scope = InteractionScope {
+            project_id,
+            thread_id,
+            root_node_id: node.id,
+            read_only: false,
+        };
+        let actions = ContextTable::new(&mut transaction)
+            .insert_all(&scope, contexts)
+            .await?;
+        transaction.commit().await?;
+        Ok((node, actions))
+    }
+
     pub async fn writer_for_subgraph(&self, node_id: NodeId) -> Result<GraphWriter, GraphError> {
         let scope = {
             let mut connection = self.storage.acquire().await?;
@@ -80,6 +119,20 @@ impl GraphDatabase {
                 source_interaction_node_id: lease.source_interaction_id,
                 source_action_id: lease.action_id,
             }))
+    }
+
+    pub async fn interaction_context_actions(
+        &self,
+        node_id: NodeId,
+    ) -> Result<Vec<InteractionContextAction>, GraphError> {
+        let scope = {
+            let mut connection = self.storage.acquire().await?;
+            NodeTable::new(&mut connection)
+                .interaction_scope(node_id)
+                .await?
+        };
+        let mut connection = self.storage.acquire().await?;
+        ContextTable::new(&mut connection).actions(&scope).await
     }
 
     pub async fn close(&self) {

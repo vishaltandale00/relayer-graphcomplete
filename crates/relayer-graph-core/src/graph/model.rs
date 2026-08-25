@@ -1,4 +1,5 @@
 mod action;
+mod context;
 mod edge;
 mod icon;
 mod ids;
@@ -7,6 +8,10 @@ mod node;
 mod record_state;
 
 pub use action::{ActionDraft, ActionKind, ActionVariant, GraphAction, NavigateRelation};
+pub use context::{
+    InteractionContext, InteractionContextAction, InteractionContextDraft,
+    InteractionContextTarget, InteractionInput,
+};
 pub use edge::{EdgeDraft, GraphEdge};
 pub use icon::{
     RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, is_supported_icon, normalize_icon_name,

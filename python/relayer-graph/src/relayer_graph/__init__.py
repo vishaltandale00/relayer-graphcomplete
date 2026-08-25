@@ -1,7 +1,8 @@
 """Object-based Python client for the GraphComplete Rust graph engine."""
 
 from .authoring import (ActionVariant, EdgeObject, GraphAuthoringClient, GraphEdge,
-                        GraphLayer, GraphNode, LayerLayout, LayerLayoutObject,
+                        GraphLayer, GraphNode, InteractionContext, InteractionInput,
+                        LayerLayout, LayerLayoutObject,
                         LayerObject, NavigateRelation, NodeObject, NodePlacement,
                         NodePlacementObject, RelayerGraphClient)
 from .exceptions import (APIError, AuthenticationError, ConfigurationError, NotFound,
@@ -19,7 +20,8 @@ __all__ = [
     "Client", "GraphClient", "RelayerGraphClient", "GraphAuthoringClient",
     "GraphSession",
     "NodeObject", "EdgeObject", "LayerObject", "NodePlacementObject", "LayerLayoutObject",
-    "GraphNode", "GraphEdge", "GraphLayer", "NodePlacement", "LayerLayout",
+    "GraphNode", "GraphEdge", "GraphLayer", "InteractionContext", "InteractionInput",
+    "NodePlacement", "LayerLayout",
     "ActionVariant", "NavigateRelation",
     "RelayerGraphError", "ConfigurationError", "TransportError", "APIError",
     "AuthenticationError", "NotFound", "ValidationError", "ValidationIssue",

@@ -8,8 +8,9 @@ use axum::{
 use relayer_graph_core::{
     ActionDraft, ActionId, ActionKind, CompletionOutput, EdgeDraft, GraphAction, GraphDatabase,
     GraphError, GraphNode, GraphWriter, ImportedConversationStage, ImportedTurn,
-    InteractionInvocation, LayerDraft, LayerId, LayerLayout, NodeDraft, NodeId, NodePlacement,
-    ProjectId, RecordState, ThreadId,
+    InteractionContextAction, InteractionContextDraft, InteractionInput, InteractionInvocation,
+    LayerDraft, LayerId, LayerLayout, NodeDraft, NodeId, NodePlacement, ProjectId, RecordState,
+    ThreadId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -41,6 +42,11 @@ pub fn router(state: ServerState) -> Router {
         .route("/health", get(health))
         .route("/api/control/interactions", post(create_interaction))
         .route("/api/control/interactions/{id}", get(interaction_metadata))
+        .route("/api/control/interactions/{id}/input", get(control_input))
+        .route(
+            "/api/control/interactions/{id}/context-actions",
+            get(control_context_actions),
+        )
         .route("/api/control/interactions/{id}/output", get(control_output))
         .route(
             "/api/control/interactions/{id}/layers/{layer_id}",
@@ -81,6 +87,7 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/graph/nodes", post(submit_node))
         .route("/api/graph/nodes/{id}", get(get_node))
         .route("/api/graph/nodes/{id}/neighbors", get(neighbors))
+        .route("/api/graph/input", get(interaction_input))
         .route("/api/graph/edges", post(create_edge))
         .route("/api/graph/layers", post(submit_layer))
         .route("/api/graph/layers/{id}", get(get_layer))
@@ -173,6 +180,8 @@ struct CreateInteractionRequest {
     text: String,
     #[serde(default)]
     invocation: Option<InteractionInvocation>,
+    #[serde(default)]
+    contexts: Vec<InteractionContextDraft>,
     #[serde(default = "default_mint_capability")]
     mint_capability: bool,
 }
@@ -186,6 +195,8 @@ fn default_mint_capability() -> bool {
 pub struct CreateInteractionResponse {
     pub node: GraphNode,
     pub graph_token: String,
+    #[serde(default)]
+    pub context_actions: Vec<InteractionContextAction>,
 }
 
 async fn create_interaction(
@@ -194,15 +205,35 @@ async fn create_interaction(
     Json(input): Json<CreateInteractionRequest>,
 ) -> Result<Json<CreateInteractionResponse>, ApiError> {
     require_bearer(&headers, &state.control_token)?;
-    let interaction = state
-        .graph
-        .create_interaction_with_invocation(
-            input.project_id,
-            input.thread_id,
-            &input.text,
-            input.invocation,
+    if input.invocation.is_some() && !input.contexts.is_empty() {
+        return Err(ApiError::invalid(
+            "invocation and contexts cannot be prepared together yet",
+        ));
+    }
+    let (interaction, context_actions) = if input.contexts.is_empty() {
+        (
+            state
+                .graph
+                .create_interaction_with_invocation(
+                    input.project_id,
+                    input.thread_id,
+                    &input.text,
+                    input.invocation,
+                )
+                .await?,
+            Vec::new(),
         )
-        .await?;
+    } else {
+        state
+            .graph
+            .create_interaction_with_context(
+                input.project_id,
+                input.thread_id,
+                &input.text,
+                &input.contexts,
+            )
+            .await?
+    };
     let graph_token = input
         .mint_capability
         .then(|| mint_capability(&state, interaction.id, None))
@@ -210,7 +241,35 @@ async fn create_interaction(
     Ok(Json(CreateInteractionResponse {
         node: interaction,
         graph_token: graph_token.unwrap_or_default(),
+        context_actions,
     }))
+}
+
+async fn control_input(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+) -> Result<Json<InteractionInput>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_subgraph(id)
+            .await?
+            .interaction_input()
+            .await?,
+    ))
+}
+
+async fn control_context_actions(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(json!({
+        "actions": state.graph.interaction_context_actions(id).await?,
+    })))
 }
 
 async fn interaction_metadata(
@@ -411,6 +470,21 @@ async fn neighbors(
         .neighbors(id)
         .await?;
     Ok(Json(json!({"nodes":nodes})))
+}
+
+async fn interaction_input(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<InteractionInput>, ApiError> {
+    let node_id = session(&state, &headers)?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_subgraph(node_id)
+            .await?
+            .interaction_input()
+            .await?,
+    ))
 }
 async fn create_edge(
     State(state): State<ServerState>,
@@ -882,6 +956,168 @@ mod tests {
             x: 0.5,
             y: 0.5,
         }]))
+    }
+
+    #[tokio::test]
+    async fn control_prepares_context_and_capability_reads_normalized_input_only() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let source = graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "Source")
+            .await
+            .unwrap();
+        let source_writer = graph.writer_for_subgraph(source.id).await.unwrap();
+        let target = source_writer
+            .submit_node(&NodeDraft {
+                client_key: "target".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Target".into(),
+                detail: "Target detail".into(),
+            })
+            .await
+            .unwrap();
+        let layer = source_writer
+            .submit_layer(&LayerDraft {
+                client_key: "root".into(),
+                nodes: vec![target.id],
+                edges: vec![],
+                layout: authored_layout(target.id),
+                size_justification: None,
+            })
+            .await
+            .unwrap();
+        source_writer
+            .add_action(&ActionDraft {
+                client_key: "response".into(),
+                source_node_id: source.id,
+                source_layer_id: None,
+                kind: ActionKind::Navigate,
+                relation: Some(relayer_graph_core::NavigateRelation::Expand),
+                label: "Response".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: Some(layer.id),
+                interaction_text: None,
+            })
+            .await
+            .unwrap();
+        source_writer.complete(source.id).await.unwrap();
+
+        let state = ServerState::new(graph, "control");
+        let app = router(state.clone());
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/interactions")
+                    .header("authorization", "Bearer control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "projectId": 41,
+                            "threadId": 74,
+                            "text": "",
+                            "contexts": [{
+                                "target": {
+                                    "nodeId": target.id,
+                                    "sourceInteractionNodeId": source.id,
+                                    "sourceLayerId": layer.id
+                                },
+                                "annotations": ["  exact annotation  "]
+                            }]
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::OK);
+        let created: CreateInteractionResponse =
+            serde_json::from_slice(&to_bytes(created.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(created.context_actions[0].type_id, "interaction.context");
+
+        let input = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/graph/input")
+                    .header("authorization", format!("Bearer {}", created.graph_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(input.status(), StatusCode::OK);
+        let input: Value =
+            serde_json::from_slice(&to_bytes(input.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(input["interaction"]["detail"], "");
+        assert_eq!(input["contexts"][0]["type"], "interaction.context");
+        assert_eq!(input["contexts"][0]["targetNode"]["id"], target.id.value());
+        assert_eq!(
+            input["contexts"][0]["annotations"][0],
+            "  exact annotation  "
+        );
+        assert!(input["contexts"][0].get("target").is_none());
+        assert!(input["contexts"][0].get("sourceLayerId").is_none());
+
+        let diagnostic = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/control/interactions/{}/context-actions",
+                        created.node.id.value()
+                    ))
+                    .header("authorization", "Bearer control")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let diagnostic: Value =
+            serde_json::from_slice(&to_bytes(diagnostic.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            diagnostic["actions"][0]["target"]["sourceInteractionNodeId"],
+            source.id.value()
+        );
+        assert_eq!(
+            diagnostic["actions"][0]["target"]["sourceLayerId"],
+            layer.id.value()
+        );
+
+        let forged = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("authorization", format!("Bearer {}", created.graph_token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "clientKey": "forged",
+                            "sourceNodeId": created.node.id,
+                            "kind": "interaction.context",
+                            "label": "Context",
+                            "targetLayerId": null,
+                            "interactionText": null
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(forged.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let forged: Value =
+            serde_json::from_slice(&to_bytes(forged.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(forged["error"]["code"], "control_only_action");
     }
 
     #[tokio::test]
