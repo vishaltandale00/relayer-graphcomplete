@@ -319,7 +319,7 @@ describe("desktop environment rail", () => {
     expect(styles).toContain("--warning:#92400e");
     expect(styles).toContain(".environment-stale{color:var(--warning)}");
     expect(styles).toContain("@media(min-width:761px) and (max-width:1100px)");
-    expect(styles).toContain(".interaction-banner p{display:-webkit-box;");
+    expect(styles).toContain(".interaction-banner p{margin:0;display:-webkit-box;");
     expect(styles).toContain("-webkit-line-clamp:2");
     expect(styles).toContain("max-height:2.7em;overflow:hidden");
     const workspaceSource = await readFile(

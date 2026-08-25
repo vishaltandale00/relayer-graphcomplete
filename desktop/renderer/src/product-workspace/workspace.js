@@ -3,8 +3,6 @@ import { actionCanRetry, actionWasInvoked } from "../action-invocation-state.js"
 import { setControlActivationCompletion } from "../control-activation.js";
 import {
   createModelPicker,
-  interactionModelSelection,
-  modelSelectionLabels,
   selectionForNextInteraction,
 } from "../model-picker.js";
 import { pickerSelectionPayload } from "../model-picker-model.js";
@@ -1431,16 +1429,6 @@ export function createProductWorkspace({
       });
       pickerInheritanceKey = inheritanceKey;
     }
-    const interactionSelection = interactionModelSelection(interaction);
-    const identityLabels = interactionSelection
-      ? modelSelectionLabels(state.modelSettings, { harnessId, ...interactionSelection })
-      : null;
-    const identity = $("#interactionModelIdentity");
-    identity.textContent = identityLabels ? ` · ${identityLabels.compact}` : "";
-    identity.title = identityLabels
-      ? `${identityLabels.provider}: ${identityLabels.model}`
-      : "";
-    identity.classList.toggle("hidden", !identityLabels);
     renderInteractionState(state, interaction);
     renderApprovalDock(state, thread);
     renderGraph(state, thread);
