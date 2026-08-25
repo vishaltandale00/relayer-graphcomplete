@@ -4618,6 +4618,40 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
             "annotations":["raw note"]
         }])
     );
+    let hydrated = response_json(
+        resumed
+            .clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        hydrated["interactions"][1]["contexts"],
+        listed["interactions"][1]["contexts"]
+    );
+    let detail = response_json(
+        resumed
+            .clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/threads/{thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        detail["interactions"][1]["contexts"],
+        listed["interactions"][1]["contexts"]
+    );
     let replay = resumed
         .clone()
         .oneshot(api_request(

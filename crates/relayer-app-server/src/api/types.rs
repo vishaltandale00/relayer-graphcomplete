@@ -355,6 +355,11 @@ pub(crate) struct ProductStateResponse {
 }
 
 impl ProductStateResponse {
+    pub(crate) fn with_interactions(mut self, interactions: Vec<InteractionResponse>) -> Self {
+        self.interactions = interactions;
+        self
+    }
+
     pub(crate) fn with_annotations(mut self, annotations: bool) -> Self {
         self.capabilities.annotations = annotations;
         self
@@ -374,16 +379,6 @@ impl From<ProductState> for ProductStateResponse {
                 .collect(),
             approvals: state.approvals,
             capabilities: state.capabilities.into(),
-        }
-    }
-}
-
-impl ProductStateResponse {
-    pub(crate) fn mark_stale_interactions(&mut self, stale: &std::collections::HashSet<i64>) {
-        for interaction in &mut self.interactions {
-            if stale.contains(&interaction.id) {
-                interaction.mark_projection_stale();
-            }
         }
     }
 }
@@ -413,11 +408,8 @@ impl From<ThreadDetail> for ThreadDetailResponse {
 }
 
 impl ThreadDetailResponse {
-    pub(crate) fn mark_stale_interactions(&mut self, stale: &std::collections::HashSet<i64>) {
-        for interaction in &mut self.interactions {
-            if stale.contains(&interaction.id) {
-                interaction.mark_projection_stale();
-            }
-        }
+    pub(crate) fn with_interactions(mut self, interactions: Vec<InteractionResponse>) -> Self {
+        self.interactions = interactions;
+        self
     }
 }

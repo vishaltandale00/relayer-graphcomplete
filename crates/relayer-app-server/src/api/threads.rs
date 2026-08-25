@@ -262,8 +262,15 @@ pub(super) async fn get(
         &detail.action_invocations,
     )
     .await;
-    let mut response: ThreadDetailResponse = detail.into();
-    response.mark_stale_interactions(&stale);
+    let imported_thread = detail.thread.imported;
+    let interactions = project_interactions(
+        &state,
+        std::mem::take(&mut detail.interactions),
+        imported_thread,
+        &stale,
+    )
+    .await?;
+    let response = ThreadDetailResponse::from(detail).with_interactions(interactions);
     Ok(Json(response))
 }
 
@@ -314,65 +321,84 @@ pub(super) async fn list_interactions(
     )
     .await;
     let imported_thread = detail.thread.imported;
-    let mut interactions = Vec::with_capacity(detail.interactions.len());
-    for interaction in detail.interactions {
-        let id = interaction.id.value();
-        let graph_node_id = interaction.graph_node_id;
-        let mut response: InteractionResponse = interaction.into();
-        if stale.contains(&id) {
-            response.mark_projection_stale();
-        }
-        let durable_input = state
-            .product
-            .interaction_input(InteractionId::try_from(id)?)
-            .await?;
-        let has_durable_context = durable_input
-            .as_ref()
-            .is_some_and(|input| !input.contexts.is_empty());
-        if (has_durable_context || imported_thread)
-            && let (Some(runtime), Some(graph_node_id)) = (state.runtime.as_ref(), graph_node_id)
-        {
-            match runtime.interaction_input(graph_node_id).await {
-                Ok(input) => {
-                    let projected = if input.contexts.is_empty() {
-                        if has_durable_context {
-                            Err("durable product contexts are missing from graph input")
-                        } else {
+    let interactions =
+        project_interactions(&state, detail.interactions, imported_thread, &stale).await?;
+    Ok(Json(InteractionsResponse { interactions }))
+}
+
+pub(super) async fn project_interaction(
+    state: &ApiState,
+    interaction: Interaction,
+    imported_thread: bool,
+    projection_stale: bool,
+) -> Result<InteractionResponse, ApiError> {
+    let id = interaction.id.value();
+    let graph_node_id = interaction.graph_node_id;
+    let mut response: InteractionResponse = interaction.into();
+    if projection_stale {
+        response.mark_projection_stale();
+    }
+    let durable_input = state
+        .product
+        .interaction_input(InteractionId::try_from(id)?)
+        .await?;
+    let has_durable_context = durable_input
+        .as_ref()
+        .is_some_and(|input| !input.contexts.is_empty());
+    if (has_durable_context || imported_thread)
+        && let (Some(runtime), Some(graph_node_id)) = (state.runtime.as_ref(), graph_node_id)
+    {
+        match runtime.interaction_input(graph_node_id).await {
+            Ok(input) => {
+                let projected = if input.contexts.is_empty() {
+                    if has_durable_context {
+                        Err("durable product contexts are missing from graph input")
+                    } else {
+                        Ok(())
+                    }
+                } else {
+                    match runtime.interaction_context_actions(graph_node_id).await {
+                        Ok(actions) if has_durable_context => response.set_contexts(
+                            durable_input
+                                .expect("durable context checked above")
+                                .contexts,
+                            input.contexts,
+                            actions,
+                        ),
+                        Ok(actions) if imported_thread => {
+                            response.set_imported_contexts(actions, input.contexts)
+                        }
+                        Ok(_) => Err("graph interaction contexts have no durable product intent"),
+                        Err(error) => {
+                            eprintln!(
+                                "could not read context actions for interaction {id}: {error}"
+                            );
                             Ok(())
                         }
-                    } else {
-                        match runtime.interaction_context_actions(graph_node_id).await {
-                            Ok(actions) if has_durable_context => response.set_contexts(
-                                durable_input
-                                    .expect("durable context checked above")
-                                    .contexts,
-                                input.contexts,
-                                actions,
-                            ),
-                            Ok(actions) if imported_thread => {
-                                response.set_imported_contexts(actions, input.contexts)
-                            }
-                            Ok(_) => {
-                                Err("graph interaction contexts have no durable product intent")
-                            }
-                            Err(error) => {
-                                eprintln!(
-                                    "could not read context actions for interaction {id}: {error}"
-                                );
-                                Ok(())
-                            }
-                        }
-                    };
-                    if let Err(error) = projected {
-                        eprintln!("could not project context for interaction {id}: {error}");
                     }
+                };
+                if let Err(error) = projected {
+                    eprintln!("could not project context for interaction {id}: {error}");
                 }
-                Err(error) => eprintln!("could not project context for interaction {id}: {error}"),
             }
+            Err(error) => eprintln!("could not project context for interaction {id}: {error}"),
         }
-        interactions.push(response);
     }
-    Ok(Json(InteractionsResponse { interactions }))
+    Ok(response)
+}
+
+async fn project_interactions(
+    state: &ApiState,
+    interactions: Vec<Interaction>,
+    imported_thread: bool,
+    stale: &std::collections::HashSet<i64>,
+) -> Result<Vec<InteractionResponse>, ApiError> {
+    let mut responses = Vec::with_capacity(interactions.len());
+    for interaction in interactions {
+        let is_stale = stale.contains(&interaction.id.value());
+        responses.push(project_interaction(state, interaction, imported_thread, is_stale).await?);
+    }
+    Ok(responses)
 }
 
 pub(super) async fn create_interaction(
