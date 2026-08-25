@@ -50,6 +50,7 @@ export function selectOnboardingTutorialAction(
       (action.kind === "navigate" && action.targetLayerId != null)
       || (
         action.kind === "invoke"
+        && action.targetLayerId == null
         && typeof action.interactionText === "string"
         && action.interactionText.trim().length > 0
       )
@@ -138,6 +139,18 @@ export function reduceOnboardingTutorial(current, event) {
       });
 
     case "use-action":
+      if (
+        event.type === "node-selected"
+        && sameId(event.threadId, current.threadId)
+        && sameId(event.interactionId, current.interactionId)
+        && !sameId(event.nodeId, current.target?.nodeId)
+      ) {
+        return state("select-node", {
+          threadId: current.threadId,
+          interactionId: current.interactionId,
+          target: current.target,
+        });
+      }
       if (
         event.type !== "action-succeeded"
         || !sameId(event.threadId, current.threadId)

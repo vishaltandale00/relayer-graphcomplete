@@ -113,6 +113,8 @@ export function createOnboardingTutorialController({
   let graphSettleFramesRemaining = 0;
   let focusFrame = null;
   let completionFocused = false;
+  let startAttempt = 0;
+  let pendingStart = null;
 
   function removeDescription(target) {
     if (!target) return;
@@ -211,7 +213,8 @@ export function createOnboardingTutorialController({
     graphSettleFramesRemaining = 0;
   }
 
-  async function dismiss(eventType = "leave") {
+  async function dismiss(eventType = "leave", { revokeStart = true } = {}) {
+    if (revokeStart) revokePendingStart();
     if (!active || !tutorial) return;
     tutorial = reduceOnboardingTutorial(tutorial, { type: eventType });
     try {
@@ -257,39 +260,133 @@ export function createOnboardingTutorialController({
     if (tutorial.phase !== "select-node") schedulePositioning();
   }
 
-  async function start(source, context = null) {
-    if (active) await dismiss("leave");
-    const result = source === "automatic"
-      ? await lifecycle.beginAutomatic(context)
-      : await lifecycle.beginManual();
-    if (!result?.started) return false;
+  async function start(source, context = null, ownedAttempt = null) {
+    const attempt = ownedAttempt ?? claimStart(source);
+    if (!ownsStart(attempt)) return false;
+    if (active) {
+      try {
+        await dismiss("leave", { revokeStart: false });
+      } catch (error) {
+        clearStart(attempt);
+        throw error;
+      }
+    }
+    if (!ownsStart(attempt)) return false;
+    let result;
+    try {
+      result = source === "automatic"
+        ? await lifecycle.beginAutomatic(context)
+        : await lifecycle.beginManual();
+    } catch (error) {
+      await cleanupOwnedStart(attempt, { suppressError: true });
+      throw error;
+    }
+    if (!result?.started) {
+      clearStart(attempt);
+      return false;
+    }
+    if (!ownsStart(attempt)) {
+      await cleanupOwnedStart(attempt, { suppressError: true });
+      return false;
+    }
+    if (source === "automatic" && (active || liveThreadCount(context?.threadCount) !== 0)) {
+      await cleanupOwnedStart(attempt);
+      return false;
+    }
+    const canOpen = () => (
+      ownsStart(attempt)
+      && !active
+      && (source !== "automatic" || liveThreadCount(context?.threadCount) === 0)
+    );
+    let opened;
+    try {
+      opened = await openNewThread({
+        prompt: ONBOARDING_TUTORIAL_PROMPT,
+        source,
+        guard: canOpen,
+      });
+    } catch (error) {
+      await cleanupOwnedStart(attempt, { suppressError: true });
+      throw error;
+    }
+    if (opened === false || !canOpen()) {
+      await cleanupOwnedStart(attempt);
+      return false;
+    }
     active = true;
     tutorial = createOnboardingTutorialState();
     completionFocused = false;
-    try {
-      await openNewThread({ prompt: ONBOARDING_TUTORIAL_PROMPT, source });
-    } catch (error) {
-      try {
-        await lifecycle.dismiss();
-      } finally {
-        hide();
-      }
-      throw error;
-    }
+    clearStart(attempt);
     render();
     return true;
   }
 
+  function claimStart(source) {
+    const attempt = ++startAttempt;
+    pendingStart = { attempt, source };
+    return attempt;
+  }
+
+  function ownsStart(attempt) {
+    return pendingStart?.attempt === attempt;
+  }
+
+  function clearStart(attempt) {
+    if (ownsStart(attempt)) pendingStart = null;
+  }
+
+  async function cleanupOwnedStart(attempt, { suppressError = false } = {}) {
+    const owned = ownsStart(attempt);
+    if (!owned && (pendingStart || active)) return;
+    try {
+      await lifecycle.dismiss();
+    } catch (error) {
+      if (!suppressError) throw error;
+    } finally {
+      if (owned) clearStart(attempt);
+    }
+  }
+
+  function revokePendingStart() {
+    startAttempt += 1;
+    pendingStart = null;
+  }
+
+  function liveThreadCount(fallback) {
+    const latestAppState = getAppState();
+    return Array.isArray(latestAppState?.threads) ? latestAppState.threads.length : fallback;
+  }
+
   async function maybeStartAutomatic({ providerConnected, threadCount }) {
-    if (active) return false;
+    if (active || pendingStart) return false;
     const context = {
       surface: "product",
       providerConnected: Boolean(providerConnected),
       threadCount,
     };
-    const current = await lifecycle.read(context);
-    if (!current.automaticEligible) return false;
-    return start("automatic", context);
+    const attempt = claimStart("automatic");
+    let current;
+    try {
+      current = await lifecycle.read(context);
+    } catch (error) {
+      clearStart(attempt);
+      throw error;
+    }
+    if (!ownsStart(attempt)) return false;
+    if (active) {
+      clearStart(attempt);
+      return false;
+    }
+    if (!current.automaticEligible) {
+      clearStart(attempt);
+      return false;
+    }
+    const latestThreadCount = liveThreadCount(threadCount);
+    if (latestThreadCount !== 0) {
+      clearStart(attempt);
+      return false;
+    }
+    return start("automatic", { ...context, threadCount: latestThreadCount }, attempt);
   }
 
   function dispatch(event) {
@@ -356,18 +453,17 @@ export function createOnboardingTutorialController({
 
   async function followupSubmitted({ threadId, interactionId }) {
     if (!active || !tutorial) return false;
-    const next = reduceOnboardingTutorial(tutorial, {
+    const current = tutorial;
+    const next = reduceOnboardingTutorial(current, {
       type: "followup-submitted",
       threadId,
       interactionId,
     });
     if (next.phase !== "complete") return false;
+    await lifecycle.complete();
+    if (!active || tutorial !== current) return false;
     tutorial = next;
-    try {
-      await lifecycle.complete();
-    } finally {
-      render();
-    }
+    render();
     return true;
   }
 
@@ -407,6 +503,7 @@ export function createOnboardingTutorialController({
     leave: () => dismiss("leave"),
     skip: () => dismiss("skip"),
     dispose() {
+      revokePendingStart();
       hide();
       tutorialWindow.removeEventListener?.("resize", repositionForViewportChange);
       tutorialDocument.removeEventListener?.("scroll", repositionForViewportChange, true);

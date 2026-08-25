@@ -80,6 +80,31 @@ describe("onboarding tutorial state", () => {
     });
   });
 
+  it("excludes resolved invokes before choosing an invoke fallback", () => {
+    const layer = acceptedLayer({ actions: [
+      {
+        id: "invoke-resolved",
+        kind: "invoke",
+        sourceNodeId: "node-1",
+        targetLayerId: "layer-2",
+        interactionText: "Already explored",
+      },
+      {
+        id: "invoke-ready",
+        kind: "invoke",
+        sourceNodeId: "node-2",
+        targetLayerId: null,
+        interactionText: "Explore next",
+      },
+    ] });
+
+    expect(selectOnboardingTutorialAction(layer)).toEqual({
+      nodeId: "node-2",
+      actionId: "invoke-ready",
+      actionKind: "invoke",
+    });
+  });
+
   it("guides node selection, navigation, and a user-written follow-up", () => {
     let tutorial = createOnboardingTutorialState();
     tutorial = advance(tutorial, { type: "thread-created", threadId: 7, interactionId: 11 });
@@ -121,6 +146,37 @@ describe("onboarding tutorial state", () => {
       interactionId: 12,
       target: null,
       reason: null,
+    });
+  });
+
+  it.each([
+    ["closes", null],
+    ["changes", "node-1"],
+  ])("returns to node selection when the inspector %s during action guidance", (_label, nodeId) => {
+    let tutorial = createOnboardingTutorialState();
+    tutorial = advance(tutorial, { type: "thread-created", threadId: 7, interactionId: 11 });
+    tutorial = advance(tutorial, {
+      type: "response-accepted",
+      threadId: 7,
+      interactionId: 11,
+      layer: acceptedLayer({ actions: [
+        { id: 31, kind: "navigate", sourceNodeId: "node-2", targetLayerId: 20 },
+      ] }),
+    });
+    tutorial = advance(tutorial, {
+      type: "node-selected", threadId: 7, interactionId: 11, nodeId: "node-2",
+    });
+    expect(tutorial.phase).toBe("use-action");
+
+    tutorial = advance(tutorial, {
+      type: "node-selected", threadId: 7, interactionId: 11, nodeId,
+    });
+
+    expect(tutorial.phase).toBe("select-node");
+    expect(tutorial.target).toEqual({
+      nodeId: "node-2",
+      actionId: 31,
+      actionKind: "navigate",
     });
   });
 

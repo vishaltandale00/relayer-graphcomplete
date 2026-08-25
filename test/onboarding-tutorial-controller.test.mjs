@@ -169,7 +169,12 @@ function fixture(options = {}) {
   const browser = fakeBrowser();
   const newComposer = new FakeElement();
   browser.anchors.set(".new-composer", newComposer);
-  const appState = { interactions: [], actionInvocations: [], pendingActionInvocations: [] };
+  const appState = {
+    threads: [],
+    interactions: [],
+    actionInvocations: [],
+    pendingActionInvocations: [],
+  };
   const viewState = { mainView: "new", currentThreadId: null };
   const persistence = options.lifecycle ?? lifecycle();
   const openNewThread = options.openNewThread ?? vi.fn(async () => {});
@@ -254,28 +259,286 @@ describe("onboarding tutorial controller", () => {
       providerConnected: true,
       threadCount: 0,
     });
-    expect(test.openNewThread).toHaveBeenLastCalledWith({
+    expect(test.openNewThread).toHaveBeenLastCalledWith(expect.objectContaining({
       prompt: "Why can time seem to pass faster as we get older?",
       source: "automatic",
-    });
+      guard: expect.any(Function),
+    }));
 
     await test.controller.startManual();
     expect(test.lifecycle.dismiss).toHaveBeenCalledOnce();
     expect(test.lifecycle.beginManual).toHaveBeenCalledOnce();
-    expect(test.openNewThread).toHaveBeenLastCalledWith({
+    expect(test.openNewThread).toHaveBeenLastCalledWith(expect.objectContaining({
       prompt: "Why can time seem to pass faster as we get older?",
       source: "manual",
+      guard: expect.any(Function),
+    }));
+  });
+
+  it("does not auto-start when a thread appears during the lifecycle eligibility read", async () => {
+    const eligibility = deferred();
+    const test = fixture({
+      lifecycle: lifecycle({ read: vi.fn(() => eligibility.promise) }),
     });
+
+    const starting = test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    });
+    test.appState.threads.push({ id: 7 });
+    eligibility.resolve({ automaticEligible: true, status: "never-shown" });
+
+    await expect(starting).resolves.toBe(false);
+    expect(test.lifecycle.beginAutomatic).not.toHaveBeenCalled();
+    expect(test.openNewThread).not.toHaveBeenCalled();
+    expect(test.controller.isActive()).toBe(false);
+  });
+
+  it("does not auto-start when a thread appears during lifecycle begin", async () => {
+    const beginning = deferred();
+    const test = fixture({
+      lifecycle: lifecycle({ beginAutomatic: vi.fn(() => beginning.promise) }),
+    });
+
+    const starting = test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    });
+    await vi.waitFor(() => expect(test.lifecycle.beginAutomatic).toHaveBeenCalledOnce());
+    test.appState.threads.push({ id: 7 });
+    beginning.resolve({ started: true, source: "automatic" });
+
+    await expect(starting).resolves.toBe(false);
+    expect(test.lifecycle.dismiss).toHaveBeenCalledOnce();
+    expect(test.openNewThread).not.toHaveBeenCalled();
+    expect(test.controller.isActive()).toBe(false);
+    expect(test.controller.snapshot()).toBeNull();
+    expect(coachmark(test)).toBeUndefined();
+  });
+
+  it("guards the composer mutation boundary when a thread appears during preparation", async () => {
+    const preparation = deferred();
+    const mutateComposer = vi.fn();
+    const openNewThread = vi.fn(async ({ guard }) => {
+      await preparation.promise;
+      if (!guard()) return false;
+      mutateComposer();
+      return true;
+    });
+    const test = fixture({ openNewThread });
+
+    const starting = test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    });
+    await vi.waitFor(() => expect(openNewThread).toHaveBeenCalledOnce());
+    expect(test.controller.isActive()).toBe(false);
+    test.appState.threads.push({ id: 7 });
+    preparation.resolve();
+
+    await expect(starting).resolves.toBe(false);
+    expect(mutateComposer).not.toHaveBeenCalled();
+    expect(test.lifecycle.dismiss).toHaveBeenCalledOnce();
+    expect(test.controller.isActive()).toBe(false);
+    expect(test.controller.snapshot()).toBeNull();
+    expect(coachmark(test)).toBeUndefined();
+  });
+
+  it("lets a pending manual start supersede a pending automatic start", async () => {
+    const automaticBegin = deferred();
+    const manualBegin = deferred();
+    const test = fixture({
+      lifecycle: lifecycle({
+        beginAutomatic: vi.fn(() => automaticBegin.promise),
+        beginManual: vi.fn(() => manualBegin.promise),
+      }),
+    });
+
+    const automaticStart = test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    });
+    await vi.waitFor(() => expect(test.lifecycle.beginAutomatic).toHaveBeenCalledOnce());
+    const manualStart = test.controller.startManual();
+    await vi.waitFor(() => expect(test.lifecycle.beginManual).toHaveBeenCalledOnce());
+
+    automaticBegin.resolve({ started: true, source: "automatic" });
+    await expect(automaticStart).resolves.toBe(false);
+    expect(test.openNewThread).not.toHaveBeenCalled();
+
+    manualBegin.resolve({ started: true, source: "manual" });
+    await expect(manualStart).resolves.toBe(true);
+    expect(test.openNewThread).toHaveBeenCalledOnce();
+    expect(test.openNewThread).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: "Why can time seem to pass faster as we get older?",
+      source: "manual",
+      guard: expect.any(Function),
+    }));
+    expect(test.controller.isActive()).toBe(true);
+    expect(test.controller.snapshot()).toMatchObject({ phase: "initial-composer" });
+  });
+
+  it("does not let an automatic probe supersede a pending manual start", async () => {
+    const manualBegin = deferred();
+    const test = fixture({
+      lifecycle: lifecycle({
+        beginManual: vi.fn(() => manualBegin.promise),
+      }),
+    });
+
+    const manualStart = test.controller.startManual();
+    await vi.waitFor(() => expect(test.lifecycle.beginManual).toHaveBeenCalledOnce());
+    const automaticStart = test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    });
+    await expect(automaticStart).resolves.toBe(false);
+
+    manualBegin.resolve({ started: true, source: "manual" });
+    await expect(manualStart).resolves.toBe(true);
+    expect(test.lifecycle.read).not.toHaveBeenCalled();
+    expect(test.lifecycle.beginAutomatic).not.toHaveBeenCalled();
+    expect(test.openNewThread).toHaveBeenCalledOnce();
+    expect(test.openNewThread).toHaveBeenCalledWith(expect.objectContaining({
+      source: "manual",
+      guard: expect.any(Function),
+    }));
+    expect(test.controller.isActive()).toBe(true);
+    expect(test.controller.snapshot()).toMatchObject({ phase: "initial-composer" });
+  });
+
+  it("does not let a second automatic probe supersede a pending automatic start", async () => {
+    const automaticBegin = deferred();
+    const test = fixture({
+      lifecycle: lifecycle({
+        beginAutomatic: vi.fn(() => automaticBegin.promise),
+      }),
+    });
+
+    const firstStart = test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    });
+    await vi.waitFor(() => expect(test.lifecycle.beginAutomatic).toHaveBeenCalledOnce());
+
+    await expect(test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    })).resolves.toBe(false);
+    expect(test.lifecycle.read).toHaveBeenCalledOnce();
+    expect(test.lifecycle.beginAutomatic).toHaveBeenCalledOnce();
+
+    automaticBegin.resolve({ started: true, source: "automatic" });
+    await expect(firstStart).resolves.toBe(true);
+    expect(test.openNewThread).toHaveBeenCalledOnce();
+    expect(test.openNewThread).toHaveBeenCalledWith(expect.objectContaining({
+      source: "automatic",
+      guard: expect.any(Function),
+    }));
+    expect(test.controller.isActive()).toBe(true);
+    expect(test.controller.snapshot()).toMatchObject({ phase: "initial-composer" });
+  });
+
+  it("releases automatic ownership when the lifecycle eligibility read rejects", async () => {
+    const test = fixture({
+      lifecycle: lifecycle({
+        read: vi.fn()
+          .mockRejectedValueOnce(new Error("settings read failed"))
+          .mockResolvedValue({ automaticEligible: true, status: "never-shown" }),
+      }),
+    });
+
+    await expect(test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    })).rejects.toThrow("settings read failed");
+
+    await expect(test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    })).resolves.toBe(true);
+    expect(test.lifecycle.read).toHaveBeenCalledTimes(2);
+    expect(test.lifecycle.beginAutomatic).toHaveBeenCalledOnce();
+    expect(test.openNewThread).toHaveBeenCalledOnce();
+  });
+
+  it("releases automatic ownership when lifecycle begin rejects", async () => {
+    const test = fixture({
+      lifecycle: lifecycle({
+        beginAutomatic: vi.fn()
+          .mockRejectedValueOnce(new Error("automatic begin failed"))
+          .mockResolvedValue({ started: true, source: "automatic" }),
+        dismiss: vi.fn(async () => { throw new Error("cleanup failed"); }),
+      }),
+    });
+
+    await expect(test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    })).rejects.toThrow("automatic begin failed");
+
+    await expect(test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    })).resolves.toBe(true);
+    expect(test.lifecycle.beginAutomatic).toHaveBeenCalledTimes(2);
+    expect(test.lifecycle.dismiss).toHaveBeenCalledOnce();
+    expect(test.openNewThread).toHaveBeenCalledOnce();
+  });
+
+  it("releases manual ownership when lifecycle begin rejects", async () => {
+    const test = fixture({
+      lifecycle: lifecycle({
+        beginManual: vi.fn()
+          .mockRejectedValueOnce(new Error("manual begin failed"))
+          .mockResolvedValue({ started: true, source: "manual" }),
+        dismiss: vi.fn(async () => { throw new Error("cleanup failed"); }),
+      }),
+    });
+
+    await expect(test.controller.startManual()).rejects.toThrow("manual begin failed");
+    await expect(test.controller.startManual()).resolves.toBe(true);
+    expect(test.lifecycle.beginManual).toHaveBeenCalledTimes(2);
+    expect(test.lifecycle.dismiss).toHaveBeenCalledOnce();
+    expect(test.openNewThread).toHaveBeenCalledOnce();
+  });
+
+  it("lets leaving revoke a pending lifecycle begin before it can open the composer", async () => {
+    const manualBegin = deferred();
+    const test = fixture({
+      lifecycle: lifecycle({ beginManual: vi.fn(() => manualBegin.promise) }),
+    });
+
+    const starting = test.controller.startManual();
+    await vi.waitFor(() => expect(test.lifecycle.beginManual).toHaveBeenCalledOnce());
+    await test.controller.leave();
+    manualBegin.resolve({ started: true, source: "manual" });
+
+    await expect(starting).resolves.toBe(false);
+    expect(test.lifecycle.dismiss).toHaveBeenCalledOnce();
+    expect(test.openNewThread).not.toHaveBeenCalled();
+    expect(test.controller.isActive()).toBe(false);
+    expect(test.controller.snapshot()).toBeNull();
   });
 
   it("cleans up a lifecycle begun before the New Thread surface fails to open", async () => {
-    const test = fixture({ openNewThread: vi.fn(async () => { throw new Error("composer failed"); }) });
+    const openNewThread = vi.fn()
+      .mockRejectedValueOnce(new Error("composer failed"))
+      .mockResolvedValue(true);
+    const test = fixture({
+      lifecycle: lifecycle({ dismiss: vi.fn(async () => { throw new Error("cleanup failed"); }) }),
+      openNewThread,
+    });
 
     await expect(test.controller.startManual()).rejects.toThrow("composer failed");
     expect(test.lifecycle.dismiss).toHaveBeenCalledOnce();
     expect(test.controller.isActive()).toBe(false);
     expect(test.controller.snapshot()).toBeNull();
     expect(coachmark(test)).toBeUndefined();
+
+    await expect(test.controller.startManual()).resolves.toBe(true);
+    expect(openNewThread).toHaveBeenCalledTimes(2);
+    expect(test.controller.isActive()).toBe(true);
   });
 
   it("removes coach UI even when dismissal persistence fails", async () => {
@@ -331,7 +594,7 @@ describe("onboarding tutorial controller", () => {
 
     const submitted = test.controller.followupSubmitted({ threadId: 7, interactionId: 12 });
     expect(test.lifecycle.complete).toHaveBeenCalledOnce();
-    expect(test.controller.snapshot().phase).toBe("complete");
+    expect(test.controller.snapshot().phase).toBe("write-follow-up");
     expect(coachmark(test).querySelector("h2").textContent).toBe("Ask a follow-up");
     completion.resolve({ status: "completed" });
     await expect(submitted).resolves.toBe(true);
@@ -341,6 +604,32 @@ describe("onboarding tutorial controller", () => {
     expect(coachmark(test).querySelector(".tutorial-skip").classList.contains("hidden")).toBe(true);
     expect(coachmark(test).querySelector(".tutorial-done").classList.contains("hidden")).toBe(false);
     expect(prompt.classList.contains("tutorial-target")).toBe(false);
+  });
+
+  it("does not render or enter completion when lifecycle persistence rejects", async () => {
+    const test = fixture({
+      lifecycle: lifecycle({
+        complete: vi.fn(async () => { throw new Error("settings write failed"); }),
+      }),
+    });
+    await startAndCreateThread(test);
+    test.appState.interactions = [acceptedInteraction({
+      actions: [{ id: 41, kind: "navigate", sourceNodeId: 31, targetLayerId: 22 }],
+    })];
+    test.controller.syncWorkspace();
+    test.controller.nodeSelected({ threadId: 7, interactionId: 11, nodeId: 31 });
+    test.controller.actionSucceeded({ threadId: 7, interactionId: 11, actionId: 41 });
+
+    await expect(test.controller.followupSubmitted({ threadId: 7, interactionId: 12 }))
+      .rejects.toThrow("settings write failed");
+    expect(test.controller.snapshot()).toMatchObject({
+      phase: "write-follow-up",
+      threadId: 7,
+      interactionId: 11,
+    });
+    expect(coachmark(test).querySelector("h2").textContent).toBe("Ask a follow-up");
+    expect(coachmark(test).querySelector(".tutorial-skip").classList.contains("hidden")).toBe(false);
+    expect(coachmark(test).querySelector(".tutorial-done").classList.contains("hidden")).toBe(true);
   });
 
   it("transitions an invoke before its result interaction becomes visible", async () => {
@@ -532,8 +821,16 @@ describe("onboarding tutorial controller", () => {
     expect(threads).toContain("return createdInteraction;");
     expect(main).toContain("Boolean(viewState.selectedPermissionProfileId)");
     expect(main).toContain("newThreadModelSelectionReady()");
+    expect(main).toContain('async function openNewThreadComposer({ prompt = "", guard = null } = {})');
+    expect(main.indexOf("const applyPermissionProfiles = await preparePermissionProfiles("))
+      .toBeLessThan(main.indexOf("if (guard && !guard()) return false;"));
+    expect(main.indexOf("if (guard && !guard()) return false;"))
+      .toBeLessThan(main.indexOf("applyPermissionProfiles?.();"));
+    expect(main.indexOf("applyPermissionProfiles?.();"))
+      .toBeLessThan(main.indexOf("cancelNavigationHistory();"));
     expect(main.indexOf("if (!ready) return false;"))
       .toBeLessThan(main.indexOf("tutorial.maybeStartAutomatic({"));
+    expect(onboarding).toContain("guard: canOpen,");
     expect(main).toContain("if (!providerConnected) await onboardingTutorialController()?.leave();");
     expect(main.indexOf("await desktop?.account.logout();"))
       .toBeLessThan(main.indexOf("await onboardingTutorialController()?.leave();"));

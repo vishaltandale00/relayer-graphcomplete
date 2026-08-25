@@ -53,10 +53,11 @@ async function refreshProviderModelUi() {
   if (productApiAvailable) await refreshState(viewState.currentThreadId);
 }
 
-async function openNewThreadComposer({ prompt = "" } = {}) {
+async function openNewThreadComposer({ prompt = "", guard = null } = {}) {
   const applyPermissionProfiles = await preparePermissionProfiles(
     appState.modelSettings?.defaults?.harnessId,
   );
+  if (guard && !guard()) return false;
   applyPermissionProfiles?.();
   cancelNavigationHistory();
   viewState.currentThreadId = null;
@@ -67,6 +68,7 @@ async function openNewThreadComposer({ prompt = "" } = {}) {
   $("#newThreadPrompt").value = prompt;
   updateCreateThreadAvailability();
   $("#newThreadPrompt").focus();
+  return true;
 }
 
 async function maybeStartAutomaticTutorial(providerConnected) {

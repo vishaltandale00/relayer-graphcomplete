@@ -174,6 +174,10 @@ function layerContainsRefreshableInvokedAction(layer, invocations = appState.act
   );
 }
 
+function invokeResultIsRetryable(completionStatus) {
+  return completionStatus === "submitted";
+}
+
 function invalidateResolvedInvokeLayerCache(invocations) {
   for (const identity of acceptedLayerCache.identities()) {
     const layer = acceptedLayerCache.get(identity);
@@ -406,14 +410,17 @@ export async function submitInteraction(text, modelSelection) {
       method: "POST",
       body: JSON.stringify(followupRequestBody(text, modelSelection)),
     });
-    const tutorialCompletion = onboardingTutorialController()?.followupSubmitted({
-      threadId,
-      interactionId: createdInteraction?.id,
-    });
-    tutorialCompletion?.catch((error) => console.error("Tutorial completion failed:", error));
   } catch (error) {
     await refreshAfterModelSelectionRejection(error, true);
     throw error;
+  }
+  try {
+    await onboardingTutorialController()?.followupSubmitted({
+      threadId,
+      interactionId: createdInteraction?.id,
+    });
+  } catch (error) {
+    console.error("Tutorial completion failed:", error);
   }
   const current = currentNavigationEntry();
   if (!current || navigationEntryKey(current) !== sourceLocationKey) return createdInteraction;
@@ -811,7 +818,11 @@ export async function invokeAction(action) {
       currentNavigationEntry()
       && navigationEntryKey(currentNavigationEntry()) === sourceLocationKey
     );
-    if (durable?.resultInteractionId && sourceIsStillSelected) {
+    if (
+      durable?.resultInteractionId
+      && !invokeResultIsRetryable(durable.resultCompletionStatus)
+      && sourceIsStillSelected
+    ) {
       onboardingTutorialController()?.actionSucceeded({
         threadId,
         interactionId: sourceInteractionId,
@@ -844,7 +855,11 @@ export async function invokeAction(action) {
     currentNavigationEntry()
     && navigationEntryKey(currentNavigationEntry()) === sourceLocationKey
   );
-  if (response.created && response.interaction?.id && sourceIsStillSelected) {
+  const createdResultCanAdvance = response.created
+    && response.interaction?.id
+    && !invokeResultIsRetryable(response.interaction.completionStatus)
+    && sourceIsStillSelected;
+  if (createdResultCanAdvance) {
     onboardingTutorialController()?.actionSucceeded({
       threadId,
       interactionId: sourceInteractionId,
@@ -856,9 +871,7 @@ export async function invokeAction(action) {
   }
   if (String(viewState.currentThreadId) === String(threadId)) {
     await refreshState(threadId, {
-      historyMode: response.created && response.interaction?.id && sourceIsStillSelected
-        ? "push"
-        : "replace",
+      historyMode: createdResultCanAdvance ? "push" : "replace",
     });
   }
   return response;
