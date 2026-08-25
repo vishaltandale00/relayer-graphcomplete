@@ -72,6 +72,16 @@ export function hasHistoricalContextSelection(nodeId, contextTarget, overrides) 
     && overrides?.has(String(nodeId));
 }
 
+export function graphRenderClearsSelection({
+  hasResponseNodes,
+  enteringView,
+  nodeInGraph,
+  preserveHistoricalSelection,
+}) {
+  return !preserveHistoricalSelection
+    && (!hasResponseNodes || (enteringView && !nodeInGraph));
+}
+
 export function turnReviewKind(current) {
   return current ? "control" : "turn";
 }
@@ -1797,7 +1807,7 @@ export function createProductWorkspace({
       button.setAttribute("aria-label", `Open ${node.title} details`);
       button.onclick = () => {
         closeContextPopover();
-        selectNode(state, node.id, { contextTarget: context.target });
+        selectNode(state, node.id, { notify: false, contextTarget: context.target });
       };
       group.append(button);
       if (context.annotations?.length) {
@@ -2168,12 +2178,19 @@ export function createProductWorkspace({
       graphNodes = [];
       graphEdges = [];
       graphSignature = "";
-      selection.selectedNodeId = null;
-      if (!["thread", "turn"].includes(annotationSubject?.anchor.kind)) {
-        annotationSubject = null;
-        $("#inspector").classList.add("hidden");
-      } else {
-        renderAnnotationList();
+      if (graphRenderClearsSelection({
+        hasResponseNodes: false,
+        enteringView,
+        nodeInGraph: false,
+        preserveHistoricalSelection,
+      })) {
+        selection.selectedNodeId = null;
+        if (!["thread", "turn"].includes(annotationSubject?.anchor.kind)) {
+          annotationSubject = null;
+          $("#inspector").classList.add("hidden");
+        } else {
+          renderAnnotationList();
+        }
       }
       const pending = thread?.imported !== true && PENDING_COMPLETION_STATUSES.has(state.status);
       $("#thinkingDots").classList.toggle("hidden", !pending);
@@ -2298,9 +2315,12 @@ export function createProductWorkspace({
         node.y = canonical.y;
       }
     }
-    if (enteringView
-      && !ids.has(String(selection.selectedNodeId))
-      && !preserveHistoricalSelection) {
+    if (graphRenderClearsSelection({
+      hasResponseNodes: true,
+      enteringView,
+      nodeInGraph: ids.has(String(selection.selectedNodeId)),
+      preserveHistoricalSelection,
+    })) {
       selection.selectedNodeId = null;
       $("#inspector").classList.add("hidden");
     }

@@ -420,6 +420,7 @@ async function run() {
     document.querySelector('#turnPickerButton')?.textContent === 'Turn 2 of 2'
       && !document.querySelector('#interactionContextPill')?.classList.contains('hidden')
       && document.querySelector('#interactionContextCount')?.textContent === '1'
+      && document.querySelector('#threadPrompt')?.disabled === false
   `));
   const secondContext = secondDetail.interactions[1].contexts?.[0];
   if (JSON.stringify(secondContext?.annotations) !== JSON.stringify([

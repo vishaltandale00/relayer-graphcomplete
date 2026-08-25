@@ -17,6 +17,7 @@ import {
   contextEditorPresentation,
   contextStagingDisabledFor,
   graphTurnNavigationDelta,
+  graphRenderClearsSelection,
   hasHistoricalContextSelection,
   handleComposerKeydown,
   resizeComposerTextarea,
@@ -156,6 +157,18 @@ describe("product workspace keyboard behavior", () => {
     expect(hasHistoricalContextSelection(7, { nodeId: 7 }, overrides)).toBe(true);
     expect(hasHistoricalContextSelection(7, null, overrides)).toBe(false);
     expect(hasHistoricalContextSelection(8, { nodeId: 8 }, overrides)).toBe(false);
+    expect(graphRenderClearsSelection({
+      hasResponseNodes: false,
+      enteringView: true,
+      nodeInGraph: false,
+      preserveHistoricalSelection: true,
+    })).toBe(false);
+    expect(graphRenderClearsSelection({
+      hasResponseNodes: false,
+      enteringView: true,
+      nodeInGraph: false,
+      preserveHistoricalSelection: false,
+    })).toBe(true);
   });
 
   it("keeps context controls symbol-first and accessible", () => {
