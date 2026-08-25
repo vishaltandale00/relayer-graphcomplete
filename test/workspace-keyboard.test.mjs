@@ -22,6 +22,7 @@ import {
   interactionContextPayload,
   interactionContextDraftTransition,
   removeContextAnnotation,
+  resolveInteractionContextNode,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace keyboard behavior", () => {
@@ -139,6 +140,18 @@ describe("product workspace keyboard behavior", () => {
     expect(afterLastDelete).toHaveLength(1);
     expect(afterLastDelete[0].annotations).toEqual([]);
     expect(contextDetachNeedsConfirmation(afterLastDelete[0])).toBe(false);
+  });
+
+  it("resolves a historical context node while reopening it for the next message", () => {
+    const historical = { id: 7, title: "Historical target" };
+    const overrides = new Map([["7", historical]]);
+    expect(resolveInteractionContextNode(7, [], [], overrides)).toBe(historical);
+
+    const attached = { id: 8, title: "Attached draft" };
+    expect(resolveInteractionContextNode(8, [], [{
+      target: { nodeId: 8 },
+      node: attached,
+    }], overrides)).toBe(attached);
   });
 
   it("keeps context controls symbol-first and accessible", () => {

@@ -58,6 +58,14 @@ export function graphNodeIdentitySet(nodes) {
   return new Set((nodes || []).map((node) => String(node.id)));
 }
 
+export function resolveInteractionContextNode(nodeId, nodes, contexts, overrides) {
+  return (nodes || []).find((node) => String(node.id) === String(nodeId))
+    || (contexts || []).find((context) => (
+      String(context.target.nodeId) === String(nodeId)
+    ))?.node
+    || overrides?.get(String(nodeId));
+}
+
 export function turnReviewKind(current) {
   return current ? "control" : "turn";
 }
@@ -1356,9 +1364,12 @@ export function createProductWorkspace({
   };
   const updateAttachContextControl = () => {
     const button = $("#attachNodeContext");
-    const node = getState().nodes?.find((item) => (
-      String(item.id) === String(selection.selectedNodeId)
-    )) || contextNodeOverrides.get(String(selection.selectedNodeId));
+    const node = resolveInteractionContextNode(
+      selection.selectedNodeId,
+      getState().nodes,
+      composerContexts,
+      contextNodeOverrides,
+    );
     const status = composerStatusForThread(getState(), getThread());
     const available = capabilities.canCompose
       && !composerDisabledForState(status, true)
@@ -1457,8 +1468,12 @@ export function createProductWorkspace({
       return group;
     });
     if (contextEditor) {
-      const node = getState().nodes?.find((item) => String(item.id) === String(contextEditor.nodeId))
-        || contextForNode(contextEditor.nodeId)?.node;
+      const node = resolveInteractionContextNode(
+        contextEditor.nodeId,
+        getState().nodes,
+        composerContexts,
+        contextNodeOverrides,
+      );
       if (node) {
         const editorPresentation = contextEditorPresentation(
           contextEditor,
@@ -1583,8 +1598,12 @@ export function createProductWorkspace({
     }
   };
   $("#attachNodeContext").onclick = () => {
-    const node = getState().nodes?.find((item) => String(item.id) === String(selection.selectedNodeId))
-      || contextNodeOverrides.get(String(selection.selectedNodeId));
+    const node = resolveInteractionContextNode(
+      selection.selectedNodeId,
+      getState().nodes,
+      composerContexts,
+      contextNodeOverrides,
+    );
     openContextEditor(node);
   };
   syncComposer();
@@ -2367,8 +2386,12 @@ export function createProductWorkspace({
   function selectNode(state, id, { notify = true, contextTarget } = {}) {
     selection.selectedNodeId = id;
     if (contextTarget !== undefined || notify) selectedContextTarget = contextTarget || null;
-    const node = state.nodes.find((item) => String(item.id) === String(id))
-      || contextNodeOverrides.get(String(id));
+    const node = resolveInteractionContextNode(
+      id,
+      state.nodes,
+      composerContexts,
+      contextNodeOverrides,
+    );
     if (!node) return;
     const nodeAnchor = annotationEnabled
       ? subjectAnchor("node", { nodeId: node.id }, state, getThread())

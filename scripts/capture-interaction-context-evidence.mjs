@@ -151,6 +151,17 @@ async function waitForPaint() {
   await evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
 }
 
+async function refreshCaptureSurface() {
+  if (process.platform === "darwin") app.focus({ steal: true });
+  mainWindow.focus();
+  mainWindow.webContents.focus();
+  mainWindow.webContents.invalidate();
+  await sleep(120);
+  mainWindow.webContents.invalidate();
+  await waitForPaint();
+  await sleep(120);
+}
+
 async function click(selector) {
   const exists = await evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)}))`);
   if (!exists) throw new Error(`Cannot click missing element ${selector}.`);
@@ -158,7 +169,7 @@ async function click(selector) {
 }
 
 async function setValue(selector, value) {
-  await evaluate(`(() => {
+  const updated = await evaluate(`(() => {
     const field = document.querySelector(${JSON.stringify(selector)});
     if (!field) return false;
     field.value = ${JSON.stringify(value)};
@@ -170,6 +181,7 @@ async function setValue(selector, value) {
     field.focus();
     return true;
   })()`);
+  if (!updated) throw new Error(`Cannot update missing field ${selector}.`);
 }
 
 async function clickNode(title) {
@@ -211,8 +223,7 @@ async function captureStep(caption, selector, duration = 2.4) {
     caption.style.cssText = 'position:fixed;left:50%;top:58px;transform:translateX(-50%);z-index:1000;max-width:900px;padding:10px 16px;border:1px solid #4a5058;border-radius:10px;background:rgba(20,23,27,.97);box-shadow:0 14px 42px rgba(0,0,0,.5);color:#f1f2f3;font:600 14px/1.35 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:center;pointer-events:none';
     document.body.append(caption);
   })()`);
-  await waitForPaint();
-  await sleep(180);
+  await refreshCaptureSurface();
   const file = join(framesDirectory, `${String(frames.length + 1).padStart(2, "0")}.png`);
   await writeFile(file, (await mainWindow.webContents.capturePage()).toPNG());
   frames.push({ file, duration, caption });
@@ -396,6 +407,7 @@ async function run() {
   })()`));
   await setValue("#threadPrompt", "Use this connected queue context in the follow-up.");
   await waitFor("message and context send enabled", () => evaluate(`document.querySelector('#sendInteraction')?.disabled === false`));
+  await refreshCaptureSurface();
   await writeFile(composerScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
   await captureStep(
     "2. Multiple ordered annotations stay grouped under their connected node above the composer",
@@ -429,6 +441,8 @@ async function run() {
   await waitFor("historical target Node Details", () => evaluate(`
     document.querySelector('#detailTitle')?.textContent === 'Incoming queue'
       && !document.querySelector('#inspector')?.classList.contains('hidden')
+      && !document.querySelector('#attachNodeContext')?.classList.contains('hidden')
+      && document.querySelector('#attachNodeContext')?.disabled === false
   `));
   await captureStep(
     "4. Clicking the connected node reopens its full Node Details from history",
@@ -436,6 +450,9 @@ async function run() {
   );
 
   await click("#attachNodeContext");
+  await waitFor("historical target context editor", () => evaluate(`
+    Boolean(document.querySelector('#contextAnnotationEditor'))
+  `));
   await setValue("#contextAnnotationEditor", "This annotation alone is a valid interaction input.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("annotation-only send enabled", () => evaluate(`
@@ -480,6 +497,7 @@ async function run() {
     document.querySelector('#interactionContextPopover li')?.textContent
       === 'This annotation alone is a valid interaction input.'
   `));
+  await refreshCaptureSurface();
   await writeFile(restartedScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
   await captureStep(
     "7. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
