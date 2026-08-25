@@ -131,7 +131,13 @@ describe("first runtime evaluation", () => {
       nodeId: 1,
       rootAction: { id: 6, sourceNodeId: 1, sourceLayerId: null, kind: "navigate", relation: "expand", label: "Response", variant: "pill", targetLayerId: 5, state: "accepted" },
       rootLayer: {
-        layer: { id: 5, nodes: [2, 3], edges: [4], state: "accepted" },
+        layer: {
+          id: 5,
+          nodes: [2, 3],
+          edges: [4],
+          layout: { version: 1, placements: [{ nodeId: 2, x: 0.25, y: 0.5 }, { nodeId: 3, x: 0.75, y: 0.5 }] },
+          state: "accepted",
+        },
         nodes: [
           { id: 2, kind: "concept", icon: "key", title: "Stable client keys", detail: `Retry after partial persistence reuses the draft.\nGRAPH_REPAIR_EVIDENCE=${JSON.stringify({ passes: [pass, pass], orphanSubmitErrorCode: "orphan_draft_layers", discardedLayerIds: [8, 8] })}`, state: "accepted" },
           { id: 3, kind: "concept", icon: "refresh-cw", title: "Idempotent replay", detail: "Rerun safely without duplicate roots.", state: "accepted" },

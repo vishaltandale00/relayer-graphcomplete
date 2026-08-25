@@ -110,7 +110,12 @@ describe("agent-facing graph objects", () => {
       }), { status: 200, headers: { "content-type": "application/json" } });
     }));
     const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
-    const layer = new LayerObject([10], [], "abandoned");
+    const layer = new LayerObject(
+      [10],
+      [],
+      new LayerLayoutObject([new NodePlacementObject(10, 0.5, 0.5)]),
+      "abandoned",
+    );
     layer.ref = { id: 30, nodes: [10], edges: [], state: "draft" };
 
     const stopped = await graph.discardLayer(layer);

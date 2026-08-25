@@ -1371,6 +1371,7 @@ async fn discarded_layer_identity_is_terminal() {
             client_key: "abandoned".into(),
             nodes: vec![abandoned_node.id],
             edges: vec![],
+            layout: authored_layout([abandoned_node.id]),
             size_justification: None,
         })
         .await

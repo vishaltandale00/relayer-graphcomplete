@@ -62,7 +62,7 @@ describe("CodexBasicHarness", () => {
     expect(submitted?.prompt).toContain('new NodeObject("info", "Summary", "...", "concept", "summary-node")');
     expect(submitted?.prompt).not.toContain('new NodeObject("lightbulb"');
     expect(submitted?.prompt).toContain('new EdgeObject([summaryNode, detailNode], "summary-detail-edge")');
-    expect(submitted?.prompt).toContain('new LayerObject(nodes, edges, "response-layer")');
+    expect(submitted?.prompt).toContain('new LayerObject(nodes, edges, layout, "response-layer")');
     expect(submitted?.prompt).toContain('relation: "expand"');
     expect(submitted?.prompt).toContain("sourceLayer: layer");
     expect(submitted?.prompt).toContain('clientKey: "root-response"');

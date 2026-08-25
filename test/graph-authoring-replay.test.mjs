@@ -5,8 +5,10 @@ import { join, resolve } from "node:path";
 
 import {
   EdgeObject,
+  LayerLayoutObject,
   LayerObject,
   NodeObject,
+  NodePlacementObject,
   RelayerGraphClient,
 } from "@relayer/graph-client";
 import { afterEach, describe, expect, it } from "vitest";
@@ -104,8 +106,13 @@ async function authorCompleteProgram(graph, interactionNodeId) {
   const detail = new NodeObject("file-text", "Detail", "Replay-safe detail", "concept", "detail-node");
   const replacement = new NodeObject("check-circle", "Replacement", "Final response", "concept", "replacement-node");
   const summaryDetail = new EdgeObject([summary, detail], "summary-detail-edge");
-  const oldLayer = new LayerObject([summary, detail], [summaryDetail], "old-response-layer");
-  const replacementLayer = new LayerObject([replacement], [], "replacement-response-layer");
+  const oldLayout = new LayerLayoutObject([
+    new NodePlacementObject(summary, 0.25, 0.5),
+    new NodePlacementObject(detail, 0.75, 0.5),
+  ]);
+  const replacementLayout = new LayerLayoutObject([new NodePlacementObject(replacement, 0.5, 0.5)]);
+  const oldLayer = new LayerObject([summary, detail], [summaryDetail], oldLayout, "old-response-layer");
+  const replacementLayer = new LayerObject([replacement], [], replacementLayout, "replacement-response-layer");
 
   const nodes = [];
   for (const node of [summary, detail, replacement]) nodes.push(await graph.submitNode(node));

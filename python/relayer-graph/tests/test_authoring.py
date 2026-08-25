@@ -111,7 +111,8 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Handler.requests[-1][0], "/api/graph/nodes/7/output")
 
     async def test_discard_layer_posts_to_recovery_endpoint_and_refreshes_reference(self):
-        layer = LayerObject((1,), (), client_key="abandoned")
+        layout = LayerLayoutObject((NodePlacementObject(1, 0.5, 0.5),))
+        layer = LayerObject((1,), (), layout, client_key="abandoned")
         await self.client.submit_layer(layer)
         draft_id = layer.ref.id
 

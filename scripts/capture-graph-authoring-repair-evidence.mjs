@@ -6,7 +6,7 @@ import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { EdgeObject, GraphApiError, LayerObject, NodeObject, RelayerGraphClient } from "@relayer/graph-client";
+import { EdgeObject, GraphApiError, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient } from "@relayer/graph-client";
 
 import { startModelCatalogRefreshServer } from "../desktop/main/models/model-catalog-refresh-server.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
@@ -114,9 +114,15 @@ async function authorProgram(graph, interactionId, revision) {
 
   const rootEdge = new EdgeObject([summary, accepted], "repair-result-edge");
   await graph.createEdge(rootEdge);
-  const rootLayer = new LayerObject([summary, accepted], [rootEdge], "repair-root-layer");
-  const detailLayer = new LayerObject([detail], [], "repair-detail-layer");
-  const abandonedLayer = new LayerObject([abandoned], [], "abandoned-layer");
+  const rootLayout = new LayerLayoutObject([
+    new NodePlacementObject(summary, 0.5, 0.25),
+    new NodePlacementObject(accepted, 0.5, 0.75),
+  ]);
+  const detailLayout = new LayerLayoutObject([new NodePlacementObject(detail, 0.5, 0.5)]);
+  const abandonedLayout = new LayerLayoutObject([new NodePlacementObject(abandoned, 0.5, 0.5)]);
+  const rootLayer = new LayerObject([summary, accepted], [rootEdge], rootLayout, "repair-root-layer");
+  const detailLayer = new LayerObject([detail], [], detailLayout, "repair-detail-layer");
+  const abandonedLayer = new LayerObject([abandoned], [], abandonedLayout, "abandoned-layer");
   for (const layer of [rootLayer, detailLayer, abandonedLayer]) await graph.submitLayer(layer);
 
   const detailAction = {

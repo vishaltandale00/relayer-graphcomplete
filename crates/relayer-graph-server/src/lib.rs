@@ -763,6 +763,7 @@ mod tests {
                 client_key: "abandoned-layer".into(),
                 nodes: vec![node.id],
                 edges: vec![],
+                layout: authored_layout(node.id),
                 size_justification: None,
             })
             .await
@@ -1754,6 +1755,7 @@ mod tests {
                 client_key: "root-layer".into(),
                 nodes: vec![answer.id],
                 edges: vec![],
+                layout: authored_layout(answer.id),
                 size_justification: None,
             })
             .await
