@@ -952,7 +952,9 @@ mod tests {
         let turn = serde_json::to_vec(&ImportedTurn {
             source_turn_id: "turn:1".into(),
             text: "Failed turn".into(),
+            interaction_node_id: None,
             invoke_origin: None,
+            contexts: vec![],
             accepted_view: None,
         })
         .unwrap();
@@ -1102,6 +1104,8 @@ mod tests {
             input["contexts"][0]["annotations"][0],
             "  exact annotation  "
         );
+        assert!(input["contexts"][0].get("id").is_none());
+        assert!(input["contexts"][0].get("sourceNodeId").is_none());
         assert!(input["contexts"][0].get("target").is_none());
         assert!(input["contexts"][0].get("sourceLayerId").is_none());
 
@@ -1122,6 +1126,11 @@ mod tests {
         let diagnostic: Value =
             serde_json::from_slice(&to_bytes(diagnostic.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
+        assert!(diagnostic["actions"][0]["id"].is_number());
+        assert_eq!(
+            diagnostic["actions"][0]["sourceNodeId"],
+            created.node.id.value()
+        );
         assert_eq!(
             diagnostic["actions"][0]["target"]["sourceInteractionNodeId"],
             source.id.value()

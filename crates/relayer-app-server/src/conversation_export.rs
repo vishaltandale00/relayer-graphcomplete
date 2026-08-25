@@ -75,9 +75,48 @@ pub struct ConversationExportTurn {
     pub sequence: u32,
     pub created_at: String,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction_node_id: Option<String>,
     pub origin: ExportTurnOrigin,
     pub completion: ExportCompletionReceipt,
+    /// Product-authored interaction input. Absent in exports produced before
+    /// interaction context was introduced; readers deterministically treat an
+    /// absent field as an empty list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contexts: Vec<ExportInteractionContext>,
     pub accepted_view: Option<ExportAcceptedView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportInteractionContext {
+    pub id: String,
+    pub target: ExportContextTargetSnapshot,
+    pub source: ExportContextSource,
+    #[serde(default)]
+    pub annotations: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportContextTargetSnapshot {
+    /// An authority-free, export-local identity. It may match a node ID in an
+    /// accepted view, but importers never interpret it as a local database ID.
+    pub id: String,
+    pub kind: String,
+    pub icon: String,
+    pub title: String,
+    pub detail: String,
+    pub state: ExportRecordState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportContextSource {
+    /// Authority-free diagnostic references to the accepted occurrence used
+    /// when the input was prepared. Imported graph state uses fresh local IDs.
+    pub interaction_node_id: String,
+    pub layer_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -386,6 +425,7 @@ pub struct ConversationExportValidator {
     nodes_by_id: HashMap<String, [u8; 32]>,
     edges_by_id: HashMap<String, [u8; 32]>,
     actions_by_id: HashMap<String, [u8; 32]>,
+    context_actions_by_id: HashMap<String, [u8; 32]>,
 }
 
 impl ConversationExportValidator {
@@ -401,6 +441,7 @@ impl ConversationExportValidator {
             nodes_by_id: HashMap::new(),
             edges_by_id: HashMap::new(),
             actions_by_id: HashMap::new(),
+            context_actions_by_id: HashMap::new(),
         })
     }
 
@@ -431,7 +472,62 @@ impl ConversationExportValidator {
             ));
         }
         validate_turn(turn, &path, &self.prior_invokes)?;
+        for context in &turn.contexts {
+            if self.context_actions_by_id.contains_key(&context.id) {
+                return Err(ExportValidationError::new(
+                    "duplicate_context_action",
+                    format!("{path}.contexts[{}].id", context.id),
+                    "A context action belongs to exactly one portable turn.",
+                ));
+            }
+            if self.root_action_ids.contains(&context.id)
+                || self.actions_by_id.contains_key(&context.id)
+            {
+                return Err(ExportValidationError::new(
+                    "context_action_id_conflict",
+                    format!("{path}.contexts[{}].id", context.id),
+                    "A context action ID cannot also identify an authored graph action.",
+                ));
+            }
+            register_definition(
+                &mut self.context_actions_by_id,
+                &context.id,
+                context,
+                &path,
+                "context_action_identity_conflict",
+            )?;
+            let target = ExportNode {
+                id: context.target.id.clone(),
+                kind: context.target.kind.clone(),
+                icon: context.target.icon.clone(),
+                title: context.target.title.clone(),
+                detail: context.target.detail.clone(),
+                state: context.target.state,
+            };
+            register_definition(
+                &mut self.nodes_by_id,
+                &target.id,
+                &target,
+                &path,
+                "context_target_snapshot_drift",
+            )?;
+        }
         if let Some(view) = &turn.accepted_view {
+            if self
+                .context_actions_by_id
+                .contains_key(&view.root_action.id)
+                || view
+                    .layers
+                    .iter()
+                    .flat_map(|layer| &layer.actions)
+                    .any(|action| self.context_actions_by_id.contains_key(&action.id))
+            {
+                return Err(ExportValidationError::new(
+                    "context_action_id_conflict",
+                    format!("{path}.acceptedView"),
+                    "A model-authored graph action cannot reuse a context action ID.",
+                ));
+            }
             if !self
                 .interaction_ids
                 .insert(view.interaction_node_id.clone())
@@ -639,7 +735,42 @@ fn validate_turn(
     prior_invokes: &HashMap<String, HashSet<String>>,
 ) -> Result<(), ExportValidationError> {
     require_string(&turn.created_at, format!("{path}.createdAt"))?;
-    require_string(&turn.text, format!("{path}.text"))?;
+    if turn.text.len() > MAX_STRING_BYTES {
+        return Err(ExportValidationError::new(
+            "string_too_large",
+            format!("{path}.text"),
+            format!("String exceeds {MAX_STRING_BYTES} UTF-8 bytes."),
+        ));
+    }
+    validate_contexts(turn, path)?;
+    if let Some(interaction_node_id) = &turn.interaction_node_id {
+        require_id(
+            interaction_node_id,
+            "node",
+            format!("{path}.interactionNodeId"),
+        )?;
+    }
+    if !turn.contexts.is_empty() && turn.interaction_node_id.is_none() {
+        return Err(ExportValidationError::new(
+            "context_interaction_missing",
+            format!("{path}.interactionNodeId"),
+            "A turn with context must identify its authority-free interaction node.",
+        ));
+    }
+    if turn.text.trim().is_empty()
+        && !turn.contexts.iter().any(|context| {
+            context
+                .annotations
+                .iter()
+                .any(|annotation| !annotation.trim().is_empty())
+        })
+    {
+        return Err(ExportValidationError::new(
+            "interaction_input_empty",
+            format!("{path}.text"),
+            "A portable turn requires non-whitespace message text or at least one annotation.",
+        ));
+    }
     require_string(
         &turn.completion.permission_profile_id,
         format!("{path}.completion.permissionProfileId"),
@@ -733,7 +864,20 @@ fn validate_turn(
         }
     }
     match (turn.completion.status, &turn.accepted_view) {
-        (ExportCompletionStatus::Accepted, Some(view)) => validate_accepted_view(view, path),
+        (ExportCompletionStatus::Accepted, Some(view)) => {
+            if turn
+                .interaction_node_id
+                .as_deref()
+                .is_some_and(|id| id != view.interaction_node_id)
+            {
+                return Err(ExportValidationError::new(
+                    "interaction_node_mismatch",
+                    format!("{path}.interactionNodeId"),
+                    "Turn interactionNodeId must match acceptedView.interactionNodeId.",
+                ));
+            }
+            validate_accepted_view(view, path)
+        }
         (ExportCompletionStatus::Accepted, None) => Err(ExportValidationError::new(
             "accepted_view_missing",
             format!("{path}.acceptedView"),
@@ -746,6 +890,62 @@ fn validate_turn(
         )),
         (_, None) => Ok(()),
     }
+}
+
+fn validate_contexts(
+    turn: &ConversationExportTurn,
+    path: &str,
+) -> Result<(), ExportValidationError> {
+    let mut actions = HashSet::new();
+    let mut targets = HashSet::new();
+    for (index, context) in turn.contexts.iter().enumerate() {
+        let context_path = format!("{path}.contexts[{index}]");
+        require_id(&context.id, "action", format!("{context_path}.id"))?;
+        require_id(
+            &context.target.id,
+            "node",
+            format!("{context_path}.target.id"),
+        )?;
+        require_id(
+            &context.source.interaction_node_id,
+            "node",
+            format!("{context_path}.source.interactionNodeId"),
+        )?;
+        require_id(
+            &context.source.layer_id,
+            "layer",
+            format!("{context_path}.source.layerId"),
+        )?;
+        for (field, value) in [
+            ("kind", &context.target.kind),
+            ("icon", &context.target.icon),
+            ("title", &context.target.title),
+            ("detail", &context.target.detail),
+        ] {
+            require_string(value, format!("{context_path}.target.{field}"))?;
+        }
+        if !actions.insert(&context.id) {
+            return Err(ExportValidationError::new(
+                "duplicate_context_action",
+                format!("{context_path}.id"),
+                "A context action may appear only once in a turn.",
+            ));
+        }
+        if !targets.insert(&context.target.id) {
+            return Err(ExportValidationError::new(
+                "duplicate_context_target",
+                format!("{context_path}.target.id"),
+                "A turn may attach each target node only once.",
+            ));
+        }
+        for (annotation_index, annotation) in context.annotations.iter().enumerate() {
+            require_string(
+                annotation,
+                format!("{context_path}.annotations[{annotation_index}]"),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_optional_strings(

@@ -32,6 +32,15 @@ The graph capability exposes normalized interaction input from the interaction p
 node, immutable target-node contents, and annotations. It omits occurrence authority metadata.
 Control diagnostics may inspect the full persisted context action.
 
+Portable conversation V1 turn records may include an additive `contexts` array and
+`interactionNodeId`. Each context carries an export-local action ID, the immutable target-node
+snapshot under an export-local node ID, ordered annotations, and authority-free source occurrence
+references. Readers treat fields absent from older V1 exports as no attached context. Across one
+export, repeated target IDs must have byte-identical snapshots. Importers allocate fresh local
+identities, materialize one deduplicated inert target occurrence, and never interpret producer IDs
+or text containing filesystem paths as local authority. Context is materialized for non-accepted
+turns as well as accepted turns; it does not create a completion or execute imported actions.
+
 Context actions are input, not model-authored output. Ordinary action reads, layer snapshots,
 root-action guards and counting, completion closure traversal, recursive depth, orphan detection,
 and graph neighbors exclude them. `graph.submit(interactionNode)` still requires exactly one new

@@ -88,6 +88,25 @@ fn accepted_view() -> ExportAcceptedView {
     }
 }
 
+fn context(id: &str, annotations: &[&str]) -> ExportInteractionContext {
+    ExportInteractionContext {
+        id: id.into(),
+        target: ExportContextTargetSnapshot {
+            id: "node:1".into(),
+            kind: "concept".into(),
+            icon: "file".into(),
+            title: "Node node:1".into(),
+            detail: "Durable accepted detail".into(),
+            state: ExportRecordState::Accepted,
+        },
+        source: ExportContextSource {
+            interaction_node_id: "node:source-interaction".into(),
+            layer_id: "layer:source".into(),
+        },
+        annotations: annotations.iter().map(|value| (*value).into()).collect(),
+    }
+}
+
 fn receipt(status: ExportCompletionStatus) -> ExportCompletionReceipt {
     ExportCompletionReceipt {
         status,
@@ -143,8 +162,10 @@ fn records() -> Vec<ConversationExportRecord> {
             sequence: 1,
             created_at: "1769000001000".into(),
             text: "Review this tokenizer".into(),
+            interaction_node_id: None,
             origin: ExportTurnOrigin::User,
             completion: receipt(ExportCompletionStatus::Accepted),
+            contexts: vec![],
             accepted_view: Some(accepted_view()),
         })),
     ]
@@ -165,11 +186,13 @@ fn two_turn_records() -> Vec<ConversationExportRecord> {
             sequence: 2,
             created_at: "1769000002000".into(),
             text: "Continue".into(),
+            interaction_node_id: None,
             origin: ExportTurnOrigin::Action {
                 source_turn_id: "turn:1".into(),
                 source_action_id: "action:invoke-1".into(),
             },
             completion: receipt(ExportCompletionStatus::Accepted),
+            contexts: vec![],
             accepted_view: Some(ExportAcceptedView {
                 interaction_node_id: "node:interaction-2".into(),
                 root_action: action(
@@ -245,6 +268,73 @@ fn serializes_exactly_header_and_turn_records_and_round_trips() {
     assert!(
         serde_json::from_str::<ConversationExportRecord>(r#"{"recordType":"artifact"}"#).is_err()
     );
+}
+
+#[test]
+fn older_turns_without_context_fields_decode_as_empty_context() {
+    let ConversationExportRecord::Turn(turn) = &records()[1] else {
+        unreachable!()
+    };
+    let mut value = serde_json::to_value(turn.as_ref()).unwrap();
+    let object = value.as_object_mut().unwrap();
+    object.remove("contexts");
+    object.remove("interactionNodeId");
+    let decoded: ConversationExportTurn = serde_json::from_value(value).unwrap();
+    assert!(decoded.contexts.is_empty());
+    assert!(decoded.interaction_node_id.is_none());
+}
+
+#[test]
+fn context_round_trip_preserves_order_nonaccepted_turns_and_shared_snapshots() {
+    let mut fixture = records();
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.turns.push(ExportTurnManifestEntry {
+        id: "turn:2".into(),
+        sequence: 2,
+    });
+    let ConversationExportRecord::Turn(first) = &mut fixture[1] else {
+        unreachable!()
+    };
+    first.interaction_node_id = Some("node:interaction-1".into());
+    first.contexts = vec![context("action:context-1", &["First", "Second"])];
+    fixture.push(ConversationExportRecord::Turn(Box::new(
+        ConversationExportTurn {
+            id: "turn:2".into(),
+            sequence: 2,
+            created_at: "1769000002000".into(),
+            text: "The completion failed".into(),
+            interaction_node_id: Some("node:interaction-2".into()),
+            origin: ExportTurnOrigin::User,
+            completion: receipt(ExportCompletionStatus::Failed),
+            contexts: vec![context("action:context-2", &["Still inspect this"])],
+            accepted_view: None,
+        },
+    )));
+
+    validate_export_records(&fixture).unwrap();
+    let ConversationExportRecord::Turn(first) = &fixture[1] else {
+        unreachable!()
+    };
+    assert_eq!(first.contexts[0].annotations, ["First", "Second"]);
+
+    let mut annotation_only = fixture.clone();
+    if let ConversationExportRecord::Turn(first) = &mut annotation_only[1] {
+        first.text.clear();
+    }
+    validate_export_records(&annotation_only).unwrap();
+    if let ConversationExportRecord::Turn(first) = &mut annotation_only[1] {
+        first.contexts[0].annotations.clear();
+    }
+    assert_rejected_with_parity(&annotation_only, "interaction_input_empty");
+
+    let mut drifted = fixture.clone();
+    let ConversationExportRecord::Turn(second) = &mut drifted[2] else {
+        unreachable!()
+    };
+    second.contexts[0].target.detail = "Snapshot drift".into();
+    assert_rejected_with_parity(&drifted, "context_target_snapshot_drift");
 }
 
 #[test]
@@ -435,11 +525,13 @@ fn allows_reused_action_provenance_and_requires_action_origins_to_name_prior_inv
             sequence: 2,
             created_at: "1769000002000".into(),
             text: "Continue".into(),
+            interaction_node_id: None,
             origin: ExportTurnOrigin::Action {
                 source_turn_id: "turn:1".into(),
                 source_action_id: "action:invoke-1".into(),
             },
             completion: receipt(ExportCompletionStatus::Accepted),
+            contexts: vec![],
             accepted_view: Some(ExportAcceptedView {
                 interaction_node_id: "node:interaction-2".into(),
                 root_action: action(

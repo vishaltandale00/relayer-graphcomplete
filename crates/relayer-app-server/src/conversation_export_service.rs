@@ -2,14 +2,15 @@ use std::collections::HashMap;
 
 use relayer_graph_core::{
     AcceptedGraphClosure, ActionKind, ActionVariant, GraphAction, GraphEdge, GraphNode,
-    NavigateRelation, RecordState, ResolvedLayer,
+    InteractionContextAction, InteractionInput, NavigateRelation, RecordState, ResolvedLayer,
 };
 
 use crate::{
     conversation_export::{
         ConversationExportHeader, ConversationExportRecord, ConversationExportTurn,
         EXPORT_VERSION_V1, ExportAcceptedView, ExportAction, ExportActionKind, ExportActionVariant,
-        ExportCompletionReceipt, ExportCompletionStatus, ExportConversation, ExportEdge,
+        ExportCompletionReceipt, ExportCompletionStatus, ExportContextSource,
+        ExportContextTargetSnapshot, ExportConversation, ExportEdge, ExportInteractionContext,
         ExportLayer, ExportLayerLayout, ExportModelSelection, ExportNavigateRelation, ExportNode,
         ExportNodePlacement, ExportPermissionReceipt, ExportProducer, ExportRecordState,
         ExportResolvedLayer, ExportTurnManifestEntry, ExportTurnOrigin, MAX_EXPORT_BYTES,
@@ -104,6 +105,7 @@ pub(crate) async fn build_conversation_export(
         .collect::<HashMap<_, _>>();
     let mut ids = PortableIds::default();
     let mut closures = Vec::with_capacity(detail.interactions.len());
+    let mut context_inputs = Vec::with_capacity(detail.interactions.len());
     for interaction in &detail.interactions {
         let closure = if interaction.completion_status == "accepted" {
             let node_id = interaction.graph_node_id.ok_or_else(|| {
@@ -124,6 +126,14 @@ pub(crate) async fn build_conversation_export(
             None
         };
         closures.push(closure);
+        let context_input = match interaction.graph_node_id {
+            Some(node_id) => Some(RuntimeContextInput {
+                input: runtime.interaction_input(node_id).await?,
+                actions: runtime.interaction_context_actions(node_id).await?,
+            }),
+            None => None,
+        };
+        context_inputs.push(context_input);
     }
     for invocation in conversation_invocations {
         let source_index = *interaction_indexes
@@ -198,10 +208,16 @@ pub(crate) async fn build_conversation_export(
         turns,
     }));
     let mut records = vec![header];
-    for (interaction, closure) in detail.interactions.iter().zip(closures.iter()) {
+    for ((interaction, closure), context_input) in detail
+        .interactions
+        .iter()
+        .zip(closures.iter())
+        .zip(context_inputs.iter())
+    {
         records.push(ConversationExportRecord::Turn(Box::new(export_turn(
             interaction,
             closure.as_ref(),
+            context_input.as_ref(),
             invocations.get(&interaction.id).copied(),
             ImportedExportContext {
                 turn: imported_turns.get(&interaction.id).copied(),
@@ -237,15 +253,32 @@ struct ImportedExportContext<'a> {
     turn_sequences: &'a HashMap<&'a str, i64>,
 }
 
+struct RuntimeContextInput {
+    input: InteractionInput,
+    actions: Vec<InteractionContextAction>,
+}
+
 fn export_turn(
     interaction: &Interaction,
     closure: Option<&AcceptedGraphClosure>,
+    context_input: Option<&RuntimeContextInput>,
     invocation: Option<&ActionInvocation>,
     imported: ImportedExportContext<'_>,
     turn_sequences: &HashMap<InteractionId, i64>,
     ids: &mut PortableIds,
     redactor: &ProjectPathRedactor,
 ) -> Result<ConversationExportTurn, ConversationExportBuildError> {
+    if let (Some(node_id), Some(imported_turn)) = (
+        interaction.graph_node_id,
+        imported.turn.map(|record| &record.turn),
+    ) && let Some(portable_id) = imported_turn.interaction_node_id.as_ref().or_else(|| {
+        imported_turn
+            .accepted_view
+            .as_ref()
+            .map(|view| &view.interaction_node_id)
+    }) {
+        ids.bind_node(node_id, portable_id.clone())?;
+    }
     if let (Some(closure), Some(imported_view)) = (
         closure,
         imported
@@ -257,6 +290,13 @@ fn export_turn(
     let accepted_view = closure
         .map(|closure| export_view(closure, ids, redactor))
         .transpose()?;
+    let contexts = export_contexts(
+        interaction,
+        context_input,
+        imported.turn.map(|record| &record.turn.contexts),
+        ids,
+        redactor,
+    )?;
     let origin = match invocation {
         Some(invocation) => {
             let source_action_id = ids.action.get(&invocation.action_id).cloned().ok_or_else(|| {
@@ -316,6 +356,7 @@ fn export_turn(
         sequence: sequence(interaction.sequence)?,
         created_at: interaction.created_at.clone(),
         text: redactor.text(&interaction.text),
+        interaction_node_id: interaction.graph_node_id.map(|id| ids.node(id)),
         origin,
         completion: ExportCompletionReceipt {
             status,
@@ -336,8 +377,102 @@ fn export_turn(
                 .as_deref()
                 .map(|error| redactor.text(error)),
         },
+        contexts,
         accepted_view,
     })
+}
+
+fn export_contexts(
+    interaction: &Interaction,
+    runtime: Option<&RuntimeContextInput>,
+    imported: Option<&Vec<ExportInteractionContext>>,
+    ids: &mut PortableIds,
+    redactor: &ProjectPathRedactor,
+) -> Result<Vec<ExportInteractionContext>, ConversationExportBuildError> {
+    let Some(runtime) = runtime else {
+        if imported.is_some_and(|contexts| !contexts.is_empty()) {
+            return Err(ConversationExportBuildError::Invalid(format!(
+                "imported interaction {} lost its graph context materialization",
+                interaction.id
+            )));
+        }
+        return Ok(Vec::new());
+    };
+    if runtime.input.interaction.id.value() != interaction.graph_node_id.unwrap_or_default()
+        || runtime.input.contexts.len() != runtime.actions.len()
+    {
+        return Err(ConversationExportBuildError::Invalid(format!(
+            "interaction {} graph context diagnostics are inconsistent",
+            interaction.id
+        )));
+    }
+    if let Some(imported) = imported.filter(|contexts| !contexts.is_empty()) {
+        if imported.len() != runtime.input.contexts.len() {
+            return Err(ConversationExportBuildError::Invalid(format!(
+                "imported interaction {} context inventory no longer matches its portable record",
+                interaction.id
+            )));
+        }
+        for ((portable, normalized), action) in imported
+            .iter()
+            .zip(&runtime.input.contexts)
+            .zip(&runtime.actions)
+        {
+            if normalized.target_node.id != action.target.node_id
+                || normalized.annotations != portable.annotations
+                || action.annotations != portable.annotations
+                || redactor.text(&normalized.target_node.kind) != portable.target.kind
+                || redactor.text(&normalized.target_node.icon) != portable.target.icon
+                || redactor.text(&normalized.target_node.title) != portable.target.title
+                || redactor.text(&normalized.target_node.detail) != portable.target.detail
+            {
+                return Err(ConversationExportBuildError::Invalid(format!(
+                    "imported interaction {} context no longer matches its immutable portable snapshot",
+                    interaction.id
+                )));
+            }
+        }
+        return Ok(imported.clone());
+    }
+
+    runtime
+        .input
+        .contexts
+        .iter()
+        .zip(&runtime.actions)
+        .map(|(normalized, action)| {
+            if normalized.target_node.id != action.target.node_id
+                || normalized.annotations != action.annotations
+            {
+                return Err(ConversationExportBuildError::Invalid(format!(
+                    "interaction {} context input and provenance disagree",
+                    interaction.id
+                )));
+            }
+            ensure_accepted(
+                normalized.target_node.state,
+                "context target",
+                normalized.target_node.id.value(),
+            )?;
+            ensure_accepted(action.state, "context action", action.id.value())?;
+            Ok(ExportInteractionContext {
+                id: ids.action(action.id.value()),
+                target: ExportContextTargetSnapshot {
+                    id: ids.node(normalized.target_node.id.value()),
+                    kind: redactor.text(&normalized.target_node.kind),
+                    icon: redactor.text(&normalized.target_node.icon),
+                    title: redactor.text(&normalized.target_node.title),
+                    detail: redactor.text(&normalized.target_node.detail),
+                    state: ExportRecordState::Accepted,
+                },
+                source: ExportContextSource {
+                    interaction_node_id: ids.node(action.target.source_interaction_node_id.value()),
+                    layer_id: ids.layer(action.target.source_layer_id.value()),
+                },
+                annotations: normalized.annotations.clone(),
+            })
+        })
+        .collect()
 }
 
 fn seed_imported_action_ids(
@@ -642,27 +777,44 @@ impl PortableIds {
         next_id(&mut self.action, raw, "action")
     }
 
+    fn bind_node(
+        &mut self,
+        raw: i64,
+        portable: String,
+    ) -> Result<(), ConversationExportBuildError> {
+        bind_id(&mut self.node, raw, portable, "node")
+    }
+
     fn bind_action(
         &mut self,
         raw: i64,
         portable: String,
     ) -> Result<(), ConversationExportBuildError> {
-        if let Some(existing) = self.action.get(&raw) {
-            if existing == &portable {
-                return Ok(());
-            }
-            return Err(ConversationExportBuildError::Invalid(format!(
-                "imported action {raw} has conflicting portable IDs"
-            )));
-        }
-        if self.action.values().any(|existing| existing == &portable) {
-            return Err(ConversationExportBuildError::Invalid(format!(
-                "portable action ID {portable} identifies multiple imported actions"
-            )));
-        }
-        self.action.insert(raw, portable);
-        Ok(())
+        bind_id(&mut self.action, raw, portable, "action")
     }
+}
+
+fn bind_id(
+    ids: &mut HashMap<i64, String>,
+    raw: i64,
+    portable: String,
+    kind: &str,
+) -> Result<(), ConversationExportBuildError> {
+    if let Some(existing) = ids.get(&raw) {
+        if existing == &portable {
+            return Ok(());
+        }
+        return Err(ConversationExportBuildError::Invalid(format!(
+            "imported {kind} {raw} has conflicting portable IDs"
+        )));
+    }
+    if ids.values().any(|existing| existing == &portable) {
+        return Err(ConversationExportBuildError::Invalid(format!(
+            "portable {kind} ID {portable} identifies multiple imported records"
+        )));
+    }
+    ids.insert(raw, portable);
+    Ok(())
 }
 
 fn next_id(ids: &mut HashMap<i64, String>, raw: i64, kind: &str) -> String {
@@ -684,15 +836,17 @@ fn next_id(ids: &mut HashMap<i64, String>, raw: i64, kind: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ImportedExportContext, PortableIds, ProjectPathRedactor, completion_status, export_action,
-        export_turn,
+        ImportedExportContext, PortableIds, ProjectPathRedactor, RuntimeContextInput,
+        completion_status, export_action, export_contexts, export_turn,
     };
     use crate::{
         conversation_export::{ExportCompletionStatus, ExportTurnOrigin},
         product::{ActionInvocation, Interaction, InteractionId, ThreadId},
     };
     use relayer_graph_core::{
-        ActionId, ActionKind, ActionVariant, GraphAction, LayerId, NodeId, RecordState,
+        ActionId, ActionKind, ActionVariant, GraphAction, GraphNode, InteractionContext,
+        InteractionContextAction, InteractionContextTarget, InteractionInput, InteractionInputNode,
+        LayerId, NodeId, RecordState,
     };
 
     #[test]
@@ -705,6 +859,80 @@ mod tests {
             completion_status("stopped").unwrap(),
             ExportCompletionStatus::Stopped
         );
+    }
+
+    #[test]
+    fn exports_context_diagnostics_with_ordered_annotations_and_authority_free_ids() {
+        let interaction = Interaction {
+            id: InteractionId::from_database(7),
+            thread_id: ThreadId::from_database(1),
+            sequence: 1,
+            text: "Use context".into(),
+            created_at: "1".into(),
+            graph_node_id: Some(10),
+            completion_status: "failed".into(),
+            harness_configuration_name: None,
+            harness_configuration_digest: None,
+            permission_profile_id: "auto".into(),
+            model_selection: None,
+            effective_execution_digest: None,
+            effective_permission_receipt: None,
+            completion_output: None,
+            completion_error: Some("failed".into()),
+        };
+        let target = InteractionInputNode::from(GraphNode {
+            id: NodeId::new(20).unwrap(),
+            kind: "concept".into(),
+            icon: "file".into(),
+            title: "Target".into(),
+            detail: "Immutable".into(),
+            state: RecordState::Accepted,
+            leased_action_id: None,
+        });
+        let runtime = RuntimeContextInput {
+            input: InteractionInput {
+                interaction: InteractionInputNode::from(GraphNode {
+                    id: NodeId::new(10).unwrap(),
+                    kind: "user-interaction".into(),
+                    icon: "user".into(),
+                    title: "Use context".into(),
+                    detail: "Use context".into(),
+                    state: RecordState::Accepted,
+                    leased_action_id: None,
+                }),
+                contexts: vec![InteractionContext {
+                    type_id: "interaction.context".into(),
+                    target_node: target.clone(),
+                    annotations: vec!["First".into(), "Second".into()],
+                }],
+            },
+            actions: vec![InteractionContextAction {
+                id: ActionId::new(30).unwrap(),
+                type_id: "interaction.context".into(),
+                source_node_id: NodeId::new(10).unwrap(),
+                target: InteractionContextTarget {
+                    node_id: target.id,
+                    source_interaction_node_id: NodeId::new(40).unwrap(),
+                    source_layer_id: LayerId::new(50).unwrap(),
+                },
+                annotations: vec!["First".into(), "Second".into()],
+                state: RecordState::Accepted,
+            }],
+        };
+
+        let exported = export_contexts(
+            &interaction,
+            Some(&runtime),
+            None,
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::new(None),
+        )
+        .unwrap();
+        assert_eq!(exported[0].id, "action:1");
+        assert_eq!(exported[0].target.id, "node:1");
+        assert_eq!(exported[0].source.interaction_node_id, "node:2");
+        assert_eq!(exported[0].source.layer_id, "layer:1");
+        assert_eq!(exported[0].annotations, ["First", "Second"]);
     }
 
     #[test]
@@ -772,6 +1000,7 @@ mod tests {
 
         let exported = export_turn(
             &interaction,
+            None,
             None,
             Some(&invocation),
             ImportedExportContext {

@@ -709,6 +709,30 @@ impl RuntimeClient {
         )?)
     }
 
+    pub(crate) async fn interaction_input(
+        &self,
+        interaction_node_id: i64,
+    ) -> Result<relayer_graph_core::InteractionInput, RuntimeError> {
+        Ok(serde_json::from_value(
+            self.control_get(&format!(
+                "api/control/interactions/{interaction_node_id}/input"
+            ))
+            .await?,
+        )?)
+    }
+
+    pub(crate) async fn interaction_context_actions(
+        &self,
+        interaction_node_id: i64,
+    ) -> Result<Vec<relayer_graph_core::InteractionContextAction>, RuntimeError> {
+        let value = self
+            .control_get(&format!(
+                "api/control/interactions/{interaction_node_id}/context-actions"
+            ))
+            .await?;
+        Ok(serde_json::from_value(value["actions"].clone())?)
+    }
+
     async fn control_get(&self, path: &str) -> Result<Value, RuntimeError> {
         let response = self
             .client
