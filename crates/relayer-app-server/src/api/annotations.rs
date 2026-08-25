@@ -1,5 +1,5 @@
 use super::{AnnotationSession, ApiState, auth::authorize_read, error::ApiError};
-use crate::product::{Annotation, AnnotationAnchor, ThreadId};
+use crate::product::{Annotation, AnnotationAnchor, MAX_ANNOTATION_SNAPSHOT_THREADS, ThreadId};
 use axum::{
     Json,
     extract::{Path, State},
@@ -18,6 +18,18 @@ pub(super) struct RegisterAnnotationSessionRequest {
     thread_ids: Vec<i64>,
     author_id: String,
     author_display_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct RevokeAnnotationSessionRequest {
+    token: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct SnapshotAnnotationsRequest {
+    thread_ids: Vec<i64>,
 }
 
 #[derive(Deserialize)]
@@ -72,6 +84,23 @@ pub(super) struct AnnotationSnapshotResponse {
     annotations: Vec<Annotation>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ThreadAnnotationSnapshot {
+    thread_id: i64,
+    annotations: Vec<Annotation>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct AnnotationSnapshotSetResponse {
+    schema_version: u32,
+    kind: &'static str,
+    exported_at: String,
+    annotations_sha256: String,
+    threads: Vec<ThreadAnnotationSnapshot>,
+}
+
 pub(super) async fn register_session(
     State(state): State<ApiState>,
     headers: HeaderMap,
@@ -115,6 +144,30 @@ pub(super) async fn register_session(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub(super) async fn revoke_session(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(request): Json<RevokeAnnotationSessionRequest>,
+) -> Result<StatusCode, ApiError> {
+    if !state.annotations_enabled {
+        return Err(ApiError::not_found("annotation sessions are unavailable"));
+    }
+    if !state.authenticator.is_control(&headers) {
+        return Err(ApiError::unauthorized());
+    }
+    if request.token.len() < 32 || request.token.len() > 512 {
+        return Err(ApiError::invalid(
+            "annotation session token must contain 32 to 512 bytes",
+        ));
+    }
+    state
+        .annotation_sessions
+        .lock()
+        .expect("annotation session lock poisoned")
+        .remove(&request.token);
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub(super) async fn list(
     State(state): State<ApiState>,
     headers: HeaderMap,
@@ -148,6 +201,32 @@ pub(super) async fn snapshot(
             .to_string(),
         annotations_sha256: format!("sha256:{:x}", Sha256::digest(material)),
         annotations,
+    }))
+}
+
+pub(super) async fn snapshot_many(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(request): Json<SnapshotAnnotationsRequest>,
+) -> Result<Json<AnnotationSnapshotSetResponse>, ApiError> {
+    let thread_ids = validate_snapshot_thread_ids(request.thread_ids)?;
+    annotation_session_for_threads(&state, &headers, &thread_ids)?;
+    let snapshots = state.product.snapshot_annotations(&thread_ids).await?;
+    let threads = snapshots
+        .into_iter()
+        .map(|(thread_id, annotations)| ThreadAnnotationSnapshot {
+            thread_id: thread_id.value(),
+            annotations,
+        })
+        .collect::<Vec<_>>();
+    let material =
+        serde_json::to_vec(&threads).map_err(|error| ApiError::internal(&error.to_string()))?;
+    Ok(Json(AnnotationSnapshotSetResponse {
+        schema_version: 1,
+        kind: "relayer_eval_annotation_snapshot_set",
+        exported_at: timestamp(),
+        annotations_sha256: format!("sha256:{:x}", Sha256::digest(material)),
+        threads,
     }))
 }
 
@@ -249,6 +328,62 @@ fn annotation_session(
         ));
     }
     Ok(session.clone())
+}
+
+fn annotation_session_for_threads(
+    state: &ApiState,
+    headers: &HeaderMap,
+    thread_ids: &[ThreadId],
+) -> Result<AnnotationSession, ApiError> {
+    authorize_read(state, headers)?;
+    let token = state
+        .authenticator
+        .annotation_token(headers)
+        .ok_or_else(ApiError::unauthorized)?;
+    let sessions = state
+        .annotation_sessions
+        .lock()
+        .expect("annotation session lock poisoned");
+    let session = sessions.get(token).ok_or_else(ApiError::unauthorized)?;
+    let requested = thread_ids
+        .iter()
+        .map(|thread_id| thread_id.value())
+        .collect::<HashSet<_>>();
+    if requested != session.thread_ids {
+        return Err(ApiError::not_found(
+            "annotation snapshot thread IDs must exactly match this session's authorized threads",
+        ));
+    }
+    Ok(session.clone())
+}
+
+fn validate_snapshot_thread_ids(raw_ids: Vec<i64>) -> Result<Vec<ThreadId>, ApiError> {
+    if raw_ids.is_empty() || raw_ids.len() > MAX_ANNOTATION_SNAPSHOT_THREADS {
+        return Err(ApiError::invalid(format!(
+            "annotation snapshot must request 1 to {MAX_ANNOTATION_SNAPSHOT_THREADS} threads"
+        )));
+    }
+    let mut seen = HashSet::with_capacity(raw_ids.len());
+    raw_ids
+        .into_iter()
+        .map(|raw_id| {
+            let thread_id = ThreadId::try_from(raw_id)?;
+            if !seen.insert(raw_id) {
+                return Err(ApiError::invalid(
+                    "annotation snapshot thread IDs must be unique",
+                ));
+            }
+            Ok(thread_id)
+        })
+        .collect()
+}
+
+fn timestamp() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time is before unix epoch")
+        .as_millis()
+        .to_string()
 }
 
 async fn validate_anchor(

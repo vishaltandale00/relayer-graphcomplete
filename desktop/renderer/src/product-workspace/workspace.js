@@ -22,6 +22,7 @@ import { productWorkspaceMarkup } from "./view.js";
 import {
   annotationNavigationContext,
   annotationRatingLabel,
+  annotationSubjectContextChanged,
   annotationTimestamp,
   annotationsForAnchor,
   latestAnnotationRevision,
@@ -436,6 +437,8 @@ export function createProductWorkspace({
   const annotationLoads = new Map();
   const annotationLoadRevisions = new Map();
   let annotationSubject = null;
+  let annotationThreadId = null;
+  let renderedThreadId = null;
   let annotationRatingTouched = false;
   let editingAnnotation = null;
 
@@ -558,6 +561,8 @@ export function createProductWorkspace({
     cancelInspectorFit();
     selection.selectedNodeId = null;
     annotationSubject = null;
+    annotationThreadId = null;
+    resetAnnotationComposer();
     onSelectionChange(null);
     $("#inspector").classList.add("hidden");
     $$('[data-node]').forEach((element) => element.classList.remove("selected"));
@@ -666,6 +671,7 @@ export function createProductWorkspace({
 
   function isCurrentAnnotationContext(threadId, anchor) {
     return String(getThread()?.id) === String(threadId)
+      && String(annotationThreadId) === String(threadId)
       && sameAnnotationAnchor(annotationSubject?.anchor, anchor);
   }
 
@@ -767,6 +773,7 @@ export function createProductWorkspace({
       retract.onclick = async () => {
         const operationThread = getThread();
         const operationAnchor = annotationSubject.anchor;
+        if (String(operationThread?.id) !== String(annotationThreadId)) return;
         retract.disabled = true;
         try {
           await annotationApi.retract(operationThread.id, annotation.id, {
@@ -806,6 +813,15 @@ export function createProductWorkspace({
   }
 
   function openAnnotationSubject(state, anchor, { title, kind, icon = "annotation" } = {}) {
+    const threadId = getThread()?.id;
+    const subjectChanged = annotationSubjectContextChanged(
+      annotationThreadId,
+      annotationSubject?.anchor,
+      threadId,
+      anchor,
+    );
+    if (subjectChanged) resetAnnotationComposer();
+    annotationThreadId = threadId;
     annotationSubject = { anchor, title, kind };
     selection.selectedNodeId = anchor.kind === "node" ? anchor.nodeId : null;
     onSelectionChange(selection.selectedNodeId);
@@ -817,7 +833,6 @@ export function createProductWorkspace({
     $("#detailActions").classList.add("hidden");
     $("#detailActions").replaceChildren();
     $$('[data-node]').forEach((element) => element.classList.remove("selected"));
-    resetAnnotationComposer();
     renderAnnotationList();
   }
 
@@ -832,6 +847,13 @@ export function createProductWorkspace({
     const comment = $("#annotationComment").value.trim();
     if (!comment || !annotationSubject || !annotationEnabled) return;
     const thread = getThread();
+    if (String(thread?.id) !== String(annotationThreadId)) {
+      annotationSubject = null;
+      annotationThreadId = null;
+      resetAnnotationComposer();
+      $("#annotationPanel").classList.add("hidden");
+      return;
+    }
     const operationAnchor = structuredClone(annotationSubject.anchor);
     const operationEditing = editingAnnotation;
     const payload = {
@@ -1211,6 +1233,17 @@ export function createProductWorkspace({
       showEmpty();
       return;
     }
+    const threadId = String(thread.id);
+    if (renderedThreadId !== null && renderedThreadId !== threadId) {
+      annotationSubject = null;
+      annotationThreadId = null;
+      resetAnnotationComposer();
+      $("#annotationPanel").classList.add("hidden");
+      cancelInspectorFit();
+      $("#inspector").classList.add("hidden");
+      selection.selectedNodeId = null;
+    }
+    renderedThreadId = threadId;
     if (annotationSubject?.anchor.kind !== "thread") {
       const interactionId = currentInteraction(state, thread)?.id;
       const layerId = currentLayerId(state, thread);
@@ -1330,10 +1363,26 @@ export function createProductWorkspace({
         badge.type = "button";
         badge.className = "annotation-count-badge breadcrumb-annotation-badge";
         updateCountBadge(badge, anchor);
-        badge.onclick = () => openAnnotationSubject(state, anchor, {
-          title: item.label,
-          kind: "LAYER",
-        });
+        badge.onclick = async () => {
+          badge.disabled = true;
+          try {
+            if (!item.current) {
+              await onNavigateLayer(item.layerId, {
+                restore: true,
+                pathIndex: item.pathIndex,
+              });
+            }
+            if (String(getThread()?.id) !== String(thread?.id)) return;
+            openAnnotationSubject(getState(), anchor, {
+              title: item.label,
+              kind: "LAYER",
+            });
+          } catch (error) {
+            toast(error.message);
+          } finally {
+            if (badge.isConnected) badge.disabled = false;
+          }
+        };
         children.push(badge);
       }
     });
@@ -1642,7 +1691,7 @@ export function createProductWorkspace({
       const count = anchor ? annotationCount(anchor) : 0;
       const middleX = (segment.x1 + segment.x2) / 2;
       const middleY = (segment.y1 + segment.y2) / 2;
-      return `<g class="graph-edge-group" data-edge="${edgeId}"><line class="graph-edge" style="stroke-width:${graphEdgeStrokeWidth(camera.zoom)}" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/><line class="graph-edge-hit ${annotatable ? "" : "hidden"}" tabindex="0" role="button" aria-label="Open relationship comments" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/>${annotatable && count ? `<g class="edge-annotation-badge" transform="translate(${middleX} ${middleY})"><circle r="9"></circle><text y="3">${count}</text></g>` : ""}</g>`;
+      return `<g class="graph-edge-group" data-edge="${edgeId}"><line class="graph-edge" aria-hidden="true" style="stroke-width:${graphEdgeStrokeWidth(camera.zoom)}" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/><line class="graph-edge-hit ${annotatable ? "" : "hidden"}" tabindex="0" role="button" aria-label="Open relationship comments" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/>${annotatable && count ? `<g class="edge-annotation-badge" aria-hidden="true" transform="translate(${middleX} ${middleY})"><circle r="9"></circle><text y="3">${count}</text></g>` : ""}</g>`;
     }).join("");
     if (annotationEnabled) {
       $$("[data-edge]").forEach((group) => {
@@ -1690,8 +1739,19 @@ export function createProductWorkspace({
     selection.selectedNodeId = id;
     const node = state.nodes.find((item) => String(item.id) === String(id));
     if (!node) return;
+    const nodeAnchor = annotationEnabled
+      ? subjectAnchor("node", { nodeId: node.id }, state, getThread())
+      : null;
+    const subjectChanged = annotationEnabled && annotationSubjectContextChanged(
+      annotationThreadId,
+      annotationSubject?.anchor,
+      getThread()?.id,
+      nodeAnchor,
+    );
+    if (subjectChanged) resetAnnotationComposer();
+    annotationThreadId = annotationEnabled ? getThread()?.id : null;
     annotationSubject = annotationEnabled ? {
-      anchor: subjectAnchor("node", { nodeId: node.id }, state, getThread()),
+      anchor: nodeAnchor,
       title: node.title,
       kind: "NODE",
     } : null;

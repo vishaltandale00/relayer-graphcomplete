@@ -48,6 +48,16 @@ export function annotationsForAnchor(annotations, anchor) {
   ));
 }
 
+export function annotationSubjectContextChanged(
+  currentThreadId,
+  currentAnchor,
+  nextThreadId,
+  nextAnchor,
+) {
+  return String(currentThreadId ?? "") !== String(nextThreadId ?? "")
+    || !sameAnnotationAnchor(currentAnchor, nextAnchor);
+}
+
 export function annotationNavigationContext(selection, anchor) {
   return {
     turnId: anchor.interactionId ?? selection.currentInteractionId ?? null,

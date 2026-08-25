@@ -10,6 +10,7 @@ import { codexBinaryPath, nativeBinaryName } from "../shared/target.mjs";
 import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 import { evalHarnessConfigurationPaths } from "./configuration-paths.mjs";
 import { EvalService } from "./eval-service.mjs";
+import { loadAtomicAnnotationSnapshots } from "./annotation-snapshot-loader.mjs";
 import { loadJudgeScreenshotArtifact } from "./judge-screenshot-loader.mjs";
 import { ReviewSession } from "./review-session.mjs";
 import {
@@ -461,39 +462,13 @@ async function productRequest(session, path) {
 async function loadAnnotationSnapshots(session, threadIds) {
   const token = randomBytes(32).toString("hex");
   const username = userInfo().username;
-  const registration = await fetch(new URL("/api/internal/annotation-sessions", session.origin), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Cookie: `${session.cookie.name}=${session.cookie.value}`,
-    },
-    body: JSON.stringify({
-      token,
-      threadIds,
-      authorId: `local:${username}`,
-      authorDisplayName: String(process.env.RELAYER_EVAL_ANNOTATOR_NAME || username).trim(),
-    }),
+  return loadAtomicAnnotationSnapshots({
+    session,
+    threadIds,
+    token,
+    authorId: `local:${username}`,
+    authorDisplayName: String(process.env.RELAYER_EVAL_ANNOTATOR_NAME || username).trim(),
   });
-  if (!registration.ok) {
-    const value = await registration.json().catch(() => ({}));
-    throw new Error(value?.error || `Annotation export session failed (${registration.status}).`);
-  }
-  return Promise.all(threadIds.map(async (threadId) => {
-    const response = await fetch(new URL(
-      `/api/threads/${encodeURIComponent(threadId)}/annotations/snapshot`,
-      session.origin,
-    ), {
-      headers: {
-        Accept: "application/json",
-        Cookie: `${session.cookie.name}=${session.cookie.value}; relayer_annotation=${token}`,
-      },
-    });
-    const value = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(value?.error || `Annotation snapshot failed (${response.status}).`);
-    }
-    return value;
-  }));
 }
 
 function stop() {

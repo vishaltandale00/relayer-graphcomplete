@@ -1,11 +1,11 @@
 use super::{
     ActionInvocation, Annotation, AnnotationAnchor, AnnotationState, CatalogError,
-    CreateModelFamilyCommand, Interaction, InteractionId, InteractionModelSelection, ModelFamily,
-    ModelFamilyId, ModelFamilyKind, ModelSelection, ModelSettings, ModelSettingsDefaults,
-    NewAnnotationRevision, ProductCapabilities, ProductState, Project, ProjectId,
-    ProviderCatalogSnapshot, ReorderModelFamiliesCommand, Thread, ThreadId, ThreadView,
-    UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand, ValidateModelSelectionCommand,
-    validate_family, validate_revision_content,
+    CreateModelFamilyCommand, Interaction, InteractionId, InteractionModelSelection,
+    MAX_ANNOTATION_SNAPSHOT_THREADS, ModelFamily, ModelFamilyId, ModelFamilyKind, ModelSelection,
+    ModelSettings, ModelSettingsDefaults, NewAnnotationRevision, ProductCapabilities, ProductState,
+    Project, ProjectId, ProviderCatalogSnapshot, ReorderModelFamiliesCommand, Thread, ThreadId,
+    ThreadView, UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand,
+    ValidateModelSelectionCommand, validate_family, validate_revision_content,
 };
 use crate::approval::{ApprovalReceipt, ApprovalRequest, ApprovalResolution};
 use crate::storage::{
@@ -120,6 +120,31 @@ impl ProductService {
             .list_annotations(thread_id)
             .await
             .map_err(Into::into)
+    }
+
+    pub(crate) async fn snapshot_annotations(
+        &self,
+        thread_ids: &[ThreadId],
+    ) -> Result<Vec<(ThreadId, Vec<Annotation>)>, ProductError> {
+        if thread_ids.is_empty() || thread_ids.len() > MAX_ANNOTATION_SNAPSHOT_THREADS {
+            return Err(ProductError::Invalid(format!(
+                "annotation snapshot must request 1 to {MAX_ANNOTATION_SNAPSHOT_THREADS} threads"
+            )));
+        }
+        if thread_ids
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            != thread_ids.len()
+        {
+            return Err(ProductError::Invalid(
+                "annotation snapshot thread IDs must be unique".into(),
+            ));
+        }
+        self.storage
+            .snapshot_annotations(thread_ids)
+            .await?
+            .ok_or_else(|| ProductError::NotFound("annotation snapshot thread".into()))
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -159,6 +159,94 @@ async fn eval_annotations_are_scoped_append_only_and_durable() {
     assert_eq!(created["revisions"][0]["authorDisplayName"], "Vishal");
     let annotation_id = created["id"].as_i64().unwrap();
 
+    let expanded = app.clone().oneshot(api_request(
+        "POST", "/api/internal/annotation-sessions", Some(json!({
+            "token": token, "threadIds": [thread_id, other_thread_id], "authorId": "local-vishal", "authorDisplayName": "Vishal"
+        })), true,
+    )).await.unwrap();
+    assert_eq!(expanded.status(), StatusCode::NO_CONTENT);
+    let other_created = response_json(
+        app.clone()
+            .oneshot(annotation_request(
+                "POST",
+                &format!("/api/threads/{other_thread_id}/annotations"),
+                Some(json!({
+                    "anchor": { "kind": "thread" },
+                    "comment": "Second thread comment"
+                })),
+                token,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let snapshot_set = response_json(
+        app.clone()
+            .oneshot(annotation_request(
+                "POST",
+                "/api/annotations/snapshot",
+                Some(json!({ "threadIds": [other_thread_id, thread_id] })),
+                token,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(snapshot_set["kind"], "relayer_eval_annotation_snapshot_set");
+    assert_eq!(snapshot_set["threads"].as_array().unwrap().len(), 2);
+    assert_eq!(snapshot_set["threads"][0]["threadId"], other_thread_id);
+    assert_eq!(snapshot_set["threads"][1]["threadId"], thread_id);
+    assert_eq!(
+        snapshot_set["threads"][0]["annotations"][0]["id"],
+        other_created["id"]
+    );
+    assert_eq!(
+        snapshot_set["threads"][1]["annotations"][0]["id"],
+        annotation_id
+    );
+
+    let incomplete_snapshot = app
+        .clone()
+        .oneshot(annotation_request(
+            "POST",
+            "/api/annotations/snapshot",
+            Some(json!({ "threadIds": [thread_id] })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(incomplete_snapshot.status(), StatusCode::NOT_FOUND);
+
+    let duplicate_snapshot = app
+        .clone()
+        .oneshot(annotation_request(
+            "POST",
+            "/api/annotations/snapshot",
+            Some(json!({ "threadIds": [thread_id, thread_id] })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        duplicate_snapshot.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let over_limit_ids = (1_i64..=257).collect::<Vec<_>>();
+    let over_limit_snapshot = app
+        .clone()
+        .oneshot(annotation_request(
+            "POST",
+            "/api/annotations/snapshot",
+            Some(json!({ "threadIds": over_limit_ids })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        over_limit_snapshot.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+
     let revised = response_json(
         app.clone()
             .oneshot(annotation_request(
@@ -226,6 +314,48 @@ async fn eval_annotations_are_scoped_append_only_and_durable() {
     .await;
     assert_eq!(retracted["latestRevision"], 3);
     assert_eq!(retracted["revisions"][2]["state"], "retracted");
+
+    let revoked = app
+        .clone()
+        .oneshot(api_request(
+            "DELETE",
+            "/api/internal/annotation-sessions",
+            Some(json!({ "token": token })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(revoked.status(), StatusCode::NO_CONTENT);
+    let denied_after_revoke = app
+        .clone()
+        .oneshot(annotation_request(
+            "GET",
+            &format!("/api/threads/{thread_id}/annotations"),
+            None,
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(denied_after_revoke.status(), StatusCode::UNAUTHORIZED);
+    let state_after_revoke = response_json(
+        app.clone()
+            .oneshot(annotation_request("GET", "/api/state", None, token))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(state_after_revoke["capabilities"]["annotations"], false);
+    let revoked_again = app
+        .clone()
+        .oneshot(api_request(
+            "DELETE",
+            "/api/internal/annotation-sessions",
+            Some(json!({ "token": token })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(revoked_again.status(), StatusCode::NO_CONTENT);
 
     drop(app);
     let reopened = open_app(&database, &root).await;

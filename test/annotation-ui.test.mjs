@@ -5,6 +5,7 @@ import {
   activeAnnotations,
   annotationNavigationContext,
   annotationRatingLabel,
+  annotationSubjectContextChanged,
   annotationTimestamp,
   annotationsForAnchor,
   sameAnnotationAnchor,
@@ -66,6 +67,18 @@ describe("Eval ProductWorkspace annotations", () => {
     });
   });
 
+  it("resets annotation drafts when either the thread or semantic subject changes", () => {
+    const node = { kind: "node", interactionId: "turn-1", layerId: "layer-1", nodeId: "node-1" };
+    expect(annotationSubjectContextChanged("thread-1", node, "thread-1", { ...node })).toBe(false);
+    expect(annotationSubjectContextChanged("thread-1", node, "thread-2", { ...node })).toBe(true);
+    expect(annotationSubjectContextChanged(
+      "thread-1",
+      node,
+      "thread-1",
+      { ...node, nodeId: "node-2" },
+    )).toBe(true);
+  });
+
   it("renders one compact slider and no unset or text Add controls", async () => {
     const markup = productWorkspaceMarkup();
     expect(markup.match(/type="range"/g)).toHaveLength(1);
@@ -75,7 +88,14 @@ describe("Eval ProductWorkspace annotations", () => {
     expect(markup).toContain(">↑</button>");
 
     const graphAdapter = await readFile(new URL("../desktop/renderer/src/graph.js", import.meta.url), "utf8");
+    const workspace = await readFile(new URL("../desktop/renderer/src/product-workspace/workspace.js", import.meta.url), "utf8");
+    const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
     expect(graphAdapter).toContain("appState.capabilities?.annotations === true");
     expect(graphAdapter).not.toContain('query.get("review") === "1"\n    ? createAnnotationApi');
+    expect(workspace).toContain("if (!item.current)");
+    expect(workspace).toContain("await onNavigateLayer(item.layerId");
+    expect(styles).toContain("#nodeLayer{pointer-events:none}");
+    expect(styles).toContain(".graph-node{position:absolute");
+    expect(styles).toContain("pointer-events:auto");
   });
 });

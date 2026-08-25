@@ -9,6 +9,48 @@ use crate::{
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 
 impl SqliteProductStore {
+    pub(crate) async fn snapshot_annotations(
+        &self,
+        thread_ids: &[ThreadId],
+    ) -> Result<Option<Vec<(ThreadId, Vec<Annotation>)>>, StorageError> {
+        if thread_ids.is_empty()
+            || thread_ids.len() > crate::product::MAX_ANNOTATION_SNAPSHOT_THREADS
+            || thread_ids
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != thread_ids.len()
+        {
+            return Err(StorageError::AnnotationConflict(
+                "annotation snapshot thread set is empty, duplicated, or over limit".into(),
+            ));
+        }
+        // The entire requested set is resolved under one SQLite read transaction.
+        // Callers therefore cannot observe revisions from different database moments
+        // across threads, even when a writer commits while this snapshot is assembled.
+        let mut transaction = self.pool.begin().await?;
+        for thread_id in thread_ids {
+            let exists: bool =
+                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1)")
+                    .bind(thread_id.value())
+                    .fetch_one(&mut *transaction)
+                    .await?;
+            if !exists {
+                transaction.rollback().await?;
+                return Ok(None);
+            }
+        }
+        let mut snapshots = Vec::with_capacity(thread_ids.len());
+        for thread_id in thread_ids {
+            snapshots.push((
+                *thread_id,
+                fetch_annotations(&mut transaction, *thread_id).await?,
+            ));
+        }
+        transaction.commit().await?;
+        Ok(Some(snapshots))
+    }
+
     pub(crate) async fn list_annotations(
         &self,
         thread_id: ThreadId,
@@ -208,4 +250,71 @@ fn json<T: serde::Serialize + ?Sized>(value: &T) -> Result<String, StorageError>
 
 fn from_json<T: serde::de::DeserializeOwned>(value: String) -> Result<T, StorageError> {
     serde_json::from_str(&value).map_err(|error| StorageError::Serialization(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn one_read_transaction_keeps_multi_thread_snapshot_consistent() {
+        let temporary = tempfile::tempdir().unwrap();
+        let store = SqliteProductStore::open(temporary.path().join("product.sqlite3"))
+            .await
+            .unwrap();
+        assert!(matches!(
+            store.snapshot_annotations(&[]).await,
+            Err(StorageError::AnnotationConflict(_))
+        ));
+        for id in [1_i64, 2] {
+            sqlx::query(
+                "INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (?1,?2,'1','1','codex-basic','auto')",
+            )
+            .bind(id)
+            .bind(format!("Thread {id}"))
+            .execute(&store.pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO annotations(id,thread_id,anchor_json,created_at) VALUES (?1,?1,'{\"kind\":\"thread\"}','1')",
+            )
+            .bind(id)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO annotation_revisions(annotation_id,revision,author_id,author_display_name,comment,rating,state,navigation_context_json,evidence_refs_json,created_at) VALUES (?1,1,'author','Author',?2,NULL,'active','{}','[]','1')",
+            )
+            .bind(id)
+            .bind(format!("before-{id}"))
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        }
+
+        let mut snapshot = store.pool.begin().await.unwrap();
+        let first = fetch_annotations(&mut snapshot, ThreadId::from_database(1))
+            .await
+            .unwrap();
+        assert_eq!(first[0].revisions[0].comment, "before-1");
+
+        sqlx::query(
+            "UPDATE annotation_revisions SET comment='after-2' WHERE annotation_id=2 AND revision=1",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        let second = fetch_annotations(&mut snapshot, ThreadId::from_database(2))
+            .await
+            .unwrap();
+        assert_eq!(second[0].revisions[0].comment, "before-2");
+        snapshot.commit().await.unwrap();
+
+        let current = store
+            .list_annotations(ThreadId::from_database(2))
+            .await
+            .unwrap();
+        assert_eq!(current[0].revisions[0].comment, "after-2");
+    }
 }

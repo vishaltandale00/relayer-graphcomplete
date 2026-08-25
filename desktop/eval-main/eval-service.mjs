@@ -61,6 +61,8 @@ const deterministicJudgeId = "deterministic-graph-contract";
 const simulatedUserJudgeId = "simulated-user";
 const simulatedUserJudgeIds = new Set([simulatedUserJudgeId, "simulated-user-sol-high"]);
 const MAX_CONVERSATION_IMPORT_BYTES = 256 * 1024 * 1024;
+const ANNOTATION_EXPORT_EXECUTION_STATUSES = new Set(["passed", "failed", "imported"]);
+const ANNOTATION_EXPORT_TURN_STATUSES = new Set(["accepted", "failed", "stopped"]);
 
 function copy(value) {
   return structuredClone(value);
@@ -82,6 +84,23 @@ function canonicalJson(value) {
 
 function sha256(value) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function finalizedAnnotationCoverage(execution) {
+  if (!ANNOTATION_EXPORT_EXECUTION_STATUSES.has(execution?.status)) return false;
+  const threadIds = [...new Set(execution.threadIds || [])];
+  if (!threadIds.length || !(execution.turns?.length > 0)) return false;
+  const covered = new Set();
+  for (const turn of execution.turns) {
+    if (
+      turn?.threadId == null
+      || turn?.interactionId == null
+      || !threadIds.some((threadId) => String(threadId) === String(turn.threadId))
+      || !ANNOTATION_EXPORT_TURN_STATUSES.has(turn.status)
+    ) return false;
+    covered.add(String(turn.threadId));
+  }
+  return threadIds.every((threadId) => covered.has(String(threadId)));
 }
 
 function summarize(run) {
@@ -652,14 +671,32 @@ export class EvalService {
     ));
     const execution = run?.executions.find((candidate) => candidate.id === executionId);
     if (!run || !execution) throw new Error(`Unknown execution: ${executionId}`);
-    const threadIds = [...new Set(execution.threadIds || [])];
-    if (!threadIds.length) throw new Error("The execution has no product threads to export.");
-    const annotationSnapshots = await this.annotationSnapshotLoader(threadIds);
-    if (!Array.isArray(annotationSnapshots) || annotationSnapshots.length !== threadIds.length) {
+    if (!finalizedAnnotationCoverage(execution)) {
+      throw new Error("Annotation export requires a terminal execution with finalized thread and turn coverage.");
+    }
+    const durableExecution = await this.#durableExecutionForAnnotationExport(run, executionId);
+    if (!finalizedAnnotationCoverage(durableExecution)) {
+      throw new Error("The durable source run bundle does not contain finalized execution coverage.");
+    }
+    const threadIds = [...new Set(durableExecution.threadIds)];
+    if (canonicalJson(threadIds) !== canonicalJson([...new Set(execution.threadIds)])) {
+      throw new Error("The execution thread coverage does not match its durable source run bundle.");
+    }
+    const annotationSnapshot = await this.annotationSnapshotLoader(threadIds);
+    if (
+      annotationSnapshot?.schemaVersion !== 1
+      || annotationSnapshot?.kind !== "relayer_eval_annotation_snapshot_set"
+      || typeof annotationSnapshot?.annotationsSha256 !== "string"
+      || !annotationSnapshot.annotationsSha256.startsWith("sha256:")
+    ) {
+      throw new Error("Annotation snapshot loader returned an invalid atomic snapshot set.");
+    }
+    const annotationThreads = annotationSnapshot?.threads;
+    if (!Array.isArray(annotationThreads) || annotationThreads.length !== threadIds.length) {
       throw new Error("Annotation snapshot loader returned incomplete thread coverage.");
     }
     const missingThreadIds = new Set(threadIds.map(String));
-    for (const snapshot of annotationSnapshots) {
+    for (const snapshot of annotationThreads) {
       if (!missingThreadIds.delete(String(snapshot?.threadId))) {
         throw new Error("Annotation snapshot loader returned an unexpected or duplicate thread.");
       }
@@ -669,8 +706,11 @@ export class EvalService {
     }
 
     const exportedAt = new Date().toISOString();
-    const annotationMaterialSha256 = sha256(canonicalJson(annotationSnapshots));
-    const fixedGraphReferences = (execution.turns || []).map((turn) => ({
+    // The backend hashes only the ordered thread histories, not exportedAt.
+    // Preserve that transaction-bound digest so identical histories have an
+    // identical material identity even when captured at different times.
+    const annotationMaterialSha256 = annotationSnapshot.annotationsSha256;
+    const fixedGraphReferences = durableExecution.turns.map((turn) => ({
       threadId: turn.threadId,
       interactionId: turn.interactionId,
       graphNodeId: turn.graphNodeId,
@@ -684,10 +724,10 @@ export class EvalService {
       executionId: execution.id,
       exportedAt,
       sourceRunBundleRef: run.bundleRef,
-      execution: copy(execution),
+      execution: copy(durableExecution),
       fixedGraphReferences,
       annotationMaterialSha256,
-      annotationSnapshots: copy(annotationSnapshots),
+      annotationSnapshot: copy(annotationSnapshot),
     };
     const bundle = {
       ...unsigned,
@@ -715,6 +755,32 @@ export class EvalService {
       annotationMaterialSha256,
       integritySha256: bundle.integritySha256,
     });
+  }
+
+  async #durableExecutionForAnnotationExport(run, executionId) {
+    const expectedBundleRef = ["runs", encodeURIComponent(run.id), "bundle.json"].join("/");
+    if (run.bundleRef !== expectedBundleRef) {
+      throw new Error("Annotation export requires a durable source run bundle.");
+    }
+    let bundle;
+    try {
+      bundle = JSON.parse(await readFile(
+        join(dirname(this.stateFile), ...expectedBundleRef.split("/")),
+        "utf8",
+      ));
+    } catch {
+      throw new Error("Annotation export could not read the durable source run bundle.");
+    }
+    if (
+      bundle?.kind !== "relayer_eval_run_bundle"
+      || bundle?.testRunId !== run.id
+      || bundle?.run?.bundleRef !== expectedBundleRef
+    ) {
+      throw new Error("Annotation export found an invalid durable source run bundle.");
+    }
+    const execution = bundle.run.executions?.find((candidate) => candidate.id === executionId);
+    if (!execution) throw new Error("The durable source run bundle omits this execution.");
+    return execution;
   }
 
   async #run(run) {

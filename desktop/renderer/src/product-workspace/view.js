@@ -40,7 +40,7 @@ export function productWorkspaceMarkup() {
         <nav class="workspace-breadcrumb" id="workspaceBreadcrumb" data-review-capture="breadcrumb" aria-label="Graph layer path"></nav>
         <div class="graph-empty" id="graphEmpty"><div class="thinking-dots" id="thinkingDots" role="status" aria-label="Waiting for graph"><i></i><i></i><i></i></div><p id="graphEmptyMessage">This interaction has no accepted graph yet.</p></div>
         <div class="graph-stage hidden" id="graphStage" tabindex="-1" data-review-capture="layer-viewport" role="region" aria-label="Visible graph layer">
-          <svg id="edgeCanvas" aria-hidden="true"></svg>
+          <svg id="edgeCanvas" aria-label="Graph relationships"></svg>
           <div id="nodeLayer"></div>
           <div class="graph-hint">Scroll or pinch to zoom · Drag canvas to pan · Drag nodes for this view</div>
           <div class="graph-controls" role="toolbar" aria-label="Graph view controls">

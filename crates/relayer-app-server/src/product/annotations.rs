@@ -6,6 +6,7 @@ pub(crate) const MAX_ANNOTATION_COMMENT_BYTES: usize = 16 * 1024;
 pub(crate) const MAX_NAVIGATION_CONTEXT_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_EVIDENCE_REFS: usize = 20;
 pub(crate) const MAX_EVIDENCE_REF_BYTES: usize = 512;
+pub(crate) const MAX_ANNOTATION_SNAPSHOT_THREADS: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(

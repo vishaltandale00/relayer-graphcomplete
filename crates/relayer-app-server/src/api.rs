@@ -130,7 +130,12 @@ pub(crate) fn router(
         .route("/api/threads/{id}/export", get(threads::export))
         .route(
             "/api/internal/annotation-sessions",
-            axum::routing::post(annotations::register_session),
+            axum::routing::post(annotations::register_session)
+                .delete(annotations::revoke_session),
+        )
+        .route(
+            "/api/annotations/snapshot",
+            axum::routing::post(annotations::snapshot_many),
         )
         .route(
             "/api/threads/{id}/annotations",

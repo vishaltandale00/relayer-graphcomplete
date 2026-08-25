@@ -5,8 +5,8 @@ mod models;
 mod service;
 
 pub(crate) use annotations::{
-    Annotation, AnnotationAnchor, AnnotationRevision, AnnotationState, NewAnnotationRevision,
-    validate_revision_content,
+    Annotation, AnnotationAnchor, AnnotationRevision, AnnotationState,
+    MAX_ANNOTATION_SNAPSHOT_THREADS, NewAnnotationRevision, validate_revision_content,
 };
 pub(crate) use catalog::CatalogError;
 pub(crate) use catalog::CreateModelFamilyCommand;
