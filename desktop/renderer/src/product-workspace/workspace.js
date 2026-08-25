@@ -20,6 +20,14 @@ import { graphLayoutSignature, projectLayerNodePositions } from "./graph-layout.
 import { renderMarkdown } from "./markdown.js";
 import { productWorkspaceMarkup } from "./view.js";
 import {
+  annotationNavigationContext,
+  annotationRatingLabel,
+  annotationTimestamp,
+  annotationsForAnchor,
+  latestAnnotationRevision,
+  sameAnnotationAnchor,
+} from "./annotations.js";
+import {
   approvalActionPresentation,
   approvalDockMode,
   approvalQueueKeyIntent,
@@ -401,6 +409,7 @@ export function createProductWorkspace({
   onNavigateResolvedInvoke = async () => {},
   onInvokeAction = async () => {},
   onDecideApproval = async () => {},
+  annotationApi = null,
 }) {
   const capabilities = workspaceModeCapabilities(mode);
   let graphNodes = [];
@@ -423,6 +432,12 @@ export function createProductWorkspace({
   let restoreComposerFocusThreadId = null;
   const graphViewCache = new Map();
   const activeTouchPointers = new Map();
+  const annotationCache = new Map();
+  const annotationLoads = new Map();
+  const annotationLoadRevisions = new Map();
+  let annotationSubject = null;
+  let annotationRatingTouched = false;
+  let editingAnnotation = null;
 
   const $ = (selector) => root.querySelector(selector);
   const $$ = (selector) => [...root.querySelectorAll(selector)];
@@ -542,6 +557,7 @@ export function createProductWorkspace({
   $("#closeInspector").onclick = () => {
     cancelInspectorFit();
     selection.selectedNodeId = null;
+    annotationSubject = null;
     onSelectionChange(null);
     $("#inspector").classList.add("hidden");
     $$('[data-node]').forEach((element) => element.classList.remove("selected"));
@@ -566,6 +582,285 @@ export function createProductWorkspace({
   $("#nextTurn").onclick = () => {
     closeTurnPopover();
     onSelectTurn(1);
+  };
+  const annotationEnabled = Boolean(annotationApi);
+  const ratingSurface = $("#annotationRating");
+  const ratingInput = $("#annotationRatingInput");
+  const ratingOutput = $("#annotationRatingOutput");
+
+  function setAnnotationRating(value, { touched = true } = {}) {
+    const normalized = Math.min(4, Math.max(1, Number(value) || 2));
+    ratingInput.value = String(normalized);
+    ratingSurface.style.setProperty("--annotation-rating", String(normalized));
+    ratingSurface.style.setProperty(
+      "--annotation-rating-progress",
+      `${(normalized - 1) * 33.333}%`,
+    );
+    annotationRatingTouched = touched;
+    const label = touched ? annotationRatingLabel(normalized) : null;
+    ratingInput.setAttribute("aria-valuetext", label || "No rating selected");
+    ratingOutput.textContent = label || "";
+  }
+
+  function setRatingExpanded(expanded) {
+    ratingSurface.classList.toggle("expanded", expanded);
+  }
+
+  setAnnotationRating(2, { touched: false });
+  ratingInput.onfocus = () => setRatingExpanded(true);
+  ratingInput.onpointerdown = () => setRatingExpanded(true);
+  ratingInput.oninput = () => setAnnotationRating(ratingInput.value);
+  ratingInput.onkeydown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setRatingExpanded(false);
+      ratingInput.blur();
+    }
+  };
+  ratingSurface.onfocusout = () => graphDocument.defaultView.setTimeout(() => {
+    if (!ratingSurface.contains(graphDocument.activeElement)) setRatingExpanded(false);
+  }, 0);
+  ratingSurface.querySelectorAll("[data-rating]").forEach((button) => {
+    button.onclick = () => {
+      setAnnotationRating(button.dataset.rating);
+      ratingInput.focus({ preventScroll: true });
+    };
+  });
+  $("#annotationComment").oninput = () => {
+    $("#submitAnnotation").disabled = !$("#annotationComment").value.trim();
+  };
+
+  function currentInteraction(state = getState(), thread = getThread()) {
+    return interactionForThread(state, thread);
+  }
+
+  function currentLayerId(state = getState(), thread = getThread()) {
+    return state.visibleLayer?.layer?.id
+      ?? currentInteraction(state, thread)?.completionOutput?.rootLayer?.layer?.id
+      ?? null;
+  }
+
+  function subjectAnchor(kind, identity = {}, state = getState(), thread = getThread()) {
+    const interactionId = currentInteraction(state, thread)?.id;
+    const layerId = currentLayerId(state, thread);
+    if (kind === "thread") return { kind: "thread" };
+    if (kind === "turn") return { kind: "turn", interactionId };
+    if (kind === "layer") return { kind: "layer", interactionId, layerId };
+    if (kind === "node") return { kind: "node", interactionId, layerId, nodeId: identity.nodeId };
+    if (kind === "edge") return { kind: "edge", interactionId, layerId, edgeId: identity.edgeId };
+    if (kind === "action") return {
+      kind: "action",
+      interactionId,
+      presentationLayerId: layerId,
+      sourceLayerId: identity.sourceLayerId,
+      nodeId: identity.nodeId,
+      actionId: identity.actionId,
+    };
+    throw new Error(`Unknown annotation subject: ${kind}`);
+  }
+
+  function annotationsForCurrentThread() {
+    const thread = getThread();
+    return thread ? annotationCache.get(String(thread.id)) ?? [] : [];
+  }
+
+  function isCurrentAnnotationContext(threadId, anchor) {
+    return String(getThread()?.id) === String(threadId)
+      && sameAnnotationAnchor(annotationSubject?.anchor, anchor);
+  }
+
+  function annotationCount(anchor) {
+    return annotationsForAnchor(annotationsForCurrentThread(), anchor).length;
+  }
+
+  function updateCountBadge(element, anchor) {
+    const count = annotationCount(anchor);
+    element.textContent = count ? String(count) : "✎";
+    element.classList.toggle("hidden", !annotationEnabled);
+    element.dataset.annotationKind = anchor.kind;
+    element.setAttribute("aria-label", count
+      ? `Open ${count} ${anchor.kind} comment${count === 1 ? "" : "s"}`
+      : `Add ${anchor.kind} comment`);
+  }
+
+  async function loadAnnotations(thread, { force = false } = {}) {
+    if (!annotationEnabled || !thread) return;
+    const key = String(thread.id);
+    if (!force && (annotationCache.has(key) || annotationLoads.has(key))) return;
+    const loadRevision = (annotationLoadRevisions.get(key) || 0) + 1;
+    annotationLoadRevisions.set(key, loadRevision);
+    const loading = Promise.resolve(annotationApi.list(thread.id))
+      .then((result) => {
+        if (annotationLoadRevisions.get(key) !== loadRevision) return;
+        annotationCache.set(key, Array.isArray(result?.annotations) ? result.annotations : []);
+        if (String(getThread()?.id) === key) render();
+      })
+      .catch((error) => {
+        if (
+          annotationLoadRevisions.get(key) === loadRevision
+          && String(getThread()?.id) === key
+        ) {
+          $("#annotationError").textContent = error.message;
+          $("#annotationError").classList.remove("hidden");
+        }
+      })
+      .finally(() => {
+        if (annotationLoadRevisions.get(key) === loadRevision) annotationLoads.delete(key);
+      });
+    annotationLoads.set(key, loading);
+    await loading;
+  }
+
+  function resetAnnotationComposer() {
+    editingAnnotation = null;
+    $("#annotationComment").value = "";
+    $("#submitAnnotation").disabled = true;
+    $("#annotationError").classList.add("hidden");
+    setAnnotationRating(2, { touched: false });
+    setRatingExpanded(false);
+  }
+
+  function renderAnnotationList() {
+    const panel = $("#annotationPanel");
+    panel.classList.toggle("hidden", !annotationEnabled || !annotationSubject);
+    if (!annotationEnabled || !annotationSubject) return;
+    const annotations = annotationsForAnchor(annotationsForCurrentThread(), annotationSubject.anchor);
+    $("#annotationCount").textContent = String(annotations.length);
+    const rows = annotations.map((annotation) => {
+      const revision = latestAnnotationRevision(annotation);
+      const article = graphDocument.createElement("article");
+      article.className = "annotation-item";
+      const meta = graphDocument.createElement("div");
+      meta.className = "annotation-meta";
+      const author = graphDocument.createElement("span");
+      author.textContent = revision.authorDisplayName || "Annotator";
+      const time = graphDocument.createElement("time");
+      const createdAt = annotationTimestamp(revision.createdAt);
+      time.dateTime = createdAt?.toISOString() || "";
+      time.textContent = createdAt
+        ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(createdAt)
+        : "";
+      meta.append(author, time);
+      if (revision.rating != null) {
+        const rating = graphDocument.createElement("span");
+        rating.className = "annotation-item-rating";
+        rating.textContent = annotationRatingLabel(revision.rating);
+        meta.append(rating);
+      }
+      const comment = graphDocument.createElement("p");
+      comment.textContent = revision.comment;
+      const controls = graphDocument.createElement("div");
+      controls.className = "annotation-item-controls";
+      const edit = graphDocument.createElement("button");
+      edit.type = "button";
+      edit.textContent = "Edit";
+      edit.onclick = () => {
+        editingAnnotation = annotation;
+        $("#annotationComment").value = revision.comment;
+        $("#submitAnnotation").disabled = false;
+        setAnnotationRating(revision.rating ?? 2, { touched: revision.rating != null });
+        $("#annotationComment").focus();
+      };
+      const retract = graphDocument.createElement("button");
+      retract.type = "button";
+      retract.textContent = "Retract";
+      retract.onclick = async () => {
+        const operationThread = getThread();
+        const operationAnchor = annotationSubject.anchor;
+        retract.disabled = true;
+        try {
+          await annotationApi.retract(operationThread.id, annotation.id, {
+            expectedRevision: annotation.latestRevision,
+            navigationContext: annotationNavigationContext(selection, operationAnchor),
+            evidenceRefs: [],
+          });
+          annotationCache.delete(String(operationThread.id));
+          await loadAnnotations(operationThread, { force: true });
+        } catch (error) {
+          if (isCurrentAnnotationContext(operationThread.id, operationAnchor)) {
+            $("#annotationError").textContent = error.message;
+            $("#annotationError").classList.remove("hidden");
+            retract.disabled = false;
+          }
+        }
+      };
+      controls.append(edit, retract);
+      article.append(meta, comment, controls);
+      if ((annotation.revisions?.length ?? 0) > 1) {
+        const history = graphDocument.createElement("details");
+        const summary = graphDocument.createElement("summary");
+        summary.textContent = `${annotation.revisions.length} revisions`;
+        const list = graphDocument.createElement("ol");
+        for (const prior of annotation.revisions.slice(0, -1).toReversed()) {
+          const item = graphDocument.createElement("li");
+          item.textContent = prior.comment || "Retracted";
+          list.append(item);
+        }
+        history.append(summary, list);
+        article.append(history);
+      }
+      return article;
+    });
+    $("#annotationList").replaceChildren(...rows);
+    $("#annotationList").classList.toggle("empty", !rows.length);
+  }
+
+  function openAnnotationSubject(state, anchor, { title, kind, icon = "annotation" } = {}) {
+    annotationSubject = { anchor, title, kind };
+    selection.selectedNodeId = anchor.kind === "node" ? anchor.nodeId : null;
+    onSelectionChange(selection.selectedNodeId);
+    $("#inspector").classList.remove("hidden");
+    $("#detailIcon").textContent = icon === "annotation" ? "✎" : icon;
+    $("#detailKind").textContent = kind || anchor.kind;
+    $("#detailTitle").textContent = title || `${anchor.kind} comments`;
+    $("#detailContent").replaceChildren();
+    $("#detailActions").classList.add("hidden");
+    $("#detailActions").replaceChildren();
+    $$('[data-node]').forEach((element) => element.classList.remove("selected"));
+    resetAnnotationComposer();
+    renderAnnotationList();
+  }
+
+  $("#threadAnnotationBadge").onclick = () => openAnnotationSubject(
+    getState(), subjectAnchor("thread"), { title: getThread()?.title, kind: "THREAD" },
+  );
+  $("#turnAnnotationBadge").onclick = () => openAnnotationSubject(
+    getState(), subjectAnchor("turn"), { title: "Turn comments", kind: "TURN" },
+  );
+  $("#annotationComposer").onsubmit = async (event) => {
+    event.preventDefault();
+    const comment = $("#annotationComment").value.trim();
+    if (!comment || !annotationSubject || !annotationEnabled) return;
+    const thread = getThread();
+    const operationAnchor = structuredClone(annotationSubject.anchor);
+    const operationEditing = editingAnnotation;
+    const payload = {
+      comment,
+      rating: annotationRatingTouched ? Number(ratingInput.value) : null,
+      navigationContext: annotationNavigationContext(selection, operationAnchor),
+      evidenceRefs: [],
+    };
+    $("#submitAnnotation").disabled = true;
+    $("#annotationError").classList.add("hidden");
+    try {
+      if (operationEditing) {
+        await annotationApi.revise(thread.id, operationEditing.id, {
+          ...payload,
+          expectedRevision: operationEditing.latestRevision,
+        });
+      } else {
+        await annotationApi.create(thread.id, { anchor: operationAnchor, ...payload });
+      }
+      annotationCache.delete(String(thread.id));
+      await loadAnnotations(thread, { force: true });
+      if (isCurrentAnnotationContext(thread.id, operationAnchor)) resetAnnotationComposer();
+    } catch (error) {
+      if (isCurrentAnnotationContext(thread.id, operationAnchor)) {
+        $("#annotationError").textContent = error.message;
+        $("#annotationError").classList.remove("hidden");
+        $("#submitAnnotation").disabled = false;
+      }
+    }
   };
   const closeTurnPopover = () => {
     turnPopoverOpen = false;
@@ -884,6 +1179,10 @@ export function createProductWorkspace({
       const statusText = graphDocument.createElement("span");
       statusText.className = "turn-option-status";
       statusText.textContent = status.label;
+      if (annotationEnabled) {
+        const count = annotationCount({ kind: "turn", interactionId: turn.id });
+        if (count) statusText.textContent += ` · ${count} comment${count === 1 ? "" : "s"}`;
+      }
       row.append(sequence, promptText, statusText);
       row.onclick = () => {
         closeTurnPopover();
@@ -912,9 +1211,25 @@ export function createProductWorkspace({
       showEmpty();
       return;
     }
+    if (annotationSubject?.anchor.kind !== "thread") {
+      const interactionId = currentInteraction(state, thread)?.id;
+      const layerId = currentLayerId(state, thread);
+      const anchor = annotationSubject?.anchor;
+      const anchorLayerId = anchor?.layerId ?? anchor?.presentationLayerId;
+      const wrongTurn = anchor?.interactionId != null
+        && String(anchor.interactionId) !== String(interactionId);
+      const wrongLayer = !["turn", undefined].includes(anchor?.kind)
+        && anchorLayerId != null
+        && String(anchorLayerId) !== String(layerId);
+      if (wrongTurn || wrongLayer) {
+        annotationSubject = null;
+        $("#annotationPanel").classList.add("hidden");
+      }
+    }
     applyMode();
     showThread();
     renderExportControl(thread);
+    void loadAnnotations(thread);
     renderHistoryNavigation();
     $("#threadTitle").textContent = thread.title;
     const project = state.projects.find((item) => String(item.id) === String(thread.projectId));
@@ -924,6 +1239,8 @@ export function createProductWorkspace({
     const harness = state.modelSettings?.harnesses?.find((item) => item.id === harnessId);
     $("#threadScope").textContent = `${project?.name || "No folder"} · ${permissionLabel} · ${harness?.label ?? harnessId}`;
     const interaction = interactionForThread(state, thread);
+    updateCountBadge($("#threadAnnotationBadge"), subjectAnchor("thread", {}, state, thread));
+    updateCountBadge($("#turnAnnotationBadge"), subjectAnchor("turn", {}, state, thread));
     $("#interactionText").textContent = interaction?.text
       || interaction?.summary
       || interaction?.content
@@ -959,6 +1276,8 @@ export function createProductWorkspace({
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
       selectNode(state, selection.selectedNodeId, { notify: false });
+    } else if (annotationSubject) {
+      renderAnnotationList();
     } else if (!$("#inspector").classList.contains("hidden")) {
       cancelInspectorFit();
       $("#inspector").classList.add("hidden");
@@ -1001,6 +1320,22 @@ export function createProductWorkspace({
         });
       }
       children.push(segment);
+      if (annotationEnabled) {
+        const anchor = {
+          kind: "layer",
+          interactionId: currentInteraction(state, thread)?.id,
+          layerId: item.layerId,
+        };
+        const badge = graphDocument.createElement("button");
+        badge.type = "button";
+        badge.className = "annotation-count-badge breadcrumb-annotation-badge";
+        updateCountBadge(badge, anchor);
+        badge.onclick = () => openAnnotationSubject(state, anchor, {
+          title: item.label,
+          kind: "LAYER",
+        });
+        children.push(badge);
+      }
     });
     breadcrumb.replaceChildren(...children);
     breadcrumb.scrollLeft = breadcrumb.scrollWidth;
@@ -1130,7 +1465,12 @@ export function createProductWorkspace({
       graphEdges = [];
       graphSignature = "";
       selection.selectedNodeId = null;
-      $("#inspector").classList.add("hidden");
+      if (!["thread", "turn"].includes(annotationSubject?.anchor.kind)) {
+        annotationSubject = null;
+        $("#inspector").classList.add("hidden");
+      } else {
+        renderAnnotationList();
+      }
       const pending = thread?.imported !== true && PENDING_COMPLETION_STATUSES.has(state.status);
       $("#thinkingDots").classList.toggle("hidden", !pending);
       $("#graphEmptyMessage").classList.toggle("hidden", pending);
@@ -1165,7 +1505,14 @@ export function createProductWorkspace({
       ? cachedView.signature === nextSignature
       : !enteringView && graphSignature === nextSignature;
     graphSignature = nextSignature;
-    $("#nodeLayer").innerHTML = graphNodes.map((node) => `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}" data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}"><div class="glyph"></div><div class="copy"><b>${escapeHtml(node.title)}</b></div></div>`).join("");
+    $("#nodeLayer").innerHTML = graphNodes.map((node) => {
+      const count = annotationCount(subjectAnchor("node", { nodeId: node.id }, state, thread));
+      const badge = annotationEnabled && count
+        ? `<span class="graph-annotation-badge" aria-label="${count} comment${count === 1 ? "" : "s"}">${count}</span>`
+        : "";
+      const annotationLabel = count ? `. ${count} comment${count === 1 ? "" : "s"}` : "";
+      return `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}" data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}${annotationLabel}"><div class="glyph"></div>${badge}<div class="copy"><b>${escapeHtml(node.title)}</b></div></div>`;
+    }).join("");
     $$('[data-node]').forEach((element) => {
       const authoredNode = graphNodes.find((candidate) => String(candidate.id) === element.dataset.node);
       let suppressClickAfterDrag = false;
@@ -1261,6 +1608,9 @@ export function createProductWorkspace({
   }
 
   function drawGraph() {
+    const focusedEdgeId = graphDocument.activeElement
+      ?.closest?.("[data-edge]")
+      ?.dataset.edge ?? null;
     for (const node of graphNodes) {
       const element = $$('[data-node]').find((item) => item.dataset.node === String(node.id));
       if (element) {
@@ -1285,8 +1635,39 @@ export function createProductWorkspace({
         graphScreenPoint(b, camera),
         GRAPH_NODE_ICON_RADIUS * camera.zoom,
       );
-      return `<line class="graph-edge" style="stroke-width:${graphEdgeStrokeWidth(camera.zoom)}" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/>`;
+      const edgeIdentity = edge.id ?? `${source}:${target}`;
+      const edgeId = escapeHtml(edgeIdentity);
+      const annotatable = annotationEnabled && edge.id != null;
+      const anchor = annotatable ? subjectAnchor("edge", { edgeId: edge.id }) : null;
+      const count = anchor ? annotationCount(anchor) : 0;
+      const middleX = (segment.x1 + segment.x2) / 2;
+      const middleY = (segment.y1 + segment.y2) / 2;
+      return `<g class="graph-edge-group" data-edge="${edgeId}"><line class="graph-edge" style="stroke-width:${graphEdgeStrokeWidth(camera.zoom)}" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/><line class="graph-edge-hit ${annotatable ? "" : "hidden"}" tabindex="0" role="button" aria-label="Open relationship comments" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/>${annotatable && count ? `<g class="edge-annotation-badge" transform="translate(${middleX} ${middleY})"><circle r="9"></circle><text y="3">${count}</text></g>` : ""}</g>`;
     }).join("");
+    if (annotationEnabled) {
+      $$("[data-edge]").forEach((group) => {
+        const edge = graphEdges.find((candidate) => String(candidate.id ?? `${candidate.endpoints?.[0] ?? candidate.source}:${candidate.endpoints?.[1] ?? candidate.target}`) === group.dataset.edge);
+        if (!edge || edge.id == null) return;
+        const anchor = subjectAnchor("edge", { edgeId: edge.id });
+        const open = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openAnnotationSubject(getState(), anchor, { title: "Relationship", kind: "EDGE" });
+        };
+        const hit = group.querySelector(".graph-edge-hit");
+        hit.onclick = open;
+        group.onpointerdown = (event) => event.stopPropagation();
+        hit.onkeydown = (event) => {
+          if (event.key === "Enter" || event.key === " ") open(event);
+        };
+        group.querySelector(".edge-annotation-badge")?.addEventListener("click", open);
+      });
+      if (focusedEdgeId !== null) {
+        $$('[data-edge]').find((group) => group.dataset.edge === focusedEdgeId)
+          ?.querySelector(".graph-edge-hit")
+          ?.focus({ preventScroll: true });
+      }
+    }
     graphStage.style.backgroundSize = `${22 * camera.zoom}px ${22 * camera.zoom}px`;
     graphStage.style.backgroundPosition = `${camera.x}px ${camera.y}px`;
     $("#graphZoomLevel").textContent = `${Math.round(camera.zoom * 100)}%`;
@@ -1309,6 +1690,11 @@ export function createProductWorkspace({
     selection.selectedNodeId = id;
     const node = state.nodes.find((item) => String(item.id) === String(id));
     if (!node) return;
+    annotationSubject = annotationEnabled ? {
+      anchor: subjectAnchor("node", { nodeId: node.id }, state, getThread()),
+      title: node.title,
+      kind: "NODE",
+    } : null;
     if (notify) onSelectionChange(node.id);
     const inspector = $("#inspector");
     const wasOpen = !inspector.classList.contains("hidden");
@@ -1355,9 +1741,32 @@ export function createProductWorkspace({
         copy.append(description);
       }
       button.append(copy);
-      return button;
+      const wrapper = graphDocument.createElement("span");
+      wrapper.className = "action-annotation-wrap";
+      wrapper.append(button);
+      if (annotationEnabled) {
+        const anchor = subjectAnchor("action", {
+          actionId: action.id,
+          nodeId: node.id,
+          sourceLayerId: action.sourceLayerId,
+        }, state, getThread());
+        const count = annotationCount(anchor);
+        const badge = graphDocument.createElement("button");
+        badge.type = "button";
+        badge.className = "annotation-count-badge action-annotation-badge";
+        badge.textContent = count ? String(count) : "✎";
+        badge.setAttribute("aria-label", count
+          ? `Open ${count} action comment${count === 1 ? "" : "s"}`
+          : "Add action comment");
+        badge.onclick = (event) => {
+          event.stopPropagation();
+          openAnnotationSubject(state, anchor, { title: presentation.label, kind: "ACTION" });
+        };
+        wrapper.append(badge);
+      }
+      return wrapper;
     }));
-    [...$("#detailActions").querySelectorAll("button")].forEach((button, index) => {
+    [...$("#detailActions").querySelectorAll(".action-control")].forEach((button, index) => {
       const action = actions[index];
       const invoked = actionWasInvoked(
         state.actionInvocations,
@@ -1394,6 +1803,7 @@ export function createProductWorkspace({
     $$('[data-node]').forEach((element) => {
       element.classList.toggle("selected", element.dataset.node === String(id));
     });
+    renderAnnotationList();
     renderBreadcrumb(state, getThread());
   }
 

@@ -1,4 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { randomBytes } from "node:crypto";
+import { userInfo } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -132,7 +134,7 @@ async function createReviewWindow(executionId) {
   const selected = context.cases.find((item) => item.executionId === executionId);
   const threadId = selected?.threadIds?.[0];
   if (!threadId) throw new Error("This case × harness execution has no product thread to review.");
-  const { window, productOrigin } = await createReadOnlyReviewWindow(executionId);
+  const { window, productOrigin } = await createReadOnlyReviewWindow(executionId, { annotations: true });
   manualReviewWindows.set(executionId, window);
   let reviewSession;
   window.on("closed", () => {
@@ -226,7 +228,7 @@ async function createTraceWindow(executionId, interactionId) {
   return window;
 }
 
-async function createReadOnlyReviewWindow(executionId) {
+async function createReadOnlyReviewWindow(executionId, { annotations = false } = {}) {
   const productSession = await productServer.start();
   if (!productSession.readOnlyCookie) throw new Error("Relayer Eval review session is unavailable.");
   const productOrigin = new URL(productSession.origin).origin;
@@ -240,6 +242,10 @@ async function createReadOnlyReviewWindow(executionId) {
     webPreferences: {
       preload: join(desktopDirectory, "preload", "eval-review.cjs"),
       additionalArguments: [`--relayer-eval-execution=${executionId}`],
+      // Cookies are capabilities. A unique in-memory partition prevents a
+      // manual annotation cookie from becoming visible to automated or other
+      // review windows that happen to share the same app process.
+      partition: `relayer-eval-review-${randomBytes(16).toString("hex")}`,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -256,6 +262,39 @@ async function createReadOnlyReviewWindow(executionId) {
     sameSite: "strict",
     secure: false,
   });
+  if (annotations) {
+    const annotationSessionToken = randomBytes(32).toString("hex");
+    const context = evalService.reviewContext(executionId);
+    const annotationThreadIds = [...new Set(
+      context.cases.flatMap((item) => item.threadIds || []),
+    )];
+    const displayName = String(process.env.RELAYER_EVAL_ANNOTATOR_NAME || userInfo().username).trim();
+    const response = await fetch(new URL("/api/internal/annotation-sessions", productSession.origin), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`,
+      },
+      body: JSON.stringify({
+        token: annotationSessionToken,
+        threadIds: annotationThreadIds,
+        authorId: `local:${userInfo().username}`,
+        authorDisplayName: displayName,
+      }),
+    });
+    if (!response.ok) {
+      const value = await response.json().catch(() => ({}));
+      throw new Error(value?.error || `Annotation session registration failed (${response.status}).`);
+    }
+    await window.webContents.session.cookies.set({
+      url: productSession.origin,
+      name: "relayer_annotation",
+      value: annotationSessionToken,
+      httpOnly: true,
+      sameSite: "strict",
+      secure: false,
+    });
+  }
   return { window, productOrigin };
 }
 
@@ -329,6 +368,9 @@ function registerEvalIpc() {
     await createReviewWindow(executionId);
     return true;
   });
+  ipcMain.handle("relayer-eval:export-annotations", (_event, executionId) => (
+    evalService.exportAnnotatedExecution(executionId)
+  ));
   ipcMain.handle("relayer-eval:open-judge-review", async (_event, executionId) => {
     await createJudgeWindow(executionId);
     return true;
@@ -385,6 +427,7 @@ async function start() {
     ),
     candidateTraceRequired: true,
     conversationImportEnabled: true,
+    annotationSnapshotLoader: (threadIds) => loadAnnotationSnapshots(productSession, threadIds),
     onChanged: (runs) => dashboardWindow?.webContents.send("relayer-eval:runs-changed", runs),
   }).open();
   registerEvalIpc();
@@ -413,6 +456,44 @@ async function productRequest(session, path) {
   const value = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(value?.error || `Product request failed (${response.status}).`);
   return value;
+}
+
+async function loadAnnotationSnapshots(session, threadIds) {
+  const token = randomBytes(32).toString("hex");
+  const username = userInfo().username;
+  const registration = await fetch(new URL("/api/internal/annotation-sessions", session.origin), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: `${session.cookie.name}=${session.cookie.value}`,
+    },
+    body: JSON.stringify({
+      token,
+      threadIds,
+      authorId: `local:${username}`,
+      authorDisplayName: String(process.env.RELAYER_EVAL_ANNOTATOR_NAME || username).trim(),
+    }),
+  });
+  if (!registration.ok) {
+    const value = await registration.json().catch(() => ({}));
+    throw new Error(value?.error || `Annotation export session failed (${registration.status}).`);
+  }
+  return Promise.all(threadIds.map(async (threadId) => {
+    const response = await fetch(new URL(
+      `/api/threads/${encodeURIComponent(threadId)}/annotations/snapshot`,
+      session.origin,
+    ), {
+      headers: {
+        Accept: "application/json",
+        Cookie: `${session.cookie.name}=${session.cookie.value}; relayer_annotation=${token}`,
+      },
+    });
+    const value = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(value?.error || `Annotation snapshot failed (${response.status}).`);
+    }
+    return value;
+  }));
 }
 
 function stop() {

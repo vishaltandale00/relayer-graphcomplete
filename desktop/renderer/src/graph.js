@@ -6,6 +6,7 @@ import {
 } from "./product-workspace/model.js";
 import { activeThread, appState, desktop, evalReview, query, viewState } from "./state.js";
 import { toast } from "./ui.js";
+import { createAnnotationApi } from "./annotation-api.js";
 import {
   getNavigationHistory,
   navigateHistory,
@@ -26,6 +27,9 @@ function workspace() {
     productWorkspace.dispose();
     productWorkspace = undefined;
   }
+  const annotationApi = appState.capabilities?.annotations === true
+    ? createAnnotationApi()
+    : null;
   productWorkspace ??= createProductWorkspace({
     mode: nextMode,
     getState: () => appState,
@@ -56,6 +60,7 @@ function workspace() {
     onNavigateResolvedInvoke: (action) => import("./threads.js").then(({ navigateResolvedInvoke }) => navigateResolvedInvoke(action)),
     onInvokeAction: (action) => import("./threads.js").then(({ invokeAction }) => invokeAction(action)),
     onDecideApproval: (requestId, decision) => import("./threads.js").then(({ decideApproval }) => decideApproval(requestId, decision)),
+    annotationApi,
   });
   return productWorkspace;
 }

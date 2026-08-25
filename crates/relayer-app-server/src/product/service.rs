@@ -1,10 +1,11 @@
 use super::{
-    ActionInvocation, CatalogError, CreateModelFamilyCommand, Interaction, InteractionId,
-    InteractionModelSelection, ModelFamily, ModelFamilyId, ModelFamilyKind, ModelSelection,
-    ModelSettings, ModelSettingsDefaults, ProductCapabilities, ProductState, Project, ProjectId,
+    ActionInvocation, Annotation, AnnotationAnchor, AnnotationState, CatalogError,
+    CreateModelFamilyCommand, Interaction, InteractionId, InteractionModelSelection, ModelFamily,
+    ModelFamilyId, ModelFamilyKind, ModelSelection, ModelSettings, ModelSettingsDefaults,
+    NewAnnotationRevision, ProductCapabilities, ProductState, Project, ProjectId,
     ProviderCatalogSnapshot, ReorderModelFamiliesCommand, Thread, ThreadId, ThreadView,
     UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand, ValidateModelSelectionCommand,
-    validate_family,
+    validate_family, validate_revision_content,
 };
 use crate::approval::{ApprovalReceipt, ApprovalRequest, ApprovalResolution};
 use crate::storage::{
@@ -106,6 +107,177 @@ impl ProductService {
             harness: self.runtime_available,
             ..ProductCapabilities::default()
         }
+    }
+
+    pub(crate) async fn list_annotations(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<Annotation>, ProductError> {
+        if self.storage.get_thread(thread_id).await?.is_none() {
+            return Err(ProductError::NotFound(format!("thread {thread_id}")));
+        }
+        self.storage
+            .list_annotations(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn create_annotation(
+        &self,
+        thread_id: ThreadId,
+        anchor: AnnotationAnchor,
+        author_id: &str,
+        author_display_name: &str,
+        comment: &str,
+        rating: Option<u8>,
+        navigation_context: &serde_json::Value,
+        evidence_refs: &[String],
+    ) -> Result<Annotation, ProductError> {
+        self.ensure_annotation_anchor_thread(thread_id, &anchor)
+            .await?;
+        let comment = validate_revision_content(
+            comment,
+            rating,
+            AnnotationState::Active,
+            navigation_context,
+            evidence_refs,
+        )
+        .map_err(ProductError::Invalid)?;
+        let timestamp = now();
+        self.storage
+            .create_annotation(
+                thread_id,
+                &anchor,
+                NewAnnotationRevision {
+                    author_id,
+                    author_display_name,
+                    comment: &comment,
+                    rating,
+                    state: AnnotationState::Active,
+                    navigation_context,
+                    evidence_refs,
+                    created_at: &timestamp,
+                },
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn revise_annotation(
+        &self,
+        thread_id: ThreadId,
+        annotation_id: i64,
+        expected_revision: i64,
+        author_id: &str,
+        author_display_name: &str,
+        comment: &str,
+        rating: Option<u8>,
+        navigation_context: &serde_json::Value,
+        evidence_refs: &[String],
+    ) -> Result<Annotation, ProductError> {
+        if annotation_id <= 0 || expected_revision <= 0 {
+            return Err(ProductError::Invalid(
+                "annotation ID and expected revision must be positive integers".into(),
+            ));
+        }
+        let comment = validate_revision_content(
+            comment,
+            rating,
+            AnnotationState::Active,
+            navigation_context,
+            evidence_refs,
+        )
+        .map_err(ProductError::Invalid)?;
+        let timestamp = now();
+        self.storage
+            .append_annotation_revision(
+                thread_id,
+                annotation_id,
+                expected_revision,
+                NewAnnotationRevision {
+                    author_id,
+                    author_display_name,
+                    comment: &comment,
+                    rating,
+                    state: AnnotationState::Active,
+                    navigation_context,
+                    evidence_refs,
+                    created_at: &timestamp,
+                },
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn retract_annotation(
+        &self,
+        thread_id: ThreadId,
+        annotation_id: i64,
+        expected_revision: i64,
+        author_id: &str,
+        author_display_name: &str,
+        navigation_context: &serde_json::Value,
+        evidence_refs: &[String],
+    ) -> Result<Annotation, ProductError> {
+        if annotation_id <= 0 || expected_revision <= 0 {
+            return Err(ProductError::Invalid(
+                "annotation ID and expected revision must be positive integers".into(),
+            ));
+        }
+        validate_revision_content(
+            "",
+            None,
+            AnnotationState::Retracted,
+            navigation_context,
+            evidence_refs,
+        )
+        .map_err(ProductError::Invalid)?;
+        let timestamp = now();
+        self.storage
+            .append_annotation_revision(
+                thread_id,
+                annotation_id,
+                expected_revision,
+                NewAnnotationRevision {
+                    author_id,
+                    author_display_name,
+                    comment: "",
+                    rating: None,
+                    state: AnnotationState::Retracted,
+                    navigation_context,
+                    evidence_refs,
+                    created_at: &timestamp,
+                },
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn ensure_annotation_anchor_thread(
+        &self,
+        thread_id: ThreadId,
+        anchor: &AnnotationAnchor,
+    ) -> Result<(), ProductError> {
+        anchor.validate_ids().map_err(ProductError::Invalid)?;
+        if self.storage.get_thread(thread_id).await?.is_none() {
+            return Err(ProductError::NotFound(format!("thread {thread_id}")));
+        }
+        if let Some(interaction_id) = anchor.interaction_id() {
+            let interaction = self
+                .get_interaction(
+                    interaction_id.map_err(|error| ProductError::Invalid(error.to_string()))?,
+                )
+                .await?;
+            if interaction.thread_id != thread_id {
+                return Err(ProductError::Invalid(
+                    "annotation interaction does not belong to this thread".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub(crate) async fn model_settings(&self) -> Result<ModelSettings, ProductError> {

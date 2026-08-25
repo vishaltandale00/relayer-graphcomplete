@@ -1,8 +1,13 @@
+mod annotations;
 mod catalog;
 mod ids;
 mod models;
 mod service;
 
+pub(crate) use annotations::{
+    Annotation, AnnotationAnchor, AnnotationRevision, AnnotationState, NewAnnotationRevision,
+    validate_revision_content,
+};
 pub(crate) use catalog::CatalogError;
 pub(crate) use catalog::CreateModelFamilyCommand;
 pub(crate) use catalog::HarnessModelCompatibility;

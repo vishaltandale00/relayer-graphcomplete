@@ -152,6 +152,24 @@ const APPROVAL_RESOLUTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("source_request_id", "TEXT", false, 0),
     ("resolved_at", "TEXT", true, 0),
 ];
+const ANNOTATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("id", "INTEGER", false, 1),
+    ("thread_id", "INTEGER", true, 0),
+    ("anchor_json", "TEXT", true, 0),
+    ("created_at", "TEXT", true, 0),
+];
+const ANNOTATION_REVISION_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("annotation_id", "INTEGER", true, 1),
+    ("revision", "INTEGER", true, 2),
+    ("author_id", "TEXT", true, 0),
+    ("author_display_name", "TEXT", true, 0),
+    ("comment", "TEXT", true, 0),
+    ("rating", "INTEGER", false, 0),
+    ("state", "TEXT", true, 0),
+    ("navigation_context_json", "TEXT", true, 0),
+    ("evidence_refs_json", "TEXT", true, 0),
+    ("created_at", "TEXT", true, 0),
+];
 
 pub(super) async fn validate_existing_or_empty(pool: &SqlitePool) -> Result<(), StorageError> {
     let table_count: i64 = sqlx::query_scalar(
@@ -202,6 +220,8 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     .await?;
     validate_columns(pool, "approval_requests", APPROVAL_REQUEST_COLUMNS).await?;
     validate_columns(pool, "approval_resolutions", APPROVAL_RESOLUTION_COLUMNS).await?;
+    validate_columns(pool, "annotations", ANNOTATION_COLUMNS).await?;
+    validate_columns(pool, "annotation_revisions", ANNOTATION_REVISION_COLUMNS).await?;
     validate_index(pool, "projects", &["path"], true).await?;
     validate_index(pool, "interactions", &["thread_id", "sequence"], true).await?;
     validate_index(pool, "threads", &["conversation_import_id"], false).await?;
@@ -257,6 +277,13 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         pool,
         "approval_requests",
         &["interaction_id", "created_at"],
+        false,
+    )
+    .await?;
+    validate_index(
+        pool,
+        "annotations",
+        &["thread_id", "created_at", "id"],
         false,
     )
     .await?;
@@ -330,6 +357,16 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         "request_id",
         "approval_requests",
         "request_id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(pool, "annotations", "thread_id", "threads", "id", "CASCADE").await?;
+    validate_foreign_key(
+        pool,
+        "annotation_revisions",
+        "annotation_id",
+        "annotations",
+        "id",
         "CASCADE",
     )
     .await?;
@@ -479,6 +516,16 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     if invalid_approval_resolution {
         return Err(incompatible(
             "stored approval resolution contains an unsupported product value",
+        ));
+    }
+    let invalid_annotation: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM annotations a WHERE NOT EXISTS (SELECT 1 FROM annotation_revisions r WHERE r.annotation_id=a.id AND r.revision=1) OR (SELECT COUNT(*) FROM annotation_revisions r WHERE r.annotation_id=a.id) != (SELECT MAX(r.revision) FROM annotation_revisions r WHERE r.annotation_id=a.id) OR EXISTS (SELECT 1 FROM annotation_revisions r WHERE r.annotation_id=a.id AND (r.revision<=0 OR r.state NOT IN ('active','retracted') OR (r.rating IS NOT NULL AND r.rating NOT BETWEEN 1 AND 4) OR trim(r.author_id)='' OR trim(r.author_display_name)='' OR (r.state='active' AND trim(r.comment)='') OR (r.state='retracted' AND (r.comment!='' OR r.rating IS NOT NULL)) OR NOT json_valid(r.navigation_context_json) OR NOT json_valid(r.evidence_refs_json))))",
+    )
+    .fetch_one(pool)
+    .await?;
+    if invalid_annotation {
+        return Err(incompatible(
+            "stored annotation history contains invalid rows",
         ));
     }
     Ok(())

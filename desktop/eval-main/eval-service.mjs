@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { link, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -66,6 +66,24 @@ function copy(value) {
   return structuredClone(value);
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item === undefined ? null : item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .filter((key) => value[key] !== undefined)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sha256(value) {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
 function summarize(run) {
   if (run.kind === "imported-conversation") {
     const finished = run.executions.filter((execution) => ["passed", "failed", "error"].includes(execution.status));
@@ -101,6 +119,7 @@ export class EvalService {
     candidateTraceRequired = false,
     conversationImportEnabled = false,
     conversationImportMaxBytes = MAX_CONVERSATION_IMPORT_BYTES,
+    annotationSnapshotLoader = null,
     platform = process.platform,
   }) {
     this.stateFile = stateFile;
@@ -116,6 +135,7 @@ export class EvalService {
     this.candidateTraceRequired = candidateTraceRequired;
     this.conversationImportEnabled = conversationImportEnabled;
     this.conversationImportMaxBytes = conversationImportMaxBytes;
+    this.annotationSnapshotLoader = annotationSnapshotLoader;
     this.platform = platform;
     this.runs = [];
     this.configurations = new Map();
@@ -623,6 +643,80 @@ export class EvalService {
     }
   }
 
+  async exportAnnotatedExecution(executionId) {
+    if (typeof this.annotationSnapshotLoader !== "function") {
+      throw new Error("Annotation export is unavailable in this EvalService.");
+    }
+    const run = this.runs.find((candidate) => (
+      candidate.executions.some((execution) => execution.id === executionId)
+    ));
+    const execution = run?.executions.find((candidate) => candidate.id === executionId);
+    if (!run || !execution) throw new Error(`Unknown execution: ${executionId}`);
+    const threadIds = [...new Set(execution.threadIds || [])];
+    if (!threadIds.length) throw new Error("The execution has no product threads to export.");
+    const annotationSnapshots = await this.annotationSnapshotLoader(threadIds);
+    if (!Array.isArray(annotationSnapshots) || annotationSnapshots.length !== threadIds.length) {
+      throw new Error("Annotation snapshot loader returned incomplete thread coverage.");
+    }
+    const missingThreadIds = new Set(threadIds.map(String));
+    for (const snapshot of annotationSnapshots) {
+      if (!missingThreadIds.delete(String(snapshot?.threadId))) {
+        throw new Error("Annotation snapshot loader returned an unexpected or duplicate thread.");
+      }
+    }
+    if (missingThreadIds.size) {
+      throw new Error("Annotation snapshot loader omitted an execution thread.");
+    }
+
+    const exportedAt = new Date().toISOString();
+    const annotationMaterialSha256 = sha256(canonicalJson(annotationSnapshots));
+    const fixedGraphReferences = (execution.turns || []).map((turn) => ({
+      threadId: turn.threadId,
+      interactionId: turn.interactionId,
+      graphNodeId: turn.graphNodeId,
+      rootLayerId: turn.rootLayerId,
+      completionStatus: turn.status,
+    }));
+    const unsigned = {
+      bundleSchemaVersion: 1,
+      kind: "relayer_eval_annotated_execution_bundle",
+      testRunId: run.id,
+      executionId: execution.id,
+      exportedAt,
+      sourceRunBundleRef: run.bundleRef,
+      execution: copy(execution),
+      fixedGraphReferences,
+      annotationMaterialSha256,
+      annotationSnapshots: copy(annotationSnapshots),
+    };
+    const bundle = {
+      ...unsigned,
+      integritySha256: sha256(canonicalJson(unsigned)),
+    };
+    const exportId = `${exportedAt.replace(/[:.]/g, "-")}-${randomUUID()}`;
+    const bundleRef = [
+      "runs",
+      encodeURIComponent(run.id),
+      "annotation-exports",
+      encodeURIComponent(execution.id),
+      exportId,
+      "bundle.json",
+    ].join("/");
+    const bundleFile = join(dirname(this.stateFile), ...bundleRef.split("/"));
+    await mkdir(dirname(bundleFile), { recursive: true });
+    await writeFile(bundleFile, `${JSON.stringify(bundle, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+      flag: "wx",
+    });
+    return copy({
+      bundleRef,
+      exportedAt,
+      annotationMaterialSha256,
+      integritySha256: bundle.integritySha256,
+    });
+  }
+
   async #run(run) {
     run.status = "running";
     await this.#changed();
@@ -630,11 +724,12 @@ export class EvalService {
       await this.#execute(execution);
       await this.#changed();
     }
-    run.status = run.executions.some((execution) => execution.status === "error")
+    const terminalStatus = run.executions.some((execution) => execution.status === "error")
       ? "error"
       : run.executions.every((execution) => execution.status === "passed") ? "passed" : "failed";
     run.completedAt = new Date().toISOString();
-    await this.#writeRunBundle(run);
+    await this.#writeRunBundle(run, terminalStatus);
+    run.status = terminalStatus;
     await this.#changed();
   }
 
@@ -1078,7 +1173,7 @@ export class EvalService {
     }
   }
 
-  async #writeRunBundle(run) {
+  async #writeRunBundle(run, durableStatus = run.status) {
     if (run.bundleRef) return;
     const bundleRef = ["runs", encodeURIComponent(run.id), "bundle.json"].join("/");
     const bundleFile = join(dirname(this.stateFile), ...bundleRef.split("/"));
@@ -1086,7 +1181,7 @@ export class EvalService {
       bundleSchemaVersion: 1,
       kind: "relayer_eval_run_bundle",
       testRunId: run.id,
-      run: { ...copy(run), bundleRef },
+      run: { ...copy(run), status: durableStatus, bundleRef },
     };
     await mkdir(dirname(bundleFile), { recursive: true });
     try {

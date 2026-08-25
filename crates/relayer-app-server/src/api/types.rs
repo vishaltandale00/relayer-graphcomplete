@@ -140,6 +140,14 @@ pub(crate) struct CapabilitiesResponse {
     graph: bool,
     harness: bool,
     credentials: bool,
+    annotations: bool,
+}
+
+impl CapabilitiesResponse {
+    pub(crate) fn with_annotations(mut self, annotations: bool) -> Self {
+        self.annotations = annotations;
+        self
+    }
 }
 
 impl From<ProductCapabilities> for CapabilitiesResponse {
@@ -151,6 +159,7 @@ impl From<ProductCapabilities> for CapabilitiesResponse {
             graph: capabilities.graph,
             harness: capabilities.harness,
             credentials: capabilities.credentials,
+            annotations: false,
         }
     }
 }
@@ -181,6 +190,13 @@ pub(crate) struct ProductStateResponse {
     action_invocations: Vec<ActionInvocationResponse>,
     approvals: Vec<ApprovalReceipt>,
     capabilities: CapabilitiesResponse,
+}
+
+impl ProductStateResponse {
+    pub(crate) fn with_annotations(mut self, annotations: bool) -> Self {
+        self.capabilities.annotations = annotations;
+        self
+    }
 }
 
 impl From<ProductState> for ProductStateResponse {
