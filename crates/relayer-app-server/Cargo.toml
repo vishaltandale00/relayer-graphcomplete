@@ -20,6 +20,7 @@ tower-http.workspace = true
 url.workspace = true
 uuid.workspace = true
 http-body-util.workspace = true
+time.workspace = true
 
 [dev-dependencies]
 relayer-graph-server = { path = "../relayer-graph-server" }

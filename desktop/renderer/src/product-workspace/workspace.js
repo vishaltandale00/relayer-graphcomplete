@@ -155,11 +155,11 @@ export function graphCameraViewKey(state, thread, responseNodes) {
 }
 
 export function shouldFitInspectorOpen(previousOpen, nextOpen, viewportWidth) {
-  return previousOpen === false && nextOpen === true && viewportWidth > 760;
+  return false;
 }
 
 export function shouldFitInspectorDock(previousOverlay, nextOverlay, inspectorOpen) {
-  return inspectorOpen && previousOverlay && !nextOverlay;
+  return false;
 }
 
 export function shouldActivateGraphNodeAfterPointerGesture(moved) {
@@ -221,6 +221,88 @@ export function turnStatusPresentation(status) {
   if (status === "cancelled") return { kind: "cancelled", label: "Cancelled" };
   if (status === "stopped") return { kind: "stopped", label: "Stopped" };
   return { kind: "unknown", label: status ? String(status).replaceAll("_", " ") : "Unknown" };
+}
+
+export function environmentPresentation(environment, project) {
+  if (!project?.id) {
+    return { mode: "message", message: "No project folder", busy: false };
+  }
+  if (!environment || String(environment.projectId) !== String(project.id)) {
+    return { mode: "loading", message: "Loading project context…", busy: true };
+  }
+  if (environment.status === "loading" && !environment.snapshot) {
+    return { mode: "loading", message: "Loading project context…", busy: true };
+  }
+  if (environment.status === "error") {
+    return {
+      mode: "message",
+      message: environment.error || "Project context is temporarily unavailable.",
+      busy: false,
+    };
+  }
+  const snapshot = environment.snapshot;
+  if (!snapshot) {
+    return { mode: "message", message: "Project context is unavailable.", busy: false };
+  }
+  const worktreeLabel = snapshot.worktreeLabel || project.name || "Project folder";
+  if (snapshot.kind === "folder") {
+    return {
+      mode: "facts",
+      kind: "folder",
+      worktreeLabel,
+      message: "Not a Git repository",
+      observedAt: snapshot.observedAt,
+      busy: false,
+    };
+  }
+  if (snapshot.kind === "unavailable") {
+    return {
+      mode: "facts",
+      kind: "unavailable",
+      worktreeLabel,
+      message: snapshot.unavailableReason?.message || "Project context is temporarily unavailable.",
+      observedAt: snapshot.observedAt,
+      busy: false,
+    };
+  }
+  const changes = snapshot.changes || {};
+  return {
+    mode: "facts",
+    kind: "git",
+    worktreeLabel,
+    branch: snapshot.detached ? "Detached HEAD" : (snapshot.branch || "Branch unavailable"),
+    additions: Number.isFinite(changes.additions) ? changes.additions : 0,
+    deletions: Number.isFinite(changes.deletions) ? changes.deletions : 0,
+    trackedFiles: Number.isFinite(changes.trackedFiles) ? changes.trackedFiles : 0,
+    untrackedFiles: Number.isFinite(changes.untrackedFiles) ? changes.untrackedFiles : 0,
+    observedAt: snapshot.observedAt,
+    busy: environment.status === "loading",
+  };
+}
+
+export function trackedChangesLabel({ additions = 0, deletions = 0, trackedFiles = 0 }) {
+  if (additions !== 0 || deletions !== 0 || trackedFiles <= 0) return "";
+  return `· ${trackedFiles} tracked ${trackedFiles === 1 ? "file" : "files"}`;
+}
+
+export function interactionStatusRenderKey(interaction, fallbackStatus = "idle") {
+  return `${interaction?.id ?? "none"}:${interaction?.completionStatus || fallbackStatus}`;
+}
+
+export function inspectorEscapeShouldClose({
+  key,
+  settingsMenuOpen,
+  turnPopoverOpen,
+  modelPickerOpen,
+  approvalOwnsFocus,
+  inspectorOpen,
+}) {
+  return key === "Escape"
+    && !settingsMenuOpen
+    && !turnPopoverOpen
+    && !modelPickerOpen
+    && !approvalOwnsFocus
+    && inspectorOpen;
 }
 
 export function turnSelectionIntent(turns, currentInteractionId, targetInteractionId) {
@@ -427,6 +509,7 @@ export function createProductWorkspace({
   let turnPopoverOpen = false;
   let settingsMenuOpen = false;
   let exportPending = false;
+  let renderedInteractionStatusKey = null;
   const approvalSelections = new Map();
   const approvalErrors = new Map();
   const approvalDecisionsInFlight = new Set();
@@ -512,6 +595,8 @@ export function createProductWorkspace({
   };
   const closeSettingsMenuOnEscape = (event) => {
     if (event.key !== "Escape" || !settingsMenuOpen) return;
+    event.preventDefault?.();
+    event.stopImmediatePropagation?.();
     closeSettingsMenu({ restoreFocus: true });
   };
   graphDocument.addEventListener("pointerdown", closeSettingsMenuFromOutside, true);
@@ -557,7 +642,7 @@ export function createProductWorkspace({
     if (shouldFit) scheduleInspectorFit();
   };
   narrowInspectorMedia?.addEventListener?.("change", handleInspectorLayoutChange);
-  $("#closeInspector").onclick = () => {
+  const closeInspector = ({ restoreFocus = true } = {}) => {
     cancelInspectorFit();
     selection.selectedNodeId = null;
     annotationSubject = null;
@@ -567,7 +652,22 @@ export function createProductWorkspace({
     $("#inspector").classList.add("hidden");
     $$('[data-node]').forEach((element) => element.classList.remove("selected"));
     renderBreadcrumb();
+    if (restoreFocus) graphStage.focus({ preventScroll: true });
   };
+  $("#closeInspector").onclick = () => closeInspector();
+  const closeInspectorOnEscape = (event) => {
+    if (!inspectorEscapeShouldClose({
+      key: event.key,
+      settingsMenuOpen,
+      turnPopoverOpen,
+      modelPickerOpen: !$("[data-model-picker-popover]")?.classList.contains("hidden"),
+      approvalOwnsFocus: approvalDock.contains(graphDocument.activeElement),
+      inspectorOpen: !$("#inspector").classList.contains("hidden"),
+    })) return;
+    event.preventDefault();
+    closeInspector();
+  };
+  graphDocument.addEventListener("keydown", closeInspectorOnEscape, true);
   const navigateHistory = async (direction) => {
     const history = getNavigationHistory() || {};
     const presentation = historyNavigationPresentation(history);
@@ -1270,7 +1370,10 @@ export function createProductWorkspace({
     const permissionLabel = permissionProfile?.label || thread.permissionProfileId;
     const harnessId = thread.harnessId ?? thread.harnessConfigurationName;
     const harness = state.modelSettings?.harnesses?.find((item) => item.id === harnessId);
-    $("#threadScope").textContent = `${project?.name || "No folder"} · ${permissionLabel} · ${harness?.label ?? harnessId}`;
+    const threadScope = `${project?.name || "No folder"} · ${permissionLabel} · ${harness?.label ?? harnessId}`;
+    $("#threadScope").textContent = threadScope;
+    $("#threadTitle").title = threadScope;
+    renderEnvironment(state.environment, project);
     const interaction = interactionForThread(state, thread);
     updateCountBadge($("#threadAnnotationBadge"), subjectAnchor("thread", {}, state, thread));
     updateCountBadge($("#turnAnnotationBadge"), subjectAnchor("turn", {}, state, thread));
@@ -1304,7 +1407,7 @@ export function createProductWorkspace({
       ? `${identityLabels.provider}: ${identityLabels.model}`
       : "";
     identity.classList.toggle("hidden", !identityLabels);
-    renderInteractionState(state);
+    renderInteractionState(state, interaction);
     renderApprovalDock(state, thread);
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
@@ -1390,11 +1493,52 @@ export function createProductWorkspace({
     breadcrumb.scrollLeft = breadcrumb.scrollWidth;
   }
 
-  function renderInteractionState(state) {
-    const status = state.status || "idle";
+  function renderInteractionState(state, interaction) {
+    const status = interaction?.completionStatus || state.status || "idle";
+    const presentation = turnStatusPresentation(status);
+    const statusElement = $("#interactionStatus");
+    const statusKey = interactionStatusRenderKey(interaction, state.status || "idle");
+    if (statusKey !== renderedInteractionStatusKey) {
+      statusElement.className = `interaction-status interaction-status-${presentation.kind}`;
+      statusElement.textContent = presentation.label;
+      renderedInteractionStatusKey = statusKey;
+    }
     prompt.disabled = composerDisabledForState(status, capabilities.canCompose);
     modelPicker?.setDisabled(prompt.disabled);
     syncComposer();
+  }
+
+  function renderEnvironment(environment, project) {
+    const presentation = environmentPresentation(environment, project);
+    const body = $("#environmentBody");
+    const loading = $("#environmentLoading");
+    const facts = $("#environmentFacts");
+    const message = $("#environmentMessage");
+    body.setAttribute("aria-busy", String(presentation.busy));
+    loading.classList.toggle("hidden", presentation.mode !== "loading");
+    facts.classList.toggle("hidden", presentation.mode !== "facts");
+    message.classList.toggle("hidden", presentation.mode === "loading" || presentation.mode === "facts");
+    message.textContent = presentation.message || "";
+    $("#environmentObserved").textContent = presentation.observedAt ? "Local snapshot" : "";
+    if (presentation.mode !== "facts") return;
+    $("#environmentWorktree").textContent = presentation.worktreeLabel;
+    $("#environmentWorktree").title = presentation.worktreeLabel;
+    const git = presentation.kind === "git";
+    $("#environmentBranchRow").classList.remove("hidden");
+    $("#environmentChangesRow").classList.toggle("hidden", !git);
+    $("#environmentUntrackedRow").classList.toggle("hidden", !git);
+    $("#environmentBranchLabel").textContent = git
+      ? "Branch"
+      : presentation.kind === "folder" ? "Repository" : "Status";
+    $("#environmentBranch").textContent = git ? presentation.branch : presentation.message;
+    $("#environmentBranch").title = $("#environmentBranch").textContent;
+    $("#environmentAdditions").textContent = `+${presentation.additions ?? 0}`;
+    $("#environmentDeletions").textContent = `−${presentation.deletions ?? 0}`;
+    const trackedLabel = trackedChangesLabel(presentation);
+    $("#environmentTracked").classList.toggle("hidden", !trackedLabel);
+    $("#environmentTracked").textContent = trackedLabel;
+    $("#environmentUntracked").textContent = `${presentation.untrackedFiles ?? 0} files`;
+    message.textContent = presentation.message || "";
   }
 
   function renderApprovalDock(state, thread) {
@@ -1875,6 +2019,7 @@ export function createProductWorkspace({
     graphDocument.removeEventListener("pointerdown", closeSettingsMenuFromOutside, true);
     graphDocument.removeEventListener("keydown", closeTurnPopoverOnEscape, true);
     graphDocument.removeEventListener("keydown", closeSettingsMenuOnEscape, true);
+    graphDocument.removeEventListener("keydown", closeInspectorOnEscape, true);
     narrowInspectorMedia?.removeEventListener?.("change", handleInspectorLayoutChange);
     dragging = null;
     panning = null;

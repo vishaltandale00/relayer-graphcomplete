@@ -53,6 +53,12 @@ import {
   pendingApprovalsForThread,
   validApprovalDecision,
 } from "./approval-model.js";
+import {
+  createPostFlightRefreshQueue,
+  environmentRefreshNeeded,
+  interactionReachedTerminal,
+  latestInteractionForThread,
+} from "./environment-context.js";
 
 let creatingFirstThread = false;
 let pendingRefreshTimer;
@@ -70,6 +76,99 @@ let pendingHistoryTransition = null;
 const refreshGate = createLatestRequestGate();
 const resolvedInvokeNavigationGate = createLatestRequestGate();
 let pendingResolvedInvokeNavigation = false;
+let environmentRequestSequence = 0;
+let environmentLastRequestedAt = 0;
+let environmentRequestInFlight = null;
+const environmentPostFlightQueue = createPostFlightRefreshQueue();
+
+function activeProjectId() {
+  return appState.threads.find((thread) => (
+    String(thread.id) === String(viewState.currentThreadId)
+  ))?.projectId ?? null;
+}
+
+export async function refreshCurrentEnvironment({ force = false, minimumAgeMs = 0 } = {}) {
+  if (viewState.mainView !== "thread") {
+    stopEnvironmentRefresh();
+    return false;
+  }
+  const projectId = activeProjectId();
+  if (projectId == null) {
+    environmentRequestSequence += 1;
+    environmentRequestInFlight = null;
+    appState.environment = null;
+    if (viewState.mainView === "thread") renderThread();
+    return false;
+  }
+  const now = Date.now();
+  if (!environmentRefreshNeeded({
+    currentProjectId: appState.environment?.projectId,
+    requestedProjectId: projectId,
+    lastRequestedAt: environmentLastRequestedAt,
+    now,
+    force,
+    minimumAgeMs,
+  })) return false;
+  if (environmentRequestInFlight?.projectId === String(projectId)) {
+    environmentPostFlightQueue.queue(projectId, force);
+    return environmentRequestInFlight.promise;
+  }
+  environmentPostFlightQueue.discardExcept(projectId);
+  const requestSequence = ++environmentRequestSequence;
+  environmentLastRequestedAt = now;
+  const previousSnapshot = String(appState.environment?.projectId) === String(projectId)
+    ? appState.environment?.snapshot ?? null
+    : null;
+  appState.environment = {
+    projectId,
+    status: "loading",
+    snapshot: previousSnapshot,
+    error: null,
+  };
+  if (!previousSnapshot && viewState.mainView === "thread") renderThread();
+  const completion = (async () => {
+  try {
+    const snapshot = await request(`/api/projects/${encodeURIComponent(projectId)}/environment`);
+    if (requestSequence !== environmentRequestSequence || String(activeProjectId()) !== String(projectId)) {
+      return false;
+    }
+    appState.environment = { projectId, status: "ready", snapshot, error: null };
+  } catch (error) {
+    if (requestSequence !== environmentRequestSequence || String(activeProjectId()) !== String(projectId)) {
+      return false;
+    }
+    appState.environment = {
+      projectId,
+      status: "error",
+      snapshot: previousSnapshot,
+      error: error?.message || "Project context is temporarily unavailable.",
+    };
+  }
+  if (viewState.mainView === "thread") renderThread();
+  return true;
+  })();
+  environmentRequestInFlight = { projectId: String(projectId), promise: completion };
+  try {
+    return await completion;
+  } finally {
+    if (environmentRequestInFlight?.promise === completion) {
+      environmentRequestInFlight = null;
+      if (environmentPostFlightQueue.consume(
+        projectId,
+        activeProjectId(),
+        viewState.mainView === "thread",
+      )) {
+        void refreshCurrentEnvironment({ force: true }).catch(() => {});
+      }
+    }
+  }
+}
+
+export function stopEnvironmentRefresh() {
+  environmentRequestSequence += 1;
+  environmentRequestInFlight = null;
+  environmentPostFlightQueue.clear();
+}
 
 export function updateCreateThreadAvailability() {
   $("#createThread").disabled = creatingFirstThread
@@ -242,6 +341,8 @@ export async function refreshState(
     || (requestedThreadId && String(viewState.currentThreadId) !== String(requestedThreadId))
   ) return false;
   const previousInteractionId = viewState.currentInteractionId;
+  const previousLiveInteraction = latestInteractionForThread(appState.interactions, threadId);
+  const previousProjectId = activeProjectId();
   const previousVisibleLayer = appState.visibleLayer;
   const nextProjects = state.projects || [];
   const nextThreads = state.threads || [];
@@ -309,6 +410,11 @@ export async function refreshState(
   if (viewState.mainView === "settings") setMainView("settings");
   else if (viewState.currentThreadId) renderThread();
   else setMainView("new");
+  const nextProjectId = activeProjectId();
+  const projectChanged = String(previousProjectId) !== String(nextProjectId);
+  const nextLiveInteraction = latestInteractionForThread(nextInteractions, nextThreadId);
+  const terminalTransition = interactionReachedTerminal(previousLiveInteraction, nextLiveInteraction);
+  void refreshCurrentEnvironment({ force: projectChanged || terminalTransition }).catch(() => {});
   schedulePendingRefresh(viewState.currentThreadId, { force: canonicalRefreshFailed });
   return true;
 }

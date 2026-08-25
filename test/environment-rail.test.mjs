@@ -1,0 +1,252 @@
+import { readFile } from "node:fs/promises";
+
+import { describe, expect, it } from "vitest";
+
+import {
+  ENVIRONMENT_REFRESH_INTERVAL_MS,
+  createPostFlightRefreshQueue,
+  desktopRailGeometry,
+  environmentRefreshNeeded,
+  interactionReachedTerminal,
+  latestInteractionForThread,
+} from "../desktop/renderer/src/environment-context.js";
+import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
+import {
+  environmentPresentation,
+  inspectorEscapeShouldClose,
+  interactionStatusRenderKey,
+  trackedChangesLabel,
+} from "../desktop/renderer/src/product-workspace/workspace.js";
+
+describe("desktop environment rail", () => {
+  const project = { id: 7, name: "relayer-graphcomplete" };
+
+  it("presents Git facts without merging untracked files into line counts", () => {
+    expect(environmentPresentation({
+      projectId: 7,
+      status: "ready",
+      snapshot: {
+        kind: "git",
+        worktreeLabel: "8bf2",
+        branch: null,
+        detached: true,
+        changes: { additions: 18, deletions: 4, trackedFiles: 5, untrackedFiles: 3 },
+        observedAt: "2026-08-25T05:00:00Z",
+      },
+    }, project)).toMatchObject({
+      mode: "facts",
+      kind: "git",
+      worktreeLabel: "8bf2",
+      branch: "Detached HEAD",
+      additions: 18,
+      deletions: 4,
+      trackedFiles: 5,
+      untrackedFiles: 3,
+    });
+  });
+
+  it("preserves a truthful dirty indicator for binary or mode-only tracked changes", () => {
+    expect(environmentPresentation({
+      projectId: 7,
+      status: "ready",
+      snapshot: {
+        kind: "git",
+        worktreeLabel: "relayer-graphcomplete",
+        branch: "main",
+        detached: false,
+        changes: { additions: 0, deletions: 0, trackedFiles: 2, untrackedFiles: 0 },
+      },
+    }, project)).toMatchObject({
+      additions: 0,
+      deletions: 0,
+      trackedFiles: 2,
+    });
+    expect(productWorkspaceMarkup()).toContain('id="environmentTracked"');
+    expect(trackedChangesLabel({ additions: 0, deletions: 0, trackedFiles: 1 }))
+      .toBe("· 1 tracked file");
+    expect(trackedChangesLabel({ additions: 0, deletions: 0, trackedFiles: 2 }))
+      .toBe("· 2 tracked files");
+    expect(trackedChangesLabel({ additions: 1, deletions: 0, trackedFiles: 2 })).toBe("");
+    expect(trackedChangesLabel({ additions: 0, deletions: 0, trackedFiles: 0 })).toBe("");
+  });
+
+  it("keeps standalone, loading, folder, unavailable, and request errors honest", () => {
+    expect(environmentPresentation(null, null)).toMatchObject({
+      mode: "message",
+      message: "No project folder",
+    });
+    expect(environmentPresentation(null, project).mode).toBe("loading");
+    expect(environmentPresentation({
+      projectId: 7,
+      status: "ready",
+      snapshot: { kind: "folder", worktreeLabel: "notes" },
+    }, project)).toMatchObject({
+      mode: "facts",
+      kind: "folder",
+      message: "Not a Git repository",
+    });
+    expect(environmentPresentation({
+      projectId: 7,
+      status: "ready",
+      snapshot: {
+        kind: "unavailable",
+        unavailableReason: { code: "path_unavailable", message: "Folder cannot be read" },
+      },
+    }, project)).toMatchObject({
+      mode: "facts",
+      kind: "unavailable",
+      worktreeLabel: "relayer-graphcomplete",
+      message: "Folder cannot be read",
+    });
+    expect(environmentPresentation({
+      projectId: 7,
+      status: "error",
+      error: "Request timed out",
+    }, project).message).toBe("Request timed out");
+  });
+
+  it("throttles background refreshes while allowing bounded explicit refreshes", () => {
+    const now = 20_000;
+    expect(environmentRefreshNeeded({
+      currentProjectId: 7,
+      requestedProjectId: 7,
+      lastRequestedAt: now - 500,
+      now,
+    })).toBe(false);
+    expect(environmentRefreshNeeded({
+      currentProjectId: 7,
+      requestedProjectId: 7,
+      lastRequestedAt: now - ENVIRONMENT_REFRESH_INTERVAL_MS,
+      now,
+    })).toBe(true);
+    expect(environmentRefreshNeeded({
+      currentProjectId: 7,
+      requestedProjectId: 7,
+      lastRequestedAt: now - 500,
+      now,
+      force: true,
+      minimumAgeMs: 1_000,
+    })).toBe(false);
+    expect(environmentRefreshNeeded({
+      currentProjectId: 7,
+      requestedProjectId: 8,
+      lastRequestedAt: now,
+      now,
+    })).toBe(true);
+    expect(environmentRefreshNeeded({ requestedProjectId: null, now, lastRequestedAt: 0 })).toBe(false);
+  });
+
+  it("recognizes exactly one latest-interaction terminal transition", () => {
+    const interactions = [
+      { id: 2, threadId: 4, sequence: 2, completionStatus: "running" },
+      { id: 1, threadId: 4, sequence: 1, completionStatus: "accepted" },
+      { id: 3, threadId: 5, sequence: 1, completionStatus: "accepted" },
+    ];
+    expect(latestInteractionForThread(interactions, 4).id).toBe(2);
+    expect(interactionReachedTerminal(
+      interactions[0],
+      { ...interactions[0], completionStatus: "accepted" },
+    )).toBe(true);
+    expect(interactionReachedTerminal(
+      interactions[1],
+      { ...interactions[0], completionStatus: "accepted" },
+    )).toBe(false);
+  });
+
+  it("queues exactly one forced refresh after a same-project request settles", async () => {
+    const queue = createPostFlightRefreshQueue();
+    let resolveFirst;
+    const first = new Promise((resolve) => { resolveFirst = resolve; });
+    let refreshes = 1;
+    queue.queue(7, true);
+    queue.queue(7, true);
+    const completion = first.then(() => {
+      if (queue.consume(7, 7, true)) refreshes += 1;
+    });
+    resolveFirst();
+    await completion;
+    expect(refreshes).toBe(2);
+    expect(queue.consume(7, 7, true)).toBe(false);
+
+    queue.queue(7, true);
+    expect(queue.consume(7, 8, true)).toBe(false);
+    queue.queue(7, true);
+    queue.clear();
+    expect(queue.consume(7, 7, true)).toBe(false);
+  });
+
+  it("updates selected interaction status only when identity or lifecycle state changes", () => {
+    const running = { id: 8, completionStatus: "running" };
+    expect(interactionStatusRenderKey(running, "accepted")).toBe("8:running");
+    expect(interactionStatusRenderKey({ ...running }, "failed"))
+      .toBe(interactionStatusRenderKey(running, "accepted"));
+    expect(interactionStatusRenderKey({ ...running, completionStatus: "accepted" }, "running"))
+      .toBe("8:accepted");
+    expect(interactionStatusRenderKey({ id: 9, completionStatus: "running" }, "running"))
+      .toBe("9:running");
+  });
+
+  it("lets only the topmost surface consume Escape before restoring graph focus", () => {
+    const base = {
+      key: "Escape",
+      settingsMenuOpen: false,
+      turnPopoverOpen: false,
+      modelPickerOpen: false,
+      approvalOwnsFocus: false,
+      inspectorOpen: true,
+    };
+    expect(inspectorEscapeShouldClose(base)).toBe(true);
+    expect(inspectorEscapeShouldClose({ ...base, settingsMenuOpen: true })).toBe(false);
+    expect(inspectorEscapeShouldClose({ ...base, turnPopoverOpen: true })).toBe(false);
+    expect(inspectorEscapeShouldClose({ ...base, modelPickerOpen: true })).toBe(false);
+    expect(inspectorEscapeShouldClose({ ...base, approvalOwnsFocus: true })).toBe(false);
+    expect(inspectorEscapeShouldClose({ ...base, inspectorOpen: false })).toBe(false);
+  });
+
+  it("uses one structural rail and preserves the existing inspector beneath Environment", async () => {
+    const markup = productWorkspaceMarkup();
+    const environmentStart = markup.indexOf('id="environmentPanel"');
+    const inspectorStart = markup.indexOf('id="inspector"');
+    expect(markup).toContain('class="workspace-layout"');
+    expect(markup).toContain('class="workspace-layout" data-review-capture="workspace" role="region"');
+    expect(markup).not.toContain('class="thread-workspace" data-review-capture="workspace"');
+    expect(environmentStart).toBeGreaterThan(markup.indexOf('id="interactionBanner"'));
+    expect(inspectorStart).toBeGreaterThan(environmentStart);
+    expect(markup).toContain('id="interactionStatus" role="status"');
+    expect(markup).not.toContain("Ready");
+    expect(markup).not.toContain("Successful checks");
+    expect(markup).not.toContain("Codex · Ask");
+
+    const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
+    expect(styles).toContain("--inspector:340px");
+    expect(styles).toContain("grid-template-columns:minmax(0,1fr) var(--inspector)");
+    expect(styles).toContain("padding:12px 12px 0 0");
+    expect(styles).toContain(".environment-panel{grid-column:2;grid-row:1 / 3");
+    expect(styles).toContain(".interaction-banner{grid-column:1;grid-row:2;margin:8px 0 12px 12px");
+    expect(styles).toContain(".environment-panel{grid-column:2;grid-row:1 / 3;margin:0 0 12px");
+    expect(styles).toContain(".thread-workspace{grid-column:1 / -1;grid-row:3");
+    expect(styles).toContain(".inspector{width:var(--inspector)");
+    expect(styles).not.toContain(".inspector{position:absolute");
+    expect(styles).not.toContain("ResizeObserver");
+    expect(styles).toContain("@media(prefers-reduced-transparency:reduce)");
+    expect(styles).toContain("@media(forced-colors:active)");
+    expect(styles).toContain("@media(min-width:761px) and (max-width:1100px)");
+    expect(desktopRailGeometry(1100)).toMatchObject({
+      stacked: true,
+      sidebarWidth: 244,
+      railWidth: null,
+      leftColumnWidth: 832,
+    });
+    expect(desktopRailGeometry(1101)).toMatchObject({
+      stacked: false,
+      sidebarWidth: 244,
+      railWidth: 340,
+      leftColumnWidth: 493,
+    });
+    expect(desktopRailGeometry(2998)).toMatchObject({
+      stacked: false,
+      railWidth: 340,
+      leftColumnWidth: 2390,
+    });
+  });
+});

@@ -1,6 +1,7 @@
 mod annotations;
 mod auth;
 mod conversation_imports;
+mod environment;
 mod error;
 mod model_settings;
 mod projects;
@@ -125,6 +126,10 @@ pub(crate) fn router(
         )
         .route("/api/state", get(state::product_state))
         .route("/api/projects", get(projects::list).post(projects::create))
+        .route(
+            "/api/projects/{id}/environment",
+            get(environment::get),
+        )
         .route("/api/threads", get(threads::list).post(threads::create))
         .route("/api/threads/{id}", get(threads::get))
         .route("/api/threads/{id}/export", get(threads::export))

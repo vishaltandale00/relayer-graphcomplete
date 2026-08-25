@@ -1,0 +1,418 @@
+{
+  "passed": true,
+  "generatedAt": "2026-08-25T06:54:15.708Z",
+  "source": {
+    "runtime": "real Electron + production renderer + Rust app/graph servers",
+    "harness": "fixture-task-system",
+    "inferenceCalls": 0,
+    "projectPath": "[repository-root]",
+    "threadId": 1,
+    "interactionStatus": "accepted",
+    "narrowCapture": "Production renderer in real Electron with the evidence window minimum lowered to exercise 760px CSS."
+  },
+  "gitTruth": {
+    "independent": {
+      "worktreeLabel": "relayer-graphcomplete",
+      "branch": "codex/issue-128-environment-rail",
+      "detached": false,
+      "changes": {
+        "additions": 362,
+        "deletions": 24,
+        "untrackedFiles": 12,
+        "trackedChangedFiles": 14
+      }
+    },
+    "api": {
+      "kind": "git",
+      "worktreeLabel": "relayer-graphcomplete",
+      "branch": "codex/issue-128-environment-rail",
+      "detached": false,
+      "changes": {
+        "trackedFiles": 14,
+        "additions": 362,
+        "deletions": 24,
+        "untrackedFiles": 12
+      },
+      "observedAt": "2026-08-25T06:54:14.590659Z"
+    },
+    "displayed": {
+      "worktreeLabel": "relayer-graphcomplete",
+      "branch": "codex/issue-128-environment-rail",
+      "additions": "+362",
+      "deletions": "−24",
+      "trackedFilesFallback": null,
+      "untrackedFiles": "12 files",
+      "interactionStatus": "Complete"
+    },
+    "expectedDisplay": {
+      "worktreeLabel": "relayer-graphcomplete",
+      "branch": "codex/issue-128-environment-rail",
+      "additions": "+362",
+      "deletions": "−24",
+      "untrackedFiles": "12 files"
+    },
+    "matched": true
+  },
+  "interactionProof": {
+    "closeButton": {
+      "inspectorClosed": true,
+      "environmentPreserved": true
+    },
+    "escape": {
+      "inspectorClosed": true,
+      "environmentPreserved": true,
+      "focusRestoredTo": "graphStage"
+    },
+    "evalReadOnly": true
+  },
+  "geometry": {
+    "normalEnvironment": {
+      "header": {
+        "left": 244,
+        "right": 1116,
+        "top": 12,
+        "bottom": 48,
+        "width": 872,
+        "height": 36
+      },
+      "banner": {
+        "left": 256,
+        "right": 1116,
+        "top": 56,
+        "bottom": 164,
+        "width": 860,
+        "height": 108
+      },
+      "environment": {
+        "left": 1128,
+        "right": 1468,
+        "top": 12,
+        "bottom": 164,
+        "width": 340,
+        "height": 152
+      },
+      "inspector": null,
+      "graph": {
+        "left": 244,
+        "right": 1116,
+        "top": 216,
+        "bottom": 857,
+        "width": 872,
+        "height": 641
+      },
+      "viewport": {
+        "width": 1480,
+        "height": 920
+      },
+      "borders": {
+        "header": {
+          "borderTopWidth": "1px",
+          "borderRightWidth": "1px",
+          "borderBottomWidth": "1px",
+          "borderLeftWidth": "1px"
+        },
+        "banner": {
+          "borderTopWidth": "1px",
+          "borderRightWidth": "1px",
+          "borderBottomWidth": "1px",
+          "borderLeftWidth": "1px"
+        },
+        "environment": {
+          "borderTopWidth": "1px",
+          "borderRightWidth": "1px",
+          "borderBottomWidth": "1px",
+          "borderLeftWidth": "1px"
+        },
+        "inspector": {
+          "borderTopWidth": "1px",
+          "borderRightWidth": "1px",
+          "borderBottomWidth": "1px",
+          "borderLeftWidth": "1px"
+        }
+      }
+    },
+    "normalSelected": {
+      "header": {
+        "left": 244,
+        "right": 1116,
+        "top": 12,
+        "bottom": 48,
+        "width": 872,
+        "height": 36
+      },
+      "banner": {
+        "left": 256,
+        "right": 1116,
+        "top": 56,
+        "bottom": 164,
+        "width": 860,
+        "height": 108
+      },
+      "environment": {
+        "left": 1128,
+        "right": 1468,
+        "top": 12,
+        "bottom": 164,
+        "width": 340,
+        "height": 152
+      },
+      "inspector": {
+        "left": 1128,
+        "right": 1468,
+        "top": 176,
+        "bottom": 920,
+        "width": 340,
+        "height": 744
+      },
+      "graph": {
+        "left": 244,
+        "right": 1116,
+        "top": 216,
+        "bottom": 857,
+        "width": 872,
+        "height": 641
+      },
+      "viewport": {
+        "width": 1480,
+        "height": 920
+      }
+    },
+    "ultrawideSelected": {
+      "header": {
+        "left": 244,
+        "right": 2634,
+        "top": 12,
+        "bottom": 48,
+        "width": 2390,
+        "height": 36
+      },
+      "banner": {
+        "left": 256,
+        "right": 2634,
+        "top": 56,
+        "bottom": 164,
+        "width": 2378,
+        "height": 108
+      },
+      "environment": {
+        "left": 2646,
+        "right": 2986,
+        "top": 12,
+        "bottom": 164,
+        "width": 340,
+        "height": 152
+      },
+      "inspector": {
+        "left": 2646,
+        "right": 2986,
+        "top": 176,
+        "bottom": 920,
+        "width": 340,
+        "height": 744
+      },
+      "graph": {
+        "left": 244,
+        "right": 2634,
+        "top": 216,
+        "bottom": 857,
+        "width": 2390,
+        "height": 641
+      },
+      "viewport": {
+        "width": 2998,
+        "height": 920
+      }
+    },
+    "responsiveDesktopSelected": {
+      "header": {
+        "left": 244,
+        "right": 737,
+        "top": 12,
+        "bottom": 48,
+        "width": 493,
+        "height": 36
+      },
+      "banner": {
+        "left": 256,
+        "right": 737,
+        "top": 56,
+        "bottom": 164,
+        "width": 481,
+        "height": 108
+      },
+      "environment": {
+        "left": 749,
+        "right": 1089,
+        "top": 12,
+        "bottom": 164,
+        "width": 340,
+        "height": 152
+      },
+      "inspector": {
+        "left": 749,
+        "right": 1089,
+        "top": 176,
+        "bottom": 920,
+        "width": 340,
+        "height": 744
+      },
+      "graph": {
+        "left": 244,
+        "right": 737,
+        "top": 216,
+        "bottom": 857,
+        "width": 493,
+        "height": 641
+      },
+      "viewport": {
+        "width": 1101,
+        "height": 920
+      }
+    },
+    "responsiveStackedSelected": {
+      "header": {
+        "left": 256,
+        "right": 1088,
+        "top": 12,
+        "bottom": 48,
+        "width": 832,
+        "height": 36
+      },
+      "banner": {
+        "left": 256,
+        "right": 1088,
+        "top": 56,
+        "bottom": 131.55,
+        "width": 832,
+        "height": 75.55
+      },
+      "environment": {
+        "left": 256,
+        "right": 1088,
+        "top": 143.55,
+        "bottom": 295.55,
+        "width": 832,
+        "height": 152
+      },
+      "inspector": {
+        "left": 256,
+        "right": 1088,
+        "top": 839.55,
+        "bottom": 1079.55,
+        "width": 832,
+        "height": 240
+      },
+      "graph": {
+        "left": 256,
+        "right": 1088,
+        "top": 347.55,
+        "bottom": 764.55,
+        "width": 832,
+        "height": 417
+      },
+      "viewport": {
+        "width": 1100,
+        "height": 920
+      }
+    },
+    "narrowSelected": {
+      "header": {
+        "left": 12,
+        "right": 748,
+        "top": 12,
+        "bottom": 48,
+        "width": 736,
+        "height": 36
+      },
+      "banner": {
+        "left": 12,
+        "right": 748,
+        "top": 56,
+        "bottom": 131.55,
+        "width": 736,
+        "height": 75.55
+      },
+      "environment": {
+        "left": 12,
+        "right": 748,
+        "top": 143.55,
+        "bottom": 295.55,
+        "width": 736,
+        "height": 152
+      },
+      "inspector": {
+        "left": 12,
+        "right": 748,
+        "top": 839.55,
+        "bottom": 1079.55,
+        "width": 736,
+        "height": 240
+      },
+      "graph": {
+        "left": 12,
+        "right": 748,
+        "top": 347.55,
+        "bottom": 764.55,
+        "width": 736,
+        "height": 417
+      },
+      "viewport": {
+        "width": 760,
+        "height": 920
+      }
+    },
+    "evalSelected": {
+      "header": {
+        "left": 244,
+        "right": 1116,
+        "top": 12,
+        "bottom": 48,
+        "width": 872,
+        "height": 36
+      },
+      "banner": {
+        "left": 256,
+        "right": 1116,
+        "top": 56,
+        "bottom": 164,
+        "width": 860,
+        "height": 108
+      },
+      "environment": {
+        "left": 1128,
+        "right": 1468,
+        "top": 12,
+        "bottom": 164,
+        "width": 340,
+        "height": 152
+      },
+      "inspector": {
+        "left": 1128,
+        "right": 1468,
+        "top": 176,
+        "bottom": 920,
+        "width": 340,
+        "height": 744
+      },
+      "graph": {
+        "left": 244,
+        "right": 1116,
+        "top": 216,
+        "bottom": 858,
+        "width": 872,
+        "height": 642
+      },
+      "viewport": {
+        "width": 1480,
+        "height": 920
+      }
+    }
+  },
+  "captures": [
+    "01-normal-environment.png",
+    "02-normal-node-detail.png",
+    "03-ultrawide-node-detail.png",
+    "04-narrow-stacked-node-detail.png",
+    "05-eval-node-detail.png"
+  ]
+}
