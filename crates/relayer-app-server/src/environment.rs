@@ -1,5 +1,6 @@
 use command_group::{CommandGroup, GroupChild};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     ffi::{OsStr, OsString},
@@ -32,6 +33,13 @@ const MAX_ACTIVE_COMMANDS: usize = 32;
 const MAX_PENDING_INSPECTIONS: usize = 32;
 const MAX_STDOUT_BYTES: usize = 256 * 1024;
 const MAX_STDERR_BYTES: usize = 32 * 1024;
+const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
+// Leave ample room below Windows' 32K command-line limit for the executable and
+// fixed arguments. Repository and pathname arguments are charged at twice their
+// encoded length below to cover Windows quoting expansion conservatively.
+const MAX_CHECK_ATTR_COMMAND_ARGUMENT_BYTES: usize = 28 * 1024;
+const CHECK_ATTR_FIXED_ARGUMENT_BYTES: usize = 1024;
+const MAX_CHECK_ATTR_PATH_ARGUMENTS: usize = 128;
 static ACTIVE_COMMANDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static STUCK_CLEANUPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -312,13 +320,76 @@ trait GitRunner {
         Ok(reported_root.to_owned())
     }
 
-    fn local_filter_drivers(
+    fn has_applied_transform_filter(
         &self,
         _repository: &Path,
-        _safe_directories: &[OsString],
+        _safety: &GitSafetyOverrides,
         _deadline: Instant,
-    ) -> Result<Vec<OsString>, GitRunError> {
+    ) -> Result<bool, GitRunError> {
+        Ok(false)
+    }
+
+    fn has_initialized_gitlink(
+        &self,
+        _repository: &Path,
+        _safety: &GitSafetyOverrides,
+        _deadline: Instant,
+    ) -> Result<bool, GitRunError> {
+        Ok(false)
+    }
+
+    fn repository_state_token(
+        &self,
+        _repository: &Path,
+        _safety: &GitSafetyOverrides,
+        _deadline: Instant,
+    ) -> Result<Vec<u8>, GitRunError> {
         Ok(Vec::new())
+    }
+
+    fn diff_outputs(
+        &self,
+        repository: &Path,
+        baseline: &str,
+        safety: &GitSafetyOverrides,
+        deadline: Instant,
+    ) -> Result<(GitOutput, GitOutput), GitRunError>
+    where
+        Self: Sized,
+    {
+        let staged = run_git(
+            self,
+            repository,
+            &[
+                "diff",
+                "--numstat",
+                "-z",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--ignore-submodules=dirty",
+                "--cached",
+                baseline,
+                "--",
+            ],
+            safety,
+            deadline,
+        )?;
+        let worktree = run_git(
+            self,
+            repository,
+            &[
+                "diff",
+                "--numstat",
+                "-z",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--ignore-submodules=dirty",
+                "--",
+            ],
+            safety,
+            deadline,
+        )?;
+        Ok((staged, worktree))
     }
 
     fn run(
@@ -330,7 +401,7 @@ trait GitRunner {
     ) -> Result<GitOutput, GitRunError>;
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct GitSafetyOverrides {
     safe_directories: Vec<OsString>,
     effective_config: Vec<(OsString, OsString)>,
@@ -377,13 +448,41 @@ impl GitRunner for SystemGitRunner {
         run_bounded_command_with_safety(OsStr::new("git"), path, arguments, safety, timeout, |_| {})
     }
 
-    fn local_filter_drivers(
+    fn has_applied_transform_filter(
         &self,
         repository: &Path,
-        safe_directories: &[OsString],
+        safety: &GitSafetyOverrides,
         deadline: Instant,
-    ) -> Result<Vec<OsString>, GitRunError> {
-        read_local_filter_drivers(repository, safe_directories, deadline)
+    ) -> Result<bool, GitRunError> {
+        has_applied_transform_filter(repository, safety, deadline)
+    }
+
+    fn has_initialized_gitlink(
+        &self,
+        repository: &Path,
+        safety: &GitSafetyOverrides,
+        deadline: Instant,
+    ) -> Result<bool, GitRunError> {
+        has_initialized_gitlink(repository, safety, deadline)
+    }
+
+    fn repository_state_token(
+        &self,
+        repository: &Path,
+        safety: &GitSafetyOverrides,
+        deadline: Instant,
+    ) -> Result<Vec<u8>, GitRunError> {
+        repository_state_token(repository, safety, deadline)
+    }
+
+    fn diff_outputs(
+        &self,
+        repository: &Path,
+        baseline: &str,
+        safety: &GitSafetyOverrides,
+        deadline: Instant,
+    ) -> Result<(GitOutput, GitOutput), GitRunError> {
+        run_shadow_diffs(repository, baseline, safety, deadline)
     }
 }
 
@@ -421,6 +520,10 @@ enum GitRunError {
     Output(#[source] io::Error),
     #[error("Git inspection cleanup capacity is busy ({stuck} stuck cleanups)")]
     CleanupBusy { stuck: usize },
+    #[error("Exact Git change counts are unavailable because a content filter applies")]
+    UnsupportedFilter,
+    #[error("Exact Git change counts are unavailable for initialized submodules")]
+    UnsupportedSubmodule,
 }
 
 fn inspect_with(
@@ -480,11 +583,20 @@ fn inspect_with(
             Ok(config) => config,
             Err(error) => return unavailable_from_error(worktree_label, error),
         };
-    safety.disabled_filter_drivers =
-        match git.local_filter_drivers(&repository, &safety.safe_directories, deadline) {
-            Ok(drivers) => drivers,
-            Err(error) => return unavailable_from_error(worktree_label, error),
-        };
+    match git.has_applied_transform_filter(&repository, &safety, deadline) {
+        Ok(true) => {
+            return unavailable_from_error(worktree_label, GitRunError::UnsupportedFilter);
+        }
+        Ok(false) => {}
+        Err(error) => return unavailable_from_error(worktree_label, error),
+    }
+    match git.has_initialized_gitlink(&repository, &safety, deadline) {
+        Ok(true) => {
+            return unavailable_from_error(worktree_label, GitRunError::UnsupportedSubmodule);
+        }
+        Ok(false) => {}
+        Err(error) => return unavailable_from_error(worktree_label, error),
+    }
 
     let branch_output = match run_git(
         git,
@@ -541,56 +653,59 @@ fn inspect_with(
         trimmed(&empty_tree.stdout)
     };
 
-    let staged_output = match run_git(
-        git,
-        &repository,
-        &[
-            "diff",
-            "--numstat",
-            "-z",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--cached",
-            &baseline,
-            "--",
-        ],
-        &safety,
-        deadline,
-    ) {
-        Ok(output) if output.status.success => output,
-        Ok(output) => {
-            return EnvironmentSnapshot::unavailable(
-                worktree_label,
-                "git_failed",
-                git_failure_message(&output),
-            );
-        }
+    let state_token = match git.repository_state_token(&repository, &safety, deadline) {
+        Ok(token) => token,
         Err(error) => return unavailable_from_error(worktree_label, error),
     };
-    let worktree_output = match run_git(
-        git,
-        &repository,
-        &[
-            "diff",
-            "--numstat",
-            "-z",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--",
-        ],
-        &safety,
-        deadline,
-    ) {
-        Ok(output) if output.status.success => output,
-        Ok(output) => {
-            return EnvironmentSnapshot::unavailable(
-                worktree_label,
-                "git_failed",
-                git_failure_message(&output),
-            );
-        }
+    let (staged_output, worktree_output) =
+        match git.diff_outputs(&repository, &baseline, &safety, deadline) {
+            Ok((staged, worktree)) if staged.status.success && worktree.status.success => {
+                (staged, worktree)
+            }
+            Ok((staged, worktree)) => {
+                let failed = if !staged.status.success {
+                    staged
+                } else {
+                    worktree
+                };
+                return EnvironmentSnapshot::unavailable(
+                    worktree_label,
+                    "git_failed",
+                    git_failure_message(&failed),
+                );
+            }
+            Err(error) => return unavailable_from_error(worktree_label, error),
+        };
+    let post_state_token = match git.repository_state_token(&repository, &safety, deadline) {
+        Ok(token) => token,
         Err(error) => return unavailable_from_error(worktree_label, error),
     };
+    if post_state_token != state_token {
+        return EnvironmentSnapshot::unavailable(
+            worktree_label,
+            "git_snapshot_changed",
+            "Git index changed during environment inspection.".into(),
+        );
+    }
+    let post_config =
+        match git.effective_repository_config(&repository, &safety.safe_directories, deadline) {
+            Ok(config) => config,
+            Err(error) => return unavailable_from_error(worktree_label, error),
+        };
+    if post_config != safety.effective_config {
+        return EnvironmentSnapshot::unavailable(
+            worktree_label,
+            "git_snapshot_changed",
+            "Git configuration changed during environment inspection.".into(),
+        );
+    }
+    match git.has_applied_transform_filter(&repository, &safety, deadline) {
+        Ok(true) => {
+            return unavailable_from_error(worktree_label, GitRunError::UnsupportedFilter);
+        }
+        Ok(false) => {}
+        Err(error) => return unavailable_from_error(worktree_label, error),
+    }
     let changes = match parse_numstat_changes(&[&staged_output.stdout, &worktree_output.stdout]) {
         Some(changes) => changes,
         None => {
@@ -674,6 +789,8 @@ fn unavailable_from_error(label: String, error: GitRunError) -> EnvironmentSnaps
         GitRunError::OutputTooLarge => "git_output_too_large",
         GitRunError::Output(_) => "git_output_failed",
         GitRunError::CleanupBusy { .. } => "inspection_capacity",
+        GitRunError::UnsupportedFilter => "unsupported_filter",
+        GitRunError::UnsupportedSubmodule => "unsupported_submodule",
     };
     EnvironmentSnapshot::unavailable(label, code, error.to_string())
 }
@@ -1054,8 +1171,16 @@ fn read_effective_repository_config_with(
     // commands to unrelated (and potentially executable) configuration.
     let keys = [
         ("core.autocrlf", false),
+        ("core.eol", false),
         ("core.excludesFile", true),
         ("core.attributesFile", true),
+        ("core.fileMode", false),
+        ("core.symlinks", false),
+        ("core.ignoreCase", false),
+        ("core.precomposeUnicode", false),
+        ("core.sparseCheckout", false),
+        ("core.sparseCheckoutCone", false),
+        ("index.sparse", false),
     ];
     let mut effective = Vec::new();
     for (key, expand_path) in keys {
@@ -1080,7 +1205,17 @@ fn read_effective_repository_config_with(
         if expand_path {
             command.arg("--path");
         }
-        if key == "core.autocrlf" {
+        if matches!(
+            key,
+            "core.autocrlf"
+                | "core.fileMode"
+                | "core.symlinks"
+                | "core.ignoreCase"
+                | "core.precomposeUnicode"
+                | "core.sparseCheckout"
+                | "core.sparseCheckoutCone"
+                | "index.sparse"
+        ) {
             // Normalize every boolean spelling (including implicit true and explicit
             // empty false) independently while retaining `input` and arbitrary strings.
             // This keeps a lower non-boolean value from preventing normalization of the
@@ -1112,9 +1247,670 @@ fn read_effective_repository_config_with(
                     "Git returned malformed effective {key} configuration"
                 )))
             })?;
-        effective.push((OsString::from(key), os_string_from_bytes(value)?));
+        let mut value = os_string_from_bytes(value)?;
+        if expand_path && !value.is_empty() && Path::new(&value).is_relative() {
+            value = repository.join(&value).into_os_string();
+        }
+        effective.push((OsString::from(key), value));
     }
     Ok(effective)
+}
+
+fn has_applied_transform_filter(
+    repository: &Path,
+    safety: &GitSafetyOverrides,
+    deadline: Instant,
+) -> Result<bool, GitRunError> {
+    let tracked = run_bounded_command_with_safety(
+        OsStr::new("git"),
+        repository,
+        &["ls-files", "-z"],
+        safety,
+        remaining_until(deadline)?,
+        |_| {},
+    )?;
+    if !tracked.status.success {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git could not enumerate tracked paths",
+        )));
+    }
+    if tracked.stdout.is_empty() {
+        return Ok(false);
+    }
+    if !tracked.stdout.ends_with(&[0]) {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git returned malformed tracked paths",
+        )));
+    }
+    let paths = tracked.stdout[..tracked.stdout.len() - 1]
+        .split(|byte| *byte == 0)
+        .collect::<Vec<_>>();
+    let repository_argument_bytes = repository
+        .as_os_str()
+        .as_encoded_bytes()
+        .len()
+        .checked_mul(2)
+        .and_then(|size| size.checked_add(CHECK_ATTR_FIXED_ARGUMENT_BYTES))
+        .ok_or(GitRunError::OutputTooLarge)?;
+    let pathname_budget = MAX_CHECK_ATTR_COMMAND_ARGUMENT_BYTES
+        .checked_sub(repository_argument_bytes)
+        .ok_or(GitRunError::OutputTooLarge)?;
+    let mut applied_drivers = HashSet::new();
+    let mut chunk_start = 0;
+    while chunk_start < paths.len() {
+        let chunk_end = check_attr_chunk_end(&paths, chunk_start, pathname_budget)?;
+        let chunk = &paths[chunk_start..chunk_end];
+        let mut command = Command::new("git");
+        sanitize_git_environment(&mut command);
+        isolate_git_configuration(&mut command);
+        append_safety_arguments(&mut command, safety);
+        command
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("LC_ALL", "C")
+            .arg("-C")
+            .arg(repository)
+            .args(["check-attr", "-z", "filter", "--"]);
+        for path in chunk {
+            command.arg(os_string_from_bytes(path)?);
+        }
+        command.stdin(Stdio::null());
+        let output = run_prepared_command(command, remaining_until(deadline)?)?;
+        if !output.status.success || !output.stdout.ends_with(&[0]) {
+            return Err(GitRunError::Output(io::Error::other(
+                "Git could not inspect content-filter attributes",
+            )));
+        }
+        let fields = output.stdout[..output.stdout.len() - 1]
+            .split(|byte| *byte == 0)
+            .collect::<Vec<_>>();
+        if fields.len() % 3 != 0 {
+            return Err(GitRunError::Output(io::Error::other(
+                "Git returned malformed content-filter attributes",
+            )));
+        }
+        for record in fields.chunks_exact(3) {
+            let driver = record[2];
+            if driver == b"unspecified" || driver == b"unset" || driver == b"set" {
+                continue;
+            }
+            applied_drivers.insert(driver.to_vec());
+        }
+        chunk_start = chunk_end;
+    }
+    for driver in applied_drivers {
+        for property in ["clean", "process"] {
+            let mut key = OsString::from("filter.");
+            key.push(os_string_from_bytes(&driver)?);
+            key.push(".");
+            key.push(property);
+            if effective_config_last(repository, safety, &key, false, deadline)?.is_some() {
+                return Ok(true);
+            }
+        }
+        let mut required = OsString::from("filter.");
+        required.push(os_string_from_bytes(&driver)?);
+        required.push(".required");
+        if effective_config_last(repository, safety, &required, true, deadline)?
+            .is_some_and(|value| !value.eq_ignore_ascii_case(b"false"))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn check_attr_chunk_end(
+    paths: &[&[u8]],
+    start: usize,
+    pathname_budget: usize,
+) -> Result<usize, GitRunError> {
+    let mut end = start;
+    let mut encoded_bytes = 0_usize;
+    while end < paths.len() && end - start < MAX_CHECK_ATTR_PATH_ARGUMENTS {
+        // Count a terminator/argument separator too. The 24K cap deliberately
+        // leaves headroom for platform quoting, whose precise expansion is not
+        // expressible from raw Git pathname bytes.
+        let path_bytes = paths[end]
+            .len()
+            .checked_mul(2)
+            .and_then(|size| size.checked_add(3))
+            .ok_or(GitRunError::OutputTooLarge)?;
+        if path_bytes > pathname_budget {
+            return Err(GitRunError::OutputTooLarge);
+        }
+        if encoded_bytes
+            .checked_add(path_bytes)
+            .ok_or(GitRunError::OutputTooLarge)?
+            > pathname_budget
+        {
+            break;
+        }
+        encoded_bytes += path_bytes;
+        end += 1;
+    }
+    if end == start {
+        return Err(GitRunError::OutputTooLarge);
+    }
+    Ok(end)
+}
+
+fn effective_config_last(
+    repository: &Path,
+    safety: &GitSafetyOverrides,
+    key: &OsStr,
+    boolean: bool,
+    deadline: Instant,
+) -> Result<Option<Vec<u8>>, GitRunError> {
+    let mut command = Command::new("git");
+    sanitize_git_environment(&mut command);
+    for directory in &safety.safe_directories {
+        let mut setting = OsString::from("safe.directory=");
+        setting.push(directory);
+        command.arg("-c").arg(setting);
+    }
+    command
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("LC_ALL", "C")
+        .arg("-C")
+        .arg(repository)
+        .args(["config", "--includes"]);
+    if boolean {
+        command.arg("--type=bool-or-str");
+    }
+    command
+        .args(["--null", "--get-all"])
+        .arg(key)
+        .stdin(Stdio::null());
+    let output = run_prepared_command(command, remaining_until(deadline)?)?;
+    if !output.status.success {
+        if output.status.code == Some(1) && output.stdout.is_empty() {
+            return Ok(None);
+        }
+        return Err(GitRunError::Output(io::Error::other(
+            "Git could not inspect content-filter configuration",
+        )));
+    }
+    if output.stdout.is_empty() || !output.stdout.ends_with(&[0]) {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git returned malformed content-filter configuration",
+        )));
+    }
+    Ok(Some(
+        output.stdout[..output.stdout.len() - 1]
+            .split(|byte| *byte == 0)
+            .next_back()
+            .unwrap_or_default()
+            .to_vec(),
+    ))
+}
+
+fn has_initialized_gitlink(
+    repository: &Path,
+    safety: &GitSafetyOverrides,
+    deadline: Instant,
+) -> Result<bool, GitRunError> {
+    let output = run_bounded_command_with_safety(
+        OsStr::new("git"),
+        repository,
+        &["ls-files", "--stage", "-z"],
+        safety,
+        remaining_until(deadline)?,
+        |_| {},
+    )?;
+    if !output.status.success || (!output.stdout.is_empty() && !output.stdout.ends_with(&[0])) {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git could not inspect tracked submodules",
+        )));
+    }
+    for record in output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
+        let Some(tab) = record.iter().position(|byte| *byte == b'\t') else {
+            return Err(GitRunError::Output(io::Error::other(
+                "Git returned malformed tracked entries",
+            )));
+        };
+        if !record[..tab].starts_with(b"160000 ") {
+            continue;
+        }
+        let path = PathBuf::from(os_string_from_bytes(&record[tab + 1..])?);
+        let worktree_path = repository.join(path);
+        if worktree_path.is_dir() && worktree_path.join(".git").exists() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn repository_state_token(
+    repository: &Path,
+    safety: &GitSafetyOverrides,
+    deadline: Instant,
+) -> Result<Vec<u8>, GitRunError> {
+    let index = resolve_git_path(repository, safety, "index", deadline)?;
+    let shared = run_bounded_command_with_safety(
+        OsStr::new("git"),
+        repository,
+        &["rev-parse", "--path-format=absolute", "--shared-index-path"],
+        safety,
+        remaining_until(deadline)?,
+        |_| {},
+    )?;
+    if !shared.status.success {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git could not resolve split-index storage",
+        )));
+    }
+    let mut hasher = Sha256::new();
+    hash_snapshot_file(&index, &mut hasher, false, deadline)?;
+    if let Some(shared) = repository_path(&shared.stdout) {
+        hash_snapshot_file(&shared, &mut hasher, true, deadline)?;
+    }
+    Ok(hasher.finalize().to_vec())
+}
+
+fn hash_snapshot_file(
+    path: &Path,
+    hasher: &mut Sha256,
+    required: bool,
+    deadline: Instant,
+) -> Result<(), GitRunError> {
+    hash_snapshot_file_with_before_open(path, hasher, required, deadline, || {})
+}
+
+fn hash_snapshot_file_with_before_open(
+    path: &Path,
+    hasher: &mut Sha256,
+    required: bool,
+    deadline: Instant,
+    before_open: impl FnOnce(),
+) -> Result<(), GitRunError> {
+    use std::io::Read as _;
+    remaining_until(deadline)?;
+    let before = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if !required && error.kind() == io::ErrorKind::NotFound => {
+            hasher.update(b"missing");
+            return Ok(());
+        }
+        Err(error) => return Err(GitRunError::Output(error)),
+    };
+    if !before.file_type().is_file() || before.len() > MAX_INDEX_BYTES {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git index snapshot is not a bounded regular file",
+        )));
+    }
+    before_open();
+    remaining_until(deadline)?;
+    let mut file = open_snapshot_file(path, &before, MAX_INDEX_BYTES)?;
+    let mut hashed = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        remaining_until(deadline)?;
+        let count = file.read(&mut buffer).map_err(GitRunError::Output)?;
+        if count == 0 {
+            break;
+        }
+        hashed = hashed
+            .checked_add(count as u64)
+            .ok_or(GitRunError::OutputTooLarge)?;
+        if hashed > MAX_INDEX_BYTES {
+            return Err(GitRunError::OutputTooLarge);
+        }
+        hasher.update(&buffer[..count]);
+    }
+    remaining_until(deadline)?;
+    let after = std::fs::symlink_metadata(path).map_err(GitRunError::Output)?;
+    if !after.file_type().is_file() || !same_snapshot_file(&before, &after) {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git index snapshot changed while it was hashed",
+        )));
+    }
+    Ok(())
+}
+
+fn run_shadow_diffs(
+    repository: &Path,
+    baseline: &str,
+    safety: &GitSafetyOverrides,
+    deadline: Instant,
+) -> Result<(GitOutput, GitOutput), GitRunError> {
+    run_shadow_diffs_with(repository, baseline, safety, deadline, || {})
+}
+
+fn run_shadow_diffs_with(
+    repository: &Path,
+    baseline: &str,
+    safety: &GitSafetyOverrides,
+    deadline: Instant,
+    before_diff: impl FnOnce(),
+) -> Result<(GitOutput, GitOutput), GitRunError> {
+    let index = resolve_git_path(repository, safety, "index", deadline)?;
+    let objects = resolve_git_path(repository, safety, "objects", deadline)?;
+    let attributes = resolve_git_path(repository, safety, "info/attributes", deadline)?;
+    let sparse_checkout = resolve_git_path(repository, safety, "info/sparse-checkout", deadline)?;
+    let shared_index_output = run_bounded_command_with_safety(
+        OsStr::new("git"),
+        repository,
+        &["rev-parse", "--path-format=absolute", "--shared-index-path"],
+        safety,
+        remaining_until(deadline)?,
+        |_| {},
+    )?;
+    if !shared_index_output.status.success {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git could not resolve split-index storage",
+        )));
+    }
+    let shared_index = repository_path(&shared_index_output.stdout);
+    let format = run_bounded_command_with_safety(
+        OsStr::new("git"),
+        repository,
+        &["rev-parse", "--show-object-format"],
+        safety,
+        remaining_until(deadline)?,
+        |_| {},
+    )?;
+    if !format.status.success {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git could not resolve the repository object format",
+        )));
+    }
+    let format = trimmed(&format.stdout);
+    if format != "sha1" && format != "sha256" {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git returned an unsupported repository object format",
+        )));
+    }
+    let shadow = tempfile::tempdir().map_err(GitRunError::Output)?;
+    std::fs::create_dir(shadow.path().join("objects")).map_err(GitRunError::Output)?;
+    std::fs::create_dir(shadow.path().join("refs")).map_err(GitRunError::Output)?;
+    std::fs::create_dir(shadow.path().join("info")).map_err(GitRunError::Output)?;
+    std::fs::write(
+        shadow.path().join("HEAD"),
+        "ref: refs/heads/relayer-shadow\n",
+    )
+    .map_err(GitRunError::Output)?;
+    let config = if format == "sha256" {
+        "[core]\n\trepositoryformatversion = 1\n\tbare = false\n[extensions]\n\tobjectFormat = sha256\n"
+    } else {
+        "[core]\n\trepositoryformatversion = 0\n\tbare = false\n"
+    };
+    std::fs::write(shadow.path().join("config"), config).map_err(GitRunError::Output)?;
+    copy_snapshot_file(
+        &index,
+        &shadow.path().join("index"),
+        MAX_INDEX_BYTES,
+        false,
+        deadline,
+    )?;
+    if let Some(shared_index) = shared_index {
+        let name = shared_index.file_name().ok_or_else(|| {
+            GitRunError::Output(io::Error::other("Git returned invalid split-index storage"))
+        })?;
+        copy_snapshot_file(
+            &shared_index,
+            &shadow.path().join(name),
+            MAX_INDEX_BYTES,
+            true,
+            deadline,
+        )?;
+    }
+    copy_snapshot_file(
+        &attributes,
+        &shadow.path().join("info/attributes"),
+        MAX_STDOUT_BYTES as u64,
+        false,
+        deadline,
+    )?;
+    copy_snapshot_file(
+        &sparse_checkout,
+        &shadow.path().join("info/sparse-checkout"),
+        MAX_STDOUT_BYTES as u64,
+        false,
+        deadline,
+    )?;
+    let mut shadow_safety = safety.clone();
+    if let Some((_, attributes_file)) =
+        shadow_safety.effective_config.iter_mut().find(|(key, _)| {
+            key.as_os_str()
+                .as_encoded_bytes()
+                .eq_ignore_ascii_case(b"core.attributesfile")
+        })
+        && !attributes_file.is_empty()
+    {
+        let source = PathBuf::from(&*attributes_file);
+        let destination = shadow.path().join("info/global-attributes");
+        copy_snapshot_file(
+            &source,
+            &destination,
+            MAX_STDOUT_BYTES as u64,
+            false,
+            deadline,
+        )?;
+        if destination.exists() {
+            *attributes_file = destination.into_os_string();
+        }
+    }
+    before_diff();
+    let staged = run_prepared_command(
+        shadow_diff_command(
+            repository,
+            shadow.path(),
+            &objects,
+            &shadow_safety,
+            &["--cached", baseline],
+        ),
+        remaining_until(deadline)?,
+    )?;
+    let worktree = run_prepared_command(
+        shadow_diff_command(repository, shadow.path(), &objects, &shadow_safety, &[]),
+        remaining_until(deadline)?,
+    )?;
+    Ok((staged, worktree))
+}
+
+fn shadow_diff_command(
+    repository: &Path,
+    shadow: &Path,
+    objects: &Path,
+    safety: &GitSafetyOverrides,
+    extra: &[&str],
+) -> Command {
+    let mut command = Command::new("git");
+    sanitize_git_environment(&mut command);
+    isolate_git_configuration(&mut command);
+    append_safety_arguments(&mut command, safety);
+    command
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("LC_ALL", "C")
+        .env("GIT_DIR", shadow)
+        .env("GIT_WORK_TREE", repository)
+        .env("GIT_INDEX_FILE", shadow.join("index"))
+        .env("GIT_OBJECT_DIRECTORY", objects)
+        .current_dir(repository)
+        .args([
+            "diff",
+            "--numstat",
+            "-z",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--ignore-submodules=dirty",
+        ])
+        .args(extra)
+        .arg("--")
+        .stdin(Stdio::null());
+    command
+}
+
+fn copy_snapshot_file(
+    source: &Path,
+    destination: &Path,
+    maximum: u64,
+    required: bool,
+    deadline: Instant,
+) -> Result<(), GitRunError> {
+    use std::io::{Read as _, Write as _};
+    remaining_until(deadline)?;
+    let before = match std::fs::symlink_metadata(source) {
+        Ok(metadata) => metadata,
+        Err(error) if !required && error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(GitRunError::Output(error)),
+    };
+    if !before.file_type().is_file() || before.len() > maximum {
+        return Err(if before.len() > maximum {
+            GitRunError::OutputTooLarge
+        } else {
+            GitRunError::Output(io::Error::other(
+                "Git snapshot storage is not a regular file",
+            ))
+        });
+    }
+    let mut input = open_snapshot_file(source, &before, maximum)?;
+    let mut output = std::fs::File::create(destination).map_err(GitRunError::Output)?;
+    let mut copied = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        remaining_until(deadline)?;
+        let count = input.read(&mut buffer).map_err(GitRunError::Output)?;
+        if count == 0 {
+            break;
+        }
+        copied = copied
+            .checked_add(count as u64)
+            .ok_or(GitRunError::OutputTooLarge)?;
+        if copied > maximum {
+            return Err(GitRunError::OutputTooLarge);
+        }
+        output
+            .write_all(&buffer[..count])
+            .map_err(GitRunError::Output)?;
+    }
+    output.flush().map_err(GitRunError::Output)?;
+    remaining_until(deadline)?;
+    let after = std::fs::symlink_metadata(source).map_err(GitRunError::Output)?;
+    if !after.file_type().is_file() || !same_snapshot_file(&before, &after) {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git snapshot storage changed while it was copied",
+        )));
+    }
+    Ok(())
+}
+
+fn open_snapshot_file(
+    path: &Path,
+    before: &std::fs::Metadata,
+    maximum: u64,
+) -> Result<std::fs::File, GitRunError> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        // O_NONBLOCK ensures a regular-file-to-FIFO swap cannot hang the
+        // inspection in open(2); the fstat check below then rejects the FIFO.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
+    }
+    let file = options.open(path).map_err(GitRunError::Output)?;
+    let opened = file.metadata().map_err(GitRunError::Output)?;
+    if !opened.is_file() || opened.len() > maximum || !same_snapshot_file(before, &opened) {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git snapshot storage changed before it was opened",
+        )));
+    }
+    Ok(file)
+}
+
+fn same_snapshot_file(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
+    if left.len() != right.len() || left.modified().ok() != right.modified().ok() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        left.dev() == right.dev() && left.ino() == right.ino()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        same_windows_snapshot_identity(
+            left.volume_serial_number(),
+            left.file_index(),
+            right.volume_serial_number(),
+            right.file_index(),
+        )
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        // Platforms without a stable filesystem identity API must fail closed.
+        false
+    }
+}
+
+#[cfg(any(windows, test))]
+fn same_windows_snapshot_identity(
+    left_volume: Option<u32>,
+    left_index: Option<u64>,
+    right_volume: Option<u32>,
+    right_index: Option<u64>,
+) -> bool {
+    matches!(
+        (left_volume, left_index, right_volume, right_index),
+        (Some(left_volume), Some(left_index), Some(right_volume), Some(right_index))
+            if left_volume == right_volume && left_index == right_index
+    )
+}
+
+fn resolve_git_path(
+    repository: &Path,
+    safety: &GitSafetyOverrides,
+    name: &str,
+    deadline: Instant,
+) -> Result<PathBuf, GitRunError> {
+    let output = run_bounded_command_with_safety(
+        OsStr::new("git"),
+        repository,
+        &["rev-parse", "--path-format=absolute", "--git-path", name],
+        safety,
+        remaining_until(deadline)?,
+        |_| {},
+    )?;
+    if !output.status.success {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git could not resolve repository storage",
+        )));
+    }
+    repository_path(&output.stdout).ok_or_else(|| {
+        GitRunError::Output(io::Error::other("Git returned invalid repository storage"))
+    })
+}
+
+fn remaining_until(deadline: Instant) -> Result<Duration, GitRunError> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or(GitRunError::Timeout(SNAPSHOT_TIMEOUT))
+}
+
+fn append_safety_arguments(command: &mut Command, safety: &GitSafetyOverrides) {
+    for directory in &safety.safe_directories {
+        let mut setting = OsString::from("safe.directory=");
+        setting.push(directory);
+        command.arg("-c").arg(setting);
+    }
+    for (key, value) in &safety.effective_config {
+        let mut setting = key.clone();
+        setting.push("=");
+        setting.push(value);
+        command.arg("-c").arg(setting);
+    }
 }
 
 fn validate_repository_identity(
@@ -1181,6 +1977,7 @@ fn canonical_git_dir(
     Ok(git_dir)
 }
 
+#[cfg(test)]
 fn read_local_filter_drivers(
     repository: &Path,
     safe_directories: &[OsString],
@@ -1227,6 +2024,7 @@ fn read_local_filter_drivers(
     })
 }
 
+#[cfg(test)]
 fn parse_local_filter_drivers(output: &[u8]) -> Option<Vec<OsString>> {
     if output.is_empty() {
         return Some(Vec::new());
@@ -1504,7 +2302,12 @@ fn sanitize_git_environment(command: &mut Command) {
     ] {
         command.env_remove(variable);
     }
-    command.env("GIT_ATTR_NOSYSTEM", "1");
+    command
+        .env("GIT_ATTR_NOSYSTEM", "1")
+        // Repository inspection must never hydrate missing objects. Besides making
+        // the snapshot non-deterministic, lazy fetching can invoke a configured
+        // transport helper while we are merely reading workspace state.
+        .env("GIT_NO_LAZY_FETCH", "1");
 }
 
 fn isolate_git_configuration(command: &mut Command) {
@@ -2805,7 +3608,7 @@ mod tests {
         let fixture = directory.path().join("git-environment-fixture");
         fs::write(
             &fixture,
-            "#!/bin/sh\nprintf '%s|%s|%s|%s|%s|%s|%s|%s|%s' \"${GIT_DIR-unset}\" \"${GIT_WORK_TREE-unset}\" \"${GIT_INDEX_FILE-unset}\" \"${GIT_CONFIG_PARAMETERS-unset}\" \"${GIT_CONFIG_COUNT-unset}\" \"${GIT_CONFIG_KEY_0-unset}\" \"${GIT_CONFIG_VALUE_0-unset}\" \"${GIT_TRACE-unset}\" \"${GIT_TRACE2_EVENT-unset}\"\n",
+            "#!/bin/sh\nprintf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s' \"${GIT_DIR-unset}\" \"${GIT_WORK_TREE-unset}\" \"${GIT_INDEX_FILE-unset}\" \"${GIT_CONFIG_PARAMETERS-unset}\" \"${GIT_CONFIG_COUNT-unset}\" \"${GIT_CONFIG_KEY_0-unset}\" \"${GIT_CONFIG_VALUE_0-unset}\" \"${GIT_TRACE-unset}\" \"${GIT_TRACE2_EVENT-unset}\" \"${GIT_NO_LAZY_FETCH-unset}\"\n",
         )
         .unwrap();
         let mut permissions = fs::metadata(&fixture).unwrap().permissions();
@@ -2834,11 +3637,12 @@ mod tests {
         assert!(output.status.success);
         assert_eq!(
             String::from_utf8(output.stdout).unwrap(),
-            "unset|unset|unset|unset|unset|unset|unset|unset|unset"
+            "unset|unset|unset|unset|unset|unset|unset|unset|unset|1"
         );
 
         let repository = directory.path().join("repository");
         fs::create_dir(&repository).unwrap();
+        let repository = fs::canonicalize(repository).unwrap();
         assert!(
             Command::new("git")
                 .args(["-C", repository.to_str().unwrap(), "init"])
@@ -3071,6 +3875,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let repository = directory.path().join("repository");
         fs::create_dir(&repository).unwrap();
+        let repository = fs::canonicalize(repository).unwrap();
         let initialized = Command::new("git")
             .arg("-C")
             .arg(&repository)
@@ -3403,11 +4208,7 @@ mod tests {
         fs::write(&local_excludes, "local.tmp\n").unwrap();
         run(&["config", "core.autocrlf", "false"]);
         run(&["config", "core.attributesFile", ""]);
-        run(&[
-            "config",
-            "core.excludesFile",
-            local_excludes.to_str().unwrap(),
-        ]);
+        run(&["config", "core.excludesFile", "local-ignore"]);
         fs::write(&included, "[core]\n\tautocrlf = input\n\tattributesFile = ~/global-attributes\n\texcludesFile = ~/global-ignore\n").unwrap();
         let local = read_effective_repository_config_test(&repository, |command| {
             command.env("HOME", &home);
@@ -3591,6 +4392,482 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    fn transforming_filter_fails_closed_without_executing_the_helper() {
+        use std::{fs, io::Write, os::unix::fs::PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("repository");
+        fs::create_dir(&repository).unwrap();
+        let repository = fs::canonicalize(repository).unwrap();
+        let run = |arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repository)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&["init", "--initial-branch=main"]);
+        run(&["config", "user.email", "relayer-test@example.invalid"]);
+        run(&["config", "user.name", "Relayer test"]);
+        let marker = directory.path().join("transform-filter-executed");
+        let helper = directory.path().join("transform-filter");
+        fs::write(
+            &helper,
+            format!(
+                "#!/bin/sh\ntouch '{}'\nsed 's/^PREFIX://'\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&helper).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&helper, permissions).unwrap();
+        fs::write(
+            repository.join(".gitattributes"),
+            "*.txt filter=transform\n",
+        )
+        .unwrap();
+        fs::write(repository.join("tracked.txt"), "PREFIX:value\n").unwrap();
+        run(&["config", "filter.transform.clean", helper.to_str().unwrap()]);
+        run(&["config", "filter.transform.required", "true"]);
+        run(&["add", "."]);
+        run(&["commit", "-m", "baseline"]);
+        fs::remove_file(&marker).unwrap();
+
+        for contents in ["PREFIX:value\n", "PREFIX:changed\n"] {
+            fs::write(repository.join("tracked.txt"), contents).unwrap();
+            let snapshot = inspect_with(
+                &repository,
+                "project",
+                &SystemGitRunner,
+                Instant::now() + SNAPSHOT_TIMEOUT,
+            );
+            assert_eq!(snapshot.kind, EnvironmentKind::Unavailable);
+            assert_eq!(
+                snapshot.unavailable_reason.unwrap().code,
+                "unsupported_filter"
+            );
+            assert!(
+                !marker.exists(),
+                "filter audit or shadow diff executed the transforming helper"
+            );
+        }
+        run(&["config", "--unset-all", "filter.transform.clean"]);
+        run(&["config", "filter.transform.required", "not-a-boolean"]);
+        let invalid_required = inspect_with(
+            &repository,
+            "project",
+            &SystemGitRunner,
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        );
+        assert_eq!(invalid_required.kind, EnvironmentKind::Unavailable);
+        assert_eq!(
+            invalid_required.unavailable_reason.unwrap().code,
+            "unsupported_filter"
+        );
+        run(&["config", "filter.transform.required", "false"]);
+        let mut config = fs::OpenOptions::new()
+            .append(true)
+            .open(repository.join(".git/config"))
+            .unwrap();
+        writeln!(config, "[filter \"transform\"]\n\tclean").unwrap();
+        drop(config);
+        let implicit_clean = inspect_with(
+            &repository,
+            "project",
+            &SystemGitRunner,
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        );
+        assert_eq!(implicit_clean.kind, EnvironmentKind::Unavailable);
+        assert_eq!(
+            implicit_clean.unavailable_reason.unwrap().code,
+            "unsupported_filter"
+        );
+    }
+
+    #[test]
+    fn shadow_worktree_diff_supports_sha256_split_indexes() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("repository");
+        std::fs::create_dir(&repository).unwrap();
+        let initialized = Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(["init", "--initial-branch=main", "--object-format=sha256"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        if !initialized.success() {
+            return;
+        }
+        let repository = std::fs::canonicalize(repository).unwrap();
+        let run = |arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repository)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&["config", "user.email", "relayer-test@example.invalid"]);
+        run(&["config", "user.name", "Relayer test"]);
+        std::fs::write(repository.join("tracked.txt"), "baseline\n").unwrap();
+        run(&["add", "tracked.txt"]);
+        run(&["commit", "-m", "baseline"]);
+        run(&["update-index", "--split-index"]);
+        std::fs::write(repository.join("tracked.txt"), "changed\n").unwrap();
+
+        let snapshot = inspect_with(
+            &repository,
+            "project",
+            &SystemGitRunner,
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        );
+        assert_eq!(snapshot.kind, EnvironmentKind::Git);
+        assert_eq!(snapshot.changes.tracked_files, 1);
+        assert_eq!(snapshot.changes.additions, 1);
+        assert_eq!(snapshot.changes.deletions, 1);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn shadow_diff_does_not_reread_filter_config_added_after_snapshot() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("repository");
+        fs::create_dir(&repository).unwrap();
+        let repository = fs::canonicalize(repository).unwrap();
+        let run = |arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repository)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&["init", "--initial-branch=main"]);
+        run(&["config", "user.email", "relayer-test@example.invalid"]);
+        run(&["config", "user.name", "Relayer test"]);
+        fs::write(repository.join("tracked.txt"), "baseline\n").unwrap();
+        run(&["add", "tracked.txt"]);
+        run(&["commit", "-m", "baseline"]);
+        fs::write(repository.join("tracked.txt"), "changed\n").unwrap();
+        let marker = directory.path().join("late-filter-executed");
+        let helper = directory.path().join("late-filter");
+        fs::write(
+            &helper,
+            format!("#!/bin/sh\ntouch '{}'\ncat\n", marker.display()),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&helper).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&helper, permissions).unwrap();
+
+        let baseline = Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let baseline = trimmed(&baseline.stdout);
+        let (_, output) = run_shadow_diffs_with(
+            &repository,
+            &baseline,
+            &GitSafetyOverrides::default(),
+            Instant::now() + SNAPSHOT_TIMEOUT,
+            || {
+                fs::write(repository.join(".gitattributes"), "*.txt filter=late\n").unwrap();
+                run(&["config", "filter.late.clean", helper.to_str().unwrap()]);
+                run(&["config", "filter.late.required", "true"]);
+            },
+        )
+        .unwrap();
+        assert!(output.status.success, "{}", trimmed(&output.stderr));
+        assert!(!output.stdout.is_empty());
+        assert!(
+            !marker.exists(),
+            "shadow diff reread filter configuration added after its snapshot"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn inspection_never_lazy_fetches_missing_objects_through_ext_transport() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("repository");
+        fs::create_dir(&repository).unwrap();
+        let repository = fs::canonicalize(repository).unwrap();
+        let run = |arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repository)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&["init", "--initial-branch=main"]);
+        run(&["config", "user.email", "relayer-test@example.invalid"]);
+        run(&["config", "user.name", "Relayer test"]);
+        fs::write(repository.join("tracked.txt"), "baseline\n").unwrap();
+        run(&["add", "tracked.txt"]);
+        run(&["commit", "-m", "baseline"]);
+
+        let baseline_blob = Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(["rev-parse", "HEAD:tracked.txt"])
+            .output()
+            .unwrap();
+        assert!(baseline_blob.status.success());
+        let baseline_blob = trimmed(&baseline_blob.stdout);
+        let object = repository
+            .join(".git/objects")
+            .join(&baseline_blob[..2])
+            .join(&baseline_blob[2..]);
+
+        fs::write(repository.join("tracked.txt"), "staged\n").unwrap();
+        run(&["add", "tracked.txt"]);
+        fs::remove_file(object).unwrap();
+
+        let marker = directory.path().join("ext-transport-executed");
+        let helper = directory.path().join("ext-transport");
+        fs::write(
+            &helper,
+            format!("#!/bin/sh\ntouch '{}'\nexit 1\n", marker.display()),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&helper).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&helper, permissions).unwrap();
+        run(&["config", "extensions.partialClone", "origin"]);
+        run(&["config", "remote.origin.promisor", "true"]);
+        run(&["config", "remote.origin.partialclonefilter", "blob:none"]);
+        run(&[
+            "config",
+            "remote.origin.url",
+            &format!("ext::{}", helper.display()),
+        ]);
+        run(&["config", "protocol.ext.allow", "always"]);
+
+        let snapshot = inspect_with(
+            &repository,
+            "project",
+            &SystemGitRunner,
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        );
+        assert_eq!(snapshot.kind, EnvironmentKind::Unavailable);
+        assert_eq!(snapshot.unavailable_reason.unwrap().code, "git_failed");
+        assert!(
+            !marker.exists(),
+            "repository inspection invoked a lazy-fetch transport helper"
+        );
+    }
+
+    #[test]
+    fn check_attr_chunks_respect_encoded_argument_budget() {
+        let budget = 24 * 1024;
+        let first = vec![b'a'; budget / 4 + 32];
+        let second = vec![b'b'; budget / 4 + 32];
+        let paths = vec![first.as_slice(), second.as_slice(), b"short".as_slice()];
+        assert_eq!(check_attr_chunk_end(&paths, 0, budget).unwrap(), 1);
+        assert_eq!(check_attr_chunk_end(&paths, 1, budget).unwrap(), 3);
+
+        let oversized = vec![b'x'; budget];
+        assert!(matches!(
+            check_attr_chunk_end(&[oversized.as_slice()], 0, budget),
+            Err(GitRunError::OutputTooLarge)
+        ));
+    }
+
+    #[test]
+    fn snapshot_copy_is_bounded_and_honors_its_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        let destination = directory.path().join("destination");
+        std::fs::write(&source, b"snapshot").unwrap();
+        copy_snapshot_file(
+            &source,
+            &destination,
+            8,
+            true,
+            Instant::now() + Duration::from_secs(1),
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(destination).unwrap(), b"snapshot");
+
+        assert!(matches!(
+            copy_snapshot_file(
+                &source,
+                &directory.path().join("oversized"),
+                7,
+                true,
+                Instant::now() + Duration::from_secs(1),
+            ),
+            Err(GitRunError::OutputTooLarge)
+        ));
+        assert!(matches!(
+            copy_snapshot_file(
+                &source,
+                &directory.path().join("expired"),
+                8,
+                true,
+                Instant::now(),
+            ),
+            Err(GitRunError::Timeout(_))
+        ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn snapshot_hash_rejects_a_fifo_swap_without_blocking() {
+        use std::{ffi::CString, os::unix::ffi::OsStrExt as _};
+
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("index");
+        std::fs::write(&source, b"snapshot").unwrap();
+        let started = Instant::now();
+        let mut hasher = Sha256::new();
+        let result = hash_snapshot_file_with_before_open(
+            &source,
+            &mut hasher,
+            true,
+            Instant::now() + Duration::from_millis(500),
+            || {
+                std::fs::remove_file(&source).unwrap();
+                let source = CString::new(source.as_os_str().as_bytes()).unwrap();
+                // SAFETY: source is a live NUL-terminated pathname and mkfifo does
+                // not retain the pointer.
+                assert_eq!(unsafe { libc::mkfifo(source.as_ptr(), 0o600) }, 0);
+            },
+        );
+        assert!(matches!(result, Err(GitRunError::Output(_))));
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "opening a swapped FIFO blocked past the snapshot deadline"
+        );
+    }
+
+    #[test]
+    fn windows_snapshot_identity_requires_matching_volume_and_file_index() {
+        assert!(same_windows_snapshot_identity(
+            Some(7),
+            Some(42),
+            Some(7),
+            Some(42)
+        ));
+        assert!(!same_windows_snapshot_identity(
+            Some(7),
+            Some(42),
+            Some(8),
+            Some(42)
+        ));
+        assert!(!same_windows_snapshot_identity(
+            Some(7),
+            Some(42),
+            Some(7),
+            Some(43)
+        ));
+        assert!(!same_windows_snapshot_identity(
+            Some(7),
+            Some(42),
+            None,
+            Some(42)
+        ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn initialized_gitlink_fails_closed_before_submodule_helpers_can_run() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        let repository = directory.path().join("repository");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&repository).unwrap();
+        let run = |path: &Path, arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        for path in [&source, &repository] {
+            run(path, &["init", "--initial-branch=main"]);
+            run(
+                path,
+                &["config", "user.email", "relayer-test@example.invalid"],
+            );
+            run(path, &["config", "user.name", "Relayer test"]);
+        }
+        fs::write(source.join("tracked.txt"), "baseline\n").unwrap();
+        run(&source, &["add", "tracked.txt"]);
+        run(&source, &["commit", "-m", "baseline"]);
+        run(
+            &repository,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                source.to_str().unwrap(),
+                "sub",
+            ],
+        );
+        run(&repository, &["commit", "-am", "submodule"]);
+        let marker = directory.path().join("submodule-helper-executed");
+        let helper = directory.path().join("submodule-helper");
+        fs::write(
+            &helper,
+            format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&helper).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&helper, permissions).unwrap();
+        run(
+            &repository.join("sub"),
+            &["config", "core.fsmonitor", helper.to_str().unwrap()],
+        );
+        fs::write(repository.join("sub/tracked.txt"), "changed\n").unwrap();
+        let repository = fs::canonicalize(repository).unwrap();
+        let snapshot = inspect_with(
+            &repository,
+            "project",
+            &SystemGitRunner,
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        );
+        assert_eq!(snapshot.kind, EnvironmentKind::Unavailable);
+        assert_eq!(
+            snapshot.unavailable_reason.unwrap().code,
+            "unsupported_submodule"
+        );
+        assert!(!marker.exists(), "inspection executed a submodule helper");
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn unrepresentable_local_filter_driver_fails_closed_before_diff() {
         use std::{fs, os::unix::fs::PermissionsExt};
 
@@ -3663,7 +4940,7 @@ mod tests {
         assert_eq!(snapshot.kind, EnvironmentKind::Unavailable);
         assert_eq!(
             snapshot.unavailable_reason.unwrap().code,
-            "git_output_failed"
+            "unsupported_filter"
         );
         assert!(
             !marker.exists(),
