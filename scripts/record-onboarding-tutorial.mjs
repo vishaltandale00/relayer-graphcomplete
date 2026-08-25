@@ -26,6 +26,8 @@ import { createWindowFactory } from "../desktop/main/window.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const liveInference = process.env.RELAYER_TUTORIAL_LIVE_INFERENCE === "1";
+const requestedWindowWidth = Number.parseInt(process.env.RELAYER_TUTORIAL_WINDOW_WIDTH || "1420", 10);
+const requestedWindowHeight = Number.parseInt(process.env.RELAYER_TUTORIAL_WINDOW_HEIGHT || "900", 10);
 const outputPath = resolve(
   process.env.RELAYER_TUTORIAL_VIDEO
     || join(
@@ -249,7 +251,7 @@ async function coachmark(webContents, heading) {
     return {
       text: mark.textContent,
       targetId: target?.id || null,
-      targetNode: target?.dataset?.node || null,
+      targetNode: target?.closest?.("[data-node]")?.dataset?.node || target?.dataset?.node || null,
       targetAction: target?.dataset?.actionId || null,
       targetClass: target?.className || null,
     };
@@ -437,10 +439,10 @@ async function run() {
   mainWindow = await createWindow(productSession);
   const workArea = screen.getDisplayMatching(mainWindow.getBounds()).workArea;
   mainWindow.setBounds({
-    x: workArea.x + Math.max(0, Math.floor((workArea.width - 1420) / 2)),
-    y: workArea.y + Math.max(0, Math.floor((workArea.height - 900) / 2)),
-    width: Math.min(1420, workArea.width),
-    height: Math.min(900, workArea.height),
+    x: workArea.x + Math.max(0, Math.floor((workArea.width - requestedWindowWidth) / 2)),
+    y: workArea.y + Math.max(0, Math.floor((workArea.height - requestedWindowHeight) / 2)),
+    width: Math.min(requestedWindowWidth, workArea.width),
+    height: Math.min(requestedWindowHeight, workArea.height),
   });
   mainWindow.setAlwaysOnTop(true);
   mainWindow.show();
@@ -493,7 +495,7 @@ async function run() {
   await pause(1_000);
   await click(webContents, ".action-control.tutorial-target");
   const followupMark = await coachmark(webContents, "Ask a follow-up");
-  if (followupMark.targetId !== "threadComposer") {
+  if (followupMark.targetId !== "threadPrompt") {
     throw new Error(`Unexpected follow-up target: ${JSON.stringify(followupMark)}`);
   }
   const emptyFollowup = await webContents.executeJavaScript(`document.querySelector("#threadPrompt")?.value`);
@@ -536,6 +538,7 @@ async function run() {
     completionStatus: initialInteraction.completionStatus,
     tutorialStatusAfterReplay: settingsState.tutorial?.status,
     frameCount,
+    windowSize: mainWindow.getContentBounds(),
     outputPath,
   };
   process.stdout.write(`RELAYER_TUTORIAL_VIDEO ${JSON.stringify(result)}\n`);

@@ -42,12 +42,44 @@ function escapeSelector(value) {
     : string.replace(/["\\]/g, "\\$&");
 }
 
+function clamp(value, minimum, maximum) {
+  return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
+}
+
+export function coachmarkViewportPosition(targetRect, coachRect, {
+  viewportWidth,
+  viewportHeight,
+  margin = 10,
+}) {
+  const below = targetRect.bottom + margin;
+  const above = targetRect.top - coachRect.height - margin;
+  const roomBelow = viewportHeight - margin - targetRect.bottom;
+  const roomAbove = targetRect.top - margin;
+  let preferredTop = below;
+  if (roomBelow < coachRect.height
+    && (roomAbove >= coachRect.height || roomAbove >= roomBelow)) {
+    preferredTop = above;
+  }
+  const centered = targetRect.left + targetRect.width / 2 - coachRect.width / 2;
+
+  return {
+    left: clamp(centered, margin, viewportWidth - coachRect.width - margin),
+    top: clamp(preferredTop, margin, viewportHeight - coachRect.height - margin),
+  };
+}
+
 function tutorialAnchorSelector(state) {
   if (state.phase === "initial-composer") return ".new-composer";
   if (state.phase === "select-node") return `[data-node="${escapeSelector(state.target.nodeId)}"]`;
   if (state.phase === "use-action") return `[data-action-id="${escapeSelector(state.target.actionId)}"]`;
   if (state.phase === "write-follow-up" || state.phase === "complete") return "#threadComposer";
   return null;
+}
+
+function tutorialHighlightSelector(state) {
+  if (state.phase === "write-follow-up") return "#threadPrompt";
+  if (state.phase === "complete") return null;
+  return tutorialAnchorSelector(state);
 }
 
 function invokedActionIds(appState, interactionId) {
@@ -116,28 +148,21 @@ export function createOnboardingTutorialController({
   function positionCoachmark() {
     positionFrame = null;
     if (!active || !coachmark || !tutorial) return;
-    const selector = tutorialAnchorSelector(tutorial);
-    const target = selector ? tutorialDocument.querySelector(selector) : null;
-    linkTarget(target);
-    if (!target || !target.isConnected) {
+    const anchorSelector = tutorialAnchorSelector(tutorial);
+    const highlightSelector = tutorialHighlightSelector(tutorial);
+    const anchor = anchorSelector ? tutorialDocument.querySelector(anchorSelector) : null;
+    const highlight = highlightSelector ? tutorialDocument.querySelector(highlightSelector) : null;
+    linkTarget(highlight);
+    if (!anchor || !anchor.isConnected) {
       coachmark.hidden = true;
     } else {
       coachmark.hidden = false;
-      const targetRect = target.getBoundingClientRect();
+      const targetRect = anchor.getBoundingClientRect();
       const coachRect = coachmark.getBoundingClientRect();
-      const margin = 10;
-      const viewportWidth = tutorialWindow.innerWidth;
-      const viewportHeight = tutorialWindow.innerHeight;
-      const below = targetRect.bottom + margin;
-      const above = targetRect.top - coachRect.height - margin;
-      const top = below + coachRect.height <= viewportHeight - margin
-        ? below
-        : Math.max(margin, above);
-      const centered = targetRect.left + targetRect.width / 2 - coachRect.width / 2;
-      const left = Math.min(
-        Math.max(margin, centered),
-        Math.max(margin, viewportWidth - coachRect.width - margin),
-      );
+      const { left, top } = coachmarkViewportPosition(targetRect, coachRect, {
+        viewportWidth: tutorialWindow.innerWidth,
+        viewportHeight: tutorialWindow.innerHeight,
+      });
       coachmark.style.left = `${Math.round(left)}px`;
       coachmark.style.top = `${Math.round(top)}px`;
     }
@@ -159,6 +184,7 @@ export function createOnboardingTutorialController({
     coachmark.setAttribute("aria-label", "Tutorial");
     coachmark.innerHTML = `
       <div id="onboardingTutorialCopy" role="status" aria-live="polite">
+        <div class="tutorial-eyebrow">Tutorial</div>
         <h2></h2>
         <p></p>
       </div>
@@ -214,6 +240,7 @@ export function createOnboardingTutorialController({
     paragraph.textContent = copy.body;
     paragraph.classList.toggle("hidden", !copy.body);
     const complete = tutorial.phase === "complete";
+    element.classList.toggle("tutorial-complete", complete);
     element.querySelector(".tutorial-skip").classList.toggle("hidden", complete);
     const done = element.querySelector(".tutorial-done");
     done.classList.toggle("hidden", !complete);

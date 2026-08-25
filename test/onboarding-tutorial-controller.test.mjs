@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  coachmarkViewportPosition,
   createOnboardingTutorialController,
 } from "../desktop/renderer/src/onboarding-tutorial.js";
 
@@ -221,6 +222,20 @@ function acceptedInteraction({ actions, interactionId = 11, threadId = 7 }) {
 }
 
 describe("onboarding tutorial controller", () => {
+  it.each([
+    ["below when it fits", { left: 100, top: 100, width: 80, height: 40 }, { left: 10, top: 150 }],
+    ["above near the bottom", { left: 100, top: 720, width: 80, height: 40 }, { left: 10, top: 610 }],
+    ["inside the viewport for a target below it", { left: 100, top: 850, width: 80, height: 40 }, { left: 10, top: 690 }],
+    ["inside the viewport for a target above it", { left: 100, top: -80, width: 80, height: 40 }, { left: 10, top: 10 }],
+    ["inside the viewport for a target to its right", { left: 1250, top: 100, width: 80, height: 40 }, { left: 910, top: 150 }],
+  ])("positions the coachmark %s", (_label, targetRect, expected) => {
+    expect(coachmarkViewportPosition(
+      { ...targetRect, right: targetRect.left + targetRect.width, bottom: targetRect.top + targetRect.height },
+      { left: 0, top: 0, width: 280, height: 100, right: 280, bottom: 100 },
+      { viewportWidth: 1200, viewportHeight: 800 },
+    )).toEqual(expected);
+  });
+
   it("starts automatically only when eligible and manually from the ordinary composer", async () => {
     const test = fixture();
     test.lifecycle.read.mockResolvedValueOnce({ automaticEligible: false, status: "never-shown" });
@@ -307,7 +322,9 @@ describe("onboarding tutorial controller", () => {
     expect(test.controller.snapshot().phase).toBe("use-action");
     test.controller.actionSucceeded({ threadId: 7, interactionId: 11, actionId: 41 });
     const composer = new FakeElement();
+    const prompt = new FakeElement();
     test.anchors.set("#threadComposer", composer);
+    test.anchors.set("#threadPrompt", prompt);
     test.window.runNextFrame();
     expect(test.controller.snapshot().phase).toBe("write-follow-up");
     expect(coachmark(test).querySelector("h2").textContent).toBe("Ask a follow-up");
@@ -323,6 +340,7 @@ describe("onboarding tutorial controller", () => {
     expect(coachmark(test).querySelector("p").classList.contains("hidden")).toBe(true);
     expect(coachmark(test).querySelector(".tutorial-skip").classList.contains("hidden")).toBe(true);
     expect(coachmark(test).querySelector(".tutorial-done").classList.contains("hidden")).toBe(false);
+    expect(prompt.classList.contains("tutorial-target")).toBe(false);
   });
 
   it("transitions an invoke before its result interaction becomes visible", async () => {
@@ -433,6 +451,26 @@ describe("onboarding tutorial controller", () => {
 
     expect(test.controller.snapshot().phase).toBe("select-node");
     expect(test.window.pendingFrames()).toBe(0);
+  });
+
+  it("keeps the select-node coachmark visible while highlighting an offscreen target", async () => {
+    const test = fixture();
+    await startAndCreateThread(test);
+    const node = new FakeElement({
+      rect: { left: 1150, top: 850, width: 100, height: 40 },
+    });
+    test.anchors.set('[data-node="31"]', node);
+    test.appState.interactions = [acceptedInteraction({
+      actions: [{ id: 41, kind: "navigate", sourceNodeId: 31, targetLayerId: 22 }],
+    })];
+
+    test.controller.syncWorkspace();
+
+    const coach = coachmark(test);
+    expect(coach.style.left).toBe("910px");
+    expect(coach.style.top).toBe("690px");
+    expect(node.classList.contains("tutorial-target")).toBe(true);
+    expect(node.getAttribute("aria-describedby")).toBe("onboardingTutorialCopy");
   });
 
   it("maintains coach copy, ARIA linkage, anchor churn, and cleanup", async () => {
