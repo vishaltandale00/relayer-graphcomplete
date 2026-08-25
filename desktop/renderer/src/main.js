@@ -22,6 +22,8 @@ import {
   loadThread,
   navigateHistory,
   refreshState,
+  refreshCurrentEnvironment,
+  stopEnvironmentRefresh,
   updateCreateThreadAvailability,
 } from "./threads.js";
 import { bindComposerKeydown } from "./product-workspace/workspace.js";
@@ -260,6 +262,10 @@ async function boot() {
   if (evalReview) viewState.evalContext = await evalReview.context();
   applyPlatformCopy();
   bindEvents();
+  window.addEventListener("focus", () => {
+    void refreshCurrentEnvironment({ force: true, minimumAgeMs: 1_000 }).catch(() => {});
+  });
+  window.addEventListener("pagehide", stopEnvironmentRefresh, { once: true });
   desktop?.account.onChanged(() => {
     void (async () => {
       const account = await refreshAccount();

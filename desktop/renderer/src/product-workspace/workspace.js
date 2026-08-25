@@ -3,8 +3,6 @@ import { actionCanRetry, actionWasInvoked } from "../action-invocation-state.js"
 import { setControlActivationCompletion } from "../control-activation.js";
 import {
   createModelPicker,
-  interactionModelSelection,
-  modelSelectionLabels,
   selectionForNextInteraction,
 } from "../model-picker.js";
 import { pickerSelectionPayload } from "../model-picker-model.js";
@@ -156,11 +154,24 @@ export function graphCameraViewKey(state, thread, responseNodes) {
 }
 
 export function shouldFitInspectorOpen(previousOpen, nextOpen, viewportWidth) {
-  return previousOpen === false && nextOpen === true && viewportWidth > 760;
+  return false;
 }
 
 export function shouldFitInspectorDock(previousOverlay, nextOverlay, inspectorOpen) {
-  return inspectorOpen && previousOverlay && !nextOverlay;
+  return false;
+}
+
+export function shouldRevealStackedInspector(viewportWidth, userInitiated = true) {
+  return userInitiated && viewportWidth > 0 && viewportWidth <= 1100;
+}
+
+export function inspectorFocusRestorationTarget(
+  origin,
+  graph,
+  fallbacks = [],
+  isAvailable = (candidate) => candidate != null,
+) {
+  return [origin, graph, ...fallbacks].find((candidate) => isAvailable(candidate)) ?? null;
 }
 
 export function shouldActivateGraphNodeAfterPointerGesture(moved) {
@@ -222,6 +233,119 @@ export function turnStatusPresentation(status) {
   if (status === "cancelled") return { kind: "cancelled", label: "Cancelled" };
   if (status === "stopped") return { kind: "stopped", label: "Stopped" };
   return { kind: "unknown", label: status ? String(status).replaceAll("_", " ") : "Unknown" };
+}
+
+export function environmentPresentation(environment, project) {
+  if (!project?.id) {
+    return { mode: "message", message: "No project folder", busy: false };
+  }
+  if (!environment || String(environment.projectId) !== String(project.id)) {
+    return { mode: "loading", message: "Loading project context…", busy: true };
+  }
+  if (environment.status === "loading" && !environment.snapshot) {
+    return { mode: "loading", message: "Loading project context…", busy: true };
+  }
+  if (environment.status === "error" && !environment.snapshot) {
+    return {
+      mode: "message",
+      message: environment.error || "Project context is temporarily unavailable.",
+      busy: false,
+    };
+  }
+  const snapshot = environment.snapshot;
+  if (!snapshot) {
+    return { mode: "message", message: "Project context is unavailable.", busy: false };
+  }
+  const worktreeLabel = snapshot.worktreeLabel || project.name || "Project folder";
+  const stale = environment.status === "error";
+  const staleMessage = stale
+    ? environment.error || "Refresh failed. Showing the last local snapshot."
+    : null;
+  if (snapshot.kind === "folder") {
+    return {
+      mode: "facts",
+      kind: "folder",
+      worktreeLabel,
+      message: "Not a Git repository",
+      observedAt: snapshot.observedAt,
+      stale,
+      staleMessage,
+      busy: false,
+    };
+  }
+  if (snapshot.kind === "unavailable") {
+    return {
+      mode: "facts",
+      kind: "unavailable",
+      worktreeLabel,
+      message: snapshot.unavailableReason?.message || "Project context is temporarily unavailable.",
+      observedAt: snapshot.observedAt,
+      stale,
+      staleMessage,
+      busy: false,
+    };
+  }
+  const changes = snapshot.changes || {};
+  return {
+    mode: "facts",
+    kind: "git",
+    worktreeLabel,
+    branch: snapshot.detached ? "Detached HEAD" : (snapshot.branch || "Branch unavailable"),
+    additions: Number.isFinite(changes.additions) ? changes.additions : 0,
+    deletions: Number.isFinite(changes.deletions) ? changes.deletions : 0,
+    trackedFiles: Number.isFinite(changes.trackedFiles) ? changes.trackedFiles : 0,
+    untrackedFiles: Number.isFinite(changes.untrackedFiles) ? changes.untrackedFiles : 0,
+    observedAt: snapshot.observedAt,
+    busy: environment.status === "loading",
+    stale,
+    staleMessage,
+  };
+}
+
+export function trackedChangesLabel({ additions = 0, deletions = 0, trackedFiles = 0 }) {
+  if (additions !== 0 || deletions !== 0 || trackedFiles <= 0) return "";
+  return `· ${trackedFiles} tracked ${trackedFiles === 1 ? "file" : "files"}`;
+}
+
+export function untrackedFilesLabel(count = 0) {
+  return `${count} ${count === 1 ? "file" : "files"}`;
+}
+
+export function interactionStatusRenderKey(interaction, fallbackStatus = "idle") {
+  return `${interaction?.id ?? "none"}:${interaction?.completionStatus || fallbackStatus}`;
+}
+
+export function inspectorEscapeShouldClose({
+  key,
+  settingsMenuOpen,
+  turnPopoverOpen,
+  modelPickerOpen,
+  approvalOwnsFocus,
+  annotationRatingExpanded = false,
+  inspectorOpen,
+}) {
+  return key === "Escape"
+    && !settingsMenuOpen
+    && !turnPopoverOpen
+    && !modelPickerOpen
+    && !approvalOwnsFocus
+    && !annotationRatingExpanded
+    && inspectorOpen;
+}
+
+export function workspaceBreadcrumbShouldRender(items = []) {
+  const [onlyItem] = items;
+  return items.length > 0 && !(
+    items.length === 1
+    && onlyItem.kind === "layer"
+    && onlyItem.label === "Response"
+    && onlyItem.pathIndex === 0
+    && onlyItem.actionId == null
+  );
+}
+
+export function workspaceRootAnnotationShouldRender(items = [], annotationEnabled = false) {
+  return annotationEnabled && items.length === 1 && !workspaceBreadcrumbShouldRender(items);
 }
 
 export function turnSelectionIntent(turns, currentInteractionId, targetInteractionId) {
@@ -428,6 +552,7 @@ export function createProductWorkspace({
   let turnPopoverOpen = false;
   let settingsMenuOpen = false;
   let exportPending = false;
+  let renderedInteractionStatusKey = null;
   const approvalSelections = new Map();
   const approvalErrors = new Map();
   const approvalDecisionsInFlight = new Set();
@@ -442,6 +567,7 @@ export function createProductWorkspace({
   let renderedThreadId = null;
   let annotationRatingTouched = false;
   let editingAnnotation = null;
+  let inspectorFocusOrigin = null;
 
   const $ = (selector) => root.querySelector(selector);
   const $$ = (selector) => [...root.querySelectorAll(selector)];
@@ -513,6 +639,8 @@ export function createProductWorkspace({
   };
   const closeSettingsMenuOnEscape = (event) => {
     if (event.key !== "Escape" || !settingsMenuOpen) return;
+    event.preventDefault?.();
+    event.stopImmediatePropagation?.();
     closeSettingsMenu({ restoreFocus: true });
   };
   graphDocument.addEventListener("pointerdown", closeSettingsMenuFromOutside, true);
@@ -558,7 +686,33 @@ export function createProductWorkspace({
     if (shouldFit) scheduleInspectorFit();
   };
   narrowInspectorMedia?.addEventListener?.("change", handleInspectorLayoutChange);
-  $("#closeInspector").onclick = () => {
+  const inspectorFocusTargetIsAvailable = (element) => {
+    if (!element?.isConnected || typeof element.focus !== "function" || element.disabled) return false;
+    if (element.classList?.contains("hidden") || element.closest?.(".hidden,[hidden],[aria-hidden='true']")) {
+      return false;
+    }
+    const style = graphWindow?.getComputedStyle?.(element);
+    return style?.display !== "none" && style?.visibility !== "hidden";
+  };
+  const openInspector = ({ userInitiated = true, origin = null } = {}) => {
+    if (userInitiated) inspectorFocusOrigin = origin;
+    const inspector = $("#inspector");
+    const wasOpen = !inspector.classList.contains("hidden");
+    inspectorUsesOverlay = narrowInspectorMedia?.matches
+      ?? (graphWindow?.innerWidth ?? 0) <= 760;
+    inspector.classList.remove("hidden");
+    const viewportWidth = graphWindow?.innerWidth ?? 0;
+    if (shouldFitInspectorOpen(wasOpen, true, viewportWidth)) scheduleInspectorFit();
+    return {
+      inspector,
+      reveal: () => {
+        if (shouldRevealStackedInspector(viewportWidth, userInitiated)) {
+          inspector.scrollIntoView({ block: "start" });
+        }
+      },
+    };
+  };
+  const closeInspector = ({ restoreFocus = true } = {}) => {
     cancelInspectorFit();
     selection.selectedNodeId = null;
     annotationSubject = null;
@@ -568,7 +722,32 @@ export function createProductWorkspace({
     $("#inspector").classList.add("hidden");
     $$('[data-node]').forEach((element) => element.classList.remove("selected"));
     renderBreadcrumb();
+    const focusTarget = restoreFocus
+      ? inspectorFocusRestorationTarget(
+        inspectorFocusOrigin,
+        graphStage,
+        [$("#threadAnnotationBadge"), $("#turnAnnotationBadge"), settingsButton],
+        inspectorFocusTargetIsAvailable,
+      )
+      : null;
+    inspectorFocusOrigin = null;
+    focusTarget?.focus({ preventScroll: true });
   };
+  $("#closeInspector").onclick = () => closeInspector();
+  const closeInspectorOnEscape = (event) => {
+    if (!inspectorEscapeShouldClose({
+      key: event.key,
+      settingsMenuOpen,
+      turnPopoverOpen,
+      modelPickerOpen: !$("[data-model-picker-popover]")?.classList.contains("hidden"),
+      approvalOwnsFocus: approvalDock.contains(graphDocument.activeElement),
+      annotationRatingExpanded: $("#annotationRating")?.classList.contains("expanded"),
+      inspectorOpen: !$("#inspector").classList.contains("hidden"),
+    })) return;
+    event.preventDefault();
+    closeInspector();
+  };
+  graphDocument.addEventListener("keydown", closeInspectorOnEscape, true);
   const navigateHistory = async (direction) => {
     const history = getNavigationHistory() || {};
     const presentation = historyNavigationPresentation(history);
@@ -813,7 +992,11 @@ export function createProductWorkspace({
     $("#annotationList").classList.toggle("empty", !rows.length);
   }
 
-  function openAnnotationSubject(state, anchor, { title, kind, icon = "annotation" } = {}) {
+  function openAnnotationSubject(
+    state,
+    anchor,
+    { title, kind, icon = "annotation", origin = null } = {},
+  ) {
     const threadId = getThread()?.id;
     const subjectChanged = annotationSubjectContextChanged(
       annotationThreadId,
@@ -826,7 +1009,7 @@ export function createProductWorkspace({
     annotationSubject = { anchor, title, kind };
     selection.selectedNodeId = anchor.kind === "node" ? anchor.nodeId : null;
     onSelectionChange(selection.selectedNodeId);
-    $("#inspector").classList.remove("hidden");
+    const { reveal } = openInspector({ origin });
     $("#detailIcon").textContent = icon === "annotation" ? "✎" : icon;
     $("#detailKind").textContent = kind || anchor.kind;
     $("#detailTitle").textContent = title || `${anchor.kind} comments`;
@@ -835,13 +1018,22 @@ export function createProductWorkspace({
     $("#detailActions").replaceChildren();
     $$('[data-node]').forEach((element) => element.classList.remove("selected"));
     renderAnnotationList();
+    reveal();
   }
 
-  $("#threadAnnotationBadge").onclick = () => openAnnotationSubject(
-    getState(), subjectAnchor("thread"), { title: getThread()?.title, kind: "THREAD" },
+  $("#threadAnnotationBadge").onclick = (event) => openAnnotationSubject(
+    getState(), subjectAnchor("thread"), {
+      title: getThread()?.title,
+      kind: "THREAD",
+      origin: event.currentTarget,
+    },
   );
-  $("#turnAnnotationBadge").onclick = () => openAnnotationSubject(
-    getState(), subjectAnchor("turn"), { title: "Turn comments", kind: "TURN" },
+  $("#turnAnnotationBadge").onclick = (event) => openAnnotationSubject(
+    getState(), subjectAnchor("turn"), {
+      title: "Turn comments",
+      kind: "TURN",
+      origin: event.currentTarget,
+    },
   );
   $("#annotationComposer").onsubmit = async (event) => {
     event.preventDefault();
@@ -1274,14 +1466,19 @@ export function createProductWorkspace({
     const permissionLabel = permissionProfile?.label || thread.permissionProfileId;
     const harnessId = thread.harnessId ?? thread.harnessConfigurationName;
     const harness = state.modelSettings?.harnesses?.find((item) => item.id === harnessId);
-    $("#threadScope").textContent = `${project?.name || "No folder"} · ${permissionLabel} · ${harness?.label ?? harnessId}`;
+    const threadScope = `${project?.name || "No folder"} · ${permissionLabel} · ${harness?.label ?? harnessId}`;
+    $("#threadScope").textContent = threadScope;
+    $("#threadTitle").title = threadScope;
+    renderEnvironment(state.environment, project);
     const interaction = interactionForThread(state, thread);
     updateCountBadge($("#threadAnnotationBadge"), subjectAnchor("thread", {}, state, thread));
     updateCountBadge($("#turnAnnotationBadge"), subjectAnchor("turn", {}, state, thread));
-    $("#interactionText").textContent = interaction?.text
+    const interactionText = interaction?.text
       || interaction?.summary
       || interaction?.content
       || thread.title;
+    $("#interactionText").textContent = interactionText;
+    $("#interactionText").title = interactionText;
     renderTurnNavigation(state, thread, interaction);
     const turns = (state.interactions || []).filter((item) => String(item.threadId) === String(thread.id));
     const latestInteraction = turns.at(-1);
@@ -1307,17 +1504,7 @@ export function createProductWorkspace({
       });
       pickerInheritanceKey = inheritanceKey;
     }
-    const interactionSelection = interactionModelSelection(interaction);
-    const identityLabels = interactionSelection
-      ? modelSelectionLabels(state.modelSettings, { harnessId, ...interactionSelection })
-      : null;
-    const identity = $("#interactionModelIdentity");
-    identity.textContent = identityLabels ? ` · ${identityLabels.compact}` : "";
-    identity.title = identityLabels
-      ? `${identityLabels.provider}: ${identityLabels.model}`
-      : "";
-    identity.classList.toggle("hidden", !identityLabels);
-    renderInteractionState(state, Boolean(restoredDraft));
+    renderInteractionState(state, interaction, Boolean(restoredDraft));
     renderApprovalDock(state, thread);
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
@@ -1334,38 +1521,48 @@ export function createProductWorkspace({
   function renderBreadcrumb(state = getState(), thread = getThread()) {
     const breadcrumb = $("#workspaceBreadcrumb");
     const items = workspaceBreadcrumbItems(state, thread, selection);
+    const visible = workspaceBreadcrumbShouldRender(items);
+    const rootAnnotationOnly = workspaceRootAnnotationShouldRender(items, annotationEnabled);
+    breadcrumb.classList.toggle("hidden", !visible && !rootAnnotationOnly);
+    breadcrumb.classList.toggle("root-annotation-only", rootAnnotationOnly);
+    if (!visible && !rootAnnotationOnly) {
+      breadcrumb.replaceChildren();
+      return;
+    }
     const children = [];
     items.forEach((item, index) => {
-      if (index > 0) {
+      if (visible && index > 0) {
         const separator = graphDocument.createElement("span");
         separator.className = "breadcrumb-separator";
         separator.setAttribute("aria-hidden", "true");
         separator.textContent = "/";
         children.push(separator);
       }
-      const segment = graphDocument.createElement(item.interactive ? "button" : "span");
-      segment.className = `breadcrumb-segment breadcrumb-${item.kind}`;
-      segment.append(createRelayerIcon(item.icon, { class: "breadcrumb-icon" }));
-      const label = graphDocument.createElement("span");
-      label.className = "breadcrumb-label";
-      label.textContent = item.label;
-      segment.append(label);
-      segment.title = item.description
-        ? `${item.label}: ${item.description}`
-        : item.label;
-      if (item.current) segment.setAttribute("aria-current", "location");
-      if (item.interactive) {
-        segment.type = "button";
-        segment.setAttribute("aria-label", `Go to ${item.label}`);
-        segment.dataset.reviewRef = `breadcrumb-${item.key}`;
-        segment.dataset.reviewKind = "layer-navigation";
-        segment.dataset.reviewPathIndex = String(item.pathIndex);
-        segment.onclick = () => onNavigateLayer(item.layerId, {
-          restore: true,
-          pathIndex: item.pathIndex,
-        });
+      if (visible) {
+        const segment = graphDocument.createElement(item.interactive ? "button" : "span");
+        segment.className = `breadcrumb-segment breadcrumb-${item.kind}`;
+        segment.append(createRelayerIcon(item.icon, { class: "breadcrumb-icon" }));
+        const label = graphDocument.createElement("span");
+        label.className = "breadcrumb-label";
+        label.textContent = item.label;
+        segment.append(label);
+        segment.title = item.description
+          ? `${item.label}: ${item.description}`
+          : item.label;
+        if (item.current) segment.setAttribute("aria-current", "location");
+        if (item.interactive) {
+          segment.type = "button";
+          segment.setAttribute("aria-label", `Go to ${item.label}`);
+          segment.dataset.reviewRef = `breadcrumb-${item.key}`;
+          segment.dataset.reviewKind = "layer-navigation";
+          segment.dataset.reviewPathIndex = String(item.pathIndex);
+          segment.onclick = () => onNavigateLayer(item.layerId, {
+            restore: true,
+            pathIndex: item.pathIndex,
+          });
+        }
+        children.push(segment);
       }
-      children.push(segment);
       if (annotationEnabled) {
         const anchor = {
           kind: "layer",
@@ -1389,6 +1586,7 @@ export function createProductWorkspace({
             openAnnotationSubject(getState(), anchor, {
               title: item.label,
               kind: "LAYER",
+              origin: badge,
             });
           } catch (error) {
             toast(error.message);
@@ -1403,11 +1601,56 @@ export function createProductWorkspace({
     breadcrumb.scrollLeft = breadcrumb.scrollWidth;
   }
 
-  function renderInteractionState(state, restoredDraft = false) {
-    const status = state.status || "idle";
+  function renderInteractionState(state, interaction, restoredDraft = false) {
+    const status = interaction?.completionStatus || state.status || "idle";
+    const presentation = turnStatusPresentation(status);
+    const statusElement = $("#interactionStatus");
+    const statusKey = interactionStatusRenderKey(interaction, state.status || "idle");
+    if (statusKey !== renderedInteractionStatusKey) {
+      statusElement.className = `interaction-status interaction-status-${presentation.kind}`;
+      statusElement.textContent = presentation.label;
+      renderedInteractionStatusKey = statusKey;
+    }
     prompt.disabled = composerDisabledForState(status, capabilities.canCompose, restoredDraft);
     modelPicker?.setDisabled(prompt.disabled);
     syncComposer();
+  }
+
+  function renderEnvironment(environment, project) {
+    const presentation = environmentPresentation(environment, project);
+    const body = $("#environmentBody");
+    const loading = $("#environmentLoading");
+    const facts = $("#environmentFacts");
+    const message = $("#environmentMessage");
+    body.setAttribute("aria-busy", String(presentation.busy));
+    loading.classList.toggle("hidden", presentation.mode !== "loading");
+    facts.classList.toggle("hidden", presentation.mode !== "facts");
+    message.classList.toggle("hidden", presentation.mode === "loading" || presentation.mode === "facts");
+    message.textContent = presentation.message || "";
+    $("#environmentObserved").textContent = presentation.stale
+      ? "Stale snapshot"
+      : presentation.observedAt ? "Local snapshot" : "";
+    $("#environmentObserved").classList.toggle("environment-stale", Boolean(presentation.stale));
+    $("#environmentObserved").title = presentation.staleMessage || "";
+    if (presentation.mode !== "facts") return;
+    $("#environmentWorktree").textContent = presentation.worktreeLabel;
+    $("#environmentWorktree").title = presentation.worktreeLabel;
+    const git = presentation.kind === "git";
+    $("#environmentBranchRow").classList.remove("hidden");
+    $("#environmentChangesRow").classList.toggle("hidden", !git);
+    $("#environmentUntrackedRow").classList.toggle("hidden", !git);
+    $("#environmentBranchLabel").textContent = git
+      ? "Branch"
+      : presentation.kind === "folder" ? "Repository" : "Status";
+    $("#environmentBranch").textContent = git ? presentation.branch : presentation.message;
+    $("#environmentBranch").title = $("#environmentBranch").textContent;
+    $("#environmentAdditions").textContent = `+${presentation.additions ?? 0}`;
+    $("#environmentDeletions").textContent = `−${presentation.deletions ?? 0}`;
+    const trackedLabel = trackedChangesLabel(presentation);
+    $("#environmentTracked").classList.toggle("hidden", !trackedLabel);
+    $("#environmentTracked").textContent = trackedLabel;
+    $("#environmentUntracked").textContent = untrackedFilesLabel(presentation.untrackedFiles ?? 0);
+    message.textContent = presentation.message || "";
   }
 
   function renderApprovalDock(state, thread) {
@@ -1714,7 +1957,11 @@ export function createProductWorkspace({
         const open = (event) => {
           event.preventDefault();
           event.stopPropagation();
-          openAnnotationSubject(getState(), anchor, { title: "Relationship", kind: "EDGE" });
+          openAnnotationSubject(getState(), anchor, {
+            title: "Relationship",
+            kind: "EDGE",
+            origin: event.currentTarget,
+          });
         };
         const hit = group.querySelector(".graph-edge-hit");
         hit.onclick = open;
@@ -1769,15 +2016,7 @@ export function createProductWorkspace({
       kind: "NODE",
     } : null;
     if (notify) onSelectionChange(node.id);
-    const inspector = $("#inspector");
-    const wasOpen = !inspector.classList.contains("hidden");
-    inspectorUsesOverlay = narrowInspectorMedia?.matches
-      ?? (graphWindow?.innerWidth ?? 0) <= 760;
-    inspector.classList.remove("hidden");
-    const viewportWidth = graphDocument.defaultView?.innerWidth ?? 0;
-    if (shouldFitInspectorOpen(wasOpen, true, viewportWidth)) {
-      scheduleInspectorFit();
-    }
+    const { reveal } = openInspector({ userInitiated: notify });
     $("#detailIcon").replaceChildren(createRelayerIcon(
       node.icon || node.metadata?.relayer?.icon,
       { class: "relayer-detail-icon" },
@@ -1833,7 +2072,11 @@ export function createProductWorkspace({
           : "Add action comment");
         badge.onclick = (event) => {
           event.stopPropagation();
-          openAnnotationSubject(state, anchor, { title: presentation.label, kind: "ACTION" });
+          openAnnotationSubject(state, anchor, {
+            title: presentation.label,
+            kind: "ACTION",
+            origin: event.currentTarget,
+          });
         };
         wrapper.append(badge);
       }
@@ -1878,6 +2121,7 @@ export function createProductWorkspace({
     });
     renderAnnotationList();
     renderBreadcrumb(state, getThread());
+    reveal();
   }
 
   function dispose() {
@@ -1888,6 +2132,7 @@ export function createProductWorkspace({
     graphDocument.removeEventListener("pointerdown", closeSettingsMenuFromOutside, true);
     graphDocument.removeEventListener("keydown", closeTurnPopoverOnEscape, true);
     graphDocument.removeEventListener("keydown", closeSettingsMenuOnEscape, true);
+    graphDocument.removeEventListener("keydown", closeInspectorOnEscape, true);
     narrowInspectorMedia?.removeEventListener?.("change", handleInspectorLayoutChange);
     dragging = null;
     panning = null;

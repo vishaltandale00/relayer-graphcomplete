@@ -26,6 +26,9 @@ const SAFE_SUBPROCESS_ENVIRONMENT = new Set([
   "PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC",
   "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SHELL",
 ]);
+const CODEX_MANAGED_RUNTIME_ENVIRONMENT = new Set([
+  ...SAFE_SUBPROCESS_ENVIRONMENT, "HOME", "USERPROFILE", "CODEX_HOME", "RELAYER_CODEX_BINARY",
+]);
 
 export interface CodexBasicDependencies {
   readonly runAppServerTurn?: (options: CodexAppServerTurnOptions) => ReturnType<typeof runCodexAppServerTurn>;
@@ -146,7 +149,9 @@ export class CodexBasicHarness implements Harness {
       : ambient.filter(([key]) => SAFE_SUBPROCESS_ENVIRONMENT.has(key)));
     if (access?.kind === "managed-runtime") {
       if (access.adapterId !== "codex-subscription") throw new Error(`codex.basic cannot consume managed runtime ${access.adapterId}`);
-      Object.assign(environment, access.environment);
+      Object.assign(environment, Object.fromEntries(Object.entries(access.environment).filter(([key]) => (
+        CODEX_MANAGED_RUNTIME_ENVIRONMENT.has(key)
+      ))));
     } else if (access?.kind === "secret") {
       if (!new Set(["openai-api", "openrouter", "vercel-ai-router"]).has(access.adapterId)) {
         throw new Error(`codex.basic cannot consume secret provider ${access.adapterId}`);

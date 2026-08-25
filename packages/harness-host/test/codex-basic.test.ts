@@ -284,6 +284,33 @@ describe("CodexBasicHarness", () => {
     }
   });
 
+  it("allows only Codex runtime keys from managed access and preserves graph authority", async () => {
+    let submitted: CodexAppServerTurnOptions | undefined;
+    const harness = harnessFixture("auto", async (options) => {
+      submitted = options;
+      options.onThreadId("managed-thread");
+      return { threadId: "managed-thread", turnId: "turn-1", status: "completed" };
+    });
+    await harness.complete({
+      ...runContext(1, "authoritative-graph-token"),
+      model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-5.2" },
+      access: {
+        ...codexAccess(),
+        environment: {
+          CODEX_HOME: "/isolated/codex-home",
+          OPENAI_API_KEY: "injected-unrelated-secret",
+          RELAYER_GRAPH_TOKEN: "injected-graph-token",
+          RELAYER_GRAPH_URL: "https://attacker.invalid",
+        },
+      },
+    });
+
+    expect(submitted?.environment.CODEX_HOME).toBe("/isolated/codex-home");
+    expect(submitted?.environment).not.toHaveProperty("OPENAI_API_KEY");
+    expect(submitted?.environment.RELAYER_GRAPH_TOKEN).toBe("authoritative-graph-token");
+    expect(submitted?.environment.RELAYER_GRAPH_URL).toBe("http://127.0.0.1:43123");
+  });
+
   it("rejects a provider model that codex.basic cannot execute before starting a thread", async () => {
     const runAppServerTurn = vi.fn<NonNullable<CodexBasicDependencies["runAppServerTurn"]>>();
     const harness = new CodexBasicHarness({

@@ -1,0 +1,711 @@
+{
+  "passed": true,
+  "generatedAt": "2026-08-25T08:08:18.829Z",
+  "source": {
+    "runtime": "real Electron + production renderer + Rust app/graph servers",
+    "harness": "fixture-task-system",
+    "inferenceCalls": 0,
+    "projectPath": "[repository-root]",
+    "threadId": 1,
+    "interactionStatus": "accepted",
+    "narrowCapture": "Production renderer in real Electron with the evidence window minimum lowered to exercise 760px CSS."
+  },
+  "gitTruth": {
+    "independent": {
+      "worktreeLabel": "relayer-graphcomplete",
+      "branch": "codex/issue-128-environment-rail",
+      "detached": false,
+      "changes": {
+        "additions": 69,
+        "deletions": 50,
+        "untrackedFiles": 0,
+        "trackedChangedFiles": 12
+      }
+    },
+    "api": {
+      "kind": "git",
+      "worktreeLabel": "relayer-graphcomplete",
+      "branch": "codex/issue-128-environment-rail",
+      "detached": false,
+      "changes": {
+        "trackedFiles": 12,
+        "additions": 69,
+        "deletions": 50,
+        "untrackedFiles": 0
+      },
+      "observedAt": "2026-08-25T08:08:15.15097Z"
+    },
+    "displayed": {
+      "worktreeLabel": "relayer-graphcomplete",
+      "branch": "codex/issue-128-environment-rail",
+      "additions": "+69",
+      "deletions": "−50",
+      "trackedFilesFallback": null,
+      "untrackedFiles": "0 files",
+      "interactionStatus": "Complete"
+    },
+    "expectedDisplay": {
+      "worktreeLabel": "relayer-graphcomplete",
+      "branch": "codex/issue-128-environment-rail",
+      "additions": "+69",
+      "deletions": "−50",
+      "untrackedFiles": "0 files"
+    },
+    "matched": true
+  },
+  "interactionProof": {
+    "closeButton": {
+      "inspectorClosed": true,
+      "environmentPreserved": true
+    },
+    "escape": {
+      "inspectorClosed": true,
+      "environmentPreserved": true,
+      "focusRestoredTo": "graphStage"
+    },
+    "ultrawide": {
+      "closeButton": {
+        "inspectorClosed": true,
+        "environmentPreserved": true
+      },
+      "escape": {
+        "inspectorClosed": true,
+        "environmentPreserved": true,
+        "focusRestoredTo": "graphStage"
+      },
+      "visibleCapture": {
+        "windowVisible": true,
+        "environment": {
+          "pngBytes": 25299,
+          "uniqueSampledPixels": 64,
+          "size": {
+            "width": 680,
+            "height": 304
+          }
+        },
+        "inspector": {
+          "pngBytes": 45833,
+          "uniqueSampledPixels": 64,
+          "size": {
+            "width": 680,
+            "height": 1488
+          }
+        }
+      }
+    },
+    "evalReadOnly": true,
+    "evalVisibleCapture": {
+      "windowVisible": true,
+      "environment": {
+        "pngBytes": 25299,
+        "uniqueSampledPixels": 64,
+        "size": {
+          "width": 680,
+          "height": 304
+        }
+      },
+      "inspector": {
+        "pngBytes": 45808,
+        "uniqueSampledPixels": 58,
+        "size": {
+          "width": 680,
+          "height": 1482
+        }
+      }
+    },
+    "replay": {
+      "filename": "06-interaction-replay.mp4",
+      "sha256": "fbac02429a8cf254008b9a362c255597e6950769d0db0d212df7bdd530a49be8",
+      "bytes": 137377,
+      "durationSeconds": 10,
+      "frameRate": 6,
+      "frameCount": 60,
+      "interactionInput": "Electron mouse input plus Escape keyboard input",
+      "steps": [
+        {
+          "label": "Environment remains visible",
+          "atSeconds": 0,
+          "frameSha256": "6fe128b3dbe93d10c27d4b3e7eb908544ee8b9f0ff42282e653895ac76dff959",
+          "viewportWidth": 1480,
+          "environmentVisible": true,
+          "inspectorVisible": false,
+          "selectedNodeId": null,
+          "activeElement": "BODY",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25299,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            }
+          }
+        },
+        {
+          "label": "Select node; Node Details opens beneath Environment",
+          "atSeconds": 1,
+          "frameSha256": "8ae83cdb7de5e464ea0f57fe6dce6a369c10a2a24656899c0fd12d98f73eff63",
+          "viewportWidth": 1480,
+          "environmentVisible": true,
+          "inspectorVisible": true,
+          "selectedNodeId": "2",
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25299,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            },
+            "inspector": {
+              "pngBytes": 45833,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 1488
+              }
+            }
+          }
+        },
+        {
+          "label": "Close button dismisses Node Details; Environment remains",
+          "atSeconds": 2,
+          "frameSha256": "6fe128b3dbe93d10c27d4b3e7eb908544ee8b9f0ff42282e653895ac76dff959",
+          "viewportWidth": 1480,
+          "environmentVisible": true,
+          "inspectorVisible": false,
+          "selectedNodeId": null,
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25299,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            }
+          }
+        },
+        {
+          "label": "Reopen Node Details",
+          "atSeconds": 3,
+          "frameSha256": "3bdec5f57413bb2ecd29ee9caec1b3e0464ef63c3cb552c5fecc8c9582309704",
+          "viewportWidth": 1480,
+          "environmentVisible": true,
+          "inspectorVisible": true,
+          "selectedNodeId": "2",
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25299,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            },
+            "inspector": {
+              "pngBytes": 45833,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 1488
+              }
+            }
+          }
+        },
+        {
+          "label": "Escape dismisses Node Details; Environment and graph focus remain",
+          "atSeconds": 4,
+          "frameSha256": "e9bdab4d39eda07203da42adffab91ee7396f69a55dc99c75e558913d28f3c79",
+          "viewportWidth": 1480,
+          "environmentVisible": true,
+          "inspectorVisible": false,
+          "selectedNodeId": null,
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25299,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            }
+          }
+        },
+        {
+          "label": "Ultrawide Environment remains visible",
+          "atSeconds": 5,
+          "frameSha256": "284e30f92227eb0bad00d6fb518303a5db05d53561abb1932408cfd94c86d5ca",
+          "viewportWidth": 2998,
+          "environmentVisible": true,
+          "inspectorVisible": false,
+          "selectedNodeId": null,
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25299,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            }
+          }
+        },
+        {
+          "label": "Ultrawide node selection opens Node Details",
+          "atSeconds": 6,
+          "frameSha256": "727401a85b3b0e72a6eb2447b298c70dbcd1faff80582636d88103638ef0f40f",
+          "viewportWidth": 2998,
+          "environmentVisible": true,
+          "inspectorVisible": true,
+          "selectedNodeId": "2",
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25299,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            },
+            "inspector": {
+              "pngBytes": 45833,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 1488
+              }
+            }
+          }
+        },
+        {
+          "label": "Ultrawide close button dismisses Node Details",
+          "atSeconds": 7,
+          "frameSha256": "7558daf5103297ae3eef9491162fa488dfba278566d0b7b1be96fec1110daafc",
+          "viewportWidth": 2998,
+          "environmentVisible": true,
+          "inspectorVisible": false,
+          "selectedNodeId": null,
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25299,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            }
+          }
+        },
+        {
+          "label": "Ultrawide Node Details reopens",
+          "atSeconds": 8,
+          "frameSha256": "97f0397830f7ccd6da706c980a4c4f7a6548b713e21a4124381c0d913028fc64",
+          "viewportWidth": 2998,
+          "environmentVisible": true,
+          "inspectorVisible": true,
+          "selectedNodeId": "2",
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25299,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            },
+            "inspector": {
+              "pngBytes": 45833,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 1488
+              }
+            }
+          }
+        },
+        {
+          "label": "Ultrawide Escape dismisses Node Details",
+          "atSeconds": 9,
+          "frameSha256": "284e30f92227eb0bad00d6fb518303a5db05d53561abb1932408cfd94c86d5ca",
+          "viewportWidth": 2998,
+          "environmentVisible": true,
+          "inspectorVisible": false,
+          "selectedNodeId": null,
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25299,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "geometry": {
+    "normalEnvironment": {
+      "header": {
+        "left": 244,
+        "right": 1116,
+        "top": 12,
+        "bottom": 48,
+        "width": 872,
+        "height": 36
+      },
+      "banner": {
+        "left": 256,
+        "right": 1116,
+        "top": 56,
+        "bottom": 164,
+        "width": 860,
+        "height": 108
+      },
+      "environment": {
+        "left": 1128,
+        "right": 1468,
+        "top": 12,
+        "bottom": 164,
+        "width": 340,
+        "height": 152
+      },
+      "inspector": null,
+      "graph": {
+        "left": 244,
+        "right": 1116,
+        "top": 216,
+        "bottom": 857,
+        "width": 872,
+        "height": 641
+      },
+      "viewport": {
+        "width": 1480,
+        "height": 920
+      },
+      "borders": {
+        "header": {
+          "borderTopWidth": "1px",
+          "borderRightWidth": "1px",
+          "borderBottomWidth": "1px",
+          "borderLeftWidth": "1px"
+        },
+        "banner": {
+          "borderTopWidth": "1px",
+          "borderRightWidth": "1px",
+          "borderBottomWidth": "1px",
+          "borderLeftWidth": "1px"
+        },
+        "environment": {
+          "borderTopWidth": "1px",
+          "borderRightWidth": "1px",
+          "borderBottomWidth": "1px",
+          "borderLeftWidth": "1px"
+        },
+        "inspector": {
+          "borderTopWidth": "1px",
+          "borderRightWidth": "1px",
+          "borderBottomWidth": "1px",
+          "borderLeftWidth": "1px"
+        }
+      }
+    },
+    "normalSelected": {
+      "header": {
+        "left": 244,
+        "right": 1116,
+        "top": 12,
+        "bottom": 48,
+        "width": 872,
+        "height": 36
+      },
+      "banner": {
+        "left": 256,
+        "right": 1116,
+        "top": 56,
+        "bottom": 164,
+        "width": 860,
+        "height": 108
+      },
+      "environment": {
+        "left": 1128,
+        "right": 1468,
+        "top": 12,
+        "bottom": 164,
+        "width": 340,
+        "height": 152
+      },
+      "inspector": {
+        "left": 1128,
+        "right": 1468,
+        "top": 176,
+        "bottom": 920,
+        "width": 340,
+        "height": 744
+      },
+      "graph": {
+        "left": 244,
+        "right": 1116,
+        "top": 216,
+        "bottom": 857,
+        "width": 872,
+        "height": 641
+      },
+      "viewport": {
+        "width": 1480,
+        "height": 920
+      }
+    },
+    "ultrawideSelected": {
+      "header": {
+        "left": 244,
+        "right": 2634,
+        "top": 12,
+        "bottom": 48,
+        "width": 2390,
+        "height": 36
+      },
+      "banner": {
+        "left": 256,
+        "right": 2634,
+        "top": 56,
+        "bottom": 164,
+        "width": 2378,
+        "height": 108
+      },
+      "environment": {
+        "left": 2646,
+        "right": 2986,
+        "top": 12,
+        "bottom": 164,
+        "width": 340,
+        "height": 152
+      },
+      "inspector": {
+        "left": 2646,
+        "right": 2986,
+        "top": 176,
+        "bottom": 920,
+        "width": 340,
+        "height": 744
+      },
+      "graph": {
+        "left": 244,
+        "right": 2634,
+        "top": 216,
+        "bottom": 857,
+        "width": 2390,
+        "height": 641
+      },
+      "viewport": {
+        "width": 2998,
+        "height": 920
+      }
+    },
+    "responsiveDesktopSelected": {
+      "header": {
+        "left": 244,
+        "right": 737,
+        "top": 12,
+        "bottom": 48,
+        "width": 493,
+        "height": 36
+      },
+      "banner": {
+        "left": 256,
+        "right": 737,
+        "top": 56,
+        "bottom": 164,
+        "width": 481,
+        "height": 108
+      },
+      "environment": {
+        "left": 749,
+        "right": 1089,
+        "top": 12,
+        "bottom": 164,
+        "width": 340,
+        "height": 152
+      },
+      "inspector": {
+        "left": 749,
+        "right": 1089,
+        "top": 176,
+        "bottom": 920,
+        "width": 340,
+        "height": 744
+      },
+      "graph": {
+        "left": 244,
+        "right": 737,
+        "top": 216,
+        "bottom": 857,
+        "width": 493,
+        "height": 641
+      },
+      "viewport": {
+        "width": 1101,
+        "height": 920
+      }
+    },
+    "responsiveStackedSelected": {
+      "header": {
+        "left": 256,
+        "right": 1088,
+        "top": 12,
+        "bottom": 48,
+        "width": 832,
+        "height": 36
+      },
+      "banner": {
+        "left": 256,
+        "right": 1088,
+        "top": 56,
+        "bottom": 131.55,
+        "width": 832,
+        "height": 75.55
+      },
+      "environment": {
+        "left": 256,
+        "right": 1088,
+        "top": 143.55,
+        "bottom": 295.55,
+        "width": 832,
+        "height": 152
+      },
+      "inspector": {
+        "left": 256,
+        "right": 1088,
+        "top": 839.55,
+        "bottom": 1079.55,
+        "width": 832,
+        "height": 240
+      },
+      "graph": {
+        "left": 256,
+        "right": 1088,
+        "top": 347.55,
+        "bottom": 764.55,
+        "width": 832,
+        "height": 417
+      },
+      "viewport": {
+        "width": 1100,
+        "height": 920
+      }
+    },
+    "narrowSelected": {
+      "header": {
+        "left": 12,
+        "right": 748,
+        "top": 12,
+        "bottom": 48,
+        "width": 736,
+        "height": 36
+      },
+      "banner": {
+        "left": 12,
+        "right": 748,
+        "top": 56,
+        "bottom": 131.55,
+        "width": 736,
+        "height": 75.55
+      },
+      "environment": {
+        "left": 12,
+        "right": 748,
+        "top": 143.55,
+        "bottom": 295.55,
+        "width": 736,
+        "height": 152
+      },
+      "inspector": {
+        "left": 12,
+        "right": 748,
+        "top": 839.55,
+        "bottom": 1079.55,
+        "width": 736,
+        "height": 240
+      },
+      "graph": {
+        "left": 12,
+        "right": 748,
+        "top": 347.55,
+        "bottom": 764.55,
+        "width": 736,
+        "height": 417
+      },
+      "viewport": {
+        "width": 760,
+        "height": 920
+      }
+    },
+    "evalSelected": {
+      "header": {
+        "left": 244,
+        "right": 1116,
+        "top": 12,
+        "bottom": 48,
+        "width": 872,
+        "height": 36
+      },
+      "banner": {
+        "left": 256,
+        "right": 1116,
+        "top": 56,
+        "bottom": 164,
+        "width": 860,
+        "height": 108
+      },
+      "environment": {
+        "left": 1128,
+        "right": 1468,
+        "top": 12,
+        "bottom": 164,
+        "width": 340,
+        "height": 152
+      },
+      "inspector": {
+        "left": 1128,
+        "right": 1468,
+        "top": 176,
+        "bottom": 917,
+        "width": 340,
+        "height": 741
+      },
+      "graph": {
+        "left": 244,
+        "right": 1116,
+        "top": 216,
+        "bottom": 855,
+        "width": 872,
+        "height": 639
+      },
+      "viewport": {
+        "width": 1480,
+        "height": 917
+      }
+    }
+  },
+  "captures": [
+    "01-normal-environment.png",
+    "02-normal-node-detail.png",
+    "03-ultrawide-node-detail.png",
+    "04-narrow-stacked-node-detail.png",
+    "05-eval-node-detail.png",
+    "06-interaction-replay.mp4"
+  ]
+}

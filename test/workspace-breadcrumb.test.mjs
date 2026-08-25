@@ -185,10 +185,11 @@ describe("product workspace breadcrumb", () => {
     expect(markup.indexOf('id="workspaceBreadcrumb"')).toBeLessThan(markup.indexOf('id="graphStage"'));
   });
 
-  it("aligns the interaction query and breadcrumb to the same left edge", async () => {
+  it("keeps the rounded interaction inset and breadcrumb inside the graph column", async () => {
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
 
-    expect(styles).toContain(".interaction-banner{margin:18px 17px 0;");
+    expect(styles).toContain(".interaction-banner{grid-column:1;grid-row:2;margin:8px 0 12px 12px;");
+    expect(styles).toContain(".thread-workspace{grid-column:1 / -1;grid-row:3;display:grid;grid-template-columns:minmax(0,1fr) var(--inspector);column-gap:12px;");
     expect(styles).toContain(".workspace-breadcrumb{min-height:40px;flex:none;display:flex;align-items:center;justify-content:flex-start;");
   });
 });

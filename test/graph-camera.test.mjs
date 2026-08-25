@@ -12,28 +12,55 @@ import {
   graphNodeLayoutBounds,
   graphScreenPoint,
   graphWorldPoint,
+  inspectorFocusRestorationTarget,
   inspectorFitRequestIsCurrent,
   recenterGraphCamera,
   shouldActivateGraphNodeAfterPointerGesture,
   shouldFitInspectorDock,
   shouldFitInspectorOpen,
+  shouldRevealStackedInspector,
   zoomGraphCameraAt,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace graph camera", () => {
-  it("requests an inspector fit only for a desktop closed-to-open transition", () => {
-    expect(shouldFitInspectorOpen(false, true, 761)).toBe(true);
+  it("does not refit the graph when node details opens in the permanent rail", () => {
+    expect(shouldFitInspectorOpen(false, true, 761)).toBe(false);
     expect(shouldFitInspectorOpen(false, true, 760)).toBe(false);
     expect(shouldFitInspectorOpen(true, true, 1200)).toBe(false);
     expect(shouldFitInspectorOpen(true, false, 1200)).toBe(false);
     expect(shouldFitInspectorOpen(false, false, 1200)).toBe(false);
   });
 
-  it("requests a fit when an open overlay inspector becomes docked", () => {
-    expect(shouldFitInspectorDock(true, false, true)).toBe(true);
+  it("does not refit when responsive node details changes presentation", () => {
+    expect(shouldFitInspectorDock(true, false, true)).toBe(false);
     expect(shouldFitInspectorDock(true, false, false)).toBe(false);
     expect(shouldFitInspectorDock(false, false, true)).toBe(false);
     expect(shouldFitInspectorDock(false, true, true)).toBe(false);
+  });
+
+  it("reveals every user-opened inspector in stacked layouts without scrolling restored state", () => {
+    expect(shouldRevealStackedInspector(1100, true)).toBe(true);
+    expect(shouldRevealStackedInspector(760, true)).toBe(true);
+    expect(shouldRevealStackedInspector(1101, true)).toBe(false);
+    expect(shouldRevealStackedInspector(960, false)).toBe(false);
+  });
+
+  it("restores inspector focus to a visible origin before graph and visible fallbacks", () => {
+    const available = new Set(["origin", "graph", "badge"]);
+    const choose = () => inspectorFocusRestorationTarget(
+      "origin",
+      "graph",
+      ["badge", "settings"],
+      (candidate) => available.has(candidate),
+    );
+
+    expect(choose()).toBe("origin");
+    available.delete("origin");
+    expect(choose()).toBe("graph");
+    available.delete("graph");
+    expect(choose()).toBe("badge");
+    available.clear();
+    expect(choose()).toBe(null);
   });
 
   it("does not activate a graph node from the click generated after dragging it", () => {

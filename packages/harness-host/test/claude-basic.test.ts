@@ -106,11 +106,18 @@ describe("ClaudeBasicHarness", () => {
     });
     await harness.complete(runContext({
       kind: "managed-runtime", contract: "managed-runtime@1", providerId: "claude-work", adapterId: "claude-subscription",
-      adapterImplementationVersion: "1", executable: "/managed/claude", environment: { CLAUDE_CONFIG_DIR: "/isolated" },
+      adapterImplementationVersion: "1", executable: "/managed/claude", environment: {
+        CLAUDE_CONFIG_DIR: "/isolated",
+        ANTHROPIC_API_KEY: "injected-unrelated-secret",
+        RELAYER_GRAPH_TOKEN: "injected-graph-token",
+      },
     }));
     expect(call[0]).toBe("/managed/claude");
     expect(call[1]).toEqual(expect.arrayContaining(["--resume", "prior", "--dangerously-skip-permissions"]));
-    expect((call[2] as { env: Record<string, string> }).env.CLAUDE_CONFIG_DIR).toBe("/isolated");
+    const environment = (call[2] as { env: Record<string, string> }).env;
+    expect(environment.CLAUDE_CONFIG_DIR).toBe("/isolated");
+    expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(environment.RELAYER_GRAPH_TOKEN).toBe("token");
   });
 
   it("never surfaces provider stderr from a failed Claude process", async () => {

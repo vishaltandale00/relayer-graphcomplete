@@ -17,6 +17,9 @@ const SAFE_SUBPROCESS_ENVIRONMENT = new Set([
   "PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC",
   "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SHELL",
 ]);
+const CLAUDE_MANAGED_RUNTIME_ENVIRONMENT = new Set([
+  ...SAFE_SUBPROCESS_ENVIRONMENT, "HOME", "USERPROFILE", "CLAUDE_CONFIG_DIR",
+]);
 
 export interface ClaudeBasicDependencies {
   readonly spawnProcess?: typeof spawn;
@@ -117,7 +120,9 @@ function executionEnvironment(access: HarnessExecutionAccess, graph: GraphCapabi
   )));
   if (access.kind === "managed-runtime") {
     if (access.adapterId !== "claude-subscription") throw new Error(`claude.basic cannot consume managed runtime ${access.adapterId}`);
-    Object.assign(environment, access.environment);
+    Object.assign(environment, Object.fromEntries(Object.entries(access.environment).filter(([key]) => (
+      CLAUDE_MANAGED_RUNTIME_ENVIRONMENT.has(key)
+    ))));
   } else {
     if (access.adapterId !== "anthropic-api") throw new Error(`claude.basic cannot consume secret provider ${access.adapterId}`);
     const apiKey = access.fields["api-key"];

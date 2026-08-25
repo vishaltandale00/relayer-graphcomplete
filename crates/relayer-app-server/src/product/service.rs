@@ -836,7 +836,7 @@ impl ProductService {
                 canonical_path.display()
             )));
         }
-        let path = canonical_path.to_string_lossy().into_owned();
+        let path = stored_project_path(&canonical_path)?;
         let name = command
             .name
             .as_deref()
@@ -1414,12 +1414,21 @@ impl ProductService {
     }
 
     pub(crate) async fn project_path(&self, project_id: ProjectId) -> Result<String, ProductError> {
+        self.project(project_id).await.map(|project| project.path)
+    }
+
+    pub(crate) async fn project(&self, project_id: ProjectId) -> Result<Project, ProductError> {
         self.storage
             .get_project(project_id)
             .await?
-            .map(|project| project.path)
             .ok_or_else(|| ProductError::NotFound(format!("project {project_id}")))
     }
+}
+
+fn stored_project_path(canonical_path: &std::path::Path) -> Result<String, ProductError> {
+    canonical_path.to_str().map(str::to_owned).ok_or_else(|| {
+        ProductError::Invalid("project path cannot be represented safely as UTF-8".into())
+    })
 }
 
 fn required<'a>(value: &'a str, name: &str) -> Result<&'a str, ProductError> {
@@ -1536,6 +1545,21 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static MANAGED_POLICY_TEST_ID: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    #[cfg(unix)]
+    fn rejects_a_non_utf8_canonical_project_path_instead_of_storing_a_lossy_path() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let path =
+            std::path::PathBuf::from(std::ffi::OsString::from_vec(b"/project-\xff".to_vec()));
+        let error = stored_project_path(&path).unwrap_err();
+        assert!(matches!(
+            error,
+            ProductError::Invalid(message)
+                if message == "project path cannot be represented safely as UTF-8"
+        ));
+    }
 
     #[tokio::test]
     async fn configuration_model_exemption_is_scoped_to_the_selected_harness() {

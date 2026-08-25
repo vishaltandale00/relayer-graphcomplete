@@ -19,6 +19,7 @@ export const appState = {
   actions: [],
   visibleLayer: null,
   status: "idle",
+  environment: null,
 };
 
 export const viewState = {

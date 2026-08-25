@@ -118,7 +118,7 @@ describe("product workspace keyboard behavior", () => {
     expect(markup).not.toContain("right-chat");
 
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
-    expect(styles).toContain(".thread-workspace{display:flex;flex:1;min-height:0}.graph-column");
+    expect(styles).toContain(".thread-workspace{grid-column:1 / -1;grid-row:3;display:grid;grid-template-columns:minmax(0,1fr) var(--inspector)");
     expect(styles).toContain(".approval-dock{flex:none;border-top:1px solid var(--line-strong)");
     expect(styles).toContain(".approval-always small{font-size:8px");
     expect(styles).not.toContain(".approval-dock{position:absolute");

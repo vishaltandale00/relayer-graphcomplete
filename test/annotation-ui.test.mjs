@@ -94,6 +94,10 @@ describe("Eval ProductWorkspace annotations", () => {
     expect(graphAdapter).not.toContain('query.get("review") === "1"\n    ? createAnnotationApi');
     expect(workspace).toContain("if (!item.current)");
     expect(workspace).toContain("await onNavigateLayer(item.layerId");
+    expect(workspace.match(/const \{ reveal \} = openInspector/g)).toHaveLength(2);
+    expect(workspace).toContain("const { reveal } = openInspector({ origin });");
+    expect(workspace).toContain("origin: event.currentTarget");
+    expect(workspace).toContain("inspectorFocusRestorationTarget(");
     expect(styles).toContain("#nodeLayer{pointer-events:none}");
     expect(styles).toContain(".graph-node{position:absolute");
     expect(styles).toContain("pointer-events:auto");
