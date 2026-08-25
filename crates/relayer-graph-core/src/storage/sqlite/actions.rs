@@ -13,6 +13,11 @@ pub(crate) struct ActionRecord {
     pub action: GraphAction,
 }
 
+pub(crate) struct RootActionIdentity {
+    pub id: ActionId,
+    pub client_key: String,
+}
+
 #[derive(FromRow)]
 struct ActionRow {
     id: i64,
@@ -107,6 +112,25 @@ impl<'connection> ActionTable<'connection> {
         .transpose()
     }
 
+    pub(crate) async fn active_root_identity(
+        &mut self,
+        owner: NodeId,
+    ) -> Result<Option<RootActionIdentity>, GraphError> {
+        let row: Option<(i64, String)> = sqlx::query_as(
+            "SELECT id,client_key FROM actions WHERE owner_interaction_id=?1 AND source_node_id=?1 AND source_layer_id IS NULL AND state IN ('draft','accepted') ORDER BY id LIMIT 1",
+        )
+        .bind(owner.value())
+        .fetch_optional(&mut *self.connection)
+        .await?;
+        row.map(|(id, client_key)| {
+            Ok(RootActionIdentity {
+                id: valid_action_id(id)?,
+                client_key,
+            })
+        })
+        .transpose()
+    }
+
     pub(crate) async fn for_source_layer(
         &mut self,
         scope: &InteractionScope,
@@ -141,6 +165,117 @@ impl<'connection> ActionTable<'connection> {
         .into_iter()
         .map(|relation| NavigateRelation::parse(&relation))
         .collect()
+    }
+
+    pub(crate) async fn validate_unresolved_lease(
+        &mut self,
+        scope: &InteractionScope,
+        source_interaction: NodeId,
+        action_id: ActionId,
+    ) -> Result<(), GraphError> {
+        let in_source_completion = sqlx::query_scalar::<_, i64>(
+            r#"
+            WITH RECURSIVE reachable_layers(id) AS (
+                SELECT root.target_layer_id
+                FROM completions completion
+                JOIN actions root ON root.id=completion.root_action_id
+                WHERE completion.interaction_node_id=?1
+                  AND root.state='accepted'
+                  AND root.target_layer_id IS NOT NULL
+                UNION
+                SELECT child.target_layer_id
+                FROM reachable_layers reachable
+                JOIN layer_actions membership ON membership.layer_id=reachable.id
+                JOIN actions child ON child.id=membership.action_id
+                WHERE child.state='accepted'
+                  AND child.kind='navigate'
+                  AND child.target_layer_id IS NOT NULL
+            )
+            SELECT EXISTS(
+                SELECT 1
+                FROM nodes source
+                JOIN actions leased ON leased.id=?2
+                WHERE source.id=?1
+                  AND source.kind='user-interaction'
+                  AND source.state='accepted'
+                  AND source.owner_interaction_id IS NULL
+                  AND EXISTS(SELECT 1 FROM completions WHERE interaction_node_id=source.id)
+                  AND ((?3 IS NOT NULL AND source.project_id=?3)
+                       OR (?3 IS NULL AND source.project_id IS NULL AND source.thread_id=?4))
+                  AND (leased.id=(
+                      SELECT completion.root_action_id
+                      FROM completions completion
+                      WHERE completion.interaction_node_id=?1
+                  ) OR EXISTS(
+                      SELECT 1
+                      FROM reachable_layers reachable
+                      JOIN layer_actions membership ON membership.layer_id=reachable.id
+                      WHERE membership.action_id=leased.id
+                  ))
+            )
+            "#,
+        )
+        .bind(source_interaction.value())
+        .bind(action_id.value())
+        .bind(scope.project_id.map(ProjectId::value))
+        .bind(scope.thread_id.value())
+        .fetch_one(&mut *self.connection)
+        .await?;
+        if in_source_completion == 0 {
+            return Err(GraphError::validation(
+                "invalid_invoke_lease",
+                "interactionNode.leasedActionId",
+                "The interaction lease no longer identifies an action in its exact accepted source completion.",
+            ));
+        }
+        let action = self
+            .record(scope, action_id)
+            .await?
+            .ok_or_else(|| {
+                GraphError::validation(
+                    "invalid_invoke_lease",
+                    "interactionNode.leasedActionId",
+                    "The interaction lease action is not visible in this graph scope.",
+                )
+            })?
+            .action;
+        if action.state != RecordState::Accepted || action.kind != ActionKind::Invoke {
+            return Err(GraphError::validation(
+                "invalid_invoke_lease",
+                "interactionNode.leasedActionId",
+                "The interaction lease must identify an accepted invoke action.",
+            ));
+        }
+        if action.target_layer_id.is_some() {
+            return Err(GraphError::validation(
+                "invoke_lease_already_consumed",
+                "interactionNode.leasedActionId",
+                "The leased invoke action already has a result target and cannot be redirected.",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn resolve_leased_invoke(
+        &mut self,
+        action_id: ActionId,
+        target_layer_id: LayerId,
+    ) -> Result<(), GraphError> {
+        let result = sqlx::query(
+            "UPDATE actions SET target_layer_id=?1 WHERE id=?2 AND state='accepted' AND kind='invoke' AND target_layer_id IS NULL",
+        )
+        .bind(target_layer_id.value())
+        .bind(action_id.value())
+        .execute(&mut *self.connection)
+        .await?;
+        if result.rows_affected() != 1 {
+            return Err(GraphError::validation(
+                "invoke_lease_already_consumed",
+                "interactionNode.leasedActionId",
+                "The leased invoke action was already resolved or is no longer eligible for resolution.",
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) async fn insert_draft(

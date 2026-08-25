@@ -24,6 +24,24 @@ const THREAD_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("updated_at", "TEXT", true, 0),
     ("harness_configuration_name", "TEXT", true, 0),
     ("permission_profile_id", "TEXT", true, 0),
+    ("conversation_import_id", "TEXT", false, 0),
+];
+const CONVERSATION_IMPORT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("id", "TEXT", true, 1),
+    ("source_sha256", "TEXT", true, 0),
+    ("export_version", "INTEGER", true, 0),
+    ("producer_json", "TEXT", true, 0),
+    ("header_json", "TEXT", true, 0),
+    ("state", "TEXT", true, 0),
+    ("created_at", "TEXT", true, 0),
+    ("published_at", "TEXT", false, 0),
+];
+const IMPORTED_TURN_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("conversation_import_id", "TEXT", true, 1),
+    ("source_turn_id", "TEXT", true, 2),
+    ("product_interaction_id", "INTEGER", true, 0),
+    ("source_origin_json", "TEXT", true, 0),
+    ("source_completion_json", "TEXT", true, 0),
 ];
 const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "INTEGER", false, 1),
@@ -69,6 +87,8 @@ const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("action_id", "INTEGER", true, 2),
     ("result_interaction_id", "INTEGER", true, 0),
     ("created_at", "TEXT", true, 0),
+    ("graph_lease_required", "INTEGER", true, 0),
+    ("authoritative", "INTEGER", true, 0),
 ];
 const MODEL_PROVIDER_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "TEXT", true, 1),
@@ -158,6 +178,46 @@ const PRODUCT_MODEL_PREFERENCE_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("defaults_modified", "INTEGER", true, 0),
     ("default_family_id", "INTEGER", false, 0),
 ];
+const APPROVAL_REQUEST_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("request_id", "TEXT", true, 1),
+    ("interaction_id", "INTEGER", true, 0),
+    ("complete_call_id", "TEXT", true, 0),
+    ("harness_session_id", "TEXT", true, 0),
+    ("title", "TEXT", true, 0),
+    ("reason", "TEXT", true, 0),
+    ("action_json", "TEXT", true, 0),
+    ("scope_keys_json", "TEXT", true, 0),
+    ("scope_description", "TEXT", true, 0),
+    ("created_at", "TEXT", true, 0),
+    ("expires_at", "TEXT", false, 0),
+];
+const APPROVAL_RESOLUTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("request_id", "TEXT", true, 1),
+    ("outcome", "TEXT", true, 0),
+    ("actor", "TEXT", true, 0),
+    ("decision", "TEXT", false, 0),
+    ("rationale", "TEXT", false, 0),
+    ("source_request_id", "TEXT", false, 0),
+    ("resolved_at", "TEXT", true, 0),
+];
+const ANNOTATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("id", "INTEGER", false, 1),
+    ("thread_id", "INTEGER", true, 0),
+    ("anchor_json", "TEXT", true, 0),
+    ("created_at", "TEXT", true, 0),
+];
+const ANNOTATION_REVISION_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("annotation_id", "INTEGER", true, 1),
+    ("revision", "INTEGER", true, 2),
+    ("author_id", "TEXT", true, 0),
+    ("author_display_name", "TEXT", true, 0),
+    ("comment", "TEXT", true, 0),
+    ("rating", "INTEGER", false, 0),
+    ("state", "TEXT", true, 0),
+    ("navigation_context_json", "TEXT", true, 0),
+    ("evidence_refs_json", "TEXT", true, 0),
+    ("created_at", "TEXT", true, 0),
+];
 
 pub(super) async fn validate_existing_or_empty(pool: &SqlitePool) -> Result<(), StorageError> {
     let table_count: i64 = sqlx::query_scalar(
@@ -186,6 +246,8 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "threads", THREAD_COLUMNS).await?;
     validate_columns(pool, "interactions", INTERACTION_COLUMNS).await?;
     validate_columns(pool, "interaction_attempts", INTERACTION_ATTEMPT_COLUMNS).await?;
+    validate_columns(pool, "conversation_imports", CONVERSATION_IMPORT_COLUMNS).await?;
+    validate_columns(pool, "imported_turns", IMPORTED_TURN_COLUMNS).await?;
     validate_columns(pool, "action_invocations", ACTION_INVOCATION_COLUMNS).await?;
     validate_columns(pool, "model_providers", MODEL_PROVIDER_COLUMNS).await?;
     validate_columns(pool, "provider_models", PROVIDER_MODEL_COLUMNS).await?;
@@ -206,8 +268,21 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         PRODUCT_MODEL_PREFERENCE_COLUMNS,
     )
     .await?;
+    validate_columns(pool, "approval_requests", APPROVAL_REQUEST_COLUMNS).await?;
+    validate_columns(pool, "approval_resolutions", APPROVAL_RESOLUTION_COLUMNS).await?;
+    validate_columns(pool, "annotations", ANNOTATION_COLUMNS).await?;
+    validate_columns(pool, "annotation_revisions", ANNOTATION_REVISION_COLUMNS).await?;
     validate_index(pool, "projects", &["path"], true).await?;
     validate_index(pool, "interactions", &["thread_id", "sequence"], true).await?;
+    validate_index(pool, "threads", &["conversation_import_id"], false).await?;
+    validate_index(
+        pool,
+        "imported_turns",
+        &["conversation_import_id", "source_turn_id"],
+        true,
+    )
+    .await?;
+    validate_index(pool, "imported_turns", &["product_interaction_id"], true).await?;
     validate_index(
         pool,
         "interaction_attempts",
@@ -262,6 +337,20 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         true,
     )
     .await?;
+    validate_index(
+        pool,
+        "approval_requests",
+        &["interaction_id", "created_at"],
+        false,
+    )
+    .await?;
+    validate_index(
+        pool,
+        "annotations",
+        &["thread_id", "created_at", "id"],
+        false,
+    )
+    .await?;
     validate_foreign_key(pool, "threads", "project_id", "projects", "id", "SET NULL").await?;
     validate_foreign_key(
         pool,
@@ -276,6 +365,33 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         pool,
         "interaction_attempts",
         "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "threads",
+        "conversation_import_id",
+        "conversation_imports",
+        "id",
+        "NO ACTION",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "imported_turns",
+        "conversation_import_id",
+        "conversation_imports",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "imported_turns",
+        "product_interaction_id",
         "interactions",
         "id",
         "CASCADE",
@@ -319,10 +435,38 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     .await?;
     validate_foreign_key(
         pool,
+        "approval_requests",
+        "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
         "harness_provider_compatibility",
         "harness_configuration_name",
         "product_harnesses",
         "configuration_name",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "approval_resolutions",
+        "request_id",
+        "approval_requests",
+        "request_id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(pool, "annotations", "thread_id", "threads", "id", "CASCADE").await?;
+    validate_foreign_key(
+        pool,
+        "annotation_revisions",
+        "annotation_id",
+        "annotations",
+        "id",
         "CASCADE",
     )
     .await?;
@@ -442,7 +586,48 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
             "action invocation source and result must belong to the same thread",
         ));
     }
+    let duplicate_action_invocation: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1
+            FROM action_invocations ai
+            JOIN interactions source ON source.id=ai.source_interaction_id
+            JOIN threads thread ON thread.id=source.thread_id
+            GROUP BY CASE
+                       WHEN thread.project_id IS NOT NULL THEN 'project:' || thread.project_id
+                       ELSE 'thread:' || thread.id
+                     END,
+                     ai.action_id
+            HAVING SUM(ai.authoritative) != 1
+        )",
+    )
+    .fetch_one(pool)
+    .await?;
+    if duplicate_action_invocation {
+        return Err(incompatible(
+            "a node-owned action must have exactly one authoritative invocation result in its project scope",
+        ));
+    }
     super::catalog::validate_catalog_rows(pool).await?;
+    let invalid_approval_resolution: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM approval_resolutions WHERE outcome NOT IN ('approved','denied','cancelled','expired','aborted') OR actor NOT IN ('user','session_grant','harness','host') OR (decision IS NOT NULL AND decision NOT IN ('approve_once','approve_always','deny')) OR (outcome='approved' AND (decision IS NULL OR decision NOT IN ('approve_once','approve_always'))) OR (outcome='denied' AND (decision IS NULL OR decision!='deny')) OR (outcome IN ('cancelled','expired','aborted') AND decision IS NOT NULL) OR (actor='user' AND (outcome NOT IN ('approved','denied') OR source_request_id IS NOT NULL)) OR (actor='session_grant' AND (outcome!='approved' OR decision IS NULL OR decision!='approve_once' OR source_request_id IS NULL)) OR (actor IN ('harness','host') AND (outcome IN ('approved','denied') OR source_request_id IS NOT NULL)))",
+    )
+    .fetch_one(pool)
+    .await?;
+    if invalid_approval_resolution {
+        return Err(incompatible(
+            "stored approval resolution contains an unsupported product value",
+        ));
+    }
+    let invalid_annotation: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM annotations a WHERE NOT EXISTS (SELECT 1 FROM annotation_revisions r WHERE r.annotation_id=a.id AND r.revision=1) OR (SELECT COUNT(*) FROM annotation_revisions r WHERE r.annotation_id=a.id) != (SELECT MAX(r.revision) FROM annotation_revisions r WHERE r.annotation_id=a.id) OR EXISTS (SELECT 1 FROM annotation_revisions r WHERE r.annotation_id=a.id AND (r.revision<=0 OR r.state NOT IN ('active','retracted') OR (r.rating IS NOT NULL AND r.rating NOT BETWEEN 1 AND 4) OR trim(r.author_id)='' OR trim(r.author_display_name)='' OR (r.state='active' AND trim(r.comment)='') OR (r.state='retracted' AND (r.comment!='' OR r.rating IS NOT NULL)) OR NOT json_valid(r.navigation_context_json) OR NOT json_valid(r.evidence_refs_json))))",
+    )
+    .fetch_one(pool)
+    .await?;
+    if invalid_annotation {
+        return Err(incompatible(
+            "stored annotation history contains invalid rows",
+        ));
+    }
     Ok(())
 }
 

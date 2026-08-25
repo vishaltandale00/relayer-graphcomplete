@@ -1,8 +1,8 @@
 use sqlx::{FromRow, SqliteConnection};
 
 use crate::{
-    GraphError, GraphNode, NodeDraft, NodeId, ProjectId, RecordState, ThreadId,
-    graph::InteractionScope,
+    ActionId, ActionKind, GraphError, GraphNode, InteractionInvocation, NodeDraft, NodeId,
+    ProjectId, RecordState, ThreadId, graph::InteractionScope,
 };
 
 pub(crate) struct NodeTable<'connection> {
@@ -14,9 +14,16 @@ pub(crate) struct NodeRecord {
     pub owner: Option<NodeId>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InteractionLease {
+    pub source_interaction_id: NodeId,
+    pub action_id: ActionId,
+}
+
 #[derive(FromRow)]
 struct NodeRow {
     id: i64,
+    leased_action_id: Option<i64>,
     kind: String,
     icon: String,
     title: String,
@@ -32,6 +39,7 @@ struct InteractionScopeRow {
     kind: String,
     state: String,
     owner_interaction_id: Option<i64>,
+    imported: i64,
 }
 
 impl<'connection> NodeTable<'connection> {
@@ -39,22 +47,74 @@ impl<'connection> NodeTable<'connection> {
         Self { connection }
     }
 
+    pub(crate) async fn interaction_lease(
+        &mut self,
+        interaction_id: NodeId,
+    ) -> Result<Option<InteractionLease>, GraphError> {
+        #[derive(FromRow)]
+        struct LeaseRow {
+            leased_action_id: Option<i64>,
+            lease_source_interaction_id: Option<i64>,
+        }
+
+        let row = sqlx::query_as::<_, LeaseRow>(
+            "SELECT leased_action_id,lease_source_interaction_id FROM nodes WHERE id=?1 AND kind='user-interaction' AND state='accepted' AND owner_interaction_id IS NULL",
+        )
+        .bind(interaction_id.value())
+        .fetch_optional(&mut *self.connection)
+        .await?
+        .ok_or_else(|| GraphError::NotFound(format!("interaction node {interaction_id}")))?;
+        match (row.leased_action_id, row.lease_source_interaction_id) {
+            (None, None) => Ok(None),
+            (Some(action_id), Some(source_interaction_id)) => Ok(Some(InteractionLease {
+                source_interaction_id: valid_node_id(source_interaction_id)?,
+                action_id: valid_action_id(action_id)?,
+            })),
+            _ => Err(GraphError::Internal(
+                "interaction lease identity is only partially populated".into(),
+            )),
+        }
+    }
+
     pub(crate) async fn insert_interaction(
         &mut self,
         project_id: Option<ProjectId>,
         thread_id: ThreadId,
         text: &str,
+        invocation: Option<InteractionInvocation>,
     ) -> Result<GraphNode, GraphError> {
+        if let Some(invocation) = invocation {
+            if let Some((existing, stored_source_interaction_id)) = self
+                .interaction_by_leased_action(invocation.source_action_id)
+                .await?
+            {
+                if stored_source_interaction_id != invocation.source_interaction_node_id {
+                    return Err(GraphError::validation(
+                        "invocation_action_already_leased",
+                        "invocation.sourceActionId",
+                        "This invoke action already leased a result interaction from a different source completion.",
+                    ));
+                }
+                self.validate_lease_source(project_id, thread_id, invocation, true)
+                    .await?;
+                return Ok(existing);
+            }
+            self.validate_lease_source(project_id, thread_id, invocation, false)
+                .await?;
+        }
         let result = sqlx::query(
-            "INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (?1,?2,'user-interaction','user',?3,?3,'accepted',NULL,NULL)",
+            "INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key,leased_action_id,lease_source_interaction_id) VALUES (?1,?2,'user-interaction','user',?3,?3,'accepted',NULL,NULL,?4,?5)",
         )
         .bind(project_id.map(ProjectId::value))
         .bind(thread_id.value())
         .bind(text)
+        .bind(invocation.map(|value| value.source_action_id.value()))
+        .bind(invocation.map(|value| value.source_interaction_node_id.value()))
         .execute(&mut *self.connection)
         .await?;
         Ok(GraphNode {
             id: valid_node_id(result.last_insert_rowid())?,
+            leased_action_id: invocation.map(|value| value.source_action_id),
             kind: "user-interaction".into(),
             icon: "user".into(),
             title: text.into(),
@@ -63,12 +123,142 @@ impl<'connection> NodeTable<'connection> {
         })
     }
 
+    async fn interaction_by_leased_action(
+        &mut self,
+        action_id: ActionId,
+    ) -> Result<Option<(GraphNode, NodeId)>, GraphError> {
+        let source_interaction_id = sqlx::query_scalar::<_, i64>(
+            "SELECT lease_source_interaction_id FROM nodes WHERE leased_action_id=?1",
+        )
+        .bind(action_id.value())
+        .fetch_optional(&mut *self.connection)
+        .await?
+        .map(valid_node_id)
+        .transpose()?;
+        let Some(source_interaction_id) = source_interaction_id else {
+            return Ok(None);
+        };
+        let node = self.fetch_optional(
+            "SELECT id,leased_action_id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE leased_action_id=?1",
+            action_id.value(),
+            None,
+        )
+        .await?
+        .ok_or_else(|| GraphError::Internal("leased interaction disappeared during read".into()))?
+        .node;
+        Ok(Some((node, source_interaction_id)))
+    }
+
+    async fn validate_lease_source(
+        &mut self,
+        project_id: Option<ProjectId>,
+        thread_id: ThreadId,
+        invocation: InteractionInvocation,
+        allow_existing_lease: bool,
+    ) -> Result<(), GraphError> {
+        #[derive(FromRow)]
+        struct LeaseSourceRow {
+            project_id: Option<i64>,
+            thread_id: i64,
+            action_kind: String,
+            target_layer_id: Option<i64>,
+            action_state: String,
+            in_completion: i64,
+        }
+
+        let row = sqlx::query_as::<_, LeaseSourceRow>(
+            r#"
+            WITH RECURSIVE reachable_layers(id) AS (
+                SELECT root.target_layer_id
+                FROM completions completion
+                JOIN actions root ON root.id=completion.root_action_id
+                WHERE completion.interaction_node_id=?1
+                  AND root.state='accepted'
+                  AND root.target_layer_id IS NOT NULL
+                UNION
+                SELECT child.target_layer_id
+                FROM reachable_layers reachable
+                JOIN layer_actions membership ON membership.layer_id=reachable.id
+                JOIN actions child ON child.id=membership.action_id
+                WHERE child.state='accepted'
+                  AND child.kind='navigate'
+                  AND child.target_layer_id IS NOT NULL
+            )
+            SELECT source.project_id,source.thread_id,
+                   action.kind AS action_kind,action.target_layer_id,action.state AS action_state,
+                   (action.id=(
+                       SELECT completion.root_action_id
+                       FROM completions completion
+                       WHERE completion.interaction_node_id=?1
+                   ) OR EXISTS(
+                       SELECT 1
+                       FROM reachable_layers reachable
+                       JOIN layer_actions membership ON membership.layer_id=reachable.id
+                       WHERE membership.action_id=action.id
+                   )) AS in_completion
+            FROM nodes source
+            JOIN actions action ON action.id=?2
+            WHERE source.id=?1
+              AND source.kind='user-interaction'
+              AND source.state='accepted'
+              AND source.owner_interaction_id IS NULL
+              AND EXISTS(SELECT 1 FROM completions WHERE interaction_node_id=source.id)
+            "#,
+        )
+        .bind(invocation.source_interaction_node_id.value())
+        .bind(invocation.source_action_id.value())
+        .fetch_optional(&mut *self.connection)
+        .await?;
+        let Some(row) = row else {
+            return Err(GraphError::validation(
+                "invalid_invocation_source",
+                "invocation",
+                "The invocation source must identify an accepted interaction completion and action.",
+            ));
+        };
+        let source_project_id = row.project_id.map(valid_project_id).transpose()?;
+        let source_thread_id = valid_thread_id(row.thread_id)?;
+        if source_project_id != project_id
+            || (project_id.is_none() && source_thread_id != thread_id)
+        {
+            return Err(GraphError::validation(
+                "incompatible_invocation_scope",
+                "invocation.sourceInteractionNodeId",
+                "The invocation source is outside the result interaction's graph visibility scope.",
+            ));
+        }
+        if row.in_completion == 0 {
+            return Err(GraphError::validation(
+                "action_not_in_source_completion",
+                "invocation.sourceActionId",
+                "The source action is not a member of that interaction's accepted completion.",
+            ));
+        }
+        if ActionKind::parse(&row.action_kind)? != ActionKind::Invoke
+            || RecordState::parse(&row.action_state)? != RecordState::Accepted
+        {
+            return Err(GraphError::validation(
+                "invalid_invocation_action",
+                "invocation.sourceActionId",
+                "The source action must be an accepted invoke action.",
+            ));
+        }
+        if row.target_layer_id.is_some() && !allow_existing_lease {
+            return Err(GraphError::validation(
+                "resolved_invocation_action",
+                "invocation.sourceActionId",
+                "The source invoke action is already resolved.",
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) async fn interaction_scope(
         &mut self,
         node_id: NodeId,
     ) -> Result<InteractionScope, GraphError> {
         let row = sqlx::query_as::<_, InteractionScopeRow>(
-            "SELECT project_id,thread_id,kind,state,owner_interaction_id FROM nodes WHERE id=?1",
+            "SELECT n.project_id,n.thread_id,n.kind,n.state,n.owner_interaction_id,EXISTS(SELECT 1 FROM graph_imports gi WHERE gi.thread_id=n.thread_id) AS imported FROM nodes n WHERE n.id=?1",
         )
         .bind(node_id.value())
         .fetch_optional(&mut *self.connection)
@@ -83,6 +273,7 @@ impl<'connection> NodeTable<'connection> {
                     project_id: row.project_id.map(valid_project_id).transpose()?,
                     thread_id: valid_thread_id(row.thread_id)?,
                     root_node_id: node_id,
+                    read_only: row.imported != 0,
                 })
             }
             _ => Err(GraphError::Forbidden(
@@ -97,7 +288,7 @@ impl<'connection> NodeTable<'connection> {
         client_key: &str,
     ) -> Result<Option<NodeRecord>, GraphError> {
         self.fetch_optional(
-            "SELECT id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE owner_interaction_id=?1 AND client_key=?2",
+            "SELECT id,leased_action_id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE owner_interaction_id=?1 AND client_key=?2",
             owner.value(),
             Some(client_key),
         )
@@ -110,7 +301,7 @@ impl<'connection> NodeTable<'connection> {
         id: NodeId,
     ) -> Result<GraphNode, GraphError> {
         let row = sqlx::query_as::<_, NodeRow>(
-            "SELECT id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
+            "SELECT id,leased_action_id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
         )
         .bind(id.value())
         .bind(scope.project_id.map(ProjectId::value))
@@ -147,7 +338,7 @@ impl<'connection> NodeTable<'connection> {
 
     pub(crate) async fn record(&mut self, id: NodeId) -> Result<Option<NodeRecord>, GraphError> {
         self.fetch_optional(
-            "SELECT id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE id=?1",
+            "SELECT id,leased_action_id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE id=?1",
             id.value(),
             None,
         )
@@ -201,7 +392,7 @@ impl<'connection> NodeTable<'connection> {
     ) -> Result<Vec<GraphNode>, GraphError> {
         let rows = sqlx::query_as::<_, NodeRow>(
             r#"
-            SELECT n.id,n.kind,n.icon,n.title,n.detail,n.state,n.owner_interaction_id
+            SELECT n.id,n.leased_action_id,n.kind,n.icon,n.title,n.detail,n.state,n.owner_interaction_id
             FROM edges e
             JOIN nodes n ON n.id = CASE WHEN e.left_id = ?1 THEN e.right_id ELSE e.left_id END
             WHERE e.state='accepted'
@@ -216,10 +407,39 @@ impl<'connection> NodeTable<'connection> {
         .bind(scope.thread_id.value())
         .fetch_all(&mut *self.connection)
         .await?;
-        rows.into_iter()
+        let mut nodes = rows
+            .into_iter()
             .map(NodeRecord::try_from)
             .map(|record| record.map(|record| record.node))
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        let derived = sqlx::query_as::<_, NodeRow>(
+            r#"
+            SELECT source.id,source.leased_action_id,source.kind,source.icon,source.title,
+                   source.detail,source.state,source.owner_interaction_id
+            FROM nodes interaction
+            JOIN actions leased ON leased.id=interaction.leased_action_id
+            JOIN nodes source ON source.id=leased.source_node_id
+            WHERE interaction.id=?1
+              AND source.state='accepted'
+              AND ((?2 IS NOT NULL AND source.project_id=?2)
+                   OR (?2 IS NULL AND source.project_id IS NULL AND source.thread_id=?3))
+            "#,
+        )
+        .bind(id.value())
+        .bind(scope.project_id.map(ProjectId::value))
+        .bind(scope.thread_id.value())
+        .fetch_optional(&mut *self.connection)
+        .await?
+        .map(NodeRecord::try_from)
+        .transpose()?
+        .map(|record| record.node);
+        if let Some(derived) = derived
+            && !nodes.iter().any(|node| node.id == derived.id)
+        {
+            nodes.push(derived);
+        }
+        nodes.sort_by_key(|node| node.id);
+        Ok(nodes)
     }
 
     pub(crate) async fn accept_owned(
@@ -260,6 +480,7 @@ impl TryFrom<NodeRow> for NodeRecord {
         Ok(Self {
             node: GraphNode {
                 id: valid_node_id(row.id)?,
+                leased_action_id: row.leased_action_id.map(valid_action_id).transpose()?,
                 kind: row.kind,
                 icon: row.icon,
                 title: row.title,
@@ -274,12 +495,18 @@ impl TryFrom<NodeRow> for NodeRecord {
 fn draft_node(id: NodeId, draft: &NodeDraft) -> GraphNode {
     GraphNode {
         id,
+        leased_action_id: None,
         kind: draft.kind.clone(),
         icon: draft.icon.clone(),
         title: draft.title.clone(),
         detail: draft.detail.clone(),
         state: RecordState::Draft,
     }
+}
+
+fn valid_action_id(value: i64) -> Result<ActionId, GraphError> {
+    ActionId::new(value)
+        .ok_or_else(|| GraphError::Internal("database returned an invalid action ID".into()))
 }
 
 fn valid_node_id(value: i64) -> Result<NodeId, GraphError> {

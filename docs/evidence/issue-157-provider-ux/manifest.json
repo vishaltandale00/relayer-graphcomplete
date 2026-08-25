@@ -12,8 +12,8 @@
     "captureFps": 6,
     "frameWidth": 1280,
     "frameHeight": 800,
-    "frameBytes": 6987389,
-    "framesSha256": "3d0cc39a76be339f9fb8634400f1f84a14d62bf4ee363e7f8ef370a77717b876",
+    "frameBytes": 7020127,
+    "framesSha256": "c046d978c3b803029c7bbedbf395c15bdd6c8acdbf6abcd126fd1879e0eebd65",
     "interactions": [
       "click",
       "type",
@@ -62,32 +62,32 @@
       "file": "frames/providers.png",
       "width": 1280,
       "height": 800,
-      "bytes": 58856,
-      "sha256": "d61dac00c6ca0d2e0d57cc23b2c5c623ef262666280b149d56df9707b654fa8c"
+      "bytes": 60210,
+      "sha256": "4fbedee95037de63b6d93bf4ceb538e58ac2aa29995c931948c0c9804020129f"
     },
     "families": {
       "caption": "Configure harness-agnostic model families",
       "file": "frames/families.png",
       "width": 1280,
       "height": 800,
-      "bytes": 55031,
-      "sha256": "bf9e893c50e13cb00ec8ef73c60a619e430374ec78d01f93e41da55cfce7a47f"
+      "bytes": 56298,
+      "sha256": "0d0dc39d867b6c7c089e701e4bfecab25725527782e59a1c8f33e327c4bff6e6"
     },
     "harnesses": {
       "caption": "Inspect separate harness rules",
       "file": "frames/harnesses.png",
       "width": 1280,
       "height": 800,
-      "bytes": 62376,
-      "sha256": "b76e26c82d930ec490669f830386258a9350f3c79ffd9ce966bc3bda81df49dc"
+      "bytes": 63660,
+      "sha256": "d9d3ec747235d4a1b284094aa592fcf4359ddb7830255af3de6ad9c3ff2ef9e1"
     },
     "recovery": {
       "caption": "Recover the same unsent turn with an explicit model choice",
       "file": "frames/recovery.png",
       "width": 1280,
       "height": 800,
-      "bytes": 43858,
-      "sha256": "a8fb091c01a7114350ae9bbba2903a32263d401c1378d53c23cf16411e29e21e"
+      "bytes": 42938,
+      "sha256": "de8d15ed559cf4a4724f2bf05381996ae5f5877d8d9b53df13cdac4e0f070443"
     }
   },
   "variants": {
@@ -96,8 +96,8 @@
       "file": "variants/light.png",
       "width": 1280,
       "height": 800,
-      "bytes": 58032,
-      "sha256": "65fced6489b3dbe2a8c71043dc932ea1c048b651452569888cc6c08f107013fb"
+      "bytes": 59325,
+      "sha256": "d08f5b91c09413a190a9e079deb78241eb6dff8964bfc4a0435c545fb461ac08"
     },
     "narrow": {
       "caption": "Narrow responsive settings",
@@ -112,8 +112,8 @@
       "file": "variants/long-label.png",
       "width": 1280,
       "height": 800,
-      "bytes": 63395,
-      "sha256": "166085cbf9738614aa5f5161a99bfb0730b0c115b7aca74d068c2f61c3fff1a4"
+      "bytes": 64746,
+      "sha256": "5473f0ed71f9887d218f0cc6ce21887a59c74124b67968cfa582e4c93e4bfb1b"
     },
     "loading": {
       "caption": "Connecting and discovering models",
@@ -136,8 +136,8 @@
       "file": "variants/unavailable.png",
       "width": 1280,
       "height": 800,
-      "bytes": 59373,
-      "sha256": "c134d932bbf8a8f75a70821f480fff430c9acb66939da75f39c516c198a066a8"
+      "bytes": 60746,
+      "sha256": "cb0fb8a5e17b37a86acbc110b2273b844fa1b83cdbdd614fcded65e8ba26194d"
     },
     "authorization": {
       "caption": "Authorization pending",
@@ -152,15 +152,15 @@
     "file": "provider-ux-poster.png",
     "width": 1280,
     "height": 800,
-    "bytes": 58856,
-    "sha256": "d61dac00c6ca0d2e0d57cc23b2c5c623ef262666280b149d56df9707b654fa8c"
+    "bytes": 60210,
+    "sha256": "4fbedee95037de63b6d93bf4ceb538e58ac2aa29995c931948c0c9804020129f"
   },
   "video": {
     "file": "provider-ux-demo.mp4",
     "codec": "h264",
     "width": 1280,
     "height": 800,
-    "bytes": 322661,
-    "sha256": "6bb6b239824d68405e194636ecaf96e81b915023bbcad491865291cd7386c17d"
+    "bytes": 325113,
+    "sha256": "4af38f1a9b79c2788499f51d94660642867b938586e64eae1e4916591aee9afb"
   }
 }

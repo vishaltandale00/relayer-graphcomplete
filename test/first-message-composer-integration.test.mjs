@@ -141,6 +141,44 @@ describe("first-message composer integration", () => {
     ]);
     expect(providerLeaseAcquisitions).toBe(1);
     expect(providerLeaseReleases).toBe(1);
+    const source = detail.interactions[0];
+    const invoke = source.completionOutput.rootLayer.actions.find((action) => action.kind === "invoke");
+    expect(invoke).toMatchObject({
+      targetLayerId: null,
+      label: "Plan the next improvement",
+      interactionText: "Propose the most useful next improvement to this task system.",
+    });
+
+    const invocationPath = `/api/threads/${createdThreads[0]}/interactions/${source.id}/actions/${invoke.id}/invoke`;
+    const invoked = await productRequest(productSession, invocationPath, { method: "POST" });
+    expect(invoked).toMatchObject({
+      invocation: {
+        sourceInteractionId: source.id,
+        actionId: invoke.id,
+      },
+      interaction: {
+        completionStatus: "running",
+      },
+    });
+
+    const completed = await waitForAcceptedInteractions(productSession, createdThreads[0], 2);
+    const result = completed.interactions.find((interaction) => interaction.id === invoked.invocation.resultInteractionId);
+    expect(result).toMatchObject({
+      text: "Propose the most useful next improvement to this task system.",
+      completionStatus: "accepted",
+    });
+    expect(result.completionOutput.rootLayer.nodes.map((node) => node.title)).toEqual([
+      "Incoming queue",
+      "Two-worker pool",
+      "Results store",
+    ]);
+    const refreshedInvoke = completed.interactions[0].completionOutput.rootLayer.actions
+      .find((action) => action.id === invoke.id);
+    expect(refreshedInvoke.targetLayerId).toBe(result.completionOutput.rootLayer.layer.id);
+
+    const replay = await productRequest(productSession, invocationPath, { method: "POST" });
+    expect(replay.invocation.resultInteractionId).toBe(result.id);
+    expect((await productRequest(productSession, `/api/threads/${createdThreads[0]}`)).interactions).toHaveLength(2);
   }, 15_000);
 });
 
@@ -173,6 +211,20 @@ async function waitForAcceptedThread(session, threadId) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 20));
   }
   throw new Error("The zero-inference first-message thread did not complete in time.");
+}
+
+async function waitForAcceptedInteractions(session, threadId, count) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const detail = await productRequest(session, `/api/threads/${threadId}`);
+    const failed = detail.interactions.find((interaction) => interaction.completionStatus === "failed");
+    if (failed) throw new Error(`The zero-inference invoked interaction failed: ${JSON.stringify(failed)}`);
+    if (detail.interactions.length === count && detail.interactions.every((interaction) => interaction.completionStatus === "accepted")) {
+      return detail;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+  }
+  throw new Error("The zero-inference invoked interaction did not complete in time.");
 }
 
 async function productRequest(session, path, options = {}) {

@@ -1,3 +1,4 @@
+use crate::approval::ApprovalReceipt;
 use crate::product::{
     ActionInvocation, Interaction, InteractionModelSelection, ProductCapabilities, ProductState,
     Project, Thread, ThreadDetail, ThreadView,
@@ -109,6 +110,7 @@ pub(crate) struct ThreadResponse {
     permission_profile_id: String,
     created_at: String,
     updated_at: String,
+    imported: bool,
 }
 
 impl From<Thread> for ThreadResponse {
@@ -123,6 +125,7 @@ impl From<Thread> for ThreadResponse {
             permission_profile_id: thread.permission_profile_id,
             created_at: thread.created_at,
             updated_at: thread.updated_at,
+            imported: thread.imported,
         }
     }
 }
@@ -146,6 +149,7 @@ pub(crate) struct InteractionResponse {
     completion_output: Option<serde_json::Value>,
     completion_error: Option<String>,
     latest_attempt: Option<InteractionAttemptResponse>,
+    projection_fresh: bool,
 }
 
 impl From<Interaction> for InteractionResponse {
@@ -167,7 +171,14 @@ impl From<Interaction> for InteractionResponse {
             completion_output: interaction.completion_output,
             completion_error: interaction.completion_error,
             latest_attempt: interaction.latest_attempt.map(Into::into),
+            projection_fresh: true,
         }
+    }
+}
+
+impl InteractionResponse {
+    pub(crate) fn mark_projection_stale(&mut self) {
+        self.projection_fresh = false;
     }
 }
 
@@ -177,6 +188,7 @@ pub(crate) struct ActionInvocationResponse {
     pub(super) source_interaction_id: i64,
     pub(super) action_id: i64,
     pub(super) result_interaction_id: i64,
+    pub(super) result_completion_status: String,
     pub(super) created_at: String,
 }
 
@@ -186,6 +198,7 @@ impl From<ActionInvocation> for ActionInvocationResponse {
             source_interaction_id: invocation.source_interaction_id.value(),
             action_id: invocation.action_id,
             result_interaction_id: invocation.result_interaction_id.value(),
+            result_completion_status: invocation.result_completion_status,
             created_at: invocation.created_at,
         }
     }
@@ -200,6 +213,14 @@ pub(crate) struct CapabilitiesResponse {
     graph: bool,
     harness: bool,
     credentials: bool,
+    annotations: bool,
+}
+
+impl CapabilitiesResponse {
+    pub(crate) fn with_annotations(mut self, annotations: bool) -> Self {
+        self.annotations = annotations;
+        self
+    }
 }
 
 impl From<ProductCapabilities> for CapabilitiesResponse {
@@ -211,6 +232,7 @@ impl From<ProductCapabilities> for CapabilitiesResponse {
             graph: capabilities.graph,
             harness: capabilities.harness,
             credentials: capabilities.credentials,
+            annotations: false,
         }
     }
 }
@@ -239,7 +261,15 @@ pub(crate) struct ProductStateResponse {
     threads: Vec<ThreadViewResponse>,
     interactions: Vec<InteractionResponse>,
     action_invocations: Vec<ActionInvocationResponse>,
+    approvals: Vec<ApprovalReceipt>,
     capabilities: CapabilitiesResponse,
+}
+
+impl ProductStateResponse {
+    pub(crate) fn with_annotations(mut self, annotations: bool) -> Self {
+        self.capabilities.annotations = annotations;
+        self
+    }
 }
 
 impl From<ProductState> for ProductStateResponse {
@@ -253,7 +283,18 @@ impl From<ProductState> for ProductStateResponse {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            approvals: state.approvals,
             capabilities: state.capabilities.into(),
+        }
+    }
+}
+
+impl ProductStateResponse {
+    pub(crate) fn mark_stale_interactions(&mut self, stale: &std::collections::HashSet<i64>) {
+        for interaction in &mut self.interactions {
+            if stale.contains(&interaction.id) {
+                interaction.mark_projection_stale();
+            }
         }
     }
 }
@@ -264,6 +305,7 @@ pub(crate) struct ThreadDetailResponse {
     thread: ThreadResponse,
     interactions: Vec<InteractionResponse>,
     action_invocations: Vec<ActionInvocationResponse>,
+    approvals: Vec<ApprovalReceipt>,
 }
 
 impl From<ThreadDetail> for ThreadDetailResponse {
@@ -276,6 +318,17 @@ impl From<ThreadDetail> for ThreadDetailResponse {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            approvals: detail.approvals,
+        }
+    }
+}
+
+impl ThreadDetailResponse {
+    pub(crate) fn mark_stale_interactions(&mut self, stale: &std::collections::HashSet<i64>) {
+        for interaction in &mut self.interactions {
+            if stale.contains(&interaction.id) {
+                interaction.mark_projection_stale();
+            }
         }
     }
 }

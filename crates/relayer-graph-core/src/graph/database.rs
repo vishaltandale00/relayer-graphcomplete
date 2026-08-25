@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use crate::{
-    GraphError, GraphNode, GraphWriter, NodeId, ProjectId, ThreadId,
+    AcceptedGraphClosure, GraphError, GraphNode, GraphWriter, InteractionInvocation, NodeId,
+    ProjectId, ThreadId,
     graph::model::require_nonempty,
     storage::{SqliteGraphStore, sqlite::nodes::NodeTable},
 };
@@ -30,19 +31,55 @@ impl GraphDatabase {
         thread_id: ThreadId,
         text: &str,
     ) -> Result<GraphNode, GraphError> {
-        require_nonempty(text, "text")?;
-        let mut connection = self.storage.acquire().await?;
-        NodeTable::new(&mut connection)
-            .insert_interaction(project_id, thread_id, text)
+        self.create_interaction_with_invocation(project_id, thread_id, text, None)
             .await
     }
 
-    pub async fn writer_for_subgraph(&self, node_id: NodeId) -> Result<GraphWriter, GraphError> {
-        let mut connection = self.storage.acquire().await?;
-        let scope = NodeTable::new(&mut connection)
-            .interaction_scope(node_id)
+    pub async fn create_interaction_with_invocation(
+        &self,
+        project_id: Option<ProjectId>,
+        thread_id: ThreadId,
+        text: &str,
+        invocation: Option<InteractionInvocation>,
+    ) -> Result<GraphNode, GraphError> {
+        require_nonempty(text, "text")?;
+        let mut transaction = self.storage.begin_write().await?;
+        let node = NodeTable::new(&mut transaction)
+            .insert_interaction(project_id, thread_id, text, invocation)
             .await?;
+        transaction.commit().await?;
+        Ok(node)
+    }
+
+    pub async fn writer_for_subgraph(&self, node_id: NodeId) -> Result<GraphWriter, GraphError> {
+        let scope = {
+            let mut connection = self.storage.acquire().await?;
+            NodeTable::new(&mut connection)
+                .interaction_scope(node_id)
+                .await?
+        };
         Ok(GraphWriter::new(self.clone(), scope))
+    }
+
+    pub async fn accepted_graph_closure(
+        &self,
+        node_id: NodeId,
+    ) -> Result<Option<AcceptedGraphClosure>, GraphError> {
+        crate::graph::completion::read_accepted_closure(self, node_id).await
+    }
+
+    pub async fn interaction_invocation(
+        &self,
+        node_id: NodeId,
+    ) -> Result<Option<InteractionInvocation>, GraphError> {
+        let mut connection = self.storage.acquire().await?;
+        Ok(NodeTable::new(&mut connection)
+            .interaction_lease(node_id)
+            .await?
+            .map(|lease| InteractionInvocation {
+                source_interaction_node_id: lease.source_interaction_id,
+                source_action_id: lease.action_id,
+            }))
     }
 
     pub async fn close(&self) {

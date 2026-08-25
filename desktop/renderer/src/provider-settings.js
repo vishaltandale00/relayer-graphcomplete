@@ -104,7 +104,10 @@ function renderConnectionForm(adapterId, showErrors = false) {
   $("#providerDialogContent").innerHTML = `${providerConnectionFormMarkup(selectedDescriptor, values, status.definitions, showErrors)}<div class="provider-setup-actions"><button type="button" class="secondary" data-provider-dialog-back>Back</button><button type="button" class="primary" data-provider-dialog-connect>Connect and discover models</button></div>`;
   $("[data-provider-dialog-back]").onclick = renderAdapterOptions;
   $("[data-provider-dialog-connect]").onclick = connect;
-  requestAnimationFrame(() => $("#providerDialogContent #providerField-label")?.focus());
+  requestAnimationFrame(() => $(
+    showErrors ? '[aria-invalid="true"]' : "#providerField-label",
+    $("#providerDialogContent"),
+  )?.focus());
 }
 
 async function connect() {

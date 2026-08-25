@@ -49,6 +49,12 @@ describe("PrimeAgentHarness", () => {
     expect(prompts.map(({ runContext }) => runContext)).toEqual([first, second]);
     expect(prompts[0]!.text).toContain("graph = await GraphSession.current()");
     expect(prompts[0]!.text).toContain("await graph.submit(11)");
+    expect(prompts[0]!.text).toContain("exactly one NodePlacementObject(node, x, y) per member node");
+    expect(prompts[0]!.text).toContain("Place a one-node layer at (0.5, 0.5)");
+    expect(prompts[0]!.text).toContain("explicit descriptive client_key");
+    expect(prompts[0]!.text).toContain("rerun the same authoring code with the same client_key values");
+    expect(prompts[0]!.text).toContain("Do not add fake navigation");
+    expect(prompts[0]!.text).toContain("await graph.discard_layer(layer)");
     await expect(graphHandler?.({}, invocation(first))).resolves.toEqual({
       url: "http://127.0.0.1:43123",
       token: "first-token",
@@ -122,7 +128,22 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("A flat answer is valid");
     expect(prompt).toContain("Author in whatever order fits the task");
     expect(prompt).toContain("final graph call must be await graph.submit(11)");
+    expect(prompt).toContain("await graph.get_node(11)");
+    expect(prompt).toContain("await graph.get_neighbors(11)");
+    expect(prompt).toContain("ordinary graph.submit(11) automatically fulfills any lease");
+    expect(prompt).toContain("There is no separate resolve_action call");
     expect(prompt).toContain("Never mention or expose the size justification");
+    expect(prompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
+    expect(prompt).toContain("align comparisons deliberately");
+    expect(prompt).toContain('NodeObject("info", "Summary", "...", client_key="summary-node")');
+    expect(prompt).not.toContain('NodeObject("lightbulb"');
+    expect(prompt).toContain('client_key="root-response"');
+    expect(prompt).toContain('client_key="node-detail"');
+    expect(prompt).toContain('client_key="node-evidence"');
+    expect(prompt).toContain('client_key="node-follow-up"');
+    expect(prompt).toContain("rerun it with the same client_key values");
+    expect(prompt).toContain("Do not add fake navigate or reference actions");
+    expect(prompt).toContain("await graph.discard_layer(layer)");
   });
 
   it("does not start a prompt when the run was already cancelled", async () => {
@@ -255,6 +276,7 @@ function runContext(nodeId: number, token: string, trace: HarnessTraceSink = cre
       interactionNodeId: nodeId,
       acquireCapability: () => ({ url: "http://127.0.0.1:43123", token, nodeId }),
     },
+    approvals: { request: async () => { throw new Error("unused approval channel"); } },
     trace,
   };
 }

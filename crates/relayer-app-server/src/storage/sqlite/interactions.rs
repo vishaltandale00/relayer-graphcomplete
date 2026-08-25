@@ -1,13 +1,26 @@
 use super::{SqliteProductStore, catalog};
 use crate::product::{
     AcceptedInteractionCompletion, Interaction, InteractionId, InteractionModelSelection,
-    ModelFamilyId, ProviderId, ThreadId, ValidateModelSelectionCommand,
+    ModelFamilyId, PreparedInteractionBinding, ProviderId, ThreadId, ValidateModelSelectionCommand,
 };
 use crate::storage::StorageError;
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 impl SqliteProductStore {
+    pub(crate) async fn get_interaction_by_graph_node_id(
+        &self,
+        graph_node_id: i64,
+    ) -> Result<Option<Interaction>, StorageError> {
+        let row = sqlx::query(
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.graph_node_id=?1",
+        )
+        .bind(graph_node_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(interaction_from_row).transpose()
+    }
+
     pub(crate) async fn recover_interrupted_interactions(
         &self,
         error: &str,
@@ -27,7 +40,7 @@ impl SqliteProductStore {
             .execute(&mut *transaction)
             .await?;
         let result = sqlx::query(
-            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('running','submitted')",
+            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('running','submitted') AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1) AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
         )
         .bind(error)
         .execute(&mut *transaction)
@@ -42,16 +55,17 @@ impl SqliteProductStore {
     ) -> Result<Option<Interaction>, StorageError> {
         let mut connection = self.pool.acquire().await?;
         sqlx::query(
-            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.id=?1",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary FROM interactions i JOIN threads t ON t.id=i.thread_id LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.id=?1 AND (t.conversation_import_id IS NULL OR EXISTS(SELECT 1 FROM conversation_imports ci WHERE ci.id=t.conversation_import_id AND ci.state='published'))",
         )
         .bind(interaction_id.value())
         .fetch_optional(&mut *connection)
         .await?
         .as_ref()
         .map(interaction_from_row)
-        .transpose()
+            .transpose()
     }
 
+    #[cfg(test)]
     pub(crate) async fn list_interactions(
         &self,
         thread_id: ThreadId,
@@ -166,12 +180,13 @@ impl SqliteProductStore {
         Ok(interaction)
     }
 
+    #[cfg(test)]
     pub(crate) async fn mark_interaction_running(
         &self,
         interaction_id: InteractionId,
         harness_configuration_name: &str,
     ) -> Result<(), StorageError> {
-        sqlx::query("UPDATE interactions SET completion_status='running',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2")
+        sqlx::query("UPDATE interactions SET completion_status='running',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)")
             .bind(harness_configuration_name)
             .bind(interaction_id.value())
             .execute(&self.pool)
@@ -184,9 +199,59 @@ impl SqliteProductStore {
         interaction_id: InteractionId,
         harness_configuration_name: &str,
     ) -> Result<bool, StorageError> {
-        let result = sqlx::query("UPDATE interactions SET completion_status='running',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='not_started'")
-            .bind(harness_configuration_name)
+        let result = sqlx::query("UPDATE interactions SET completion_status='running',completion_error=NULL WHERE id=?1 AND completion_status='submitted' AND graph_node_id IS NOT NULL AND harness_configuration_name=?2 AND harness_configuration_digest IS NOT NULL AND effective_execution_digest IS NOT NULL AND effective_permission_receipt_json IS NOT NULL")
             .bind(interaction_id.value())
+            .bind(harness_configuration_name)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub(crate) async fn restore_leased_interaction_submitted(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query(
+            "UPDATE interactions
+             SET completion_status='submitted',completion_error=?1
+             WHERE id=?2 AND completion_status='running'
+               AND EXISTS (
+                 SELECT 1 FROM action_invocations
+                 WHERE result_interaction_id=interactions.id AND graph_lease_required=1 AND authoritative=1
+               )",
+        )
+        .bind(error)
+        .bind(interaction_id.value())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub(crate) async fn claim_interaction_preparing(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query("UPDATE interactions SET completion_status='submitted',completion_error=NULL WHERE id=?1 AND completion_status='not_started' AND graph_node_id IS NULL")
+            .bind(interaction_id.value())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub(crate) async fn bind_prepared_interaction(
+        &self,
+        binding: PreparedInteractionBinding<'_>,
+    ) -> Result<bool, StorageError> {
+        let receipt = serde_json::to_string(binding.effective_permission_receipt)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let result = sqlx::query("UPDATE interactions SET graph_node_id=?1,harness_configuration_name=?2,harness_configuration_digest=?3,effective_execution_digest=?4,effective_permission_receipt_json=?5,completion_output_json=NULL,completion_error=NULL WHERE id=?6 AND completion_status='submitted' AND graph_node_id IS NULL")
+            .bind(binding.graph_node_id)
+            .bind(binding.harness_configuration_name)
+            .bind(binding.harness_configuration_digest)
+            .bind(binding.effective_execution_digest)
+            .bind(receipt)
+            .bind(binding.interaction_id.value())
             .execute(&self.pool)
             .await?;
         Ok(result.rows_affected() == 1)
@@ -248,7 +313,7 @@ impl SqliteProductStore {
         };
         catalog::validate_model_selection_on(&mut transaction, &command).await?;
         let result = sqlx::query(
-            "UPDATE interactions SET text=?1,model_provider_id=?2,provider_model_id=?3,model_family_id=?4,completion_status='running',harness_configuration_name=?5,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?6 AND completion_status='not_started' AND NOT EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence)",
+            "UPDATE interactions SET text=?1,model_provider_id=?2,provider_model_id=?3,model_family_id=?4,completion_status='submitted',harness_configuration_name=?5,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?6 AND completion_status='not_started' AND NOT EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence)",
         )
         .bind(text)
         .bind(model_selection.provider_id.as_str())
@@ -266,16 +331,28 @@ impl SqliteProductStore {
         &self,
         completion: AcceptedInteractionCompletion<'_>,
     ) -> Result<(), StorageError> {
-        sqlx::query("UPDATE interactions SET graph_node_id=?1,completion_status='accepted',harness_configuration_name=?2,harness_configuration_digest=?3,effective_execution_digest=?4,effective_permission_receipt_json=?5,completion_output_json=?6,completion_error=NULL WHERE id=?7")
+        let result = sqlx::query("UPDATE interactions SET completion_status='accepted',completion_output_json=?1,completion_error=NULL WHERE id=?2 AND graph_node_id=?3 AND completion_status='running' AND harness_configuration_name=?4 AND harness_configuration_digest=?5 AND effective_execution_digest=?6 AND effective_permission_receipt_json=?7")
+            .bind(serde_json::to_string(completion.output).map_err(|error| StorageError::Serialization(error.to_string()))?)
+            .bind(completion.interaction_id.value())
             .bind(completion.graph_node_id)
             .bind(completion.harness_configuration_name)
             .bind(completion.harness_configuration_digest)
             .bind(completion.effective_execution_digest)
             .bind(serde_json::to_string(completion.effective_permission_receipt).map_err(|error| StorageError::Serialization(error.to_string()))?)
-            .bind(serde_json::to_string(completion.output).map_err(|error| StorageError::Serialization(error.to_string()))?)
-            .bind(completion.interaction_id.value())
             .execute(&self.pool)
             .await?;
+        if result.rows_affected() != 1 {
+            let imported: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM interactions JOIN threads ON threads.id=interactions.thread_id WHERE interactions.id=?1 AND threads.conversation_import_id IS NOT NULL)")
+                .bind(completion.interaction_id.value())
+                .fetch_one(&self.pool)
+                .await?;
+            if imported {
+                return Ok(());
+            }
+            return Err(StorageError::IncompatibleSchema(
+                "prepared interaction identity changed before acceptance".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -337,7 +414,7 @@ impl SqliteProductStore {
             ));
         }
         let interaction = if failure.return_to_unsent {
-            sqlx::query("UPDATE interactions SET completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='running'")
+            sqlx::query("UPDATE interactions SET graph_node_id=NULL,completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='running'")
                 .bind(failure.harness_configuration_name)
                 .bind(failure.interaction_id.value())
                 .execute(&mut *transaction)
@@ -365,14 +442,30 @@ impl SqliteProductStore {
         interaction_id: InteractionId,
         harness_configuration_name: &str,
         error: &str,
-    ) -> Result<(), StorageError> {
-        sqlx::query("UPDATE interactions SET completion_status='failed',harness_configuration_name=?1,completion_error=?2 WHERE id=?3")
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query("UPDATE interactions SET completion_status='failed',harness_configuration_name=COALESCE(harness_configuration_name,?1),completion_error=?2 WHERE id=?3 AND completion_status IN ('not_started','running','submitted','waiting_for_approval') AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)")
             .bind(harness_configuration_name)
             .bind(error)
             .bind(interaction_id.value())
             .execute(&self.pool)
             .await?;
-        Ok(())
+        if result.rows_affected() == 1 {
+            return Ok(true);
+        }
+        let status: Option<String> =
+            sqlx::query_scalar("SELECT completion_status FROM interactions WHERE id=?1")
+                .bind(interaction_id.value())
+                .fetch_optional(&self.pool)
+                .await?;
+        match status.as_deref() {
+            Some("accepted" | "failed") => Ok(false),
+            Some(other) => Err(StorageError::IncompatibleSchema(format!(
+                "interaction {interaction_id} has unexpected failure-transition state {other}"
+            ))),
+            None => Err(StorageError::IncompatibleSchema(format!(
+                "interaction {interaction_id} disappeared before failure transition"
+            ))),
+        }
     }
 
     pub(crate) async fn return_interaction_to_unsent(
@@ -649,7 +742,7 @@ mod tests {
             .unwrap();
         assert_eq!(interaction.id, thread.root_interaction_id);
         assert_eq!(interaction.text, "Edited prompt");
-        assert_eq!(interaction.completion_status, "running");
+        assert_eq!(interaction.completion_status, "submitted");
         assert_eq!(interaction.model_selection, Some(next_model));
         let receipt = interaction.latest_attempt.unwrap();
         assert_eq!(receipt.id, attempt_id);
@@ -657,6 +750,93 @@ mod tests {
         assert_eq!(receipt.outcome, "model_failed");
         assert_eq!(receipt.effect_boundary, "none");
 
+        store.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn restart_recovery_preserves_every_imported_completion_status() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-import-recovery-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        sqlx::query("INSERT INTO conversation_imports(id,source_sha256,export_version,producer_json,header_json,state,created_at) VALUES ('import-1','sha256:abc',1,'{}','{}','published','1')")
+            .execute(&store.pool).await.unwrap();
+        let thread = sqlx::query("INSERT INTO threads(title,created_at,updated_at,conversation_import_id) VALUES ('Imported','1','1','import-1')")
+            .execute(&store.pool).await.unwrap().last_insert_rowid();
+        for (sequence, status) in ["not_started", "running", "submitted", "accepted", "failed"]
+            .into_iter()
+            .enumerate()
+        {
+            sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,?2,'Imported','1',?3)")
+                .bind(thread).bind((sequence + 1) as i64).bind(status)
+                .execute(&store.pool).await.unwrap();
+        }
+
+        assert_eq!(
+            store
+                .recover_interrupted_interactions("interrupted")
+                .await
+                .unwrap(),
+            0
+        );
+        let statuses = sqlx::query_scalar::<_, String>(
+            "SELECT completion_status FROM interactions WHERE thread_id=?1 ORDER BY sequence",
+        )
+        .bind(thread)
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            statuses,
+            vec!["not_started", "running", "submitted", "accepted", "failed"]
+        );
+        let ids = sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM interactions WHERE thread_id=?1 ORDER BY sequence",
+        )
+        .bind(thread)
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
+        assert!(
+            !store
+                .claim_interaction_running(InteractionId::from_database(ids[0]), "blocked")
+                .await
+                .unwrap()
+        );
+        store
+            .mark_interaction_running(InteractionId::from_database(ids[3]), "blocked")
+            .await
+            .unwrap();
+        store
+            .accept_interaction_completion(AcceptedInteractionCompletion {
+                interaction_id: InteractionId::from_database(ids[4]),
+                graph_node_id: 999,
+                harness_configuration_name: "blocked",
+                harness_configuration_digest: "sha256:blocked",
+                effective_execution_digest: "sha256:blocked",
+                effective_permission_receipt: &serde_json::json!({}),
+                output: &serde_json::json!({}),
+            })
+            .await
+            .unwrap();
+        store
+            .fail_interaction_completion(InteractionId::from_database(ids[3]), "blocked", "blocked")
+            .await
+            .unwrap();
+        let preserved = sqlx::query_scalar::<_, String>(
+            "SELECT completion_status FROM interactions WHERE thread_id=?1 ORDER BY sequence",
+        )
+        .bind(thread)
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(preserved, statuses);
         store.pool.close().await;
         std::fs::remove_file(path).unwrap();
     }

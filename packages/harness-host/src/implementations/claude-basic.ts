@@ -13,6 +13,11 @@ import { buildLayeredNavigationPrompt } from "./codex-basic.js";
 
 export const CLAUDE_BASIC_KEY = "claude.basic";
 
+const SAFE_SUBPROCESS_ENVIRONMENT = new Set([
+  "PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC",
+  "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SHELL",
+]);
+
 export interface ClaudeBasicDependencies {
   readonly spawnProcess?: typeof spawn;
   readonly clientModuleUrl?: string;
@@ -107,7 +112,9 @@ export function claudePermissionMode(value: unknown): "default" | "acceptEdits" 
 }
 
 function executionEnvironment(access: HarnessExecutionAccess, graph: GraphCapability): Record<string, string> {
-  const environment = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+  const environment = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => (
+    entry[1] !== undefined && SAFE_SUBPROCESS_ENVIRONMENT.has(entry[0])
+  )));
   if (access.kind === "managed-runtime") {
     if (access.adapterId !== "claude-subscription") throw new Error(`claude.basic cannot consume managed runtime ${access.adapterId}`);
     Object.assign(environment, access.environment);

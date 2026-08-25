@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld("relayerDesktop", {
   folder: {
     choose: () => ipcRenderer.invoke("relayer:folder-choose"),
   },
+  conversation: {
+    export: (threadId) => ipcRenderer.invoke("relayer:conversation-export", threadId),
+  },
   models: {
     settingsOpened: () => ipcRenderer.invoke("relayer:model-catalog-settings-open"),
     refresh: (providerId) => ipcRenderer.invoke("relayer:model-catalog-refresh", providerId),
@@ -35,6 +38,13 @@ contextBridge.exposeInMainWorld("relayerDesktop", {
   appearance: {
     read: () => ipcRenderer.invoke("relayer:appearance-read"),
     set: (appearance) => ipcRenderer.invoke("relayer:appearance-set", appearance),
+  },
+  tutorial: {
+    read: (context) => ipcRenderer.invoke("relayer:tutorial-read", context),
+    beginAutomatic: (context) => ipcRenderer.invoke("relayer:tutorial-begin-automatic", context),
+    beginManual: () => ipcRenderer.invoke("relayer:tutorial-begin-manual"),
+    dismiss: () => ipcRenderer.invoke("relayer:tutorial-dismiss"),
+    complete: () => ipcRenderer.invoke("relayer:tutorial-complete"),
   },
   updater: {
     status: () => ipcRenderer.invoke("relayer:update-status"),

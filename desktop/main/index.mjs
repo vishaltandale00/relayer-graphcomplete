@@ -16,11 +16,13 @@ import {
   createEncryptedCredentialStore,
 } from "./providers/provider-definition-store.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
+import { createConversationExportService } from "./services/conversation-export.mjs";
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
 import { GraphCompleteRuntimeService } from "./services/graphcomplete-runtime.mjs";
 import { resolveDesktopHarnessConfiguration } from "./services/desktop-harness-configuration.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
+import { createTutorialLifecycle } from "./services/tutorial-lifecycle.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
 import { claimPrimaryDesktopInstance } from "./single-instance.mjs";
 import { createWindowFactory } from "./window.mjs";
@@ -81,6 +83,7 @@ const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => main
 if (primaryInstance) {
   let appearance = "dark";
   const settings = createSettingsStore(userDataPath);
+  const tutorial = createTutorialLifecycle({ settings });
   const graphRuntime = new GraphCompleteRuntimeService({
     userDataDirectory: userDataPath,
     graphServerBinary: relayerGraphServerBinary,
@@ -176,6 +179,12 @@ if (primaryInstance) {
       runtimeSession,
       defaultHarnessConfiguration,
       allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-"),
+      exportProducer: {
+        desktopVersion: app.getVersion(),
+        buildCommit: metadata.relayerReleaseSourceCommit || "development",
+        platform: process.platform,
+        architecture: process.arch,
+      },
       onUnexpectedStop: () => {
         dialog.showErrorBox(
           "Relayer app server stopped",
@@ -212,6 +221,11 @@ if (primaryInstance) {
     });
     ({ modelCatalog, providerDefinitions: providerSetup } = providerComposition);
     await providerComposition.start();
+    const conversationExporter = createConversationExportService({
+      dialog,
+      getWindow: () => mainWindow,
+      exportConversation: (threadId) => productServer.exportConversation(threadId),
+    });
 
     registerDesktopIpc({
       ipcMain,
@@ -221,7 +235,9 @@ if (primaryInstance) {
       modelCatalog,
       providerDefinitions: providerSetup,
       validateProviderOnboarding: () => productServer.validateProviderOnboarding(defaultHarnessConfiguration),
+      conversationExporter,
       settings,
+      tutorial,
       updater,
       getWindow: () => mainWindow,
       getAppearance: () => appearance,

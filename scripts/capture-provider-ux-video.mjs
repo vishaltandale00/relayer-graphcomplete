@@ -211,13 +211,14 @@ async function recordBrowserFlow(url, directory, profile) {
       if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? "Flow evaluation failed.");
       return result.result.value;
     };
-    const waitFor = async (expression, description, timeoutMs = 8_000) => {
+    const waitFor = async (expression, description, timeoutMs = 8_000, diagnosticExpression = null) => {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
         if (await evaluate(`Boolean(${expression})`)) return;
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
       }
-      throw new Error(`Timed out waiting for recorded flow: ${description}`);
+      const diagnostic = diagnosticExpression ? await evaluate(diagnosticExpression) : null;
+      throw new Error(`Timed out waiting for recorded flow: ${description}${diagnostic ? ` (${JSON.stringify(diagnostic)})` : ""}`);
     };
     const capture = async (count = 1) => {
       for (let index = 0; index < count; index += 1) {
@@ -310,6 +311,23 @@ async function recordBrowserFlow(url, directory, profile) {
       await waitFor("document.querySelector('#composerRetryMessage:not(.hidden)') && !document.querySelector('#threadPrompt').disabled", "editable restored draft");
       await type("#threadPrompt", ["Review the provider adapter architecture ", "and verify retry safety"]);
       await click('[data-model-picker="ongoing"] [data-model-picker-trigger]');
+      await waitFor(`(() => {
+        const picker = document.querySelector('[data-model-picker="ongoing"]');
+        return picker?.querySelector('[data-model-picker-label]')?.textContent === 'Choose model'
+          && picker.querySelector('[data-model-family]')
+          && [...picker.querySelectorAll('[data-model-option]')].every((option) => option.getAttribute('aria-checked') === 'false');
+      })()`, "invalid prior family requires explicit model choice", 8_000, `(() => {
+        const picker = document.querySelector('[data-model-picker="ongoing"]');
+        return {
+          label: picker?.querySelector('[data-model-picker-label]')?.textContent,
+          family: picker?.querySelector('[data-model-family]')?.value,
+          options: [...(picker?.querySelectorAll('[data-model-option]') ?? [])].map((option) => ({
+            providerId: option.dataset.providerId,
+            modelId: option.dataset.modelId,
+            checked: option.getAttribute('aria-checked'),
+          })),
+        };
+      })()`);
       await click('[data-model-picker="ongoing"] [data-model-option][data-provider-id="codex"][data-model-id="gpt-5.6-sol"]');
       await waitFor("document.querySelector('[data-model-picker=\"ongoing\"] [data-model-option][data-provider-id=\"codex\"][data-model-id=\"gpt-5.6-sol\"]')?.getAttribute('aria-checked') === 'true'", "explicit retry model selection");
       await click("#sendInteraction");
@@ -451,6 +469,12 @@ async function requestJson(request) {
 function productState(scene) {
   const recovery = scene === "recovery" || scene === "flow";
   const retryAccepted = scene === "flow" && flowState.retrySubmitted;
+  const failedSelection = {
+    familyId: scene === "flow" ? 404 : 11,
+    providerId: "openai-work",
+    modelId: "gpt-5.2",
+  };
+  const acceptedSelection = { familyId: 11, providerId: "codex", modelId: "gpt-5.6-sol" };
   return {
     projects: [],
     threads: recovery ? [{
@@ -469,13 +493,13 @@ function productState(scene) {
       text: "Review the provider adapter architecture",
       completionStatus: retryAccepted ? "accepted" : "not_started",
       permissionProfileId: "auto",
-      modelSelection: { familyId: 11, providerId: "openai-work", modelId: "gpt-5.2" },
+      modelSelection: retryAccepted ? acceptedSelection : failedSelection,
       latestAttempt: retryAccepted ? {
         id: 45,
         attemptNumber: 2,
         outcome: "accepted",
         effectBoundary: "graph_write",
-        modelSelection: { familyId: 11, providerId: "codex", modelId: "gpt-5.6-sol" },
+        modelSelection: acceptedSelection,
       } : {
         id: 44,
         attemptNumber: 1,
@@ -483,7 +507,7 @@ function productState(scene) {
         failureCategory: "rate_limit",
         failureMessage: "OpenAI Work is rate limited. Choose another model or try again later.",
         effectBoundary: "none",
-        modelSelection: { familyId: 11, providerId: "openai-work", modelId: "gpt-5.2" },
+        modelSelection: failedSelection,
       },
     }] : [],
     actionInvocations: [],

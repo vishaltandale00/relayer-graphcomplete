@@ -112,4 +112,23 @@ describe("judge analysis view model", () => {
     expect(scoreForRatings({ cohesion: null })).toBeNull();
     expect(scoreForRatings(null)).toBeNull();
   });
+
+  it("shows the active imported judge instead of a stale prior result", () => {
+    const run = fixture();
+    const turn = run.executions[0].turns.find((candidate) => candidate.interactionId === 11);
+    turn.deterministicJudge = {
+      status: "completed",
+      passed: true,
+      provenance: { sourceSha256: "sha256:owner-export" },
+      checks: [{ name: "accepted", passed: true }],
+    };
+    run.judgeConfigurationName = "deterministic-graph-contract";
+    let selected = buildJudgeAnalysis(run, "execution-1").turns[0];
+    expect(selected.result).toBe(turn.deterministicJudge);
+    expect(selected.provenance.sourceSha256).toBe("sha256:owner-export");
+
+    run.judgeConfigurationName = "simulated-user";
+    selected = buildJudgeAnalysis(run, "execution-1").turns[0];
+    expect(selected.result.id).toBe("judge-1");
+  });
 });

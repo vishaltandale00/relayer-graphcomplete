@@ -6,6 +6,7 @@ import {
   COMPOSER_MIN_HEIGHT,
   bindComposerKeydown,
   composerDisabledForState,
+  composerFocusRestoration,
   composerKeydownIntent,
   composerSubmissionReady,
   graphTurnNavigationDelta,
@@ -76,6 +77,7 @@ describe("product workspace keyboard behavior", () => {
     expect(composerSubmissionReady("Ask a follow-up", true)).toBe(false);
     expect(composerDisabledForState("running")).toBe(true);
     expect(composerDisabledForState("not_started", true, true)).toBe(false);
+    expect(composerDisabledForState("waiting_for_approval")).toBe(true);
     expect(composerDisabledForState("accepted")).toBe(false);
     expect(composerDisabledForState("accepted", false)).toBe(true);
   });
@@ -100,5 +102,51 @@ describe("product workspace keyboard behavior", () => {
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
     expect(styles).toContain(".thread-composer textarea{flex:1;height:42px;min-height:42px;max-height:126px;resize:none;overflow-y:hidden");
     expect(styles).not.toContain(".thread-composer textarea{flex:1;min-height:42px;max-height:126px;resize:vertical");
+  });
+
+  it("places an accessible approval dock below the graph and above the composer", async () => {
+    const markup = productWorkspaceMarkup();
+    expect(markup.indexOf('id="graphStage"')).toBeLessThan(markup.indexOf('id="approvalDock"'));
+    expect(markup.indexOf('id="approvalDock"')).toBeLessThan(markup.indexOf('id="threadComposer"'));
+    expect(markup).toContain('id="approvalDock" tabindex="-1" aria-labelledby="approvalTitle"');
+    expect(markup).toContain('role="group" aria-label="Resolve approval request"');
+    expect(markup).toContain('id="denyApproval"');
+    expect(markup).toContain('id="approveOnce"');
+    expect(markup).toContain('id="approveAlways"');
+    expect(markup).toContain('<small>this session</small>');
+    expect(markup).toContain('id="inspector"');
+    expect(markup).not.toContain("right-chat");
+
+    const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
+    expect(styles).toContain(".thread-workspace{display:flex;flex:1;min-height:0}.graph-column");
+    expect(styles).toContain(".approval-dock{flex:none;border-top:1px solid var(--line-strong)");
+    expect(styles).toContain(".approval-always small{font-size:8px");
+    expect(styles).not.toContain(".approval-dock{position:absolute");
+    expect(styles).toContain(".approval-dock.history-only{padding-block:9px}");
+  });
+
+  it("defers same-thread composer focus until completion is no longer running", () => {
+    const waiting = composerFocusRestoration(null, {
+      activeWasInside: true,
+      dockThreadId: "10",
+      threadId: "10",
+      canCompose: true,
+      promptDisabled: true,
+    });
+    expect(waiting).toEqual({ pendingThreadId: "10", shouldFocus: false });
+    expect(composerFocusRestoration(waiting.pendingThreadId, {
+      activeWasInside: false,
+      dockThreadId: "10",
+      threadId: "10",
+      canCompose: true,
+      promptDisabled: false,
+    })).toEqual({ pendingThreadId: null, shouldFocus: true });
+    expect(composerFocusRestoration("10", {
+      activeWasInside: false,
+      dockThreadId: "10",
+      threadId: "11",
+      canCompose: true,
+      promptDisabled: false,
+    })).toEqual({ pendingThreadId: null, shouldFocus: false });
   });
 });

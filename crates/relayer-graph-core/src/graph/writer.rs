@@ -140,6 +140,51 @@ impl GraphWriter {
         Ok(layer)
     }
 
+    pub async fn discard_layer(&self, id: LayerId) -> Result<GraphLayer, GraphError> {
+        let mut transaction = self.database.storage.begin_write().await?;
+        let record = LayerTable::new(&mut transaction)
+            .record(&self.scope, id)
+            .await?
+            .ok_or_else(|| GraphError::NotFound(format!("layer {id}")))?;
+        if record.owner != self.scope.root_node_id {
+            return Err(GraphError::Forbidden(format!(
+                "layer {id} belongs to another interaction"
+            )));
+        }
+        match record.layer.state {
+            RecordState::Stopped => return Ok(record.layer),
+            RecordState::Accepted => {
+                return Err(GraphError::validation(
+                    "immutable_layer",
+                    "layer",
+                    "This layer was already accepted and cannot be discarded.",
+                ));
+            }
+            RecordState::Draft => {}
+        }
+        self.ensure_writable(&mut transaction).await?;
+        if LayerTable::new(&mut transaction)
+            .is_reachable_from_root(self.scope.root_node_id, id)
+            .await?
+        {
+            return Err(GraphError::validation(
+                "reachable_layer",
+                "layer",
+                format!(
+                    "Layer {id} is reachable from the current root action. Retarget the incoming action before discarding this layer."
+                ),
+            ));
+        }
+        LayerTable::new(&mut transaction)
+            .stop_owned_draft(id, self.scope.root_node_id)
+            .await?;
+        transaction.commit().await?;
+        Ok(GraphLayer {
+            state: RecordState::Stopped,
+            ..record.layer
+        })
+    }
+
     pub async fn add_action(&self, draft: &ActionDraft) -> Result<GraphAction, GraphError> {
         let canonical_icon = draft.validate_shape()?;
         let normalized_draft = ActionDraft {
@@ -168,6 +213,20 @@ impl GraphWriter {
                     "invalid_root_action",
                     "relation",
                     "The interaction root action must be navigate with relation=expand.",
+                ));
+            }
+            if let Some(existing) = ActionTable::new(&mut transaction)
+                .active_root_identity(self.scope.root_node_id)
+                .await?
+                && existing.client_key != draft.client_key
+            {
+                return Err(GraphError::validation(
+                    "root_action_already_exists",
+                    "clientKey",
+                    format!(
+                        "This interaction already has active root action {} with clientKey {:?}. Reuse that clientKey to update the existing draft root action, or call graph.submit(interactionNode) if it is already correct.",
+                        existing.id, existing.client_key
+                    ),
                 ));
             }
         } else {
@@ -310,16 +369,40 @@ impl GraphWriter {
         layers::resolve(&mut connection, &self.scope, id, false).await
     }
 
+    pub async fn get_layer_owner(&self, id: LayerId) -> Result<NodeId, GraphError> {
+        let mut connection = self.database.storage.acquire().await?;
+        let record = LayerTable::new(&mut connection)
+            .record(&self.scope, id)
+            .await?
+            .ok_or_else(|| GraphError::NotFound(format!("layer {id}")))?;
+        if record.layer.state != RecordState::Accepted && record.owner != self.scope.root_node_id {
+            return Err(GraphError::Forbidden(format!(
+                "layer {id} is not readable by this interaction"
+            )));
+        }
+        Ok(record.owner)
+    }
+
     pub async fn completion_output(&self) -> Result<Option<CompletionOutput>, GraphError> {
         completion::read_output(&self.database, &self.scope).await
     }
 
     pub async fn complete(&self, interaction: NodeId) -> Result<CompletionOutput, GraphError> {
         self.scope.require_root(interaction)?;
+        if self.scope.read_only {
+            return Err(GraphError::Forbidden(
+                "imported conversation graphs are immutable".into(),
+            ));
+        }
         completion::complete(&self.database, &self.scope).await
     }
 
     async fn ensure_writable(&self, connection: &mut GraphConnection) -> Result<(), GraphError> {
+        if self.scope.read_only {
+            return Err(GraphError::Forbidden(
+                "imported conversation graphs are immutable".into(),
+            ));
+        }
         if CompletionTable::new(connection)
             .root_action(self.scope.root_node_id)
             .await?

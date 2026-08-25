@@ -2,16 +2,32 @@ import { Codex } from "@openai/codex-sdk";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CompletionOutput, GraphCapability, GraphNode } from "@relayer/graph-client";
-import { digestHarnessConfiguration, startHarnessHost, type HarnessConfiguration, type HarnessFactory, type HarnessImplementationMap } from "@relayer/harness-host";
+import type { CompletionOutput, GraphCapability, GraphNode, ResolvedLayer } from "@relayer/graph-client";
+import { digestHarnessConfiguration, startHarnessHost, type HarnessConfiguration, type HarnessFactory, type HarnessImplementationMap, type RunningHarnessHost } from "@relayer/harness-host";
 import type { TestExecutionPlan } from "./run-plan.js";
 
 export const basicEvalCaseId = "empty-project.task-system.two-turn";
 export const basicEvalPrompt = "A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.";
 export const basicEvalFollowUpPrompt = "Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.";
+export const replayRepairEvalCaseId = "graph-authoring.replay-repair";
+const DEFAULT_EVAL_HARNESS_CLOSE_GRACE_MS = 30_000;
+export const replayRepairEvalPrompt = `Explain, as a useful connected graph answer, why stable idempotency keys make retrying a partially persisted graph-authoring program safe.
+
+This is a live graph-recovery evaluation. In one executable program, use explicit stable clientKey values and perform this exact recovery exercise through the ordinary Relayer graph client:
+1. Define an author() function that creates two connected useful response nodes, their edge and root layer, one root response action, plus a separate one-node orphan draft layer. Return every persisted ID.
+2. Call author() twice from newly constructed graph objects with the same stable keys, retaining both returned ID sets.
+3. Call graph.submit() while the orphan is still draft. Require this call to fail specifically with code orphan_draft_layers; rethrow any other error or an unexpected success.
+4. Call graph.discardLayer() on the orphan layer from the second pass, then call it again and retain both returned layer IDs.
+5. Update one useful response node, using its same stable key, so its detail contains exactly one line beginning GRAPH_REPAIR_EVIDENCE= followed by compact JSON with this shape:
+{"passes":[{"primaryNodeId":1,"secondaryNodeId":2,"edgeId":3,"rootLayerId":4,"rootActionId":5,"orphanNodeId":6,"orphanLayerId":7},{"primaryNodeId":1,"secondaryNodeId":2,"edgeId":3,"rootLayerId":4,"rootActionId":5,"orphanNodeId":6,"orphanLayerId":7}],"orphanSubmitErrorCode":"orphan_draft_layers","discardedLayerIds":[7,7]}
+Use the actual returned numeric IDs, not these example values. Preserve the useful explanation around that evidence line, resubmit the stable-keyed root layer and root action if needed, then finish with a successful graph.submit().
+
+Do not create fake navigation to the orphan. Do not delete graph records. The accepted answer should clearly explain stable client keys, retry after partial persistence, and idempotent recovery.`;
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 
 export function basicEvalPythonPath(existingPythonPath?: string): string {
@@ -41,6 +57,7 @@ export interface RuntimeEvalTurn {
   readonly output: CompletionOutput;
   readonly checks: readonly EvalCheck[];
   readonly judge?: BasicJudge;
+  readonly repairEvidence?: ReplayRepairEvidence;
   readonly passed: boolean;
 }
 export interface RuntimeEvalArtifact {
@@ -55,14 +72,49 @@ export interface RuntimeEvalArtifact {
 export interface BasicJudge { readonly factIds: readonly string[]; readonly graphUseful: boolean; readonly detailsUseful: boolean; readonly problems: readonly string[]; readonly verdict: "pass" | "fail" }
 export interface BasicJudgeConfiguration { readonly name: "none" | "codex-structured" }
 
+export interface ReplayRepairPass {
+  readonly primaryNodeId: number;
+  readonly secondaryNodeId: number;
+  readonly edgeId: number;
+  readonly rootLayerId: number;
+  readonly rootActionId: number;
+  readonly orphanNodeId: number;
+  readonly orphanLayerId: number;
+}
+
+export interface ReportedReplayRepairEvidence {
+  readonly passes: readonly [ReplayRepairPass, ReplayRepairPass];
+  readonly orphanSubmitErrorCode: "orphan_draft_layers";
+  readonly discardedLayerIds: readonly [number, number];
+}
+
+export interface ReplayRepairEvidence {
+  readonly reported: ReportedReplayRepairEvidence;
+  readonly stoppedLayer: ResolvedLayer;
+  readonly stoppedLayerOwnerNodeId: number;
+  readonly auditEvents: readonly ReplayRepairAuditEvent[];
+}
+
+export interface ReplayRepairAuditEvent {
+  readonly sequence: number;
+  readonly method: string;
+  readonly path: string;
+  readonly status: number;
+  readonly recordKind?: "node" | "edge" | "layer" | "action";
+  readonly recordId?: number;
+  readonly recordState?: string;
+  readonly errorCodes?: readonly string[];
+}
+
 export async function runBasicRuntimeEval(options: {
   outputDirectory: string;
   execution: TestExecutionPlan<BasicJudgeConfiguration>;
   implementations: HarnessImplementationMap;
   serverBinary?: string;
   serverReadyTimeoutMs?: number;
+  harnessCloseGraceMs?: number;
 }): Promise<RuntimeEvalArtifact> {
-  if (options.execution.testCaseId !== basicEvalCaseId) throw new Error(`Unsupported runtime-basic test case: ${options.execution.testCaseId}`);
+  if (![basicEvalCaseId, replayRepairEvalCaseId].includes(options.execution.testCaseId)) throw new Error(`Unsupported runtime-basic test case: ${options.execution.testCaseId}`);
   if (options.execution.harnessConfiguration.name !== options.execution.harnessConfigurationName) {
     throw new Error("Execution harness configuration name does not match its resolved snapshot");
   }
@@ -74,9 +126,12 @@ export async function runBasicRuntimeEval(options: {
   const graphControlToken = randomUUID();
   const harnessControlToken = randomUUID();
   let graphProcess: Awaited<ReturnType<typeof startGraphServer>> | undefined;
+  let graphAuditProxy: Awaited<ReturnType<typeof startGraphAuditProxy>> | undefined;
   let harnessHost: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
+  let operationError: unknown;
   try {
     graphProcess = await startGraphServer(options.serverBinary, join(stateDirectory, "graph.sqlite"), graphControlToken, options.serverReadyTimeoutMs);
+    if (options.execution.testCaseId === replayRepairEvalCaseId) graphAuditProxy = await startGraphAuditProxy(graphProcess.url);
     const projectId = 1;
     const threadId = 1;
     let harnessFactoryCalls = 0;
@@ -96,17 +151,29 @@ export async function runBasicRuntimeEval(options: {
 
     const capabilities: GraphCapability[] = [];
     const turns: RuntimeEvalTurn[] = [];
-    for (const prompt of [basicEvalPrompt, basicEvalFollowUpPrompt]) {
+    const prompts = options.execution.testCaseId === replayRepairEvalCaseId
+      ? [replayRepairEvalPrompt]
+      : [basicEvalPrompt, basicEvalFollowUpPrompt];
+    for (const prompt of prompts) {
       const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, graphControlToken, { projectId, threadId, text: prompt });
-      const capability = { url: graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
+      const capability = { url: graphAuditProxy?.url ?? graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
       const complete = await completeWithCapabilityCleanup(async () => {
         await requestJson(`${runningHarnessHost.url}/sessions`, harnessControlToken, { threadId, configuration, permissionProfileId, workingDirectory }, 201);
-        return requestJson<{ output: CompletionOutput }>(`${runningHarnessHost.url}/sessions/${threadId}/complete`, harnessControlToken, { graph: capability });
+        return requestJson<{ output: CompletionOutput }>(`${runningHarnessHost.url}/sessions/${threadId}/complete`, harnessControlToken, {
+          interactionId: interaction.node.id,
+          graph: capability,
+        });
       }, capability, graphControlToken);
-      const checks = checkBasicOutput(complete.output, interaction.node.id);
+      const isReplayRepair = options.execution.testCaseId === replayRepairEvalCaseId;
+      const repairEvidence = isReplayRepair
+        ? await readReplayRepairEvidence(complete.output, interaction.node.id, graphProcess.url, graphControlToken, graphAuditProxy?.events() ?? [])
+        : undefined;
+      const checks = isReplayRepair
+        ? checkReplayRepairOutput(complete.output, repairEvidence, interaction.node.id)
+        : checkBasicOutput(complete.output, interaction.node.id);
       const deterministicPassed = checks.every((check) => check.passed);
-      const judge = options.execution.judgeConfiguration.name === "codex-structured" && deterministicPassed
+      const judge = options.execution.testCaseId === basicEvalCaseId && options.execution.judgeConfiguration.name === "codex-structured" && deterministicPassed
         ? await judgeOutput(complete.output, prompt, workingDirectory)
         : undefined;
       turns.push({
@@ -114,6 +181,7 @@ export async function runBasicRuntimeEval(options: {
         prompt,
         output: complete.output,
         checks,
+        ...(repairEvidence === undefined ? {} : { repairEvidence }),
         ...(judge === undefined ? {} : { judge }),
         passed: deterministicPassed && (judge === undefined || judge.verdict === "pass"),
       });
@@ -124,9 +192,11 @@ export async function runBasicRuntimeEval(options: {
       });
       return response.status === 401;
     }));
+    const uniqueInteractionNodes = new Set(capabilities.map((capability) => capability.nodeId));
+    const uniqueCapabilityTokens = new Set(capabilities.map((capability) => capability.token));
     const sessionChecks: EvalCheck[] = [
-      { name: "single-harness-object", passed: harnessFactoryCalls === 1, detail: `Harness factory called ${harnessFactoryCalls} time${harnessFactoryCalls === 1 ? "" : "s"} for two interactions.` },
-      { name: "distinct-interaction-capabilities", passed: capabilities.length === 2 && capabilities[0]!.nodeId !== capabilities[1]!.nodeId && capabilities[0]!.token !== capabilities[1]!.token, detail: "Each interaction used a distinct node and opaque capability token." },
+      { name: "single-harness-object", passed: harnessFactoryCalls === 1, detail: `Harness factory called ${harnessFactoryCalls} time${harnessFactoryCalls === 1 ? "" : "s"} for ${prompts.length} interaction${prompts.length === 1 ? "" : "s"}.` },
+      { name: "distinct-interaction-capabilities", passed: capabilities.length === prompts.length && uniqueInteractionNodes.size === prompts.length && uniqueCapabilityTokens.size === prompts.length, detail: "Each interaction used a distinct node and opaque capability token." },
       { name: "revoked-interaction-capabilities", passed: revokedCapabilities.every(Boolean), detail: "The eval runtime revoked every graph capability after its Complete call settled." },
     ];
     const deterministicPassed = sessionChecks.every((check) => check.passed) && turns.every((turn) => turn.checks.every((check) => check.passed));
@@ -145,23 +215,73 @@ export async function runBasicRuntimeEval(options: {
     await writeFile(join(runDirectory, "result.json"), `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
     await writeFile(join(runDirectory, "index.html"), renderArtifact(artifact), "utf8");
     return artifact;
+  } catch (error) {
+    operationError = error;
+    throw error;
   } finally {
-    await harnessHost?.close();
-    if (graphProcess !== undefined) {
-      graphProcess.process.kill("SIGTERM");
-      await onceExit(graphProcess.process);
+    const cleanupErrors: unknown[] = [];
+    for (const cleanup of [
+      async () => {
+        if (harnessHost !== undefined) {
+          await closeHarnessHostForEval(
+            harnessHost,
+            options.harnessCloseGraceMs ?? DEFAULT_EVAL_HARNESS_CLOSE_GRACE_MS,
+            workingDirectory,
+          );
+        }
+      },
+      async () => graphAuditProxy?.close(),
+      async () => { if (graphProcess !== undefined) await terminate(graphProcess.process); },
+      async () => rm(workingDirectory, { recursive: true, force: true }),
+    ]) {
+      const result = await settle(cleanup);
+      if (!result.ok) cleanupErrors.push(result.error);
     }
-    await rm(workingDirectory, { recursive: true, force: true });
+    if (cleanupErrors.length > 0) {
+      if (operationError !== undefined) {
+        throw new AggregateError([operationError, ...cleanupErrors], "Runtime Eval failed and cleanup also failed");
+      }
+      if (cleanupErrors.length === 1) throw cleanupErrors[0];
+      throw new AggregateError(cleanupErrors, "Runtime Eval cleanup failed");
+    }
   }
 }
 
-export function checkBasicOutput(output: CompletionOutput, expectedInteractionNodeId = output.nodeId): EvalCheck[] {
+async function closeHarnessHostForEval(host: RunningHarnessHost, closeGraceMs: number, workingDirectory: string): Promise<void> {
+  const closing = settle(() => host.close());
+  if (!(await settlesWithin(closing.then(() => {}), closeGraceMs))) {
+    host.forceClose();
+    void closing.then(async () => {
+      await rm(workingDirectory, { recursive: true, force: true });
+    }).catch(() => undefined);
+    throw new Error(`Harness host did not close within ${closeGraceMs}ms and was forcibly disconnected`);
+  }
+  const result = await closing;
+  if (!result.ok) throw result.error;
+}
+
+export function checkBasicOutput(
+  output: CompletionOutput,
+  expectedInteractionNodeId = output.nodeId,
+  options: { allowLegacyLayout?: boolean } = {},
+): EvalCheck[] {
   const layer = output.rootLayer;
   const declaredNodeIds = layer.layer.nodes;
   const resolvedNodeIds = layer.nodes.map((node) => node.id);
   const declaredEdgeIds = layer.layer.edges;
   const resolvedEdgeIds = layer.edges.map((edge) => edge.id);
   const nodeIds = new Set(layer.nodes.map((node) => node.id));
+  const layout = layer.layer.layout;
+  const placements = layout?.placements ?? [];
+  const placementIds = new Set(placements.map((placement) => placement.nodeId));
+  const layoutComplete = layout?.version === 1
+    && placements.length === nodeIds.size
+    && placementIds.size === nodeIds.size
+    && [...nodeIds].every((id) => placementIds.has(id))
+    && placements.every(({ x, y }) => (
+      Number.isFinite(x) && x >= 0 && x <= 1
+      && Number.isFinite(y) && y >= 0 && y <= 1
+    ));
   const adjacency = new Map(layer.nodes.map((node) => [node.id, new Set<number>()]));
   for (const edge of layer.edges) { adjacency.get(edge.endpoints[0])?.add(edge.endpoints[1]); adjacency.get(edge.endpoints[1])?.add(edge.endpoints[0]); }
   const visited = new Set<number>(); const pending = layer.nodes[0] === undefined ? [] : [layer.nodes[0].id];
@@ -170,11 +290,326 @@ export function checkBasicOutput(output: CompletionOutput, expectedInteractionNo
     { name: "interaction-output", passed: output.nodeId === expectedInteractionNodeId && output.rootAction.sourceNodeId === expectedInteractionNodeId, detail: "Completion output and response action belong to the requested interaction." },
     { name: "accepted-closure", passed: output.rootAction.state === "accepted" && layer.layer.state === "accepted" && layer.nodes.every((node) => node.state === "accepted") && layer.edges.every((edge) => edge.state === "accepted") && layer.actions.every((action) => action.state === "accepted"), detail: "The response action and complete visible closure are accepted." },
     { name: "resolved-membership", passed: arraysEqual(declaredNodeIds, resolvedNodeIds) && arraysEqual(declaredEdgeIds, resolvedEdgeIds), detail: "Resolved records exactly match the accepted layer references." },
+    {
+      name: "authored-layout",
+      passed: layoutComplete || (options.allowLegacyLayout === true && layout == null),
+      detail: layout == null && options.allowLegacyLayout === true
+        ? "The accepted legacy layer has no authored layout and remains compatible."
+        : "The accepted layer has one finite normalized v1 placement per visible node.",
+    },
     { name: "response-action", passed: output.rootAction.kind === "navigate" && output.rootAction.relation === "expand" && output.rootAction.sourceLayerId == null && output.rootAction.targetLayerId === layer.layer.id, detail: "Interaction has one accepted root expansion action." },
     { name: "visible-layer", passed: layer.nodes.length >= 1 && layer.nodes.length <= 8 && layer.nodes.every((node) => node.icon.trim() && node.title.trim() && node.detail.trim()), detail: `${layer.nodes.length} complete visible nodes.` },
     { name: "exact-edges", passed: layer.edges.every((edge) => edge.endpoints[0] !== edge.endpoints[1] && nodeIds.has(edge.endpoints[0]) && nodeIds.has(edge.endpoints[1])), detail: `${layer.edges.length} visible undirected edges stay inside the layer.` },
     { name: "connected", passed: visited.size === layer.nodes.length, detail: `${visited.size}/${layer.nodes.length} nodes connected.` },
   ];
+}
+
+export function parseReportedReplayRepairEvidence(output: CompletionOutput): ReportedReplayRepairEvidence | undefined {
+  const prefix = "GRAPH_REPAIR_EVIDENCE=";
+  const evidenceLines = output.rootLayer.nodes
+    .flatMap((node) => node.detail.split(/\r?\n/))
+    .filter((line) => line.startsWith(prefix));
+  if (evidenceLines.length !== 1) return undefined;
+  try {
+    const value: unknown = JSON.parse(evidenceLines[0]!.slice(prefix.length));
+    if (!isRecord(value) || !Array.isArray(value.passes) || value.passes.length !== 2 || value.orphanSubmitErrorCode !== "orphan_draft_layers" || !Array.isArray(value.discardedLayerIds) || value.discardedLayerIds.length !== 2) return undefined;
+    const passes = value.passes.map(readReplayRepairPass);
+    if (passes.some((pass) => pass === undefined) || !value.discardedLayerIds.every(isPositiveInteger)) return undefined;
+    return {
+      passes: passes as [ReplayRepairPass, ReplayRepairPass],
+      orphanSubmitErrorCode: "orphan_draft_layers",
+      discardedLayerIds: value.discardedLayerIds as [number, number],
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function checkReplayRepairOutput(
+  output: CompletionOutput,
+  evidence: ReplayRepairEvidence | undefined,
+  expectedInteractionNodeId = output.nodeId,
+): EvalCheck[] {
+  const base = checkBasicOutput(output, expectedInteractionNodeId);
+  const text = output.rootLayer.nodes.map((node) => `${node.title}\n${node.detail}`).join("\n");
+  if (evidence === undefined) {
+    return [
+      ...base,
+      { name: "accepted-useful-output", passed: false, detail: "Accepted output must explain stable-key replay and include one machine-readable evidence line." },
+      { name: "stable-object-replay", passed: false, detail: "No valid two-pass replay evidence was found." },
+      { name: "single-root-action", passed: false, detail: "No replayed root-action identity was available." },
+      { name: "orphan-validation-observed", passed: false, detail: "No required orphan_draft_layers validation evidence was found." },
+      { name: "explicit-stopped-orphan", passed: false, detail: "No discarded-layer identity was available for authoritative graph lookup." },
+      { name: "idempotent-discard", passed: false, detail: "No repeated discard result was available." },
+    ];
+  }
+  const [first, second] = evidence.reported.passes;
+  const replayKeys = Object.keys(first) as (keyof ReplayRepairPass)[];
+  const stableReplay = replayKeys.every((key) => first[key] === second[key]);
+  const expectedWrites: readonly [keyof ReplayRepairPass, ReplayRepairAuditEvent["recordKind"]][] = [
+    ["primaryNodeId", "node"],
+    ["secondaryNodeId", "node"],
+    ["edgeId", "edge"],
+    ["rootLayerId", "layer"],
+    ["rootActionId", "action"],
+    ["orphanNodeId", "node"],
+    ["orphanLayerId", "layer"],
+  ];
+  const authoritativeReplay = expectedWrites.every(([key, kind]) => evidence.auditEvents.filter((event) => (
+    event.status >= 200
+    && event.status < 300
+    && event.recordKind === kind
+    && event.recordId === second[key]
+  )).length >= 2);
+  const rootMatchesAccepted = second.rootLayerId === output.rootLayer.layer.id
+    && second.rootActionId === output.rootAction.id
+    && output.rootLayer.layer.nodes.includes(second.primaryNodeId)
+    && output.rootLayer.layer.nodes.includes(second.secondaryNodeId)
+    && output.rootLayer.layer.edges.includes(second.edgeId);
+  const discardedIdsMatch = evidence.reported.discardedLayerIds[0] === second.orphanLayerId
+    && evidence.reported.discardedLayerIds[1] === second.orphanLayerId;
+  const failedOrphanSubmit = evidence.auditEvents.find((event) => (
+    event.method === "POST"
+    && event.path === "/api/graph/submit"
+    && event.status >= 400
+    && event.errorCodes?.includes("orphan_draft_layers")
+  ));
+  const authoritativeDiscards = failedOrphanSubmit === undefined ? [] : evidence.auditEvents.filter((event) => (
+    event.sequence > failedOrphanSubmit.sequence
+    && event.method === "POST"
+    && event.path === `/api/graph/layers/${second.orphanLayerId}/discard`
+    && event.status >= 200
+    && event.status < 300
+    && event.recordKind === "layer"
+    && event.recordId === second.orphanLayerId
+    && event.recordState === "stopped"
+  ));
+  const successfulFinalSubmit = authoritativeDiscards.length < 2 ? undefined : evidence.auditEvents.find((event) => (
+    event.sequence > authoritativeDiscards[1]!.sequence
+    && event.method === "POST"
+    && event.path === "/api/graph/submit"
+    && event.status >= 200
+    && event.status < 300
+  ));
+  const stoppedLayerMatches = evidence.stoppedLayer.layer.id === second.orphanLayerId
+    && evidence.stoppedLayer.layer.state === "stopped"
+    && evidence.stoppedLayerOwnerNodeId === expectedInteractionNodeId;
+  const orphanNodePreserved = evidence.stoppedLayer.layer.nodes.includes(second.orphanNodeId)
+    && evidence.stoppedLayer.nodes.some((node) => node.id === second.orphanNodeId && node.state === "draft");
+  const useful = /stable.{0,30}(client|idempotency).{0,30}key/i.test(text)
+    && /(retry|rerun|replay)/i.test(text)
+    && /(partial|persist|draft)/i.test(text);
+  return [
+    ...base,
+    { name: "accepted-useful-output", passed: useful, detail: "Accepted connected output explains stable keys and retry after partial persistence." },
+    { name: "stable-object-replay", passed: stableReplay && authoritativeReplay && rootMatchesAccepted, detail: "The audit observed at least two successful writes for every reported stable node, edge, layer, orphan, and action ID, with accepted root membership matching those IDs." },
+    { name: "single-root-action", passed: first.rootActionId === second.rootActionId && second.rootActionId === output.rootAction.id && authoritativeReplay && successfulFinalSubmit !== undefined, detail: "Audited root-action replay retained one identity and a later submission accepted that exact root action." },
+    { name: "orphan-validation-observed", passed: failedOrphanSubmit !== undefined, detail: "The audit observed graph.submit fail with orphan_draft_layers before discard." },
+    { name: "explicit-stopped-orphan", passed: stoppedLayerMatches && orphanNodePreserved, detail: "Control-authoritative graph reads show the reported orphan layer stopped under this interaction while its node remains draft." },
+    { name: "idempotent-discard", passed: discardedIdsMatch && authoritativeDiscards.length >= 2 && successfulFinalSubmit !== undefined, detail: "The audit observed two successful post-validation discard calls return the same stopped orphan before final submission." },
+  ];
+}
+
+async function readReplayRepairEvidence(
+  output: CompletionOutput,
+  interactionNodeId: number,
+  graphUrl: string,
+  graphControlToken: string,
+  auditEvents: readonly ReplayRepairAuditEvent[],
+): Promise<ReplayRepairEvidence | undefined> {
+  const reported = parseReportedReplayRepairEvidence(output);
+  if (reported === undefined) return undefined;
+  const discardedLayerId = reported.discardedLayerIds[1];
+  try {
+    const stoppedLayer = await requestControlJson<ResolvedLayer>(
+      `${graphUrl}/api/control/interactions/${interactionNodeId}/layers/${discardedLayerId}`,
+      graphControlToken,
+    );
+    const owner = await requestControlJson<{ ownerInteractionNodeId: number }>(
+      `${graphUrl}/api/control/interactions/${interactionNodeId}/layers/${discardedLayerId}/owner`,
+      graphControlToken,
+    );
+    return { reported, stoppedLayer, stoppedLayerOwnerNodeId: owner.ownerInteractionNodeId, auditEvents };
+  } catch {
+    return undefined;
+  }
+}
+
+function readReplayRepairPass(value: unknown): ReplayRepairPass | undefined {
+  if (!isRecord(value)) return undefined;
+  const keys = ["primaryNodeId", "secondaryNodeId", "edgeId", "rootLayerId", "rootActionId", "orphanNodeId", "orphanLayerId"] as const;
+  if (Object.keys(value).length !== keys.length || !keys.every((key) => isPositiveInteger(value[key]))) return undefined;
+  return Object.fromEntries(keys.map((key) => [key, value[key]])) as unknown as ReplayRepairPass;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+export async function startGraphAuditProxy(upstreamUrl: string, closeGraceMs = 250): Promise<{
+  readonly url: string;
+  readonly events: () => readonly ReplayRepairAuditEvent[];
+  readonly close: () => Promise<void>;
+}> {
+  const upstream = new URL(upstreamUrl);
+  const auditEvents: ReplayRepairAuditEvent[] = [];
+  const sockets = new Set<Socket>();
+  const requests = new Set<AbortController>();
+  let sequence = 0;
+  const server = createServer((request, response) => {
+    const controller = new AbortController();
+    requests.add(controller);
+    void forwardAuditedGraphRequest(request, response, upstream, controller.signal, (event) => {
+      if (event.path.startsWith("/api/graph/")) auditEvents.push({ ...event, sequence: ++sequence });
+    }).catch((error: unknown) => {
+      if (response.headersSent) {
+        response.destroy(error instanceof Error ? error : undefined);
+        return;
+      }
+      const invalidTarget = error instanceof InvalidAuditProxyTargetError;
+      response.writeHead(invalidTarget ? 400 : 502, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { code: invalidTarget ? "invalid_proxy_target" : "audit_proxy_failed", message: error instanceof Error ? error.message : String(error) } }));
+    }).finally(() => requests.delete(controller));
+  });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
+  await new Promise<void>((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolveListen();
+    });
+  });
+  const address = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    events: () => structuredClone(auditEvents),
+    close: () => closeGraphAuditProxy(server, sockets, requests, closeGraceMs),
+  };
+}
+
+class InvalidAuditProxyTargetError extends Error {}
+
+async function closeGraphAuditProxy(
+  server: ReturnType<typeof createServer>,
+  sockets: Set<Socket>,
+  requests: Set<AbortController>,
+  closeGraceMs: number,
+): Promise<void> {
+  let closeError: Error | undefined;
+  let closed = false;
+  const closeResult = new Promise<void>((resolveClose) => {
+    server.close((error) => {
+      closeError = error;
+      closed = true;
+      resolveClose();
+    });
+  });
+  server.closeIdleConnections();
+  if (!(await settlesWithin(closeResult, closeGraceMs))) {
+    for (const request of requests) request.abort();
+    for (const socket of sockets) socket.destroy();
+    server.closeAllConnections();
+    await settlesWithin(closeResult, closeGraceMs);
+  }
+  if (!closed) throw new Error(`Graph audit proxy did not close within ${closeGraceMs * 2}ms`);
+  if (closeError !== undefined) throw closeError;
+}
+
+function settlesWithin(operation: Promise<void>, milliseconds: number): Promise<boolean> {
+  return new Promise<boolean>((resolveSettled) => {
+    const timer = setTimeout(() => resolveSettled(false), milliseconds);
+    void operation.then(() => {
+      clearTimeout(timer);
+      resolveSettled(true);
+    });
+  });
+}
+
+async function forwardAuditedGraphRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  upstream: URL,
+  signal: AbortSignal,
+  record: (event: Omit<ReplayRepairAuditEvent, "sequence">) => void,
+): Promise<void> {
+  const method = request.method ?? "GET";
+  const target = request.url ?? "/";
+  if (!target.startsWith("/") || target.startsWith("//")) {
+    throw new InvalidAuditProxyTargetError("Graph audit proxy accepts only origin-relative request targets.");
+  }
+  const requestUrl = new URL(target, upstream);
+  if (requestUrl.origin !== upstream.origin) {
+    throw new InvalidAuditProxyTargetError("Graph audit proxy request target escaped the configured upstream origin.");
+  }
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  const requestBody = Buffer.concat(chunks);
+  const headers = new Headers();
+  for (const name of ["accept", "authorization", "content-type"] as const) {
+    const value = request.headers[name];
+    if (typeof value === "string") headers.set(name, value);
+  }
+  const upstreamResponse = await fetch(requestUrl, {
+    method,
+    headers,
+    signal,
+    ...(requestBody.byteLength === 0 || method === "GET" || method === "HEAD" ? {} : { body: requestBody }),
+  });
+  const responseBytes = Buffer.from(await upstreamResponse.arrayBuffer());
+  const contentType = upstreamResponse.headers.get("content-type");
+  response.writeHead(upstreamResponse.status, contentType === null ? {} : { "content-type": contentType });
+  response.end(responseBytes);
+  const responseValue = parseJsonObject(responseBytes);
+  record(sanitizeGraphAuditEvent(method, requestUrl.pathname, upstreamResponse.status, responseValue));
+}
+
+function sanitizeGraphAuditEvent(
+  method: string,
+  path: string,
+  status: number,
+  response: Record<string, unknown> | undefined,
+): Omit<ReplayRepairAuditEvent, "sequence"> {
+  const event: Omit<ReplayRepairAuditEvent, "sequence"> = { method, path, status };
+  if (method === "POST" && path === "/api/graph/nodes") return withRecord(event, "node", response?.node);
+  if (method === "POST" && path === "/api/graph/edges") return withRecord(event, "edge", response?.edge);
+  if (method === "POST" && path === "/api/graph/layers") return withRecord(event, "layer", response?.layer);
+  if (method === "POST" && path === "/api/graph/actions") return withRecord(event, "action", response?.action);
+  if (method === "POST" && /^\/api\/graph\/layers\/\d+\/discard$/.test(path)) return withRecord(event, "layer", response?.layer);
+  const error = isRecord(response?.error) ? response.error : undefined;
+  const issues = Array.isArray(error?.issues) ? error.issues : [];
+  const errorCodes = [error?.code, ...issues.map((issue) => isRecord(issue) ? issue.code : undefined)]
+    .filter((code): code is string => typeof code === "string");
+  return errorCodes.length === 0 ? event : { ...event, errorCodes: [...new Set(errorCodes)] };
+}
+
+function withRecord(
+  event: Omit<ReplayRepairAuditEvent, "sequence">,
+  recordKind: NonNullable<ReplayRepairAuditEvent["recordKind"]>,
+  value: unknown,
+): Omit<ReplayRepairAuditEvent, "sequence"> {
+  if (!isRecord(value) || !isPositiveInteger(value.id)) return event;
+  return {
+    ...event,
+    recordKind,
+    recordId: value.id,
+    ...(typeof value.state === "string" ? { recordState: value.state } : {}),
+  };
+}
+
+function parseJsonObject(bytes: Buffer): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(bytes.toString("utf8"));
+    return isRecord(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function checkNodeNavigation(output: CompletionOutput): EvalCheck[] {
@@ -262,6 +697,13 @@ async function terminate(child: ChildProcessWithoutNullStreams): Promise<void> {
 }
 async function requestJson<T=unknown>(url:string,token:string,body:unknown,expected=200):Promise<T>{const response=await fetch(url,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify(body)});const value=await response.json();if(response.status!==expected)throw new Error(`Request ${url} failed (${response.status}): ${JSON.stringify(value)}`);return value as T;}
 
+async function requestControlJson<T>(url: string, token: string): Promise<T> {
+  const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  const value: unknown = await response.json();
+  if (!response.ok) throw new Error(`Request ${url} failed (${response.status}): ${JSON.stringify(value)}`);
+  return value as T;
+}
+
 async function completeWithCapabilityCleanup<T>(operation: () => Promise<T>, capability: GraphCapability, controlToken: string): Promise<T> {
   const completion = await settle(operation);
   const cleanup = await settle(async () => {
@@ -341,7 +783,16 @@ export function renderArtifact(artifact: RuntimeEvalArtifact): string {
       document.querySelector('#prompt').textContent=turn.prompt;
       document.querySelectorAll('.node').forEach((node)=>node.remove());
       edgeCanvas.replaceChildren();
-      nodes=turn.output.rootLayer.nodes.map((node,index)=>({...node,x:innerWidth/2+Math.cos(index*6.28/turn.output.rootLayer.nodes.length)*220,y:stage.clientHeight/2+Math.sin(index*6.28/turn.output.rootLayer.nodes.length)*150}));
+      const layout=turn.output.rootLayer.layer.layout;
+      const authored=new Map((layout?.version===1?layout.placements:[]).map((placement)=>[String(placement.nodeId),placement]));
+      const legacy=[...turn.output.rootLayer.nodes].sort((left,right)=>String(left.id).localeCompare(String(right.id)));
+      nodes=turn.output.rootLayer.nodes.map((node)=>{
+        const placement=authored.get(String(node.id));
+        if(placement)return {...node,x:110+placement.x*740,y:80+placement.y*440};
+        const index=legacy.findIndex((candidate)=>String(candidate.id)===String(node.id));
+        const angle=-Math.PI/2+(index*2*Math.PI/Math.max(legacy.length,1));
+        return {...node,x:480+(legacy.length===1?0:Math.cos(angle)*260),y:300+(legacy.length===1?0:Math.sin(angle)*180)};
+      });
       edges=turn.output.rootLayer.edges;
       for(const node of nodes){
         const element=document.createElement('div');

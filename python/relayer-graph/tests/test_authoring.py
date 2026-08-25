@@ -9,8 +9,9 @@ import types
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from relayer_graph import (APIError, ConfigurationError, EdgeObject, GraphSession,
-                           LayerObject, NodeObject,
+from relayer_graph import (APIError, ConfigurationError, EdgeObject, GraphNode, GraphSession,
+                           LayerLayoutObject, LayerObject, NodeObject,
+                           NodePlacementObject,
                            RELAYER_ICON_NAMES, RelayerGraphClient, ValidationError,
                            is_supported_relayer_icon, resolve_relayer_icon_name)
 
@@ -46,7 +47,10 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.endswith("/edges"):
             self._reply({"edge": {"id": Handler.next_id, "endpoints": body["endpoints"], "state": "draft"}})
         elif self.path.endswith("/layers"):
-            self._reply({"layer": {"id": Handler.next_id, "nodes": body["nodes"], "edges": body["edges"], "state": "draft"}})
+            self._reply({"layer": {"id": Handler.next_id, "nodes": body["nodes"], "edges": body["edges"], "layout": body["layout"], "state": "draft"}})
+        elif self.path.endswith("/discard"):
+            layer_id = int(self.path.split("/")[-2])
+            self._reply({"layer": {"id": layer_id, "nodes": [1], "edges": [], "state": "stopped"}})
         else:
             self._reply({"ok": True})
 
@@ -80,10 +84,22 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         await self.client.submit_node(queue); await self.client.submit_node(worker)
         edge = EdgeObject((queue, worker), client_key="queue-worker")
         await self.client.create_edge(edge)
-        layer = LayerObject((queue, worker), (edge,), client_key="root")
+        layout = LayerLayoutObject((
+            NodePlacementObject(queue, 0.25, 0.5),
+            NodePlacementObject(worker, 0.75, 0.5),
+        ))
+        layer = LayerObject((queue, worker), (edge,), layout, client_key="root")
         await self.client.submit_layer(layer)
         self.assertIsNotNone(queue.ref); self.assertIsNotNone(edge.ref); self.assertIsNotNone(layer.ref)
         self.assertEqual(Handler.requests[-1][2]["nodes"], [queue.ref.id, worker.ref.id])
+        self.assertEqual(Handler.requests[-1][2]["layout"], {
+            "version": 1,
+            "placements": [
+                {"nodeId": queue.ref.id, "x": 0.25, "y": 0.5},
+                {"nodeId": worker.ref.id, "x": 0.75, "y": 0.5},
+            ],
+        })
+        self.assertEqual(layer.ref.layout.version, 1)
         self.assertEqual(Handler.requests[0][1]["Authorization"], "Bearer secret")
 
     async def test_submit_and_completion_output_use_the_active_interaction(self):
@@ -93,6 +109,20 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         output = await self.client.get_completion_output()
         self.assertEqual(output["nodeId"], 7)
         self.assertEqual(Handler.requests[-1][0], "/api/graph/nodes/7/output")
+
+    async def test_discard_layer_posts_to_recovery_endpoint_and_refreshes_reference(self):
+        layout = LayerLayoutObject((NodePlacementObject(1, 0.5, 0.5),))
+        layer = LayerObject((1,), (), layout, client_key="abandoned")
+        await self.client.submit_layer(layer)
+        draft_id = layer.ref.id
+
+        stopped = await self.client.discard_layer(layer)
+
+        self.assertEqual(
+            Handler.requests[-1][0], f"/api/graph/layers/{draft_id}/discard"
+        )
+        self.assertEqual(stopped.state, "stopped")
+        self.assertEqual(layer.ref, stopped)
 
     async def test_action_retries_use_the_caller_owned_key(self):
         await self.client.add_invoke_action(7, "Ask", "Continue", source_layer=8, client_key="ask-again")
@@ -140,7 +170,15 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("submit the node again", raised.exception.issues[0].message)
 
     async def test_large_layer_justification_is_request_only_authoring_data(self):
-        layer = LayerObject((1, 2, 3, 4, 5, 6), (), client_key="large")
+        layer = LayerObject(
+            (1, 2, 3, 4, 5, 6),
+            (),
+            LayerLayoutObject(tuple(
+                NodePlacementObject(node_id, index / 5, 0.5)
+                for index, node_id in enumerate(range(1, 7))
+            )),
+            client_key="large",
+        )
         await self.client.submit_layer(
             layer,
             size_justification="These six concepts must stay together for comparison.",
@@ -149,6 +187,16 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
             Handler.requests[-1][2]["sizeJustification"],
             "These six concepts must stay together for comparison.",
         )
+
+    async def test_unsubmitted_layout_reference_fails_before_transport(self):
+        pending = NodeObject("box", "Pending", "Not submitted")
+        layer = LayerObject(
+            (1,), (),
+            LayerLayoutObject((NodePlacementObject(pending, 0.5, 0.5),)),
+        )
+        with self.assertRaisesRegex(ValueError, "must be submitted"):
+            await self.client.submit_layer(layer)
+        self.assertEqual(Handler.requests, [])
 
     async def test_internal_server_errors_are_not_classified_as_validation_errors(self):
         with self.assertRaisesRegex(APIError, "database failed") as raised:
@@ -216,6 +264,20 @@ class IconVocabularyTests(unittest.TestCase):
     def test_exports_curated_names_without_duplicates(self):
         self.assertIn("compass", RELAYER_ICON_NAMES)
         self.assertEqual(len(RELAYER_ICON_NAMES), len(set(RELAYER_ICON_NAMES)))
+
+    def test_graph_node_parses_nullable_lease_identity(self):
+        leased = GraphNode.from_dict({
+            "id": 7, "leasedActionId": 11, "kind": "user-interaction", "icon": "user",
+            "title": "Result", "detail": "Result", "state": "accepted",
+        })
+        ordinary = GraphNode.from_dict({
+            "id": 8, "leasedActionId": None, "kind": "user-interaction", "icon": "user",
+            "title": "Question", "detail": "Question", "state": "accepted",
+        })
+        self.assertEqual(leased.leased_action_id, 11)
+        self.assertIsNone(ordinary.leased_action_id)
+        positional = GraphNode(9, "concept", "box", "Legacy", "Legacy", "accepted")
+        self.assertIsNone(positional.leased_action_id)
 
     def test_resolves_aliases_without_accepting_arbitrary_lucide_names(self):
         self.assertEqual(resolve_relayer_icon_name("CIRCLE_ALERT"), "alert-circle")

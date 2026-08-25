@@ -9,7 +9,9 @@ export function registerDesktopIpc({
   modelCatalog,
   providerDefinitions = null,
   validateProviderOnboarding = null,
+  conversationExporter,
   settings,
+  tutorial,
   updater,
   getWindow,
   getAppearance,
@@ -96,6 +98,7 @@ export function registerDesktopIpc({
     await settings.write({ ...saved, providerOnboardingComplete: true });
     return { hasCompletedOnboarding: true };
   });
+  ipcMain.handle("relayer:conversation-export", (_event, threadId) => conversationExporter.save(threadId));
   ipcMain.handle("relayer:folder-choose", async () => {
     const selection = await dialog.showOpenDialog(getWindow(), {
       properties: ["openDirectory", "createDirectory"],
@@ -109,9 +112,14 @@ export function registerDesktopIpc({
     setAppearance(appearance);
     nativeTheme.themeSource = appearance;
     getWindow()?.setBackgroundColor(appearance === "light" ? "#fafafa" : "#0b0c0d");
-    await settings.write({ ...(await settings.read()), appearance });
+    await settings.update((current) => ({ ...current, appearance }));
     return { appearance };
   });
+  ipcMain.handle("relayer:tutorial-read", (_event, context) => tutorial.read(context));
+  ipcMain.handle("relayer:tutorial-begin-automatic", (_event, context) => tutorial.beginAutomatic(context));
+  ipcMain.handle("relayer:tutorial-begin-manual", () => tutorial.beginManual());
+  ipcMain.handle("relayer:tutorial-dismiss", () => tutorial.dismiss());
+  ipcMain.handle("relayer:tutorial-complete", () => tutorial.complete());
   ipcMain.handle("relayer:update-status", () => updater.status());
   ipcMain.handle("relayer:update-check", () => updater.check());
   ipcMain.handle("relayer:update-download", () => updater.download());
@@ -128,7 +136,7 @@ export function registerDesktopIpc({
   });
   ipcMain.handle("relayer:update-channel", async (_event, channel) => {
     const state = updater.setChannel(channel);
-    await settings.write({ ...(await settings.read()), updateChannel: channel });
+    await settings.update((current) => ({ ...current, updateChannel: channel }));
     return state;
   });
 }

@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-24T18:56:49.137Z",
+  "sourceCommit": "f5a73c682525092aec9157e56b7896471369b9cd",
+  "workingTreeDirty": false,
+  "command": "RELAYER_CAPTURE_CONVERSATION_EVAL_EVIDENCE=1 RELAYER_RECORD_CONVERSATION_EVAL_VIDEO=1 electron scripts/capture-conversation-eval-evidence.mjs",
+  "paidInferenceCalls": 0,
+  "ownerExportSha256": "sha256:94a92421701cbc1b8e654e85e1b683c88d10ba0177250c75fdf0665583405fcf",
+  "importedSourceSha256": "sha256:94a92421701cbc1b8e654e85e1b683c88d10ba0177250c75fdf0665583405fcf",
+  "exactOwnerBytesImported": true,
+  "restartReplay": {
+    "runId": "import-dfeb20cf-8199-4654-a7a4-881c9563c7ec",
+    "executionId": "execution-dfeb20cf-8199-4654-a7a4-881c9563c7ec",
+    "sourceSha256": "sha256:94a92421701cbc1b8e654e85e1b683c88d10ba0177250c75fdf0665583405fcf",
+    "status": "passed",
+    "judgeProvenance": {
+      "kind": "external-conversation-export",
+      "importId": "dfeb20cf-8199-4654-a7a4-881c9563c7ec",
+      "sourceSha256": "sha256:94a92421701cbc1b8e654e85e1b683c88d10ba0177250c75fdf0665583405fcf",
+      "sourceTurnId": "turn:1",
+      "producer": {
+        "desktopVersion": "development",
+        "buildCommit": "development",
+        "platform": "darwin",
+        "architecture": "arm64"
+      }
+    }
+  },
+  "renderer": "desktop/renderer ProductWorkspace and desktop/eval-renderer dashboard",
+  "screenshots": [
+    {
+      "file": "ordinary-conversation-export.png",
+      "sha256": "638eed0a6107598ff5b5e479deb99fc789c941bbc8facb9e22eb3a9e01510eef",
+      "requirements": [
+        "Owner opens Conversation settings and sees the enabled Export conversation menu item"
+      ]
+    },
+    {
+      "file": "eval-dashboard-imported.png",
+      "sha256": "eda81d884ecc84a220d5cec6640036ffd6bfe9e82c094adc1f43eefdee9106fa",
+      "requirements": [
+        "Eval dashboard imported the exact owner-saved JSONL as an immutable external conversation"
+      ]
+    },
+    {
+      "file": "eval-dashboard-judged.png",
+      "sha256": "bcd742f12978da24592987d5945c84513bc14ff82f943e743265339c5a8f599f",
+      "requirements": [
+        "Existing deterministic judge completed",
+        "Product workspace action remains available"
+      ]
+    },
+    {
+      "file": "product-workspace-imported-root.png",
+      "sha256": "680a30b336e25d950dede73d909a8965bb9c36fb11f00ce89bfa54c018c581f8",
+      "requirements": [
+        "Production ProductWorkspace renders imported accepted turn",
+        "Review mode is read-only",
+        "Turn navigation includes unfinished and failed turns"
+      ]
+    },
+    {
+      "file": "product-workspace-turn-statuses.png",
+      "sha256": "a8e3aae91ccec00d22c3592ebfac826ad41fd6af37fcb107b9db0bcf8de48a8f",
+      "requirements": [
+        "Turn picker visibly distinguishes accepted, failed, and unfinished imported turns"
+      ]
+    },
+    {
+      "file": "product-workspace-reference-detail.png",
+      "sha256": "945aa240df7f68cec5aaa4472235b1e579a8c090f11d0a3a1f740308f316a288",
+      "requirements": [
+        "Reference navigation reached shared layer",
+        "Breadcrumb preserves authored path",
+        "Node detail renders in production inspector"
+      ]
+    },
+    {
+      "file": "eval-dashboard-restarted.png",
+      "sha256": "2f8e8c70eaf67e17f5cf48cdbcd9d3a4fe0ecb1f673d197362d309a436d13a6e",
+      "requirements": [
+        "Eval restart replays the same imported source digest and completed deterministic judge"
+      ]
+    },
+    {
+      "file": "product-workspace-restarted-reference.png",
+      "sha256": "5ed032c72f590f0399829a14db91f0ed09d608340241be8da44b0c698c3c74fa",
+      "requirements": [
+        "After graph, product, and Eval restart, the same imported execution reopens and reference navigation still works"
+      ]
+    }
+  ],
+  "video": {
+    "file": "conversation-export-eval.mp4",
+    "sha256": "62fb8d161eba81f2fd31e470834fceefb207b997d5782c5790c65b11053bae64",
+    "durationSeconds": 13.967,
+    "steps": [
+      "1. Open Conversation settings",
+      "2. Choose Export conversation…",
+      "3. The conversation is saved as JSONL",
+      "4. In Eval, choose Import conversation",
+      "5. Eval imports the JSONL as an immutable external run",
+      "6. Open the imported conversation to inspect and judge it"
+    ]
+  }
+}

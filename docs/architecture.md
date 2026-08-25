@@ -2,22 +2,22 @@
 
 ## Ownership boundary
 
-Prime Agent is the execution runtime. GraphComplete is the graph algorithm. Relayer is one product host.
+Relayer is the product host. GraphComplete owns graph semantics and acceptance. A thread-selected harness owns model execution behind a provider-agnostic product contract.
 
 ```text
 Product host
     -> complete(interaction-node pointer)
         -> persistent Node host resolves the thread's selected harness object
         -> selected harness implementation
-            -> Prime Agent root content owner (production target)
-                -> child content owners
-                -> independent self-assess reviewers
-                -> targeted revisers
-            -> or basic Codex reference harness (first eval)
+            -> selected provider adapter and model
+            -> direct execution
+            -> or Prime Agent-owned recursive delegation
         -> graph.submit(interaction node)
         -> accepted resolved root layer or explicit failure
     -> product persistence and activation
 ```
+
+Product records pin stable provider, model, harness-configuration, and permission identifiers. Harness implementations and provider adapters translate those selections into runtime-specific credentials, sessions, and model calls. Prime Agent alone owns recursive delegation. Supporting a new implementation requires an explicit adapter; agnostic does not mean arbitrary runtimes work without integration.
 
 ## Working desktop product path
 
@@ -47,7 +47,7 @@ Within the app-server crate, each layer has one concrete responsibility:
 
 SQLite migrations are storage implementation details. `SqliteProductStore::open` requires any existing product tables to carry Relayer's SQLx migration history, applies the embedded versioned files under `storage/sqlite/migrations/`, and validates the exact resulting schema and row invariants before the store becomes available. This permits a recognized predecessor to migrate while an unmanaged, incompatible, partially initialized, or corrupt schema fails startup. Electron, the HTTP API, and the product service neither run nor interpret migrations. The storage pool is asynchronous, bounded, configured for foreign keys and WAL, and is not guarded by a process-wide blocking mutex. Composite product-state and thread-detail reads use SQLite snapshot transactions so each API response is internally consistent. Operations that allocate per-thread interaction sequence numbers acquire an immediate SQLite transaction before assigning their timestamp or sequence, so concurrent requests cannot select the same next sequence or move a thread's chronology backward.
 
-For every product interaction, the app server durably creates the product interaction and marks it running before acknowledging the write. It then creates the canonical user-interaction graph node with product project/thread provenance, supplies that graph capability only to the matching `complete()` call, awaits explicit graph submission in background work owned by the app-server process, and persists the accepted output or explicit failure on the product interaction. This lets every product host display the thread and waiting state immediately while polling the same product record to terminal state. Product and graph writes remain separate SQLite transactions; the stored graph node ID is the durable join between them.
+For every product interaction, the app server durably creates the product interaction and atomically reserves its `submitted` preparation state before graph control. It then creates the canonical user-interaction graph node with product project/thread provenance, stores that node plus the frozen execution identity, claims `running`, and only then supplies the transient graph capability to the matching `complete()` call. Explicit graph submission runs in background work owned by the app-server process, which persists accepted output or explicit failure on the product interaction. This lets every product host display the thread and waiting state while polling the same product record to terminal state. Product and graph writes remain separate SQLite transactions; the stored graph node ID is the durable join between them.
 
 ## Product permission profiles
 
@@ -75,9 +75,17 @@ This contract applies equally to `codex.basic`, `prime.agent`, and future harnes
 
 ## Shared product and Eval workspace
 
-Relayer and Relayer Eval are separate Electron build targets. Relayer exposes the ordinary product window and a fixed production harness configuration. Relayer Eval exposes a test-run dashboard and enables named harness overrides, but executes each case through the same product app server. A case may create one or more ordinary product threads and interactions.
+Relayer and Relayer Eval are separate Electron build targets. Relayer exposes the ordinary product window and lets each new thread pin an available catalog configuration. Relayer Eval exposes a test-run dashboard and selects named configurations for its matrix, but executes each case through the same product app server. A case may create one or more ordinary product threads and interactions.
 
 Opening one case × harness execution creates a separate review window using the exact production renderer and `ProductWorkspace` component. The review preload supplies only Eval navigation context: the run's cases and product thread IDs for the selected harness. Product graph reads, accepted-layer navigation, turn navigation, layout, and node inspection remain owned by the ordinary product API and workspace. The same app server issues the review window a read-only session capability and rejects writes at the API boundary; workspace review mode also removes composition and mutating controls. See [ADR 0003](decisions/0003-shared-product-eval-workspace.md).
+
+Every newly authored layer carries a versioned layout with exactly one normalized
+placement per member node. Graph core validates and persists those placements as
+part of the draft and accepted layer snapshot. The shared Product/Eval renderer
+projects normalized coordinates into a stable world plane; responsive fitting,
+panning, zooming, and inspector changes affect only the camera. Historical
+accepted layers without layout data remain readable through one deterministic,
+viewport-independent renderer fallback and are never rewritten during reads.
 
 Each product or Eval review window owns one bounded renderer-side navigation history for thread, turn, authored layer path, and remembered node selection. Restoration resolves accepted product data before committing the presentation and cursor together. Eval's judge history command delegates to this controller; the Eval main process records and validates the result but does not own a second stack. Hierarchy breadcrumbs and direct chronological turn controls remain separate presentations of layer ancestry and durable interaction order.
 
@@ -90,9 +98,12 @@ Each product or Eval review window owns one bounded renderer-side navigation his
 5. Every capability maps to one canonical interaction `NodeId`. `GraphDatabase::writer_for_subgraph(node_id)` derives project/thread visibility and draft-write ownership from that node instead of trusting repeated caller context.
 6. Navigate actions are explicitly `expand` or `reference`. Expansion is acyclic decomposition; references may share or revisit accepted supporting context. Non-root actions record their exact source layer.
 7. Prior stable nodes and layers may be referenced across turns rather than duplicated. A reference destination is an accepted boundary, not a request to reaccept historical records.
-8. Draft records remain distinct from atomically accepted completion closures. Accepted layers snapshot their exact node, edge, and action membership so later graph writes cannot rewrite prior output.
-9. A model turn ending is not completion; the root must explicitly submit or stop. Submission validates authored closure, expansion cycles, reference visibility, orphan drafts, and layer size.
-10. Prime Agent owns recursive execution; GraphComplete does not add another scheduler. See [ADR 0005](decisions/0005-layered-navigation-contract.md).
+8. Draft records remain distinct from atomically accepted completion closures. Harness-authored programs use explicit stable client keys for every persisted node, edge, layer, and action so a whole-program repair rerun upserts the same current-interaction drafts. An unreachable owned draft layer may be explicitly discarded into terminal stopped history without deleting or cascading state to its nodes, edges, actions, or child layers; artificial navigation is not a valid orphan repair. Accepted layers snapshot their exact node, edge, and action membership so later graph writes cannot rewrite prior output. The only accepted-action mutation is the one-shot leased-invoke transition defined below.
+9. An invoke-created user-interaction node may carry one immutable nullable `leased_action_id`, unique when present, plus a private immutable nullable `lease_source_interaction_id`; both are null or both non-null, preserving the exact accepted source/action pair for retries even when a node-owned action is reused. Neighbor reads derive its accepted source node through the leased action without persisting a semantic `GraphEdge`; pre-lease invocations remain unleased and are not backfilled.
+10. New layer submissions include complete versioned normalized placement data. Layout integrity is deterministic graph validation; spatial meaning remains model judgment. Legacy accepted layers may lack layout, but reads never infer and persist replacement graph content.
+11. A model turn ending is not completion; the root must explicitly submit or stop. Submission validates authored closure, expansion cycles, reference visibility, orphan drafts, layer size, and current-draft layout completeness. For a leased interaction, the same submission transaction also changes the exact accepted source action's `target_layer_id` once from `null` to the accepted result root layer. Its kind remains `invoke`; no `resolveAction` authoring API or resolution table exists.
+12. A resolved invoke is project-visible cross-interaction navigation wherever its node-owned action is reused, not an `expand` or `reference` relation. Generic renderer navigation history remains an independent product concern.
+13. The selected harness owns model execution. Prime Agent owns recursive child scheduling. GraphComplete does not add a model-call or recursive-agent scheduler. See [ADR 0005](decisions/0005-layered-navigation-contract.md) and [ADR 0006](decisions/0006-harness-provider-agnostic-product-boundary.md).
 
 ## Target self-assessing policy invariants
 
@@ -109,19 +120,15 @@ The following apply when the optional recursive self-assessment policy is enable
 9. The graph is terminal only when accepted or stopped with a recorded reason.
 10. Budgets limit recursion without converting incomplete work into accepted work.
 
-## Model policy
+## Harness-owned model policy
 
-The initial policy is configurable rather than hard-coded:
+Model selection is a stable product choice resolved against the selected harness's declared provider and model compatibility. Thinking level is a separate choice. Execution must fail clearly when the selected combination is unavailable.
 
-- Luna: primary orchestrator and ordinary content ownership.
-- Terra: difficult revisions and upgrades.
-- Sol: independent self-assessment.
+Prime Agent may define an internal multi-model policy for delegation or review. It may assign different supported models to content ownership, revision, and self-assessment. That policy belongs to its configuration and must not become a Relayer product invariant. Other harnesses execute directly under the current accepted boundary.
 
-Model and thinking level are separate choices. The runtime must fail clearly when the requested model or effort cannot be provided.
+## Harness configurations and evaluation
 
-## Basic Codex reference harness and eval
-
-`codex.basic` proves the harness boundary before the production Prime Agent policy is implemented. A named YAML configuration selects the `codex.basic` implementation, contains that implementation's settings, and supplies its bindings for the three product permission profiles. The host treats settings and bindings as opaque; the selected implementation validates and interprets them. A code-owned implementation map still connects implementation types to executable factories, so adding a Prime Agent configuration does not require adding Prime Agent-specific fields to the host.
+The packaged `codex-basic` and `codex-basic-high` configurations currently select the `codex.basic` implementation. A named YAML configuration selects an implementation, contains that implementation's settings, declares provider/model compatibility, and supplies bindings for the three product permission profiles. The host treats implementation settings and bindings as opaque. A code-owned implementation map connects implementation types to executable factories without adding implementation-specific fields to product records.
 
 Configuration, implementation code, session state, and live authority are deliberately separate:
 
@@ -130,7 +137,7 @@ Configuration, implementation code, session state, and live authority are delibe
 3. The host copies the selected configuration onto the thread and persists the implementation's opaque JSON resume state. For `codex.basic`, that state is only the Codex thread ID.
 4. The current graph URL, token, and interaction node form a per-call graph scope. They are never factory inputs or harness state. The host closes its in-memory scope when the call settles; the calling runtime that minted the capability owns token revocation.
 
-The reference harness uses the TypeScript Codex SDK with the existing local Codex login. It keeps one resumable Codex thread per Relayer thread and asks Codex to execute the TypeScript graph client. The graph is not returned as structured JSON: Codex submits objects to the Rust engine, reacts to repairable validation errors, and ends with `graph.submit(interactionNode)`.
+The current packaged harness uses the TypeScript Codex SDK with the existing local Codex login. It keeps one resumable Codex thread per Relayer thread and asks Codex to execute the TypeScript graph client. The graph is not returned as structured JSON: Codex submits objects to the Rust engine, reacts to repairable validation errors, and ends with `graph.submit(interactionNode)`. The development-only `prime.agent` implementation uses the same host and graph contracts while owning its own recursive runtime policy.
 
 The default and opt-in live evals start from an empty temporary folder and run two interactions through one cached harness object. Each serialized Complete call receives a distinct graph capability while the harness retains its provider-session identity, and the eval runtime revokes that capability after the call settles. The case owns harness-agnostic graph-contract checks. The Eval application waits for each product interaction to reach a terminal state before starting the next turn. A selected judge configuration may add semantic scoring without changing the case:
 
@@ -161,11 +168,13 @@ Each interaction is serialized on its thread's host queue and receives a new `Ha
 
 Harness factories may initialize asynchronously so provider runtimes such as Prime Agent can open durable sessions before registration completes. The host serializes first construction and Complete calls per thread, forwards cancellation through an `AbortSignal`, aborts active work during shutdown, and disposes every live harness object exactly once.
 
-This runtime slice does not make product metadata writes and graph writes share one SQLite transaction. The desktop app-server slice remains independently mergeable with provisional product interaction chronology. A later integration change will pass real product IDs into graph core, store the returned canonical `NodeId` as the product interaction identity, and decide the shared transaction boundary without adding a duplicate interaction node.
+Product and graph metadata remain in separate SQLite databases, so the app server uses an explicit recoverable handoff rather than pretending they share a transaction. It first creates the durable product interaction, conditionally reserves `submitted`, prepares the canonical graph interaction, and stores the graph `NodeId`, frozen configuration/model identity, effective-execution digest, and permission receipt. Only a conditional transition on that exact prepared identity may claim `running` and enter the harness. The graph capability token remains transient runtime memory and is never product data. Product graph reads use control-authenticated read endpoints rather than minting harness writer capabilities.
+
+Invoke preparation supplies the accepted source interaction/action pair to graph control. That pair is the graph-side idempotency key, so retrying a lost create response recovers the same leased graph interaction while the product-side invocation record recovers the same result interaction. At startup, bound interrupted invokes are reconciled against canonical graph completion output: an accepted graph finalizes product history using its already persisted execution receipt, while the absence of graph acceptance fails the product result and leaves the leased action unresolved. This closes the graph-accepted/product-uncommitted crash window without a distributed transaction or a second scheduler.
 
 ## Desktop release boundary
 
-Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of Prime Agent and GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates target Apple Silicon and Intel macOS 13 or newer plus Windows x64 and begin at version `0.2.0`.
+Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of any selected harness, provider, or GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates target Apple Silicon and Intel macOS 13 or newer plus Windows x64 and begin at version `0.2.0`.
 
 Release configuration resolves through one fail-closed contract. The contract seals the numeric version, source commit, product identity, target, architecture, signing authority, channel manifest, and exact HTTPS update base into both the application package and its release receipt. macOS targets additionally seal the Apple team and minimum OS; Windows seals the Artifact Signing endpoint, account, profile, and publisher. The updater and publisher consume this contract rather than maintaining parallel identity or channel rules. See [ADR 0002](decisions/0002-desktop-release-contract.md).
 

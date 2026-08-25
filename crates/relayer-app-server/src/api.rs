@@ -1,19 +1,32 @@
+mod annotations;
 mod auth;
+mod conversation_imports;
 mod error;
 mod model_settings;
 mod projects;
 mod state;
-mod threads;
+pub(crate) mod threads;
 mod types;
 
-use crate::runtime::RuntimeClient;
+use crate::{approval::ApprovalDecision, runtime::RuntimeClient};
 use crate::{permissions::PermissionCatalog, product::ProductService};
 use auth::DesktopSessionAuthenticator;
 use axum::{Router, routing::get};
-use std::path::PathBuf;
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tower_http::services::ServeDir;
 
 pub const CONTROL_COOKIE: &str = "relayer_control";
+
+#[derive(Clone)]
+pub(crate) struct AnnotationSession {
+    pub(crate) thread_ids: HashSet<i64>,
+    pub(crate) author_id: String,
+    pub(crate) author_display_name: String,
+}
 
 #[derive(Clone)]
 pub(crate) struct ApiState {
@@ -23,7 +36,12 @@ pub(crate) struct ApiState {
     pub(crate) permission_catalog: PermissionCatalog,
     pub(crate) default_harness_configuration: String,
     pub(crate) allow_harness_override: bool,
+    pub(crate) allow_conversation_import: bool,
     pub(crate) standalone_workspaces_directory: PathBuf,
+    pub(crate) export_producer: crate::conversation_export::ExportProducer,
+    pub(crate) approval_decisions: Arc<Mutex<HashMap<String, ApprovalDecision>>>,
+    pub(crate) annotation_sessions: Arc<Mutex<HashMap<String, AnnotationSession>>>,
+    pub(crate) annotations_enabled: bool,
 }
 
 pub(crate) struct ApiRuntime {
@@ -31,7 +49,9 @@ pub(crate) struct ApiRuntime {
     pub(crate) permission_catalog: PermissionCatalog,
     pub(crate) default_harness_configuration: String,
     pub(crate) allow_harness_override: bool,
+    pub(crate) allow_conversation_import: bool,
     pub(crate) standalone_workspaces_directory: PathBuf,
+    pub(crate) export_producer: crate::conversation_export::ExportProducer,
 }
 
 pub(crate) fn router(
@@ -41,6 +61,7 @@ pub(crate) fn router(
     runtime: ApiRuntime,
 ) -> Router {
     let (control_token, read_only_control_token) = control_tokens;
+    let annotations_enabled = read_only_control_token.is_some();
     let state = ApiState {
         product,
         authenticator: DesktopSessionAuthenticator::new(control_token, read_only_control_token),
@@ -48,7 +69,12 @@ pub(crate) fn router(
         permission_catalog: runtime.permission_catalog,
         default_harness_configuration: runtime.default_harness_configuration,
         allow_harness_override: runtime.allow_harness_override,
+        allow_conversation_import: runtime.allow_conversation_import,
         standalone_workspaces_directory: runtime.standalone_workspaces_directory,
+        export_producer: runtime.export_producer,
+        approval_decisions: Arc::new(Mutex::new(HashMap::new())),
+        annotation_sessions: Arc::new(Mutex::new(HashMap::new())),
+        annotations_enabled,
     };
     Router::new()
         .route("/health", get(state::health))
@@ -96,10 +122,46 @@ pub(crate) fn router(
             "/api/internal/provider-definitions/staged",
             axum::routing::post(model_settings::create_provider_with_catalog),
         )
+        .route(
+            "/api/internal/conversation-imports",
+            get(conversation_imports::list)
+                .post(conversation_imports::import)
+                .put(conversation_imports::publish)
+                .delete(conversation_imports::remove)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::conversation_export::MAX_EXPORT_BYTES,
+                )),
+        )
         .route("/api/state", get(state::product_state))
         .route("/api/projects", get(projects::list).post(projects::create))
         .route("/api/threads", get(threads::list).post(threads::create))
         .route("/api/threads/{id}", get(threads::get))
+        .route("/api/threads/{id}/export", get(threads::export))
+        .route(
+            "/api/internal/annotation-sessions",
+            axum::routing::post(annotations::register_session)
+                .delete(annotations::revoke_session),
+        )
+        .route(
+            "/api/annotations/snapshot",
+            axum::routing::post(annotations::snapshot_many),
+        )
+        .route(
+            "/api/threads/{id}/annotations",
+            get(annotations::list).post(annotations::create),
+        )
+        .route(
+            "/api/threads/{id}/annotations/snapshot",
+            get(annotations::snapshot),
+        )
+        .route(
+            "/api/threads/{thread_id}/annotations/{annotation_id}/revisions",
+            axum::routing::post(annotations::revise),
+        )
+        .route(
+            "/api/threads/{thread_id}/annotations/{annotation_id}/retract",
+            axum::routing::post(annotations::retract),
+        )
         .route(
             "/api/threads/{id}/interactions",
             get(threads::list_interactions).post(threads::create_interaction),
@@ -115,6 +177,14 @@ pub(crate) fn router(
         .route(
             "/api/threads/{thread_id}/interactions/{interaction_id}/actions/{action_id}/invoke",
             axum::routing::post(threads::invoke_action),
+        )
+        .route(
+            "/api/threads/{thread_id}/interactions/{interaction_id}/approvals/{request_id}/decision",
+            axum::routing::post(threads::decide_approval),
+        )
+        .route(
+            "/api/threads/{thread_id}/interactions/{interaction_id}/actions/{action_id}/destination",
+            get(threads::get_action_destination),
         )
         .fallback_service(ServeDir::new(web_directory).append_index_html_on_directories(true))
         .with_state(state)

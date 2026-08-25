@@ -1,20 +1,20 @@
 # Relayer GraphComplete
 
-Relayer GraphComplete is an open-source recursive graph-construction system built on [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent).
+Relayer GraphComplete is an open-source, graph-native agent workspace with a harness- and provider-agnostic product contract. Each thread pins a supported execution configuration behind the same GraphComplete boundary.
 
-The canonical future product boundary remains conceptually:
+The canonical external product boundary remains conceptually:
 
 ```ts
 const result = await complete(inputGraph);
 ```
 
-This top-level function is not exported by the first runtime slice yet. `inputGraph` is the pointer to the current user-interaction node. The selected thread harness keeps its working directory and provider session, while each `complete()` call receives a separate graph scope. A root model ending its turn does not mean the graph is complete; the harness must finish with `graph.submit(interactionNode)`.
+The root package does not export this top-level function yet. `inputGraph` points to the current user-interaction node. The selected thread harness keeps its working directory and provider session, while each `complete()` call receives a separate graph scope. A model turn ending does not mean the graph is complete; the harness must finish with `graph.submit(interactionNode)`.
 
-The executable first slice enters through the persistent `HarnessHost` while the app-server integration behind the canonical product boundary remains future work. There is intentionally no second structured-output harness path: accepted product output must come from graph-tool writes and explicit submission.
+The working desktop reaches this boundary through the Rust app server and persistent `HarnessHost`. There is intentionally no second structured-output path: every supported harness produces accepted product output through graph-tool writes and explicit submission.
 
 ## Status
 
-Pre-alpha executable runtime slice. The repository now includes:
+Pre-alpha product and executable runtime. The repository now includes:
 
 - a Rust SQLx/SQLite graph core and async loopback server with interaction-scoped capability tokens;
 - object-based TypeScript and Python clients for nodes, undirected edges, layers, actions, and submission;
@@ -30,21 +30,30 @@ The Node runtime is split into explicit workspace packages: `@relayer/graph-clie
 
 ## Core design
 
-- Prime Agent owns recursive model execution; GraphComplete does not add another scheduler.
-- GraphComplete owns graph records, active-interaction write authority, validation, immutable accepted history, and explicit submission.
+- The selected harness owns model execution. Prime Agent alone owns recursive child scheduling; GraphComplete does not add another scheduler.
+- GraphComplete owns graph records, active-interaction write authority, validation, accepted-history integrity, and explicit submission. Accepted records are immutable except for ADR 0005's exact one-shot leased-invoke target transition.
 - Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
 - The Node harness host owns live per-thread harness objects and provider-session resume state, not graph rules or product lifecycle.
+- Provider adapters own authentication, model discovery, and provider-specific execution details. Product records use stable provider, model, harness, and permission identifiers.
 
 The implemented basic loop is:
 
 1. A trusted runtime supplies its existing positive-integer project/thread IDs; graph core creates the canonical user-interaction node and activates a capability for that node.
 2. The Node host resolves the thread's harness once and keeps that object alive.
-3. The host supplies the current graph scope only for that `complete()` call. The harness submits node objects, creates undirected edges, packages the exact visible layer, and adds the interaction's response navigate action. It may also attach useful navigate or invoke actions to output nodes; nested layers are an available authoring capability, not a per-node requirement.
+3. The host supplies the current graph scope only for that `complete()` call. Harness-authored programs give every persisted node, edge, layer, and action an explicit stable client key, so editing and rerunning the whole program updates the same current-interaction drafts while their identity-owning context remains unchanged. An action's source node is part of that identity, so repair keeps each draft action on its original source node. The harness submits node objects, creates undirected edges, packages the exact visible layer with one versioned normalized placement per node, and adds the interaction's response navigate action. It may also attach useful navigate or invoke actions to output nodes; nested layers are an available authoring capability, not a per-node requirement. An intentionally abandoned orphan draft layer may be preserved as stopped history with `discardLayer`; authors must not invent navigation merely to make abandoned work reachable.
 4. The host reads the accepted output and closes the turn's in-memory graph scope. The calling runtime that minted the graph capability revokes its token after the Complete call settles. The host has a separate API credential and never receives graph control authority. A cached client from an earlier IPython turn cannot modify a later interaction.
-5. `graph.submit(interactionNode)` recursively validates typed `expand` and `reference` navigation, exact source-layer provenance, and layer size, then atomically accepts only the current authored closure. Flat answers remain valid. See [ADR 0005](docs/decisions/0005-layered-navigation-contract.md).
+5. `graph.submit(interactionNode)` recursively validates typed `expand` and `reference` navigation, exact source-layer provenance, layer size, and complete authored layouts, then atomically accepts only the current authored closure. Flat answers remain valid. See [ADR 0005](docs/decisions/0005-layered-navigation-contract.md).
 6. Complete returns the resolved root layer for immediate display; later navigation reads the persisted layer.
 
 Independent self-assessment will later add an optional review gate to this same loop.
+
+Issue #55's accepted, not-yet-implemented invoke-resolution contract extends this
+same boundary without adding another authoring API. An invoke-created interaction
+carries the exact source/action lease pair, with source interaction provenance kept
+private by graph core; ordinary `graph.submit(interactionNode)`
+atomically fills that accepted `invoke` action's target with the accepted result
+root exactly once. Derived neighbor reads expose the source node without an
+authored edge, and pre-lease invocations are not backfilled.
 
 The `prime.agent` adapter targets the run-context API in
 [Prime Agent PR #1538](https://github.com/PrimeIntellect-ai/prime-agent/pull/1538).
@@ -53,7 +62,7 @@ still needs that forked package exposed under its canonical
 `@earendil-works/pi-coding-agent` package name; the PR branch is a monorepo, not
 an installable npm subdirectory.
 
-See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/architecture.md), and [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
+Prime Agent is one optional recursive harness implementation, not the product runtime. See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/architecture.md), [ADR 0006](docs/decisions/0006-harness-provider-agnostic-product-boundary.md), and the adapter-specific [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
 
 ## Run the GraphComplete runtime eval
 
@@ -75,18 +84,33 @@ Selecting two configurations expands the same harness-agnostic case into two exe
 npm run eval:basic:live -- --configuration codex-basic --configuration codex-basic-high
 ```
 
+An additional opt-in live case exercises graph-authoring recovery through the
+ordinary Codex harness Complete path. It requires a whole-program stable-key
+replay, observes orphan validation, explicitly discards the orphan twice, and
+then verifies the accepted output plus the stopped layer through graph control:
+
+```sh
+npm run eval:graph-repair:live -- --configuration codex-basic
+```
+
+Its durable `result.json` and viewer are written under
+`.relayer/evals/runtime/<test-run-id>/graph-authoring.replay-repair/<configuration>/`.
+The live command is not part of `npm run check` and is the only part of this
+case that invokes inference; its evidence parser and grader run in the default
+deterministic test suite.
+
 The CLI resolves configuration files before case execution. Every saved execution records its `(testRunId, testCaseId, harnessConfigurationName)` identity, exact resolved configuration snapshot, and stable digest. Live inference is deliberately excluded from `npm test` and `npm run check`. Its saved HTML remains a lower-level debugging artifact; product-faithful review belongs to Relayer Eval.
 
 ## Relayer Desktop
 
-Relayer Desktop is an Electron application backed by the Rust graph and product servers, a persistent Node harness host, and SQLite product storage. Each question becomes a canonical graph interaction, runs through the thread's pinned harness, and persists its accepted output for replay in the production graph/chat workspace. Codex provider setup remains an Electron-owned service.
+Relayer Desktop is an Electron application backed by the Rust graph and product servers, a persistent Node harness host, and SQLite product storage. Each question becomes a canonical graph interaction, runs through the thread's pinned harness, and persists its accepted output for replay in the production graph/chat workspace. The current packaged provider adapter uses Codex login; provider-specific setup remains outside the product record contract.
 
 ```sh
 npm install
 npm run desktop:dev
 ```
 
-Ask a question in the composer to open the thread immediately while the default `codex-basic` harness builds its graph in the background. Follow-up turns reuse the same harness/provider session while receiving a fresh graph capability. The graph workspace supports node arrangement and background-drag canvas panning; the same interactions are available in read-only Eval review windows.
+Ask a question in the composer to open the thread immediately while the default `codex-basic` harness builds its graph in the background. Follow-up turns reuse the same harness/provider session while receiving a fresh graph capability. The accepted layer owns semantic node placement in normalized coordinates. The graph workspace projects it into a stable world plane while fit, pan, zoom, resizing, and the details inspector change only the camera. Dragging a node is an ephemeral local view override. Historical coordinate-free layers use a deterministic viewport-independent fallback without rewriting accepted history. Product and read-only Eval use this same renderer path.
 
 To try the Prime Agent harness in the real Relayer chat, first build the Prime Agent
 [run-context branch](https://github.com/vishaltandale00/prime-agent/tree/codex/run-scoped-kernel-context)
@@ -107,8 +131,8 @@ The Prime launcher selects `prime-agent-basic`, adds the local Python graph clie
 to every IPython kernel, and uses a separate ignored desktop profile. Prime Agent
 reads its normal local provider credentials. Use
 `npm run desktop:dev:prime -- --configuration prime-agent-deep` to try the deeper
-configuration. The packaged Relayer application remains pinned to its production
-harness configuration.
+configuration. Packaged builds expose only configurations whose implementations
+and provider adapters are included and available; they omit the unpublished Prime Agent options.
 
 Every thread pins a product permission profile before execution. New Thread loads the available Ask for approval, Approve for me, and Full access choices from Rust product policy, selects the product default, and sends that choice through ordinary thread creation. The saved thread shows its pinned profile. The public contract is `ask`, `auto`, or `full`; raw provider sandbox and approval flags remain harness implementation details. Full access is intentionally unrestricted and is not a hard filesystem or network boundary. See [ADR 0004](docs/decisions/0004-product-permission-profiles.md).
 

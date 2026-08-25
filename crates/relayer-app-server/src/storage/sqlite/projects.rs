@@ -66,6 +66,19 @@ pub(super) async fn fetch_projects(
     rows.iter().map(project_from_row).collect()
 }
 
+pub(super) async fn fetch_project(
+    connection: &mut SqliteConnection,
+    id: ProjectId,
+) -> Result<Option<Project>, StorageError> {
+    sqlx::query("SELECT id,name,path,created_at,updated_at FROM projects WHERE id=?1")
+        .bind(id.value())
+        .fetch_optional(connection)
+        .await?
+        .as_ref()
+        .map(project_from_row)
+        .transpose()
+}
+
 fn project_from_row(row: &SqliteRow) -> Result<Project, StorageError> {
     Ok(Project {
         id: ProjectId::from_database(row.try_get(0)?),

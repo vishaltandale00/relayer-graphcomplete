@@ -3,16 +3,23 @@
 A dependency-free asynchronous client for the GraphComplete Rust graph service.
 
 ```python
-from relayer_graph import EdgeObject, LayerObject, NodeObject, RelayerGraphClient
+from relayer_graph import (
+    EdgeObject, LayerLayoutObject, LayerObject, NodeObject,
+    NodePlacementObject, RelayerGraphClient,
+)
 
 async with RelayerGraphClient.from_env() as graph:
-    intro = NodeObject("book", "Introduction", "Useful markdown detail")
-    detail = NodeObject("code", "Implementation", "How the concept works")
+    intro = NodeObject("book", "Introduction", "Useful markdown detail", client_key="intro")
+    detail = NodeObject("code", "Implementation", "How the concept works", client_key="implementation")
     await graph.submit_node(intro)
     await graph.submit_node(detail)
-    connection = EdgeObject((intro, detail))
+    connection = EdgeObject((intro, detail), client_key="intro-implementation")
     await graph.create_edge(connection)
-    layer = LayerObject((intro, detail), (connection,))
+    layout = LayerLayoutObject((
+        NodePlacementObject(intro, 0.25, 0.5),
+        NodePlacementObject(detail, 0.75, 0.5),
+    ))
+    layer = LayerObject((intro, detail), (connection,), layout, client_key="response-layer")
     await graph.submit_layer(layer)
     await graph.add_navigate_action(
         graph.node_id,
@@ -27,6 +34,10 @@ async with RelayerGraphClient.from_env() as graph:
 Configuration is read from `RELAYER_GRAPH_URL`, `RELAYER_GRAPH_TOKEN`, and
 `RELAYER_NODE_ID`. The client uses only Python's standard library.
 
+Supply an explicit, deterministic `client_key` for every persisted node, edge,
+layer, and action. Rerunning the whole authoring program with those same keys
+updates its logical drafts instead of creating duplicate records.
+
 Inside a Prime Agent IPython run, acquire the current call's host-owned scope instead:
 
 ```python
@@ -40,3 +51,20 @@ credential is selected by the host-side run context, so Python cannot request a
 different interaction by supplying an ID or token.
 The returned client is intentionally not serializable, so Prime Agent's kernel
 snapshot skips it instead of persisting an expired graph credential.
+
+Every newly submitted layer requires a version-1 layout with exactly one
+normalized placement per member node. Coordinates range from `0` through `1`
+and express semantic relative position, independent of the viewport. Accepted
+layers created before layouts were introduced remain readable with `layout=None`.
+
+If submission reports an intentionally abandoned orphan draft layer, discard
+that layer explicitly before retrying submission:
+
+```python
+await graph.discard_layer(abandoned_layer)
+```
+
+Discard preserves the layer as terminal stopped history. It does not delete or
+change the layer's nodes, edges, actions, or child layers, and it rejects layers
+that are accepted, owned by another interaction, or still reachable from the
+current root action.

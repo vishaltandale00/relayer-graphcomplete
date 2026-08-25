@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EdgeObject, LayerObject, NodeObject, edgeId, layerId, nodeId, type ActionObject, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
-import { GraphApiError, type CompletionOutput, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphNode, type ResolvedLayer } from "./types.js";
+import { GraphApiError, type CompletionOutput, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type ResolvedLayer } from "./types.js";
 
 export class RelayerGraphClient {
   readonly capability: GraphCapability;
@@ -63,6 +63,14 @@ export class RelayerGraphClient {
         clientKey: layer.clientKey,
         nodes: layer.nodes.map(nodeId),
         edges: layer.edges.map(edgeId),
+        layout: {
+          version: layer.layout.version,
+          placements: layer.layout.placements.map((placement) => ({
+            nodeId: nodeId(placement.node),
+            x: placement.x,
+            y: placement.y,
+          })),
+        },
         sizeJustification: options.sizeJustification,
       }),
     });
@@ -103,6 +111,15 @@ export class RelayerGraphClient {
 
   async getLayer(reference: LayerReference): Promise<ResolvedLayer> {
     return this.request<ResolvedLayer>(`/api/graph/layers/${layerId(reference)}`);
+  }
+
+  async discardLayer(reference: LayerReference): Promise<GraphLayer> {
+    const layer = await this.request<{ layer: GraphLayer }>(
+      `/api/graph/layers/${layerId(reference)}/discard`,
+      { method: "POST" },
+    );
+    if (reference instanceof LayerObject) reference.ref = layer.layer;
+    return layer.layer;
   }
 
   async submit(interactionNode: NodeReference = this.capability.nodeId): Promise<CompletionOutput> {

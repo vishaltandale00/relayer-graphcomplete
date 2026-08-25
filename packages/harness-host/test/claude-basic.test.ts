@@ -54,6 +54,7 @@ function runContext(access: HarnessRunContext["access"]): HarnessRunContext {
   return {
     inputGraph: { id: 4, kind: "user-interaction", icon: "user", title: "Question", detail: "Explain", state: "accepted" },
     graph: { interactionNodeId: 4, acquireCapability: () => ({ url: "http://127.0.0.1:9", token: "token", nodeId: 4 }) },
+    approvals: { request: async () => { throw new Error("unused approval channel"); } },
     model: { providerId: "anthropic-work", adapterId: access.adapterId, modelId: "claude-sonnet-4" },
     access,
     trace: createNoopHarnessTraceSink(),
@@ -68,26 +69,34 @@ describe("ClaudeBasicHarness", () => {
     expect(() => claudePermissionMode("untrusted")).toThrow(/ask, auto, or full/);
   });
   it("uses execution-scoped Anthropic access, canonical graph guidance, and the configured permission mode", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "ambient-openai-secret");
+    vi.stubEnv("CLAUDE_CONFIG_DIR", "/ambient/claude-home");
     let call: readonly unknown[] = [];
-    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
-      spawnProcess: fakeSpawn({ result: "done", session_id: "session-1" }, (args) => { call = args; }),
-      clientModuleUrl: "@relayer/graph-client",
-    });
-    await harness.complete(runContext({
-      kind: "secret", contract: "secret@1", providerId: "anthropic-work", adapterId: "anthropic-api",
-      adapterImplementationVersion: "1", endpoint: "https://gateway.test/anthropic/v1", fields: { "api-key": "secret" },
-    }));
+    try {
+      const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
+        spawnProcess: fakeSpawn({ result: "done", session_id: "session-1" }, (args) => { call = args; }),
+        clientModuleUrl: "@relayer/graph-client",
+      });
+      await harness.complete(runContext({
+        kind: "secret", contract: "secret@1", providerId: "anthropic-work", adapterId: "anthropic-api",
+        adapterImplementationVersion: "1", endpoint: "https://gateway.test/anthropic/v1", fields: { "api-key": "secret" },
+      }));
 
-    const args = call[1] as string[];
-    const options = call[2] as { env: Record<string, string> };
-    expect(args).toContain("--permission-mode");
-    expect(args).toContain("acceptEdits");
-    expect(args).not.toContain("--dangerously-skip-permissions");
-    expect(args.join(" ")).toContain("sourceLayer");
-    expect(args.join(" ")).toContain("clientKey");
-    expect(options.env.ANTHROPIC_API_KEY).toBe("secret");
-    expect(options.env.ANTHROPIC_BASE_URL).toBe("https://gateway.test/anthropic");
-    expect(harness.state()).toEqual({ claudeSessionId: "session-1" });
+      const args = call[1] as string[];
+      const options = call[2] as { env: Record<string, string> };
+      expect(args).toContain("--permission-mode");
+      expect(args).toContain("acceptEdits");
+      expect(args).not.toContain("--dangerously-skip-permissions");
+      expect(args.join(" ")).toContain("sourceLayer");
+      expect(args.join(" ")).toContain("clientKey");
+      expect(options.env.ANTHROPIC_API_KEY).toBe("secret");
+      expect(options.env.ANTHROPIC_BASE_URL).toBe("https://gateway.test/anthropic");
+      expect(options.env).not.toHaveProperty("OPENAI_API_KEY");
+      expect(options.env).not.toHaveProperty("CLAUDE_CONFIG_DIR");
+      expect(harness.state()).toEqual({ claudeSessionId: "session-1" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("uses definition-scoped managed runtime state and explicit bypass only for full access", async () => {

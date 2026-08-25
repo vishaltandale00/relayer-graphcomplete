@@ -134,6 +134,17 @@ export function normalizePickerSelection(settings, candidate) {
   };
 }
 
+export function defaultFamilySelection(settings, harnessId = settings.defaults?.harnessId) {
+  const familyId = settings.defaults?.familyId;
+  if (familyId == null) return null;
+  return normalizePickerSelection(settings, { harnessId, familyId });
+}
+
+export function defaultFamilySelectionForProvider(settings, harnessId, providerId) {
+  const selection = defaultFamilySelection(settings, harnessId);
+  return String(selection?.providerId) === String(providerId) ? selection : null;
+}
+
 export function reconcilePickerSelection(settings, candidate) {
   const harnessId = candidate?.harnessId ?? settings.defaults.harnessId;
   const normalized = normalizePickerSelection(settings, { ...candidate, harnessId });

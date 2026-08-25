@@ -1,6 +1,7 @@
 use super::{
     ExecutionModelSelection, InteractionId, InteractionModelSelection, ProjectId, ThreadId,
 };
+use crate::approval::ApprovalReceipt;
 use serde_json::Value;
 
 pub(crate) struct BeginInteractionAttempt<'a> {
@@ -30,6 +31,7 @@ pub(crate) struct Thread {
     pub(crate) permission_profile_id: String,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
+    pub(crate) imported: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +80,7 @@ pub(crate) struct ActionInvocation {
     pub(crate) source_interaction_id: InteractionId,
     pub(crate) action_id: i64,
     pub(crate) result_interaction_id: InteractionId,
+    pub(crate) result_completion_status: String,
     pub(crate) created_at: String,
 }
 
@@ -109,6 +112,7 @@ pub(crate) struct ProductState {
     pub(crate) threads: Vec<ThreadView>,
     pub(crate) interactions: Vec<Interaction>,
     pub(crate) action_invocations: Vec<ActionInvocation>,
+    pub(crate) approvals: Vec<ApprovalReceipt>,
     pub(crate) capabilities: ProductCapabilities,
 }
 

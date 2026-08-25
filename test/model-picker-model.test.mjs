@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   availablePickerFamilies,
+  defaultFamilySelection,
+  defaultFamilySelectionForProvider,
   firstAvailableSelection,
   harnessUsesConfigurationModel,
   isModelSelectionCatalogError,
@@ -14,7 +16,11 @@ import {
   selectionForInteraction,
   validateCandidateHarness,
 } from "../desktop/renderer/src/model-picker-model.js";
-import { modelSelectionLabels, selectionForNextInteraction } from "../desktop/renderer/src/model-picker.js";
+import {
+  modelPickerFamilyPresentation,
+  modelSelectionLabels,
+  selectionForNextInteraction,
+} from "../desktop/renderer/src/model-picker.js";
 
 function settings() {
   return {
@@ -191,6 +197,29 @@ describe("composer model picker selection", () => {
     expect(normalizePickerSelection(catalog, stale)).toBeNull();
   });
 
+  it("preserves a removed family as blocked intent until the user explicitly chooses again", () => {
+    const catalog = settings();
+    catalog.families = [{
+      id: 3,
+      name: "Replacement",
+      enabled: true,
+      position: 0,
+      members: [{ providerId: "codex", modelId: "one", position: 0 }],
+    }];
+    const blocked = selectionForNextInteraction(catalog, "codex-basic", {
+      modelSelection: { familyId: 99, providerId: "codex", modelId: "removed" },
+    });
+    expect(blocked).toEqual({
+      harnessId: "codex-basic",
+      familyId: 99,
+      providerId: "codex",
+      modelId: "removed",
+    });
+    const presentation = modelPickerFamilyPresentation(catalog, "codex-basic", blocked);
+    expect(presentation.selectedFamily.id).toBe(3);
+    expect(presentation.requiresExplicitSelection).toBe(true);
+  });
+
   it("uses first available only when no explicit model was selected", () => {
     const catalog = settings();
     expect(normalizePickerSelection(catalog, { harnessId: "codex-basic" })).toMatchObject({
@@ -208,6 +237,23 @@ describe("composer model picker selection", () => {
       familyId: 99,
       providerId: "codex",
       modelId: "removed",
+    });
+  });
+
+  it("resolves only the configured default family without falling through to another family", () => {
+    const catalog = settings();
+    catalog.defaults.familyId = 2;
+    expect(defaultFamilySelection(catalog, "codex-basic")).toBeNull();
+    catalog.defaults.familyId = 1;
+    expect(defaultFamilySelection(catalog, "codex-basic")).toMatchObject({
+      familyId: 1,
+      providerId: "codex",
+      modelId: "one",
+    });
+    expect(defaultFamilySelectionForProvider(catalog, "codex-basic", "other-provider")).toBeNull();
+    expect(defaultFamilySelectionForProvider(catalog, "codex-basic", "codex")).toMatchObject({
+      familyId: 1,
+      providerId: "codex",
     });
   });
 

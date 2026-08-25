@@ -1,5 +1,5 @@
 import { escapeHtml, toast } from "../ui.js";
-import { actionWasInvoked } from "../action-invocation-state.js";
+import { actionCanRetry, actionWasInvoked } from "../action-invocation-state.js";
 import { setControlActivationCompletion } from "../control-activation.js";
 import {
   createModelPicker,
@@ -16,18 +16,29 @@ import {
   workspaceTurns,
 } from "./model.js";
 import { createRelayerIcon } from "./icons.js";
-import { createGraphSimulationController } from "./graph-simulation.js";
+import { graphLayoutSignature, projectLayerNodePositions } from "./graph-layout.js";
 import { renderMarkdown } from "./markdown.js";
 import { productWorkspaceMarkup } from "./view.js";
 import { restoredDraftForInteraction } from "../interaction-failure-model.js";
-
-function hash(value) {
-  let result = 0;
-  for (const character of String(value)) {
-    result = ((result << 5) - result + character.charCodeAt(0)) | 0;
-  }
-  return Math.abs(result);
-}
+import {
+  annotationNavigationContext,
+  annotationRatingLabel,
+  annotationSubjectContextChanged,
+  annotationTimestamp,
+  annotationsForAnchor,
+  latestAnnotationRevision,
+  sameAnnotationAnchor,
+} from "./annotations.js";
+import {
+  approvalActionPresentation,
+  approvalDockMode,
+  approvalQueueKeyIntent,
+  approvalQueueTarget,
+  approvalResolutionLabel,
+  pendingApprovalsForThread,
+  resolvedApprovalHistoryForThread,
+  selectedPendingApproval,
+} from "../approval-model.js";
 
 export const GRAPH_NODE_ICON_RADIUS = 24;
 export const GRAPH_MIN_ZOOM = 0.4;
@@ -39,7 +50,12 @@ const GRAPH_NODE_HALF_WIDTH = 82;
 const GRAPH_NODE_TOP = 28;
 const GRAPH_NODE_BOTTOM = 72;
 const GRAPH_FIT_PADDING = 48;
-const PENDING_COMPLETION_STATUSES = new Set(["not_started", "running", "submitted"]);
+const PENDING_COMPLETION_STATUSES = new Set([
+  "not_started",
+  "running",
+  "submitted",
+  "waiting_for_approval",
+]);
 
 export function graphNodeIdentitySet(nodes) {
   return new Set((nodes || []).map((node) => String(node.id)));
@@ -139,13 +155,29 @@ export function graphCameraViewKey(state, thread, responseNodes) {
   return `${thread.id}:${interaction?.id ?? ""}:${layerId}`;
 }
 
-export function shouldAutoFitSettledGraph(
-  autoFitViewKey,
-  currentViewKey,
-  autoFitRevision,
-  currentRevision,
-) {
-  return autoFitViewKey === currentViewKey && autoFitRevision === currentRevision;
+export function shouldFitInspectorOpen(previousOpen, nextOpen, viewportWidth) {
+  return previousOpen === false && nextOpen === true && viewportWidth > 760;
+}
+
+export function shouldFitInspectorDock(previousOverlay, nextOverlay, inspectorOpen) {
+  return inspectorOpen && previousOverlay && !nextOverlay;
+}
+
+export function shouldActivateGraphNodeAfterPointerGesture(moved) {
+  return !moved;
+}
+
+export function inspectorFitRequestIsCurrent(request, {
+  cameraRevision,
+  graphViewKey,
+  inspectorOpen,
+  viewportWidth,
+}) {
+  return request !== null
+    && request.graphViewKey === graphViewKey
+    && request.cameraRevision === cameraRevision
+    && inspectorOpen
+    && viewportWidth > 760;
 }
 
 export function graphEdgeSegment(source, target, radius = GRAPH_NODE_ICON_RADIUS) {
@@ -179,6 +211,9 @@ export function graphTurnNavigationDelta(event, graphFocused) {
 export { workspaceTurns } from "./model.js";
 
 export function turnStatusPresentation(status) {
+  if (status === "waiting_for_approval") {
+    return { kind: "approval", label: "Needs approval" };
+  }
   if (["not_started", "running", "submitted"].includes(status)) {
     return { kind: "running", label: status === "not_started" ? "Waiting" : "Running" };
   }
@@ -267,6 +302,26 @@ export function composerDisabledForState(status, canCompose = true, restoredDraf
   return !canCompose || (PENDING_COMPLETION_STATUSES.has(status) && !restoredDraft);
 }
 
+export function composerFocusRestoration(
+  pendingThreadId,
+  { activeWasInside, dockThreadId, threadId, canCompose, promptDisabled },
+) {
+  const currentThreadId = String(threadId);
+  let nextThreadId = pendingThreadId;
+  if (activeWasInside && String(dockThreadId) === currentThreadId) {
+    nextThreadId = currentThreadId;
+  } else if (String(dockThreadId) !== currentThreadId) {
+    nextThreadId = null;
+  }
+  const shouldFocus = String(nextThreadId) === currentThreadId
+    && canCompose
+    && !promptDisabled;
+  return {
+    pendingThreadId: shouldFocus ? null : nextThreadId,
+    shouldFocus,
+  };
+}
+
 const ACTION_VARIANTS = new Set(["chip", "pill", "wide", "card"]);
 
 export function actionPresentation(action) {
@@ -281,11 +336,35 @@ export function actionPresentation(action) {
   };
 }
 
+export function actionActivationPresentation(
+  action,
+  { invoked = false, retryable = false, canInvokeMutatingActions = false } = {},
+) {
+  const layerNavigation = action?.kind === "navigate" && action.targetLayerId != null;
+  const resolvedInvoke = action?.kind === "invoke" && action.targetLayerId != null;
+  const navigational = layerNavigation || resolvedInvoke;
+  const retryableInvoke = action?.kind === "invoke" && !navigational && retryable;
+  return Object.freeze({
+    layerNavigation,
+    resolvedInvoke,
+    navigational,
+    retryableInvoke,
+    label: retryableInvoke ? `Retry ${actionPresentation(action).label}` : actionPresentation(action).label,
+    disabled: navigational ? false : invoked || !canInvokeMutatingActions,
+  });
+}
+
+export function actionReviewKind(action) {
+  return (
+    action?.kind === "navigate"
+    || (action?.kind === "invoke" && action.targetLayerId != null)
+  ) ? "navigate-action" : "invoke-action";
+}
+
 export function captureGraphViewState(
   nodes,
   camera,
   signature,
-  settled,
   cameraRevision,
 ) {
   return {
@@ -295,11 +374,9 @@ export function captureGraphViewState(
       id: node.id,
       x: node.x,
       y: node.y,
-      vx: node.vx,
-      vy: node.vy,
       pinned: node.pinned,
     })),
-    settled,
+    settled: true,
     signature,
   };
 }
@@ -327,26 +404,44 @@ export function createProductWorkspace({
   onSelectTurn = () => {},
   onSelectTurnById,
   onSelectionChange = () => {},
+  onExportConversation = null,
   onSubmitInteraction = async () => {},
   onOpenSettings = () => {},
   onNavigateLayer = async () => {},
+  onNavigateResolvedInvoke = async () => {},
   onInvokeAction = async () => {},
+  onDecideApproval = async () => {},
+  annotationApi = null,
 }) {
   const capabilities = workspaceModeCapabilities(mode);
-  const graphSimulation = createGraphSimulationController();
   let graphNodes = [];
   let graphEdges = [];
   let graphSignature = "";
   let graphViewKey = "";
-  let graphLayoutSettled = false;
   let dragging = null;
   let panning = null;
   let pinching = null;
   let camera = { x: 0, y: 0, zoom: 1 };
   let cameraRevision = 0;
+  let inspectorFitRequest = null;
+  let inspectorFitFrame = null;
   let turnPopoverOpen = false;
+  let settingsMenuOpen = false;
+  let exportPending = false;
+  const approvalSelections = new Map();
+  const approvalErrors = new Map();
+  const approvalDecisionsInFlight = new Set();
+  let restoreComposerFocusThreadId = null;
   const graphViewCache = new Map();
   const activeTouchPointers = new Map();
+  const annotationCache = new Map();
+  const annotationLoads = new Map();
+  const annotationLoadRevisions = new Map();
+  let annotationSubject = null;
+  let annotationThreadId = null;
+  let renderedThreadId = null;
+  let annotationRatingTouched = false;
+  let editingAnnotation = null;
 
   const $ = (selector) => root.querySelector(selector);
   const $$ = (selector) => [...root.querySelectorAll(selector)];
@@ -354,8 +449,121 @@ export function createProductWorkspace({
   const threadView = $("#threadView");
   if (!threadView) throw new Error("Product workspace requires a #threadView host.");
   threadView.innerHTML = productWorkspaceMarkup();
+  const settingsControl = $("#conversationSettings");
+  const settingsButton = $("#conversationSettingsButton");
+  const settingsMenu = $("#conversationSettingsMenu");
+  const exportButton = $("#exportConversation");
+  const closeSettingsMenu = ({ restoreFocus = false } = {}) => {
+    settingsMenuOpen = false;
+    settingsMenu.classList.add("hidden");
+    settingsButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus) settingsButton.focus();
+  };
+  const openSettingsMenu = () => {
+    if (settingsButton.disabled) return;
+    settingsMenuOpen = true;
+    settingsMenu.classList.remove("hidden");
+    settingsButton.setAttribute("aria-expanded", "true");
+    exportButton.focus();
+  };
+  const renderExportControl = (thread = getThread()) => {
+    const available = capabilities.canExportConversation
+      && typeof onExportConversation === "function";
+    settingsControl.classList.toggle("hidden", !available);
+    exportButton.classList.toggle("hidden", !available);
+    exportButton.disabled = !available || exportPending || thread?.id == null;
+    settingsButton.disabled = !available || exportPending;
+    settingsButton.setAttribute("aria-busy", String(exportPending));
+    exportButton.setAttribute("aria-busy", String(exportPending));
+    exportButton.textContent = exportPending ? "Exporting…" : "Export conversation…";
+    if (!available) closeSettingsMenu();
+  };
+  settingsButton.onclick = () => {
+    if (settingsMenuOpen) closeSettingsMenu();
+    else openSettingsMenu();
+  };
+  exportButton.onclick = async () => {
+    const thread = getThread();
+    if (
+      !capabilities.canExportConversation
+      || exportPending
+      || thread?.id == null
+      || typeof onExportConversation !== "function"
+    ) return;
+    closeSettingsMenu();
+    exportPending = true;
+    renderExportControl(thread);
+    try {
+      const result = await onExportConversation(thread.id);
+      if (result?.status === "saved") toast("Conversation exported.");
+      else if (result?.status === "canceled") toast("Export canceled.");
+      else throw new Error("Conversation export returned an unknown status.");
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      exportPending = false;
+      renderExportControl();
+    }
+  };
+  const graphStage = $("#graphStage");
+  const graphDocument = graphStage.ownerDocument;
+  const graphWindow = graphDocument.defaultView;
+  const closeSettingsMenuFromOutside = (event) => {
+    if (settingsMenuOpen && !settingsControl.contains(event.target)) closeSettingsMenu();
+  };
+  const closeSettingsMenuOnEscape = (event) => {
+    if (event.key !== "Escape" || !settingsMenuOpen) return;
+    closeSettingsMenu({ restoreFocus: true });
+  };
+  graphDocument.addEventListener("pointerdown", closeSettingsMenuFromOutside, true);
+  graphDocument.addEventListener("keydown", closeSettingsMenuOnEscape, true);
+  const narrowInspectorMedia = graphWindow?.matchMedia?.("(max-width: 760px)");
+  let inspectorUsesOverlay = narrowInspectorMedia?.matches
+    ?? (graphWindow?.innerWidth ?? 0) <= 760;
+  const cancelInspectorFit = () => {
+    if (inspectorFitFrame !== null) {
+      graphDocument.defaultView?.cancelAnimationFrame?.(inspectorFitFrame);
+      inspectorFitFrame = null;
+    }
+    inspectorFitRequest = null;
+  };
+  const scheduleInspectorFit = () => {
+    cancelInspectorFit();
+    const request = { graphViewKey, cameraRevision };
+    inspectorFitRequest = request;
+    inspectorFitFrame = graphWindow?.requestAnimationFrame?.(() => {
+      inspectorFitFrame = null;
+      if (!inspectorFitRequestIsCurrent(request, {
+        cameraRevision,
+        graphViewKey,
+        inspectorOpen: !$("#inspector").classList.contains("hidden"),
+        viewportWidth: graphWindow?.innerWidth ?? 0,
+      })) {
+        if (inspectorFitRequest === request) inspectorFitRequest = null;
+        return;
+      }
+      updateCamera(fitGraphCamera(graphNodes, graphStage.getBoundingClientRect()), false);
+      inspectorFitRequest = null;
+    }) ?? null;
+  };
+  const handleInspectorLayoutChange = (event) => {
+    const previouslyUsedOverlay = inspectorUsesOverlay;
+    inspectorUsesOverlay = event.matches;
+    const inspectorOpen = !$("#inspector").classList.contains("hidden");
+    const shouldFit = shouldFitInspectorDock(
+      previouslyUsedOverlay,
+      event.matches,
+      inspectorOpen,
+    );
+    if (shouldFit) scheduleInspectorFit();
+  };
+  narrowInspectorMedia?.addEventListener?.("change", handleInspectorLayoutChange);
   $("#closeInspector").onclick = () => {
+    cancelInspectorFit();
     selection.selectedNodeId = null;
+    annotationSubject = null;
+    annotationThreadId = null;
+    resetAnnotationComposer();
     onSelectionChange(null);
     $("#inspector").classList.add("hidden");
     $$('[data-node]').forEach((element) => element.classList.remove("selected"));
@@ -381,8 +589,302 @@ export function createProductWorkspace({
     closeTurnPopover();
     onSelectTurn(1);
   };
-  const graphStage = $("#graphStage");
-  const graphDocument = graphStage.ownerDocument;
+  const annotationEnabled = Boolean(annotationApi);
+  const ratingSurface = $("#annotationRating");
+  const ratingInput = $("#annotationRatingInput");
+  const ratingOutput = $("#annotationRatingOutput");
+
+  function setAnnotationRating(value, { touched = true } = {}) {
+    const normalized = Math.min(4, Math.max(1, Number(value) || 2));
+    ratingInput.value = String(normalized);
+    ratingSurface.style.setProperty("--annotation-rating", String(normalized));
+    ratingSurface.style.setProperty(
+      "--annotation-rating-progress",
+      `${(normalized - 1) * 33.333}%`,
+    );
+    annotationRatingTouched = touched;
+    const label = touched ? annotationRatingLabel(normalized) : null;
+    ratingInput.setAttribute("aria-valuetext", label || "No rating selected");
+    ratingOutput.textContent = label || "";
+  }
+
+  function setRatingExpanded(expanded) {
+    ratingSurface.classList.toggle("expanded", expanded);
+  }
+
+  setAnnotationRating(2, { touched: false });
+  ratingInput.onfocus = () => setRatingExpanded(true);
+  ratingInput.onpointerdown = () => setRatingExpanded(true);
+  ratingInput.oninput = () => setAnnotationRating(ratingInput.value);
+  ratingInput.onkeydown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setRatingExpanded(false);
+      ratingInput.blur();
+    }
+  };
+  ratingSurface.onfocusout = () => graphDocument.defaultView.setTimeout(() => {
+    if (!ratingSurface.contains(graphDocument.activeElement)) setRatingExpanded(false);
+  }, 0);
+  ratingSurface.querySelectorAll("[data-rating]").forEach((button) => {
+    button.onclick = () => {
+      setAnnotationRating(button.dataset.rating);
+      ratingInput.focus({ preventScroll: true });
+    };
+  });
+  $("#annotationComment").oninput = () => {
+    $("#submitAnnotation").disabled = !$("#annotationComment").value.trim();
+  };
+
+  function currentInteraction(state = getState(), thread = getThread()) {
+    return interactionForThread(state, thread);
+  }
+
+  function currentLayerId(state = getState(), thread = getThread()) {
+    return state.visibleLayer?.layer?.id
+      ?? currentInteraction(state, thread)?.completionOutput?.rootLayer?.layer?.id
+      ?? null;
+  }
+
+  function subjectAnchor(kind, identity = {}, state = getState(), thread = getThread()) {
+    const interactionId = currentInteraction(state, thread)?.id;
+    const layerId = currentLayerId(state, thread);
+    if (kind === "thread") return { kind: "thread" };
+    if (kind === "turn") return { kind: "turn", interactionId };
+    if (kind === "layer") return { kind: "layer", interactionId, layerId };
+    if (kind === "node") return { kind: "node", interactionId, layerId, nodeId: identity.nodeId };
+    if (kind === "edge") return { kind: "edge", interactionId, layerId, edgeId: identity.edgeId };
+    if (kind === "action") return {
+      kind: "action",
+      interactionId,
+      presentationLayerId: layerId,
+      sourceLayerId: identity.sourceLayerId,
+      nodeId: identity.nodeId,
+      actionId: identity.actionId,
+    };
+    throw new Error(`Unknown annotation subject: ${kind}`);
+  }
+
+  function annotationsForCurrentThread() {
+    const thread = getThread();
+    return thread ? annotationCache.get(String(thread.id)) ?? [] : [];
+  }
+
+  function isCurrentAnnotationContext(threadId, anchor) {
+    return String(getThread()?.id) === String(threadId)
+      && String(annotationThreadId) === String(threadId)
+      && sameAnnotationAnchor(annotationSubject?.anchor, anchor);
+  }
+
+  function annotationCount(anchor) {
+    return annotationsForAnchor(annotationsForCurrentThread(), anchor).length;
+  }
+
+  function updateCountBadge(element, anchor) {
+    const count = annotationCount(anchor);
+    element.textContent = count ? String(count) : "✎";
+    element.classList.toggle("hidden", !annotationEnabled);
+    element.dataset.annotationKind = anchor.kind;
+    element.setAttribute("aria-label", count
+      ? `Open ${count} ${anchor.kind} comment${count === 1 ? "" : "s"}`
+      : `Add ${anchor.kind} comment`);
+  }
+
+  async function loadAnnotations(thread, { force = false } = {}) {
+    if (!annotationEnabled || !thread) return;
+    const key = String(thread.id);
+    if (!force && (annotationCache.has(key) || annotationLoads.has(key))) return;
+    const loadRevision = (annotationLoadRevisions.get(key) || 0) + 1;
+    annotationLoadRevisions.set(key, loadRevision);
+    const loading = Promise.resolve(annotationApi.list(thread.id))
+      .then((result) => {
+        if (annotationLoadRevisions.get(key) !== loadRevision) return;
+        annotationCache.set(key, Array.isArray(result?.annotations) ? result.annotations : []);
+        if (String(getThread()?.id) === key) render();
+      })
+      .catch((error) => {
+        if (
+          annotationLoadRevisions.get(key) === loadRevision
+          && String(getThread()?.id) === key
+        ) {
+          $("#annotationError").textContent = error.message;
+          $("#annotationError").classList.remove("hidden");
+        }
+      })
+      .finally(() => {
+        if (annotationLoadRevisions.get(key) === loadRevision) annotationLoads.delete(key);
+      });
+    annotationLoads.set(key, loading);
+    await loading;
+  }
+
+  function resetAnnotationComposer() {
+    editingAnnotation = null;
+    $("#annotationComment").value = "";
+    $("#submitAnnotation").disabled = true;
+    $("#annotationError").classList.add("hidden");
+    setAnnotationRating(2, { touched: false });
+    setRatingExpanded(false);
+  }
+
+  function renderAnnotationList() {
+    const panel = $("#annotationPanel");
+    panel.classList.toggle("hidden", !annotationEnabled || !annotationSubject);
+    if (!annotationEnabled || !annotationSubject) return;
+    const annotations = annotationsForAnchor(annotationsForCurrentThread(), annotationSubject.anchor);
+    $("#annotationCount").textContent = String(annotations.length);
+    const rows = annotations.map((annotation) => {
+      const revision = latestAnnotationRevision(annotation);
+      const article = graphDocument.createElement("article");
+      article.className = "annotation-item";
+      const meta = graphDocument.createElement("div");
+      meta.className = "annotation-meta";
+      const author = graphDocument.createElement("span");
+      author.textContent = revision.authorDisplayName || "Annotator";
+      const time = graphDocument.createElement("time");
+      const createdAt = annotationTimestamp(revision.createdAt);
+      time.dateTime = createdAt?.toISOString() || "";
+      time.textContent = createdAt
+        ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(createdAt)
+        : "";
+      meta.append(author, time);
+      if (revision.rating != null) {
+        const rating = graphDocument.createElement("span");
+        rating.className = "annotation-item-rating";
+        rating.textContent = annotationRatingLabel(revision.rating);
+        meta.append(rating);
+      }
+      const comment = graphDocument.createElement("p");
+      comment.textContent = revision.comment;
+      const controls = graphDocument.createElement("div");
+      controls.className = "annotation-item-controls";
+      const edit = graphDocument.createElement("button");
+      edit.type = "button";
+      edit.textContent = "Edit";
+      edit.onclick = () => {
+        editingAnnotation = annotation;
+        $("#annotationComment").value = revision.comment;
+        $("#submitAnnotation").disabled = false;
+        setAnnotationRating(revision.rating ?? 2, { touched: revision.rating != null });
+        $("#annotationComment").focus();
+      };
+      const retract = graphDocument.createElement("button");
+      retract.type = "button";
+      retract.textContent = "Retract";
+      retract.onclick = async () => {
+        const operationThread = getThread();
+        const operationAnchor = annotationSubject.anchor;
+        if (String(operationThread?.id) !== String(annotationThreadId)) return;
+        retract.disabled = true;
+        try {
+          await annotationApi.retract(operationThread.id, annotation.id, {
+            expectedRevision: annotation.latestRevision,
+            navigationContext: annotationNavigationContext(selection, operationAnchor),
+            evidenceRefs: [],
+          });
+          annotationCache.delete(String(operationThread.id));
+          await loadAnnotations(operationThread, { force: true });
+        } catch (error) {
+          if (isCurrentAnnotationContext(operationThread.id, operationAnchor)) {
+            $("#annotationError").textContent = error.message;
+            $("#annotationError").classList.remove("hidden");
+            retract.disabled = false;
+          }
+        }
+      };
+      controls.append(edit, retract);
+      article.append(meta, comment, controls);
+      if ((annotation.revisions?.length ?? 0) > 1) {
+        const history = graphDocument.createElement("details");
+        const summary = graphDocument.createElement("summary");
+        summary.textContent = `${annotation.revisions.length} revisions`;
+        const list = graphDocument.createElement("ol");
+        for (const prior of annotation.revisions.slice(0, -1).toReversed()) {
+          const item = graphDocument.createElement("li");
+          item.textContent = prior.comment || "Retracted";
+          list.append(item);
+        }
+        history.append(summary, list);
+        article.append(history);
+      }
+      return article;
+    });
+    $("#annotationList").replaceChildren(...rows);
+    $("#annotationList").classList.toggle("empty", !rows.length);
+  }
+
+  function openAnnotationSubject(state, anchor, { title, kind, icon = "annotation" } = {}) {
+    const threadId = getThread()?.id;
+    const subjectChanged = annotationSubjectContextChanged(
+      annotationThreadId,
+      annotationSubject?.anchor,
+      threadId,
+      anchor,
+    );
+    if (subjectChanged) resetAnnotationComposer();
+    annotationThreadId = threadId;
+    annotationSubject = { anchor, title, kind };
+    selection.selectedNodeId = anchor.kind === "node" ? anchor.nodeId : null;
+    onSelectionChange(selection.selectedNodeId);
+    $("#inspector").classList.remove("hidden");
+    $("#detailIcon").textContent = icon === "annotation" ? "✎" : icon;
+    $("#detailKind").textContent = kind || anchor.kind;
+    $("#detailTitle").textContent = title || `${anchor.kind} comments`;
+    $("#detailContent").replaceChildren();
+    $("#detailActions").classList.add("hidden");
+    $("#detailActions").replaceChildren();
+    $$('[data-node]').forEach((element) => element.classList.remove("selected"));
+    renderAnnotationList();
+  }
+
+  $("#threadAnnotationBadge").onclick = () => openAnnotationSubject(
+    getState(), subjectAnchor("thread"), { title: getThread()?.title, kind: "THREAD" },
+  );
+  $("#turnAnnotationBadge").onclick = () => openAnnotationSubject(
+    getState(), subjectAnchor("turn"), { title: "Turn comments", kind: "TURN" },
+  );
+  $("#annotationComposer").onsubmit = async (event) => {
+    event.preventDefault();
+    const comment = $("#annotationComment").value.trim();
+    if (!comment || !annotationSubject || !annotationEnabled) return;
+    const thread = getThread();
+    if (String(thread?.id) !== String(annotationThreadId)) {
+      annotationSubject = null;
+      annotationThreadId = null;
+      resetAnnotationComposer();
+      $("#annotationPanel").classList.add("hidden");
+      return;
+    }
+    const operationAnchor = structuredClone(annotationSubject.anchor);
+    const operationEditing = editingAnnotation;
+    const payload = {
+      comment,
+      rating: annotationRatingTouched ? Number(ratingInput.value) : null,
+      navigationContext: annotationNavigationContext(selection, operationAnchor),
+      evidenceRefs: [],
+    };
+    $("#submitAnnotation").disabled = true;
+    $("#annotationError").classList.add("hidden");
+    try {
+      if (operationEditing) {
+        await annotationApi.revise(thread.id, operationEditing.id, {
+          ...payload,
+          expectedRevision: operationEditing.latestRevision,
+        });
+      } else {
+        await annotationApi.create(thread.id, { anchor: operationAnchor, ...payload });
+      }
+      annotationCache.delete(String(thread.id));
+      await loadAnnotations(thread, { force: true });
+      if (isCurrentAnnotationContext(thread.id, operationAnchor)) resetAnnotationComposer();
+    } catch (error) {
+      if (isCurrentAnnotationContext(thread.id, operationAnchor)) {
+        $("#annotationError").textContent = error.message;
+        $("#annotationError").classList.remove("hidden");
+        $("#submitAnnotation").disabled = false;
+      }
+    }
+  };
   const closeTurnPopover = () => {
     turnPopoverOpen = false;
     $("#turnPopover").classList.add("hidden");
@@ -435,7 +937,10 @@ export function createProductWorkspace({
 
   function updateCamera(nextCamera, manual = true) {
     camera = nextCamera;
-    if (manual) cameraRevision += 1;
+    if (manual) {
+      cancelInspectorFit();
+      cameraRevision += 1;
+    }
     drawGraph();
   }
 
@@ -501,6 +1006,7 @@ export function createProductWorkspace({
       return;
     }
     if (!panning || panning.pointerId !== event.pointerId) return;
+    cancelInspectorFit();
     camera.x = panning.startCameraX + event.clientX - panning.startClientX;
     camera.y = panning.startCameraY + event.clientY - panning.startClientY;
     cameraRevision += 1;
@@ -583,11 +1089,63 @@ export function createProductWorkspace({
   };
   syncComposer();
 
+  const approvalDock = $("#approvalDock");
+  const selectApproval = (intent) => {
+    const state = getState();
+    const thread = getThread();
+    const pending = pendingApprovalsForThread(state, thread);
+    const current = approvalSelections.get(String(thread?.id));
+    const target = approvalQueueTarget(pending, current, intent);
+    if (target == null) return;
+    approvalSelections.set(String(thread.id), String(target));
+    renderApprovalDock(state, thread);
+  };
+  $("#previousApproval").onclick = () => selectApproval(-1);
+  $("#nextApproval").onclick = () => selectApproval(1);
+  approvalDock.onkeydown = (event) => {
+    const intent = approvalQueueKeyIntent(event, graphDocument.activeElement === approvalDock);
+    if (intent === null) return;
+    event.preventDefault();
+    selectApproval(intent);
+  };
+  const decideSelectedApproval = async (decision) => {
+    const state = getState();
+    const thread = getThread();
+    const pending = pendingApprovalsForThread(state, thread);
+    const selected = selectedPendingApproval(
+      pending,
+      approvalSelections.get(String(thread?.id)),
+    );
+    const requestId = selected?.request.requestId;
+    if (!capabilities.canResolveApprovals || requestId == null) return;
+    const key = String(requestId);
+    if (approvalDecisionsInFlight.has(key)) return;
+    approvalDecisionsInFlight.add(key);
+    approvalErrors.delete(key);
+    renderApprovalDock(state, thread);
+    try {
+      await onDecideApproval(requestId, decision);
+    } catch (error) {
+      if (String(getThread()?.id) === String(thread.id)) {
+        approvalErrors.set(key, error?.message || "Approval decision failed.");
+      }
+    } finally {
+      approvalDecisionsInFlight.delete(key);
+      if (String(getThread()?.id) === String(thread.id)) {
+        renderApprovalDock(getState(), getThread());
+      }
+    }
+  };
+  $("#denyApproval").onclick = () => decideSelectedApproval("deny");
+  $("#approveOnce").onclick = () => decideSelectedApproval("approve_once");
+  $("#approveAlways").onclick = () => decideSelectedApproval("approve_always");
+
   function applyMode() {
     threadView.dataset.workspaceMode = mode;
     threadView.dataset.canNavigate = String(capabilities.canNavigate);
     threadView.dataset.canCompose = String(capabilities.canCompose);
     threadView.dataset.canInvokeMutatingActions = String(capabilities.canInvokeMutatingActions);
+    threadView.dataset.canExportConversation = String(capabilities.canExportConversation);
     $("#threadComposer").classList.toggle("disabled-composer", !capabilities.canCompose);
     prompt.classList.toggle("hidden", !capabilities.canCompose);
     send.classList.toggle("hidden", !capabilities.canCompose);
@@ -647,6 +1205,10 @@ export function createProductWorkspace({
       const statusText = graphDocument.createElement("span");
       statusText.className = "turn-option-status";
       statusText.textContent = status.label;
+      if (annotationEnabled) {
+        const count = annotationCount({ kind: "turn", interactionId: turn.id });
+        if (count) statusText.textContent += ` · ${count} comment${count === 1 ? "" : "s"}`;
+      }
       row.append(sequence, promptText, statusText);
       row.onclick = () => {
         closeTurnPopover();
@@ -675,8 +1237,36 @@ export function createProductWorkspace({
       showEmpty();
       return;
     }
+    const threadId = String(thread.id);
+    if (renderedThreadId !== null && renderedThreadId !== threadId) {
+      annotationSubject = null;
+      annotationThreadId = null;
+      resetAnnotationComposer();
+      $("#annotationPanel").classList.add("hidden");
+      cancelInspectorFit();
+      $("#inspector").classList.add("hidden");
+      selection.selectedNodeId = null;
+    }
+    renderedThreadId = threadId;
+    if (annotationSubject?.anchor.kind !== "thread") {
+      const interactionId = currentInteraction(state, thread)?.id;
+      const layerId = currentLayerId(state, thread);
+      const anchor = annotationSubject?.anchor;
+      const anchorLayerId = anchor?.layerId ?? anchor?.presentationLayerId;
+      const wrongTurn = anchor?.interactionId != null
+        && String(anchor.interactionId) !== String(interactionId);
+      const wrongLayer = !["turn", undefined].includes(anchor?.kind)
+        && anchorLayerId != null
+        && String(anchorLayerId) !== String(layerId);
+      if (wrongTurn || wrongLayer) {
+        annotationSubject = null;
+        $("#annotationPanel").classList.add("hidden");
+      }
+    }
     applyMode();
     showThread();
+    renderExportControl(thread);
+    void loadAnnotations(thread);
     renderHistoryNavigation();
     $("#threadTitle").textContent = thread.title;
     const project = state.projects.find((item) => String(item.id) === String(thread.projectId));
@@ -686,6 +1276,8 @@ export function createProductWorkspace({
     const harness = state.modelSettings?.harnesses?.find((item) => item.id === harnessId);
     $("#threadScope").textContent = `${project?.name || "No folder"} · ${permissionLabel} · ${harness?.label ?? harnessId}`;
     const interaction = interactionForThread(state, thread);
+    updateCountBadge($("#threadAnnotationBadge"), subjectAnchor("thread", {}, state, thread));
+    updateCountBadge($("#turnAnnotationBadge"), subjectAnchor("turn", {}, state, thread));
     $("#interactionText").textContent = interaction?.text
       || interaction?.summary
       || interaction?.content
@@ -725,10 +1317,16 @@ export function createProductWorkspace({
       ? `${identityLabels.provider}: ${identityLabels.model}`
       : "";
     identity.classList.toggle("hidden", !identityLabels);
-    renderRunState(state, Boolean(restoredDraft));
+    renderInteractionState(state, Boolean(restoredDraft));
+    renderApprovalDock(state, thread);
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
       selectNode(state, selection.selectedNodeId, { notify: false });
+    } else if (annotationSubject) {
+      renderAnnotationList();
+    } else if (!$("#inspector").classList.contains("hidden")) {
+      cancelInspectorFit();
+      $("#inspector").classList.add("hidden");
     }
     renderBreadcrumb(state, thread);
   }
@@ -768,25 +1366,148 @@ export function createProductWorkspace({
         });
       }
       children.push(segment);
+      if (annotationEnabled) {
+        const anchor = {
+          kind: "layer",
+          interactionId: currentInteraction(state, thread)?.id,
+          layerId: item.layerId,
+        };
+        const badge = graphDocument.createElement("button");
+        badge.type = "button";
+        badge.className = "annotation-count-badge breadcrumb-annotation-badge";
+        updateCountBadge(badge, anchor);
+        badge.onclick = async () => {
+          badge.disabled = true;
+          try {
+            if (!item.current) {
+              await onNavigateLayer(item.layerId, {
+                restore: true,
+                pathIndex: item.pathIndex,
+              });
+            }
+            if (String(getThread()?.id) !== String(thread?.id)) return;
+            openAnnotationSubject(getState(), anchor, {
+              title: item.label,
+              kind: "LAYER",
+            });
+          } catch (error) {
+            toast(error.message);
+          } finally {
+            if (badge.isConnected) badge.disabled = false;
+          }
+        };
+        children.push(badge);
+      }
     });
     breadcrumb.replaceChildren(...children);
     breadcrumb.scrollLeft = breadcrumb.scrollWidth;
   }
 
-  function renderRunState(state, restoredDraft = false) {
+  function renderInteractionState(state, restoredDraft = false) {
     const status = state.status || "idle";
-    const pending = PENDING_COMPLETION_STATUSES.has(status);
-    const display = status === "accepted" ? "Complete"
-      : pending ? "…"
-        : status === "idle" ? "Ready"
-          : status[0].toUpperCase() + status.slice(1);
-    const runState = $("#runState");
-    runState.className = `run-state ${pending ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
-    runState.setAttribute("aria-label", pending ? "Waiting for graph" : display);
-    runState.querySelector("span").textContent = display;
     prompt.disabled = composerDisabledForState(status, capabilities.canCompose, restoredDraft);
     modelPicker?.setDisabled(prompt.disabled);
     syncComposer();
+  }
+
+  function renderApprovalDock(state, thread) {
+    const pending = pendingApprovalsForThread(state, thread);
+    const threadKey = String(thread?.id);
+    const priorRequestId = approvalSelections.get(threadKey);
+    const selected = selectedPendingApproval(pending, priorRequestId);
+    const activeWasInside = approvalDock.contains(graphDocument.activeElement);
+    const wasHidden = approvalDock.classList.contains("hidden");
+    const wasHistoryOnly = approvalDock.classList.contains("history-only");
+    const history = resolvedApprovalHistoryForThread(state, thread);
+    const dockMode = approvalDockMode(pending, history);
+    const renderHistory = () => {
+      $("#approvalHistory").classList.toggle("hidden", history.length === 0);
+      $("#approvalHistorySummary").textContent = `Approval history (${history.length})`;
+      $("#approvalHistoryList").replaceChildren(...history.map((receipt) => {
+        const item = graphDocument.createElement("li");
+        item.textContent = `${receipt.request.title} — ${approvalResolutionLabel(receipt)}`;
+        return item;
+      }));
+    };
+    if (!selected) {
+      approvalSelections.delete(threadKey);
+      const focus = composerFocusRestoration(restoreComposerFocusThreadId, {
+        activeWasInside,
+        dockThreadId: approvalDock.dataset.threadId,
+        threadId: threadKey,
+        canCompose: capabilities.canCompose,
+        promptDisabled: prompt.disabled,
+      });
+      restoreComposerFocusThreadId = focus.pendingThreadId;
+      approvalDock.classList.toggle("hidden", dockMode === "hidden");
+      approvalDock.classList.toggle("history-only", dockMode === "history");
+      approvalDock.removeAttribute("aria-busy");
+      approvalDock.dataset.threadId = threadKey;
+      $("#threadComposer").classList.remove("hidden");
+      if (dockMode === "history") {
+        approvalDock.setAttribute("aria-describedby", "approvalHistorySummary");
+        $("#approvalStatusIcon").textContent = "✓";
+        $("#approvalEyebrow").textContent = "Resolved";
+        $("#approvalTitle").textContent = "Approval history";
+        $("#approvalQueueControls").classList.add("hidden");
+        $("#approvalReason").classList.add("hidden");
+        $(".approval-action-summary").classList.add("hidden");
+        $(".approval-metadata").classList.add("hidden");
+        $("#approvalError").classList.add("hidden");
+        $(".approval-actions").classList.add("hidden");
+        renderHistory();
+      }
+      if (focus.shouldFocus) {
+        prompt.focus({ preventScroll: true });
+      }
+      return;
+    }
+    const request = selected.request;
+    const requestId = String(request.requestId);
+    const selectedDisappeared = priorRequestId != null
+      && !pending.some((receipt) => String(receipt.request.requestId) === String(priorRequestId));
+    approvalSelections.set(threadKey, requestId);
+    approvalDock.classList.remove("hidden");
+    approvalDock.classList.remove("history-only");
+    approvalDock.setAttribute(
+      "aria-describedby",
+      "approvalReason approvalActionValue approvalScopeDescription",
+    );
+    approvalDock.dataset.threadId = threadKey;
+    $("#threadComposer").classList.add("hidden");
+    approvalDock.dataset.requestId = requestId;
+    $("#approvalStatusIcon").textContent = "!";
+    $("#approvalEyebrow").textContent = "Needs approval";
+    $("#approvalTitle").textContent = request.title;
+    $("#approvalReason").classList.remove("hidden");
+    $("#approvalReason").textContent = request.reason;
+    $(".approval-action-summary").classList.remove("hidden");
+    $(".approval-metadata").classList.remove("hidden");
+    $(".approval-actions").classList.remove("hidden");
+    $("#approvalScopeDescription").textContent = request.scopeDescription;
+    const action = approvalActionPresentation(request.action);
+    $("#approvalActionLabel").textContent = action.label;
+    $("#approvalActionValue").textContent = action.value;
+    $("#approvalWorkingDirectoryRow").classList.toggle("hidden", !action.workingDirectory);
+    $("#approvalWorkingDirectory").textContent = action.workingDirectory || "";
+    $("#approvalAffectedFilesRow").classList.toggle("hidden", action.affectedFiles.length === 0);
+    $("#approvalAffectedFiles").textContent = action.affectedFiles.join(", ");
+    const index = pending.findIndex((receipt) => String(receipt.request.requestId) === requestId);
+    $("#approvalQueuePosition").textContent = `${index + 1} of ${pending.length}`;
+    $("#approvalQueueControls").classList.toggle("hidden", pending.length < 2);
+    renderHistory();
+    const error = approvalErrors.get(requestId);
+    $("#approvalError").classList.toggle("hidden", !error);
+    $("#approvalError").textContent = error || "";
+    const decisionPending = approvalDecisionsInFlight.has(requestId)
+      || state.pendingApprovalDecisions?.some((id) => String(id) === requestId);
+    approvalDock.setAttribute("aria-busy", String(decisionPending));
+    for (const selector of ["#denyApproval", "#approveOnce", "#approveAlways"]) {
+      $(selector).disabled = decisionPending || !capabilities.canResolveApprovals;
+    }
+    if (wasHidden || wasHistoryOnly || selectedDisappeared) {
+      approvalDock.focus({ preventScroll: true });
+    }
   }
 
   function renderGraph(state, thread) {
@@ -794,8 +1515,9 @@ export function createProductWorkspace({
     const nextViewKey = graphCameraViewKey(state, thread, responseNodes);
     const enteringView = nextViewKey !== graphViewKey;
     if (enteringView) {
+      cancelInspectorFit();
+      $("#inspector").classList.add("hidden");
       saveGraphView();
-      graphSimulation.cancel();
     }
     $("#graphEmpty").classList.toggle("hidden", responseNodes.length > 0);
     $("#graphStage").classList.toggle("hidden", responseNodes.length === 0);
@@ -804,62 +1526,58 @@ export function createProductWorkspace({
       graphNodes = [];
       graphEdges = [];
       graphSignature = "";
-      graphLayoutSettled = false;
       selection.selectedNodeId = null;
-      $("#inspector").classList.add("hidden");
-      const pending = PENDING_COMPLETION_STATUSES.has(state.status);
+      if (!["thread", "turn"].includes(annotationSubject?.anchor.kind)) {
+        annotationSubject = null;
+        $("#inspector").classList.add("hidden");
+      } else {
+        renderAnnotationList();
+      }
+      const pending = thread?.imported !== true && PENDING_COMPLETION_STATUSES.has(state.status);
       $("#thinkingDots").classList.toggle("hidden", !pending);
       $("#graphEmptyMessage").classList.toggle("hidden", pending);
-      $("#graphEmptyMessage").textContent = state.status === "failed"
+      $("#graphEmptyMessage").textContent = thread?.imported === true && PENDING_COMPLETION_STATUSES.has(state.status)
+        ? "This imported interaction was unfinished and has no accepted graph."
+        : state.status === "failed"
         ? "This interaction failed before producing an accepted graph."
         : "This interaction has no accepted graph yet.";
       return;
     }
 
-    const bounds = $("#graphStage").getBoundingClientRect();
     const cachedView = enteringView ? graphViewCache.get(nextViewKey) : null;
     const previous = new Map(
       (cachedView?.nodes ?? (!enteringView ? graphNodes : []))
-        .map((node) => [node.id, node]),
+        .map((node) => [String(node.id), node]),
     );
     graphViewKey = nextViewKey;
-    graphNodes = responseNodes.map((node, index) => {
-      const prior = previous.get(node.id);
-      return prior ? {
-        ...node,
-        x: prior.x,
-        y: prior.y,
-        vx: prior.vx,
-        vy: prior.vy,
-        pinned: prior.pinned,
-        index,
-      } : {
-        ...node,
-        x: Math.max(120, bounds.width / 2 + ((hash(node.id) % 300) - 150)),
-        y: Math.max(90, bounds.height / 2 + ((hash(`${node.id}-y`) % 220) - 110)),
-        vx: 0,
-        vy: 0,
-        pinned: false,
-        index,
-      };
-    });
+    graphNodes = responseNodes.map((node, index) => ({
+      ...node,
+      x: 0,
+      y: 0,
+      pinned: false,
+      index,
+    }));
     const ids = graphNodeIdentitySet(graphNodes);
     graphEdges = (state.edges || []).filter((edge) => {
       const [source, target] = edge.endpoints || [edge.source, edge.target];
       return ids.has(String(source)) && ids.has(String(target));
     });
-    const nextSignature = JSON.stringify({
-      viewKey: graphViewKey,
-      nodes: graphNodes.map((node) => node.id),
-      edges: graphEdges.map((edge) => edge.endpoints || [edge.source, edge.target]),
-    });
-    const topologyChanged = cachedView
-      ? cachedView.signature !== nextSignature || !cachedView.settled
-      : nextSignature !== graphSignature;
+    const nextSignature = graphLayoutSignature(state.visibleLayer, graphNodes, graphEdges);
+    const cachedLayoutMatches = cachedView
+      ? cachedView.signature === nextSignature
+      : !enteringView && graphSignature === nextSignature;
     graphSignature = nextSignature;
-    $("#nodeLayer").innerHTML = graphNodes.map((node) => `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}" data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}"><div class="glyph"></div><div class="copy"><b>${escapeHtml(node.title)}</b></div></div>`).join("");
+    $("#nodeLayer").innerHTML = graphNodes.map((node) => {
+      const count = annotationCount(subjectAnchor("node", { nodeId: node.id }, state, thread));
+      const badge = annotationEnabled && count
+        ? `<span class="graph-annotation-badge" aria-label="${count} comment${count === 1 ? "" : "s"}">${count}</span>`
+        : "";
+      const annotationLabel = count ? `. ${count} comment${count === 1 ? "" : "s"}` : "";
+      return `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}" data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}${annotationLabel}"><div class="glyph"></div>${badge}<div class="copy"><b>${escapeHtml(node.title)}</b></div></div>`;
+    }).join("");
     $$('[data-node]').forEach((element) => {
       const authoredNode = graphNodes.find((candidate) => String(candidate.id) === element.dataset.node);
+      let suppressClickAfterDrag = false;
       element.querySelector(".glyph").replaceChildren(createRelayerIcon(
         authoredNode?.icon || authoredNode?.metadata?.relayer?.icon,
         { class: "relayer-node-icon" },
@@ -870,7 +1588,13 @@ export function createProductWorkspace({
           element.offsetHeight,
         );
       }
-      element.onclick = () => selectNode(state, element.dataset.node);
+      element.onclick = () => {
+        if (!shouldActivateGraphNodeAfterPointerGesture(suppressClickAfterDrag)) {
+          suppressClickAfterDrag = false;
+          return;
+        }
+        selectNode(state, element.dataset.node);
+      };
       element.onkeydown = (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
@@ -903,110 +1627,52 @@ export function createProductWorkspace({
         }, camera);
         dragging.node.x = point.x;
         dragging.node.y = point.y;
-        dragging.node.vx = 0;
-        dragging.node.vy = 0;
         if (dragging.moved) dragging.node.pinned = true;
         drawGraph();
       };
-      const finishDrag = () => { dragging = null; };
-      element.onpointerup = finishDrag;
-      element.onpointercancel = finishDrag;
+      element.onpointerup = () => {
+        suppressClickAfterDrag = Boolean(dragging?.moved);
+        if (suppressClickAfterDrag) {
+          graphWindow?.setTimeout?.(() => { suppressClickAfterDrag = false; }, 0);
+        }
+        dragging = null;
+      };
+      element.onpointercancel = () => { dragging = null; };
     });
+    const projected = projectLayerNodePositions(state.visibleLayer, graphNodes);
+    for (const node of graphNodes) {
+      const canonical = projected.positions.get(String(node.id));
+      if (!canonical) throw new Error(`Visible graph layout is missing node ${String(node.id)}.`);
+      node.canonicalX = canonical.x;
+      node.canonicalY = canonical.y;
+      node.layoutSource = projected.source;
+      const prior = previous.get(String(node.id));
+      if (cachedLayoutMatches && prior?.pinned) {
+        node.x = prior.x;
+        node.y = prior.y;
+        node.pinned = true;
+      } else {
+        node.x = canonical.x;
+        node.y = canonical.y;
+      }
+    }
     if (enteringView && !ids.has(String(selection.selectedNodeId))) {
       selection.selectedNodeId = null;
       $("#inspector").classList.add("hidden");
     }
-    if (cachedView) {
+    if (cachedView && cachedLayoutMatches) {
       camera = { ...cachedView.camera };
       cameraRevision = cachedView.cameraRevision;
-      graphLayoutSettled = cachedView.settled;
-    } else if (enteringView) {
-      camera = { x: 0, y: 0, zoom: 1 };
-      graphLayoutSettled = false;
+    } else if (enteringView || !cachedLayoutMatches) {
+      camera = fitGraphCamera(graphNodes, graphStage.getBoundingClientRect());
     }
-    if (!topologyChanged) {
-      drawGraph();
-      return;
-    }
-    graphLayoutSettled = false;
-    const autoFitRevision = cameraRevision;
-    const autoFitViewKey = enteringView ? graphViewKey : null;
-    let ticks = 0;
-    graphSimulation.start(() => {
-      physicsStep(bounds);
-      drawGraph();
-      if (++ticks < 220) {
-        return true;
-      }
-      graphLayoutSettled = true;
-      if (shouldAutoFitSettledGraph(
-        autoFitViewKey,
-        graphViewKey,
-        autoFitRevision,
-        cameraRevision,
-      )) {
-        updateCamera(fitGraphCamera(graphNodes, bounds), false);
-      } else {
-        saveGraphView();
-      }
-      return false;
-    });
-  }
-
-  function physicsStep(bounds) {
-    const centerX = bounds.width / 2;
-    const centerY = bounds.height / 2;
-    const anchored = (node) => node.pinned || dragging?.node.id === node.id;
-    for (let i = 0; i < graphNodes.length; i++) {
-      for (let j = i + 1; j < graphNodes.length; j++) {
-        const a = graphNodes[i];
-        const b = graphNodes[j];
-        const dx = b.x - a.x || 0.1;
-        const dy = b.y - a.y || 0.1;
-        const distance2 = Math.max(400, dx * dx + dy * dy);
-        const force = 950 / distance2;
-        if (!anchored(a)) {
-          a.vx -= dx * force;
-          a.vy -= dy * force;
-        }
-        if (!anchored(b)) {
-          b.vx += dx * force;
-          b.vy += dy * force;
-        }
-      }
-    }
-    for (const edge of graphEdges) {
-      const [source, target] = edge.endpoints || [edge.source, edge.target];
-      const a = graphNodes.find((node) => node.id === source);
-      const b = graphNodes.find((node) => node.id === target);
-      if (!a || !b) continue;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const distance = Math.hypot(dx, dy) || 1;
-      const force = (distance - 150) * 0.002;
-      if (!anchored(a)) {
-        a.vx += dx * force;
-        a.vy += dy * force;
-      }
-      if (!anchored(b)) {
-        b.vx -= dx * force;
-        b.vy -= dy * force;
-      }
-    }
-    for (const node of graphNodes) {
-      if (anchored(node)) {
-        node.vx = 0;
-        node.vy = 0;
-        continue;
-      }
-      node.vx = (node.vx + (centerX - node.x) * 0.0014) * 0.88;
-      node.vy = (node.vy + (centerY - node.y) * 0.0014) * 0.88;
-      node.x += node.vx;
-      node.y += node.vy;
-    }
+    drawGraph();
   }
 
   function drawGraph() {
+    const focusedEdgeId = graphDocument.activeElement
+      ?.closest?.("[data-edge]")
+      ?.dataset.edge ?? null;
     for (const node of graphNodes) {
       const element = $$('[data-node]').find((item) => item.dataset.node === String(node.id));
       if (element) {
@@ -1014,6 +1680,11 @@ export function createProductWorkspace({
         element.style.left = `${point.x}px`;
         element.style.top = `${point.y}px`;
         element.style.setProperty("--graph-zoom", camera.zoom);
+        element.dataset.worldX = String(node.x);
+        element.dataset.worldY = String(node.y);
+        element.dataset.canonicalWorldX = String(node.canonicalX);
+        element.dataset.canonicalWorldY = String(node.canonicalY);
+        element.dataset.layoutSource = node.layoutSource;
       }
     }
     $("#edgeCanvas").innerHTML = graphEdges.map((edge) => {
@@ -1026,8 +1697,39 @@ export function createProductWorkspace({
         graphScreenPoint(b, camera),
         GRAPH_NODE_ICON_RADIUS * camera.zoom,
       );
-      return `<line class="graph-edge" style="stroke-width:${graphEdgeStrokeWidth(camera.zoom)}" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/>`;
+      const edgeIdentity = edge.id ?? `${source}:${target}`;
+      const edgeId = escapeHtml(edgeIdentity);
+      const annotatable = annotationEnabled && edge.id != null;
+      const anchor = annotatable ? subjectAnchor("edge", { edgeId: edge.id }) : null;
+      const count = anchor ? annotationCount(anchor) : 0;
+      const middleX = (segment.x1 + segment.x2) / 2;
+      const middleY = (segment.y1 + segment.y2) / 2;
+      return `<g class="graph-edge-group" data-edge="${edgeId}"><line class="graph-edge" aria-hidden="true" style="stroke-width:${graphEdgeStrokeWidth(camera.zoom)}" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/><line class="graph-edge-hit ${annotatable ? "" : "hidden"}" tabindex="0" role="button" aria-label="Open relationship comments" x1="${segment.x1}" y1="${segment.y1}" x2="${segment.x2}" y2="${segment.y2}"/>${annotatable && count ? `<g class="edge-annotation-badge" aria-hidden="true" transform="translate(${middleX} ${middleY})"><circle r="9"></circle><text y="3">${count}</text></g>` : ""}</g>`;
     }).join("");
+    if (annotationEnabled) {
+      $$("[data-edge]").forEach((group) => {
+        const edge = graphEdges.find((candidate) => String(candidate.id ?? `${candidate.endpoints?.[0] ?? candidate.source}:${candidate.endpoints?.[1] ?? candidate.target}`) === group.dataset.edge);
+        if (!edge || edge.id == null) return;
+        const anchor = subjectAnchor("edge", { edgeId: edge.id });
+        const open = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openAnnotationSubject(getState(), anchor, { title: "Relationship", kind: "EDGE" });
+        };
+        const hit = group.querySelector(".graph-edge-hit");
+        hit.onclick = open;
+        group.onpointerdown = (event) => event.stopPropagation();
+        hit.onkeydown = (event) => {
+          if (event.key === "Enter" || event.key === " ") open(event);
+        };
+        group.querySelector(".edge-annotation-badge")?.addEventListener("click", open);
+      });
+      if (focusedEdgeId !== null) {
+        $$('[data-edge]').find((group) => group.dataset.edge === focusedEdgeId)
+          ?.querySelector(".graph-edge-hit")
+          ?.focus({ preventScroll: true });
+      }
+    }
     graphStage.style.backgroundSize = `${22 * camera.zoom}px ${22 * camera.zoom}px`;
     graphStage.style.backgroundPosition = `${camera.x}px ${camera.y}px`;
     $("#graphZoomLevel").textContent = `${Math.round(camera.zoom * 100)}%`;
@@ -1042,7 +1744,6 @@ export function createProductWorkspace({
       graphNodes,
       camera,
       graphSignature,
-      graphLayoutSettled,
       cameraRevision,
     ));
   }
@@ -1051,8 +1752,32 @@ export function createProductWorkspace({
     selection.selectedNodeId = id;
     const node = state.nodes.find((item) => String(item.id) === String(id));
     if (!node) return;
+    const nodeAnchor = annotationEnabled
+      ? subjectAnchor("node", { nodeId: node.id }, state, getThread())
+      : null;
+    const subjectChanged = annotationEnabled && annotationSubjectContextChanged(
+      annotationThreadId,
+      annotationSubject?.anchor,
+      getThread()?.id,
+      nodeAnchor,
+    );
+    if (subjectChanged) resetAnnotationComposer();
+    annotationThreadId = annotationEnabled ? getThread()?.id : null;
+    annotationSubject = annotationEnabled ? {
+      anchor: nodeAnchor,
+      title: node.title,
+      kind: "NODE",
+    } : null;
     if (notify) onSelectionChange(node.id);
-    $("#inspector").classList.remove("hidden");
+    const inspector = $("#inspector");
+    const wasOpen = !inspector.classList.contains("hidden");
+    inspectorUsesOverlay = narrowInspectorMedia?.matches
+      ?? (graphWindow?.innerWidth ?? 0) <= 760;
+    inspector.classList.remove("hidden");
+    const viewportWidth = graphDocument.defaultView?.innerWidth ?? 0;
+    if (shouldFitInspectorOpen(wasOpen, true, viewportWidth)) {
+      scheduleInspectorFit();
+    }
     $("#detailIcon").replaceChildren(createRelayerIcon(
       node.icon || node.metadata?.relayer?.icon,
       { class: "relayer-detail-icon" },
@@ -1069,8 +1794,11 @@ export function createProductWorkspace({
       button.className = `action-control action-${presentation.variant}`;
       button.dataset.actionId = String(action.id);
       button.dataset.reviewRef = `action-${action.id}`;
-      button.dataset.reviewKind = action.kind === "navigate" ? "navigate-action" : "invoke-action";
+      button.dataset.reviewKind = actionReviewKind(action);
       button.dataset.reviewActionId = String(action.id);
+      if (action.targetLayerId != null) {
+        button.dataset.reviewTargetLayerId = String(action.targetLayerId);
+      }
       if (presentation.icon) {
         button.append(createRelayerIcon(presentation.icon, { class: "relayer-action-icon" }));
       }
@@ -1086,24 +1814,55 @@ export function createProductWorkspace({
         copy.append(description);
       }
       button.append(copy);
-      return button;
+      const wrapper = graphDocument.createElement("span");
+      wrapper.className = "action-annotation-wrap";
+      wrapper.append(button);
+      if (annotationEnabled) {
+        const anchor = subjectAnchor("action", {
+          actionId: action.id,
+          nodeId: node.id,
+          sourceLayerId: action.sourceLayerId,
+        }, state, getThread());
+        const count = annotationCount(anchor);
+        const badge = graphDocument.createElement("button");
+        badge.type = "button";
+        badge.className = "annotation-count-badge action-annotation-badge";
+        badge.textContent = count ? String(count) : "✎";
+        badge.setAttribute("aria-label", count
+          ? `Open ${count} action comment${count === 1 ? "" : "s"}`
+          : "Add action comment");
+        badge.onclick = (event) => {
+          event.stopPropagation();
+          openAnnotationSubject(state, anchor, { title: presentation.label, kind: "ACTION" });
+        };
+        wrapper.append(badge);
+      }
+      return wrapper;
     }));
-    [...$("#detailActions").querySelectorAll("button")].forEach((button, index) => {
+    [...$("#detailActions").querySelectorAll(".action-control")].forEach((button, index) => {
       const action = actions[index];
-      const navigational = action?.kind === "navigate" && action.targetLayerId;
       const invoked = actionWasInvoked(
         state.actionInvocations,
         state.pendingActionInvocations,
         state.currentInteractionId,
         action.id,
       );
-      button.disabled = invoked || (!navigational && !capabilities.canInvokeMutatingActions);
+      const retryable = actionCanRetry(state.actionInvocations, action.id);
+      const activation = actionActivationPresentation(action, {
+        invoked,
+        retryable,
+        canInvokeMutatingActions: capabilities.canInvokeMutatingActions,
+      });
+      button.querySelector(".action-label").textContent = activation.label;
+      button.disabled = activation.disabled;
       button.classList.toggle("invoked", invoked);
+      button.classList.toggle("retryable", activation.retryableInvoke);
       button.onclick = async () => {
-        if (navigational) {
+        if (activation.navigational) {
           button.disabled = true;
           try {
-            await onNavigateLayer(action.targetLayerId, { action, sourceNode: node });
+            if (activation.resolvedInvoke) await onNavigateResolvedInvoke(action);
+            else await onNavigateLayer(action.targetLayerId, { action, sourceNode: node });
           } finally {
             if (button.isConnected) button.disabled = false;
           }
@@ -1117,14 +1876,19 @@ export function createProductWorkspace({
     $$('[data-node]').forEach((element) => {
       element.classList.toggle("selected", element.dataset.node === String(id));
     });
+    renderAnnotationList();
     renderBreadcrumb(state, getThread());
   }
 
   function dispose() {
-    graphSimulation.cancel();
+    modelPicker?.dispose();
+    cancelInspectorFit();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     graphDocument.removeEventListener("pointerdown", closeTurnPopoverFromOutside, true);
+    graphDocument.removeEventListener("pointerdown", closeSettingsMenuFromOutside, true);
     graphDocument.removeEventListener("keydown", closeTurnPopoverOnEscape, true);
+    graphDocument.removeEventListener("keydown", closeSettingsMenuOnEscape, true);
+    narrowInspectorMedia?.removeEventListener?.("change", handleInspectorLayoutChange);
     dragging = null;
     panning = null;
     pinching = null;

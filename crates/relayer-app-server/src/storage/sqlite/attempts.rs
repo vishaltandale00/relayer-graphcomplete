@@ -319,6 +319,11 @@ mod tests {
             .begin_interaction_attempt(receipt(interaction_id, &route), "10")
             .await
             .unwrap();
+        sqlx::query("UPDATE interactions SET graph_node_id=77 WHERE id=?1")
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
         store
             .fail_interaction_completion_with_attempt(
                 FailedInteractionCompletion {
@@ -352,6 +357,13 @@ mod tests {
                 "none".into()
             )
         );
+        let graph_node_id: Option<i64> =
+            sqlx::query_scalar("SELECT graph_node_id FROM interactions WHERE id=?1")
+                .bind(interaction_id.value())
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(graph_node_id, None);
     }
 
     #[tokio::test]

@@ -1,8 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 import { dirname, resolve } from "node:path";
 import { GraphApiError, RelayerGraphClient, type GraphCapability } from "@relayer/graph-client";
+import {
+  HarnessApprovalCoordinator,
+  HarnessApprovalCoordinatorError,
+  type HarnessApprovalChannel,
+  type HarnessApprovalResolution,
+  type HarnessApprovalSnapshot,
+} from "./approval-coordinator.js";
 import {
   isJsonObject,
   parseHarnessConfiguration,
@@ -37,8 +45,13 @@ import type {
 interface LiveSession {
   descriptor: HarnessSessionDescriptor;
   harness: Harness;
+  approvals: HarnessApprovalCoordinator;
   tail: Promise<void>;
-  activeCompletion?: AbortController;
+  activeCompletion?: {
+    readonly completeCallId: string;
+    readonly interactionId: number;
+    readonly controller: AbortController;
+  };
   currentPolicyRevision?: number;
   currentPolicyIdentity?: string;
 }
@@ -89,6 +102,7 @@ export interface HarnessHostOptions {
 export interface RunningHarnessHost {
   readonly url: string;
   readonly close: () => Promise<void>;
+  readonly forceClose: () => void;
   readonly host: HarnessHost;
 }
 
@@ -108,6 +122,7 @@ export class HarnessHost {
     state: "admitted" | "claimed" | "awaiting-terminal";
   }>();
   private closed = false;
+  private closeAbandoned = false;
   private readonly traceStore: HarnessTraceStore | undefined;
 
   constructor(private readonly options: HarnessHostOptions) {
@@ -205,15 +220,26 @@ export class HarnessHost {
       throw error;
     }
     const persisted: HarnessSessionDescriptor = { ...descriptor, state };
-    this.sessions.set(descriptor.threadId, { descriptor: persisted, harness, tail: Promise.resolve() });
+    this.sessions.set(descriptor.threadId, {
+      descriptor: persisted,
+      harness,
+      approvals: new HarnessApprovalCoordinator({ threadId: descriptor.threadId }),
+      tail: Promise.resolve(),
+    });
     this.saved.set(descriptor.threadId, persistedDescriptor(persisted));
     this.legacySaved.delete(descriptor.threadId);
     await this.persist();
   }
 
-  async complete(threadId: number, capability: GraphCapability, signal?: AbortSignal): Promise<HarnessCompleteResult>;
   async complete(
     threadId: number,
+    interactionId: number,
+    capability: GraphCapability,
+    signal?: AbortSignal,
+  ): Promise<HarnessCompleteResult>;
+  async complete(
+    threadId: number,
+    interactionId: number,
     capability: GraphCapability,
     model: InteractionModelSelection | undefined,
     signal?: AbortSignal,
@@ -223,6 +249,7 @@ export class HarnessHost {
   ): Promise<HarnessCompleteResult>;
   async complete(
     threadId: number,
+    interactionId: number,
     capability: GraphCapability,
     modelOrSignal?: InteractionModelSelection | AbortSignal,
     trailingSignal?: AbortSignal,
@@ -231,6 +258,7 @@ export class HarnessHost {
     harnessPolicy?: HarnessExecutionPolicy,
   ): Promise<HarnessCompleteResult> {
     if (this.closed) throw new Error("Harness host is closed");
+    if (!Number.isSafeInteger(interactionId) || interactionId < 1) throw new Error("Harness interactionId must be a positive integer");
     validateGraphCapability(capability);
     const model = isAbortSignal(modelOrSignal) ? undefined : modelOrSignal;
     const signal = isAbortSignal(modelOrSignal) ? modelOrSignal : trailingSignal;
@@ -241,19 +269,41 @@ export class HarnessHost {
     return this.withSessionLock(session, async () => {
       const controller = new AbortController();
       const detachSignal = forwardAbort(signal, controller);
-      session.activeCompletion = controller;
+      const completeCallId = randomUUID();
+      const approvals = session.approvals.beginCompletion({ interactionId, completeCallId });
+      session.activeCompletion = { completeCallId, interactionId, controller };
+      const abortApprovals = () => session.approvals.endCompletion(
+        completeCallId,
+        "aborted",
+        "Harness completion ended before the approval was resolved.",
+      );
+      controller.signal.addEventListener("abort", abortApprovals, { once: true });
       let result: HarnessCompleteResult | undefined;
       let operationError: unknown;
       try {
         if (this.closed) throw new Error("Harness host is closed");
         controller.signal.throwIfAborted();
         result = await this.executeCompletion(
-          threadId, session, capability, model, controller.signal, traceContext, executionLeaseId, harnessPolicy,
+          threadId,
+          session,
+          capability,
+          model,
+          approvals,
+          controller.signal,
+          traceContext,
+          executionLeaseId,
+          harnessPolicy,
         );
       } catch (error) {
         operationError = error;
       }
-      if (session.activeCompletion === controller) delete session.activeCompletion;
+      session.approvals.endCompletion(
+        completeCallId,
+        "aborted",
+        "Harness completion ended before the approval was resolved.",
+      );
+      controller.signal.removeEventListener("abort", abortApprovals);
+      if (session.activeCompletion?.controller === controller) delete session.activeCompletion;
       detachSignal();
       const errors: unknown[] = operationError === undefined ? [] : [operationError];
       try {
@@ -346,6 +396,7 @@ export class HarnessHost {
     session: LiveSession,
     capability: GraphCapability,
     model: InteractionModelSelection | undefined,
+    approvals: HarnessApprovalChannel,
     signal: AbortSignal,
     traceContext?: HarnessCompletionTraceContext,
     executionLeaseId?: string,
@@ -411,6 +462,7 @@ export class HarnessHost {
       await session.harness.complete({
         inputGraph: interaction,
         graph: scope,
+        approvals,
         trace: observedTrace,
         ...(model === undefined ? {} : { model }),
         ...(accessLease === undefined ? {} : { access: accessLease.access }),
@@ -490,17 +542,37 @@ export class HarnessHost {
   }
 
   cancel(threadId: number): boolean {
-    const controller = this.sessions.get(threadId)?.activeCompletion;
-    if (controller === undefined || controller.signal.aborted) return false;
-    controller.abort(new Error(`Harness completion cancelled for thread ${threadId}`));
+    const session = this.sessions.get(threadId);
+    const active = session?.activeCompletion;
+    if (session === undefined || active === undefined || active.controller.signal.aborted) return false;
+    session.approvals.endCompletion(
+      active.completeCallId,
+      "cancelled",
+      `Harness completion cancelled for thread ${threadId}`,
+    );
+    active.controller.abort(new Error(`Harness completion cancelled for thread ${threadId}`));
     return true;
+  }
+
+  approvalEvents(threadId: number, after = 0): HarnessApprovalSnapshot {
+    return this.approvalSession(threadId).snapshot(after);
+  }
+
+  decideApproval(threadId: number, requestId: string, input: unknown): HarnessApprovalResolution {
+    if (requestId.trim() === "") {
+      throw new HarnessApprovalCoordinatorError("invalid_approval_request", "Harness approval request ID must be non-empty");
+    }
+    return this.approvalSession(threadId).decide(requestId, input);
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     await Promise.all([...this.pendingExecutionAccess.keys()].map((id) => this.releaseProviderExecution(id)));
-    for (const session of this.sessions.values()) session.activeCompletion?.abort(new Error("Harness host closed"));
+    for (const session of this.sessions.values()) {
+      session.approvals.close("Harness host closed before the approval was resolved.");
+      session.activeCompletion?.controller.abort(new Error("Harness host closed"));
+    }
     const errors: unknown[] = [];
     await Promise.all([...this.sessions.entries()].map(async ([threadId, session]) => {
       await session.tail;
@@ -517,12 +589,18 @@ export class HarnessHost {
       }
     }));
     this.sessions.clear();
-    try {
-      await this.persist();
-    } catch (error) {
-      errors.push(error);
+    if (!this.closeAbandoned) {
+      try {
+        await this.persist();
+      } catch (error) {
+        errors.push(error);
+      }
     }
     if (errors.length > 0) throw new AggregateError(errors, "Harness host did not close cleanly");
+  }
+
+  abandonClose(): void {
+    this.closeAbandoned = true;
   }
 
   sessionCount(): number { return this.sessions.size; }
@@ -533,6 +611,12 @@ export class HarnessHost {
     const saved = this.saved.get(threadId);
     if (saved === undefined) throw new Error(`Unknown harness thread: ${threadId}`);
     throw new Error(`Thread ${threadId} must be registered before its harness can resume`);
+  }
+
+  private approvalSession(threadId: number): HarnessApprovalCoordinator {
+    const session = this.sessions.get(threadId);
+    if (session !== undefined) return session.approvals;
+    throw new HarnessApprovalCoordinatorError("approval_request_not_found", `Unknown live harness thread: ${threadId}`);
   }
 
   private async withSessionLock<T>(session: LiveSession, operation: () => Promise<T>): Promise<T> {
@@ -693,6 +777,11 @@ export async function startHarnessHost(options: HarnessHostOptions): Promise<Run
   const host = new HarnessHost(options);
   await host.initialize();
   const server = createServer((request, response) => void route(host, options.controlToken, request, response));
+  const sockets = new Set<Socket>();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
   await listen(server, options.port ?? 0, options.host ?? "127.0.0.1");
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("Harness host did not bind a TCP address");
@@ -700,6 +789,12 @@ export async function startHarnessHost(options: HarnessHostOptions): Promise<Run
   return {
     url: `http://${boundHost}:${address.port}`,
     host,
+    forceClose: () => {
+      host.abandonClose();
+      server.close();
+      for (const socket of sockets) socket.destroy();
+      server.closeAllConnections();
+    },
     close: async () => {
       const closingServer = close(server);
       try {
@@ -748,34 +843,61 @@ async function route(host: HarnessHost, token: string, request: IncomingMessage,
       if (!Number.isSafeInteger(threadId) || threadId < 1) return reply(response, 400, { error: "invalid_thread_id" });
       return reply(response, 200, { cancelled: host.cancel(threadId) });
     }
+    const approvalDecisionMatch = /^\/sessions\/([^/]+)\/approvals\/([^/]+)\/decision$/.exec(url.pathname);
+    if (request.method === "POST" && approvalDecisionMatch?.[1] !== undefined && approvalDecisionMatch[2] !== undefined) {
+      const threadId = readThreadId(approvalDecisionMatch[1]);
+      if (threadId === undefined) return reply(response, 400, { error: "invalid_thread_id" });
+      const requestId = decodeURIComponent(approvalDecisionMatch[2]);
+      return reply(response, 200, host.decideApproval(threadId, requestId, await body(request)));
+    }
+    const approvalEventsMatch = /^\/sessions\/([^/]+)\/approval-events$/.exec(url.pathname);
+    if (request.method === "GET" && approvalEventsMatch?.[1] !== undefined) {
+      const threadId = readThreadId(approvalEventsMatch[1]);
+      if (threadId === undefined) return reply(response, 400, { error: "invalid_thread_id" });
+      const cursor = url.searchParams.get("after");
+      const after = cursor === null ? 0 : Number(cursor);
+      return reply(response, 200, host.approvalEvents(threadId, after));
+    }
     const match = /^\/sessions\/([^/]+)\/complete$/.exec(url.pathname);
     if (request.method === "POST" && match?.[1] !== undefined) {
       const threadId = Number(decodeURIComponent(match[1]));
       if (!Number.isSafeInteger(threadId) || threadId < 1) return reply(response, 400, { error: "invalid_thread_id" });
-      const input = await body(request);
-      const capability = readGraphCapability(input);
-      const model = readInteractionModelSelection(input);
+      const input = readCompleteInput(await body(request));
       const controller = new AbortController();
       const abort = () => controller.abort(new Error("Harness completion request disconnected"));
+      const abortOnResponseClose = () => {
+        if (!response.writableEnded) abort();
+      };
       request.once("aborted", abort);
+      response.once("close", abortOnResponseClose);
       try {
         const completed = await host.complete(
           threadId,
-          capability,
-          model,
+          input.interactionId,
+          input.graph,
+          input.model,
           controller.signal,
-          readTraceContext(input),
+          input.traceContext,
           readExecutionLeaseId(input),
           readHarnessExecutionPolicy(input),
         );
         return reply(response, 200, completed);
       } finally {
         request.off("aborted", abort);
+        response.off("close", abortOnResponseClose);
       }
     }
     if (request.method === "GET" && url.pathname === "/health") return reply(response, 200, { ok: true });
     return reply(response, 404, { error: "not_found" });
   } catch (error) {
+    if (error instanceof HarnessApprovalCoordinatorError) {
+      const status = error.code === "invalid_approval_request"
+        ? 400
+        : error.code === "approval_request_not_found"
+          ? 404
+          : 409;
+      return reply(response, status, { error: error.code, message: error.message });
+    }
     return reply(response, 500, error instanceof HarnessExecutionFailure
       ? { error: error.message, failureCategory: error.failureCategory, effectBoundary: error.effectBoundary }
       : { error: error instanceof Error ? error.message : String(error), failureCategory: "application", effectBoundary: "unknown" });
@@ -919,6 +1041,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function readThreadId(value: string): number | undefined {
+  const threadId = Number(decodeURIComponent(value));
+  return Number.isSafeInteger(threadId) && threadId > 0 ? threadId : undefined;
+}
+
+function readCompleteInput(value: unknown): {
+  readonly interactionId: number;
+  readonly graph: GraphCapability;
+  readonly model?: InteractionModelSelection;
+  readonly traceContext?: HarnessCompletionTraceContext;
+  readonly executionLeaseId?: string;
+  readonly harnessPolicy?: HarnessExecutionPolicy;
+} {
+  if (!isRecord(value)) throw new Error("Harness completion input must be an object");
+  const unknown = Object.keys(value).filter((key) => ![
+    "interactionId", "graph", "model", "traceContext", "executionLeaseId", "harnessPolicy",
+  ].includes(key));
+  if (unknown.length > 0) throw new Error(`Harness completion contains unsupported fields: ${unknown.join(", ")}`);
+  if (!Number.isSafeInteger(value.interactionId) || (value.interactionId as number) < 1) {
+    throw new Error("Harness completion requires a positive interactionId");
+  }
+  const model = readInteractionModelSelection(value);
+  const traceContext = readTraceContext(value);
+  const executionLeaseId = readExecutionLeaseId(value);
+  const harnessPolicy = readHarnessExecutionPolicy(value);
+  return {
+    interactionId: value.interactionId as number,
+    graph: readGraphCapability(value),
+    ...(model === undefined ? {} : { model }),
+    ...(traceContext === undefined ? {} : { traceContext }),
+    ...(executionLeaseId === undefined ? {} : { executionLeaseId }),
+    ...(harnessPolicy === undefined ? {} : { harnessPolicy }),
+  };
+}
+
 function readGraphCapability(value: unknown): GraphCapability {
   if (!isRecord(value) || !isRecord(value.graph)) throw new Error("Harness completion requires a graph capability");
   const { url, token, nodeId } = value.graph;
@@ -1010,13 +1167,15 @@ function readHarnessExecutionPolicy(value: unknown): HarnessExecutionPolicy | un
   const { configurationRevision, configurationDigest, modelRules } = policy;
   if (typeof configurationRevision !== "number" || !Number.isSafeInteger(configurationRevision) || configurationRevision < 1
     || typeof configurationDigest !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(configurationDigest)
-    || (modelRules !== null && !isRecord(modelRules))) {
+    || (modelRules !== undefined && modelRules !== null && !isRecord(modelRules))) {
     throw new Error("Harness execution policy is invalid");
   }
   return {
     configurationRevision,
     configurationDigest,
-    ...(modelRules === null ? {} : { modelRules: modelRules as unknown as HarnessConfiguration["modelRules"] }),
+    ...(modelRules === undefined || modelRules === null
+      ? {}
+      : { modelRules: modelRules as unknown as HarnessConfiguration["modelRules"] }),
   };
 }
 

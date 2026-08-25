@@ -58,6 +58,7 @@ describe("Relayer Eval application service", () => {
       runtimeSession,
       defaultHarnessConfiguration: "fixture-task-system",
       allowHarnessOverride: true,
+      allowConversationImport: true,
     });
     services.push(product);
     const productSession = await product.start();
@@ -69,6 +70,7 @@ describe("Relayer Eval application service", () => {
       configurationPaths: [configurationPath],
       candidateTraceExporter: (interactionId, targetDirectory, correlation) => runtime.exportCandidateTrace(interactionId, targetDirectory, correlation),
       candidateTraceRequired: true,
+      conversationImportEnabled: true,
       projectFixtureMaterializer: async ({ workspaceDirectory }) => {
         await mkdir(workspaceDirectory, { recursive: true });
         return {
@@ -183,6 +185,13 @@ describe("Relayer Eval application service", () => {
         kind: "navigate",
         relation: "expand",
         label: "See queue behavior",
+      }),
+      expect.objectContaining({
+        sourceNodeId: layer.nodes[2].id,
+        sourceLayerId: layer.layer.id,
+        kind: "invoke",
+        targetLayerId: null,
+        label: "Plan the next improvement",
       }),
     ]);
     const childLayer = await productRequest(

@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
-import { createGraphSimulationController } from "../desktop/renderer/src/product-workspace/graph-simulation.js";
 import {
   GRAPH_MAX_ZOOM,
   GRAPH_MIN_ZOOM,
@@ -13,33 +12,48 @@ import {
   graphNodeLayoutBounds,
   graphScreenPoint,
   graphWorldPoint,
+  inspectorFitRequestIsCurrent,
   recenterGraphCamera,
-  shouldAutoFitSettledGraph,
+  shouldActivateGraphNodeAfterPointerGesture,
+  shouldFitInspectorDock,
+  shouldFitInspectorOpen,
   zoomGraphCameraAt,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace graph camera", () => {
-  it("invalidates a previous view's queued physics frame before it can mutate a restored view", () => {
-    const queuedFrames = new Map();
-    let nextFrame = 0;
-    const requestFrame = vi.fn((callback) => {
-      const frame = ++nextFrame;
-      queuedFrames.set(frame, callback);
-      return frame;
-    });
-    const cancelFrame = vi.fn((frame) => queuedFrames.delete(frame));
-    const controller = createGraphSimulationController({ requestFrame, cancelFrame });
-    const step = vi.fn(() => true);
+  it("requests an inspector fit only for a desktop closed-to-open transition", () => {
+    expect(shouldFitInspectorOpen(false, true, 761)).toBe(true);
+    expect(shouldFitInspectorOpen(false, true, 760)).toBe(false);
+    expect(shouldFitInspectorOpen(true, true, 1200)).toBe(false);
+    expect(shouldFitInspectorOpen(true, false, 1200)).toBe(false);
+    expect(shouldFitInspectorOpen(false, false, 1200)).toBe(false);
+  });
 
-    controller.start(step);
-    const staleFrame = requestFrame.mock.results[0].value;
-    const staleCallback = queuedFrames.get(staleFrame);
-    controller.cancel();
-    staleCallback();
+  it("requests a fit when an open overlay inspector becomes docked", () => {
+    expect(shouldFitInspectorDock(true, false, true)).toBe(true);
+    expect(shouldFitInspectorDock(true, false, false)).toBe(false);
+    expect(shouldFitInspectorDock(false, false, true)).toBe(false);
+    expect(shouldFitInspectorDock(false, true, true)).toBe(false);
+  });
 
-    expect(step).toHaveBeenCalledTimes(1);
-    expect(cancelFrame).toHaveBeenCalledWith(staleFrame);
-    expect(queuedFrames.has(staleFrame)).toBe(false);
+  it("does not activate a graph node from the click generated after dragging it", () => {
+    expect(shouldActivateGraphNodeAfterPointerGesture(false)).toBe(true);
+    expect(shouldActivateGraphNodeAfterPointerGesture(true)).toBe(false);
+  });
+
+  it("invalidates queued inspector fits after camera, view, close, or narrow-layout changes", () => {
+    const request = { graphViewKey: "thread:turn:layer", cameraRevision: 4 };
+    const current = {
+      cameraRevision: 4,
+      graphViewKey: "thread:turn:layer",
+      inspectorOpen: true,
+      viewportWidth: 1200,
+    };
+    expect(inspectorFitRequestIsCurrent(request, current)).toBe(true);
+    expect(inspectorFitRequestIsCurrent(request, { ...current, cameraRevision: 5 })).toBe(false);
+    expect(inspectorFitRequestIsCurrent(request, { ...current, graphViewKey: "other" })).toBe(false);
+    expect(inspectorFitRequestIsCurrent(request, { ...current, inspectorOpen: false })).toBe(false);
+    expect(inspectorFitRequestIsCurrent(request, { ...current, viewportWidth: 760 })).toBe(false);
   });
 
   it("scales edge thickness with the camera zoom", () => {
@@ -66,12 +80,6 @@ describe("product workspace graph camera", () => {
     expect(zoomGraphCameraAt(camera, 10, anchor).zoom).toBe(GRAPH_MAX_ZOOM);
     expect(zoomGraphCameraAt(camera, 0.01, anchor).zoom).toBe(GRAPH_MIN_ZOOM);
     expect(clampGraphZoom(1.25)).toBe(1.25);
-  });
-
-  it("fits a settled new view only when the user has not changed its camera", () => {
-    expect(shouldAutoFitSettledGraph("turn:layer", "turn:layer", 3, 3)).toBe(true);
-    expect(shouldAutoFitSettledGraph("turn:layer", "turn:layer", 3, 4)).toBe(false);
-    expect(shouldAutoFitSettledGraph("turn:layer", "other:layer", 3, 3)).toBe(false);
   });
 
   it("scales edge endpoints to the rendered icon boundary", () => {
@@ -134,16 +142,16 @@ describe("product workspace graph camera", () => {
   });
 
   it("captures settled node positions and camera for turn navigation round trips", () => {
-    const nodes = [{ id: 1, x: 120, y: 90, vx: 0, vy: 0, pinned: true }];
+    const nodes = [{ id: 1, x: 120, y: 90, pinned: true }];
     const camera = { x: 30, y: -20, zoom: 1.25 };
-    const captured = captureGraphViewState(nodes, camera, "turn-1", true, 4);
+    const captured = captureGraphViewState(nodes, camera, "turn-1", 4);
 
     nodes[0].x = 999;
     camera.zoom = 0.4;
     expect(captured).toEqual({
       camera: { x: 30, y: -20, zoom: 1.25 },
       cameraRevision: 4,
-      nodes: [{ id: 1, x: 120, y: 90, vx: 0, vy: 0, pinned: true }],
+      nodes: [{ id: 1, x: 120, y: 90, pinned: true }],
       settled: true,
       signature: "turn-1",
     });

@@ -42,7 +42,10 @@ pub(super) async fn capabilities(
     headers: HeaderMap,
 ) -> Result<Json<CapabilitiesResponse>, ApiError> {
     authorize_read(&state, &headers)?;
-    Ok(Json(state.product.capabilities().into()))
+    let annotations = annotation_capability(&state, &headers);
+    Ok(Json(
+        CapabilitiesResponse::from(state.product.capabilities()).with_annotations(annotations),
+    ))
 }
 
 pub(super) async fn permission_profiles(
@@ -76,5 +79,29 @@ pub(super) async fn product_state(
 ) -> Result<Json<ProductStateResponse>, ApiError> {
     authorize_read(&state, &headers)?;
     let thread_id = query.thread_id.map(ThreadId::try_from).transpose()?;
-    Ok(Json(state.product.load_state(thread_id).await?.into()))
+    let mut product_state = state.product.load_state(thread_id).await?;
+    let stale = super::threads::refresh_accepted_outputs(
+        &state.product,
+        state.runtime.as_ref(),
+        &mut product_state.interactions,
+        &product_state.action_invocations,
+    )
+    .await;
+    let mut response = ProductStateResponse::from(product_state)
+        .with_annotations(annotation_capability(&state, &headers));
+    response.mark_stale_interactions(&stale);
+    Ok(Json(response))
+}
+
+fn annotation_capability(state: &ApiState, headers: &HeaderMap) -> bool {
+    state
+        .authenticator
+        .annotation_token(headers)
+        .is_some_and(|token| {
+            state
+                .annotation_sessions
+                .lock()
+                .expect("annotation session lock poisoned")
+                .contains_key(token)
+        })
 }

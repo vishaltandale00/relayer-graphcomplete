@@ -1,6 +1,9 @@
 mod action_invocations;
+mod annotations;
+mod approvals;
 mod attempts;
 mod catalog;
+mod conversation_imports;
 mod interactions;
 mod migrations;
 mod product_state;

@@ -1,9 +1,14 @@
+mod annotations;
 mod catalog;
 mod ids;
 mod model_policy;
 mod models;
 mod service;
 
+pub(crate) use annotations::{
+    Annotation, AnnotationAnchor, AnnotationRevision, AnnotationState,
+    MAX_ANNOTATION_SNAPSHOT_THREADS, NewAnnotationRevision, validate_revision_content,
+};
 pub(crate) use catalog::CatalogError;
 #[cfg(test)]
 pub(crate) use catalog::CatalogModelSnapshot;
@@ -58,6 +63,7 @@ pub(crate) use service::CreateProjectCommand;
 pub(crate) use service::CreateThreadCommand;
 pub(crate) use service::FailedInteractionCompletion;
 pub(crate) use service::InvokeActionOutcome;
+pub(crate) use service::PreparedInteractionBinding;
 pub(crate) use service::ProductError;
 pub(crate) use service::ProductService;
 pub(crate) use service::ThreadDetail;

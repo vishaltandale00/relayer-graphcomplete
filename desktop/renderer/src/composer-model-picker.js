@@ -8,6 +8,7 @@ import { $ } from "./ui.js";
 let newThreadPicker;
 
 export function initializeNewThreadModelPicker({
+  onUserTakeover = () => {},
   onSelectionChange = () => {},
   onOpenSettings = () => {},
 } = {}) {
@@ -15,6 +16,7 @@ export function initializeNewThreadModelPicker({
     root: $("#newModelControl"),
     mode: "new",
     settings: appState.modelSettings,
+    onUserTakeover,
     onSelectionChange,
     onOpenSettings,
     prepareHarnessChange: preparePermissionProfiles,

@@ -1,8 +1,9 @@
 use sqlx::{FromRow, SqliteConnection};
 
 use crate::{
-    ActionId, EdgeId, GraphError, GraphLayer, LayerDraft, LayerId, NodeId, ProjectId, RecordState,
-    ResolvedLayer, graph::InteractionScope,
+    ActionId, EdgeId, GraphError, GraphLayer, LayerDraft, LayerId, LayerLayout, NodeId,
+    NodePlacement, ProjectId, RecordState, ResolvedLayer,
+    graph::{InteractionScope, validate_authored_layout},
 };
 
 use super::{actions::ActionTable, edges::EdgeTable, nodes::NodeTable};
@@ -106,6 +107,14 @@ struct LayerRow {
     id: i64,
     state: String,
     owner_interaction_id: i64,
+    layout_schema_version: Option<i64>,
+}
+
+#[derive(FromRow)]
+struct PlacementRow {
+    node_id: i64,
+    x: f64,
+    y: f64,
 }
 
 impl<'connection> LayerTable<'connection> {
@@ -119,7 +128,7 @@ impl<'connection> LayerTable<'connection> {
         id: LayerId,
     ) -> Result<Option<LayerRecord>, GraphError> {
         let row = sqlx::query_as::<_, LayerRow>(
-            "SELECT id,state,owner_interaction_id FROM layers WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
+            "SELECT id,state,owner_interaction_id,layout_schema_version FROM layers WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
         )
         .bind(id.value())
         .bind(scope.project_id.map(ProjectId::value))
@@ -147,11 +156,19 @@ impl<'connection> LayerTable<'connection> {
         .into_iter()
         .map(valid_edge_id)
         .collect::<Result<Vec<_>, _>>()?;
+        let placement_rows = sqlx::query_as::<_, PlacementRow>(
+            "SELECT node_id,x,y FROM layer_placements WHERE layer_id=?1 ORDER BY position",
+        )
+        .bind(id.value())
+        .fetch_all(&mut *self.connection)
+        .await?;
+        let layout = stored_layout(row.id, row.layout_schema_version, placement_rows, &nodes)?;
         Ok(Some(LayerRecord {
             layer: GraphLayer {
                 id: valid_layer_id(row.id)?,
                 nodes,
                 edges,
+                layout,
                 state: RecordState::parse(&row.state)?,
             },
             owner: valid_node_id(row.owner_interaction_id)?,
@@ -208,6 +225,61 @@ impl<'connection> LayerTable<'connection> {
         .collect()
     }
 
+    pub(crate) async fn is_reachable_from_root(
+        &mut self,
+        owner: NodeId,
+        target: LayerId,
+    ) -> Result<bool, GraphError> {
+        let reachable = sqlx::query_scalar::<_, i64>(
+            r#"
+            WITH RECURSIVE reachable_layers(id) AS (
+                SELECT root.target_layer_id
+                FROM actions root
+                WHERE root.owner_interaction_id=?1
+                  AND root.source_node_id=?1
+                  AND root.source_layer_id IS NULL
+                  AND root.state='draft'
+                  AND root.kind='navigate'
+                  AND root.target_layer_id IS NOT NULL
+                UNION
+                SELECT child.target_layer_id
+                FROM reachable_layers reachable
+                JOIN actions child ON child.source_layer_id=reachable.id
+                WHERE child.owner_interaction_id=?1
+                  AND child.state='draft'
+                  AND child.kind='navigate'
+                  AND child.target_layer_id IS NOT NULL
+            )
+            SELECT EXISTS(SELECT 1 FROM reachable_layers WHERE id=?2)
+            "#,
+        )
+        .bind(owner.value())
+        .bind(target.value())
+        .fetch_one(&mut *self.connection)
+        .await?;
+        Ok(reachable != 0)
+    }
+
+    pub(crate) async fn stop_owned_draft(
+        &mut self,
+        id: LayerId,
+        owner: NodeId,
+    ) -> Result<(), GraphError> {
+        let result = sqlx::query(
+            "UPDATE layers SET state='stopped' WHERE id=?1 AND owner_interaction_id=?2 AND state='draft'",
+        )
+        .bind(id.value())
+        .bind(owner.value())
+        .execute(&mut *self.connection)
+        .await?;
+        if result.rows_affected() != 1 {
+            return Err(GraphError::Internal(format!(
+                "draft layer {id} changed while it was being discarded"
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) async fn upsert_draft(
         &mut self,
         scope: &InteractionScope,
@@ -226,23 +298,36 @@ impl<'connection> LayerTable<'connection> {
                     .bind(id.value())
                     .execute(&mut *self.connection)
                     .await?;
+                sqlx::query("UPDATE layers SET layout_schema_version=?1 WHERE id=?2")
+                    .bind(layout(draft)?.version as i64)
+                    .bind(id.value())
+                    .execute(&mut *self.connection)
+                    .await?;
                 id
             }
-            Some(_) => {
+            Some((_, RecordState::Accepted)) => {
                 return Err(GraphError::validation(
                     "immutable_layer",
                     "layer",
                     "This layer was already accepted. Create a new layer instead of editing history.",
                 ));
             }
+            Some((_, RecordState::Stopped)) => {
+                return Err(GraphError::validation(
+                    "discarded_layer",
+                    "layer",
+                    "This layer was discarded and cannot be revived. Create a new layer with a new client key instead.",
+                ));
+            }
             None => {
                 let result = sqlx::query(
-                    "INSERT INTO layers(project_id,thread_id,state,owner_interaction_id,client_key) VALUES (?1,?2,'draft',?3,?4)",
+                    "INSERT INTO layers(project_id,thread_id,state,owner_interaction_id,client_key,layout_schema_version) VALUES (?1,?2,'draft',?3,?4,?5)",
                 )
                 .bind(scope.project_id.map(ProjectId::value))
                 .bind(scope.thread_id.value())
                 .bind(scope.root_node_id.value())
                 .bind(&draft.client_key)
+                .bind(layout(draft)?.version as i64)
                 .execute(&mut *self.connection)
                 .await?;
                 valid_layer_id(result.last_insert_rowid())?
@@ -264,10 +349,23 @@ impl<'connection> LayerTable<'connection> {
                 .execute(&mut *self.connection)
                 .await?;
         }
+        for (position, placement) in layout(draft)?.placements.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO layer_placements(layer_id,node_id,position,x,y) VALUES (?1,?2,?3,?4,?5)",
+            )
+            .bind(id.value())
+            .bind(placement.node_id.value())
+            .bind(position as i64)
+            .bind(placement.x)
+            .bind(placement.y)
+            .execute(&mut *self.connection)
+            .await?;
+        }
         Ok(GraphLayer {
             id,
             nodes: draft.nodes.clone(),
             edges: draft.edges.clone(),
+            layout: draft.layout.clone(),
             state: RecordState::Draft,
         })
     }
@@ -304,6 +402,54 @@ impl<'connection> LayerTable<'connection> {
         }
         Ok(())
     }
+}
+
+fn layout(draft: &LayerDraft) -> Result<&LayerLayout, GraphError> {
+    draft
+        .layout
+        .as_ref()
+        .ok_or_else(|| GraphError::Internal("validated layer draft has no layout".into()))
+}
+
+fn stored_layout(
+    layer_id: i64,
+    version: Option<i64>,
+    rows: Vec<PlacementRow>,
+    nodes: &[NodeId],
+) -> Result<Option<LayerLayout>, GraphError> {
+    let Some(version) = version else {
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        return Err(GraphError::Internal(format!(
+            "legacy layer {layer_id} has stored placements without a layout version"
+        )));
+    };
+    let version = u32::try_from(version).map_err(|_| {
+        GraphError::Internal(format!(
+            "layer {layer_id} has invalid layout version {version}"
+        ))
+    })?;
+    let placements = rows
+        .into_iter()
+        .map(|row| {
+            Ok(NodePlacement {
+                node_id: valid_node_id(row.node_id)?,
+                x: row.x,
+                y: row.y,
+            })
+        })
+        .collect::<Result<Vec<_>, GraphError>>()?;
+    let layout = LayerLayout {
+        version,
+        placements,
+    };
+    validate_authored_layout(Some(&layout), nodes).map_err(|error| {
+        GraphError::Internal(format!(
+            "layer {layer_id} has invalid stored layout: {error}"
+        ))
+    })?;
+    Ok(Some(layout))
 }
 
 fn valid_layer_id(value: i64) -> Result<LayerId, GraphError> {

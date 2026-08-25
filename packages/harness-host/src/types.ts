@@ -1,4 +1,5 @@
 import type { CompletionOutput, GraphCapability, GraphId, GraphNode } from "@relayer/graph-client";
+import type { HarnessApprovalChannel } from "./approval-coordinator.js";
 
 export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export type JsonObject = Readonly<Record<string, JsonValue>>;
@@ -190,6 +191,7 @@ export interface HarnessGraphScope {
 export interface HarnessRunContext {
   readonly inputGraph: GraphNode;
   readonly graph: HarnessGraphScope;
+  readonly approvals: HarnessApprovalChannel;
   readonly model?: InteractionModelSelection;
   /** Execution-scoped and never persisted in harness session state or receipts. */
   readonly access?: HarnessExecutionAccess;

@@ -14,12 +14,18 @@ import {
 
 function fixture() {
   const root = {
-    layer: { id: 100 },
+    layer: {
+      id: 100,
+      layout: { version: 1, placements: [{ nodeId: 10, x: 0.25, y: 0.5 }] },
+    },
     nodes: [{ id: 10, title: "Architecture" }],
     actions: [{ id: 501, kind: "navigate", sourceNodeId: 10, targetLayerId: 101 }],
   };
   const child = {
-    layer: { id: 101 },
+    layer: {
+      id: 101,
+      layout: { version: 1, placements: [{ nodeId: 11, x: 0.75, y: 0.5 }] },
+    },
     nodes: [{ id: 11, title: "API" }],
     actions: [],
   };
@@ -33,6 +39,7 @@ function fixture() {
     thread: { id: 7, title: "Navigation history" },
     interactions: [{ id: 1, threadId: 7 }, interaction],
     actionInvocations: [{ sourceInteractionId: 1, actionId: 9 }],
+    approvals: [{ request: { requestId: "approval-1" } }],
   };
   return { child, detail, interaction, root };
 }
@@ -112,10 +119,13 @@ describe("workspace navigation presentation", () => {
     const second = await resolveNavigationPresentation(entry, { loadThread, loadLayer, layerCache });
 
     expect(first.layer).toBe(child);
+    expect(first.layer.layer.layout).toEqual(child.layer.layout);
     expect(first.layerPath.map(({ label }) => label)).toEqual(["Response", "Architecture"]);
     expect(first.entry.selectedNodeId).toBe("11");
     expect(first.actionInvocations).toEqual(detail.actionInvocations);
+    expect(first.approvals).toEqual(detail.approvals);
     expect(second.layer).toBe(child);
+    expect(second.layer.layer.layout).toEqual(child.layer.layout);
     expect(loadThread).toHaveBeenCalledTimes(2);
     expect(loadLayer).toHaveBeenCalledTimes(1);
   });

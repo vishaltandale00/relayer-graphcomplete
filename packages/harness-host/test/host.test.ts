@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -52,7 +53,7 @@ describe("HarnessHost", () => {
       });
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
-      await expect(host.complete(1, graph(), undefined, undefined, { productInteractionId: 31 }))
+      await expect(host.complete(1, 1, graph(), undefined, undefined, { productInteractionId: 31 }))
         .rejects.toMatchObject({ effectBoundary: "partial_output" });
       const exported = join(directory, "exported");
       await host.exportCandidateTrace(31, exported, {
@@ -80,7 +81,7 @@ describe("HarnessHost", () => {
       });
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
-      await expect(host.complete(1, graph())).rejects.toMatchObject({ effectBoundary: "graph_write" });
+      await expect(host.complete(1, 1, graph())).rejects.toMatchObject({ effectBoundary: "graph_write" });
     } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
@@ -104,7 +105,7 @@ describe("HarnessHost", () => {
       });
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
-      await expect(host.complete(1, graph())).rejects.toMatchObject({ effectBoundary: "tool_effect" });
+      await expect(host.complete(1, 1, graph())).rejects.toMatchObject({ effectBoundary: "tool_effect" });
     } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
@@ -131,8 +132,8 @@ describe("HarnessHost", () => {
       });
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
-      await expect(host.complete(1, graph())).resolves.toMatchObject({ output: completion });
-      await expect(host.complete(1, graph())).resolves.toMatchObject({ output: completion });
+      await expect(host.complete(1, 1, graph())).resolves.toMatchObject({ output: completion });
+      await expect(host.complete(1, 1, graph())).resolves.toMatchObject({ output: completion });
       expect(calls).toBe(1);
     } finally {
       vi.unstubAllGlobals();
@@ -165,7 +166,7 @@ describe("HarnessHost", () => {
       });
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration, workingDirectory: directory });
-      await expect(host.complete(1, graph(), { providerId: "provider", adapterId: "openai-api", modelId: "gpt-test" }))
+      await expect(host.complete(1, 1, graph(), { providerId: "provider", adapterId: "openai-api", modelId: "gpt-test" }))
         .rejects.toMatchObject({ effectBoundary: "unknown" });
     } finally {
       vi.unstubAllGlobals();
@@ -187,7 +188,7 @@ describe("HarnessHost", () => {
       });
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
-      await expect(host.complete(1, graph(), { providerId: "provider", adapterId: "openai-api", modelId: "gpt-test" }))
+      await expect(host.complete(1, 1, graph(), { providerId: "provider", adapterId: "openai-api", modelId: "gpt-test" }))
         .rejects.toMatchObject({ failureCategory: "configuration", effectBoundary: "none" });
     } finally {
       vi.unstubAllGlobals();
@@ -222,7 +223,7 @@ describe("HarnessHost", () => {
       });
       await failing.initialize();
       await failing.createSession(descriptor);
-      await expect(failing.complete(descriptor.threadId, capability, undefined, undefined, { productInteractionId: 7 })).rejects.toThrow("model failed");
+      await expect(failing.complete(descriptor.threadId, 1, capability, undefined, undefined, { productInteractionId: 7 })).rejects.toThrow("model failed");
       await failing.exportCandidateTrace(7, join(directory, "failed-export"), {
         runId: "run", executionId: "execution", interactionId: "7", harnessConfigurationName: "test-default",
       });
@@ -391,7 +392,7 @@ describe("HarnessHost", () => {
         } },
       });
       await restored.initialize();
-      await expect(restored.complete(1, graph())).rejects.toThrow("must be registered");
+      await expect(restored.complete(1, 1, graph())).rejects.toThrow("must be registered");
       await restored.createSession(descriptor);
       expect(restoredState).toEqual({ sessionId: "saved" });
     } finally {
@@ -425,7 +426,7 @@ describe("HarnessHost", () => {
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
-      const completing = host.complete(1, graph(), undefined, undefined, { productInteractionId: 8 });
+      const completing = host.complete(1, 1, graph(), undefined, undefined, { productInteractionId: 8 });
       await started;
       expect(host.cancel(1)).toBe(true);
       await expect(completing).rejects.toThrow("cancelled for thread 1");
@@ -443,8 +444,8 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("preserves the legacy third-argument AbortSignal completion API", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-legacy-signal-"));
+  it("accepts an AbortSignal after the required interaction identity", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-signal-"));
     const host = new HarnessHost({
       stateFile: join(directory, "sessions.json"),
       controlToken: "control",
@@ -456,9 +457,57 @@ describe("HarnessHost", () => {
       const controller = new AbortController();
       controller.abort(new Error("legacy caller cancelled"));
 
-      await expect(host.complete(1, graph(), controller.signal)).rejects.toThrow("legacy caller cancelled");
+      await expect(host.complete(1, 1, graph(), controller.signal)).rejects.toThrow("legacy caller cancelled");
     } finally {
       await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("cancels a waiting approval closed and returns the terminal outcome to the harness", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-approval-cancel-"));
+    let approvalStarted!: () => void;
+    const started = new Promise<void>((resolve) => { approvalStarted = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          async complete(context) {
+            const waiting = context.approvals.request({
+              providerItemId: "provider-1",
+              title: "Run tests",
+              reason: "Verify the requested change.",
+              action: { kind: "command", command: "npm test", workingDirectory: directory },
+              scopeKeys: ["command:npm test"],
+              scopeDescription: "Run npm test for this session.",
+            });
+            approvalStarted();
+            await waiting;
+          },
+          state: emptyState,
+        }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "ask", configuration: testConfiguration, workingDirectory: directory });
+      const completing = host.complete(1, 44, graph());
+      await started;
+
+      expect(host.cancel(1)).toBe(true);
+
+      await expect(completing).rejects.toThrow("cancelled");
+      expect(host.approvalEvents(1)).toMatchObject({
+        pendingRequests: [],
+        events: [
+          { sequence: 1, type: "requested" },
+          { sequence: 2, type: "resolved", resolution: { outcome: "cancelled", actor: "host" } },
+        ],
+      });
+    } finally {
+      vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -520,9 +569,9 @@ describe("HarnessHost", () => {
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
-      const active = host.complete(1, graph(1, "active-token"), undefined, undefined, { productInteractionId: 10 });
+      const active = host.complete(1, 1, graph(1, "active-token"), undefined, undefined, { productInteractionId: 10 });
       await started;
-      const queued = host.complete(1, graph(2, "queued-token"));
+      const queued = host.complete(1, 2, graph(2, "queued-token"));
       const closing = host.close();
 
       await expect(active).rejects.toThrow("closed");
@@ -553,7 +602,7 @@ describe("HarnessHost", () => {
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
-      await expect(host.complete(1, graph())).resolves.toMatchObject({ output: completion });
+      await expect(host.complete(1, 1, graph())).resolves.toMatchObject({ output: completion });
       expect(calls).toBe(0);
     } finally {
       vi.unstubAllGlobals();
@@ -593,7 +642,7 @@ describe("HarnessHost", () => {
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
-      await expect(host.complete(1, graph(), undefined, undefined, { productInteractionId: 9 })).rejects.toThrow("before inference");
+      await expect(host.complete(1, 1, graph(), undefined, undefined, { productInteractionId: 9 })).rejects.toThrow("before inference");
       expect(completionCalls).toBe(0);
     } finally {
       vi.unstubAllGlobals();
@@ -631,7 +680,7 @@ describe("HarnessHost", () => {
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
-      await expect(host.complete(1, graph(), undefined, undefined, { productInteractionId: 11 })).resolves.toMatchObject({
+      await expect(host.complete(1, 1, graph(), undefined, undefined, { productInteractionId: 11 })).resolves.toMatchObject({
         output: completion,
         trace: { status: "failed", error: expect.stringContaining("could not be sealed") },
       });
@@ -686,8 +735,8 @@ describe("HarnessHost", () => {
       const base = { threadId: 1, permissionProfileId: "auto", configuration: { ...testConfiguration, executionAccessContracts: ["managed-runtime@1"] }, workingDirectory: directory };
       await host.createSession(base);
 
-      await host.complete(1, graph(1, "first-token"), { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-first" });
-      await expect(host.complete(1, graph(2, "second-token"), { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-second" })).resolves.toMatchObject({
+      await host.complete(1, 1, graph(1, "first-token"), { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-first" });
+      await expect(host.complete(1, 2, graph(2, "second-token"), { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-second" })).resolves.toMatchObject({
         output: { nodeId: 2 },
       });
       expect(factoryCalls).toBe(1);
@@ -726,7 +775,7 @@ describe("HarnessHost", () => {
         workingDirectory: directory,
       });
 
-      await expect(host.complete(1, graph(), { providerId: "codex", modelId: "blocked" }))
+      await expect(host.complete(1, 1, graph(), { providerId: "codex", modelId: "blocked" }))
         .rejects.toThrow("not compatible with this configuration");
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
@@ -760,12 +809,12 @@ describe("HarnessHost", () => {
         workingDirectory: directory,
       });
 
-      await expect(host.complete(1, graph(), {
+      await expect(host.complete(1, 1, graph(), {
         providerId: "openai-work",
         adapterId: "openai-api",
         modelId: "gpt-preview",
       })).rejects.toThrow("not compatible with this configuration");
-      await expect(host.complete(1, graph(), {
+      await expect(host.complete(1, 1, graph(), {
         providerId: "openai-work",
         modelId: "gpt-5.2",
       })).rejects.toThrow("not compatible with this configuration");
@@ -797,6 +846,7 @@ describe("HarnessHost", () => {
       });
       await expect(host.complete(
         1,
+        1,
         graph(),
         { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
         undefined,
@@ -812,6 +862,7 @@ describe("HarnessHost", () => {
         },
       )).rejects.toThrow("not compatible with this configuration");
       await expect(host.complete(
+        1,
         1,
         graph(),
         { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
@@ -873,6 +924,61 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("accepts an HTTP harness policy whose optional modelRules field is omitted", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-policy-without-rules-"));
+    const release = vi.fn();
+    let running: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
+    try {
+      running = await startHarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        accessBroker: { async acquire(model) {
+          return {
+            access: {
+              kind: "secret", contract: "secret@1", providerId: model.providerId, adapterId: model.adapterId!,
+              adapterImplementationVersion: "1", endpoint: "https://api.openai.test", fields: { "api-key": "opaque" },
+            },
+            release,
+          };
+        } },
+        implementations: { test: () => ({ async complete() {}, state: emptyState }) },
+      });
+      await running.host.createSession({
+        threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: {
+          ...testConfiguration,
+          revision: 1,
+          modelCompatibility: [{ providerId: "openai-work" }],
+          executionAccessContracts: ["secret@1"],
+        },
+      });
+
+      const admission = await fetch(`${running.url}/sessions/1/execution-leases`, {
+        method: "POST",
+        headers: { authorization: "Bearer control", "content-type": "application/json" },
+        body: JSON.stringify({
+          model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+          harnessPolicy: {
+            configurationRevision: 2,
+            configurationDigest: `sha256:${"a".repeat(64)}`,
+          },
+        }),
+      });
+      expect(admission.status).toBe(201);
+      const admitted = await admission.json() as { executionLeaseId: string; adapterImplementationVersion: string };
+      expect(admitted.adapterImplementationVersion).toBe("1");
+      const released = await fetch(`${running.url}/sessions/1/execution-leases/${admitted.executionLeaseId}`, {
+        method: "DELETE",
+        headers: { authorization: "Bearer control" },
+      });
+      expect(released.status).toBe(200);
+      expect(release).toHaveBeenCalledOnce();
+    } finally {
+      await running?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("leases execution-scoped provider access and releases it when the harness fails", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-access-broker-"));
     const release = vi.fn();
@@ -911,7 +1017,7 @@ describe("HarnessHost", () => {
           executionAccessContracts: ["secret@1"],
         },
       });
-      await expect(host.complete(1, graph(), { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" }))
+      await expect(host.complete(1, 1, graph(), { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" }))
         .rejects.toThrow("provider failed");
       expect(acquire).toHaveBeenCalledWith(
         { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
@@ -968,11 +1074,11 @@ describe("HarnessHost", () => {
       const admission = await host.admitProviderExecution(1, model, new AbortController().signal);
       expect(admission.adapterImplementationVersion).toBe("7");
       expect(release).not.toHaveBeenCalled();
-      await expect(host.complete(1, graph(), model, undefined, undefined, admission.executionLeaseId)).resolves.toMatchObject({ output: completion });
+      await expect(host.complete(1, 1, graph(), model, undefined, undefined, admission.executionLeaseId)).resolves.toMatchObject({ output: completion });
       expect(acquire).toHaveBeenCalledOnce();
       expect(release).not.toHaveBeenCalled();
       accepted = false;
-      await expect(host.complete(1, graph(), model, undefined, undefined, admission.executionLeaseId))
+      await expect(host.complete(1, 1, graph(), model, undefined, undefined, admission.executionLeaseId))
         .rejects.toThrow("invalid or expired");
       expect(await host.releaseProviderExecution(admission.executionLeaseId)).toBe(true);
       expect(release).toHaveBeenCalledOnce();
@@ -982,7 +1088,7 @@ describe("HarnessHost", () => {
       const cancelled = await host.admitProviderExecution(1, model, new AbortController().signal);
       expect(await host.releaseProviderExecution(cancelled.executionLeaseId)).toBe(true);
       expect(release).toHaveBeenCalledTimes(2);
-      await expect(host.complete(1, graph(), model, undefined, undefined, cancelled.executionLeaseId))
+      await expect(host.complete(1, 1, graph(), model, undefined, undefined, cancelled.executionLeaseId))
         .rejects.toThrow("invalid or expired");
     } finally {
       vi.unstubAllGlobals();
@@ -1033,7 +1139,7 @@ describe("HarnessHost", () => {
       });
       const model = { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" };
       const admission = await host.admitProviderExecution(1, model, new AbortController().signal);
-      const running = host.complete(1, graph(), model, undefined, undefined, admission.executionLeaseId);
+      const running = host.complete(1, 1, graph(), model, undefined, undefined, admission.executionLeaseId);
       await started;
       await vi.advanceTimersByTimeAsync(60_000);
       expect(release).not.toHaveBeenCalled();
@@ -1081,9 +1187,9 @@ describe("HarnessHost", () => {
       const first = { threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory };
       await host.createSession(first);
 
-      const completing = host.complete(1, graph(1, "first-token"));
+      const completing = host.complete(1, 1, graph(1, "first-token"));
       await started;
-      const queued = host.complete(1, graph(2, "second-token"));
+      const queued = host.complete(1, 2, graph(2, "second-token"));
       await new Promise((resolveTurn) => setTimeout(resolveTurn, 0));
       expect(adopted).toEqual(["first-token"]);
 
@@ -1118,8 +1224,8 @@ describe("HarnessHost", () => {
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
-      await expect(host.complete(1, graph())).rejects.toThrow("state failed");
-      await expect(host.complete(1, graph())).resolves.toMatchObject({ output: completion });
+      await expect(host.complete(1, 1, graph())).rejects.toThrow("state failed");
+      await expect(host.complete(1, 2, graph())).resolves.toMatchObject({ output: completion });
     } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
@@ -1505,27 +1611,295 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("force-closes the listener and active sockets while graceful harness disposal is stalled", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-force-close-"));
+    let running: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
+    let releaseDispose!: () => void;
+    let markDisposeStarted!: () => void;
+    const disposeStarted = new Promise<void>((resolveStarted) => { markDisposeStarted = resolveStarted; });
+    const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
+    try {
+      running = await startHarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          async complete() {},
+          state: emptyState,
+          async dispose() {
+            markDisposeStarted();
+            await disposeGate;
+          },
+        }) },
+      });
+      await running.host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      const address = new URL(running.url);
+      const socket = connect(Number(address.port), address.hostname);
+      await new Promise<void>((resolveConnect, reject) => {
+        socket.once("connect", resolveConnect);
+        socket.once("error", reject);
+      });
+      const socketClosed = new Promise<void>((resolveClose) => socket.once("close", () => resolveClose()));
+      socket.write("POST /sessions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\n\r\n{");
+
+      const closing = running.close();
+      await disposeStarted;
+      running.forceClose();
+      await socketClosed;
+      await expect(fetch(`${running.url}/sessions`, { method: "POST" })).rejects.toThrow();
+      releaseDispose();
+      await closing;
+    } finally {
+      releaseDispose?.();
+      running?.forceClose();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps one HTTP completion waiting while its approval decision bypasses the session lock", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-approval-route-"));
+    const nativeFetch = globalThis.fetch;
+    let running: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
+    let accepted = false;
+    let approvalStarted!: () => void;
+    const started = new Promise<void>((resolve) => { approvalStarted = resolve; });
+    const observedDecisions: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (!url.startsWith("http://127.0.0.1:43123")) return nativeFetch(input, init);
+      if (url.endsWith("/output")) {
+        return accepted
+          ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    try {
+      running = await startHarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          async complete(context) {
+            const waiting = context.approvals.request({
+              providerItemId: "private-provider-item",
+              title: "Run tests",
+              reason: "Verify the requested change.",
+              action: { kind: "command", command: "npm test", workingDirectory: directory },
+              scopeKeys: ["command:npm test", `cwd:${directory}`],
+              scopeDescription: `Run npm test in ${directory} for this session.`,
+            });
+            approvalStarted();
+            observedDecisions.push(await waiting);
+            accepted = true;
+          },
+          state: emptyState,
+        }) },
+      });
+      await running.host.createSession({
+        threadId: 1,
+        permissionProfileId: "ask",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+
+      const completing = fetch(`${running.url}/sessions/1/complete`, {
+        method: "POST",
+        headers: { authorization: "Bearer control", "content-type": "application/json" },
+        body: JSON.stringify({ interactionId: 91, graph: graph() }),
+      });
+      await started;
+      const snapshotResponse = await fetch(`${running.url}/sessions/1/approval-events?after=0`, {
+        headers: { authorization: "Bearer control" },
+      });
+      const snapshot = await snapshotResponse.json() as {
+        harnessSessionId: string;
+        latestSequence: number;
+        pendingRequests: { requestId: string; correlation: { interactionId: number } }[];
+      };
+      expect(snapshotResponse.status).toBe(200);
+      expect(snapshot).toMatchObject({
+        latestSequence: 1,
+        pendingRequests: [{ correlation: { interactionId: 91 } }],
+      });
+      expect(JSON.stringify(snapshot)).not.toContain("private-provider-item");
+
+      const requestId = snapshot.pendingRequests[0]!.requestId;
+      const decisionResponse = await fetch(`${running.url}/sessions/1/approvals/${requestId}/decision`, {
+        method: "POST",
+        headers: { authorization: "Bearer control", "content-type": "application/json" },
+        body: JSON.stringify({ decision: "approve_once", rationale: "Reviewed in Relayer." }),
+      });
+      expect(decisionResponse.status).toBe(200);
+      expect(await decisionResponse.json()).toMatchObject({
+        requestId,
+        correlation: { threadId: 1, interactionId: 91, harnessSessionId: snapshot.harnessSessionId },
+        outcome: "approved",
+        actor: "user",
+        decision: "approve_once",
+      });
+
+      const completionResponse = await completing;
+      expect(completionResponse.status).toBe(200);
+      expect(await completionResponse.json()).toMatchObject({ output: completion });
+      expect(observedDecisions).toEqual([expect.objectContaining({ requestId, decision: "approve_once", actor: "user" })]);
+
+      const terminalSnapshot = await fetch(`${running.url}/sessions/1/approval-events?after=1`, {
+        headers: { authorization: "Bearer control" },
+      });
+      expect(await terminalSnapshot.json()).toMatchObject({
+        latestSequence: 2,
+        pendingRequests: [],
+        events: [{ sequence: 2, type: "resolved", resolution: { requestId, outcome: "approved" } }],
+      });
+      const duplicate = await fetch(`${running.url}/sessions/1/approvals/${requestId}/decision`, {
+        method: "POST",
+        headers: { authorization: "Bearer control", "content-type": "application/json" },
+        body: JSON.stringify({ decision: "approve_once" }),
+      });
+      expect(duplicate.status).toBe(409);
+
+      const persisted = await readFile(join(directory, "sessions.json"), "utf8");
+      expect(persisted).not.toContain(snapshot.harnessSessionId);
+      expect(persisted).not.toContain(requestId);
+    } finally {
+      await running?.close();
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("aborts a waiting approval when its HTTP response closes and releases the session lock", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-approval-disconnect-"));
+    const nativeFetch = globalThis.fetch;
+    let running: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
+    let accepted = false;
+    let approvalStarted!: () => void;
+    const started = new Promise<void>((resolve) => { approvalStarted = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (!url.startsWith("http://127.0.0.1:43123")) return nativeFetch(input, init);
+      if (url.endsWith("/output")) {
+        return accepted
+          ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    try {
+      running = await startHarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          async complete(context) {
+            const waiting = context.approvals.request({
+              providerItemId: "provider-disconnect",
+              title: "Run tests",
+              reason: "Verify the requested change.",
+              action: { kind: "command", command: "npm test", workingDirectory: directory },
+              scopeKeys: ["command:npm test", `cwd:${directory}`],
+              scopeDescription: `Run npm test in ${directory} for this session.`,
+            });
+            approvalStarted();
+            await waiting;
+          },
+          state: emptyState,
+        }) },
+      });
+      await running.host.createSession({
+        threadId: 1,
+        permissionProfileId: "ask",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      const controller = new AbortController();
+      const completing = fetch(`${running.url}/sessions/1/complete`, {
+        method: "POST",
+        headers: { authorization: "Bearer control", "content-type": "application/json" },
+        body: JSON.stringify({ interactionId: 91, graph: graph() }),
+        signal: controller.signal,
+      });
+      await started;
+      expect(running.host.approvalEvents(1).pendingRequests).toHaveLength(1);
+
+      controller.abort();
+      await expect(completing).rejects.toThrow();
+      await vi.waitFor(() => expect(running!.host.approvalEvents(1)).toMatchObject({
+        pendingRequests: [],
+        events: [
+          { type: "requested" },
+          { type: "resolved", resolution: { outcome: "aborted", actor: "host" } },
+        ],
+      }));
+
+      accepted = true;
+      await expect(running.host.complete(1, 92, graph())).resolves.toMatchObject({ output: completion });
+    } finally {
+      await running?.close();
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("creates a new ephemeral approval session ID when a persisted harness is registered again", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-approval-session-"));
+    const stateFile = join(directory, "sessions.json");
+    const descriptor = { threadId: 1, permissionProfileId: "ask", configuration: testConfiguration, workingDirectory: directory };
+    try {
+      const first = new HarnessHost({
+        stateFile,
+        controlToken: "control",
+        implementations: { test: () => ({ async complete() {}, state: emptyState }) },
+      });
+      await first.initialize();
+      await first.createSession(descriptor);
+      const firstSessionId = first.approvalEvents(1).harnessSessionId;
+      await first.close();
+
+      const restored = new HarnessHost({
+        stateFile,
+        controlToken: "control",
+        implementations: { test: () => ({ async complete() {}, state: emptyState }) },
+      });
+      await restored.initialize();
+      await restored.createSession(descriptor);
+
+      expect(restored.approvalEvents(1).harnessSessionId).not.toBe(firstSessionId);
+      expect(await readFile(stateFile, "utf8")).not.toContain(firstSessionId);
+      await restored.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects graph capabilities outside the authenticated loopback server", async () => {
     const host = new HarnessHost({ stateFile: "/tmp/unused-harness-state.json", controlToken: "control", implementations: {} });
-    await expect(host.complete(1, { url: "https://example.com", token: "secret", nodeId: 1 })).rejects.toThrow("127.0.0.1 HTTP");
+    await expect(host.complete(1, 1, { url: "https://example.com", token: "secret", nodeId: 1 })).rejects.toThrow("127.0.0.1 HTTP");
   });
 
   it("uses the product stable-ID rules for interaction model identities", async () => {
     const host = new HarnessHost({ stateFile: "/tmp/unused-harness-state.json", controlToken: "control", implementations: {} });
     const capability = graph();
-    await expect(host.complete(1, capability, { providerId: "codex", modelId: "🧠".repeat(200) }))
+    await expect(host.complete(1, 1, capability, { providerId: "codex", modelId: "🧠".repeat(200) }))
       .rejects.toThrow("Unknown harness thread");
-    await expect(host.complete(1, capability, { providerId: "codex", modelId: "\uFEFFmodel\uFEFF" }))
+    await expect(host.complete(1, 1, capability, { providerId: "codex", modelId: "\uFEFFmodel\uFEFF" }))
       .rejects.toThrow("Unknown harness thread");
-    await expect(host.complete(1, capability, { providerId: " codex", modelId: "model" }))
+    await expect(host.complete(1, 1, capability, { providerId: " codex", modelId: "model" }))
       .rejects.toThrow("invalid model selection");
-    await expect(host.complete(1, capability, { providerId: "codex", modelId: "model\n" }))
+    await expect(host.complete(1, 1, capability, { providerId: "codex", modelId: "model\n" }))
       .rejects.toThrow("invalid model selection");
-    await expect(host.complete(1, capability, { providerId: "codex", modelId: "model\uD800" }))
+    await expect(host.complete(1, 1, capability, { providerId: "codex", modelId: "model\uD800" }))
       .rejects.toThrow("invalid model selection");
-    await expect(host.complete(1, capability, { providerId: "codex", modelId: "m".repeat(201) }))
+    await expect(host.complete(1, 1, capability, { providerId: "codex", modelId: "m".repeat(201) }))
       .rejects.toThrow("invalid model selection");
-    await expect(host.complete(1, capability, { providerId: "codex", modelId: "🧠".repeat(201) }))
+    await expect(host.complete(1, 1, capability, { providerId: "codex", modelId: "🧠".repeat(201) }))
       .rejects.toThrow("invalid model selection");
   });
 

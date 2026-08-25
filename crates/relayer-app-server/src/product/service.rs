@@ -1,13 +1,17 @@
 use super::{
-    ActionInvocation, CatalogError, CreateModelFamilyCommand, FamilyPolicyReference, Interaction,
-    InteractionId, InteractionModelSelection, ModelFamily, ModelFamilyId, ModelFamilyKind,
-    ModelSelection, ModelSettings, ModelSettingsDefaults, ProductCapabilities, ProductState,
-    Project, ProjectId, ProviderCatalogSnapshot, ReorderModelFamiliesCommand, SystemFamilySnapshot,
-    Thread, ThreadId, ThreadView, UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand,
-    ValidateModelSelectionCommand, validate_family,
+    ActionInvocation, Annotation, AnnotationAnchor, AnnotationState, CatalogError,
+    CreateModelFamilyCommand, FamilyPolicyReference, Interaction, InteractionId,
+    InteractionModelSelection, MAX_ANNOTATION_SNAPSHOT_THREADS, ModelFamily, ModelFamilyId,
+    ModelFamilyKind, ModelSelection, ModelSettings, ModelSettingsDefaults, NewAnnotationRevision,
+    ProductCapabilities, ProductState, Project, ProjectId, ProviderCatalogSnapshot,
+    ReorderModelFamiliesCommand, SystemFamilySnapshot, Thread, ThreadId, ThreadView,
+    UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand, ValidateModelSelectionCommand,
+    validate_family, validate_revision_content,
 };
+use crate::approval::{ApprovalReceipt, ApprovalRequest, ApprovalResolution};
 use crate::storage::{
-    ActionInvocationInsertOutcome, NewThreadRecord, SqliteProductStore, StorageError,
+    ActionInvocationInsertOutcome, ConversationImportRecord, NewConversationImport,
+    NewThreadRecord, SqliteProductStore, StagedConversationImport, StorageError,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -52,6 +56,15 @@ pub(crate) struct FailedInteractionCompletion<'a> {
     pub(crate) graph_node_id: Option<i64>,
 }
 
+pub(crate) struct PreparedInteractionBinding<'a> {
+    pub(crate) interaction_id: InteractionId,
+    pub(crate) graph_node_id: i64,
+    pub(crate) harness_configuration_name: &'a str,
+    pub(crate) harness_configuration_digest: &'a str,
+    pub(crate) effective_execution_digest: &'a str,
+    pub(crate) effective_permission_receipt: &'a serde_json::Value,
+}
+
 pub(crate) struct ProjectWriteOutcome {
     pub(crate) project: Project,
     pub(crate) created: bool,
@@ -59,8 +72,10 @@ pub(crate) struct ProjectWriteOutcome {
 
 pub(crate) struct ThreadDetail {
     pub(crate) thread: Thread,
+    pub(crate) project: Option<Project>,
     pub(crate) interactions: Vec<Interaction>,
     pub(crate) action_invocations: Vec<ActionInvocation>,
+    pub(crate) approvals: Vec<ApprovalReceipt>,
 }
 
 pub(crate) struct InvokeActionOutcome {
@@ -186,6 +201,202 @@ impl ProductService {
             harness: self.runtime_available,
             ..ProductCapabilities::default()
         }
+    }
+
+    pub(crate) async fn list_annotations(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<Annotation>, ProductError> {
+        if self.storage.get_thread(thread_id).await?.is_none() {
+            return Err(ProductError::NotFound(format!("thread {thread_id}")));
+        }
+        self.storage
+            .list_annotations(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn snapshot_annotations(
+        &self,
+        thread_ids: &[ThreadId],
+    ) -> Result<Vec<(ThreadId, Vec<Annotation>)>, ProductError> {
+        if thread_ids.is_empty() || thread_ids.len() > MAX_ANNOTATION_SNAPSHOT_THREADS {
+            return Err(ProductError::Invalid(format!(
+                "annotation snapshot must request 1 to {MAX_ANNOTATION_SNAPSHOT_THREADS} threads"
+            )));
+        }
+        if thread_ids
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            != thread_ids.len()
+        {
+            return Err(ProductError::Invalid(
+                "annotation snapshot thread IDs must be unique".into(),
+            ));
+        }
+        self.storage
+            .snapshot_annotations(thread_ids)
+            .await?
+            .ok_or_else(|| ProductError::NotFound("annotation snapshot thread".into()))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn create_annotation(
+        &self,
+        thread_id: ThreadId,
+        anchor: AnnotationAnchor,
+        author_id: &str,
+        author_display_name: &str,
+        comment: &str,
+        rating: Option<u8>,
+        navigation_context: &serde_json::Value,
+        evidence_refs: &[String],
+    ) -> Result<Annotation, ProductError> {
+        self.ensure_annotation_anchor_thread(thread_id, &anchor)
+            .await?;
+        let comment = validate_revision_content(
+            comment,
+            rating,
+            AnnotationState::Active,
+            navigation_context,
+            evidence_refs,
+        )
+        .map_err(ProductError::Invalid)?;
+        let timestamp = now();
+        self.storage
+            .create_annotation(
+                thread_id,
+                &anchor,
+                NewAnnotationRevision {
+                    author_id,
+                    author_display_name,
+                    comment: &comment,
+                    rating,
+                    state: AnnotationState::Active,
+                    navigation_context,
+                    evidence_refs,
+                    created_at: &timestamp,
+                },
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn revise_annotation(
+        &self,
+        thread_id: ThreadId,
+        annotation_id: i64,
+        expected_revision: i64,
+        author_id: &str,
+        author_display_name: &str,
+        comment: &str,
+        rating: Option<u8>,
+        navigation_context: &serde_json::Value,
+        evidence_refs: &[String],
+    ) -> Result<Annotation, ProductError> {
+        if annotation_id <= 0 || expected_revision <= 0 {
+            return Err(ProductError::Invalid(
+                "annotation ID and expected revision must be positive integers".into(),
+            ));
+        }
+        let comment = validate_revision_content(
+            comment,
+            rating,
+            AnnotationState::Active,
+            navigation_context,
+            evidence_refs,
+        )
+        .map_err(ProductError::Invalid)?;
+        let timestamp = now();
+        self.storage
+            .append_annotation_revision(
+                thread_id,
+                annotation_id,
+                expected_revision,
+                NewAnnotationRevision {
+                    author_id,
+                    author_display_name,
+                    comment: &comment,
+                    rating,
+                    state: AnnotationState::Active,
+                    navigation_context,
+                    evidence_refs,
+                    created_at: &timestamp,
+                },
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn retract_annotation(
+        &self,
+        thread_id: ThreadId,
+        annotation_id: i64,
+        expected_revision: i64,
+        author_id: &str,
+        author_display_name: &str,
+        navigation_context: &serde_json::Value,
+        evidence_refs: &[String],
+    ) -> Result<Annotation, ProductError> {
+        if annotation_id <= 0 || expected_revision <= 0 {
+            return Err(ProductError::Invalid(
+                "annotation ID and expected revision must be positive integers".into(),
+            ));
+        }
+        validate_revision_content(
+            "",
+            None,
+            AnnotationState::Retracted,
+            navigation_context,
+            evidence_refs,
+        )
+        .map_err(ProductError::Invalid)?;
+        let timestamp = now();
+        self.storage
+            .append_annotation_revision(
+                thread_id,
+                annotation_id,
+                expected_revision,
+                NewAnnotationRevision {
+                    author_id,
+                    author_display_name,
+                    comment: "",
+                    rating: None,
+                    state: AnnotationState::Retracted,
+                    navigation_context,
+                    evidence_refs,
+                    created_at: &timestamp,
+                },
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn ensure_annotation_anchor_thread(
+        &self,
+        thread_id: ThreadId,
+        anchor: &AnnotationAnchor,
+    ) -> Result<(), ProductError> {
+        anchor.validate_ids().map_err(ProductError::Invalid)?;
+        if self.storage.get_thread(thread_id).await?.is_none() {
+            return Err(ProductError::NotFound(format!("thread {thread_id}")));
+        }
+        if let Some(interaction_id) = anchor.interaction_id() {
+            let interaction = self
+                .get_interaction(
+                    interaction_id.map_err(|error| ProductError::Invalid(error.to_string()))?,
+                )
+                .await?;
+            if interaction.thread_id != thread_id {
+                return Err(ProductError::Invalid(
+                    "annotation interaction does not belong to this thread".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub(crate) async fn model_settings(&self) -> Result<ModelSettings, ProductError> {
@@ -593,6 +804,7 @@ impl ProductService {
             threads,
             interactions: snapshot.interactions,
             action_invocations: snapshot.action_invocations,
+            approvals: snapshot.approvals,
             capabilities: self.capabilities(),
         })
     }
@@ -711,22 +923,11 @@ impl ProductService {
             .ok_or_else(|| ProductError::NotFound(format!("thread {id}")))?;
         Ok(ThreadDetail {
             thread,
+            project: snapshot.project,
             interactions: snapshot.interactions,
             action_invocations: snapshot.action_invocations,
+            approvals: snapshot.approvals,
         })
-    }
-
-    pub(crate) async fn list_interactions(
-        &self,
-        thread_id: ThreadId,
-    ) -> Result<Vec<Interaction>, ProductError> {
-        if self.storage.get_thread(thread_id).await?.is_none() {
-            return Err(ProductError::NotFound(format!("thread {thread_id}")));
-        }
-        self.storage
-            .list_interactions(thread_id)
-            .await
-            .map_err(Into::into)
     }
 
     pub(crate) async fn create_interaction(
@@ -737,6 +938,11 @@ impl ProductService {
         allow_unselected_model: bool,
     ) -> Result<Interaction, ProductError> {
         let text = required(text, "text")?;
+        if self.storage.thread_is_imported(thread_id).await? {
+            return Err(ProductError::Invalid(
+                "imported conversations are immutable".into(),
+            ));
+        }
         if self.storage.get_thread(thread_id).await?.is_none() {
             return Err(ProductError::NotFound(format!("thread {thread_id}")));
         }
@@ -761,6 +967,12 @@ impl ProductService {
         if action_id <= 0 {
             return Err(ProductError::Invalid(
                 "action ID must be a positive integer".into(),
+            ));
+        }
+        let source = self.get_interaction(source_interaction_id).await?;
+        if self.storage.thread_is_imported(source.thread_id).await? {
+            return Err(ProductError::Invalid(
+                "imported conversation actions cannot execute".into(),
             ));
         }
         if let Some(existing) = self
@@ -794,6 +1006,112 @@ impl ProductService {
         })
     }
 
+    pub(crate) async fn stage_conversation_import(
+        &self,
+        input: NewConversationImport<'_>,
+    ) -> Result<StagedConversationImport, ProductError> {
+        self.storage
+            .stage_conversation_import(input)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn append_conversation_import_turn(
+        &self,
+        import_id: &str,
+        turn: &crate::conversation_export::ConversationExportTurn,
+    ) -> Result<crate::storage::StagedConversationTurnSummary, ProductError> {
+        self.storage
+            .append_conversation_import_turn(import_id, turn)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn finalize_conversation_import_digest(
+        &self,
+        import_id: &str,
+        source_sha256: &str,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .finalize_conversation_import_digest(import_id, source_sha256)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn staged_conversation_import(
+        &self,
+        import_id: &str,
+    ) -> Result<StagedConversationImport, ProductError> {
+        self.storage
+            .staged_conversation_import(import_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn imported_turn_export_records(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<crate::storage::ImportedTurnExportRecord>, ProductError> {
+        self.storage
+            .imported_turn_export_records(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn staged_conversation_turn(
+        &self,
+        import_id: &str,
+        source_turn_id: &str,
+    ) -> Result<crate::conversation_export::ConversationExportTurn, ProductError> {
+        self.storage
+            .staged_conversation_turn(import_id, source_turn_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn prepare_conversation_import_turn(
+        &self,
+        import_id: &str,
+        source_turn_id: &str,
+        graph_node_id: Option<i64>,
+        output: Option<&serde_json::Value>,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .prepare_conversation_import_turn(import_id, source_turn_id, graph_node_id, output)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn publish_conversation_import(
+        &self,
+        import_id: &str,
+        published_at: &str,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .publish_conversation_import(import_id, published_at)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn remove_conversation_import(
+        &self,
+        import_id: &str,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .remove_conversation_import(import_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn list_published_conversation_imports(
+        &self,
+    ) -> Result<Vec<ConversationImportRecord>, ProductError> {
+        self.storage
+            .list_published_conversation_imports()
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn permits_unselected_action_execution(
         &self,
         interaction_id: InteractionId,
@@ -820,6 +1138,16 @@ impl ProductService {
             }))
     }
 
+    pub(crate) async fn action_invocations_for_export(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<ActionInvocation>, ProductError> {
+        self.storage
+            .action_invocations_for_export(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn get_interaction(
         &self,
         interaction_id: super::InteractionId,
@@ -830,15 +1158,14 @@ impl ProductService {
             .ok_or_else(|| ProductError::NotFound(format!("interaction {interaction_id}")))
     }
 
-    pub(crate) async fn mark_interaction_running(
+    pub(crate) async fn get_interaction_by_graph_node_id(
         &self,
-        interaction_id: super::InteractionId,
-        harness_configuration_name: &str,
-    ) -> Result<(), ProductError> {
+        graph_node_id: i64,
+    ) -> Result<Interaction, ProductError> {
         self.storage
-            .mark_interaction_running(interaction_id, harness_configuration_name)
-            .await
-            .map_err(Into::into)
+            .get_interaction_by_graph_node_id(graph_node_id)
+            .await?
+            .ok_or_else(|| ProductError::NotFound(format!("graph interaction {graph_node_id}")))
     }
 
     pub(crate) async fn claim_interaction_running(
@@ -846,6 +1173,7 @@ impl ProductService {
         interaction_id: super::InteractionId,
         harness_configuration_name: &str,
     ) -> Result<bool, ProductError> {
+        self.ensure_interaction_mutable(interaction_id).await?;
         self.storage
             .claim_interaction_running(interaction_id, harness_configuration_name)
             .await
@@ -873,10 +1201,85 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn restore_leased_interaction_submitted(
+        &self,
+        interaction_id: super::InteractionId,
+        error: &str,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .restore_leased_interaction_submitted(interaction_id, error)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn claim_interaction_preparing(
+        &self,
+        interaction_id: super::InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .claim_interaction_preparing(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn bind_prepared_interaction(
+        &self,
+        binding: PreparedInteractionBinding<'_>,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .bind_prepared_interaction(binding)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn invocation_graph_source(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<Option<(i64, i64)>, ProductError> {
+        self.storage
+            .invocation_graph_source(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn invocation_requires_graph_lease(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .invocation_requires_graph_lease(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn terminate_legacy_action_invocation(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .terminate_legacy_action_invocation(interaction_id, error)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn recover_interaction_accepted(
+        &self,
+        interaction_id: InteractionId,
+        output: &serde_json::Value,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .recover_interaction_accepted(interaction_id, output)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn accept_interaction_completion(
         &self,
         completion: AcceptedInteractionCompletion<'_>,
     ) -> Result<(), ProductError> {
+        self.ensure_interaction_mutable(completion.interaction_id)
+            .await?;
         self.storage
             .accept_interaction_completion(completion)
             .await
@@ -909,7 +1312,8 @@ impl ProductService {
         interaction_id: super::InteractionId,
         harness_configuration_name: &str,
         error: &str,
-    ) -> Result<(), ProductError> {
+    ) -> Result<bool, ProductError> {
+        self.ensure_interaction_mutable(interaction_id).await?;
         self.storage
             .fail_interaction_completion(interaction_id, harness_configuration_name, error)
             .await
@@ -946,6 +1350,65 @@ impl ProductService {
     ) -> Result<(), ProductError> {
         self.storage
             .return_interaction_to_unsent(interaction_id, harness_configuration_name)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn ensure_interaction_mutable(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<(), ProductError> {
+        let interaction = self.get_interaction(interaction_id).await?;
+        if self
+            .storage
+            .thread_is_imported(interaction.thread_id)
+            .await?
+        {
+            return Err(ProductError::Invalid(
+                "imported conversations are immutable".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn get_approval(
+        &self,
+        request_id: &str,
+    ) -> Result<ApprovalReceipt, ProductError> {
+        self.storage
+            .get_approval(request_id)
+            .await?
+            .ok_or_else(|| ProductError::NotFound(format!("approval request {request_id}")))
+    }
+
+    pub(crate) async fn record_approval_request(
+        &self,
+        request: &ApprovalRequest,
+    ) -> Result<ApprovalReceipt, ProductError> {
+        self.storage
+            .record_approval_request(request)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn record_approval_resolution(
+        &self,
+        resolution: &ApprovalResolution,
+        harness_live: bool,
+    ) -> Result<ApprovalReceipt, ProductError> {
+        self.storage
+            .record_approval_resolution(resolution, harness_live)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn abort_pending_approvals(
+        &self,
+        interaction_id: Option<InteractionId>,
+        rationale: &str,
+    ) -> Result<u64, ProductError> {
+        self.storage
+            .abort_pending_approvals(interaction_id, rationale, &now())
             .await
             .map_err(Into::into)
     }

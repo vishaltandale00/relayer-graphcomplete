@@ -289,7 +289,7 @@ export class ReviewSession {
     let current = validateState(this.executionId, await this.#rendererCommand("snapshot"));
     const changedAsExpected = (state) => {
       if (control.kind === "node") return state.selectedNodeId !== before.selectedNodeId;
-      if (control.kind === "navigate-action") return state.layerId !== before.layerId;
+      if (control.kind === "navigate-action") return presentationKey(state) !== presentationKey(before);
       if (control.kind === "turn") return state.turnId !== before.turnId;
       if (control.kind === "thread") return state.threadId !== before.threadId;
       if (control.kind === "history") return presentationKey(state) !== presentationKey(before);

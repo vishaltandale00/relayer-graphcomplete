@@ -16,6 +16,10 @@ const screenshotPath = process.env.RELAYER_FIRST_MESSAGE_SCREENSHOT
   || join(repositoryRoot, ".relayer", "evidence", "first-message-enter-smoke.png");
 const evalScreenshotPath = process.env.RELAYER_NAVIGATION_EVAL_SCREENSHOT
   || screenshotPath.replace(/\.png$/i, "-eval.png");
+const evalNarrowScreenshotPath = process.env.RELAYER_NAVIGATION_EVAL_NARROW_SCREENSHOT
+  || screenshotPath.replace(/\.png$/i, "-eval-narrow.png");
+const invokeEvidenceDirectory = process.env.RELAYER_INVOKE_EVIDENCE_DIR
+  || join(repositoryRoot, ".relayer", "evidence", "invoke-navigation");
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-first-message-app-"));
 const services = [];
 let window;
@@ -70,6 +74,93 @@ async function waitFor(label, check, timeoutMs = 10_000) {
   throw new Error(`Timed out waiting for ${label}.`);
 }
 
+async function graphPresentation(webContents) {
+  return webContents.executeJavaScript(`(() => {
+    const stage = document.querySelector("#graphStage")?.getBoundingClientRect();
+    const inspector = document.querySelector("#inspector")?.getBoundingClientRect();
+    const nodes = [...document.querySelectorAll("[data-node]")].map((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        id: node.dataset.node,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        worldX: Number(node.dataset.worldX),
+        worldY: Number(node.dataset.worldY),
+        canonicalWorldX: Number(node.dataset.canonicalWorldX),
+        canonicalWorldY: Number(node.dataset.canonicalWorldY),
+        layoutSource: node.dataset.layoutSource,
+      };
+    });
+    return {
+      innerWidth: window.innerWidth,
+      inspectorOpen: !document.querySelector("#inspector")?.classList.contains("hidden"),
+      inspector: inspector && { left: inspector.left, right: inspector.right, width: inspector.width },
+      stage: stage && { left: stage.left, right: stage.right, top: stage.top, bottom: stage.bottom, width: stage.width },
+      nodes,
+    };
+  })()`);
+}
+
+async function waitForPaint(webContents) {
+  await webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+}
+
+function nodesAreContained(presentation) {
+  const { stage } = presentation;
+  return Boolean(stage) && presentation.nodes.length > 0 && presentation.nodes.every((node) => (
+    node.left >= stage.left - 1
+    && node.right <= stage.right + 1
+    && node.top >= stage.top - 1
+    && node.bottom <= stage.bottom + 1
+  ));
+}
+
+function nodeRectSignature(presentation) {
+  return presentation.nodes.map(({ id, left, right, top, bottom }) => [
+    id,
+    Math.round(left),
+    Math.round(right),
+    Math.round(top),
+    Math.round(bottom),
+  ]);
+}
+
+function canonicalLayoutSignature(presentation) {
+  return [...presentation.nodes]
+    .sort((left, right) => String(left.id).localeCompare(String(right.id)))
+    .map(({ id, canonicalWorldX, canonicalWorldY, layoutSource }) => [
+      id,
+      canonicalWorldX,
+      canonicalWorldY,
+      layoutSource,
+    ]);
+}
+
+function requireAuthoredLayout(label, presentation) {
+  if (!presentation.nodes.length || presentation.nodes.some((node) => (
+    node.layoutSource !== "authored"
+    || !Number.isFinite(node.canonicalWorldX)
+    || !Number.isFinite(node.canonicalWorldY)
+  ))) {
+    throw new Error(`${label} did not expose a complete authored canonical layout.`);
+  }
+  return canonicalLayoutSignature(presentation);
+}
+
+async function waitForStableGraph(label, webContents) {
+  let previous = null;
+  let stableSamples = 0;
+  return waitFor(label, async () => {
+    const presentation = await graphPresentation(webContents);
+    const signature = JSON.stringify(nodeRectSignature(presentation));
+    stableSamples = signature === previous ? stableSamples + 1 : 0;
+    previous = signature;
+    return stableSamples >= 3 ? presentation : false;
+  }, 15_000);
+}
+
 async function productRequest(session, path, init = {}) {
   const response = await fetch(new URL(path, session.origin), {
     ...init,
@@ -85,6 +176,16 @@ async function productRequest(session, path, init = {}) {
   return value;
 }
 
+async function captureEvidence(webContents, name, { settle = true } = {}) {
+  const path = join(invokeEvidenceDirectory, `${name}.png`);
+  await mkdir(dirname(path), { recursive: true });
+  if (settle) {
+    await webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  }
+  await writeFile(path, (await webContents.capturePage()).toPNG());
+  return path;
+}
+
 function pressEnter(webContents, modifiers = [], { insertText = false } = {}) {
   webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter", modifiers });
   if (insertText) webContents.sendInputEvent({ type: "char", keyCode: "\r", modifiers });
@@ -94,6 +195,9 @@ function pressEnter(webContents, modifiers = [], { insertText = false } = {}) {
 async function run() {
   process.stdout.write("Electron application ready.\n");
   registerTestIpc();
+  const invokeGatePath = join(dataDirectory, "invoke-evidence-gate");
+  await writeFile(invokeGatePath, "hold");
+  process.env.RELAYER_FIXTURE_INVOKE_GATE_FILE = invokeGatePath;
   const configurationPath = join(repositoryRoot, "harnesses", "fixture-task-system.yaml");
   const runtime = new GraphCompleteRuntimeService({
     userDataDirectory: dataDirectory,
@@ -219,8 +323,108 @@ async function run() {
   }
 
   const threadId = accepted.thread.id;
-  let navigationDetail = accepted;
-  for (let turnNumber = 2; turnNumber <= 4; turnNumber += 1) {
+  const sourceInteraction = accepted.interactions[0];
+  const invokeAction = sourceInteraction.completionOutput.rootLayer.actions.find((action) => action.kind === "invoke");
+  if (!invokeAction) throw new Error("The deterministic root did not expose an invoke action.");
+  const unresolvedActionVisible = `(() => {
+    const inspector = document.querySelector("#inspector");
+    const button = document.querySelector('[data-action-id="${invokeAction.id}"]');
+    return !inspector?.classList.contains("hidden")
+      && document.querySelector("#detailTitle")?.textContent === "Results store"
+      && Boolean(button && button.offsetParent !== null)
+      && button?.disabled === false;
+  })()`;
+  let unresolvedReady = false;
+  for (let attempt = 0; attempt < 5 && !unresolvedReady; attempt += 1) {
+    await webContents.executeJavaScript(`document.querySelector('[data-node="${invokeAction.sourceNodeId}"]')?.click()`);
+    await webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+    unresolvedReady = await webContents.executeJavaScript(unresolvedActionVisible);
+  }
+  if (!unresolvedReady) throw new Error("The unresolved invoke action did not remain visibly selected for capture.");
+  const invokeEvidencePaths = {
+    unresolved: await captureEvidence(webContents, "01-unresolved", { settle: false }),
+  };
+
+  await webContents.executeJavaScript(`document.querySelector('[data-action-id="${invokeAction.id}"]')?.click()`);
+  await waitFor("the running invoked interaction", async () => {
+    const detail = await productRequest(productSession, `/api/threads/${threadId}`);
+    return detail.interactions.some((interaction) => interaction.completionStatus === "running");
+  });
+  await webContents.executeJavaScript(`document.querySelector("#previousTurn")?.click()`);
+  await waitFor("the source turn while the invoked interaction runs", () => webContents.executeJavaScript(
+    `document.querySelector("#interactionText")?.textContent === "Show the deterministic task system."`,
+  ));
+  await webContents.executeJavaScript(`document.querySelector('[data-node="${invokeAction.sourceNodeId}"]')?.click()`);
+  await waitFor("the visible disabled source invoke while its result runs", () => webContents.executeJavaScript(`(() => {
+    const button = document.querySelector('[data-action-id="${invokeAction.id}"]');
+    return document.querySelector("#interactionText")?.textContent === "Show the deterministic task system."
+      && !document.querySelector("#inspector")?.classList.contains("hidden")
+      && document.querySelector("#detailTitle")?.textContent === "Results store"
+      && Boolean(button && button.offsetParent !== null)
+      && button?.disabled === true;
+  })()`));
+  invokeEvidencePaths.runningDisabled = await captureEvidence(webContents, "02-running-disabled");
+  await writeFile(invokeGatePath, "release");
+
+  const invokedDetail = await waitFor("the invoked result to be accepted", async () => {
+    const detail = await productRequest(productSession, `/api/threads/${threadId}`);
+    return detail.interactions.length === 2
+      && detail.interactions.every((interaction) => interaction.completionStatus === "accepted")
+      ? detail
+      : false;
+  });
+  const invokedResult = invokedDetail.interactions.find((interaction) => interaction.id !== sourceInteraction.id);
+  const canonicalSourceDetail = await productRequest(productSession, `/api/threads/${threadId}`);
+  const canonicalSource = canonicalSourceDetail.interactions.find((interaction) => (
+    String(interaction.id) === String(sourceInteraction.id)
+  ));
+  const canonicalInvoke = canonicalSource?.completionOutput?.rootLayer?.actions?.find((action) => (
+    String(action.id) === String(invokeAction.id)
+  ));
+  const invokedRootLayerId = invokedResult?.completionOutput?.rootLayer?.layer?.id;
+  if (
+    canonicalInvoke?.kind !== "invoke"
+    || canonicalInvoke.targetLayerId == null
+    || String(canonicalInvoke.targetLayerId) !== String(invokedRootLayerId)
+  ) {
+    throw new Error("The accepted source projection did not expose the invoked result root as its durable target.");
+  }
+  const canonicalDestination = await productRequest(
+    productSession,
+    `/api/threads/${threadId}/interactions/${sourceInteraction.id}/actions/${invokeAction.id}/destination`,
+  );
+  if (
+    String(canonicalDestination.interactionId) !== String(invokedResult.id)
+    || String(canonicalDestination.rootLayerId) !== String(invokedRootLayerId)
+    || String(canonicalDestination.targetLayerId) !== String(canonicalInvoke.targetLayerId)
+  ) {
+    throw new Error("The resolved invoke destination did not identify the accepted result interaction and root.");
+  }
+  await waitFor("the visible source invoke to refresh as resolved navigation", () => webContents.executeJavaScript(`(() => {
+    const button = document.querySelector('[data-action-id="${invokeAction.id}"]');
+    return document.querySelector("#interactionText")?.textContent === "Show the deterministic task system."
+      && !document.querySelector("#inspector")?.classList.contains("hidden")
+      && document.querySelector("#detailTitle")?.textContent === "Results store"
+      && Boolean(button && button.offsetParent !== null)
+      && button?.disabled === false
+      && button?.dataset.reviewKind === "navigate-action"
+      && button?.dataset.reviewTargetLayerId === "${canonicalInvoke.targetLayerId}";
+  })()`));
+  invokeEvidencePaths.resolved = await captureEvidence(webContents, "03-resolved");
+
+  await webContents.executeJavaScript(`document.querySelector('[data-action-id="${invokeAction.id}"]')?.click()`);
+  await waitFor("the resolved cross-interaction destination", () => webContents.executeJavaScript(
+    `document.querySelector("#turnPickerButton")?.textContent === "Turn 2 of 2"`,
+  ));
+  invokeEvidencePaths.crossInteraction = await captureEvidence(webContents, "04-cross-interaction-destination");
+  await webContents.executeJavaScript(`import("./src/threads.js").then(({ navigateHistory }) => navigateHistory("back"))`);
+  await waitFor("the revisited resolved source", () => webContents.executeJavaScript(
+    `document.querySelector("#interactionText")?.textContent === "Show the deterministic task system."`,
+  ));
+  invokeEvidencePaths.revisited = await captureEvidence(webContents, "05-revisited-source");
+
+  let navigationDetail = invokedDetail;
+  for (let turnNumber = 3; turnNumber <= 4; turnNumber += 1) {
     const created = await productRequest(productSession, `/api/threads/${threadId}/interactions`, {
       method: "POST",
       body: JSON.stringify({ text: `Deterministic navigation turn ${turnNumber}.` }),
@@ -242,6 +446,50 @@ async function run() {
   const navigateAction = latestRoot.actions.find((action) => action.kind === "navigate");
   if (!navigateAction) throw new Error("The deterministic root did not expose a navigate action.");
   await webContents.executeJavaScript(`document.querySelector('[data-node="${navigateAction.sourceNodeId}"]')?.click()`);
+  const productInspectorFit = await waitFor("the Product inspector fit", async () => {
+    const presentation = await graphPresentation(webContents);
+    return presentation.inspectorOpen && nodesAreContained(presentation) ? presentation : false;
+  });
+  const productStableOpen = await waitForStableGraph("the stable Product inspector view", webContents);
+  const productOpenSignature = nodeRectSignature(productStableOpen);
+  const productRootLayout = requireAuthoredLayout("Product root", productStableOpen);
+  await mkdir(dirname(screenshotPath), { recursive: true });
+  await writeFile(screenshotPath, (await webContents.capturePage()).toPNG());
+  await webContents.executeJavaScript(`document.querySelector('[data-node]:not([data-node="${navigateAction.sourceNodeId}"])')?.click()`);
+  await waitFor("the second Product node detail", () => webContents.executeJavaScript(
+    `document.querySelector(".graph-node.selected")?.dataset.node !== "${navigateAction.sourceNodeId}"`,
+  ));
+  const productOpenToOpen = await graphPresentation(webContents);
+  if (JSON.stringify(nodeRectSignature(productOpenToOpen)) !== JSON.stringify(productOpenSignature)) {
+    throw new Error("Selecting another node while the inspector was open changed the Product graph camera.");
+  }
+  await webContents.executeJavaScript(`document.querySelector("#closeInspector")?.click()`);
+  const productAfterClose = await graphPresentation(webContents);
+  if (JSON.stringify(nodeRectSignature(productAfterClose)) !== JSON.stringify(productOpenSignature)) {
+    throw new Error("Closing the inspector changed the Product graph camera.");
+  }
+  const dragPoint = await webContents.executeJavaScript(`(() => {
+    const rect = document.querySelector("[data-node]")?.getBoundingClientRect();
+    return rect ? { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + 23) } : null;
+  })()`);
+  if (!dragPoint) throw new Error("The Product graph did not expose a node to drag.");
+  webContents.sendInputEvent({ type: "mouseDown", ...dragPoint, button: "left", clickCount: 1 });
+  webContents.sendInputEvent({ type: "mouseMove", x: dragPoint.x + 24, y: dragPoint.y + 12 });
+  webContents.sendInputEvent({
+    type: "mouseUp",
+    x: dragPoint.x + 24,
+    y: dragPoint.y + 12,
+    button: "left",
+    clickCount: 1,
+  });
+  await waitForPaint(webContents);
+  const dragSelectionSuppressed = await webContents.executeJavaScript(
+    `document.querySelector("#inspector")?.classList.contains("hidden")`,
+  );
+  if (!dragSelectionSuppressed) {
+    throw new Error("Dragging a Product graph node opened the inspector and refit the camera.");
+  }
+  await webContents.executeJavaScript(`document.querySelector('[data-node="${navigateAction.sourceNodeId}"]')?.click()`);
   await waitFor("the navigate action control", () => webContents.executeJavaScript(
     `Boolean(document.querySelector('[data-action-id="${navigateAction.id}"]'))`,
   ));
@@ -261,6 +509,11 @@ async function run() {
     document.querySelectorAll("#workspaceBreadcrumb .breadcrumb-segment").length === 2
     && !document.querySelector("#inspector")?.classList.contains("hidden")
   ))()`));
+  const restoredInspectorFit = await waitFor("the restored Product inspector fit", async () => {
+    const presentation = await graphPresentation(webContents);
+    return presentation.inspectorOpen && nodesAreContained(presentation) ? presentation : false;
+  });
+  const productChildLayout = requireAuthoredLayout("Product child", restoredInspectorFit);
   await webContents.executeJavaScript(`document.querySelector("#turnPickerButton")?.click()`);
   const productNavigationState = await waitFor("the scrolling turn picker", () => webContents.executeJavaScript(`(() => {
     const popover = document.querySelector("#turnPopover");
@@ -274,9 +527,13 @@ async function run() {
       selectedNodeId: document.querySelector(".graph-node.selected")?.dataset.node || null,
     };
   })()`));
-  await mkdir(dirname(screenshotPath), { recursive: true });
-  await writeFile(screenshotPath, (await webContents.capturePage()).toPNG());
-
+  productNavigationState.inspectorFit = {
+    initialContained: nodesAreContained(productInspectorFit),
+    restoredContained: nodesAreContained(restoredInspectorFit),
+    openToOpenPreserved: true,
+    closePreserved: true,
+    dragSelectionSuppressed,
+  };
   reviewContext = {
     ...reviewContext,
     cases: [{
@@ -314,7 +571,34 @@ async function run() {
     document.querySelector("#threadView")?.dataset.workspaceMode === "review"
     && document.querySelector("#turnPickerButton")?.textContent === "Turn 4 of 4"
   ))()`));
+  const evalRootStable = await waitForStableGraph("the stable Eval root graph", evalContents);
+  const evalRootLayout = requireAuthoredLayout("Eval root", evalRootStable);
+  if (JSON.stringify(evalRootLayout) !== JSON.stringify(productRootLayout)) {
+    throw new Error("Product and read-only Eval projected different canonical positions for the same accepted root layer.");
+  }
+  await evalContents.executeJavaScript(`import("./src/threads.js").then(({ selectTurnById }) => selectTurnById(${sourceInteraction.id}))`);
+  await evalContents.executeJavaScript(`document.querySelector('[data-node="${invokeAction.sourceNodeId}"]')?.click()`);
+  await waitFor("the Eval resolved invoke action", () => evalContents.executeJavaScript(`(() => {
+    const button = document.querySelector('[data-action-id="${invokeAction.id}"]');
+    return Boolean(button && button.offsetParent !== null && button.disabled === false);
+  })()`));
+  await evalContents.executeJavaScript(`document.querySelector('[data-action-id="${invokeAction.id}"]')?.click()`);
+  await waitFor("the Eval resolved invoke destination", () => evalContents.executeJavaScript(
+    `document.querySelector("#interactionText")?.textContent === "Propose the most useful next improvement to this task system."`,
+  ));
+  invokeEvidencePaths.evalCrossInteraction = await captureEvidence(evalContents, "06-eval-cross-interaction-destination");
+  await evalContents.executeJavaScript(`import("./src/threads.js").then(({ selectTurnById }) => selectTurnById(${latest.id}))`);
   await evalContents.executeJavaScript(`document.querySelector('[data-node="${navigateAction.sourceNodeId}"]')?.click()`);
+  const evalRootInspectorFit = await waitFor("the Eval root inspector fit", async () => {
+    const presentation = await graphPresentation(evalContents);
+    return presentation.inspectorOpen && nodesAreContained(presentation) ? presentation : false;
+  });
+  if (JSON.stringify(requireAuthoredLayout("Eval root inspector", evalRootInspectorFit)) !== JSON.stringify(evalRootLayout)) {
+    throw new Error("Opening the Eval inspector changed canonical root positions.");
+  }
+  await waitForPaint(evalContents);
+  await mkdir(dirname(evalScreenshotPath), { recursive: true });
+  await writeFile(evalScreenshotPath, (await evalContents.capturePage()).toPNG());
   await waitFor("the Eval navigate action", () => evalContents.executeJavaScript(
     `Boolean(document.querySelector('[data-action-id="${navigateAction.id}"]'))`,
   ));
@@ -322,7 +606,60 @@ async function run() {
   await waitFor("the Eval descendant layer", () => evalContents.executeJavaScript(
     `document.querySelectorAll("#workspaceBreadcrumb .breadcrumb-segment").length === 2`,
   ));
-  await evalContents.executeJavaScript(`document.querySelector("[data-node]")?.click(); document.querySelector("#turnPickerButton")?.click()`);
+  await evalContents.executeJavaScript(`document.querySelector("[data-node]")?.click()`);
+  const evalInspectorFit = await waitFor("the Eval inspector fit", async () => {
+    const presentation = await graphPresentation(evalContents);
+    return presentation.inspectorOpen && nodesAreContained(presentation) ? presentation : false;
+  });
+  const evalChildLayout = requireAuthoredLayout("Eval child", evalInspectorFit);
+  if (JSON.stringify(evalChildLayout) !== JSON.stringify(productChildLayout)) {
+    throw new Error("Product and read-only Eval projected different canonical positions for the same accepted child layer.");
+  }
+
+  await evalContents.executeJavaScript(`document.querySelector("#closeInspector")?.click()`);
+  evalWindow.setContentSize(760, 920);
+  const narrowClosed = await waitFor("the exact 760px Eval workspace", async () => {
+    const presentation = await graphPresentation(evalContents);
+    return presentation.innerWidth === 760 && !presentation.inspectorOpen
+      ? presentation
+      : false;
+  });
+  const narrowClosedSignature = nodeRectSignature(await waitForStableGraph(
+    "the stable narrow Eval graph",
+    evalContents,
+  ));
+  await evalContents.executeJavaScript(`document.querySelector("[data-node]")?.click()`);
+  const evalNarrowInspector = await waitFor("the narrow Eval inspector overlay", async () => {
+    const presentation = await graphPresentation(evalContents);
+    return presentation.innerWidth === 760
+      && presentation.inspectorOpen
+      && presentation.inspector?.width > 0
+      && presentation.inspector.left < presentation.innerWidth
+      && presentation.inspector.right <= presentation.innerWidth + 1
+      ? presentation
+      : false;
+  });
+  if (Math.round(evalNarrowInspector.stage.width) !== Math.round(narrowClosed.stage.width)) {
+    throw new Error("The 760px inspector changed the Eval graph-stage width instead of overlaying it.");
+  }
+  if (JSON.stringify(nodeRectSignature(evalNarrowInspector)) !== JSON.stringify(narrowClosedSignature)) {
+    throw new Error("The 760px inspector changed the Eval graph camera.");
+  }
+  if (JSON.stringify(requireAuthoredLayout("narrow Eval child", evalNarrowInspector)) !== JSON.stringify(evalChildLayout)) {
+    throw new Error("The narrow Eval viewport changed canonical child positions.");
+  }
+  await waitForPaint(evalContents);
+  await writeFile(evalNarrowScreenshotPath, (await evalContents.capturePage()).toPNG());
+  evalWindow.setContentSize(1480, 920);
+  const evalRedockedInspector = await waitFor("the redocked Eval inspector fit", async () => {
+    const presentation = await graphPresentation(evalContents);
+    return presentation.innerWidth === 1480
+      && presentation.inspectorOpen
+      && nodesAreContained(presentation)
+      ? presentation
+      : false;
+  });
+  await evalContents.executeJavaScript(`document.querySelector("#turnPickerButton")?.click()`);
   const evalNavigationState = await waitFor("the Eval scrolling turn picker", () => evalContents.executeJavaScript(`(() => {
     const popover = document.querySelector("#turnPopover");
     const rows = [...popover?.querySelectorAll("[data-turn-id]") || []];
@@ -333,10 +670,15 @@ async function run() {
       backEnabled: document.querySelector("#historyBack")?.disabled === false,
       breadcrumbSegments: document.querySelectorAll("#workspaceBreadcrumb .breadcrumb-segment").length,
       readOnlyCopy: document.querySelector("#threadComposer")?.textContent,
+      viewportWidth: window.innerWidth,
     };
   })()`));
-  await mkdir(dirname(evalScreenshotPath), { recursive: true });
-  await writeFile(evalScreenshotPath, (await evalContents.capturePage()).toPNG());
+  evalNavigationState.inspectorFit = {
+    desktopContained: nodesAreContained(evalInspectorFit),
+    narrowOverlayPreservedStage: true,
+    narrowOverlayPreservedCamera: true,
+    redockedContained: nodesAreContained(evalRedockedInspector),
+  };
 
   const result = {
     passed: true,
@@ -348,8 +690,18 @@ async function run() {
     renderedNodes,
     screenshotPath,
     evalScreenshotPath,
+    evalNarrowScreenshotPath,
     productNavigationState,
     evalNavigationState,
+    layoutEvidence: {
+      rootProductEvalParity: true,
+      childProductEvalParity: true,
+      narrowViewportPreservedCanonicalLayout: true,
+      productRootLayout,
+      productChildLayout,
+    },
+    invokeResultInteractionId: invokedResult.id,
+    invokeEvidencePaths,
   };
   process.stdout.write(`RELAYER_FIRST_MESSAGE_SMOKE ${JSON.stringify(result)}\n`);
   exitCode = 0;
@@ -374,5 +726,9 @@ async function shutdown() {
 process.stdout.write("Starting isolated Electron first-message smoke test...\n");
 void app.whenReady()
   .then(run)
-  .catch((error) => process.stderr.write(`${error.stack || error.message}\n`))
+  .catch((error) => {
+    exitCode = 1;
+    process.exitCode = 1;
+    process.stderr.write(`${error.stack || error.message}\n`);
+  })
   .finally(shutdown);

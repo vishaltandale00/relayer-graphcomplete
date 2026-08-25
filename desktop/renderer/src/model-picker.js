@@ -24,6 +24,24 @@ function harnessFor(settings, harnessId) {
   return settings?.harnesses?.find((harness) => harness.id === harnessId);
 }
 
+export function modelPickerFamilyPresentation(settings, harnessId, selection) {
+  const families = settings ? availablePickerFamilies(settings, harnessId) : [];
+  const selectedFamily = families.find((family) => (
+    String(family.id) === String(selection?.familyId)
+  )) ?? families[0] ?? null;
+  return {
+    families,
+    selectedFamily,
+    requiresExplicitSelection: Boolean(selectedFamily) && !pickerSelectionIsAvailable(settings, selection),
+  };
+}
+
+export function modelPickerMemberIsSelected(familyId, selection, member) {
+  return String(familyId) === String(selection?.familyId)
+    && member.providerId === selection?.providerId
+    && member.modelId === selection?.modelId;
+}
+
 export function modelPickerMarkup({ mode = "new" } = {}) {
   const safeMode = mode === "ongoing" ? "ongoing" : "new";
   return `<div class="model-control model-control-${safeMode}" data-model-picker="${safeMode}">
@@ -112,7 +130,9 @@ export function interactionModelSelection(interaction) {
 export function selectionForNextInteraction(settings, harnessId, interaction) {
   if (!settings || !harnessId) return null;
   const prior = interactionModelSelection(interaction);
-  return resolveUnsentModelIntent(settings, { harnessId, ...prior }).selection;
+  const resolution = resolveUnsentModelIntent(settings, { harnessId, ...prior });
+  if (resolution.selection) return resolution.selection;
+  return resolution.blockedFamilyId != null && prior ? { harnessId, ...prior } : null;
 }
 
 export function createModelPicker({
@@ -121,6 +141,7 @@ export function createModelPicker({
   settings = null,
   pinnedHarnessId = null,
   selection = null,
+  onUserTakeover = () => {},
   onSelectionChange = () => {},
   onOpenSettings = () => {},
   prepareHarnessChange = async () => () => {},
@@ -165,19 +186,19 @@ export function createModelPicker({
 
   function renderModelPanel() {
     const panel = root.querySelector('[data-model-picker-panel="model"]');
-    const families = currentSettings
-      ? availablePickerFamilies(currentSettings, selectedHarnessId())
-      : [];
-    const selectedFamily = families.find((family) => (
-      String(family.id) === String(currentSelection?.familyId)
-    )) ?? families[0];
-    if (!selectedFamily || !currentSelection) {
+    const { families, selectedFamily } = modelPickerFamilyPresentation(
+      currentSettings,
+      selectedHarnessId(),
+      currentSelection,
+    );
+    if (!selectedFamily) {
       if (harnessUsesConfigurationModel(currentSettings, selectedHarnessId())) {
         panel.innerHTML = `<div class="model-picker-empty"><strong>Harness default</strong><span>The model is set by this harness configuration.</span></div>`;
         return;
       }
       panel.innerHTML = `<div class="model-picker-empty"><strong>No available models</strong><button type="button" class="secondary" data-model-picker-settings>Open Settings</button></div>`;
       panel.querySelector("[data-model-picker-settings]").onclick = () => {
+        onUserTakeover();
         close();
         onOpenSettings();
       };
@@ -187,11 +208,11 @@ export function createModelPicker({
       <div class="model-option-list" role="radiogroup" aria-label="Models in ${escapeHtmlAttribute(selectedFamily.name)}">${selectedFamily.availableMembers.map((member) => {
         const model = modelFor(currentSettings, member.providerId, member.modelId);
         const provider = currentSettings.providers.find((item) => item.id === member.providerId);
-        const checked = member.providerId === currentSelection.providerId
-          && member.modelId === currentSelection.modelId;
+        const checked = modelPickerMemberIsSelected(selectedFamily.id, currentSelection, member);
         return `<button type="button" role="radio" aria-checked="${checked}" data-model-option data-provider-id="${escapeHtmlAttribute(member.providerId)}" data-model-id="${escapeHtmlAttribute(member.modelId)}"><span><strong>${escapeHtml(model?.label ?? member.modelId)}</strong><small>${escapeHtml(provider?.label ?? member.providerId)}</small></span><i aria-hidden="true">${checked ? "✓" : ""}</i></button>`;
       }).join("")}</div>`;
     panel.querySelector("[data-model-family]").onchange = (event) => {
+      onUserTakeover();
       const nextFamily = families.find((family) => String(family.id) === event.target.value);
       const member = nextFamily?.availableMembers[0];
       if (!member) return;
@@ -205,6 +226,7 @@ export function createModelPicker({
     };
     panel.querySelectorAll("[data-model-option]").forEach((button) => {
       button.onclick = () => {
+        onUserTakeover();
         const providerId = button.dataset.providerId;
         const modelId = button.dataset.modelId;
         commit({
@@ -244,11 +266,13 @@ export function createModelPicker({
       }).join("")}</div>`
       : `<div class="model-picker-empty"><strong>No available harnesses</strong><button type="button" class="secondary" data-model-picker-settings>Open Settings</button></div>`;
     panel.querySelector("[data-model-picker-settings]")?.addEventListener("click", () => {
+      onUserTakeover();
       close();
       onOpenSettings();
     });
     panel.querySelectorAll("[data-harness-option]").forEach((button) => {
       button.onclick = async () => {
+        onUserTakeover();
         const candidateHarnessId = button.dataset.harnessOption;
         const validationSequence = harnessValidationGate.begin();
         validatingHarness = true;
@@ -352,6 +376,7 @@ export function createModelPicker({
   }
 
   trigger.onclick = () => {
+    onUserTakeover();
     if (popover.classList.contains("hidden")) open();
     else close();
   };
@@ -388,6 +413,13 @@ export function createModelPicker({
 
   return Object.freeze({
     close,
+    dispose() {
+      harnessValidationGate.invalidate();
+      root.ownerDocument.removeEventListener("click", outsideClick);
+      trigger.onclick = null;
+      root.onkeydown = null;
+      root.querySelectorAll("[data-model-picker-tab]").forEach((tab) => { tab.onclick = null; });
+    },
     getSelection: () => selectionReady() ? { ...currentSelection } : null,
     isReady: selectionReady,
     open,

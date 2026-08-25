@@ -1,5 +1,5 @@
 import { createModelFamily, loadDefaultModelSelection, loadModelSettings, saveModelDefaults } from "./model-settings-api.js";
-import { availableFamilyMembers, firstAvailableSelection } from "./model-picker-model.js";
+import { availableFamilyMembers, defaultFamilySelectionForProvider } from "./model-picker-model.js";
 import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload } from "./provider-ui-model.js";
 import { bindRovingRadioGroup, providerConnectionFormMarkup, providerOptionsMarkup } from "./provider-ui.js";
 import { desktop, productApiAvailable } from "./state.js";
@@ -65,7 +65,10 @@ function showProviderForm(adapterId, { showErrors = false } = {}) {
     providerStatus.definitions,
     showErrors,
   );
-  requestAnimationFrame(() => $("#providerField-label")?.focus());
+  requestAnimationFrame(() => $(
+    showErrors ? '[aria-invalid="true"]' : "#providerField-label",
+    $("#providerSetupFields"),
+  )?.focus());
 }
 
 async function completeOnboarding() {
@@ -80,7 +83,9 @@ async function completeOnboarding() {
 async function prepareFamilyStep(definition) {
   if (!productApiAvailable) return completeOnboarding();
   const settings = await loadModelSettings();
-  if (settings.defaults.familyId && firstAvailableSelection(settings, settings.defaults.harnessId)) return completeOnboarding();
+  if (defaultFamilySelectionForProvider(settings, settings.defaults.harnessId, definition.id)) {
+    return completeOnboarding();
+  }
   const provider = settings.providers.find((item) => String(item.id) === String(definition.id));
   onboardingHarness = settings.defaults.harnessId;
   const trustedHarness = settings.harnesses.find(({ id }) => id === onboardingHarness);
@@ -196,18 +201,39 @@ export function showAuth(message = "") {
 }
 
 export async function refreshAccount() {
-  if (!desktop) return showApplication();
+  if (!desktop) {
+    showApplication();
+    return { status: "connected" };
+  }
   bindProviderSetup();
   providerStatus = await desktop.providers?.status?.();
   if (providerStatus) {
-    if (providerStatus.hasCompletedOnboarding) return showApplication();
+    if (providerStatus.hasCompletedOnboarding) {
+      showApplication();
+      const account = await desktop.account?.read?.().catch(() => null);
+      if (account?.status === "connected") {
+        const label = account.account?.email || "Codex connected";
+        $("#settingsAccount").textContent = account.account?.planType
+          ? `${label} · ${account.account.planType}`
+          : label;
+      }
+      return { status: "connected", providerStatus, account: account?.account };
+    }
     showAuth();
     showProviderOptions();
-    return;
+    return { status: "disconnected", providerStatus };
   }
-  const account = await desktop.account.read();
-  if (account.status === "connected") return showApplication();
-  showAuth(account.error || "Provider setup is unavailable.");
+  const result = await desktop.account.read();
+  if (result.status === "connected") {
+    showApplication();
+    const label = result.account?.email || "Codex connected";
+    $("#settingsAccount").textContent = result.account?.planType
+      ? `${label} · ${result.account.planType}`
+      : label;
+    return result;
+  }
+  showAuth(result.error || "Provider setup is unavailable.");
+  return result;
 }
 
 export async function connectCodex() {

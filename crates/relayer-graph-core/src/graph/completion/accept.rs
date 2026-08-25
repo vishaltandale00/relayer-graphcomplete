@@ -42,6 +42,11 @@ pub(crate) async fn apply(
             .snapshot_actions(*layer, scope.root_node_id, actions)
             .await?;
     }
+    if let Some(lease) = plan.lease {
+        ActionTable::new(&mut *connection)
+            .resolve_leased_invoke(lease.action_id, plan.root_layer_id()?)
+            .await?;
+    }
     CompletionTable::new(connection)
         .insert(scope.root_node_id, plan.root_action.id)
         .await
