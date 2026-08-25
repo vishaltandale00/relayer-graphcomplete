@@ -275,6 +275,7 @@ describe("desktop environment rail", () => {
     expect(inspectorEscapeShouldClose({ ...base, turnPopoverOpen: true })).toBe(false);
     expect(inspectorEscapeShouldClose({ ...base, modelPickerOpen: true })).toBe(false);
     expect(inspectorEscapeShouldClose({ ...base, approvalOwnsFocus: true })).toBe(false);
+    expect(inspectorEscapeShouldClose({ ...base, annotationRatingExpanded: true })).toBe(false);
     expect(inspectorEscapeShouldClose({ ...base, inspectorOpen: false })).toBe(false);
   });
 
