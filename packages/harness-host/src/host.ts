@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 import { dirname, resolve } from "node:path";
 import { GraphApiError, RelayerGraphClient, type GraphCapability } from "@relayer/graph-client";
 import {
@@ -76,6 +77,7 @@ export interface HarnessHostOptions {
 export interface RunningHarnessHost {
   readonly url: string;
   readonly close: () => Promise<void>;
+  readonly forceClose: () => void;
   readonly host: HarnessHost;
 }
 
@@ -486,6 +488,11 @@ export async function startHarnessHost(options: HarnessHostOptions): Promise<Run
   const host = new HarnessHost(options);
   await host.initialize();
   const server = createServer((request, response) => void route(host, options.controlToken, request, response));
+  const sockets = new Set<Socket>();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
   await listen(server, options.port ?? 0, options.host ?? "127.0.0.1");
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("Harness host did not bind a TCP address");
@@ -493,6 +500,11 @@ export async function startHarnessHost(options: HarnessHostOptions): Promise<Run
   return {
     url: `http://${boundHost}:${address.port}`,
     host,
+    forceClose: () => {
+      server.close();
+      for (const socket of sockets) socket.destroy();
+      server.closeAllConnections();
+    },
     close: async () => {
       const closingServer = close(server);
       try {

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CompletionOutput, GraphCapability, GraphNode, ResolvedLayer } from "@relayer/graph-client";
-import { digestHarnessConfiguration, startHarnessHost, type HarnessConfiguration, type HarnessFactory, type HarnessImplementationMap } from "@relayer/harness-host";
+import { digestHarnessConfiguration, startHarnessHost, type HarnessConfiguration, type HarnessFactory, type HarnessImplementationMap, type RunningHarnessHost } from "@relayer/harness-host";
 import type { TestExecutionPlan } from "./run-plan.js";
 
 export const basicEvalCaseId = "empty-project.task-system.two-turn";
@@ -111,6 +111,7 @@ export async function runBasicRuntimeEval(options: {
   implementations: HarnessImplementationMap;
   serverBinary?: string;
   serverReadyTimeoutMs?: number;
+  harnessCloseGraceMs?: number;
 }): Promise<RuntimeEvalArtifact> {
   if (![basicEvalCaseId, replayRepairEvalCaseId].includes(options.execution.testCaseId)) throw new Error(`Unsupported runtime-basic test case: ${options.execution.testCaseId}`);
   if (options.execution.harnessConfiguration.name !== options.execution.harnessConfigurationName) {
@@ -219,7 +220,7 @@ export async function runBasicRuntimeEval(options: {
   } finally {
     const cleanupErrors: unknown[] = [];
     for (const cleanup of [
-      async () => harnessHost?.close(),
+      async () => { if (harnessHost !== undefined) await closeHarnessHostForEval(harnessHost, options.harnessCloseGraceMs ?? 1_000); },
       async () => graphAuditProxy?.close(),
       async () => { if (graphProcess !== undefined) await terminate(graphProcess.process); },
       async () => rm(workingDirectory, { recursive: true, force: true }),
@@ -235,6 +236,16 @@ export async function runBasicRuntimeEval(options: {
       throw new AggregateError(cleanupErrors, "Runtime Eval cleanup failed");
     }
   }
+}
+
+async function closeHarnessHostForEval(host: RunningHarnessHost, closeGraceMs: number): Promise<void> {
+  const closing = settle(() => host.close());
+  if (!(await settlesWithin(closing.then(() => {}), closeGraceMs))) {
+    host.forceClose();
+    throw new Error(`Harness host did not close within ${closeGraceMs}ms and was forcibly disconnected`);
+  }
+  const result = await closing;
+  if (!result.ok) throw result.error;
 }
 
 export function checkBasicOutput(

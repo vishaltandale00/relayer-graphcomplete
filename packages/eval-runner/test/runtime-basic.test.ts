@@ -1,9 +1,9 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { productHarnessImplementations } from "@relayer/harness-host";
+import { productHarnessImplementations, type HarnessFactory } from "@relayer/harness-host";
 import type { CompletionOutput } from "@relayer/graph-client";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
@@ -240,6 +240,33 @@ describe("first runtime evaluation", () => {
     } finally {
       await upstream.close();
     }
+  });
+
+  it("forces a stalled harness shutdown and still removes runtime state within a bound", async () => {
+    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-stalled-dispose-"));
+    temporary.push(outputDirectory);
+    let runtimeDirectory: string | undefined;
+    const stalledFactory: HarnessFactory = async (context) => {
+      runtimeDirectory = context.workingDirectory;
+      const fixture = await taskSystemFixtureFactory(context);
+      return {
+        complete: (runContext, signal) => fixture.complete(runContext, signal),
+        state: () => fixture.state(),
+        dispose: () => new Promise<void>(() => {}),
+      };
+    };
+    const startedAt = Date.now();
+
+    await expect(runBasicRuntimeEval({
+      outputDirectory,
+      execution: fixtureExecution(),
+      implementations: { "fixture.task-system": stalledFactory },
+      harnessCloseGraceMs: 25,
+    })).rejects.toThrow("Harness host did not close within 25ms and was forcibly disconnected");
+
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    expect(runtimeDirectory).toBeDefined();
+    await expect(stat(runtimeDirectory!)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("runs two interactions through one live harness object and saves both fixture graphs", async () => {
