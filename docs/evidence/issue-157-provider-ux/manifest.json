@@ -12,8 +12,8 @@
     "captureFps": 6,
     "frameWidth": 1280,
     "frameHeight": 800,
-    "frameBytes": 6987426,
-    "framesSha256": "9005c4f9cbbc03006e8574d152659b2e1c19b8f67749e511eb3c1649c69c342c",
+    "frameBytes": 6987389,
+    "framesSha256": "3d0cc39a76be339f9fb8634400f1f84a14d62bf4ee363e7f8ef370a77717b876",
     "interactions": [
       "click",
       "type",
@@ -86,8 +86,8 @@
       "file": "frames/recovery.png",
       "width": 1280,
       "height": 800,
-      "bytes": 43849,
-      "sha256": "a83b1ccec597077c2f5d43c3de20b7057ecb923679a3ce45454174f779e7532d"
+      "bytes": 43858,
+      "sha256": "a8fb091c01a7114350ae9bbba2903a32263d401c1378d53c23cf16411e29e21e"
     }
   },
   "variants": {
@@ -160,7 +160,7 @@
     "codec": "h264",
     "width": 1280,
     "height": 800,
-    "bytes": 322589,
-    "sha256": "1d72eb329f47223de91cae80450ad328a72b87ecf0243a1c311a654331309bf7"
+    "bytes": 322661,
+    "sha256": "6bb6b239824d68405e194636ecaf96e81b915023bbcad491865291cd7386c17d"
   }
 }
