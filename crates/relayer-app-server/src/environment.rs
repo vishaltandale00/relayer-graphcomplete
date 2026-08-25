@@ -22,13 +22,18 @@ const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(2);
 const CACHE_TTL: Duration = Duration::from_millis(200);
 const CAPACITY_WAIT: Duration = Duration::from_millis(100);
 const MAX_CONCURRENT_INSPECTIONS: usize = 4;
+#[cfg(not(test))]
+const MAX_ACTIVE_COMMANDS: usize = MAX_CONCURRENT_INSPECTIONS;
+// Unit tests intentionally exercise several independent command-runner edge cases in
+// parallel. Giving the test process its own wider slot pool prevents unrelated fixtures
+// from observing production backpressure while leaving the shipped bound unchanged.
+#[cfg(test)]
+const MAX_ACTIVE_COMMANDS: usize = 32;
 const MAX_PENDING_INSPECTIONS: usize = 32;
 const MAX_STDOUT_BYTES: usize = 256 * 1024;
 const MAX_STDERR_BYTES: usize = 32 * 1024;
 static ACTIVE_COMMANDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static STUCK_CLEANUPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-#[cfg(test)]
-static TEST_COMMAND_SERIALIZATION: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -288,12 +293,13 @@ trait GitRunner {
         Ok(Vec::new())
     }
 
-    fn protected_excludes_file(
+    fn effective_repository_config(
         &self,
-        _path: &Path,
+        _repository: &Path,
+        _safe_directories: &[OsString],
         _deadline: Instant,
-    ) -> Result<Option<OsString>, GitRunError> {
-        Ok(None)
+    ) -> Result<Vec<(OsString, OsString)>, GitRunError> {
+        Ok(Vec::new())
     }
 
     fn validate_repository_selection(
@@ -327,7 +333,7 @@ trait GitRunner {
 #[derive(Default)]
 struct GitSafetyOverrides {
     safe_directories: Vec<OsString>,
-    excludes_file: Option<OsString>,
+    effective_config: Vec<(OsString, OsString)>,
     disabled_filter_drivers: Vec<OsString>,
 }
 
@@ -342,12 +348,13 @@ impl GitRunner for SystemGitRunner {
         read_protected_safe_directories(path, deadline)
     }
 
-    fn protected_excludes_file(
+    fn effective_repository_config(
         &self,
-        path: &Path,
+        repository: &Path,
+        safe_directories: &[OsString],
         deadline: Instant,
-    ) -> Result<Option<OsString>, GitRunError> {
-        read_protected_excludes_file(path, deadline)
+    ) -> Result<Vec<(OsString, OsString)>, GitRunError> {
+        read_effective_repository_config(repository, safe_directories, deadline)
     }
 
     fn validate_repository_selection(
@@ -429,16 +436,11 @@ fn inspect_with(
     let mut safety = match git.protected_safe_directories(path, deadline) {
         Ok(safe_directories) => GitSafetyOverrides {
             safe_directories,
-            excludes_file: None,
+            effective_config: Vec::new(),
             disabled_filter_drivers: Vec::new(),
         },
         Err(error) => return unavailable_from_error(fallback_label, error),
     };
-    safety.excludes_file = match git.protected_excludes_file(path, deadline) {
-        Ok(excludes_file) => excludes_file,
-        Err(error) => return unavailable_from_error(fallback_label, error),
-    };
-
     let repository = match run_git(
         git,
         path,
@@ -473,6 +475,11 @@ fn inspect_with(
         Err(error) => return unavailable_from_error(fallback_label, error),
     };
     let worktree_label = folder_label(&repository, project_name);
+    safety.effective_config =
+        match git.effective_repository_config(&repository, &safety.safe_directories, deadline) {
+            Ok(config) => config,
+            Err(error) => return unavailable_from_error(worktree_label, error),
+        };
     safety.disabled_filter_drivers =
         match git.local_filter_drivers(&repository, &safety.safe_directories, deadline) {
             Ok(drivers) => drivers,
@@ -861,9 +868,10 @@ fn run_bounded_command_with_safety(
         setting.push(directory);
         command.arg("-c").arg(setting);
     }
-    if let Some(excludes_file) = &safety.excludes_file {
-        let mut setting = OsString::from("core.excludesFile=");
-        setting.push(excludes_file);
+    for (key, value) in &safety.effective_config {
+        let mut setting = key.clone();
+        setting.push("=");
+        setting.push(value);
         command.arg("-c").arg(setting);
     }
     for driver in &safety.disabled_filter_drivers {
@@ -952,13 +960,7 @@ fn read_protected_safe_directories_with(
     Ok(directories)
 }
 
-fn read_protected_excludes_file(
-    path: &Path,
-    deadline: Instant,
-) -> Result<Option<OsString>, GitRunError> {
-    read_protected_excludes_file_with(path, deadline, |_| {})
-}
-
+#[cfg(test)]
 fn read_protected_excludes_file_with(
     path: &Path,
     deadline: Instant,
@@ -972,6 +974,7 @@ fn read_protected_excludes_file_with(
     )
 }
 
+#[cfg(test)]
 fn read_protected_excludes_file_with_configurers(
     path: &Path,
     deadline: Instant,
@@ -1028,6 +1031,89 @@ fn read_protected_excludes_file_with_configurers(
     }
     // An explicit empty value is not equivalent to absence: Git uses it to disable the
     // default XDG excludes file. Preserve it so command-scope replay keeps that reset.
+    Ok(effective)
+}
+
+fn read_effective_repository_config(
+    repository: &Path,
+    safe_directories: &[OsString],
+    deadline: Instant,
+) -> Result<Vec<(OsString, OsString)>, GitRunError> {
+    read_effective_repository_config_with(repository, safe_directories, deadline, |_| {})
+}
+
+fn read_effective_repository_config_with(
+    repository: &Path,
+    safe_directories: &[OsString],
+    deadline: Instant,
+    mut configure: impl FnMut(&mut Command),
+) -> Result<Vec<(OsString, OsString)>, GitRunError> {
+    // Only replay fixed, data-only keys whose absence would change Git's view of the
+    // worktree. Reading their effective value in repository context preserves normal
+    // system/global/local/worktree precedence without exposing the later inspection
+    // commands to unrelated (and potentially executable) configuration.
+    let keys = [
+        ("core.autocrlf", false),
+        ("core.excludesFile", true),
+        ("core.attributesFile", true),
+    ];
+    let mut effective = Vec::new();
+    for (key, expand_path) in keys {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(GitRunError::Timeout(SNAPSHOT_TIMEOUT))?;
+        let mut command = Command::new("git");
+        configure(&mut command);
+        sanitize_git_environment(&mut command);
+        for directory in safe_directories {
+            let mut setting = OsString::from("safe.directory=");
+            setting.push(directory);
+            command.arg("-c").arg(setting);
+        }
+        command
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("LC_ALL", "C")
+            .arg("-C")
+            .arg(repository)
+            .args(["config", "--includes"]);
+        if expand_path {
+            command.arg("--path");
+        }
+        if key == "core.autocrlf" {
+            // Normalize every boolean spelling (including implicit true and explicit
+            // empty false) independently while retaining `input` and arbitrary strings.
+            // This keeps a lower non-boolean value from preventing normalization of the
+            // higher-precedence value selected below.
+            command.arg("--type=bool-or-str");
+        }
+        command
+            .args(["--null", "--get-all", key])
+            .stdin(Stdio::null());
+        let output = run_prepared_command(command, remaining)?;
+        if !output.status.success {
+            if output.status.code == Some(1) && output.stdout.is_empty() {
+                continue;
+            }
+            return Err(GitRunError::Output(io::Error::other(format!(
+                "Git could not read effective {key} configuration"
+            ))));
+        }
+        if output.stdout.is_empty() || !output.stdout.ends_with(&[0]) {
+            return Err(GitRunError::Output(io::Error::other(format!(
+                "Git returned malformed effective {key} configuration"
+            ))));
+        }
+        let value = output.stdout[..output.stdout.len() - 1]
+            .split(|byte| *byte == 0)
+            .next_back()
+            .ok_or_else(|| {
+                GitRunError::Output(io::Error::other(format!(
+                    "Git returned malformed effective {key} configuration"
+                )))
+            })?;
+        effective.push((OsString::from(key), os_string_from_bytes(value)?));
+    }
     Ok(effective)
 }
 
@@ -1193,10 +1279,6 @@ fn os_string_from_bytes(bytes: &[u8]) -> Result<OsString, GitRunError> {
 fn run_prepared_command(mut command: Command, timeout: Duration) -> Result<GitOutput, GitRunError> {
     use std::os::fd::AsRawFd;
 
-    #[cfg(test)]
-    let _test_serialization = TEST_COMMAND_SERIALIZATION
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let slot = CommandSlot::acquire()?;
     let child = command
         .stdout(Stdio::piped())
@@ -1243,10 +1325,6 @@ fn run_prepared_command(mut command: Command, timeout: Duration) -> Result<GitOu
 
 #[cfg(not(unix))]
 fn run_prepared_command(mut command: Command, timeout: Duration) -> Result<GitOutput, GitRunError> {
-    #[cfg(test)]
-    let _test_serialization = TEST_COMMAND_SERIALIZATION
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut stdout_file = tempfile::tempfile().map_err(GitRunError::Output)?;
     let mut stderr_file = tempfile::tempfile().map_err(GitRunError::Output)?;
     let slot = CommandSlot::acquire()?;
@@ -1443,7 +1521,7 @@ impl CommandSlot {
     fn acquire() -> Result<Self, GitRunError> {
         ACTIVE_COMMANDS
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
-                (active < MAX_CONCURRENT_INSPECTIONS).then_some(active + 1)
+                (active < MAX_ACTIVE_COMMANDS).then_some(active + 1)
             })
             .map(|_| Self)
             .map_err(|_| GitRunError::CleanupBusy {
@@ -1846,6 +1924,38 @@ mod tests {
                 result => return result,
             }
         }
+    }
+
+    fn read_effective_repository_config_test(
+        repository: &Path,
+        mut configure: impl FnMut(&mut Command),
+    ) -> Result<Vec<(OsString, OsString)>, GitRunError> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match read_effective_repository_config_with(
+                repository,
+                &[],
+                Instant::now() + SNAPSHOT_TIMEOUT,
+                |command| configure(command),
+            ) {
+                Err(GitRunError::CleanupBusy { .. } | GitRunError::Timeout(_))
+                    if Instant::now() < deadline =>
+                {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                result => return result,
+            }
+        }
+    }
+
+    fn effective_config_value<'a>(
+        config: &'a [(OsString, OsString)],
+        key: &str,
+    ) -> Option<&'a OsStr> {
+        config
+            .iter()
+            .find(|(candidate, _)| candidate == key)
+            .map(|(_, value)| value.as_os_str())
     }
 
     fn read_local_filter_drivers_test(repository: &Path) -> Result<Vec<OsString>, GitRunError> {
@@ -2647,15 +2757,26 @@ mod tests {
             &[],
             Duration::from_millis(500),
         );
-        assert!(matches!(
-            output,
-            Ok(GitOutput {
-                status: GitExit { success: true, .. },
-                ..
-            }) | Err(GitRunError::Timeout(_))
-        ));
+        let timed_out = matches!(&output, Err(GitRunError::Timeout(_)));
+        assert!(
+            matches!(
+                &output,
+                Ok(GitOutput {
+                    status: GitExit { success: true, .. },
+                    ..
+                })
+            ) || timed_out
+        );
         assert!(started.elapsed() < Duration::from_secs(1));
-        let pid = fs::read_to_string(descendant_pid).unwrap();
+        let pid = match fs::read_to_string(descendant_pid) {
+            Ok(pid) => pid,
+            Err(error) if timed_out && error.kind() == io::ErrorKind::NotFound => {
+                // Under suite contention the deadline may expire before the fixture starts;
+                // in that case no descendant was created and there is nothing to reap.
+                return;
+            }
+            Err(error) => panic!("could not read descendant pid: {error}"),
+        };
         let mut alive = true;
         for _ in 0..20 {
             alive = Command::new("/bin/kill")
@@ -2842,7 +2963,10 @@ mod tests {
         );
         let safety = GitSafetyOverrides {
             safe_directories,
-            excludes_file: protected_excludes_file,
+            effective_config: protected_excludes_file
+                .into_iter()
+                .map(|value| (OsString::from("core.excludesFile"), value))
+                .collect(),
             disabled_filter_drivers: Vec::new(),
         };
 
@@ -2977,7 +3101,10 @@ mod tests {
             &["ls-files", "--others", "--exclude-standard", "-z"],
             &GitSafetyOverrides {
                 safe_directories: Vec::new(),
-                excludes_file: system_value,
+                effective_config: system_value
+                    .into_iter()
+                    .map(|value| (OsString::from("core.excludesFile"), value))
+                    .collect(),
                 disabled_filter_drivers: Vec::new(),
             },
             |command| {
@@ -3002,7 +3129,10 @@ mod tests {
             &["ls-files", "--others", "--exclude-standard", "-z"],
             &GitSafetyOverrides {
                 safe_directories: Vec::new(),
-                excludes_file: reset_value,
+                effective_config: reset_value
+                    .into_iter()
+                    .map(|value| (OsString::from("core.excludesFile"), value))
+                    .collect(),
                 disabled_filter_drivers: Vec::new(),
             },
             |command| {
@@ -3014,6 +3144,336 @@ mod tests {
         .unwrap();
         assert!(reset_result.status.success);
         assert_eq!(reset_result.stdout, b"system.tmp\0visible.tmp\0xdg.tmp\0");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn effective_global_autocrlf_keeps_clean_worktree_and_does_not_enable_filter_helper() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("repository");
+        let home = directory.path().join("home");
+        fs::create_dir(&repository).unwrap();
+        fs::create_dir(&home).unwrap();
+        let run = |arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repository)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&["init", "--initial-branch=main"]);
+        run(&["config", "user.email", "relayer-test@example.invalid"]);
+        run(&["config", "user.name", "Relayer test"]);
+        fs::write(repository.join("line.txt"), "line one\nline two\n").unwrap();
+        fs::write(repository.join("payload.flt"), "baseline\n").unwrap();
+        fs::write(repository.join(".gitattributes"), "*.flt filter=attack\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-m", "baseline"]);
+
+        let marker = directory.path().join("global-filter-executed");
+        let helper = directory.path().join("global-filter");
+        fs::write(
+            &helper,
+            format!("#!/bin/sh\ntouch '{}'\ncat\n", marker.display()),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&helper).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&helper, permissions).unwrap();
+        fs::write(
+            home.join(".gitconfig"),
+            format!(
+                "[core]\n\tautocrlf = true\n[filter \"attack\"]\n\tclean = {}\n",
+                helper.display()
+            ),
+        )
+        .unwrap();
+        fs::write(repository.join("line.txt"), "line one\r\nline two\r\n").unwrap();
+        fs::write(repository.join("payload.flt"), "changed\n").unwrap();
+
+        let effective = read_effective_repository_config_test(&repository, |command| {
+            command.env("HOME", &home);
+        })
+        .unwrap();
+        assert_eq!(
+            effective_config_value(&effective, "core.autocrlf"),
+            Some(OsStr::new("true"))
+        );
+        assert!(
+            !marker.exists(),
+            "effective config discovery executed an unrelated filter helper"
+        );
+        let output = run_bounded_git_test(
+            &repository,
+            &[
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--",
+            ],
+            &GitSafetyOverrides {
+                safe_directories: Vec::new(),
+                effective_config: effective,
+                disabled_filter_drivers: Vec::new(),
+            },
+            |command| {
+                command.env("HOME", &home);
+            },
+        )
+        .unwrap();
+        assert!(output.status.success, "{}", trimmed(&output.stderr));
+        assert_eq!(output.stdout, b"payload.flt\0");
+        assert!(
+            !marker.exists(),
+            "isolated repository diff executed a global filter helper"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn effective_config_preserves_includes_paths_empty_values_and_local_precedence() {
+        use std::{fs, io::Write};
+
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("repository");
+        let home = directory.path().join("home");
+        fs::create_dir(&repository).unwrap();
+        fs::create_dir(&home).unwrap();
+        let run = |arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repository)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&["init", "--initial-branch=main"]);
+        run(&["config", "user.email", "relayer-test@example.invalid"]);
+        run(&["config", "user.name", "Relayer test"]);
+        fs::write(repository.join("sample.attr"), "one\ntwo\n").unwrap();
+        run(&["add", "sample.attr"]);
+        run(&["commit", "-m", "baseline"]);
+
+        let global_attributes = home.join("global-attributes");
+        let global_excludes = home.join("global-ignore");
+        fs::write(&global_attributes, "*.attr text\n").unwrap();
+        fs::write(&global_excludes, "global.tmp\n").unwrap();
+        let included = home.join("included.gitconfig");
+        fs::write(
+            &included,
+            "[core]\n\tautocrlf = false\n\tattributesFile = ~/global-attributes\n\texcludesFile = ~/global-ignore\n",
+        )
+        .unwrap();
+        fs::write(
+            home.join(".gitconfig"),
+            format!("[include]\n\tpath = {}\n", included.display()),
+        )
+        .unwrap();
+        fs::write(repository.join("sample.attr"), "one\r\ntwo\r\n").unwrap();
+
+        let global = read_effective_repository_config_test(&repository, |command| {
+            command.env("HOME", &home);
+        })
+        .unwrap();
+        assert_eq!(
+            effective_config_value(&global, "core.autocrlf"),
+            Some(OsStr::new("false"))
+        );
+        assert_eq!(
+            effective_config_value(&global, "core.attributesFile"),
+            Some(global_attributes.as_os_str())
+        );
+        assert_eq!(
+            effective_config_value(&global, "core.excludesFile"),
+            Some(global_excludes.as_os_str())
+        );
+        let normalized = run_bounded_git_test(
+            &repository,
+            &[
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--",
+            ],
+            &GitSafetyOverrides {
+                safe_directories: Vec::new(),
+                effective_config: global,
+                disabled_filter_drivers: Vec::new(),
+            },
+            |command| {
+                command.env("HOME", &home);
+            },
+        )
+        .unwrap();
+        assert!(normalized.status.success);
+        assert!(normalized.stdout.is_empty());
+
+        fs::write(
+            &included,
+            "[core]\n\tautocrlf = input\n\tattributesFile = ~/global-attributes\n\texcludesFile = ~/global-ignore\n",
+        )
+        .unwrap();
+        let input = read_effective_repository_config_test(&repository, |command| {
+            command.env("HOME", &home);
+        })
+        .unwrap();
+        assert_eq!(
+            effective_config_value(&input, "core.autocrlf"),
+            Some(OsStr::new("input"))
+        );
+        let mut local_config = fs::OpenOptions::new()
+            .append(true)
+            .open(repository.join(".git/config"))
+            .unwrap();
+        writeln!(local_config, "[core]\n\tautocrlf").unwrap();
+        drop(local_config);
+        let mixed_input = read_effective_repository_config_test(&repository, |command| {
+            command.env("HOME", &home);
+        })
+        .unwrap();
+        assert_eq!(
+            effective_config_value(&mixed_input, "core.autocrlf"),
+            Some(OsStr::new("true")),
+            "a local implicit true must override a global input value"
+        );
+        fs::write(
+            &included,
+            "[core]\n\tautocrlf = invalid-lower-value\n\tattributesFile = ~/global-attributes\n\texcludesFile = ~/global-ignore\n",
+        )
+        .unwrap();
+        let mixed_invalid = read_effective_repository_config_test(&repository, |command| {
+            command.env("HOME", &home);
+        })
+        .unwrap();
+        assert_eq!(
+            effective_config_value(&mixed_invalid, "core.autocrlf"),
+            Some(OsStr::new("true")),
+            "a lower invalid string must not prevent normalization of the winning value"
+        );
+        run(&["config", "--unset-all", "core.autocrlf"]);
+        fs::write(
+            &included,
+            "[core]\n\tautocrlf =\n\tattributesFile = ~/global-attributes\n\texcludesFile = ~/global-ignore\n",
+        )
+        .unwrap();
+        let empty = read_effective_repository_config_test(&repository, |command| {
+            command.env("HOME", &home);
+        })
+        .unwrap();
+        assert_eq!(
+            effective_config_value(&empty, "core.autocrlf"),
+            Some(OsStr::new("false")),
+            "Git's explicit empty boolean must be replayed as false, not implicit true"
+        );
+        fs::write(
+            &included,
+            "[core]\n\tautocrlf\n\tattributesFile = ~/global-attributes\n\texcludesFile = ~/global-ignore\n",
+        )
+        .unwrap();
+        let implicit = read_effective_repository_config_test(&repository, |command| {
+            command.env("HOME", &home);
+        })
+        .unwrap();
+        assert_eq!(
+            effective_config_value(&implicit, "core.autocrlf"),
+            Some(OsStr::new("true")),
+            "Git's implicit boolean must remain true"
+        );
+
+        let local_excludes = repository.join("local-ignore");
+        fs::write(&local_excludes, "local.tmp\n").unwrap();
+        run(&["config", "core.autocrlf", "false"]);
+        run(&["config", "core.attributesFile", ""]);
+        run(&[
+            "config",
+            "core.excludesFile",
+            local_excludes.to_str().unwrap(),
+        ]);
+        fs::write(&included, "[core]\n\tautocrlf = input\n\tattributesFile = ~/global-attributes\n\texcludesFile = ~/global-ignore\n").unwrap();
+        let local = read_effective_repository_config_test(&repository, |command| {
+            command.env("HOME", &home);
+        })
+        .unwrap();
+        assert_eq!(
+            effective_config_value(&local, "core.autocrlf"),
+            Some(OsStr::new("false")),
+            "local false must override included global input"
+        );
+        assert_eq!(
+            effective_config_value(&local, "core.attributesFile"),
+            Some(OsStr::new("")),
+            "an explicit empty local path must reset the global attributes file"
+        );
+        assert_eq!(
+            effective_config_value(&local, "core.excludesFile"),
+            Some(local_excludes.as_os_str())
+        );
+        let dirty = run_bounded_git_test(
+            &repository,
+            &[
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--",
+            ],
+            &GitSafetyOverrides {
+                safe_directories: Vec::new(),
+                effective_config: local.clone(),
+                disabled_filter_drivers: Vec::new(),
+            },
+            |command| {
+                command.env("HOME", &home);
+            },
+        )
+        .unwrap();
+        assert!(dirty.status.success);
+        assert_eq!(dirty.stdout, b"sample.attr\0");
+
+        for name in ["global.tmp", "local.tmp", "visible.tmp"] {
+            fs::write(repository.join(name), name).unwrap();
+        }
+        let untracked = run_bounded_git_test(
+            &repository,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+            &GitSafetyOverrides {
+                safe_directories: Vec::new(),
+                effective_config: local,
+                disabled_filter_drivers: Vec::new(),
+            },
+            |command| {
+                command.env("HOME", &home);
+            },
+        )
+        .unwrap();
+        assert!(untracked.status.success);
+        assert_eq!(untracked.stdout, b"global.tmp\0local-ignore\0visible.tmp\0");
+
+        run(&["config", "extensions.worktreeConfig", "true"]);
+        run(&["config", "--worktree", "core.autocrlf", "input"]);
+        let worktree = read_effective_repository_config_test(&repository, |command| {
+            command.env("HOME", &home);
+        })
+        .unwrap();
+        assert_eq!(
+            effective_config_value(&worktree, "core.autocrlf"),
+            Some(OsStr::new("input")),
+            "worktree config must override local and global values"
+        );
     }
 
     #[test]
@@ -3109,7 +3569,7 @@ mod tests {
             &arguments,
             &GitSafetyOverrides {
                 safe_directories: Vec::new(),
-                excludes_file: None,
+                effective_config: Vec::new(),
                 disabled_filter_drivers,
             },
             |_| {},
