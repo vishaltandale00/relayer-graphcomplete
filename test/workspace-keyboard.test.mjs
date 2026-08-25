@@ -19,6 +19,7 @@ import {
   graphTurnNavigationDelta,
   graphRenderClearsSelection,
   hasHistoricalContextSelection,
+  historicalContextSelectionOptions,
   handleComposerKeydown,
   resizeComposerTextarea,
   interactionContextPayload,
@@ -169,6 +170,14 @@ describe("product workspace keyboard behavior", () => {
       nodeInGraph: false,
       preserveHistoricalSelection: false,
     })).toBe(true);
+    const origin = { id: "context-node" };
+    expect(historicalContextSelectionOptions({ nodeId: 7 }, origin)).toEqual({
+      notify: false,
+      userInitiated: true,
+      focusInspector: true,
+      contextTarget: { nodeId: 7 },
+      origin,
+    });
   });
 
   it("keeps context controls symbol-first and accessible", () => {

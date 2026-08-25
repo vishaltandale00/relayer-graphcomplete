@@ -82,6 +82,16 @@ export function graphRenderClearsSelection({
     && (!hasResponseNodes || (enteringView && !nodeInGraph));
 }
 
+export function historicalContextSelectionOptions(contextTarget, origin) {
+  return {
+    notify: false,
+    userInitiated: true,
+    focusInspector: true,
+    contextTarget,
+    origin,
+  };
+}
+
 export function turnReviewKind(current) {
   return current ? "control" : "turn";
 }
@@ -1807,7 +1817,11 @@ export function createProductWorkspace({
       button.setAttribute("aria-label", `Open ${node.title} details`);
       button.onclick = () => {
         closeContextPopover();
-        selectNode(state, node.id, { notify: false, contextTarget: context.target });
+        selectNode(
+          state,
+          node.id,
+          historicalContextSelectionOptions(context.target, button),
+        );
       };
       group.append(button);
       if (context.annotations?.length) {
@@ -2416,7 +2430,13 @@ export function createProductWorkspace({
     ));
   }
 
-  function selectNode(state, id, { notify = true, contextTarget } = {}) {
+  function selectNode(state, id, {
+    notify = true,
+    userInitiated = notify,
+    focusInspector = false,
+    contextTarget,
+    origin = null,
+  } = {}) {
     selection.selectedNodeId = id;
     if (contextTarget !== undefined || notify) selectedContextTarget = contextTarget || null;
     const node = resolveInteractionContextNode(
@@ -2443,7 +2463,7 @@ export function createProductWorkspace({
       kind: "NODE",
     } : null;
     if (notify) onSelectionChange(node.id);
-    const { reveal } = openInspector({ userInitiated: notify });
+    const { reveal } = openInspector({ userInitiated, origin });
     $("#detailIcon").replaceChildren(createRelayerIcon(
       node.icon || node.metadata?.relayer?.icon,
       { class: "relayer-detail-icon" },
@@ -2550,6 +2570,7 @@ export function createProductWorkspace({
     renderBreadcrumb(state, getThread());
     updateAttachContextControl();
     reveal();
+    if (focusInspector) $("#closeInspector").focus({ preventScroll: true });
   }
 
   function dispose() {
