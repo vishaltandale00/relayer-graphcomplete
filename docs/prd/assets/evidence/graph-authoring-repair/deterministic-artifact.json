@@ -55,12 +55,12 @@
     "status": 422,
     "code": "orphan_draft_layers",
     "path": "layers",
-    "message": "Current draft layers are not reachable from the root action: 3. Connect each intended layer with a current expand or reference action, or call graph.discardLayer(layer) for each intentionally abandoned layer.",
+    "message": "Current draft layers are not reachable from the root action: 3. Connect each intended layer with a current expand or reference action, or explicitly discard each intentionally abandoned layer with the client API (discardLayer in TypeScript; discard_layer in Python).",
     "issues": [
       {
         "code": "orphan_draft_layers",
         "path": "layers",
-        "message": "Current draft layers are not reachable from the root action: 3. Connect each intended layer with a current expand or reference action, or call graph.discardLayer(layer) for each intentionally abandoned layer."
+        "message": "Current draft layers are not reachable from the root action: 3. Connect each intended layer with a current expand or reference action, or explicitly discard each intentionally abandoned layer with the client API (discardLayer in TypeScript; discard_layer in Python)."
       }
     ]
   },
@@ -81,6 +81,16 @@
     "first": {
       "edges": [],
       "id": 3,
+      "layout": {
+        "placements": [
+          {
+            "nodeId": 5,
+            "x": 0.5,
+            "y": 0.5
+          }
+        ],
+        "version": 1
+      },
       "nodes": [
         5
       ],
@@ -89,6 +99,16 @@
     "repeated": {
       "edges": [],
       "id": 3,
+      "layout": {
+        "placements": [
+          {
+            "nodeId": 5,
+            "x": 0.5,
+            "y": 0.5
+          }
+        ],
+        "version": 1
+      },
       "nodes": [
         5
       ],
@@ -97,6 +117,16 @@
     "afterAcceptedSubmission": {
       "edges": [],
       "id": 3,
+      "layout": {
+        "placements": [
+          {
+            "nodeId": 5,
+            "x": 0.5,
+            "y": 0.5
+          }
+        ],
+        "version": 1
+      },
       "nodes": [
         5
       ],
@@ -118,8 +148,8 @@
     "repeatedDiscardReturnedSameStoppedLayer": true,
     "finalSubmissionAccepted": true
   },
-  "generatedAt": "2026-08-25T07:05:06.991Z",
-  "sourceCommit": "31771d50f9d38cf91ac66ac759d9225b97fdfe8a",
+  "generatedAt": "2026-08-25T07:20:54.745Z",
+  "sourceCommit": "589276b8ceb2224e6030a43e4a2e2118205a2064",
   "workingTreeDirty": false,
   "productThreadId": 1,
   "productInteractionId": 1

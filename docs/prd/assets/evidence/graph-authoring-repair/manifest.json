@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-08-25T07:05:06.991Z",
-  "sourceCommit": "31771d50f9d38cf91ac66ac759d9225b97fdfe8a",
+  "capturedAt": "2026-08-25T07:20:54.745Z",
+  "sourceCommit": "589276b8ceb2224e6030a43e4a2e2118205a2064",
   "workingTreeDirty": false,
   "command": "RELAYER_CAPTURE_GRAPH_AUTHORING_REPAIR_EVIDENCE=1 RELAYER_RECORD_GRAPH_AUTHORING_REPAIR_VIDEO=1 electron scripts/capture-graph-authoring-repair-evidence.mjs",
   "paidInferenceCalls": 0,
@@ -12,14 +12,14 @@
   },
   "screenshot": {
     "file": "accepted-replay-safe-graph.png",
-    "sha256": "86a7c8adb653b81a42be9af68ab590afb9d2c73748d547de8030f34d6e325904",
+    "sha256": "a10f7cbcc3f60acf0f284ed70cca172a05aabc848ccd5e0ef0b95534f75865e7",
     "proves": [
       "Production ProductWorkspace renders the accepted replay-safe root graph"
     ]
   },
   "deterministicArtifact": {
     "file": "deterministic-artifact.json",
-    "sha256": "a9cccb761756f06b74677f5998159feef22397874c2aa2ac0ef14a57baf0e3e8",
+    "sha256": "62f8ffa5c521645e27fed6637190a40d190482b3da04d920a53dd9d8c234ba3a",
     "proves": [
       "Whole-program replay retained the same node, edge, layer, and action IDs",
       "Orphan submission failed before discard",
@@ -30,8 +30,8 @@
   },
   "screenRecording": {
     "file": "graph-authoring-repair.mp4",
-    "sha256": "a10995c589dbaffde6dc3a4498ae822ef70e1dcce0dbbdc9bd3c26c0be8dd5b3",
-    "durationSeconds": 13.1,
+    "sha256": "054f504bf2f21d9a9ab1d66e08a17014d0582f0eae66f548d52bd991397f54e6",
+    "durationSeconds": 12.9,
     "capture": "Direct frame recording of the real Electron BrowserWindow at 10 fps",
     "visibleSteps": [
       "Accepted root graph renders in production ProductWorkspace",
