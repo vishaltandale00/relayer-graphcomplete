@@ -234,6 +234,16 @@ class RelayerGraphClient:
     async def get_layer(self, layer: LayerReference) -> Mapping[str, Any]:
         return await self._request("GET", f"/api/graph/layers/{_layer_id(layer)}")
 
+    async def discard_layer(self, layer: LayerReference) -> GraphLayer:
+        """Preserve an abandoned draft layer as stopped without changing its contents."""
+        value = await self._request(
+            "POST", f"/api/graph/layers/{_layer_id(layer)}/discard"
+        )
+        stopped = GraphLayer.from_dict(value["layer"])
+        if isinstance(layer, LayerObject):
+            layer.ref = stopped
+        return stopped
+
     async def submit(self, interaction_node: NodeReference | None = None) -> Mapping[str, Any]:
         interaction_id = self.node_id if interaction_node is None else _node_id(interaction_node)
         return await self._request("POST", "/api/graph/submit", {"nodeId": interaction_id})

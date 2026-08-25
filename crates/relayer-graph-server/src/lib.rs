@@ -84,6 +84,7 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/graph/edges", post(create_edge))
         .route("/api/graph/layers", post(submit_layer))
         .route("/api/graph/layers/{id}", get(get_layer))
+        .route("/api/graph/layers/{id}/discard", post(discard_layer))
         .route("/api/graph/actions", post(add_action))
         .route("/api/graph/actions/{id}", get(get_action))
         .route("/api/graph/submit", post(submit_completion))
@@ -519,6 +520,20 @@ async fn get_layer(
         .await?;
     Ok(Json(json!(layer)))
 }
+async fn discard_layer(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<LayerId>,
+) -> Result<Json<Value>, ApiError> {
+    let node_id = session(&state, &headers)?;
+    let layer = state
+        .graph
+        .writer_for_subgraph(node_id)
+        .await?
+        .discard_layer(id)
+        .await?;
+    Ok(Json(json!({"layer":layer})))
+}
 async fn add_action(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -724,6 +739,58 @@ mod tests {
         http::Request,
     };
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn graph_capability_can_discard_an_owned_orphan_layer() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "Question")
+            .await
+            .unwrap();
+        let writer = graph.writer_for_subgraph(interaction.id).await.unwrap();
+        let node = writer
+            .submit_node(&NodeDraft {
+                client_key: "abandoned-node".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Abandoned".into(),
+                detail: "Preserve this draft".into(),
+            })
+            .await
+            .unwrap();
+        let layer = writer
+            .submit_layer(&LayerDraft {
+                client_key: "abandoned-layer".into(),
+                nodes: vec![node.id],
+                edges: vec![],
+                layout: authored_layout(node.id),
+                size_justification: None,
+            })
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let graph_token = mint_capability(&state, interaction.id, None).ok().unwrap();
+        let app = router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/graph/layers/{}/discard", layer.id.value()))
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["layer"]["id"], layer.id.value());
+        assert_eq!(body["layer"]["state"], "stopped");
+    }
 
     #[tokio::test]
     async fn staged_import_endpoints_require_control_authority_and_finalize_in_order() {
@@ -1663,6 +1730,113 @@ mod tests {
                 .unwrap();
         assert_eq!(unsupported["error"]["code"], "unsupported_action_variant");
         assert_eq!(unsupported["error"]["path"], "variant");
+    }
+
+    #[tokio::test]
+    async fn action_api_returns_repairable_error_for_a_second_root_key() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "hello")
+            .await
+            .unwrap();
+        let writer = graph.writer_for_subgraph(interaction.id).await.unwrap();
+        let answer = writer
+            .submit_node(&NodeDraft {
+                client_key: "answer".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Answer".into(),
+                detail: "Answer detail".into(),
+            })
+            .await
+            .unwrap();
+        let layer = writer
+            .submit_layer(&LayerDraft {
+                client_key: "root-layer".into(),
+                nodes: vec![answer.id],
+                edges: vec![],
+                layout: authored_layout(answer.id),
+                size_justification: None,
+            })
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let graph_token = mint_capability(&state, interaction.id, None).ok().unwrap();
+        let app = router(state);
+        let action_body = |client_key: &str, label: &str| {
+            serde_json::to_vec(&json!({
+                "clientKey": client_key,
+                "sourceNodeId": interaction.id,
+                "kind": "navigate",
+                "relation": "expand",
+                "label": label,
+                "targetLayerId": layer.id,
+            }))
+            .unwrap()
+        };
+
+        let first = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(action_body("response", "Response")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let first: Value =
+            serde_json::from_slice(&to_bytes(first.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+
+        let rejected = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(action_body("duplicate", "Duplicate")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let rejected: Value =
+            serde_json::from_slice(&to_bytes(rejected.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(rejected["error"]["code"], "root_action_already_exists");
+        assert_eq!(rejected["error"]["path"], "clientKey");
+        assert!(
+            rejected["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("response")
+        );
+
+        let replayed = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/actions")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {graph_token}"))
+                    .body(Body::from(action_body("response", "Updated response")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(replayed.status(), StatusCode::OK);
+        let replayed: Value =
+            serde_json::from_slice(&to_bytes(replayed.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(replayed["action"]["id"], first["action"]["id"]);
+        assert_eq!(replayed["action"]["label"], "Updated response");
     }
 
     #[tokio::test]
