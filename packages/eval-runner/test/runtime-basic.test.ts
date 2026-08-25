@@ -1,4 +1,5 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,7 +7,7 @@ import { productHarnessImplementations } from "@relayer/harness-host";
 import type { CompletionOutput } from "@relayer/graph-client";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
-import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, type ReplayRepairEvidence } from "../src/runtime-basic.js";
+import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type ReplayRepairEvidence } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -200,6 +201,47 @@ describe("first runtime evaluation", () => {
     })).toBeUndefined();
   });
 
+  it("rejects hostile audit-proxy targets without contacting either upstream or the requested origin", async () => {
+    let upstreamRequests = 0;
+    let hostileRequests = 0;
+    const upstream = await listenServer(() => { upstreamRequests += 1; });
+    const hostile = await listenServer(() => { hostileRequests += 1; });
+    const proxy = await startGraphAuditProxy(upstream.url);
+    try {
+      const absoluteStatus = await rawHttpRequest(proxy.url, `${hostile.url}/api/graph/nodes`);
+      const schemeRelativeStatus = await rawHttpRequest(proxy.url, `//127.0.0.1:${new URL(hostile.url).port}/api/graph/nodes`);
+      expect(absoluteStatus).toBe(400);
+      expect(schemeRelativeStatus).toBe(400);
+      expect(upstreamRequests).toBe(0);
+      expect(hostileRequests).toBe(0);
+      expect(proxy.events()).toEqual([]);
+    } finally {
+      await proxy.close();
+      await upstream.close();
+      await hostile.close();
+    }
+  });
+
+  it("bounds audit-proxy shutdown while an active upstream request never responds", async () => {
+    let markUpstreamReached!: () => void;
+    const upstreamReached = new Promise<void>((resolveReached) => { markUpstreamReached = resolveReached; });
+    const upstream = await listenServer(() => {
+      markUpstreamReached();
+      return false;
+    });
+    const proxy = await startGraphAuditProxy(upstream.url, 25);
+    const pendingResponse = rawHttpRequest(proxy.url, "/api/graph/nodes").catch(() => 0);
+    await upstreamReached;
+    const startedAt = Date.now();
+    try {
+      await proxy.close();
+      expect(Date.now() - startedAt).toBeLessThan(500);
+      await pendingResponse;
+    } finally {
+      await upstream.close();
+    }
+  });
+
   it("runs two interactions through one live harness object and saves both fixture graphs", async () => {
     const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-test-")); temporary.push(outputDirectory);
     const execution = fixtureExecution();
@@ -296,3 +338,44 @@ describe("first runtime evaluation", () => {
     })).rejects.toThrow("Unexpected token");
   });
 });
+
+async function listenServer(onRequest: () => boolean | void): Promise<{ readonly url: string; readonly close: () => Promise<void> }> {
+  const server = createServer((_request, response) => {
+    if (onRequest() === false) return;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end("{}");
+  });
+  await new Promise<void>((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolveListen());
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("Expected a TCP test server address");
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise<void>((resolveClose, reject) => {
+      server.close((error) => error === undefined ? resolveClose() : reject(error));
+      server.closeAllConnections();
+    }),
+  };
+}
+
+async function rawHttpRequest(proxyUrl: string, target: string): Promise<number> {
+  const proxy = new URL(proxyUrl);
+  return new Promise<number>((resolveResponse, reject) => {
+    const outgoing = request({
+      hostname: proxy.hostname,
+      port: proxy.port,
+      method: "POST",
+      path: target,
+      headers: { authorization: "Bearer must-not-leave-proxy" },
+    }, (response) => {
+      response.resume();
+      response.once("end", () => resolveResponse(response.statusCode ?? 0));
+      response.once("aborted", () => resolveResponse(0));
+      response.once("error", reject);
+    });
+    outgoing.once("error", reject);
+    outgoing.end();
+  });
+}

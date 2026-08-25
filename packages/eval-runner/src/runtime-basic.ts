@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -126,6 +126,7 @@ export async function runBasicRuntimeEval(options: {
   let graphProcess: Awaited<ReturnType<typeof startGraphServer>> | undefined;
   let graphAuditProxy: Awaited<ReturnType<typeof startGraphAuditProxy>> | undefined;
   let harnessHost: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
+  let operationError: unknown;
   try {
     graphProcess = await startGraphServer(options.serverBinary, join(stateDirectory, "graph.sqlite"), graphControlToken, options.serverReadyTimeoutMs);
     if (options.execution.testCaseId === replayRepairEvalCaseId) graphAuditProxy = await startGraphAuditProxy(graphProcess.url);
@@ -212,14 +213,27 @@ export async function runBasicRuntimeEval(options: {
     await writeFile(join(runDirectory, "result.json"), `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
     await writeFile(join(runDirectory, "index.html"), renderArtifact(artifact), "utf8");
     return artifact;
+  } catch (error) {
+    operationError = error;
+    throw error;
   } finally {
-    await harnessHost?.close();
-    await graphAuditProxy?.close();
-    if (graphProcess !== undefined) {
-      graphProcess.process.kill("SIGTERM");
-      await onceExit(graphProcess.process);
+    const cleanupErrors: unknown[] = [];
+    for (const cleanup of [
+      async () => harnessHost?.close(),
+      async () => graphAuditProxy?.close(),
+      async () => { if (graphProcess !== undefined) await terminate(graphProcess.process); },
+      async () => rm(workingDirectory, { recursive: true, force: true }),
+    ]) {
+      const result = await settle(cleanup);
+      if (!result.ok) cleanupErrors.push(result.error);
     }
-    await rm(workingDirectory, { recursive: true, force: true });
+    if (cleanupErrors.length > 0) {
+      if (operationError !== undefined) {
+        throw new AggregateError([operationError, ...cleanupErrors], "Runtime Eval failed and cleanup also failed");
+      }
+      if (cleanupErrors.length === 1) throw cleanupErrors[0];
+      throw new AggregateError(cleanupErrors, "Runtime Eval cleanup failed");
+    }
   }
 }
 
@@ -413,24 +427,34 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
-async function startGraphAuditProxy(upstreamUrl: string): Promise<{
+export async function startGraphAuditProxy(upstreamUrl: string, closeGraceMs = 250): Promise<{
   readonly url: string;
   readonly events: () => readonly ReplayRepairAuditEvent[];
   readonly close: () => Promise<void>;
 }> {
+  const upstream = new URL(upstreamUrl);
   const auditEvents: ReplayRepairAuditEvent[] = [];
+  const sockets = new Set<Socket>();
+  const requests = new Set<AbortController>();
   let sequence = 0;
   const server = createServer((request, response) => {
-    void forwardAuditedGraphRequest(request, response, upstreamUrl, (event) => {
+    const controller = new AbortController();
+    requests.add(controller);
+    void forwardAuditedGraphRequest(request, response, upstream, controller.signal, (event) => {
       if (event.path.startsWith("/api/graph/")) auditEvents.push({ ...event, sequence: ++sequence });
     }).catch((error: unknown) => {
       if (response.headersSent) {
         response.destroy(error instanceof Error ? error : undefined);
         return;
       }
-      response.writeHead(502, { "content-type": "application/json" });
-      response.end(JSON.stringify({ error: { code: "audit_proxy_failed", message: error instanceof Error ? error.message : String(error) } }));
-    });
+      const invalidTarget = error instanceof InvalidAuditProxyTargetError;
+      response.writeHead(invalidTarget ? 400 : 502, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { code: invalidTarget ? "invalid_proxy_target" : "audit_proxy_failed", message: error instanceof Error ? error.message : String(error) } }));
+    }).finally(() => requests.delete(controller));
+  });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
   });
   await new Promise<void>((resolveListen, reject) => {
     server.once("error", reject);
@@ -443,18 +467,64 @@ async function startGraphAuditProxy(upstreamUrl: string): Promise<{
   return {
     url: `http://127.0.0.1:${address.port}`,
     events: () => structuredClone(auditEvents),
-    close: () => new Promise<void>((resolveClose, reject) => server.close((error) => error === undefined ? resolveClose() : reject(error))),
+    close: () => closeGraphAuditProxy(server, sockets, requests, closeGraceMs),
   };
+}
+
+class InvalidAuditProxyTargetError extends Error {}
+
+async function closeGraphAuditProxy(
+  server: ReturnType<typeof createServer>,
+  sockets: Set<Socket>,
+  requests: Set<AbortController>,
+  closeGraceMs: number,
+): Promise<void> {
+  let closeError: Error | undefined;
+  let closed = false;
+  const closeResult = new Promise<void>((resolveClose) => {
+    server.close((error) => {
+      closeError = error;
+      closed = true;
+      resolveClose();
+    });
+  });
+  server.closeIdleConnections();
+  if (!(await settlesWithin(closeResult, closeGraceMs))) {
+    for (const request of requests) request.abort();
+    for (const socket of sockets) socket.destroy();
+    server.closeAllConnections();
+    await settlesWithin(closeResult, closeGraceMs);
+  }
+  if (!closed) throw new Error(`Graph audit proxy did not close within ${closeGraceMs * 2}ms`);
+  if (closeError !== undefined) throw closeError;
+}
+
+function settlesWithin(operation: Promise<void>, milliseconds: number): Promise<boolean> {
+  return new Promise<boolean>((resolveSettled) => {
+    const timer = setTimeout(() => resolveSettled(false), milliseconds);
+    void operation.then(() => {
+      clearTimeout(timer);
+      resolveSettled(true);
+    });
+  });
 }
 
 async function forwardAuditedGraphRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  upstreamUrl: string,
+  upstream: URL,
+  signal: AbortSignal,
   record: (event: Omit<ReplayRepairAuditEvent, "sequence">) => void,
 ): Promise<void> {
   const method = request.method ?? "GET";
-  const requestUrl = new URL(request.url ?? "/", upstreamUrl);
+  const target = request.url ?? "/";
+  if (!target.startsWith("/") || target.startsWith("//")) {
+    throw new InvalidAuditProxyTargetError("Graph audit proxy accepts only origin-relative request targets.");
+  }
+  const requestUrl = new URL(target, upstream);
+  if (requestUrl.origin !== upstream.origin) {
+    throw new InvalidAuditProxyTargetError("Graph audit proxy request target escaped the configured upstream origin.");
+  }
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   const requestBody = Buffer.concat(chunks);
@@ -463,17 +533,18 @@ async function forwardAuditedGraphRequest(
     const value = request.headers[name];
     if (typeof value === "string") headers.set(name, value);
   }
-  const upstream = await fetch(requestUrl, {
+  const upstreamResponse = await fetch(requestUrl, {
     method,
     headers,
+    signal,
     ...(requestBody.byteLength === 0 || method === "GET" || method === "HEAD" ? {} : { body: requestBody }),
   });
-  const responseBytes = Buffer.from(await upstream.arrayBuffer());
-  const contentType = upstream.headers.get("content-type");
-  response.writeHead(upstream.status, contentType === null ? {} : { "content-type": contentType });
+  const responseBytes = Buffer.from(await upstreamResponse.arrayBuffer());
+  const contentType = upstreamResponse.headers.get("content-type");
+  response.writeHead(upstreamResponse.status, contentType === null ? {} : { "content-type": contentType });
   response.end(responseBytes);
   const responseValue = parseJsonObject(responseBytes);
-  record(sanitizeGraphAuditEvent(method, requestUrl.pathname, upstream.status, responseValue));
+  record(sanitizeGraphAuditEvent(method, requestUrl.pathname, upstreamResponse.status, responseValue));
 }
 
 function sanitizeGraphAuditEvent(
