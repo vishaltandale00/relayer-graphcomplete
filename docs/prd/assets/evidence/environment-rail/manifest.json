@@ -1,6 +1,6 @@
 {
   "passed": true,
-  "generatedAt": "2026-08-25T06:54:15.708Z",
+  "generatedAt": "2026-08-25T07:29:43.158Z",
   "source": {
     "runtime": "real Electron + production renderer + Rust app/graph servers",
     "harness": "fixture-task-system",
@@ -16,10 +16,10 @@
       "branch": "codex/issue-128-environment-rail",
       "detached": false,
       "changes": {
-        "additions": 362,
-        "deletions": 24,
-        "untrackedFiles": 12,
-        "trackedChangedFiles": 14
+        "additions": 1693,
+        "deletions": 178,
+        "untrackedFiles": 1,
+        "trackedChangedFiles": 20
       }
     },
     "api": {
@@ -28,28 +28,28 @@
       "branch": "codex/issue-128-environment-rail",
       "detached": false,
       "changes": {
-        "trackedFiles": 14,
-        "additions": 362,
-        "deletions": 24,
-        "untrackedFiles": 12
+        "trackedFiles": 20,
+        "additions": 1693,
+        "deletions": 178,
+        "untrackedFiles": 1
       },
-      "observedAt": "2026-08-25T06:54:14.590659Z"
+      "observedAt": "2026-08-25T07:29:39.474471Z"
     },
     "displayed": {
       "worktreeLabel": "relayer-graphcomplete",
       "branch": "codex/issue-128-environment-rail",
-      "additions": "+362",
-      "deletions": "−24",
+      "additions": "+1693",
+      "deletions": "−178",
       "trackedFilesFallback": null,
-      "untrackedFiles": "12 files",
+      "untrackedFiles": "1 file",
       "interactionStatus": "Complete"
     },
     "expectedDisplay": {
       "worktreeLabel": "relayer-graphcomplete",
       "branch": "codex/issue-128-environment-rail",
-      "additions": "+362",
-      "deletions": "−24",
-      "untrackedFiles": "12 files"
+      "additions": "+1693",
+      "deletions": "−178",
+      "untrackedFiles": "1 file"
     },
     "matched": true
   },
@@ -63,7 +63,299 @@
       "environmentPreserved": true,
       "focusRestoredTo": "graphStage"
     },
-    "evalReadOnly": true
+    "ultrawide": {
+      "closeButton": {
+        "inspectorClosed": true,
+        "environmentPreserved": true
+      },
+      "escape": {
+        "inspectorClosed": true,
+        "environmentPreserved": true,
+        "focusRestoredTo": "graphStage"
+      },
+      "visibleCapture": {
+        "windowVisible": true,
+        "environment": {
+          "pngBytes": 25210,
+          "uniqueSampledPixels": 64,
+          "size": {
+            "width": 680,
+            "height": 304
+          }
+        },
+        "inspector": {
+          "pngBytes": 45833,
+          "uniqueSampledPixels": 64,
+          "size": {
+            "width": 680,
+            "height": 1488
+          }
+        }
+      }
+    },
+    "evalReadOnly": true,
+    "evalVisibleCapture": {
+      "windowVisible": true,
+      "environment": {
+        "pngBytes": 25210,
+        "uniqueSampledPixels": 64,
+        "size": {
+          "width": 680,
+          "height": 304
+        }
+      },
+      "inspector": {
+        "pngBytes": 45808,
+        "uniqueSampledPixels": 58,
+        "size": {
+          "width": 680,
+          "height": 1482
+        }
+      }
+    },
+    "replay": {
+      "filename": "06-interaction-replay.mp4",
+      "sha256": "e60758ea2984396aade3f50ef1193d4ebebbb48a7730e7e20451abb2e35de318",
+      "bytes": 137538,
+      "durationSeconds": 10,
+      "frameRate": 6,
+      "frameCount": 60,
+      "interactionInput": "Electron mouse input plus Escape keyboard input",
+      "steps": [
+        {
+          "label": "Environment remains visible",
+          "atSeconds": 0,
+          "frameSha256": "1b966004c00139d1db1412ca2094b7f05fc0f74b746be9454419e45d9e74fd9b",
+          "viewportWidth": 1480,
+          "environmentVisible": true,
+          "inspectorVisible": false,
+          "selectedNodeId": null,
+          "activeElement": "BODY",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25210,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            }
+          }
+        },
+        {
+          "label": "Select node; Node Details opens beneath Environment",
+          "atSeconds": 1,
+          "frameSha256": "ad22d44a2efe99f11bc32d471523be2ff071c83b336ff029a682d03648f5818b",
+          "viewportWidth": 1480,
+          "environmentVisible": true,
+          "inspectorVisible": true,
+          "selectedNodeId": "2",
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25210,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            },
+            "inspector": {
+              "pngBytes": 45833,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 1488
+              }
+            }
+          }
+        },
+        {
+          "label": "Close button dismisses Node Details; Environment remains",
+          "atSeconds": 2,
+          "frameSha256": "1b966004c00139d1db1412ca2094b7f05fc0f74b746be9454419e45d9e74fd9b",
+          "viewportWidth": 1480,
+          "environmentVisible": true,
+          "inspectorVisible": false,
+          "selectedNodeId": null,
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25210,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            }
+          }
+        },
+        {
+          "label": "Reopen Node Details",
+          "atSeconds": 3,
+          "frameSha256": "9c13137b584808ba22767682cc50489a55086b441eea7b21495f574fe91e6693",
+          "viewportWidth": 1480,
+          "environmentVisible": true,
+          "inspectorVisible": true,
+          "selectedNodeId": "2",
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25210,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            },
+            "inspector": {
+              "pngBytes": 45833,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 1488
+              }
+            }
+          }
+        },
+        {
+          "label": "Escape dismisses Node Details; Environment and graph focus remain",
+          "atSeconds": 4,
+          "frameSha256": "37f4debfbc0938f6ac0a3d8f11d33f8a40a2d737ed606e304d5e0cac84b1d342",
+          "viewportWidth": 1480,
+          "environmentVisible": true,
+          "inspectorVisible": false,
+          "selectedNodeId": null,
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25210,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            }
+          }
+        },
+        {
+          "label": "Ultrawide Environment remains visible",
+          "atSeconds": 5,
+          "frameSha256": "7f18f32f20aa76bd67121d138050fbdb508826e66324b911aae7782d1dacb0d8",
+          "viewportWidth": 2998,
+          "environmentVisible": true,
+          "inspectorVisible": false,
+          "selectedNodeId": null,
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25210,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            }
+          }
+        },
+        {
+          "label": "Ultrawide node selection opens Node Details",
+          "atSeconds": 6,
+          "frameSha256": "9245e6d624ede0d6f67ac28f8d63af384e96fbe06d5ef334ed600d89d43a83c8",
+          "viewportWidth": 2998,
+          "environmentVisible": true,
+          "inspectorVisible": true,
+          "selectedNodeId": "2",
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25210,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            },
+            "inspector": {
+              "pngBytes": 45833,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 1488
+              }
+            }
+          }
+        },
+        {
+          "label": "Ultrawide close button dismisses Node Details",
+          "atSeconds": 7,
+          "frameSha256": "87211b85845b81f661fd9e2da2c42346fa8aa7df805fec0872538c96af4a8e86",
+          "viewportWidth": 2998,
+          "environmentVisible": true,
+          "inspectorVisible": false,
+          "selectedNodeId": null,
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25210,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            }
+          }
+        },
+        {
+          "label": "Ultrawide Node Details reopens",
+          "atSeconds": 8,
+          "frameSha256": "ccf390d089103ab87f0b9daebaf78ed1b181c057952f25bcfcef98cb69a2116c",
+          "viewportWidth": 2998,
+          "environmentVisible": true,
+          "inspectorVisible": true,
+          "selectedNodeId": "2",
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25210,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            },
+            "inspector": {
+              "pngBytes": 45833,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 1488
+              }
+            }
+          }
+        },
+        {
+          "label": "Ultrawide Escape dismisses Node Details",
+          "atSeconds": 9,
+          "frameSha256": "7f18f32f20aa76bd67121d138050fbdb508826e66324b911aae7782d1dacb0d8",
+          "viewportWidth": 2998,
+          "environmentVisible": true,
+          "inspectorVisible": false,
+          "selectedNodeId": null,
+          "activeElement": "graphStage",
+          "pixelProof": {
+            "environment": {
+              "pngBytes": 25210,
+              "uniqueSampledPixels": 64,
+              "size": {
+                "width": 680,
+                "height": 304
+              }
+            }
+          }
+        }
+      ]
+    }
   },
   "geometry": {
     "normalEnvironment": {
@@ -390,21 +682,21 @@
         "left": 1128,
         "right": 1468,
         "top": 176,
-        "bottom": 920,
+        "bottom": 917,
         "width": 340,
-        "height": 744
+        "height": 741
       },
       "graph": {
         "left": 244,
         "right": 1116,
         "top": 216,
-        "bottom": 858,
+        "bottom": 855,
         "width": 872,
-        "height": 642
+        "height": 639
       },
       "viewport": {
         "width": 1480,
-        "height": 920
+        "height": 917
       }
     }
   },
@@ -413,6 +705,7 @@
     "02-normal-node-detail.png",
     "03-ultrawide-node-detail.png",
     "04-narrow-stacked-node-detail.png",
-    "05-eval-node-detail.png"
+    "05-eval-node-detail.png",
+    "06-interaction-replay.mp4"
   ]
 }

@@ -13,6 +13,11 @@ pub(super) async fn get(
 ) -> Result<Json<crate::environment::EnvironmentSnapshot>, ApiError> {
     authorize_read(&state, &headers)?;
     let project_id = ProjectId::try_from(id)?;
-    let project_path = state.product.project_path(project_id).await?;
-    Ok(Json(crate::environment::inspect(project_path.into()).await))
+    let project = state.product.project(project_id).await?;
+    Ok(Json(
+        state
+            .environment_inspector
+            .inspect(project.path.into(), project.name)
+            .await,
+    ))
 }

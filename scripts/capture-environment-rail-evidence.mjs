@@ -1,7 +1,8 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { execFile as execFileCallback } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync } from "node:fs";
-import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -271,7 +272,7 @@ function requireGitParity(apiSnapshot, independent, displayed) {
     branch: expected.detached ? "Detached HEAD" : expected.branch,
     additions: `+${expected.changes.additions}`,
     deletions: `−${expected.changes.deletions}`,
-    untrackedFiles: `${expected.changes.untrackedFiles} files`,
+    untrackedFiles: `${expected.changes.untrackedFiles} ${expected.changes.untrackedFiles === 1 ? "file" : "files"}`,
   };
   for (const [key, expectedValue] of Object.entries(expectedDisplay)) {
     if (displayed[key] !== expectedValue) {
@@ -288,6 +289,111 @@ async function capture(webContents, filename) {
   return path;
 }
 
+function sampledUniquePixels(image) {
+  const bitmap = image.toBitmap();
+  const stride = Math.max(4, Math.floor(bitmap.length / (5_000 * 4)) * 4);
+  const colors = new Set();
+  for (let offset = 0; offset + 3 < bitmap.length; offset += stride) {
+    colors.add(bitmap.subarray(offset, offset + 4).toString("hex"));
+    if (colors.size >= 64) break;
+  }
+  return colors.size;
+}
+
+function validateImageRegions(image, viewport, regions) {
+  const imageSize = image.getSize();
+  const scaleX = imageSize.width / viewport.width;
+  const scaleY = imageSize.height / viewport.height;
+  const validation = {};
+  for (const [name, rect] of Object.entries(regions)) {
+    const crop = image.crop({
+      x: Math.floor(rect.left * scaleX),
+      y: Math.floor(rect.top * scaleY),
+      width: Math.max(1, Math.ceil(rect.width * scaleX)),
+      height: Math.max(1, Math.ceil(rect.height * scaleY)),
+    });
+    const pngBytes = crop.toPNG().length;
+    const uniqueSampledPixels = sampledUniquePixels(crop);
+    if (crop.isEmpty() || pngBytes < 2_000 || uniqueSampledPixels < 8) {
+      throw new Error(`${name} did not produce a visibly rendered capture: ${JSON.stringify({ pngBytes, uniqueSampledPixels })}`);
+    }
+    validation[name] = { pngBytes, uniqueSampledPixels, size: crop.getSize() };
+  }
+  return validation;
+}
+
+async function captureWithPixelProof(webContents, filename, regions) {
+  webContents.invalidate();
+  await waitForPaint(webContents);
+  await waitForPaint(webContents);
+  const viewport = await webContents.executeJavaScript(`({ width: innerWidth, height: innerHeight })`);
+  const image = await webContents.capturePage(undefined, { stayHidden: false, stayAwake: true });
+  const path = join(evidenceDirectory, filename);
+  await writeFile(path, image.toPNG());
+  const validation = validateImageRegions(image, viewport, regions);
+  return { path, validation };
+}
+
+async function appendReplayHold(webContents, directory, frames, steps, label, state, frameCount = 6) {
+  webContents.invalidate();
+  await waitForPaint(webContents);
+  await waitForPaint(webContents);
+  const image = await webContents.capturePage(undefined, { stayHidden: false, stayAwake: true });
+  const png = image.toPNG();
+  const pixelProof = validateImageRegions(image, state.viewport, {
+    environment: state.environment,
+    ...(state.inspectorVisible ? { inspector: state.inspector } : {}),
+  });
+  const startFrame = frames.length;
+  steps.push({
+    label,
+    atSeconds: startFrame / 6,
+    frameSha256: createHash("sha256").update(png).digest("hex"),
+    viewportWidth: state.viewport.width,
+    environmentVisible: state.environmentVisible,
+    inspectorVisible: state.inspectorVisible,
+    selectedNodeId: state.selectedNodeId,
+    activeElement: state.activeElement,
+    pixelProof,
+  });
+  for (let index = 0; index < frameCount; index += 1) {
+    const frame = String(frames.length).padStart(3, "0");
+    const path = join(directory, `${frame}.png`);
+    await writeFile(path, png);
+    frames.push(path);
+  }
+}
+
+async function encodeReplay(frameDirectory, outputPath, frameCount) {
+  await execFile("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-framerate", "6",
+    "-i", join(frameDirectory, "%03d.png"),
+    "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease:flags=lanczos,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black",
+    "-c:v", "libx264",
+    "-preset", "slow",
+    "-crf", "23",
+    "-pix_fmt", "yuv420p",
+    "-movflags", "+faststart",
+    outputPath,
+  ], { maxBuffer: 1024 * 1024, timeout: 60_000 });
+  const bytes = await readFile(outputPath);
+  const probe = await execFile("ffprobe", [
+    "-v", "error",
+    "-show_entries", "format=duration",
+    "-of", "default=noprint_wrappers=1:nokey=1",
+    outputPath,
+  ], { encoding: "utf8", timeout: 10_000 });
+  return {
+    filename: outputPath.split("/").at(-1),
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    bytes: bytes.length,
+    durationSeconds: Number(Number.parseFloat(probe.stdout).toFixed(3)),
+    frameRate: 6,
+    frameCount,
+  };
+}
+
 async function setViewport(window, webContents, width, height = 920) {
   window.setContentSize(width, height);
   return waitFor(`the ${width}px viewport`, async () => {
@@ -296,8 +402,18 @@ async function setViewport(window, webContents, width, height = 920) {
   });
 }
 
+async function clickElement(webContents, selector) {
+  const point = await webContents.executeJavaScript(`(() => {
+    const rect = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect();
+    return rect ? { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) } : null;
+  })()`);
+  if (!point) throw new Error(`Cannot click missing element ${selector}.`);
+  webContents.sendInputEvent({ type: "mouseDown", ...point, button: "left", clickCount: 1 });
+  webContents.sendInputEvent({ type: "mouseUp", ...point, button: "left", clickCount: 1 });
+}
+
 async function selectFirstNode(webContents) {
-  await webContents.executeJavaScript(`document.querySelector("[data-node]")?.click()`);
+  await clickElement(webContents, "[data-node]");
   return waitFor("selected node details", async () => {
     const value = await presentation(webContents);
     return value.inspectorVisible && value.selectedNodeId && value.detailTitle ? value : false;
@@ -313,6 +429,7 @@ async function run() {
     "03-ultrawide-node-detail.png",
     "04-narrow-stacked-node-detail.png",
     "05-eval-node-detail.png",
+    "06-interaction-replay.mp4",
     "manifest.json",
   ]) {
     const path = join(evidenceDirectory, filename);
@@ -420,30 +537,155 @@ async function run() {
   requireVisibleBorders("normal Environment-only", normalEnvironment.borders);
   const expectedDisplay = requireGitParity(apiSnapshot, independentGit, normalEnvironment.displayed);
   await capture(productContents, "01-normal-environment.png");
+  const replayFrameDirectory = join(dataDirectory, "environment-rail-replay-frames");
+  await mkdir(replayFrameDirectory, { recursive: true });
+  const replayFrames = [];
+  const replaySteps = [];
+  await appendReplayHold(
+    productContents,
+    replayFrameDirectory,
+    replayFrames,
+    replaySteps,
+    "Environment remains visible",
+    normalEnvironment,
+  );
 
   const normalSelected = await selectFirstNode(productContents);
   requireDesktopGeometry("normal selected", normalSelected, { inspector: true });
   await capture(productContents, "02-normal-node-detail.png");
+  await appendReplayHold(
+    productContents,
+    replayFrameDirectory,
+    replayFrames,
+    replaySteps,
+    "Select node; Node Details opens beneath Environment",
+    normalSelected,
+  );
 
-  await productContents.executeJavaScript(`document.querySelector("#closeInspector")?.click()`);
+  await clickElement(productContents, "#closeInspector");
   const afterClose = await waitFor("Node Details close with Environment preserved", async () => {
     const value = await presentation(productContents);
     return !value.inspectorVisible && value.environmentVisible ? value : false;
   });
-  await selectFirstNode(productContents);
+  await appendReplayHold(
+    productContents,
+    replayFrameDirectory,
+    replayFrames,
+    replaySteps,
+    "Close button dismisses Node Details; Environment remains",
+    afterClose,
+  );
+  const reopenedSelected = await selectFirstNode(productContents);
+  await appendReplayHold(
+    productContents,
+    replayFrameDirectory,
+    replayFrames,
+    replaySteps,
+    "Reopen Node Details",
+    reopenedSelected,
+  );
   productContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
   productContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
   const afterEscape = await waitFor("Escape close with Environment preserved", async () => {
     const value = await presentation(productContents);
     return !value.inspectorVisible && value.environmentVisible && value.activeElement === "graphStage" ? value : false;
   });
-
+  await appendReplayHold(
+    productContents,
+    replayFrameDirectory,
+    replayFrames,
+    replaySteps,
+    "Escape dismisses Node Details; Environment and graph focus remain",
+    afterEscape,
+  );
   await setViewport(productWindow, productContents, 2998);
+  const ultrawideEnvironment = await waitFor("ultrawide Environment-only rail", async () => {
+    const value = await presentation(productContents);
+    return !value.inspectorVisible && value.environmentVisible ? value : false;
+  });
+  requireDesktopGeometry("ultrawide Environment-only", ultrawideEnvironment);
+  await appendReplayHold(
+    productContents,
+    replayFrameDirectory,
+    replayFrames,
+    replaySteps,
+    "Ultrawide Environment remains visible",
+    ultrawideEnvironment,
+  );
   const ultrawideSelected = await selectFirstNode(productContents);
   requireDesktopGeometry("ultrawide selected", ultrawideSelected, { inspector: true });
-  await capture(productContents, "03-ultrawide-node-detail.png");
+  const ultrawideCapture = await captureWithPixelProof(
+    productContents,
+    "03-ultrawide-node-detail.png",
+    { environment: ultrawideSelected.environment, inspector: ultrawideSelected.inspector },
+  );
+  await appendReplayHold(
+    productContents,
+    replayFrameDirectory,
+    replayFrames,
+    replaySteps,
+    "Ultrawide node selection opens Node Details",
+    ultrawideSelected,
+  );
+  await clickElement(productContents, "#closeInspector");
+  const ultrawideAfterClose = await waitFor("ultrawide close with Environment preserved", async () => {
+    const value = await presentation(productContents);
+    return !value.inspectorVisible && value.environmentVisible ? value : false;
+  });
+  await appendReplayHold(
+    productContents,
+    replayFrameDirectory,
+    replayFrames,
+    replaySteps,
+    "Ultrawide close button dismisses Node Details",
+    ultrawideAfterClose,
+  );
+  const ultrawideReopened = await selectFirstNode(productContents);
+  await appendReplayHold(
+    productContents,
+    replayFrameDirectory,
+    replayFrames,
+    replaySteps,
+    "Ultrawide Node Details reopens",
+    ultrawideReopened,
+  );
+  productContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+  productContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+  const ultrawideAfterEscape = await waitFor("ultrawide Escape with Environment preserved", async () => {
+    const value = await presentation(productContents);
+    return !value.inspectorVisible && value.environmentVisible && value.activeElement === "graphStage" ? value : false;
+  });
+  await appendReplayHold(
+    productContents,
+    replayFrameDirectory,
+    replayFrames,
+    replaySteps,
+    "Ultrawide Escape dismisses Node Details",
+    ultrawideAfterEscape,
+  );
+  const replayStateSequence = replaySteps.map((step) => [
+    step.viewportWidth,
+    step.environmentVisible,
+    step.inspectorVisible,
+  ]);
+  const expectedReplayStateSequence = [1480, 2998].flatMap((width) => [
+    [width, true, false],
+    [width, true, true],
+    [width, true, false],
+    [width, true, true],
+    [width, true, false],
+  ]);
+  if (JSON.stringify(replayStateSequence) !== JSON.stringify(expectedReplayStateSequence)) {
+    throw new Error(`Replay did not record the required normal/ultrawide sequence: ${JSON.stringify(replayStateSequence)}`);
+  }
+  const replay = await encodeReplay(
+    replayFrameDirectory,
+    join(evidenceDirectory, "06-interaction-replay.mp4"),
+    replayFrames.length,
+  );
 
   await setViewport(productWindow, productContents, 1101);
+  await selectFirstNode(productContents);
   const responsiveDesktopSelected = await waitFor("1101px desktop rail", async () => {
     const value = await presentation(productContents);
     return value.inspectorVisible && value.environmentVisible ? value : false;
@@ -503,6 +745,12 @@ async function run() {
   });
   await evalWindow.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(thread.id)}&review=1`);
   await setViewport(evalWindow, evalWindow.webContents, 1480);
+  evalWindow.show();
+  if (process.platform === "darwin") app.focus({ steal: true });
+  evalWindow.focus();
+  await waitFor("the visible Eval window", () => evalWindow.isVisible() && !evalWindow.isMinimized());
+  await waitForPaint(evalWindow.webContents);
+  await waitForPaint(evalWindow.webContents);
   await waitFor("the read-only Eval Environment", () => evalWindow.webContents.executeJavaScript(`(() => (
     document.querySelector("#threadView")?.dataset.workspaceMode === "review"
     && document.querySelectorAll("[data-node]").length === 3
@@ -511,7 +759,11 @@ async function run() {
   const evalSelected = await selectFirstNode(evalWindow.webContents);
   requireDesktopGeometry("read-only Eval selected", evalSelected, { inspector: true });
   requireGitParity(apiSnapshot, independentGit, evalSelected.displayed);
-  await capture(evalWindow.webContents, "05-eval-node-detail.png");
+  const evalCapture = await captureWithPixelProof(
+    evalWindow.webContents,
+    "05-eval-node-detail.png",
+    { environment: evalSelected.environment, inspector: evalSelected.inspector },
+  );
 
   const manifest = {
     passed: true,
@@ -542,7 +794,33 @@ async function run() {
         environmentPreserved: afterEscape.environmentVisible,
         focusRestoredTo: afterEscape.activeElement,
       },
+      ultrawide: {
+        closeButton: {
+          inspectorClosed: !ultrawideAfterClose.inspectorVisible,
+          environmentPreserved: ultrawideAfterClose.environmentVisible,
+        },
+        escape: {
+          inspectorClosed: !ultrawideAfterEscape.inspectorVisible,
+          environmentPreserved: ultrawideAfterEscape.environmentVisible,
+          focusRestoredTo: ultrawideAfterEscape.activeElement,
+        },
+        visibleCapture: {
+          windowVisible: productWindow.isVisible(),
+          environment: ultrawideCapture.validation.environment,
+          inspector: ultrawideCapture.validation.inspector,
+        },
+      },
       evalReadOnly: evalSelected.environmentVisible && evalSelected.inspectorVisible,
+      evalVisibleCapture: {
+        windowVisible: evalWindow.isVisible(),
+        environment: evalCapture.validation.environment,
+        inspector: evalCapture.validation.inspector,
+      },
+      replay: {
+        ...replay,
+        interactionInput: "Electron mouse input plus Escape keyboard input",
+        steps: replaySteps,
+      },
     },
     geometry: {
       normalEnvironment: {
@@ -588,9 +866,16 @@ async function run() {
       "03-ultrawide-node-detail.png",
       "04-narrow-stacked-node-detail.png",
       "05-eval-node-detail.png",
+      "06-interaction-replay.mp4",
     ],
   };
   await writeFile(join(evidenceDirectory, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  const finalGit = await independentGitSnapshot();
+  if (JSON.stringify(finalGit) !== JSON.stringify(independentGit)) {
+    throw new Error(
+      `Evidence outputs changed the captured Git truth; rerun once to converge: ${JSON.stringify({ captured: independentGit, final: finalGit })}`,
+    );
+  }
   process.stdout.write(`RELAYER_ENVIRONMENT_RAIL_EVIDENCE ${JSON.stringify(manifest)}\n`);
   exitCode = 0;
 }

@@ -6,6 +6,7 @@ import {
   ENVIRONMENT_REFRESH_INTERVAL_MS,
   createPostFlightRefreshQueue,
   desktopRailGeometry,
+  environmentBackoffAfterFailure,
   environmentRefreshNeeded,
   interactionReachedTerminal,
   latestInteractionForThread,
@@ -16,6 +17,7 @@ import {
   inspectorEscapeShouldClose,
   interactionStatusRenderKey,
   trackedChangesLabel,
+  untrackedFilesLabel,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("desktop environment rail", () => {
@@ -68,6 +70,9 @@ describe("desktop environment rail", () => {
       .toBe("· 2 tracked files");
     expect(trackedChangesLabel({ additions: 1, deletions: 0, trackedFiles: 2 })).toBe("");
     expect(trackedChangesLabel({ additions: 0, deletions: 0, trackedFiles: 0 })).toBe("");
+    expect(untrackedFilesLabel(0)).toBe("0 files");
+    expect(untrackedFilesLabel(1)).toBe("1 file");
+    expect(untrackedFilesLabel(2)).toBe("2 files");
   });
 
   it("keeps standalone, loading, folder, unavailable, and request errors honest", () => {
@@ -105,6 +110,43 @@ describe("desktop environment rail", () => {
     }, project).message).toBe("Request timed out");
   });
 
+  it("keeps retained Git, folder, and unavailable snapshots visible after refresh errors", () => {
+    const retained = (snapshot) => environmentPresentation({
+      projectId: 7,
+      status: "error",
+      error: "Refresh timed out",
+      snapshot,
+    }, project);
+    expect(retained({
+      kind: "git",
+      worktreeLabel: "8bf2",
+      branch: "main",
+      detached: false,
+      changes: { additions: 3, deletions: 1, trackedFiles: 1, untrackedFiles: 0 },
+    })).toMatchObject({
+      mode: "facts",
+      kind: "git",
+      worktreeLabel: "8bf2",
+      stale: true,
+      staleMessage: "Refresh timed out",
+    });
+    expect(retained({ kind: "folder", worktreeLabel: "notes" })).toMatchObject({
+      mode: "facts",
+      kind: "folder",
+      stale: true,
+    });
+    expect(retained({
+      kind: "unavailable",
+      worktreeLabel: "missing",
+      unavailableReason: { message: "Folder cannot be read" },
+    })).toMatchObject({
+      mode: "facts",
+      kind: "unavailable",
+      stale: true,
+      message: "Folder cannot be read",
+    });
+  });
+
   it("throttles background refreshes while allowing bounded explicit refreshes", () => {
     const now = 20_000;
     expect(environmentRefreshNeeded({
@@ -134,6 +176,39 @@ describe("desktop environment rail", () => {
       now,
     })).toBe(true);
     expect(environmentRefreshNeeded({ requestedProjectId: null, now, lastRequestedAt: 0 })).toBe(false);
+  });
+
+  it("applies capped exponential error backoff while allowing bounded focus override", () => {
+    const now = 100_000;
+    const first = environmentBackoffAfterFailure(0, now);
+    const second = environmentBackoffAfterFailure(first.failureCount, first.nextAttemptAt);
+    const capped = environmentBackoffAfterFailure(20, now);
+    expect(first).toMatchObject({ failureCount: 1, delayMs: 5_000, nextAttemptAt: 105_000 });
+    expect(second).toMatchObject({ failureCount: 2, delayMs: 10_000, nextAttemptAt: 115_000 });
+    expect(capped.delayMs).toBe(60_000);
+    expect(environmentRefreshNeeded({
+      currentProjectId: 7,
+      requestedProjectId: 7,
+      lastRequestedAt: 95_000,
+      nextAttemptAt: 110_000,
+      now: 105_000,
+    })).toBe(false);
+    expect(environmentRefreshNeeded({
+      currentProjectId: 7,
+      requestedProjectId: 7,
+      lastRequestedAt: 95_000,
+      nextAttemptAt: 110_000,
+      now: 110_000,
+    })).toBe(true);
+    expect(environmentRefreshNeeded({
+      currentProjectId: 7,
+      requestedProjectId: 7,
+      lastRequestedAt: 103_000,
+      nextAttemptAt: 160_000,
+      now: 105_000,
+      force: true,
+      minimumAgeMs: 1_000,
+    })).toBe(true);
   });
 
   it("recognizes exactly one latest-interaction terminal transition", () => {
@@ -230,7 +305,18 @@ describe("desktop environment rail", () => {
     expect(styles).not.toContain("ResizeObserver");
     expect(styles).toContain("@media(prefers-reduced-transparency:reduce)");
     expect(styles).toContain("@media(forced-colors:active)");
+    expect(styles).toContain("--warning:#e3bd62");
+    expect(styles).toContain("--warning:#92400e");
+    expect(styles).toContain(".environment-stale{color:var(--warning)}");
     expect(styles).toContain("@media(min-width:761px) and (max-width:1100px)");
+    expect(styles).toContain(".interaction-banner p{display:-webkit-box;");
+    expect(styles).toContain("-webkit-line-clamp:2");
+    expect(styles).toContain("max-height:2.7em;overflow:hidden");
+    const workspaceSource = await readFile(
+      new URL("../desktop/renderer/src/product-workspace/workspace.js", import.meta.url),
+      "utf8",
+    );
+    expect(workspaceSource).toContain('$("#interactionText").title = interactionText;');
     expect(desktopRailGeometry(1100)).toMatchObject({
       stacked: true,
       sidebarWidth: 244,

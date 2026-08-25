@@ -45,6 +45,7 @@ pub(crate) struct ApiState {
     pub(crate) approval_decisions: Arc<Mutex<HashMap<String, ApprovalDecision>>>,
     pub(crate) annotation_sessions: Arc<Mutex<HashMap<String, AnnotationSession>>>,
     pub(crate) annotations_enabled: bool,
+    pub(crate) environment_inspector: crate::environment::EnvironmentInspector,
 }
 
 pub(crate) struct ApiRuntime {
@@ -80,6 +81,7 @@ pub(crate) fn router(
         approval_decisions: Arc::new(Mutex::new(HashMap::new())),
         annotation_sessions: Arc::new(Mutex::new(HashMap::new())),
         annotations_enabled,
+        environment_inspector: crate::environment::EnvironmentInspector::new(),
     };
     Router::new()
         .route("/health", get(state::health))

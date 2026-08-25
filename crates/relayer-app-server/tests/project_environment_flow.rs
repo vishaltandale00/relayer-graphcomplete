@@ -53,6 +53,7 @@ async fn project_environment_is_scoped_to_the_stored_path_and_reports_git_facts(
 
     fs::write(repository.join("tracked.txt"), "first\nsecond\nthird\n").unwrap();
     git(&repository, &["add", "tracked.txt"]);
+    expire_environment_cache().await;
     let staged = get_environment(&app, project_id).await;
     assert_eq!(staged["changes"]["trackedFiles"], 1);
     assert_eq!(staged["changes"]["additions"], 2);
@@ -67,6 +68,7 @@ async fn project_environment_is_scoped_to_the_stored_path_and_reports_git_facts(
         "not part of line totals\n",
     )
     .unwrap();
+    expire_environment_cache().await;
     let response = app
         .clone()
         .oneshot(cookie_request(
@@ -91,6 +93,7 @@ async fn project_environment_is_scoped_to_the_stored_path_and_reports_git_facts(
     fs::write(repository.join("binary.bin"), [0, 1, 0, 3]).unwrap();
     #[cfg(unix)]
     set_mode(&repository.join("mode-only.sh"), 0o755);
+    expire_environment_cache().await;
     let binary_and_mode = get_environment(&app, project_id).await;
     #[cfg(unix)]
     assert_eq!(binary_and_mode["changes"]["trackedFiles"], 3);
@@ -99,6 +102,7 @@ async fn project_environment_is_scoped_to_the_stored_path_and_reports_git_facts(
     assert_eq!(binary_and_mode["changes"]["additions"], 3);
 
     git(&repository, &["checkout", "--detach"]);
+    expire_environment_cache().await;
     let detached = response_json(
         app.oneshot(cookie_request(
             "GET",
@@ -119,11 +123,16 @@ async fn project_environment_returns_safe_folder_unavailable_and_not_found_state
     let root = tempfile::tempdir().unwrap();
     let folder = root.path().join("plain-folder");
     let removable = root.path().join("removed-folder");
+    let retargeted = root.path().join("retargeted-folder");
+    let replacement = root.path().join("replacement-folder");
     fs::create_dir(&folder).unwrap();
     fs::create_dir(&removable).unwrap();
+    fs::create_dir(&retargeted).unwrap();
+    fs::create_dir(&replacement).unwrap();
     let app = open_app(&root.path().join("product.sqlite3"), root.path()).await;
     let folder_id = create_project(&app, &folder).await;
     let removable_id = create_project(&app, &removable).await;
+    let retargeted_id = create_project(&app, &retargeted).await;
 
     let unauthorized = app
         .clone()
@@ -173,6 +182,21 @@ async fn project_environment_returns_safe_folder_unavailable_and_not_found_state
     assert_eq!(unavailable["worktreeLabel"], "removed-folder");
     assert_eq!(unavailable["unavailableReason"]["code"], "path_unavailable");
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+
+        fs::rename(&retargeted, root.path().join("moved-retargeted-folder")).unwrap();
+        symlink(&replacement, &retargeted).unwrap();
+        let retargeted_environment = get_environment(&app, retargeted_id).await;
+        assert_eq!(retargeted_environment["kind"], "unavailable");
+        assert_eq!(
+            retargeted_environment["unavailableReason"]["code"],
+            "path_retargeted"
+        );
+        assert_eq!(retargeted_environment["worktreeLabel"], "retargeted-folder");
+    }
+
     let not_found = app
         .clone()
         .oneshot(cookie_request(
@@ -189,6 +213,37 @@ async fn project_environment_returns_safe_folder_unavailable_and_not_found_state
         .await
         .unwrap();
     assert_eq!(invalid_id.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+#[cfg(all(unix, not(target_os = "macos")))]
+async fn project_creation_rejects_a_canonical_path_that_is_not_utf8() {
+    use std::{os::unix::ffi::OsStringExt, os::unix::fs::symlink};
+
+    let root = tempfile::tempdir().unwrap();
+    let non_utf8 = root
+        .path()
+        .join(std::ffi::OsString::from_vec(b"project-\xff".to_vec()));
+    let selectable_alias = root.path().join("selectable-alias");
+    fs::create_dir(&non_utf8).unwrap();
+    symlink(&non_utf8, &selectable_alias).unwrap();
+    let app = open_app(&root.path().join("product.sqlite3"), root.path()).await;
+
+    let response = app
+        .oneshot(cookie_request(
+            "POST",
+            "/api/projects",
+            Some(json!({ "path": selectable_alias })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = response_json(response).await;
+    assert_eq!(body["code"], "invalid_input");
+    assert_eq!(
+        body["error"],
+        "project path cannot be represented safely as UTF-8"
+    );
 }
 
 async fn create_project(app: &Router, path: &Path) -> i64 {
@@ -219,6 +274,10 @@ async fn get_environment(app: &Router, project_id: i64) -> Value {
             .unwrap(),
     )
     .await
+}
+
+async fn expire_environment_cache() {
+    tokio::time::sleep(std::time::Duration::from_millis(220)).await;
 }
 
 #[cfg(unix)]

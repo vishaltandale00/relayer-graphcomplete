@@ -1,4 +1,5 @@
 export const ENVIRONMENT_REFRESH_INTERVAL_MS = 5_000;
+export const ENVIRONMENT_MAX_BACKOFF_MS = 60_000;
 export const ENVIRONMENT_STACK_BREAKPOINT_PX = 1_100;
 
 export function desktopRailGeometry(viewportWidth) {
@@ -26,11 +27,24 @@ export function environmentRefreshNeeded({
   now,
   force = false,
   minimumAgeMs = 0,
+  nextAttemptAt = 0,
 }) {
   if (requestedProjectId == null) return false;
   return (force && now - lastRequestedAt >= minimumAgeMs)
     || String(currentProjectId) !== String(requestedProjectId)
-    || now - lastRequestedAt >= ENVIRONMENT_REFRESH_INTERVAL_MS;
+    || (
+      now >= nextAttemptAt
+      && now - lastRequestedAt >= ENVIRONMENT_REFRESH_INTERVAL_MS
+    );
+}
+
+export function environmentBackoffAfterFailure(failureCount, now) {
+  const nextFailureCount = Math.max(0, failureCount) + 1;
+  const delayMs = Math.min(
+    ENVIRONMENT_REFRESH_INTERVAL_MS * (2 ** (nextFailureCount - 1)),
+    ENVIRONMENT_MAX_BACKOFF_MS,
+  );
+  return { failureCount: nextFailureCount, nextAttemptAt: now + delayMs, delayMs };
 }
 
 export function latestInteractionForThread(interactions, threadId) {

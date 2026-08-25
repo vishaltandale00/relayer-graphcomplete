@@ -55,6 +55,7 @@ import {
 } from "./approval-model.js";
 import {
   createPostFlightRefreshQueue,
+  environmentBackoffAfterFailure,
   environmentRefreshNeeded,
   interactionReachedTerminal,
   latestInteractionForThread,
@@ -77,7 +78,7 @@ const refreshGate = createLatestRequestGate();
 const resolvedInvokeNavigationGate = createLatestRequestGate();
 let pendingResolvedInvokeNavigation = false;
 let environmentRequestSequence = 0;
-let environmentLastRequestedAt = 0;
+const environmentRefreshRecords = new Map();
 let environmentRequestInFlight = null;
 const environmentPostFlightQueue = createPostFlightRefreshQueue();
 
@@ -101,13 +102,28 @@ export async function refreshCurrentEnvironment({ force = false, minimumAgeMs = 
     return false;
   }
   const now = Date.now();
+  const projectKey = String(projectId);
+  if (String(appState.environment?.projectId) !== projectKey) {
+    environmentRefreshRecords.set(projectKey, {
+      lastRequestedAt: 0,
+      failureCount: 0,
+      nextAttemptAt: 0,
+    });
+  }
+  const refreshRecord = environmentRefreshRecords.get(projectKey) ?? {
+    lastRequestedAt: 0,
+    failureCount: 0,
+    nextAttemptAt: 0,
+  };
+  environmentRefreshRecords.set(projectKey, refreshRecord);
   if (!environmentRefreshNeeded({
     currentProjectId: appState.environment?.projectId,
     requestedProjectId: projectId,
-    lastRequestedAt: environmentLastRequestedAt,
+    lastRequestedAt: refreshRecord.lastRequestedAt,
     now,
     force,
     minimumAgeMs,
+    nextAttemptAt: refreshRecord.nextAttemptAt,
   })) return false;
   if (environmentRequestInFlight?.projectId === String(projectId)) {
     environmentPostFlightQueue.queue(projectId, force);
@@ -115,7 +131,7 @@ export async function refreshCurrentEnvironment({ force = false, minimumAgeMs = 
   }
   environmentPostFlightQueue.discardExcept(projectId);
   const requestSequence = ++environmentRequestSequence;
-  environmentLastRequestedAt = now;
+  refreshRecord.lastRequestedAt = now;
   const previousSnapshot = String(appState.environment?.projectId) === String(projectId)
     ? appState.environment?.snapshot ?? null
     : null;
@@ -133,6 +149,8 @@ export async function refreshCurrentEnvironment({ force = false, minimumAgeMs = 
       return false;
     }
     appState.environment = { projectId, status: "ready", snapshot, error: null };
+    refreshRecord.failureCount = 0;
+    refreshRecord.nextAttemptAt = 0;
   } catch (error) {
     if (requestSequence !== environmentRequestSequence || String(activeProjectId()) !== String(projectId)) {
       return false;
@@ -143,6 +161,10 @@ export async function refreshCurrentEnvironment({ force = false, minimumAgeMs = 
       snapshot: previousSnapshot,
       error: error?.message || "Project context is temporarily unavailable.",
     };
+    Object.assign(
+      refreshRecord,
+      environmentBackoffAfterFailure(refreshRecord.failureCount, Date.now()),
+    );
   }
   if (viewState.mainView === "thread") renderThread();
   return true;
@@ -168,6 +190,7 @@ export function stopEnvironmentRefresh() {
   environmentRequestSequence += 1;
   environmentRequestInFlight = null;
   environmentPostFlightQueue.clear();
+  environmentRefreshRecords.clear();
 }
 
 export function updateCreateThreadAvailability() {

@@ -233,7 +233,7 @@ export function environmentPresentation(environment, project) {
   if (environment.status === "loading" && !environment.snapshot) {
     return { mode: "loading", message: "Loading project context…", busy: true };
   }
-  if (environment.status === "error") {
+  if (environment.status === "error" && !environment.snapshot) {
     return {
       mode: "message",
       message: environment.error || "Project context is temporarily unavailable.",
@@ -245,6 +245,10 @@ export function environmentPresentation(environment, project) {
     return { mode: "message", message: "Project context is unavailable.", busy: false };
   }
   const worktreeLabel = snapshot.worktreeLabel || project.name || "Project folder";
+  const stale = environment.status === "error";
+  const staleMessage = stale
+    ? environment.error || "Refresh failed. Showing the last local snapshot."
+    : null;
   if (snapshot.kind === "folder") {
     return {
       mode: "facts",
@@ -252,6 +256,8 @@ export function environmentPresentation(environment, project) {
       worktreeLabel,
       message: "Not a Git repository",
       observedAt: snapshot.observedAt,
+      stale,
+      staleMessage,
       busy: false,
     };
   }
@@ -262,6 +268,8 @@ export function environmentPresentation(environment, project) {
       worktreeLabel,
       message: snapshot.unavailableReason?.message || "Project context is temporarily unavailable.",
       observedAt: snapshot.observedAt,
+      stale,
+      staleMessage,
       busy: false,
     };
   }
@@ -277,12 +285,18 @@ export function environmentPresentation(environment, project) {
     untrackedFiles: Number.isFinite(changes.untrackedFiles) ? changes.untrackedFiles : 0,
     observedAt: snapshot.observedAt,
     busy: environment.status === "loading",
+    stale,
+    staleMessage,
   };
 }
 
 export function trackedChangesLabel({ additions = 0, deletions = 0, trackedFiles = 0 }) {
   if (additions !== 0 || deletions !== 0 || trackedFiles <= 0) return "";
   return `· ${trackedFiles} tracked ${trackedFiles === 1 ? "file" : "files"}`;
+}
+
+export function untrackedFilesLabel(count = 0) {
+  return `${count} ${count === 1 ? "file" : "files"}`;
 }
 
 export function interactionStatusRenderKey(interaction, fallbackStatus = "idle") {
@@ -295,6 +309,7 @@ export function inspectorEscapeShouldClose({
   turnPopoverOpen,
   modelPickerOpen,
   approvalOwnsFocus,
+  annotationRatingExpanded = false,
   inspectorOpen,
 }) {
   return key === "Escape"
@@ -302,6 +317,7 @@ export function inspectorEscapeShouldClose({
     && !turnPopoverOpen
     && !modelPickerOpen
     && !approvalOwnsFocus
+    && !annotationRatingExpanded
     && inspectorOpen;
 }
 
@@ -662,6 +678,7 @@ export function createProductWorkspace({
       turnPopoverOpen,
       modelPickerOpen: !$("[data-model-picker-popover]")?.classList.contains("hidden"),
       approvalOwnsFocus: approvalDock.contains(graphDocument.activeElement),
+      annotationRatingExpanded: $("#annotationRating")?.classList.contains("expanded"),
       inspectorOpen: !$("#inspector").classList.contains("hidden"),
     })) return;
     event.preventDefault();
@@ -1377,10 +1394,12 @@ export function createProductWorkspace({
     const interaction = interactionForThread(state, thread);
     updateCountBadge($("#threadAnnotationBadge"), subjectAnchor("thread", {}, state, thread));
     updateCountBadge($("#turnAnnotationBadge"), subjectAnchor("turn", {}, state, thread));
-    $("#interactionText").textContent = interaction?.text
+    const interactionText = interaction?.text
       || interaction?.summary
       || interaction?.content
       || thread.title;
+    $("#interactionText").textContent = interactionText;
+    $("#interactionText").title = interactionText;
     renderTurnNavigation(state, thread, interaction);
     const turns = (state.interactions || []).filter((item) => String(item.threadId) === String(thread.id));
     const latestInteraction = turns.at(-1);
@@ -1519,7 +1538,11 @@ export function createProductWorkspace({
     facts.classList.toggle("hidden", presentation.mode !== "facts");
     message.classList.toggle("hidden", presentation.mode === "loading" || presentation.mode === "facts");
     message.textContent = presentation.message || "";
-    $("#environmentObserved").textContent = presentation.observedAt ? "Local snapshot" : "";
+    $("#environmentObserved").textContent = presentation.stale
+      ? "Stale snapshot"
+      : presentation.observedAt ? "Local snapshot" : "";
+    $("#environmentObserved").classList.toggle("environment-stale", Boolean(presentation.stale));
+    $("#environmentObserved").title = presentation.staleMessage || "";
     if (presentation.mode !== "facts") return;
     $("#environmentWorktree").textContent = presentation.worktreeLabel;
     $("#environmentWorktree").title = presentation.worktreeLabel;
@@ -1537,7 +1560,7 @@ export function createProductWorkspace({
     const trackedLabel = trackedChangesLabel(presentation);
     $("#environmentTracked").classList.toggle("hidden", !trackedLabel);
     $("#environmentTracked").textContent = trackedLabel;
-    $("#environmentUntracked").textContent = `${presentation.untrackedFiles ?? 0} files`;
+    $("#environmentUntracked").textContent = untrackedFilesLabel(presentation.untrackedFiles ?? 0);
     message.textContent = presentation.message || "";
   }
 
