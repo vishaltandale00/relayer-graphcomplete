@@ -38,6 +38,16 @@ pub(crate) async fn complete(
         return Ok(output);
     }
     let mut transaction = database.storage.begin_write().await?;
+    if CompletionTable::new(&mut transaction)
+        .root_action(scope.root_node_id)
+        .await?
+        .is_some()
+    {
+        transaction.rollback().await?;
+        return read_output(database, scope)
+            .await?
+            .ok_or_else(|| GraphError::Internal("accepted completion could not be read".into()));
+    }
     let plan = CompletionPlan::build(&mut transaction, scope).await?;
     accept::apply(&mut transaction, scope, &plan).await?;
     transaction.commit().await?;

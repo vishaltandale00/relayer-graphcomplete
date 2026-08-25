@@ -130,7 +130,7 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::raw_sql(include_str!("migrations/0005_layer_layout.sql"))
+        sqlx::raw_sql(include_str!("migrations/0006_layer_layout.sql"))
             .execute(&mut connection)
             .await
             .unwrap();
@@ -164,5 +164,64 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(stored, (2, 0.25, 0.75));
+    }
+
+    #[tokio::test]
+    async fn interaction_lease_migration_preserves_legacy_nodes_and_enforces_one_lease_per_action()
+    {
+        let mut connection = SqliteConnection::connect("sqlite::memory:").await.unwrap();
+        sqlx::raw_sql(include_str!("migrations/0001_graph_schema.sql"))
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        sqlx::raw_sql(include_str!("migrations/0002_action_presentation.sql"))
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        sqlx::raw_sql(include_str!("migrations/0003_navigation_relations.sql"))
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO nodes(id,project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (1,1,1,'user-interaction','user','Source','Source','accepted',NULL,NULL),(2,1,2,'user-interaction','user','Legacy','Legacy','accepted',NULL,NULL)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO actions(id,project_id,thread_id,source_node_id,kind,label,target_layer_id,interaction_text,response,state,owner_interaction_id,client_key,variant,source_layer_id,relation) VALUES (1,1,1,1,'invoke','Continue',NULL,'Continue',0,'accepted',1,'continue','pill',NULL,NULL)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        sqlx::raw_sql(include_str!(
+            "migrations/0005_interaction_action_leases.sql"
+        ))
+        .execute(&mut connection)
+        .await
+        .unwrap();
+
+        let legacy: Option<i64> =
+            sqlx::query_scalar("SELECT leased_action_id FROM nodes WHERE id=2")
+                .fetch_one(&mut connection)
+                .await
+                .unwrap();
+        assert_eq!(legacy, None);
+        let partial = sqlx::query("UPDATE nodes SET leased_action_id=1 WHERE id=2")
+            .execute(&mut connection)
+            .await
+            .unwrap_err();
+        assert!(partial.to_string().contains("CHECK constraint failed"));
+        sqlx::query("UPDATE nodes SET leased_action_id=1,lease_source_interaction_id=1 WHERE id=2")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        let duplicate = sqlx::query(
+            "INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key,leased_action_id,lease_source_interaction_id) VALUES (1,3,'user-interaction','user','Duplicate','Duplicate','accepted',NULL,NULL,1,1)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap_err();
+        assert!(duplicate.to_string().contains("UNIQUE constraint failed"));
     }
 }

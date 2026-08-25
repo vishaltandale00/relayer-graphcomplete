@@ -286,7 +286,7 @@ export function createReviewPresentationAdapter({
     for (let frame = 0; frame < frameLimit; frame++) {
       await nextFrame(windowObject);
       const current = getPresentationState();
-      settled = kind === "navigate-action" ? current.layerId !== before.layerId
+      settled = kind === "navigate-action" ? logicalPresentationKey(current) !== logicalPresentationKey(before)
         : kind === "layer-navigation" ? (
           current.layerId !== before.layerId
           || current.selectedNodeId !== before.selectedNodeId

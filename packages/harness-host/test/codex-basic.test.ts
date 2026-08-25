@@ -119,6 +119,10 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).toContain("A flat answer is valid");
     expect(submittedPrompt).toContain("Author in whatever order fits the task");
     expect(submittedPrompt).toContain("final graph call must be await graph.submit(1)");
+    expect(submittedPrompt).toContain("graph.getNode(1)");
+    expect(submittedPrompt).toContain("graph.getNeighbors(1)");
+    expect(submittedPrompt).toContain("ordinary graph.submit(1) automatically fulfills any lease");
+    expect(submittedPrompt).toContain("There is no separate resolveAction call");
     expect(submittedPrompt).toContain("Never mention or expose the size justification");
     expect(submittedPrompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
     expect(submittedPrompt).toContain("align comparisons deliberately");

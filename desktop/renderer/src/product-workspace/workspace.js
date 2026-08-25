@@ -1,5 +1,5 @@
 import { escapeHtml, toast } from "../ui.js";
-import { actionWasInvoked } from "../action-invocation-state.js";
+import { actionCanRetry, actionWasInvoked } from "../action-invocation-state.js";
 import { setControlActivationCompletion } from "../control-activation.js";
 import {
   createModelPicker,
@@ -326,6 +326,31 @@ export function actionPresentation(action) {
   };
 }
 
+export function actionActivationPresentation(
+  action,
+  { invoked = false, retryable = false, canInvokeMutatingActions = false } = {},
+) {
+  const layerNavigation = action?.kind === "navigate" && action.targetLayerId != null;
+  const resolvedInvoke = action?.kind === "invoke" && action.targetLayerId != null;
+  const navigational = layerNavigation || resolvedInvoke;
+  const retryableInvoke = action?.kind === "invoke" && !navigational && retryable;
+  return Object.freeze({
+    layerNavigation,
+    resolvedInvoke,
+    navigational,
+    retryableInvoke,
+    label: retryableInvoke ? `Retry ${actionPresentation(action).label}` : actionPresentation(action).label,
+    disabled: navigational ? false : invoked || !canInvokeMutatingActions,
+  });
+}
+
+export function actionReviewKind(action) {
+  return (
+    action?.kind === "navigate"
+    || (action?.kind === "invoke" && action.targetLayerId != null)
+  ) ? "navigate-action" : "invoke-action";
+}
+
 export function captureGraphViewState(
   nodes,
   camera,
@@ -373,6 +398,7 @@ export function createProductWorkspace({
   onSubmitInteraction = async () => {},
   onOpenSettings = () => {},
   onNavigateLayer = async () => {},
+  onNavigateResolvedInvoke = async () => {},
   onInvokeAction = async () => {},
   onDecideApproval = async () => {},
 }) {
@@ -1309,8 +1335,11 @@ export function createProductWorkspace({
       button.className = `action-control action-${presentation.variant}`;
       button.dataset.actionId = String(action.id);
       button.dataset.reviewRef = `action-${action.id}`;
-      button.dataset.reviewKind = action.kind === "navigate" ? "navigate-action" : "invoke-action";
+      button.dataset.reviewKind = actionReviewKind(action);
       button.dataset.reviewActionId = String(action.id);
+      if (action.targetLayerId != null) {
+        button.dataset.reviewTargetLayerId = String(action.targetLayerId);
+      }
       if (presentation.icon) {
         button.append(createRelayerIcon(presentation.icon, { class: "relayer-action-icon" }));
       }
@@ -1330,20 +1359,28 @@ export function createProductWorkspace({
     }));
     [...$("#detailActions").querySelectorAll("button")].forEach((button, index) => {
       const action = actions[index];
-      const navigational = action?.kind === "navigate" && action.targetLayerId;
       const invoked = actionWasInvoked(
         state.actionInvocations,
         state.pendingActionInvocations,
         state.currentInteractionId,
         action.id,
       );
-      button.disabled = invoked || (!navigational && !capabilities.canInvokeMutatingActions);
+      const retryable = actionCanRetry(state.actionInvocations, action.id);
+      const activation = actionActivationPresentation(action, {
+        invoked,
+        retryable,
+        canInvokeMutatingActions: capabilities.canInvokeMutatingActions,
+      });
+      button.querySelector(".action-label").textContent = activation.label;
+      button.disabled = activation.disabled;
       button.classList.toggle("invoked", invoked);
+      button.classList.toggle("retryable", activation.retryableInvoke);
       button.onclick = async () => {
-        if (navigational) {
+        if (activation.navigational) {
           button.disabled = true;
           try {
-            await onNavigateLayer(action.targetLayerId, { action, sourceNode: node });
+            if (activation.resolvedInvoke) await onNavigateResolvedInvoke(action);
+            else await onNavigateLayer(action.targetLayerId, { action, sourceNode: node });
           } finally {
             if (button.isConnected) button.disabled = false;
           }

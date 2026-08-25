@@ -15,7 +15,7 @@ pub use icon::{
 pub use ids::{ActionId, EdgeId, LayerId, NodeId, ProjectId, ThreadId};
 pub(crate) use layer::validate_authored_layout;
 pub use layer::{GraphLayer, LayerDraft, LayerLayout, NodePlacement, ResolvedLayer};
-pub use node::{GraphNode, NodeDraft};
+pub use node::{GraphNode, InteractionInvocation, NodeDraft};
 pub use record_state::RecordState;
 
 pub(crate) use layer::{LayerCandidate, validate_connected};

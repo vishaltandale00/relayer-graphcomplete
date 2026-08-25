@@ -30,7 +30,16 @@ pub struct ImportedConversationStage {
 pub struct ImportedTurn {
     pub source_turn_id: String,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invoke_origin: Option<ImportedInvokeOrigin>,
     pub accepted_view: Option<ImportedAcceptedView>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedInvokeOrigin {
+    pub source_turn_id: String,
+    pub source_action_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -412,6 +421,70 @@ impl crate::GraphDatabase {
             receipt.root_layer_id = Some(layer_ids[&view.root_layer_id]);
             receipt.root_action_id = Some(action_ids[&view.root_action.id]);
         }
+
+        // V1 exports retain the authored invoke shape (`targetLayerId: null`). The
+        // already-validated origin on a later accepted turn is the portable record
+        // that the invoke resolved, so reconstruct that projection inside the same
+        // immutable import transaction.
+        let mut resolved_invokes = HashSet::new();
+        for position in 0..turn_count {
+            let turn = load_turn(&mut tx, import_id, position).await?;
+            let (Some(origin), Some(view)) = (turn.invoke_origin, turn.accepted_view) else {
+                continue;
+            };
+            let source_turn_position =
+                source_turn_position(&mut tx, import_id, &origin.source_turn_id)
+                    .await?
+                    .ok_or_else(|| {
+                        GraphError::Internal(
+                            "imported invoke origin names an unknown source turn".into(),
+                        )
+                    })?;
+            if source_turn_position >= position {
+                return Err(GraphError::Internal(
+                    "imported invoke origin must name an earlier turn".into(),
+                ));
+            }
+            let source_turn = load_turn(&mut tx, import_id, source_turn_position).await?;
+            let source_has_invoke = source_turn
+                .accepted_view
+                .as_ref()
+                .is_some_and(|source_view| {
+                    source_view.layers.iter().any(|layer| {
+                        layer.actions.iter().any(|action| {
+                            action.id == origin.source_action_id && action.kind == "invoke"
+                        })
+                    })
+                });
+            if !source_has_invoke {
+                return Err(GraphError::Internal(
+                    "imported invoke origin does not name an invoke in its source turn".into(),
+                ));
+            }
+            if !resolved_invokes.insert(origin.source_action_id.clone()) {
+                return Err(GraphError::Internal(
+                    "imported invoke action resolves more than once".into(),
+                ));
+            }
+            let action_id = action_ids.get(&origin.source_action_id).ok_or_else(|| {
+                GraphError::Internal("imported invoke origin action was not materialized".into())
+            })?;
+            let target_layer_id = layer_ids.get(&view.root_layer_id).ok_or_else(|| {
+                GraphError::Internal("imported invoke destination root was not materialized".into())
+            })?;
+            let updated = sqlx::query(
+                "UPDATE actions SET target_layer_id=?1 WHERE id=?2 AND kind='invoke' AND target_layer_id IS NULL",
+            )
+            .bind(target_layer_id)
+            .bind(action_id)
+            .execute(&mut *tx)
+            .await?;
+            if updated.rows_affected() != 1 {
+                return Err(GraphError::Internal(
+                    "imported invoke resolution could not be reconstructed exactly once".into(),
+                ));
+            }
+        }
         tx.commit().await?;
         for receipt in &mut receipts {
             if let Some(node_id) = receipt.graph_node_id {
@@ -527,6 +600,20 @@ fn validate_imported_layout(layer: &ImportedLayer) -> Result<(), GraphError> {
         }
     }
     Ok(())
+}
+
+async fn source_turn_position(
+    tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>,
+    import_id: &str,
+    source_turn_id: &str,
+) -> Result<Option<i64>, GraphError> {
+    Ok(sqlx::query_scalar(
+        "SELECT position FROM graph_import_turns WHERE import_id=?1 AND source_turn_id=?2",
+    )
+    .bind(import_id)
+    .bind(source_turn_id)
+    .fetch_optional(&mut **tx)
+    .await?)
 }
 
 async fn load_metadata(

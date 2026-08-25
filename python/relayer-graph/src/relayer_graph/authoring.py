@@ -23,11 +23,14 @@ class GraphNode:
     title: str
     detail: str
     state: str
+    leased_action_id: int | None = None
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "GraphNode":
+        leased_action_id = value.get("leasedActionId")
         return cls(int(value["id"]), str(value["kind"]), str(value["icon"]),
-                   str(value["title"]), str(value["detail"]), str(value["state"]))
+                   str(value["title"]), str(value["detail"]), str(value["state"]),
+                   None if leased_action_id is None else int(leased_action_id))
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,7 +9,7 @@ import types
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from relayer_graph import (APIError, ConfigurationError, EdgeObject, GraphSession,
+from relayer_graph import (APIError, ConfigurationError, EdgeObject, GraphNode, GraphSession,
                            LayerLayoutObject, LayerObject, NodeObject,
                            NodePlacementObject,
                            RELAYER_ICON_NAMES, RelayerGraphClient, ValidationError,
@@ -247,6 +247,20 @@ class IconVocabularyTests(unittest.TestCase):
     def test_exports_curated_names_without_duplicates(self):
         self.assertIn("compass", RELAYER_ICON_NAMES)
         self.assertEqual(len(RELAYER_ICON_NAMES), len(set(RELAYER_ICON_NAMES)))
+
+    def test_graph_node_parses_nullable_lease_identity(self):
+        leased = GraphNode.from_dict({
+            "id": 7, "leasedActionId": 11, "kind": "user-interaction", "icon": "user",
+            "title": "Result", "detail": "Result", "state": "accepted",
+        })
+        ordinary = GraphNode.from_dict({
+            "id": 8, "leasedActionId": None, "kind": "user-interaction", "icon": "user",
+            "title": "Question", "detail": "Question", "state": "accepted",
+        })
+        self.assertEqual(leased.leased_action_id, 11)
+        self.assertIsNone(ordinary.leased_action_id)
+        positional = GraphNode(9, "concept", "box", "Legacy", "Legacy", "accepted")
+        self.assertIsNone(positional.leased_action_id)
 
     def test_resolves_aliases_without_accepting_arbitrary_lucide_names(self):
         self.assertEqual(resolve_relayer_icon_name("CIRCLE_ALERT"), "alert-circle")

@@ -31,7 +31,7 @@ The Node runtime is split into explicit workspace packages: `@relayer/graph-clie
 ## Core design
 
 - The selected harness owns model execution. Prime Agent alone owns recursive child scheduling; GraphComplete does not add another scheduler.
-- GraphComplete owns graph records, active-interaction write authority, validation, immutable accepted history, and explicit submission.
+- GraphComplete owns graph records, active-interaction write authority, validation, accepted-history integrity, and explicit submission. Accepted records are immutable except for ADR 0005's exact one-shot leased-invoke target transition.
 - Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
 - The Node harness host owns live per-thread harness objects and provider-session resume state, not graph rules or product lifecycle.
 - Provider adapters own authentication, model discovery, and provider-specific execution details. Product records use stable provider, model, harness, and permission identifiers.
@@ -46,6 +46,14 @@ The implemented basic loop is:
 6. Complete returns the resolved root layer for immediate display; later navigation reads the persisted layer.
 
 Independent self-assessment will later add an optional review gate to this same loop.
+
+Issue #55's accepted, not-yet-implemented invoke-resolution contract extends this
+same boundary without adding another authoring API. An invoke-created interaction
+carries the exact source/action lease pair, with source interaction provenance kept
+private by graph core; ordinary `graph.submit(interactionNode)`
+atomically fills that accepted `invoke` action's target with the accepted result
+root exactly once. Derived neighbor reads expose the source node without an
+authored edge, and pre-lease invocations are not backfilled.
 
 The `prime.agent` adapter targets the run-context API in
 [Prime Agent PR #1538](https://github.com/PrimeIntellect-ai/prime-agent/pull/1538).

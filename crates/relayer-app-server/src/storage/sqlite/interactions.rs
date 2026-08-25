@@ -1,13 +1,26 @@
 use super::{SqliteProductStore, catalog};
 use crate::product::{
     AcceptedInteractionCompletion, Interaction, InteractionId, InteractionModelSelection,
-    ModelFamilyId, ProviderId, ThreadId, ValidateModelSelectionCommand,
+    ModelFamilyId, PreparedInteractionBinding, ProviderId, ThreadId, ValidateModelSelectionCommand,
 };
 use crate::storage::StorageError;
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 impl SqliteProductStore {
+    pub(crate) async fn get_interaction_by_graph_node_id(
+        &self,
+        graph_node_id: i64,
+    ) -> Result<Option<Interaction>, StorageError> {
+        let row = sqlx::query(
+            "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json,model_provider_id,provider_model_id,model_family_id FROM interactions WHERE graph_node_id=?1",
+        )
+        .bind(graph_node_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(interaction_from_row).transpose()
+    }
+
     pub(crate) async fn recover_interrupted_interactions(
         &self,
         error: &str,
@@ -15,7 +28,7 @@ impl SqliteProductStore {
         // Ordinary completions cannot resume across a backend restart. Make every remaining
         // nonterminal row explicit and terminal so thread-level exclusivity does not deadlock.
         let result = sqlx::query(
-            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('not_started','running','submitted') AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('not_started','running','submitted') AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1) AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
         )
         .bind(error)
         .execute(&self.pool)
@@ -36,9 +49,10 @@ impl SqliteProductStore {
         .await?
         .as_ref()
         .map(interaction_from_row)
-        .transpose()
+            .transpose()
     }
 
+    #[cfg(test)]
     pub(crate) async fn list_interactions(
         &self,
         thread_id: ThreadId,
@@ -153,6 +167,7 @@ impl SqliteProductStore {
         Ok(interaction)
     }
 
+    #[cfg(test)]
     pub(crate) async fn mark_interaction_running(
         &self,
         interaction_id: InteractionId,
@@ -171,9 +186,59 @@ impl SqliteProductStore {
         interaction_id: InteractionId,
         harness_configuration_name: &str,
     ) -> Result<bool, StorageError> {
-        let result = sqlx::query("UPDATE interactions SET completion_status='running',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='not_started' AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)")
-            .bind(harness_configuration_name)
+        let result = sqlx::query("UPDATE interactions SET completion_status='running',completion_error=NULL WHERE id=?1 AND completion_status='submitted' AND graph_node_id IS NOT NULL AND harness_configuration_name=?2 AND harness_configuration_digest IS NOT NULL AND effective_execution_digest IS NOT NULL AND effective_permission_receipt_json IS NOT NULL")
             .bind(interaction_id.value())
+            .bind(harness_configuration_name)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub(crate) async fn restore_leased_interaction_submitted(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query(
+            "UPDATE interactions
+             SET completion_status='submitted',completion_error=?1
+             WHERE id=?2 AND completion_status='running'
+               AND EXISTS (
+                 SELECT 1 FROM action_invocations
+                 WHERE result_interaction_id=interactions.id AND graph_lease_required=1 AND authoritative=1
+               )",
+        )
+        .bind(error)
+        .bind(interaction_id.value())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub(crate) async fn claim_interaction_preparing(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query("UPDATE interactions SET completion_status='submitted',completion_error=NULL WHERE id=?1 AND completion_status='not_started' AND graph_node_id IS NULL")
+            .bind(interaction_id.value())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub(crate) async fn bind_prepared_interaction(
+        &self,
+        binding: PreparedInteractionBinding<'_>,
+    ) -> Result<bool, StorageError> {
+        let receipt = serde_json::to_string(binding.effective_permission_receipt)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let result = sqlx::query("UPDATE interactions SET graph_node_id=?1,harness_configuration_name=?2,harness_configuration_digest=?3,effective_execution_digest=?4,effective_permission_receipt_json=?5,completion_output_json=NULL,completion_error=NULL WHERE id=?6 AND completion_status='submitted' AND graph_node_id IS NULL")
+            .bind(binding.graph_node_id)
+            .bind(binding.harness_configuration_name)
+            .bind(binding.harness_configuration_digest)
+            .bind(binding.effective_execution_digest)
+            .bind(receipt)
+            .bind(binding.interaction_id.value())
             .execute(&self.pool)
             .await?;
         Ok(result.rows_affected() == 1)
@@ -183,14 +248,14 @@ impl SqliteProductStore {
         &self,
         completion: AcceptedInteractionCompletion<'_>,
     ) -> Result<(), StorageError> {
-        let result = sqlx::query("UPDATE interactions SET graph_node_id=?1,completion_status='accepted',harness_configuration_name=?2,harness_configuration_digest=?3,effective_execution_digest=?4,effective_permission_receipt_json=?5,completion_output_json=?6,completion_error=NULL WHERE id=?7 AND completion_status='running' AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)")
+        let result = sqlx::query("UPDATE interactions SET completion_status='accepted',completion_output_json=?1,completion_error=NULL WHERE id=?2 AND graph_node_id=?3 AND completion_status='running' AND harness_configuration_name=?4 AND harness_configuration_digest=?5 AND effective_execution_digest=?6 AND effective_permission_receipt_json=?7")
+            .bind(serde_json::to_string(completion.output).map_err(|error| StorageError::Serialization(error.to_string()))?)
+            .bind(completion.interaction_id.value())
             .bind(completion.graph_node_id)
             .bind(completion.harness_configuration_name)
             .bind(completion.harness_configuration_digest)
             .bind(completion.effective_execution_digest)
             .bind(serde_json::to_string(completion.effective_permission_receipt).map_err(|error| StorageError::Serialization(error.to_string()))?)
-            .bind(serde_json::to_string(completion.output).map_err(|error| StorageError::Serialization(error.to_string()))?)
-            .bind(completion.interaction_id.value())
             .execute(&self.pool)
             .await?;
         if result.rows_affected() != 1 {
@@ -201,10 +266,9 @@ impl SqliteProductStore {
             if imported {
                 return Ok(());
             }
-            return Err(StorageError::LifecycleConflict(format!(
-                "interaction {} cannot accept completion from its current lifecycle state",
-                completion.interaction_id
-            )));
+            return Err(StorageError::IncompatibleSchema(
+                "prepared interaction identity changed before acceptance".into(),
+            ));
         }
         Ok(())
     }
@@ -214,14 +278,30 @@ impl SqliteProductStore {
         interaction_id: InteractionId,
         harness_configuration_name: &str,
         error: &str,
-    ) -> Result<(), StorageError> {
-        sqlx::query("UPDATE interactions SET completion_status='failed',harness_configuration_name=?1,completion_error=?2 WHERE id=?3 AND completion_status IN ('running','waiting_for_approval') AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)")
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query("UPDATE interactions SET completion_status='failed',harness_configuration_name=COALESCE(harness_configuration_name,?1),completion_error=?2 WHERE id=?3 AND completion_status IN ('not_started','running','submitted','waiting_for_approval') AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)")
             .bind(harness_configuration_name)
             .bind(error)
             .bind(interaction_id.value())
             .execute(&self.pool)
             .await?;
-        Ok(())
+        if result.rows_affected() == 1 {
+            return Ok(true);
+        }
+        let status: Option<String> =
+            sqlx::query_scalar("SELECT completion_status FROM interactions WHERE id=?1")
+                .bind(interaction_id.value())
+                .fetch_optional(&self.pool)
+                .await?;
+        match status.as_deref() {
+            Some("accepted" | "failed") => Ok(false),
+            Some(other) => Err(StorageError::IncompatibleSchema(format!(
+                "interaction {interaction_id} has unexpected failure-transition state {other}"
+            ))),
+            None => Err(StorageError::IncompatibleSchema(format!(
+                "interaction {interaction_id} disappeared before failure transition"
+            ))),
+        }
     }
 }
 

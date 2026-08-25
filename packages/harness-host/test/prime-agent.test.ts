@@ -124,6 +124,10 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("A flat answer is valid");
     expect(prompt).toContain("Author in whatever order fits the task");
     expect(prompt).toContain("final graph call must be await graph.submit(11)");
+    expect(prompt).toContain("await graph.get_node(11)");
+    expect(prompt).toContain("await graph.get_neighbors(11)");
+    expect(prompt).toContain("ordinary graph.submit(11) automatically fulfills any lease");
+    expect(prompt).toContain("There is no separate resolve_action call");
     expect(prompt).toContain("Never mention or expose the size justification");
     expect(prompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
     expect(prompt).toContain("align comparisons deliberately");
