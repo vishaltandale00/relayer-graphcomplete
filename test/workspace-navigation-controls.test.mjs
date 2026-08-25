@@ -99,11 +99,12 @@ describe("product workspace navigation controls", () => {
       "Waiting",
       "Running",
       "Running",
-      "Complete",
+      "",
       "Failed",
       "Cancelled",
       "Stopped",
     ]);
+    expect(turnStatusPresentation("accepted")).toMatchObject({ hidden: true, label: "" });
   });
 
   it("keeps unfinished imports selectable without treating immutable history as live work", () => {

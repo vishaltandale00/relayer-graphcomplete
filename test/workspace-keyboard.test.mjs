@@ -4,14 +4,24 @@ import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspac
 import {
   COMPOSER_MAX_HEIGHT,
   COMPOSER_MIN_HEIGHT,
+  applyContextEditor,
   bindComposerKeydown,
   composerDisabledForState,
   composerFocusRestoration,
   composerKeydownIntent,
   composerSubmissionReady,
+  composerStatusForThread,
+  contextDraftHasAnnotation,
+  contextDetachNeedsConfirmation,
+  contextEditorCanConfirm,
+  contextEditorPresentation,
+  contextStagingDisabledFor,
   graphTurnNavigationDelta,
   handleComposerKeydown,
   resizeComposerTextarea,
+  interactionContextPayload,
+  interactionContextDraftTransition,
+  removeContextAnnotation,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace keyboard behavior", () => {
@@ -75,10 +85,101 @@ describe("product workspace keyboard behavior", () => {
     expect(composerSubmissionReady("Ask a follow-up")).toBe(true);
     expect(composerSubmissionReady("  \n ")).toBe(false);
     expect(composerSubmissionReady("Ask a follow-up", true)).toBe(false);
+    const contexts = [{
+      target: { nodeId: 3, sourceInteractionNodeId: 2, sourceLayerId: 1 },
+      annotations: ["  note  "],
+      node: { id: 3, title: "Context" },
+    }];
+    expect(contextDraftHasAnnotation(contexts)).toBe(true);
+    expect(composerSubmissionReady("", false, true, contexts)).toBe(true);
+    expect(composerSubmissionReady("", false, true, [{ ...contexts[0], annotations: [] }]))
+      .toBe(false);
+    expect(composerSubmissionReady("message", false, true, contexts, true)).toBe(false);
+    expect(interactionContextPayload(contexts)).toEqual([{
+      target: { nodeId: 3, sourceInteractionNodeId: 2, sourceLayerId: 1 },
+      annotations: ["note"],
+    }]);
     expect(composerDisabledForState("running")).toBe(true);
     expect(composerDisabledForState("waiting_for_approval")).toBe(true);
     expect(composerDisabledForState("accepted")).toBe(false);
     expect(composerDisabledForState("accepted", false)).toBe(true);
+  });
+
+  it("attaches an unannotated node only after confirmation and preserves annotation order", () => {
+    const node = { id: 3, title: "Context" };
+    const target = { nodeId: 3, sourceInteractionNodeId: 2, sourceLayerId: 1 };
+    const attaching = { attaching: true, annotationIndex: null, value: "" };
+    expect(contextEditorCanConfirm(attaching)).toBe(true);
+    const attached = applyContextEditor([], attaching, node, target);
+    expect(attached).toEqual([{ target, node, annotations: [] }]);
+    expect(composerSubmissionReady("", false, true, attached)).toBe(false);
+
+    const first = applyContextEditor(attached, {
+      attaching: false,
+      annotationIndex: null,
+      value: " first ",
+    }, node, target);
+    const second = applyContextEditor(first, {
+      attaching: false,
+      annotationIndex: null,
+      value: "second",
+    }, node, target);
+    expect(second[0].annotations).toEqual(["first", "second"]);
+    const edited = applyContextEditor(second, {
+      attaching: false,
+      annotationIndex: 0,
+      value: "revised",
+    }, node, target);
+    expect(edited[0].annotations).toEqual(["revised", "second"]);
+    expect(contextEditorCanConfirm({ attaching: false, annotationIndex: null, value: "  " }))
+      .toBe(false);
+    expect(contextDetachNeedsConfirmation(edited[0])).toBe(true);
+    const afterFirstDelete = removeContextAnnotation(edited, 3, 0);
+    const afterLastDelete = removeContextAnnotation(afterFirstDelete, 3, 0);
+    expect(afterLastDelete).toHaveLength(1);
+    expect(afterLastDelete[0].annotations).toEqual([]);
+    expect(contextDetachNeedsConfirmation(afterLastDelete[0])).toBe(false);
+  });
+
+  it("keeps context controls symbol-first and accessible", () => {
+    const markup = productWorkspaceMarkup();
+    expect(markup).toContain('id="composerContextTray" aria-label="Connected node draft"');
+    expect(markup).toContain('id="attachNodeContext"');
+    expect(markup).toContain('aria-label="Connect node to next message">+</button>');
+    expect(markup).toContain('id="interactionContextPill"');
+    expect(markup.indexOf('id="interactionContextPill"')).toBeLessThan(
+      markup.indexOf('id="turnPickerButton"'),
+    );
+  });
+
+  it("preserves failed drafts but clears them after durable send or a thread switch", () => {
+    const draft = {
+      contexts: [{ target: { nodeId: 3 }, annotations: ["note"] }],
+      editor: { nodeId: 3, value: "unsaved" },
+    };
+    expect(interactionContextDraftTransition(draft, "send_failure")).toBe(draft);
+    expect(interactionContextDraftTransition(draft, "durable_send"))
+      .toEqual({ contexts: [], editor: null });
+    expect(interactionContextDraftTransition(draft, "thread_change"))
+      .toEqual({ contexts: [], editor: null });
+    expect(contextStagingDisabledFor("running", true, false)).toBe(true);
+    expect(contextStagingDisabledFor("accepted", true, true)).toBe(true);
+    expect(contextStagingDisabledFor("failed", true, false)).toBe(false);
+    expect(contextEditorPresentation({ attaching: true, value: "" }, true)).toEqual({
+      textareaDisabled: true,
+      confirmDisabled: true,
+    });
+    expect(contextEditorPresentation({ attaching: true, value: "" }, false)).toEqual({
+      textareaDisabled: false,
+      confirmDisabled: false,
+    });
+    expect(composerStatusForThread({
+      status: "accepted",
+      interactions: [
+        { id: 1, threadId: 10, sequence: 1, completionStatus: "accepted" },
+        { id: 2, threadId: 10, sequence: 2, completionStatus: "running" },
+      ],
+    }, { id: 10 })).toBe("running");
   });
 
   it("starts at one line, grows to its cap, and then enables vertical scrolling", async () => {

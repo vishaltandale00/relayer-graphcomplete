@@ -5,6 +5,54 @@ use crate::product::{
 };
 use serde::Serialize;
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InteractionContextResponse {
+    id: relayer_graph_core::ActionId,
+    #[serde(rename = "type")]
+    type_id: String,
+    target: crate::product::InteractionContextTarget,
+    target_node: relayer_graph_core::InteractionInputNode,
+    annotations: Vec<String>,
+}
+
+fn project_interaction_contexts(
+    intents: Vec<crate::product::InteractionContextIntent>,
+    contexts: Vec<relayer_graph_core::InteractionContext>,
+    actions: Vec<relayer_graph_core::InteractionContextAction>,
+) -> Result<Vec<InteractionContextResponse>, &'static str> {
+    if intents.len() != contexts.len()
+        || contexts.len() != actions.len()
+        || intents
+            .iter()
+            .zip(&contexts)
+            .zip(&actions)
+            .any(|((intent, context), action)| {
+                intent.target.node_id != context.target_node.id.value()
+                    || intent.target.node_id != action.target.node_id.value()
+                    || intent.target.source_interaction_node_id
+                        != action.target.source_interaction_node_id.value()
+                    || intent.target.source_layer_id != action.target.source_layer_id.value()
+                    || intent.annotations != context.annotations
+                    || intent.annotations != action.annotations
+            })
+    {
+        return Err("product and graph interaction contexts diverged");
+    }
+    Ok(intents
+        .into_iter()
+        .zip(contexts)
+        .zip(actions)
+        .map(|((intent, context), action)| InteractionContextResponse {
+            id: action.id,
+            type_id: action.type_id,
+            target: intent.target,
+            target_node: context.target_node,
+            annotations: context.annotations,
+        })
+        .collect())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProjectResponse {
@@ -78,6 +126,7 @@ pub(crate) struct InteractionResponse {
     completion_output: Option<serde_json::Value>,
     completion_error: Option<String>,
     projection_fresh: bool,
+    contexts: Vec<InteractionContextResponse>,
 }
 
 impl From<Interaction> for InteractionResponse {
@@ -99,6 +148,7 @@ impl From<Interaction> for InteractionResponse {
             completion_output: interaction.completion_output,
             completion_error: interaction.completion_error,
             projection_fresh: true,
+            contexts: Vec::new(),
         }
     }
 }
@@ -106,6 +156,118 @@ impl From<Interaction> for InteractionResponse {
 impl InteractionResponse {
     pub(crate) fn mark_projection_stale(&mut self) {
         self.projection_fresh = false;
+    }
+
+    pub(crate) fn set_contexts(
+        &mut self,
+        intents: Vec<crate::product::InteractionContextIntent>,
+        contexts: Vec<relayer_graph_core::InteractionContext>,
+        actions: Vec<relayer_graph_core::InteractionContextAction>,
+    ) -> Result<(), &'static str> {
+        self.contexts = project_interaction_contexts(intents, contexts, actions)?;
+        Ok(())
+    }
+
+    pub(crate) fn set_imported_contexts(
+        &mut self,
+        actions: Vec<relayer_graph_core::InteractionContextAction>,
+        contexts: Vec<relayer_graph_core::InteractionContext>,
+    ) -> Result<(), &'static str> {
+        let intents = actions
+            .iter()
+            .map(|action| crate::product::InteractionContextIntent {
+                target: crate::product::InteractionContextTarget {
+                    node_id: action.target.node_id.value(),
+                    source_interaction_node_id: action.target.source_interaction_node_id.value(),
+                    source_layer_id: action.target.source_layer_id.value(),
+                },
+                annotations: action.annotations.clone(),
+            })
+            .collect();
+        self.contexts = project_interaction_contexts(intents, contexts, actions)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::product::{InteractionContextIntent, InteractionContextTarget};
+    use serde_json::json;
+
+    fn action(annotations: Vec<&str>) -> relayer_graph_core::InteractionContextAction {
+        serde_json::from_value(json!({
+            "id":11,"type":"interaction.context","sourceNodeId":9,
+            "target":{"nodeId":7,"sourceInteractionNodeId":3,"sourceLayerId":5},
+            "annotations":annotations,"state":"accepted"
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn context_projection_preserves_node_content_order_and_hidden_occurrence_identity() {
+        let intents = vec![InteractionContextIntent {
+            target: InteractionContextTarget {
+                node_id: 7,
+                source_interaction_node_id: 3,
+                source_layer_id: 5,
+            },
+            annotations: vec!["first".into(), "second".into()],
+        }];
+        let contexts = vec![
+            serde_json::from_value(json!({
+                "type":"interaction.context",
+                "targetNode":{
+                    "id":7,"kind":"concept","icon":"circle","title":"Target",
+                    "detail":"Immutable detail","state":"accepted"
+                },
+                "annotations":["first","second"]
+            }))
+            .unwrap(),
+        ];
+        let projected =
+            project_interaction_contexts(intents, contexts, vec![action(vec!["first", "second"])])
+                .unwrap();
+        assert_eq!(
+            serde_json::to_value(projected).unwrap(),
+            json!([{
+                "id":11,"type":"interaction.context",
+                "target":{"nodeId":7,"sourceInteractionNodeId":3,"sourceLayerId":5},
+                "targetNode":{
+                    "id":7,"kind":"concept","icon":"circle","title":"Target",
+                    "detail":"Immutable detail","state":"accepted"
+                },
+                "annotations":["first","second"]
+            }])
+        );
+    }
+
+    #[test]
+    fn context_projection_rejects_product_graph_drift() {
+        let intents = vec![InteractionContextIntent {
+            target: InteractionContextTarget {
+                node_id: 7,
+                source_interaction_node_id: 3,
+                source_layer_id: 5,
+            },
+            annotations: vec!["product".into()],
+        }];
+        let contexts = vec![
+            serde_json::from_value(json!({
+                "type":"interaction.context",
+                "targetNode":{
+                    "id":7,"kind":"concept","icon":"circle","title":"Target",
+                    "detail":"Immutable detail","state":"accepted"
+                },
+                "annotations":["graph"]
+            }))
+            .unwrap(),
+        ];
+        assert_eq!(
+            project_interaction_contexts(intents, contexts, vec![action(vec!["graph"])])
+                .unwrap_err(),
+            "product and graph interaction contexts diverged"
+        );
     }
 }
 

@@ -4547,6 +4547,19 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
         .route("/api/control/interactions/77/output", axum::routing::get(|| async {
             (StatusCode::NOT_FOUND, axum::Json(json!({"error":{"code":"completion_not_found"}})))
         }))
+        .route("/api/control/interactions/77/input", axum::routing::get(|| async {
+            axum::Json(json!({
+                "interaction":{"id":77,"kind":"user-interaction","icon":"user","title":"Use this context","detail":"Use this context","state":"accepted"},
+                "contexts":[{"type":"interaction.context","targetNode":{"id":7,"kind":"concept","icon":"box","title":"Target","detail":"Immutable target","state":"accepted"},"annotations":["raw note"]}]
+            }))
+        }))
+        .route("/api/control/interactions/77/context-actions", axum::routing::get(|| async {
+            axum::Json(json!({"actions":[{
+                "id":88,"type":"interaction.context","sourceNodeId":77,
+                "target":{"nodeId":7,"sourceInteractionNodeId":3,"sourceLayerId":5},
+                "annotations":["raw note"],"state":"accepted"
+            }]}))
+        }))
         .route("/api/control/capabilities", axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
             axum::Json(json!({"graphToken":body["graphToken"]}))
         }).delete(|| async { axum::Json(json!({"revoked":true})) }));
@@ -4583,6 +4596,28 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
             .unwrap();
     assert_eq!(status, "accepted");
     pool.close().await;
+    let listed = response_json(
+        resumed
+            .clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/threads/{thread_id}/interactions"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        listed["interactions"][1]["contexts"],
+        json!([{
+            "id":88,"type":"interaction.context",
+            "target":{"nodeId":7,"sourceInteractionNodeId":3,"sourceLayerId":5},
+            "targetNode":{"id":7,"kind":"concept","icon":"box","title":"Target","detail":"Immutable target","state":"accepted"},
+            "annotations":["raw note"]
+        }])
+    );
     let replay = resumed
         .clone()
         .oneshot(api_request(

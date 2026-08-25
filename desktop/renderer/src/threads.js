@@ -620,7 +620,12 @@ export async function submitInteraction(text, modelSelection, contexts = []) {
   if (!current || navigationEntryKey(current) !== sourceLocationKey) return createdInteraction;
   supersedePendingHistory({ presentationChanged: true });
   viewState.currentInteractionId = null;
-  await refreshState(threadId, { historyMode: "push" });
+  try {
+    await refreshState(threadId, { historyMode: "push" });
+  } catch (error) {
+    toast("Message sent. Refreshing the new turn…");
+    schedulePendingRefresh(threadId, { force: true });
+  }
   return createdInteraction;
 }
 
