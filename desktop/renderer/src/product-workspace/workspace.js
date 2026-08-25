@@ -164,6 +164,15 @@ export function shouldRevealStackedInspector(viewportWidth, userInitiated = true
   return userInitiated && viewportWidth > 0 && viewportWidth <= 1100;
 }
 
+export function inspectorFocusRestorationTarget(
+  origin,
+  graph,
+  fallbacks = [],
+  isAvailable = (candidate) => candidate != null,
+) {
+  return [origin, graph, ...fallbacks].find((candidate) => isAvailable(candidate)) ?? null;
+}
+
 export function shouldActivateGraphNodeAfterPointerGesture(moved) {
   return !moved;
 }
@@ -557,6 +566,7 @@ export function createProductWorkspace({
   let renderedThreadId = null;
   let annotationRatingTouched = false;
   let editingAnnotation = null;
+  let inspectorFocusOrigin = null;
 
   const $ = (selector) => root.querySelector(selector);
   const $$ = (selector) => [...root.querySelectorAll(selector)];
@@ -675,6 +685,32 @@ export function createProductWorkspace({
     if (shouldFit) scheduleInspectorFit();
   };
   narrowInspectorMedia?.addEventListener?.("change", handleInspectorLayoutChange);
+  const inspectorFocusTargetIsAvailable = (element) => {
+    if (!element?.isConnected || typeof element.focus !== "function" || element.disabled) return false;
+    if (element.classList?.contains("hidden") || element.closest?.(".hidden,[hidden],[aria-hidden='true']")) {
+      return false;
+    }
+    const style = graphWindow?.getComputedStyle?.(element);
+    return style?.display !== "none" && style?.visibility !== "hidden";
+  };
+  const openInspector = ({ userInitiated = true, origin = null } = {}) => {
+    if (userInitiated) inspectorFocusOrigin = origin;
+    const inspector = $("#inspector");
+    const wasOpen = !inspector.classList.contains("hidden");
+    inspectorUsesOverlay = narrowInspectorMedia?.matches
+      ?? (graphWindow?.innerWidth ?? 0) <= 760;
+    inspector.classList.remove("hidden");
+    const viewportWidth = graphWindow?.innerWidth ?? 0;
+    if (shouldFitInspectorOpen(wasOpen, true, viewportWidth)) scheduleInspectorFit();
+    return {
+      inspector,
+      reveal: () => {
+        if (shouldRevealStackedInspector(viewportWidth, userInitiated)) {
+          inspector.scrollIntoView({ block: "start" });
+        }
+      },
+    };
+  };
   const closeInspector = ({ restoreFocus = true } = {}) => {
     cancelInspectorFit();
     selection.selectedNodeId = null;
@@ -685,7 +721,16 @@ export function createProductWorkspace({
     $("#inspector").classList.add("hidden");
     $$('[data-node]').forEach((element) => element.classList.remove("selected"));
     renderBreadcrumb();
-    if (restoreFocus) graphStage.focus({ preventScroll: true });
+    const focusTarget = restoreFocus
+      ? inspectorFocusRestorationTarget(
+        inspectorFocusOrigin,
+        graphStage,
+        [$("#threadAnnotationBadge"), $("#turnAnnotationBadge"), settingsButton],
+        inspectorFocusTargetIsAvailable,
+      )
+      : null;
+    inspectorFocusOrigin = null;
+    focusTarget?.focus({ preventScroll: true });
   };
   $("#closeInspector").onclick = () => closeInspector();
   const closeInspectorOnEscape = (event) => {
@@ -946,7 +991,11 @@ export function createProductWorkspace({
     $("#annotationList").classList.toggle("empty", !rows.length);
   }
 
-  function openAnnotationSubject(state, anchor, { title, kind, icon = "annotation" } = {}) {
+  function openAnnotationSubject(
+    state,
+    anchor,
+    { title, kind, icon = "annotation", origin = null } = {},
+  ) {
     const threadId = getThread()?.id;
     const subjectChanged = annotationSubjectContextChanged(
       annotationThreadId,
@@ -959,7 +1008,7 @@ export function createProductWorkspace({
     annotationSubject = { anchor, title, kind };
     selection.selectedNodeId = anchor.kind === "node" ? anchor.nodeId : null;
     onSelectionChange(selection.selectedNodeId);
-    $("#inspector").classList.remove("hidden");
+    const { reveal } = openInspector({ origin });
     $("#detailIcon").textContent = icon === "annotation" ? "✎" : icon;
     $("#detailKind").textContent = kind || anchor.kind;
     $("#detailTitle").textContent = title || `${anchor.kind} comments`;
@@ -968,13 +1017,22 @@ export function createProductWorkspace({
     $("#detailActions").replaceChildren();
     $$('[data-node]').forEach((element) => element.classList.remove("selected"));
     renderAnnotationList();
+    reveal();
   }
 
-  $("#threadAnnotationBadge").onclick = () => openAnnotationSubject(
-    getState(), subjectAnchor("thread"), { title: getThread()?.title, kind: "THREAD" },
+  $("#threadAnnotationBadge").onclick = (event) => openAnnotationSubject(
+    getState(), subjectAnchor("thread"), {
+      title: getThread()?.title,
+      kind: "THREAD",
+      origin: event.currentTarget,
+    },
   );
-  $("#turnAnnotationBadge").onclick = () => openAnnotationSubject(
-    getState(), subjectAnchor("turn"), { title: "Turn comments", kind: "TURN" },
+  $("#turnAnnotationBadge").onclick = (event) => openAnnotationSubject(
+    getState(), subjectAnchor("turn"), {
+      title: "Turn comments",
+      kind: "TURN",
+      origin: event.currentTarget,
+    },
   );
   $("#annotationComposer").onsubmit = async (event) => {
     event.preventDefault();
@@ -1515,6 +1573,7 @@ export function createProductWorkspace({
             openAnnotationSubject(getState(), anchor, {
               title: item.label,
               kind: "LAYER",
+              origin: badge,
             });
           } catch (error) {
             toast(error.message);
@@ -1885,7 +1944,11 @@ export function createProductWorkspace({
         const open = (event) => {
           event.preventDefault();
           event.stopPropagation();
-          openAnnotationSubject(getState(), anchor, { title: "Relationship", kind: "EDGE" });
+          openAnnotationSubject(getState(), anchor, {
+            title: "Relationship",
+            kind: "EDGE",
+            origin: event.currentTarget,
+          });
         };
         const hit = group.querySelector(".graph-edge-hit");
         hit.onclick = open;
@@ -1940,15 +2003,7 @@ export function createProductWorkspace({
       kind: "NODE",
     } : null;
     if (notify) onSelectionChange(node.id);
-    const inspector = $("#inspector");
-    const wasOpen = !inspector.classList.contains("hidden");
-    inspectorUsesOverlay = narrowInspectorMedia?.matches
-      ?? (graphWindow?.innerWidth ?? 0) <= 760;
-    inspector.classList.remove("hidden");
-    const viewportWidth = graphDocument.defaultView?.innerWidth ?? 0;
-    if (shouldFitInspectorOpen(wasOpen, true, viewportWidth)) {
-      scheduleInspectorFit();
-    }
+    const { reveal } = openInspector({ userInitiated: notify });
     $("#detailIcon").replaceChildren(createRelayerIcon(
       node.icon || node.metadata?.relayer?.icon,
       { class: "relayer-detail-icon" },
@@ -2004,7 +2059,11 @@ export function createProductWorkspace({
           : "Add action comment");
         badge.onclick = (event) => {
           event.stopPropagation();
-          openAnnotationSubject(state, anchor, { title: presentation.label, kind: "ACTION" });
+          openAnnotationSubject(state, anchor, {
+            title: presentation.label,
+            kind: "ACTION",
+            origin: event.currentTarget,
+          });
         };
         wrapper.append(badge);
       }
@@ -2049,9 +2108,7 @@ export function createProductWorkspace({
     });
     renderAnnotationList();
     renderBreadcrumb(state, getThread());
-    if (shouldRevealStackedInspector(viewportWidth, notify)) {
-      inspector.scrollIntoView({ block: "start" });
-    }
+    reveal();
   }
 
   function dispose() {

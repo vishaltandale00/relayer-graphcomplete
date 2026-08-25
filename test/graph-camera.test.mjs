@@ -12,6 +12,7 @@ import {
   graphNodeLayoutBounds,
   graphScreenPoint,
   graphWorldPoint,
+  inspectorFocusRestorationTarget,
   inspectorFitRequestIsCurrent,
   recenterGraphCamera,
   shouldActivateGraphNodeAfterPointerGesture,
@@ -37,11 +38,29 @@ describe("product workspace graph camera", () => {
     expect(shouldFitInspectorDock(false, true, true)).toBe(false);
   });
 
-  it("reveals every user-selected node in stacked layouts without scrolling restored state", () => {
+  it("reveals every user-opened inspector in stacked layouts without scrolling restored state", () => {
     expect(shouldRevealStackedInspector(1100, true)).toBe(true);
     expect(shouldRevealStackedInspector(760, true)).toBe(true);
     expect(shouldRevealStackedInspector(1101, true)).toBe(false);
     expect(shouldRevealStackedInspector(960, false)).toBe(false);
+  });
+
+  it("restores inspector focus to a visible origin before graph and visible fallbacks", () => {
+    const available = new Set(["origin", "graph", "badge"]);
+    const choose = () => inspectorFocusRestorationTarget(
+      "origin",
+      "graph",
+      ["badge", "settings"],
+      (candidate) => available.has(candidate),
+    );
+
+    expect(choose()).toBe("origin");
+    available.delete("origin");
+    expect(choose()).toBe("graph");
+    available.delete("graph");
+    expect(choose()).toBe("badge");
+    available.clear();
+    expect(choose()).toBe(null);
   });
 
   it("does not activate a graph node from the click generated after dragging it", () => {

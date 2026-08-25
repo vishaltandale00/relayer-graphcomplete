@@ -366,7 +366,7 @@ trait GitRunner {
                 "-z",
                 "--no-ext-diff",
                 "--no-textconv",
-                "--ignore-submodules=dirty",
+                "--ignore-submodules=none",
                 "--cached",
                 baseline,
                 "--",
@@ -383,7 +383,7 @@ trait GitRunner {
                 "-z",
                 "--no-ext-diff",
                 "--no-textconv",
-                "--ignore-submodules=dirty",
+                "--ignore-submodules=none",
                 "--",
             ],
             safety,
@@ -590,12 +590,14 @@ fn inspect_with(
         Ok(false) => {}
         Err(error) => return unavailable_from_error(worktree_label, error),
     }
-    match git.has_initialized_gitlink(&repository, &safety, deadline) {
-        Ok(true) => {
-            return unavailable_from_error(worktree_label, GitRunError::UnsupportedSubmodule);
+    if !ignores_all_submodules(&safety) {
+        match git.has_initialized_gitlink(&repository, &safety, deadline) {
+            Ok(true) => {
+                return unavailable_from_error(worktree_label, GitRunError::UnsupportedSubmodule);
+            }
+            Ok(false) => {}
+            Err(error) => return unavailable_from_error(worktree_label, error),
         }
-        Ok(false) => {}
-        Err(error) => return unavailable_from_error(worktree_label, error),
     }
 
     let branch_output = match run_git(
@@ -1181,6 +1183,7 @@ fn read_effective_repository_config_with(
         ("core.sparseCheckout", false),
         ("core.sparseCheckoutCone", false),
         ("index.sparse", false),
+        ("diff.ignoreSubmodules", false),
     ];
     let mut effective = Vec::new();
     for (key, expand_path) in keys {
@@ -1442,6 +1445,28 @@ fn effective_config_last(
             .unwrap_or_default()
             .to_vec(),
     ))
+}
+
+fn effective_ignore_submodules(safety: &GitSafetyOverrides) -> &OsStr {
+    safety
+        .effective_config
+        .iter()
+        .rev()
+        .find(|(key, _)| {
+            key.as_os_str()
+                .as_encoded_bytes()
+                .eq_ignore_ascii_case(b"diff.ignoresubmodules")
+        })
+        .map(|(_, value)| value.as_os_str())
+        // Git's ordinary default is `none`; use an explicit value so the
+        // isolated shadow command cannot inherit a different host setting.
+        .unwrap_or_else(|| OsStr::new("none"))
+}
+
+fn ignores_all_submodules(safety: &GitSafetyOverrides) -> bool {
+    effective_ignore_submodules(safety)
+        .as_encoded_bytes()
+        .eq_ignore_ascii_case(b"all")
 }
 
 fn has_initialized_gitlink(
@@ -1720,6 +1745,8 @@ fn shadow_diff_command(
     extra: &[&str],
 ) -> Command {
     let mut command = Command::new("git");
+    let mut ignore_submodules = OsString::from("--ignore-submodules=");
+    ignore_submodules.push(effective_ignore_submodules(safety));
     sanitize_git_environment(&mut command);
     isolate_git_configuration(&mut command);
     append_safety_arguments(&mut command, safety);
@@ -1731,14 +1758,8 @@ fn shadow_diff_command(
         .env("GIT_INDEX_FILE", shadow.join("index"))
         .env("GIT_OBJECT_DIRECTORY", objects)
         .current_dir(repository)
-        .args([
-            "diff",
-            "--numstat",
-            "-z",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--ignore-submodules=dirty",
-        ])
+        .args(["diff", "--numstat", "-z", "--no-ext-diff", "--no-textconv"])
+        .arg(ignore_submodules)
         .args(extra)
         .arg("--")
         .stdin(Stdio::null());
@@ -4864,6 +4885,230 @@ mod tests {
             "unsupported_submodule"
         );
         assert!(!marker.exists(), "inspection executed a submodule helper");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn global_ignore_submodules_all_preserves_diff_semantics_without_helpers() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        struct HomeSystemGitRunner(PathBuf);
+
+        impl GitRunner for HomeSystemGitRunner {
+            fn effective_repository_config(
+                &self,
+                repository: &Path,
+                safe_directories: &[OsString],
+                deadline: Instant,
+            ) -> Result<Vec<(OsString, OsString)>, GitRunError> {
+                read_effective_repository_config_with(
+                    repository,
+                    safe_directories,
+                    deadline,
+                    |command| {
+                        command.env("HOME", &self.0).env_remove("GIT_CONFIG_GLOBAL");
+                    },
+                )
+            }
+
+            fn validate_repository_selection(
+                &self,
+                selected_path: &Path,
+                reported_root: &Path,
+                safety: &GitSafetyOverrides,
+                deadline: Instant,
+            ) -> Result<PathBuf, GitRunError> {
+                validate_repository_identity(selected_path, reported_root, safety, deadline)
+            }
+
+            fn has_applied_transform_filter(
+                &self,
+                repository: &Path,
+                safety: &GitSafetyOverrides,
+                deadline: Instant,
+            ) -> Result<bool, GitRunError> {
+                has_applied_transform_filter(repository, safety, deadline)
+            }
+
+            fn has_initialized_gitlink(
+                &self,
+                repository: &Path,
+                safety: &GitSafetyOverrides,
+                deadline: Instant,
+            ) -> Result<bool, GitRunError> {
+                has_initialized_gitlink(repository, safety, deadline)
+            }
+
+            fn repository_state_token(
+                &self,
+                repository: &Path,
+                safety: &GitSafetyOverrides,
+                deadline: Instant,
+            ) -> Result<Vec<u8>, GitRunError> {
+                repository_state_token(repository, safety, deadline)
+            }
+
+            fn diff_outputs(
+                &self,
+                repository: &Path,
+                baseline: &str,
+                safety: &GitSafetyOverrides,
+                deadline: Instant,
+            ) -> Result<(GitOutput, GitOutput), GitRunError> {
+                run_shadow_diffs(repository, baseline, safety, deadline)
+            }
+
+            fn run(
+                &self,
+                path: &Path,
+                arguments: &[&str],
+                safety: &GitSafetyOverrides,
+                timeout: Duration,
+            ) -> Result<GitOutput, GitRunError> {
+                run_bounded_command_with_safety(
+                    OsStr::new("git"),
+                    path,
+                    arguments,
+                    safety,
+                    timeout,
+                    |command| {
+                        command.env("HOME", &self.0);
+                    },
+                )
+            }
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        let source = directory.path().join("source");
+        let repository = directory.path().join("repository");
+        fs::create_dir(&home).unwrap();
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&repository).unwrap();
+        let run = |path: &Path, arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        for path in [&source, &repository] {
+            run(path, &["init", "--initial-branch=main"]);
+            run(
+                path,
+                &["config", "user.email", "relayer-test@example.invalid"],
+            );
+            run(path, &["config", "user.name", "Relayer test"]);
+        }
+        fs::write(source.join("tracked.txt"), "baseline\n").unwrap();
+        run(&source, &["add", "tracked.txt"]);
+        run(&source, &["commit", "-m", "baseline"]);
+        run(
+            &repository,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                source.to_str().unwrap(),
+                "sub",
+            ],
+        );
+        run(&repository, &["commit", "-am", "submodule"]);
+
+        let marker = directory.path().join("submodule-helper-executed");
+        let helper = directory.path().join("submodule-helper");
+        fs::write(
+            &helper,
+            format!("#!/bin/sh\ntouch '{}'\nexit 0\n", marker.display()),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&helper).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&helper, permissions).unwrap();
+        run(
+            &repository.join("sub"),
+            &["config", "core.fsmonitor", helper.to_str().unwrap()],
+        );
+        fs::write(repository.join("sub/tracked.txt"), "diverged\n").unwrap();
+        fs::write(
+            home.join(".gitconfig"),
+            "[diff]\n\tignoreSubmodules = all\n",
+        )
+        .unwrap();
+        let repository = fs::canonicalize(repository).unwrap();
+
+        // Prove the configured helper is live, then clear the marker before the
+        // ordinary and isolated parent-repository comparisons.
+        run(&repository.join("sub"), &["status", "--porcelain"]);
+        assert!(marker.exists(), "submodule helper fixture was not active");
+        fs::remove_file(&marker).unwrap();
+
+        let ordinary = Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(["diff", "--numstat", "-z", "--"])
+            .env("HOME", &home)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env_remove("GIT_CONFIG_GLOBAL")
+            .output()
+            .unwrap();
+        assert!(ordinary.status.success());
+        assert!(ordinary.stdout.is_empty());
+        assert!(!marker.exists(), "ordinary ignored diff invoked a helper");
+
+        let effective = read_effective_repository_config_with(
+            &repository,
+            &[],
+            Instant::now() + SNAPSHOT_TIMEOUT,
+            |command| {
+                command.env("HOME", &home).env_remove("GIT_CONFIG_GLOBAL");
+            },
+        )
+        .unwrap();
+        let safety = GitSafetyOverrides {
+            effective_config: effective,
+            ..GitSafetyOverrides::default()
+        };
+        assert!(ignores_all_submodules(&safety));
+        assert!(
+            has_initialized_gitlink(&repository, &safety, Instant::now() + SNAPSHOT_TIMEOUT)
+                .unwrap(),
+            "fixture must exercise the initialized-gitlink bypass"
+        );
+        let baseline = Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(baseline.status.success());
+        let (staged, worktree) = run_shadow_diffs(
+            &repository,
+            &trimmed(&baseline.stdout),
+            &safety,
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        )
+        .unwrap();
+        assert!(staged.status.success, "{}", trimmed(&staged.stderr));
+        assert!(worktree.status.success, "{}", trimmed(&worktree.stderr));
+        assert_eq!(staged.stdout, ordinary.stdout);
+        assert_eq!(worktree.stdout, ordinary.stdout);
+        assert!(!marker.exists(), "shadow diff invoked a submodule helper");
+
+        let snapshot = inspect_with(
+            &repository,
+            "project",
+            &HomeSystemGitRunner(home),
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        );
+        assert_eq!(snapshot.kind, EnvironmentKind::Git);
+        assert_eq!(snapshot.changes, EnvironmentChanges::default());
+        assert!(!marker.exists(), "environment inspection invoked a helper");
     }
 
     #[test]
