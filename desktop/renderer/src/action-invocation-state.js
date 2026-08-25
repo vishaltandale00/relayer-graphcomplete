@@ -6,9 +6,19 @@ export function actionWasInvoked(
   sourceInteractionId,
   actionId,
 ) {
-  return [...invocations, ...pendingInvocations].some((invocation) => (
+  return invocations.some((invocation) => (
+    String(invocation.actionId) === String(actionId)
+    && invocation.resultCompletionStatus !== "submitted"
+  )) || pendingInvocations.some((invocation) => (
     String(invocation.sourceInteractionId) === String(sourceInteractionId)
     && String(invocation.actionId) === String(actionId)
+  ));
+}
+
+export function actionCanRetry(invocations = [], actionId) {
+  return invocations.some((invocation) => (
+    String(invocation.actionId) === String(actionId)
+    && invocation.resultCompletionStatus === "submitted"
   ));
 }
 
@@ -47,11 +57,16 @@ export function visibleLayerAfterRefresh(
   previousVisibleLayer,
   selectedInteraction,
 ) {
+  const refreshedRoot = selectedInteraction?.completionOutput?.rootLayer ?? null;
   if (
     previousVisibleLayer
     && String(previousInteractionId) === String(selectedInteraction?.id)
   ) {
+    if (
+      refreshedRoot
+      && String(previousVisibleLayer.layer?.id) === String(refreshedRoot.layer?.id)
+    ) return refreshedRoot;
     return previousVisibleLayer;
   }
-  return selectedInteraction?.completionOutput?.rootLayer ?? null;
+  return refreshedRoot;
 }

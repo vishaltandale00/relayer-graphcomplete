@@ -481,6 +481,13 @@ async fn open_app(database: &Path, web_directory: &Path) -> Router {
         provider_catalog_refresh_url: None,
         provider_catalog_refresh_token: None,
         runtime: None,
+        allow_conversation_import: false,
+        export_producer: relayer_app_server::conversation_export::ExportProducer {
+            desktop_version: "test".into(),
+            build_commit: "test".into(),
+            platform: "test".into(),
+            architecture: "test".into(),
+        },
     })
     .await
     .unwrap()

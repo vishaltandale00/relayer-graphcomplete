@@ -11,6 +11,7 @@ import { CodexModelCatalogAdapter } from "./models/codex-model-catalog-adapter.m
 import { startModelCatalogRefreshServer } from "./models/model-catalog-refresh-server.mjs";
 import { ModelCatalogService } from "./models/model-catalog-service.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
+import { createConversationExportService } from "./services/conversation-export.mjs";
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
 import { GraphCompleteRuntimeService } from "./services/graphcomplete-runtime.mjs";
@@ -196,6 +197,12 @@ if (primaryInstance) {
       providerCatalogRefreshSession: modelCatalogRefreshServer.session,
       defaultHarnessConfiguration,
       allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-"),
+      exportProducer: {
+        desktopVersion: app.getVersion(),
+        buildCommit: metadata.relayerReleaseSourceCommit || "development",
+        platform: process.platform,
+        architecture: process.arch,
+      },
       onUnexpectedStop: () => {
         dialog.showErrorBox(
           "Relayer app server stopped",
@@ -206,6 +213,11 @@ if (primaryInstance) {
     });
     const productSession = await productServer.start();
     await modelCatalog.startup();
+    const conversationExporter = createConversationExportService({
+      dialog,
+      getWindow: () => mainWindow,
+      exportConversation: (threadId) => productServer.exportConversation(threadId),
+    });
 
     registerDesktopIpc({
       ipcMain,
@@ -214,6 +226,7 @@ if (primaryInstance) {
       nativeTheme,
       credentials,
       modelCatalog,
+      conversationExporter,
       settings,
       tutorial,
       updater,

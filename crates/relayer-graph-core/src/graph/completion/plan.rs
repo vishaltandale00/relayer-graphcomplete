@@ -3,17 +3,22 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::{
     ActionId, ActionKind, EdgeId, GraphAction, GraphError, LayerId, NavigateRelation, NodeId,
     RecordState,
-    graph::{InteractionScope, model::validate_connected},
+    graph::{InteractionScope, model::validate_connected, validate_authored_layout},
     storage::{
         GraphConnection,
         sqlite::{
-            actions::ActionTable, edges::EdgeTable, layers, layers::LayerTable, nodes::NodeTable,
+            actions::ActionTable,
+            edges::EdgeTable,
+            layers,
+            layers::LayerTable,
+            nodes::{InteractionLease, NodeTable},
         },
     },
 };
 
 pub(crate) struct CompletionPlan {
     pub root_action: GraphAction,
+    pub lease: Option<InteractionLease>,
     pub nodes: HashSet<NodeId>,
     pub edges: HashSet<EdgeId>,
     pub layers: HashSet<LayerId>,
@@ -62,6 +67,7 @@ impl CompletionPlan {
         })?;
         let mut plan = Self {
             root_action,
+            lease: None,
             nodes: HashSet::new(),
             edges: HashSet::new(),
             layers: HashSet::new(),
@@ -73,7 +79,21 @@ impl CompletionPlan {
         plan.validate_expand_acyclic(connection, scope).await?;
         plan.validate_no_orphan_layers(connection, scope).await?;
         plan.validate_edge_uniqueness(connection, scope).await?;
+        plan.lease = NodeTable::new(&mut *connection)
+            .interaction_lease(scope.root_node_id)
+            .await?;
+        if let Some(lease) = plan.lease {
+            ActionTable::new(&mut *connection)
+                .validate_unresolved_lease(scope, lease.source_interaction_id, lease.action_id)
+                .await?;
+        }
         Ok(plan)
+    }
+
+    pub(crate) fn root_layer_id(&self) -> Result<LayerId, GraphError> {
+        self.root_action
+            .target_layer_id
+            .ok_or_else(|| GraphError::Internal("validated completion root has no target".into()))
     }
 
     async fn validate_edge_uniqueness(
@@ -141,6 +161,7 @@ impl CompletionPlan {
                     "draft layer {layer_id} belongs to another interaction"
                 )));
             }
+            validate_authored_layout(record.layer.layout.as_ref(), &record.layer.nodes)?;
             if !self.layers.insert(layer_id) {
                 continue;
             }

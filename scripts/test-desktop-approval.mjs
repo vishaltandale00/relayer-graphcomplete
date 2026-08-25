@@ -103,7 +103,8 @@ async function approvalDockState() {
       scope: document.querySelector("#approvalScopeDescription")?.textContent,
       queue: document.querySelector("#approvalQueuePosition")?.textContent,
       queueLive: document.querySelector("#approvalQueuePosition")?.getAttribute("aria-live"),
-      runState: document.querySelector("#runState")?.getAttribute("aria-label"),
+      settingsLabel: document.querySelector("#conversationSettingsButton")?.getAttribute("aria-label"),
+      runStateRemoved: !document.querySelector("#runState"),
       composerHidden: document.querySelector("#threadComposer")?.classList.contains("hidden"),
       buttons: ["denyApproval", "approveOnce", "approveAlways"].map((id) => ({
         id,
@@ -219,7 +220,7 @@ async function run() {
   if (firstDock.action !== "npm test" || !firstDock.scope?.includes("this live harness session")) {
     throw new Error(`The dock did not show exact normalized authority: ${JSON.stringify(firstDock)}`);
   }
-  if (!firstDock.composerHidden || firstDock.runState !== "Waiting for user approval" || firstDock.queueLive !== "polite") {
+  if (!firstDock.composerHidden || firstDock.settingsLabel !== "Conversation settings" || !firstDock.runStateRemoved || firstDock.queueLive !== "polite") {
     throw new Error(`The approval waiting presentation was incomplete: ${JSON.stringify(firstDock)}`);
   }
   if (firstDock.buttons.map(({ text }) => text).join("|") !== "Deny|Approve once|Approve alwaysthis session") {

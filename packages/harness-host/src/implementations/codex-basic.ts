@@ -6,7 +6,18 @@ import {
   type CodexAppServerSpawn,
   type CodexAppServerTurnOptions,
 } from "./codex-app-server.js";
-import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState, HarnessTraceSupport, JsonObject } from "../types.js";
+import type {
+  Harness,
+  HarnessFactory,
+  HarnessFactoryContext,
+  HarnessRunContext,
+  HarnessSessionState,
+  HarnessTraceSpan,
+  HarnessTraceSupport,
+  HarnessTraceTerminalStatus,
+  JsonObject,
+  JsonValue,
+} from "../types.js";
 
 export const CODEX_BASIC_KEY = "codex.basic";
 
@@ -31,7 +42,7 @@ interface CodexBasicConfiguration {
 interface ResolvedCodexConfiguration {
   readonly settings: CodexBasicConfiguration;
   readonly permission: ResolvedCodexPermission;
-  readonly promptProfile?: "layered-navigation-v1";
+  readonly promptProfile?: "layered-navigation-v1" | "layered-navigation-multi-agent-v1";
 }
 
 interface ResolvedCodexPermission {
@@ -39,6 +50,23 @@ interface ResolvedCodexPermission {
   readonly approvalPolicy: ApprovalMode;
   readonly approvalsReviewer?: "user" | "auto_review";
   readonly networkAccessEnabled?: boolean;
+}
+
+interface CodexTraceState {
+  readonly collaborationSpans: Map<string, HarnessTraceSpan>;
+}
+
+interface NormalizedCollaborationItem {
+  readonly providerItemId?: string;
+  readonly operation: "spawn_agent" | "send_input" | "resume_agent" | "wait" | "close_agent" | "unknown";
+  readonly providerOperation?: string;
+  readonly senderThreadId?: string;
+  readonly receiverThreadIds?: readonly string[];
+  readonly delegationPrompt?: string;
+  readonly model?: string;
+  readonly reasoningEffort?: JsonValue;
+  readonly agentStates?: JsonObject;
+  readonly status?: "in_progress" | "completed" | "failed";
 }
 
 export class CodexBasicHarness implements Harness {
@@ -62,21 +90,26 @@ export class CodexBasicHarness implements Harness {
     const run = this.dependencies.runAppServerTurn ?? runCodexAppServerTurn;
     const prompt = this.prompt(context.inputGraph);
     context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
-    await run({
-      environment,
-      ...(this.dependencies.codexPathOverride === undefined ? {} : { codexPathOverride: this.dependencies.codexPathOverride }),
-      ...(this.codexThreadId === undefined ? {} : { savedThreadId: this.codexThreadId }),
-      threadParams: this.threadParams(model),
-      turnParams: this.turnParams(sandboxPolicy, model),
-      prompt,
-      approvals: context.approvals,
-      workingDirectory: this.context.workingDirectory,
-      sandboxPolicy,
-      ...(signal === undefined ? {} : { signal }),
-      ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
-      onThreadId: (threadId) => { this.codexThreadId = threadId; },
-      onNotification: (method, params) => traceCodexAppServerNotification(context, method, params),
-    });
+    const traceState: CodexTraceState = { collaborationSpans: new Map() };
+    try {
+      await run({
+        environment,
+        ...(this.dependencies.codexPathOverride === undefined ? {} : { codexPathOverride: this.dependencies.codexPathOverride }),
+        ...(this.codexThreadId === undefined ? {} : { savedThreadId: this.codexThreadId }),
+        threadParams: this.threadParams(model),
+        turnParams: this.turnParams(sandboxPolicy, model),
+        prompt,
+        approvals: context.approvals,
+        workingDirectory: this.context.workingDirectory,
+        sandboxPolicy,
+        ...(signal === undefined ? {} : { signal }),
+        ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
+        onThreadId: (threadId) => { this.codexThreadId = threadId; },
+        onNotification: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
+      });
+    } finally {
+      closeIncompleteCollaborationSpans(traceState);
+    }
   }
 
   traceSupport(): HarnessTraceSupport {
@@ -159,6 +192,11 @@ export class CodexBasicHarness implements Harness {
     if (this.resolved.promptProfile === "layered-navigation-v1") {
       return this.layeredNavigationPrompt(interactionNode);
     }
+    if (this.resolved.promptProfile === "layered-navigation-multi-agent-v1") {
+      return `${this.layeredNavigationPrompt(interactionNode)}
+
+Codex native subagents are available when useful. Subagents may directly author, revise, and submit graph objects using the available graph capability. Use the configured model family as appropriate; coordination remains native to Codex.`;
+    }
     return `You are the basic Relayer graph harness. Answer the current user interaction by authoring and accepting a useful graph layer.
 
 Current interaction node: ${interactionNode.id}
@@ -167,15 +205,17 @@ User text: ${interactionNode.detail}
 Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a small .mjs file in the system temporary directory, not in the project checkout, and run it with Node.js. Import from:
 ${this.clientModuleUrl}
 
-The module exports RelayerGraphClient, NodeObject, EdgeObject, and LayerObject. Use RelayerGraphClient.fromEnv(). The required order is:
+The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). The required order is:
 1. create NodeObject values with icon, title, and useful markdown detail;
 2. await graph.submitNode(node) for each node;
 3. await graph.createEdge(leftNode, rightNode) for each visible undirected connection;
-4. create and await graph.submitLayer(new LayerObject(nodes, edges));
+4. create a version-1 LayerLayoutObject with exactly one NodePlacementObject(node, x, y) per layer node, then await graph.submitLayer(new LayerObject(nodes, edges, layout));
 5. await graph.addAction(${interactionNode.id}, { kind: "navigate", label: "Response", target: layer, response: true });
 6. await graph.submit(${interactionNode.id}).
 
 The visible layer must contain 1 to 8 nodes and must be connected. Layer edges are exactly what the user sees.
+
+Every new layer, including every child layer, requires an intentional authored layout. Coordinates are normalized numbers from 0 through 1 and describe semantic relative position independently of the viewport. Place a one-node layer at (0.5, 0.5). Keep flow or time moving consistently, use a parent or summary node to anchor hierarchy, group related nodes spatially, align comparisons deliberately, and avoid accidental overlap or edge crossings where a clearer arrangement is available. The renderer changes the camera for the viewport; do not derive coordinates from pixels, window size, or inspector state.
 
 Every node icon, and every optional action icon, must use exactly one supported Relayer icon name. Unsupported names are rejected so that you can repair the object. Choose the closest semantic name from:
 ${RELAYER_ICON_NAMES.join(", ")}
@@ -207,7 +247,9 @@ User text: ${interactionNode.detail}
 Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a small .mjs file in the system temporary directory, not in the project checkout, and run it with Node.js. Import from:
 ${this.clientModuleUrl}
 
-The module exports RelayerGraphClient, NodeObject, EdgeObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.
+The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.
+
+The current interaction may carry an invoke lease created by the product. Before authoring, use graph.getNode(${interactionNode.id}) and graph.getNeighbors(${interactionNode.id}) to inspect the current node and any relevant source context exposed by the graph. Treat that context as input to your answer; do not copy, forge, or manage lease metadata. Author the response normally. A successful ordinary graph.submit(${interactionNode.id}) automatically fulfills any lease held by this interaction. There is no separate resolveAction call.
 
 Navigation has two meanings:
 - "expand" continues the explanation with a more detailed layer. Expansion must not point back to an expansion ancestor.
@@ -223,6 +265,8 @@ await graph.addAction(node, { kind: "invoke", sourceLayer: rootLayer, label: "Fo
 
 Layers normally contain 1 to 5 nodes. A layer may contain 6 to 8 nodes only when keeping them together is important; pass that private reason as await graph.submitLayer(layer, { sizeJustification: "..." }). Never mention or expose the size justification in user-facing node text. More than 8 nodes must be split into useful layers.
 
+Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject with exactly one NodePlacementObject(node, x, y) per member node. Coordinates are normalized numbers from 0 through 1 and express semantic relative position independently of the viewport. Place a one-node layer at (0.5, 0.5). Keep flow or time moving consistently, use a parent or summary node to anchor hierarchy, group related nodes spatially, align comparisons deliberately, and avoid accidental overlap or edge crossings where a clearer arrangement is available. Do not use pixels, window size, or inspector state. Example: const layout = new LayerLayoutObject([new NodePlacementObject(first, 0.25, 0.5), new NodePlacementObject(second, 0.75, 0.5)]); const layer = new LayerObject([first, second], [edge], layout);
+
 Layer edges are exactly what the user sees and are undirected. Every node needs a supported icon, a short title, and useful markdown detail. Optional action icons must also use a supported Relayer icon name:
 ${RELAYER_ICON_NAMES.join(", ")}
 
@@ -232,20 +276,28 @@ The graph service enforces exact provenance, target visibility, layer size, expa
   }
 }
 
-function traceCodexAppServerNotification(context: HarnessRunContext, method: string, params: unknown): void {
-  const data = redactTraceData(params) as JsonObject;
+function traceCodexAppServerNotification(context: HarnessRunContext, method: string, params: unknown, state: CodexTraceState): void {
+  const redactedParams = redactTraceData(params);
+  const data = isRecord(redactedParams) ? redactedParams : {};
   const item = isRecord(data.item) ? data.item : undefined;
-  const providerEventId = typeof item?.id === "string" ? item.id : undefined;
+  const providerEventId = optionalNonemptyString(item?.id);
   context.trace.emit({
     type: "provider.event",
     ...(providerEventId === undefined ? {} : { providerEventId }),
-    data: { provider: "codex", method, params: data },
+    data: { provider: "codex", method, params: redactedParams },
   });
+  try {
+    const phase = collaborationNotificationPhase(method);
+    if (phase !== undefined && item !== undefined && traceCodexCollaborationItem(context, phase, item, state.collaborationSpans)) return;
+  } catch {
+    // The raw provider event remains authoritative when a future or malformed shape cannot be normalized.
+  }
   if (method === "turn/started") {
     context.trace.emit({ type: "model.call.started", data: { provider: "codex" } });
     return;
   }
   if (method === "turn/completed") {
+    closeIncompleteCollaborationSpans(state);
     const turn = isRecord(data.turn) ? data.turn : {};
     const status = turn.status === "completed" ? "completed" : "failed";
     const usage = isRecord(turn.usage) ? turn.usage : isRecord(data.usage) ? data.usage : undefined;
@@ -266,8 +318,186 @@ function traceCodexAppServerNotification(context: HarnessRunContext, method: str
   }
 }
 
+function traceCodexCollaborationItem(
+  context: HarnessRunContext,
+  phase: "started" | "completed",
+  itemValue: JsonObject,
+  spans: Map<string, HarnessTraceSpan>,
+): boolean {
+  const item = normalizeCollaborationItem(itemValue);
+  if (item === undefined) return false;
+  const data = collaborationItemData(item);
+  const providerItemId = item.providerItemId;
+  if (providerItemId === undefined) {
+    context.trace.emit({
+      type: phase === "started" ? "tool.call.started" : "tool.call.completed",
+      data: { ...data, missingProviderItemId: true },
+    });
+    return true;
+  }
+  if (phase === "started") {
+    if (spans.has(providerItemId)) return true;
+    const span = context.trace.openSpan({
+      name: collaborationItemLabel(item.operation),
+      kind: "tool",
+      providerSpanId: providerItemId,
+    });
+    spans.set(providerItemId, span);
+    span.emit({ type: "tool.call.started", providerEventId: providerItemId, data });
+    return true;
+  }
+  const missingStart = !spans.has(providerItemId);
+  const span = spans.get(providerItemId) ?? context.trace.openSpan({
+    name: collaborationItemLabel(item.operation),
+    kind: "tool",
+    providerSpanId: providerItemId,
+  });
+  if (missingStart) {
+    span.emit({
+      type: "tool.call.started",
+      providerEventId: providerItemId,
+      data: { ...data, missingStart: true },
+    });
+  }
+  const terminalStatus: HarnessTraceTerminalStatus = item.status === "failed" ? "failed" : "completed";
+  span.emit({
+    type: "tool.call.completed",
+    providerEventId: providerItemId,
+    data: { ...data, ...(missingStart ? { missingStart: true } : {}) },
+  });
+  span.end(terminalStatus, missingStart ? { missingStart: true } : undefined);
+  spans.delete(providerItemId);
+  return true;
+}
+
+function closeIncompleteCollaborationSpans(state: CodexTraceState): void {
+  for (const [providerItemId, span] of state.collaborationSpans) {
+    try {
+      span.end("partial", { providerItemId, reason: "Codex collaboration operation did not report completion" });
+    } catch {
+      // Trace finalization is best effort and must not change completion behavior.
+    }
+  }
+  state.collaborationSpans.clear();
+}
+
+function normalizeCollaborationItem(value: JsonObject): NormalizedCollaborationItem | undefined {
+  const itemType = normalizeName(value.type);
+  if (itemType !== "collabtoolcall" && itemType !== "collabagenttoolcall") return undefined;
+  const rawOperation = optionalNonemptyString(firstDefined(value, "tool", "operation"));
+  if (rawOperation === undefined) return undefined;
+  const operation = normalizeCollaborationOperation(rawOperation);
+  const providerItemId = optionalNonemptyString(value.id);
+  const senderThreadId = optionalNonemptyString(firstDefined(value, "sender_thread_id", "senderThreadId"));
+  const receiverThreadIds = optionalStringList(firstDefined(value, "receiver_thread_ids", "receiverThreadIds"));
+  const delegationPrompt = optionalPlainString(firstDefined(value, "prompt", "delegation_prompt", "delegationPrompt"));
+  const model = optionalNonemptyString(value.model);
+  const reasoningEffort = optionalJsonValue(firstDefined(value, "reasoning_effort", "reasoningEffort"));
+  const agentStates = optionalAgentStates(firstDefined(value, "agents_states", "agentsStates"));
+  const status = normalizeCollaborationStatus(value.status);
+  return {
+    ...(providerItemId === undefined ? {} : { providerItemId }),
+    operation,
+    ...(operation === "unknown" ? { providerOperation: rawOperation } : {}),
+    ...(senderThreadId === undefined ? {} : { senderThreadId }),
+    ...(receiverThreadIds === undefined ? {} : { receiverThreadIds }),
+    ...(delegationPrompt === undefined ? {} : { delegationPrompt }),
+    ...(model === undefined ? {} : { model }),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    ...(agentStates === undefined ? {} : { agentStates }),
+    ...(status === undefined ? {} : { status }),
+  };
+}
+
+function collaborationItemData(item: NormalizedCollaborationItem): JsonObject {
+  return redactTraceData({
+    provider: "codex",
+    coordinationOperation: true,
+    itemType: "collaboration_operation",
+    providerItemId: item.providerItemId,
+    operation: item.operation,
+    providerOperation: item.providerOperation,
+    senderThreadId: item.senderThreadId,
+    receiverThreadIds: item.receiverThreadIds,
+    delegationPrompt: item.delegationPrompt,
+    model: item.model,
+    reasoningEffort: item.reasoningEffort,
+    agentStates: item.agentStates,
+    status: item.status,
+  }) as JsonObject;
+}
+
+function collaborationNotificationPhase(method: string): "started" | "completed" | undefined {
+  const normalized = normalizeName(method);
+  if (normalized === "itemstarted") return "started";
+  if (normalized === "itemcompleted") return "completed";
+  return undefined;
+}
+
+function collaborationItemLabel(operation: NormalizedCollaborationItem["operation"]): string {
+  return operation === "unknown" ? "Codex collaboration operation" : `Codex ${operation}`;
+}
+
+function normalizeCollaborationOperation(value: string): NormalizedCollaborationItem["operation"] {
+  const normalized = normalizeName(value);
+  if (normalized === "spawnagent") return "spawn_agent";
+  if (normalized === "sendinput") return "send_input";
+  if (normalized === "resumeagent") return "resume_agent";
+  if (normalized === "wait") return "wait";
+  if (normalized === "closeagent") return "close_agent";
+  return "unknown";
+}
+
+function normalizeCollaborationStatus(value: JsonValue | undefined): NormalizedCollaborationItem["status"] | undefined {
+  const normalized = normalizeName(value);
+  if (normalized === "inprogress") return "in_progress";
+  if (normalized === "completed") return "completed";
+  if (normalized === "failed") return "failed";
+  return undefined;
+}
+
 function isRecord(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function firstDefined(value: JsonObject, ...keys: readonly string[]): JsonValue | undefined {
+  for (const key of keys) if (value[key] !== undefined) return value[key];
+  return undefined;
+}
+
+function normalizeName(value: JsonValue | undefined): string {
+  return typeof value === "string" ? value.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() : "";
+}
+
+function optionalNonemptyString(value: JsonValue | undefined): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+function optionalPlainString(value: JsonValue | undefined): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function optionalStringList(value: JsonValue | undefined): readonly string[] | undefined {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : undefined;
+}
+
+function optionalAgentStates(value: JsonValue | undefined): JsonObject | undefined {
+  if (!isRecord(value)) return undefined;
+  const states: Record<string, JsonValue> = {};
+  for (const [agentId, agentState] of Object.entries(value)) {
+    if (typeof agentState === "string") {
+      states[agentId] = agentState;
+      continue;
+    }
+    if (!isRecord(agentState)) continue;
+    const status = optionalNonemptyString(firstDefined(agentState, "status", "state"));
+    if (status !== undefined) states[agentId] = { status };
+  }
+  return states;
+}
+
+function optionalJsonValue(value: JsonValue | undefined): JsonValue | undefined {
+  return value;
 }
 
 function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedCodexConfiguration {
@@ -288,7 +518,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
   const webSearchMode = optionalEnum(configuration.webSearchMode, ["disabled", "cached", "live"] as const, "webSearchMode");
   const skipGitRepoCheck = optionalBoolean(configuration.skipGitRepoCheck, "skipGitRepoCheck");
   const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
-  const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1"] as const, "promptProfile");
+  const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1", "layered-navigation-multi-agent-v1"] as const, "promptProfile");
   const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);
 
   return {

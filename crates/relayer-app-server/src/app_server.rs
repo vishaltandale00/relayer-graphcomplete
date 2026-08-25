@@ -1,10 +1,43 @@
 use crate::{
-    api, permissions::PermissionCatalog, product::ProductService,
-    provider_catalog_refresh::ProviderCatalogRefreshClient, runtime::RuntimeClient,
+    api,
+    permissions::PermissionCatalog,
+    product::{Interaction, PreparedInteractionBinding, ProductService, ProjectId},
+    provider_catalog_refresh::ProviderCatalogRefreshClient,
+    runtime::RuntimeClient,
     storage::SqliteProductStore,
 };
 use axum::Router;
 use std::path::PathBuf;
+
+#[derive(Debug, thiserror::Error)]
+enum StartupReconciliationError {
+    #[error("{0}")]
+    Retryable(#[source] anyhow::Error),
+    #[error("{0}")]
+    Deterministic(#[source] anyhow::Error),
+}
+
+impl StartupReconciliationError {
+    fn retryable(error: impl Into<anyhow::Error>) -> Self {
+        Self::Retryable(error.into())
+    }
+
+    fn deterministic(error: impl Into<anyhow::Error>) -> Self {
+        Self::Deterministic(error.into())
+    }
+
+    fn from_runtime(error: crate::runtime::RuntimeError) -> Self {
+        if error.is_retryable_startup_failure() {
+            Self::retryable(error)
+        } else {
+            Self::deterministic(error)
+        }
+    }
+
+    fn is_retryable(&self) -> bool {
+        matches!(self, Self::Retryable(_))
+    }
+}
 
 pub struct RelayerRuntimeConfig {
     pub graph_url: String,
@@ -17,6 +50,152 @@ pub struct RelayerRuntimeConfig {
     pub standalone_workspaces_directory: PathBuf,
 }
 
+async fn reconcile_interrupted_interaction(
+    storage: &SqliteProductStore,
+    runtime: &RuntimeClient,
+    permission_catalog: &PermissionCatalog,
+    mut interaction: Interaction,
+) -> Result<(), StartupReconciliationError> {
+    if interaction.graph_node_id.is_none()
+        && let Some((source_interaction_node_id, source_action_id)) = storage
+            .invocation_graph_source(interaction.id)
+            .await
+            .map_err(StartupReconciliationError::retryable)?
+    {
+        if interaction.completion_status == "not_started"
+            && !storage
+                .claim_interaction_preparing(interaction.id)
+                .await
+                .map_err(StartupReconciliationError::retryable)?
+        {
+            return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                "could not reserve interrupted interaction {}",
+                interaction.id
+            )));
+        }
+        let thread = storage
+            .get_thread(interaction.thread_id)
+            .await
+            .map_err(StartupReconciliationError::retryable)?
+            .ok_or_else(|| {
+                StartupReconciliationError::deterministic(anyhow::anyhow!(
+                    "missing thread for {}",
+                    interaction.id
+                ))
+            })?;
+        let permission = permission_catalog
+            .profile(&thread.permission_profile_id)
+            .map_err(StartupReconciliationError::deterministic)?;
+        let prepared = runtime
+            .prepare(&crate::runtime::CompleteInteraction {
+                project_id: thread.project_id.map(ProjectId::value),
+                product_interaction_id: interaction.id.value(),
+                thread_id: thread.id.value(),
+                interaction_id: interaction.id.value(),
+                text: &interaction.text,
+                working_directory: "",
+                harness_configuration_name: &thread.harness_configuration_name,
+                permission_profile: permission,
+                model_selection: interaction.model_selection.as_ref(),
+                invocation: Some(crate::runtime::PreparedInvocation {
+                    source_interaction_node_id,
+                    source_action_id,
+                }),
+            })
+            .await
+            .map_err(StartupReconciliationError::from_runtime)?;
+        let bound = match storage
+            .bind_prepared_interaction(PreparedInteractionBinding {
+                interaction_id: interaction.id,
+                graph_node_id: prepared.graph_node_id,
+                harness_configuration_name: &prepared.harness_configuration_name,
+                harness_configuration_digest: &prepared.harness_configuration_digest,
+                effective_execution_digest: &prepared.effective_execution_digest,
+                effective_permission_receipt: &prepared.effective_permission_receipt,
+            })
+            .await
+        {
+            Ok(bound) => bound,
+            Err(error) => {
+                let cleanup = runtime.discard_prepared(prepared).await;
+                return Err(StartupReconciliationError::retryable(anyhow::anyhow!(
+                    "startup binding failed: {error}{}",
+                    cleanup
+                        .err()
+                        .map(|cleanup| format!("; capability cleanup also failed: {cleanup}"))
+                        .unwrap_or_default()
+                )));
+            }
+        };
+        if !bound {
+            return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                "could not recover graph binding for {}",
+                interaction.id
+            )));
+        }
+        interaction.graph_node_id = Some(prepared.graph_node_id);
+    }
+    if let Some(graph_node_id) = interaction.graph_node_id {
+        // Product never persists writer tokens. Invalidating by node closes the crash window
+        // between durable binding and the normal token revocation path.
+        runtime
+            .invalidate_node_capabilities(graph_node_id)
+            .await
+            .map_err(StartupReconciliationError::from_runtime)?;
+        let metadata = runtime
+            .interaction_metadata(graph_node_id)
+            .await
+            .map_err(StartupReconciliationError::from_runtime)?;
+        let expected = storage
+            .invocation_graph_source(interaction.id)
+            .await
+            .map_err(StartupReconciliationError::retryable)?;
+        let graph_lease_required = storage
+            .invocation_requires_graph_lease(interaction.id)
+            .await
+            .map_err(StartupReconciliationError::retryable)?;
+        let expected = expected.map(|(source_interaction_node_id, source_action_id)| {
+            crate::runtime::PreparedInvocation {
+                source_interaction_node_id,
+                source_action_id,
+            }
+        });
+        let legacy_unleased_invocation =
+            !graph_lease_required && expected.is_some() && metadata.invocation.is_none();
+        if metadata.node_id != graph_node_id
+            || (metadata.invocation != expected && !legacy_unleased_invocation)
+        {
+            return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                "bound graph interaction provenance mismatch for {}",
+                interaction.id
+            )));
+        }
+        if let Some(output) = runtime
+            .completion_output(graph_node_id)
+            .await
+            .map_err(StartupReconciliationError::from_runtime)?
+        {
+            if output.get("nodeId").and_then(serde_json::Value::as_i64) != Some(graph_node_id) {
+                return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                    "canonical output node mismatch for interaction {}",
+                    interaction.id
+                )));
+            }
+            if !storage
+                .recover_interaction_accepted(interaction.id, &output)
+                .await
+                .map_err(StartupReconciliationError::retryable)?
+            {
+                return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                    "interaction {} changed during startup reconciliation",
+                    interaction.id
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub struct RelayerAppServerConfig {
     pub database_path: PathBuf,
     pub web_directory: PathBuf,
@@ -26,6 +205,8 @@ pub struct RelayerAppServerConfig {
     pub provider_catalog_refresh_url: Option<String>,
     pub provider_catalog_refresh_token: Option<String>,
     pub runtime: Option<RelayerRuntimeConfig>,
+    pub allow_conversation_import: bool,
+    pub export_producer: crate::conversation_export::ExportProducer,
 }
 
 pub struct RelayerAppServer {
@@ -38,7 +219,9 @@ pub struct RelayerAppServer {
     permission_catalog: PermissionCatalog,
     default_harness_configuration: String,
     allow_harness_override: bool,
+    allow_conversation_import: bool,
     standalone_workspaces_directory: PathBuf,
+    export_producer: crate::conversation_export::ExportProducer,
 }
 
 impl RelayerAppServer {
@@ -60,38 +243,6 @@ impl RelayerAppServer {
         }
         let permission_catalog = PermissionCatalog::load(&config.permission_catalog).await?;
         let storage = SqliteProductStore::open(&config.database_path).await?;
-        let interrupted_approvals = storage
-            .abort_pending_approvals(
-                None,
-                "Approval request was aborted because its harness session ended when Relayer stopped.",
-                &startup_timestamp(),
-            )
-            .await?;
-        if interrupted_approvals > 0 {
-            eprintln!(
-                "marked {interrupted_approvals} interrupted approval request(s) aborted during backend startup"
-            );
-        }
-        let interrupted = storage
-            .recover_interrupted_action_invocations(
-                "Action invocation was interrupted when Relayer stopped. Retry is unavailable while actions use the temporary one-shot UX.",
-            )
-            .await?;
-        if interrupted > 0 {
-            eprintln!(
-                "marked {interrupted} interrupted action invocation result(s) failed during backend startup"
-            );
-        }
-        let interrupted = storage
-            .recover_interrupted_interactions(
-                "Interaction was interrupted when Relayer stopped. Send a follow-up to continue.",
-            )
-            .await?;
-        if interrupted > 0 {
-            eprintln!(
-                "marked {interrupted} interrupted ordinary interaction(s) failed during backend startup"
-            );
-        }
         let runtime = match &config.runtime {
             Some(runtime) => Some(
                 RuntimeClient::open(
@@ -105,6 +256,98 @@ impl RelayerAppServer {
             ),
             None => None,
         };
+        if config.allow_conversation_import {
+            let runtime = runtime.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("conversation import requires the GraphComplete runtime")
+            })?;
+            for import_id in storage.staged_conversation_import_ids().await? {
+                runtime.remove_imported_conversation(&import_id).await?;
+                storage.remove_conversation_import(&import_id).await?;
+            }
+        }
+        if let Some(runtime) = &runtime {
+            for interaction in storage.interrupted_interactions().await? {
+                if let Err(error) = reconcile_interrupted_interaction(
+                    &storage,
+                    runtime,
+                    &permission_catalog,
+                    interaction.clone(),
+                )
+                .await
+                {
+                    if error.is_retryable()
+                        && storage
+                            .invocation_requires_graph_lease(interaction.id)
+                            .await?
+                    {
+                        // A strict invoke is recoverable by its immutable source pair. Leave its
+                        // nonterminal state intact here: the restart recovery passes below will
+                        // abort any stale approval receipt and normalize it to `submitted`, so a
+                        // later restart or re-invocation can resume the same result. Quarantining
+                        // would make the only interaction allowed to consume the lease terminal.
+                        eprintln!(
+                            "preserving interrupted leased action invocation {} after transient startup reconciliation failure: {error}",
+                            interaction.id
+                        );
+                        continue;
+                    }
+                    eprintln!(
+                        "quarantining interrupted interaction {} after reconciliation failure: {error}",
+                        interaction.id
+                    );
+                    let harness = storage
+                        .get_thread(interaction.thread_id)
+                        .await?
+                        .map(|thread| thread.harness_configuration_name)
+                        .or(interaction.harness_configuration_name.clone())
+                        .unwrap_or_else(|| "unknown".into());
+                    storage
+                        .fail_interaction_completion(
+                            interaction.id,
+                            &harness,
+                            &format!(
+                                "{} {error}",
+                                crate::api::threads::RECONCILIATION_PENDING_PREFIX
+                            ),
+                        )
+                        .await?;
+                }
+            }
+        }
+        // Reconcile canonical graph acceptance before aborting approvals left open by the dead
+        // harness session. A completion may have been accepted after the last product write; in
+        // that case graph authority wins while the stale approval is still durably closed below.
+        let interrupted_approvals = storage
+            .abort_pending_approvals_on_restart(
+                "Approval request was aborted because its harness session ended when Relayer stopped.",
+                &startup_timestamp(),
+            )
+            .await?;
+        if interrupted_approvals > 0 {
+            eprintln!(
+                "marked {interrupted_approvals} interrupted approval request(s) aborted during backend startup"
+            );
+        }
+        let interrupted = storage
+            .recover_interrupted_action_invocations(
+                "Action invocation was interrupted before graph acceptance. Invoke the action again to resume its leased result.",
+            )
+            .await?;
+        if interrupted > 0 {
+            eprintln!(
+                "reconciled {interrupted} interrupted action invocation result(s), preserving leased results for source-pair recovery"
+            );
+        }
+        let interrupted = storage
+            .recover_interrupted_interactions(
+                "Interaction was interrupted when Relayer stopped. Send a follow-up to continue.",
+            )
+            .await?;
+        if interrupted > 0 {
+            eprintln!(
+                "marked {interrupted} interrupted ordinary interaction(s) failed during backend startup"
+            );
+        }
         let default_harness_configuration = config
             .runtime
             .as_ref()
@@ -168,7 +411,9 @@ impl RelayerAppServer {
             permission_catalog,
             default_harness_configuration,
             allow_harness_override,
+            allow_conversation_import: config.allow_conversation_import,
             standalone_workspaces_directory,
+            export_producer: config.export_producer,
         })
     }
 
@@ -185,8 +430,10 @@ impl RelayerAppServer {
                 permission_catalog: self.permission_catalog.clone(),
                 default_harness_configuration: self.default_harness_configuration.clone(),
                 allow_harness_override: self.allow_harness_override,
+                allow_conversation_import: self.allow_conversation_import,
                 provider_catalog_refresh: self.provider_catalog_refresh.clone(),
                 standalone_workspaces_directory: self.standalone_workspaces_directory.clone(),
+                export_producer: self.export_producer.clone(),
             },
         )
     }

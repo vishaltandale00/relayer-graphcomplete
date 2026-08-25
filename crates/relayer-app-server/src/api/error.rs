@@ -1,4 +1,6 @@
 use super::types::ProjectResponse;
+use crate::conversation_export_service::ConversationExportBuildError;
+use crate::conversation_import_service::ConversationImportError;
 use crate::permissions::PermissionError;
 use crate::product::{CatalogError, InvalidProductId, ProductError};
 use crate::provider_catalog_refresh::ProviderCatalogRefreshError;
@@ -25,6 +27,13 @@ impl ApiError {
         Self(
             StatusCode::FORBIDDEN,
             json!({ "code": "read_only_session", "error": "This Relayer session is read-only." }),
+        )
+    }
+
+    pub(crate) fn forbidden(message: impl Into<String>) -> Self {
+        Self(
+            StatusCode::FORBIDDEN,
+            json!({ "code": "forbidden", "error": message.into() }),
         )
     }
 
@@ -71,6 +80,29 @@ impl From<RuntimeError> for ApiError {
             RuntimeError::Remote { status: 404, body } => Self(StatusCode::NOT_FOUND, body),
             RuntimeError::Remote { status: 409, body } => Self(StatusCode::CONFLICT, body),
             other => Self::internal(&other.to_string()),
+        }
+    }
+}
+
+impl From<ConversationExportBuildError> for ApiError {
+    fn from(error: ConversationExportBuildError) -> Self {
+        match error {
+            ConversationExportBuildError::Product(error) => error.into(),
+            other => Self::internal(&other.to_string()),
+        }
+    }
+}
+
+impl From<ConversationImportError> for ApiError {
+    fn from(error: ConversationImportError) -> Self {
+        match error {
+            ConversationImportError::Read(error) => Self::invalid(error.to_string()),
+            ConversationImportError::Product(error) => error.into(),
+            ConversationImportError::Runtime(error) => error.into(),
+            ConversationImportError::Input(message) => Self::invalid(message),
+            ConversationImportError::Cleanup { operation, cleanup } => Self::internal(&format!(
+                "conversation import failed: {operation}; cleanup failed: {cleanup}"
+            )),
         }
     }
 }

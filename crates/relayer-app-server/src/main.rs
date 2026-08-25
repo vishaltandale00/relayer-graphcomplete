@@ -38,11 +38,21 @@ struct Arguments {
     #[arg(long, default_value_t = false)]
     allow_harness_override: bool,
     #[arg(long, default_value_t = false)]
+    allow_conversation_import: bool,
+    #[arg(long, default_value_t = false)]
     read_only_control_token_stdin: bool,
     #[arg(long)]
     provider_catalog_refresh_url: Option<String>,
     #[arg(long, default_value_t = false)]
     provider_catalog_refresh_token_stdin: bool,
+    #[arg(long)]
+    producer_desktop_version: String,
+    #[arg(long)]
+    producer_build_commit: String,
+    #[arg(long)]
+    producer_platform: String,
+    #[arg(long)]
+    producer_architecture: String,
 }
 
 #[tokio::main]
@@ -100,6 +110,13 @@ async fn main() -> anyhow::Result<()> {
         provider_catalog_refresh_url: arguments.provider_catalog_refresh_url,
         provider_catalog_refresh_token,
         runtime,
+        allow_conversation_import: arguments.allow_conversation_import,
+        export_producer: relayer_app_server::conversation_export::ExportProducer {
+            desktop_version: arguments.producer_desktop_version,
+            build_commit: arguments.producer_build_commit,
+            platform: arguments.producer_platform,
+            architecture: arguments.producer_architecture,
+        },
     })
     .await
     .context("open Relayer app server")?;

@@ -1,6 +1,7 @@
 import { appState, desktop, viewState } from "./state.js";
 import { onboardingTutorialController } from "./onboarding-tutorial.js";
 import { $, $$, escapeHtml } from "./ui.js";
+import { evalSidebarHeading } from "./navigation-model.js";
 
 const settingsTabs = {
   models: "Models and harnesses",
@@ -64,7 +65,7 @@ export function renderSidebar() {
     const projectSection = $("#projectList").closest(".side-section");
     document.querySelector(".sidebar-title strong").textContent = "Relayer Eval";
     $("#newThread").classList.add("hidden");
-    chatSection.querySelector(".section-label").textContent = `Cases · ${viewState.evalContext.harnessConfigurationName}`;
+    chatSection.querySelector(".section-label").textContent = evalSidebarHeading(viewState.evalContext);
     chatSection.classList.remove("hidden");
     projectSection.classList.add("hidden");
     $("#settingsButton").classList.add("hidden");

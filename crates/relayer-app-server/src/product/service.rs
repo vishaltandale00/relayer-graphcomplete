@@ -8,7 +8,8 @@ use super::{
 };
 use crate::approval::{ApprovalReceipt, ApprovalRequest, ApprovalResolution};
 use crate::storage::{
-    ActionInvocationInsertOutcome, NewThreadRecord, SqliteProductStore, StorageError,
+    ActionInvocationInsertOutcome, ConversationImportRecord, NewConversationImport,
+    NewThreadRecord, SqliteProductStore, StagedConversationImport, StorageError,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -41,6 +42,15 @@ pub(crate) struct AcceptedInteractionCompletion<'a> {
     pub(crate) output: &'a serde_json::Value,
 }
 
+pub(crate) struct PreparedInteractionBinding<'a> {
+    pub(crate) interaction_id: InteractionId,
+    pub(crate) graph_node_id: i64,
+    pub(crate) harness_configuration_name: &'a str,
+    pub(crate) harness_configuration_digest: &'a str,
+    pub(crate) effective_execution_digest: &'a str,
+    pub(crate) effective_permission_receipt: &'a serde_json::Value,
+}
+
 pub(crate) struct ProjectWriteOutcome {
     pub(crate) project: Project,
     pub(crate) created: bool,
@@ -48,6 +58,7 @@ pub(crate) struct ProjectWriteOutcome {
 
 pub(crate) struct ThreadDetail {
     pub(crate) thread: Thread,
+    pub(crate) project: Option<Project>,
     pub(crate) interactions: Vec<Interaction>,
     pub(crate) action_invocations: Vec<ActionInvocation>,
     pub(crate) approvals: Vec<ApprovalReceipt>,
@@ -515,23 +526,11 @@ impl ProductService {
             .ok_or_else(|| ProductError::NotFound(format!("thread {id}")))?;
         Ok(ThreadDetail {
             thread,
+            project: snapshot.project,
             interactions: snapshot.interactions,
             action_invocations: snapshot.action_invocations,
             approvals: snapshot.approvals,
         })
-    }
-
-    pub(crate) async fn list_interactions(
-        &self,
-        thread_id: ThreadId,
-    ) -> Result<Vec<Interaction>, ProductError> {
-        if self.storage.get_thread(thread_id).await?.is_none() {
-            return Err(ProductError::NotFound(format!("thread {thread_id}")));
-        }
-        self.storage
-            .list_interactions(thread_id)
-            .await
-            .map_err(Into::into)
     }
 
     pub(crate) async fn create_interaction(
@@ -542,6 +541,11 @@ impl ProductService {
         allow_unselected_model: bool,
     ) -> Result<Interaction, ProductError> {
         let text = required(text, "text")?;
+        if self.storage.thread_is_imported(thread_id).await? {
+            return Err(ProductError::Invalid(
+                "imported conversations are immutable".into(),
+            ));
+        }
         if self.storage.get_thread(thread_id).await?.is_none() {
             return Err(ProductError::NotFound(format!("thread {thread_id}")));
         }
@@ -566,6 +570,12 @@ impl ProductService {
         if action_id <= 0 {
             return Err(ProductError::Invalid(
                 "action ID must be a positive integer".into(),
+            ));
+        }
+        let source = self.get_interaction(source_interaction_id).await?;
+        if self.storage.thread_is_imported(source.thread_id).await? {
+            return Err(ProductError::Invalid(
+                "imported conversation actions cannot execute".into(),
             ));
         }
         if let Some(existing) = self
@@ -599,6 +609,112 @@ impl ProductService {
         })
     }
 
+    pub(crate) async fn stage_conversation_import(
+        &self,
+        input: NewConversationImport<'_>,
+    ) -> Result<StagedConversationImport, ProductError> {
+        self.storage
+            .stage_conversation_import(input)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn append_conversation_import_turn(
+        &self,
+        import_id: &str,
+        turn: &crate::conversation_export::ConversationExportTurn,
+    ) -> Result<crate::storage::StagedConversationTurnSummary, ProductError> {
+        self.storage
+            .append_conversation_import_turn(import_id, turn)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn finalize_conversation_import_digest(
+        &self,
+        import_id: &str,
+        source_sha256: &str,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .finalize_conversation_import_digest(import_id, source_sha256)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn staged_conversation_import(
+        &self,
+        import_id: &str,
+    ) -> Result<StagedConversationImport, ProductError> {
+        self.storage
+            .staged_conversation_import(import_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn imported_turn_export_records(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<crate::storage::ImportedTurnExportRecord>, ProductError> {
+        self.storage
+            .imported_turn_export_records(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn staged_conversation_turn(
+        &self,
+        import_id: &str,
+        source_turn_id: &str,
+    ) -> Result<crate::conversation_export::ConversationExportTurn, ProductError> {
+        self.storage
+            .staged_conversation_turn(import_id, source_turn_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn prepare_conversation_import_turn(
+        &self,
+        import_id: &str,
+        source_turn_id: &str,
+        graph_node_id: Option<i64>,
+        output: Option<&serde_json::Value>,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .prepare_conversation_import_turn(import_id, source_turn_id, graph_node_id, output)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn publish_conversation_import(
+        &self,
+        import_id: &str,
+        published_at: &str,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .publish_conversation_import(import_id, published_at)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn remove_conversation_import(
+        &self,
+        import_id: &str,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .remove_conversation_import(import_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn list_published_conversation_imports(
+        &self,
+    ) -> Result<Vec<ConversationImportRecord>, ProductError> {
+        self.storage
+            .list_published_conversation_imports()
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn permits_unselected_action_execution(
         &self,
         interaction_id: InteractionId,
@@ -625,6 +741,16 @@ impl ProductService {
             }))
     }
 
+    pub(crate) async fn action_invocations_for_export(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<ActionInvocation>, ProductError> {
+        self.storage
+            .action_invocations_for_export(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn get_interaction(
         &self,
         interaction_id: super::InteractionId,
@@ -635,15 +761,14 @@ impl ProductService {
             .ok_or_else(|| ProductError::NotFound(format!("interaction {interaction_id}")))
     }
 
-    pub(crate) async fn mark_interaction_running(
+    pub(crate) async fn get_interaction_by_graph_node_id(
         &self,
-        interaction_id: super::InteractionId,
-        harness_configuration_name: &str,
-    ) -> Result<(), ProductError> {
+        graph_node_id: i64,
+    ) -> Result<Interaction, ProductError> {
         self.storage
-            .mark_interaction_running(interaction_id, harness_configuration_name)
-            .await
-            .map_err(Into::into)
+            .get_interaction_by_graph_node_id(graph_node_id)
+            .await?
+            .ok_or_else(|| ProductError::NotFound(format!("graph interaction {graph_node_id}")))
     }
 
     pub(crate) async fn claim_interaction_running(
@@ -651,8 +776,82 @@ impl ProductService {
         interaction_id: super::InteractionId,
         harness_configuration_name: &str,
     ) -> Result<bool, ProductError> {
+        self.ensure_interaction_mutable(interaction_id).await?;
         self.storage
             .claim_interaction_running(interaction_id, harness_configuration_name)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn restore_leased_interaction_submitted(
+        &self,
+        interaction_id: super::InteractionId,
+        error: &str,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .restore_leased_interaction_submitted(interaction_id, error)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn claim_interaction_preparing(
+        &self,
+        interaction_id: super::InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .claim_interaction_preparing(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn bind_prepared_interaction(
+        &self,
+        binding: PreparedInteractionBinding<'_>,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .bind_prepared_interaction(binding)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn invocation_graph_source(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<Option<(i64, i64)>, ProductError> {
+        self.storage
+            .invocation_graph_source(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn invocation_requires_graph_lease(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .invocation_requires_graph_lease(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn terminate_legacy_action_invocation(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .terminate_legacy_action_invocation(interaction_id, error)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn recover_interaction_accepted(
+        &self,
+        interaction_id: InteractionId,
+        output: &serde_json::Value,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .recover_interaction_accepted(interaction_id, output)
             .await
             .map_err(Into::into)
     }
@@ -661,6 +860,8 @@ impl ProductService {
         &self,
         completion: AcceptedInteractionCompletion<'_>,
     ) -> Result<(), ProductError> {
+        self.ensure_interaction_mutable(completion.interaction_id)
+            .await?;
         self.storage
             .accept_interaction_completion(completion)
             .await
@@ -672,11 +873,29 @@ impl ProductService {
         interaction_id: super::InteractionId,
         harness_configuration_name: &str,
         error: &str,
-    ) -> Result<(), ProductError> {
+    ) -> Result<bool, ProductError> {
+        self.ensure_interaction_mutable(interaction_id).await?;
         self.storage
             .fail_interaction_completion(interaction_id, harness_configuration_name, error)
             .await
             .map_err(Into::into)
+    }
+
+    async fn ensure_interaction_mutable(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<(), ProductError> {
+        let interaction = self.get_interaction(interaction_id).await?;
+        if self
+            .storage
+            .thread_is_imported(interaction.thread_id)
+            .await?
+        {
+            return Err(ProductError::Invalid(
+                "imported conversations are immutable".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) async fn get_approval(

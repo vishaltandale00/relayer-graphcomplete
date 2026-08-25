@@ -1,4 +1,4 @@
-import { LayerObject, NodeObject, RelayerGraphClient } from "@relayer/graph-client";
+import { LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient } from "@relayer/graph-client";
 import type {
   Harness,
   HarnessApprovalDecision,
@@ -127,7 +127,12 @@ class ApprovalFixtureHarness implements Harness {
       `approval-fixture-result-${completion}`,
     );
     await graph.submitNode(node);
-    const layer = new LayerObject([node], [], `approval-fixture-layer-${completion}`);
+    const layer = new LayerObject(
+      [node],
+      [],
+      new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)]),
+      `approval-fixture-layer-${completion}`,
+    );
     await graph.submitLayer(layer);
     await graph.addAction(context.inputGraph.id, {
       kind: "navigate",

@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld("relayerDesktop", {
   folder: {
     choose: () => ipcRenderer.invoke("relayer:folder-choose"),
   },
+  conversation: {
+    export: (threadId) => ipcRenderer.invoke("relayer:conversation-export", threadId),
+  },
   models: {
     settingsOpened: () => ipcRenderer.invoke("relayer:model-catalog-settings-open"),
     refresh: (providerId) => ipcRenderer.invoke("relayer:model-catalog-refresh", providerId),

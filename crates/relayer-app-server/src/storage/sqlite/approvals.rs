@@ -184,6 +184,31 @@ impl SqliteProductStore {
         rationale: &str,
         resolved_at: &str,
     ) -> Result<u64, StorageError> {
+        self.abort_pending_approvals_with_restart_recovery(
+            interaction_id,
+            rationale,
+            resolved_at,
+            false,
+        )
+        .await
+    }
+
+    pub(crate) async fn abort_pending_approvals_on_restart(
+        &self,
+        rationale: &str,
+        resolved_at: &str,
+    ) -> Result<u64, StorageError> {
+        self.abort_pending_approvals_with_restart_recovery(None, rationale, resolved_at, true)
+            .await
+    }
+
+    async fn abort_pending_approvals_with_restart_recovery(
+        &self,
+        interaction_id: Option<InteractionId>,
+        rationale: &str,
+        resolved_at: &str,
+        preserve_strict_graph_leases: bool,
+    ) -> Result<u64, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let filter = interaction_id.map(InteractionId::value);
         let result = sqlx::query(
@@ -195,10 +220,20 @@ impl SqliteProductStore {
         .execute(&mut *transaction)
         .await?;
         sqlx::query(
-            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status='waiting_for_approval' AND (?2 IS NULL OR id=?2)",
+            "UPDATE interactions
+             SET completion_status=CASE
+                   WHEN ?3 AND EXISTS (
+                     SELECT 1 FROM action_invocations
+                     WHERE result_interaction_id=interactions.id AND graph_lease_required=1 AND authoritative=1
+                   ) THEN 'submitted'
+                   ELSE 'failed'
+                 END,
+                 completion_error=?1
+             WHERE completion_status='waiting_for_approval' AND (?2 IS NULL OR id=?2)",
         )
         .bind(rationale)
         .bind(filter)
+        .bind(preserve_strict_graph_leases)
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;

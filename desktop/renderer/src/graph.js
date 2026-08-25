@@ -1,6 +1,10 @@
 import { setMainView, setSettingsTab } from "./navigation.js";
 import { createProductWorkspace } from "./product-workspace/index.js";
-import { activeThread, appState, evalReview, query, viewState } from "./state.js";
+import {
+  productWorkspaceMode,
+  productWorkspaceNeedsRecreation,
+} from "./product-workspace/model.js";
+import { activeThread, appState, desktop, evalReview, query, viewState } from "./state.js";
 import { toast } from "./ui.js";
 import { onboardingTutorialController } from "./onboarding-tutorial.js";
 import {
@@ -14,8 +18,17 @@ import {
 let productWorkspace;
 
 function workspace() {
+  const nextMode = productWorkspaceMode({
+    evalReviewContext: evalReview,
+    reviewRequested: query.get("review") === "1",
+    thread: activeThread(),
+  });
+  if (productWorkspaceNeedsRecreation(productWorkspace?.mode, nextMode)) {
+    productWorkspace.dispose();
+    productWorkspace = undefined;
+  }
   productWorkspace ??= createProductWorkspace({
-    mode: evalReview || query.get("review") === "1" ? "review" : "interactive",
+    mode: nextMode,
     getState: () => appState,
     getThread: activeThread,
     selection: viewState,
@@ -39,10 +52,10 @@ function workspace() {
         nodeId,
       });
     },
-    onSubmitInteraction: async (text, modelSelection) => {
-      const { submitInteraction } = await import("./threads.js");
-      return submitInteraction(text, modelSelection);
-    },
+    onExportConversation: desktop?.conversation?.export
+      ? (threadId) => desktop.conversation.export(threadId)
+      : null,
+    onSubmitInteraction: (text, modelSelection) => import("./threads.js").then(({ submitInteraction }) => submitInteraction(text, modelSelection)),
     onOpenSettings: () => {
       setSettingsTab("models");
       document.querySelector("#settingsButton")?.click();
@@ -62,6 +75,7 @@ function workspace() {
       }
       return navigated;
     },
+    onNavigateResolvedInvoke: (action) => import("./threads.js").then(({ navigateResolvedInvoke }) => navigateResolvedInvoke(action)),
     onInvokeAction: async (action) => {
       const { invokeAction } = await import("./threads.js");
       const source = {

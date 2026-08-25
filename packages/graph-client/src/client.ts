@@ -63,6 +63,14 @@ export class RelayerGraphClient {
         clientKey: layer.clientKey,
         nodes: layer.nodes.map(nodeId),
         edges: layer.edges.map(edgeId),
+        layout: {
+          version: layer.layout.version,
+          placements: layer.layout.placements.map((placement) => ({
+            nodeId: nodeId(placement.node),
+            x: placement.x,
+            y: placement.y,
+          })),
+        },
         sizeJustification: options.sizeJustification,
       }),
     });

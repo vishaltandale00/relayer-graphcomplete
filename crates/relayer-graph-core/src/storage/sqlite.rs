@@ -56,6 +56,10 @@ impl SqliteGraphStore {
         Ok(self.pool.begin_with("BEGIN IMMEDIATE").await?)
     }
 
+    pub(crate) async fn begin_read(&self) -> Result<Transaction<'static, Sqlite>, GraphError> {
+        Ok(self.pool.begin().await?)
+    }
+
     pub(crate) async fn close(&self) {
         self.pool.close().await;
     }

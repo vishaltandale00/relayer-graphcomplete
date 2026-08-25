@@ -387,6 +387,13 @@ export function createModelPicker({
 
   return Object.freeze({
     close,
+    dispose() {
+      harnessValidationGate.invalidate();
+      root.ownerDocument.removeEventListener("click", outsideClick);
+      trigger.onclick = null;
+      root.onkeydown = null;
+      root.querySelectorAll("[data-model-picker-tab]").forEach((tab) => { tab.onclick = null; });
+    },
     getSelection: () => selectionReady() ? { ...currentSelection } : null,
     isReady: selectionReady,
     open,

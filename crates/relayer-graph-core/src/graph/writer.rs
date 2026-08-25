@@ -310,16 +310,40 @@ impl GraphWriter {
         layers::resolve(&mut connection, &self.scope, id, false).await
     }
 
+    pub async fn get_layer_owner(&self, id: LayerId) -> Result<NodeId, GraphError> {
+        let mut connection = self.database.storage.acquire().await?;
+        let record = LayerTable::new(&mut connection)
+            .record(&self.scope, id)
+            .await?
+            .ok_or_else(|| GraphError::NotFound(format!("layer {id}")))?;
+        if record.layer.state != RecordState::Accepted && record.owner != self.scope.root_node_id {
+            return Err(GraphError::Forbidden(format!(
+                "layer {id} is not readable by this interaction"
+            )));
+        }
+        Ok(record.owner)
+    }
+
     pub async fn completion_output(&self) -> Result<Option<CompletionOutput>, GraphError> {
         completion::read_output(&self.database, &self.scope).await
     }
 
     pub async fn complete(&self, interaction: NodeId) -> Result<CompletionOutput, GraphError> {
         self.scope.require_root(interaction)?;
+        if self.scope.read_only {
+            return Err(GraphError::Forbidden(
+                "imported conversation graphs are immutable".into(),
+            ));
+        }
         completion::complete(&self.database, &self.scope).await
     }
 
     async fn ensure_writable(&self, connection: &mut GraphConnection) -> Result<(), GraphError> {
+        if self.scope.read_only {
+            return Err(GraphError::Forbidden(
+                "imported conversation graphs are immutable".into(),
+            ));
+        }
         if CompletionTable::new(connection)
             .root_action(self.scope.root_node_id)
             .await?

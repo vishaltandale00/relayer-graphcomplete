@@ -65,12 +65,16 @@ function turnState(turn, result) {
   if (result?.status === "partial") return "partial";
   if (result?.status === "failed") return "failed";
   if (result?.status === "running") return "running";
+  if (turn.judgeEligible === false) return "skipped";
   if (turn.deterministicPassed === false) return "skipped";
   return "unjudged";
 }
 
 function missingReason(turn, result) {
   if (result?.error) return result.error;
+  if (turn.judgeEligible === false) {
+    return `This ${turn.status || "unaccepted"} turn has no accepted graph and is not result-judge eligible.`;
+  }
   if (turn.deterministicPassed !== false) return null;
   const failures = asArray(turn.deterministicChecks).filter((check) => !check.passed);
   if (!failures.length) return "This turn did not pass the deterministic gate.";
@@ -90,8 +94,11 @@ function missingSubjectKeys(result) {
   return keys;
 }
 
-function normalizeTurn(turn, position) {
-  const result = asArray(turn.judgeResults).at(-1) ?? null;
+function normalizeTurn(turn, position, judgeConfigurationName) {
+  const simulatedResult = asArray(turn.judgeResults).at(-1) ?? null;
+  const result = judgeConfigurationName === "deterministic-graph-contract"
+    ? turn.deterministicJudge ?? null
+    : simulatedResult ?? turn.deterministicJudge ?? null;
   const review = result?.review ?? null;
   const inventory = review?.inventory ?? { layers: [], nodes: [], actions: [] };
   const layerRecords = new Map(asArray(review?.layers).map((entry) => [id(entry?.subject?.layerId ?? current(entry)?.layerId), entry]));
@@ -187,12 +194,14 @@ function normalizeTurn(turn, position) {
     threadId: id(turn.threadId),
     threadDefinitionId: turn.threadDefinitionId ?? null,
     prompt: turn.prompt ?? "",
+    completionStatus: turn.status ?? null,
     state: turnState(turn, result),
     stateLabel: stateLabel(turnState(turn, result)),
     stateReason: missingReason(turn, result),
     deterministicPassed: turn.deterministicPassed,
     judgeResultId: id(result?.id),
     result,
+    provenance: result?.provenance ?? null,
     review: review?.turn ?? review?.turnReview ?? null,
     reviewed: Boolean(review?.turn) && !missing.has("turn"),
     evidenceIds: evidenceIdsForReview(review?.turn),
@@ -211,7 +220,7 @@ export function buildJudgeAnalysis(run, executionId) {
       (Number.isInteger(left.turn.turnIndex) ? left.turn.turnIndex : left.sourcePosition)
       - (Number.isInteger(right.turn.turnIndex) ? right.turn.turnIndex : right.sourcePosition)
     ))
-    .map(({ turn }, position) => normalizeTurn(turn, position));
+    .map(({ turn }, position) => normalizeTurn(turn, position, run.judgeConfigurationName));
   return {
     runId: id(run.id),
     runStatus: run.status ?? "unknown",

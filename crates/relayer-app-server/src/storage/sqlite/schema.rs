@@ -24,6 +24,24 @@ const THREAD_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("updated_at", "TEXT", true, 0),
     ("harness_configuration_name", "TEXT", true, 0),
     ("permission_profile_id", "TEXT", true, 0),
+    ("conversation_import_id", "TEXT", false, 0),
+];
+const CONVERSATION_IMPORT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("id", "TEXT", true, 1),
+    ("source_sha256", "TEXT", true, 0),
+    ("export_version", "INTEGER", true, 0),
+    ("producer_json", "TEXT", true, 0),
+    ("header_json", "TEXT", true, 0),
+    ("state", "TEXT", true, 0),
+    ("created_at", "TEXT", true, 0),
+    ("published_at", "TEXT", false, 0),
+];
+const IMPORTED_TURN_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("conversation_import_id", "TEXT", true, 1),
+    ("source_turn_id", "TEXT", true, 2),
+    ("product_interaction_id", "INTEGER", true, 0),
+    ("source_origin_json", "TEXT", true, 0),
+    ("source_completion_json", "TEXT", true, 0),
 ];
 const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "INTEGER", false, 1),
@@ -49,6 +67,8 @@ const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("action_id", "INTEGER", true, 2),
     ("result_interaction_id", "INTEGER", true, 0),
     ("created_at", "TEXT", true, 0),
+    ("graph_lease_required", "INTEGER", true, 0),
+    ("authoritative", "INTEGER", true, 0),
 ];
 const MODEL_PROVIDER_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "TEXT", true, 1),
@@ -159,6 +179,8 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "projects", PROJECT_COLUMNS).await?;
     validate_columns(pool, "threads", THREAD_COLUMNS).await?;
     validate_columns(pool, "interactions", INTERACTION_COLUMNS).await?;
+    validate_columns(pool, "conversation_imports", CONVERSATION_IMPORT_COLUMNS).await?;
+    validate_columns(pool, "imported_turns", IMPORTED_TURN_COLUMNS).await?;
     validate_columns(pool, "action_invocations", ACTION_INVOCATION_COLUMNS).await?;
     validate_columns(pool, "model_providers", MODEL_PROVIDER_COLUMNS).await?;
     validate_columns(pool, "provider_models", PROVIDER_MODEL_COLUMNS).await?;
@@ -182,6 +204,15 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "approval_resolutions", APPROVAL_RESOLUTION_COLUMNS).await?;
     validate_index(pool, "projects", &["path"], true).await?;
     validate_index(pool, "interactions", &["thread_id", "sequence"], true).await?;
+    validate_index(pool, "threads", &["conversation_import_id"], false).await?;
+    validate_index(
+        pool,
+        "imported_turns",
+        &["conversation_import_id", "source_turn_id"],
+        true,
+    )
+    .await?;
+    validate_index(pool, "imported_turns", &["product_interaction_id"], true).await?;
     validate_index(
         pool,
         "action_invocations",
@@ -235,6 +266,33 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         "interactions",
         "thread_id",
         "threads",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "threads",
+        "conversation_import_id",
+        "conversation_imports",
+        "id",
+        "NO ACTION",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "imported_turns",
+        "conversation_import_id",
+        "conversation_imports",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "imported_turns",
+        "product_interaction_id",
+        "interactions",
         "id",
         "CASCADE",
     )
@@ -389,6 +447,27 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     if cross_thread_invocation {
         return Err(incompatible(
             "action invocation source and result must belong to the same thread",
+        ));
+    }
+    let duplicate_action_invocation: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1
+            FROM action_invocations ai
+            JOIN interactions source ON source.id=ai.source_interaction_id
+            JOIN threads thread ON thread.id=source.thread_id
+            GROUP BY CASE
+                       WHEN thread.project_id IS NOT NULL THEN 'project:' || thread.project_id
+                       ELSE 'thread:' || thread.id
+                     END,
+                     ai.action_id
+            HAVING SUM(ai.authoritative) != 1
+        )",
+    )
+    .fetch_one(pool)
+    .await?;
+    if duplicate_action_invocation {
+        return Err(incompatible(
+            "a node-owned action must have exactly one authoritative invocation result in its project scope",
         ));
     }
     super::catalog::validate_catalog_rows(pool).await?;

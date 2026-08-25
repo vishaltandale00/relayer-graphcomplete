@@ -7,8 +7,15 @@ export function productWorkspaceMarkup() {
         <button id="historyBack" data-review-ref="history-back" data-review-kind="history" disabled title="Back" aria-label="Back"><span aria-hidden="true">←</span><i class="history-spinner hidden" aria-hidden="true"></i></button>
         <button id="historyForward" data-review-ref="history-forward" data-review-kind="history" disabled title="Forward" aria-label="Forward"><span aria-hidden="true">→</span><i class="history-spinner hidden" aria-hidden="true"></i></button>
       </nav>
-      <div><h2 id="threadTitle">New thread</h2><p id="threadScope">No folder</p></div>
-      <div class="run-state" id="runState"><i></i><span>Ready</span></div>
+      <div class="thread-title-group">
+        <div class="thread-title-copy"><h2 id="threadTitle">New thread</h2><p id="threadScope">No folder</p></div>
+        <div class="conversation-settings hidden" id="conversationSettings">
+          <button class="conversation-settings-button" id="conversationSettingsButton" type="button" title="Conversation settings" aria-label="Conversation settings" aria-expanded="false" aria-controls="conversationSettingsMenu">•••</button>
+          <div class="conversation-settings-menu hidden" id="conversationSettingsMenu" role="menu" aria-label="Conversation settings">
+            <button class="conversation-export" id="exportConversation" type="button" role="menuitem" data-review-ref="export-conversation" data-review-kind="conversation-export">Export conversation…</button>
+          </div>
+        </div>
+      </div>
     </header>
     <div class="thread-workspace" data-review-capture="workspace" role="region" aria-label="Thread workspace">
       <div class="graph-column">
@@ -34,7 +41,7 @@ export function productWorkspaceMarkup() {
         <div class="graph-stage hidden" id="graphStage" tabindex="-1" data-review-capture="layer-viewport" role="region" aria-label="Visible graph layer">
           <svg id="edgeCanvas" aria-hidden="true"></svg>
           <div id="nodeLayer"></div>
-          <div class="graph-hint">Scroll or pinch to zoom · Drag canvas to pan · Drag nodes to arrange</div>
+          <div class="graph-hint">Scroll or pinch to zoom · Drag canvas to pan · Drag nodes for this view</div>
           <div class="graph-controls" role="toolbar" aria-label="Graph view controls">
             <button id="zoomOutGraph" title="Zoom out" aria-label="Zoom out">−</button>
             <output id="graphZoomLevel" aria-label="Graph zoom level">100%</output>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  actionCanRetry,
   actionWasInvoked,
   reconcileActionTransitions,
   visibleLayerAfterRefresh,
@@ -26,7 +27,25 @@ describe("durable action invocation renderer state", () => {
       [],
       1,
       2,
+    )).toBe(true);
+  });
+
+  it("unlocks only submitted durable invocations for source-pair recovery", () => {
+    expect(actionWasInvoked(
+      [{ sourceInteractionId: 1, actionId: 2, resultCompletionStatus: "submitted" }],
+      [],
+      1,
+      2,
     )).toBe(false);
+    expect(actionCanRetry(
+      [{ sourceInteractionId: 9, actionId: 2, resultCompletionStatus: "submitted" }],
+      2,
+    )).toBe(true);
+    for (const resultCompletionStatus of ["running", "waiting_for_approval", "accepted", "failed", "stopped"]) {
+      const invocations = [{ sourceInteractionId: 1, actionId: 2, resultCompletionStatus }];
+      expect(actionWasInvoked(invocations, [], 1, 2)).toBe(true);
+      expect(actionCanRetry(invocations, 2)).toBe(false);
+    }
   });
 
   it("clears only the rejected action's optimistic lock", () => {
@@ -79,5 +98,21 @@ describe("durable action invocation renderer state", () => {
     };
     expect(visibleLayerAfterRefresh(1, nested, source)).toBe(nested);
     expect(visibleLayerAfterRefresh(1, nested, result)).toBe(result.completionOutput.rootLayer);
+  });
+
+  it("replaces a visible root with its canonical resolved-action refresh", () => {
+    const staleRoot = {
+      layer: { id: 11 },
+      actions: [{ id: 4, kind: "invoke", targetLayerId: null }],
+    };
+    const canonicalRoot = {
+      layer: { id: 11 },
+      actions: [{ id: 4, kind: "invoke", targetLayerId: 33 }],
+    };
+    const selected = {
+      id: 1,
+      completionOutput: { rootLayer: canonicalRoot },
+    };
+    expect(visibleLayerAfterRefresh(1, staleRoot, selected)).toBe(canonicalRoot);
   });
 });

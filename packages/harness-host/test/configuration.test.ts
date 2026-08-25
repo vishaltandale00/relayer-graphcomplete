@@ -174,6 +174,30 @@ describe("harness configuration", () => {
     });
   });
 
+  it("loads the model-neutral Codex multi-agent layered-navigation configuration", async () => {
+    const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-multi-agent-layered-navigation.yaml"));
+
+    expect(configuration).toEqual({
+      schemaVersion: 1,
+      name: "codex-multi-agent-layered-navigation",
+      implementation: "codex.basic",
+      implementationVersion: 1,
+      permissionBindings: {
+        ask: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user", networkAccessEnabled: true },
+        auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
+        full: { sandboxMode: "danger-full-access", approvalPolicy: "never" },
+      },
+      modelCompatibility: [{ providerId: "codex" }],
+      settings: {
+        modelReasoningEffort: "medium",
+        promptProfile: "layered-navigation-multi-agent-v1",
+        skipGitRepoCheck: true,
+      },
+    });
+    expect(configuration.settings).not.toHaveProperty("model");
+    expect(configuration.modelCompatibility?.[0]).not.toHaveProperty("preferredModelId");
+  });
+
   it("rejects duplicate configuration names in a catalog", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-config-"));
     const first = join(directory, "first.yaml");

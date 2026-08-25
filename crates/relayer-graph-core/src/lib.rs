@@ -4,9 +4,13 @@ mod storage;
 
 pub use error::{GraphError, ValidationIssue};
 pub use graph::{
-    ActionDraft, ActionId, ActionKind, ActionVariant, CompletionOutput, EdgeDraft, EdgeId,
-    GraphAction, GraphDatabase, GraphEdge, GraphLayer, GraphNode, GraphWriter, LayerDraft, LayerId,
-    NavigateRelation, NodeDraft, NodeId, ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES,
+    AcceptedGraphClosure, ActionDraft, ActionId, ActionKind, ActionVariant, CompletionOutput,
+    EdgeDraft, EdgeId, GraphAction, GraphDatabase, GraphEdge, GraphLayer, GraphNode, GraphWriter,
+    ImportedAcceptedView, ImportedAction, ImportedConversation, ImportedConversationReceipt,
+    ImportedConversationStage, ImportedEdge, ImportedInvokeOrigin, ImportedLayer,
+    ImportedLayerLayout, ImportedNode, ImportedNodePlacement, ImportedResolvedLayer, ImportedTurn,
+    ImportedTurnReceipt, InteractionInvocation, LayerDraft, LayerId, LayerLayout, NavigateRelation,
+    NodeDraft, NodeId, NodePlacement, ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES,
     RecordState, ResolvedLayer, ThreadId, is_supported_icon, normalize_icon_name,
     resolve_icon_name,
 };

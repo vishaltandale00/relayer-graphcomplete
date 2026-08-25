@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
 import { controlActivationCompletionFor } from "../desktop/renderer/src/control-activation.js";
+import { shouldPollThreadInteractions } from "../desktop/renderer/src/product-workspace/model.js";
 import {
   activateHistoryControl,
   graphNodeIdentitySet,
@@ -34,6 +35,14 @@ describe("product workspace navigation controls", () => {
 
     expect(markup.indexOf('id="historyBack"')).toBeLessThan(headerEnd);
     expect(markup.indexOf('id="historyForward"')).toBeLessThan(headerEnd);
+    expect(markup).toContain('class="thread-title-group"');
+    expect(markup.indexOf('id="conversationSettingsButton"')).toBeGreaterThan(markup.indexOf('id="threadTitle"'));
+    expect(markup.indexOf('id="conversationSettingsButton"')).toBeLessThan(headerEnd);
+    expect(markup).toContain('aria-label="Conversation settings"');
+    expect(markup).not.toContain('id="runState"');
+    expect(markup.indexOf('id="exportConversation"')).toBeLessThan(headerEnd);
+    expect(markup.indexOf('id="exportConversation"')).toBeGreaterThan(markup.indexOf('id="conversationSettingsMenu"'));
+    expect(markup).toContain('data-review-ref="export-conversation"');
     expect(markup.indexOf('id="previousTurn"')).toBeGreaterThan(bannerStart);
     expect(markup.indexOf('id="nextTurn"')).toBeGreaterThan(bannerStart);
     expect(markup).toContain('id="turnPickerButton"');
@@ -98,6 +107,12 @@ describe("product workspace navigation controls", () => {
     ]);
   });
 
+  it("keeps unfinished imports selectable without treating immutable history as live work", () => {
+    const interactions = [{ id: 1, threadId: 4, completionStatus: "running" }];
+    expect(shouldPollThreadInteractions({ id: 4, imported: true }, interactions)).toBe(false);
+    expect(shouldPollThreadInteractions({ id: 4, imported: false }, interactions)).toBe(true);
+  });
+
   it("makes the current turn a no-op while direct jumps preserve stable identity", () => {
     const turns = [{ id: "one" }, { id: "two" }, { id: "three" }];
     expect(turnSelectionIntent(turns, "two", "two")).toBeNull();
@@ -113,6 +128,8 @@ describe("product workspace navigation controls", () => {
 
   it("caps the popover viewport at exactly three complete rows", async () => {
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
+    expect(styles).toContain(".thread-title-group{display:flex;align-items:center;gap:7px;");
+    expect(styles).not.toContain(".thread-header-actions{margin-left:auto");
     expect(styles).toContain(".turn-popover{position:absolute;");
     expect(styles).toContain("max-height:calc(52px * 3 + 2px);overflow-y:auto");
     expect(styles).toContain(".turn-option{width:100%;height:52px;");

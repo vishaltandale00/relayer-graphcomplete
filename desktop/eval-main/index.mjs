@@ -313,6 +313,18 @@ function registerEvalIpc() {
   ipcMain.handle("relayer-eval:list-runs", () => evalService.listRuns());
   ipcMain.handle("relayer-eval:get-run", (_event, runId) => evalService.getRun(runId));
   ipcMain.handle("relayer-eval:create-run", (_event, selection) => evalService.createRun(selection));
+  ipcMain.handle("relayer-eval:import-conversation", async () => {
+    const selection = await dialog.showOpenDialog(dashboardWindow, {
+      title: "Import conversation",
+      properties: ["openFile"],
+      filters: [{ name: "Relayer conversation", extensions: ["jsonl"] }],
+    });
+    if (selection.canceled || selection.filePaths.length !== 1) return null;
+    return evalService.importConversation(selection.filePaths[0]);
+  });
+  ipcMain.handle("relayer-eval:judge-imported-conversation", (_event, executionId, judgeConfigurationName) => (
+    evalService.judgeImportedConversation(executionId, judgeConfigurationName)
+  ));
   ipcMain.handle("relayer-eval:open-review", async (_event, executionId) => {
     await createReviewWindow(executionId);
     return true;
@@ -344,7 +356,14 @@ async function start() {
     runtimeSession,
     defaultHarnessConfiguration: "fixture-task-system",
     allowHarnessOverride: true,
+    allowConversationImport: true,
     enableReadOnlySession: true,
+    exportProducer: {
+      desktopVersion: app.getVersion(),
+      buildCommit: "development",
+      platform: process.platform,
+      architecture: process.arch,
+    },
     onUnexpectedStop: () => app.quit(),
   });
   const productSession = await productServer.start();
@@ -365,6 +384,7 @@ async function start() {
       graphRuntime.exportCandidateTrace(productInteractionId, targetDirectory, correlation)
     ),
     candidateTraceRequired: true,
+    conversationImportEnabled: true,
     onChanged: (runs) => dashboardWindow?.webContents.send("relayer-eval:runs-changed", runs),
   }).open();
   registerEvalIpc();

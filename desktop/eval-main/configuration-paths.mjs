@@ -12,6 +12,7 @@ export function evalHarnessConfigurationPaths({
     join(harnessDirectory, "codex-basic.yaml"),
     join(harnessDirectory, "codex-basic-high.yaml"),
     join(harnessDirectory, "codex-layered-navigation-luna.yaml"),
+    join(harnessDirectory, "codex-multi-agent-layered-navigation.yaml"),
   ];
   if (!isPackaged && packageAvailable(primeAgentPackage)) {
     paths.push(

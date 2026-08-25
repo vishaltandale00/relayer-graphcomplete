@@ -5,7 +5,14 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { EdgeObject, LayerObject, NodeObject, RelayerGraphClient } from "@relayer/graph-client";
+import {
+  EdgeObject,
+  LayerLayoutObject,
+  LayerObject,
+  NodeObject,
+  NodePlacementObject,
+  RelayerGraphClient,
+} from "@relayer/graph-client";
 
 import { startModelCatalogRefreshServer } from "../desktop/main/models/model-catalog-refresh-server.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
@@ -92,10 +99,23 @@ class TutorialFixtureHarness {
     const attentionMemory = new EdgeObject([attention, memory], "attention-memory");
     const distinctPatterns = new EdgeObject([distinct, patterns], "distinct-patterns");
     for (const edge of [noveltyAttention, attentionMemory, distinctPatterns]) await graph.createEdge(edge);
-    const detailLayer = new LayerObject([distinct, patterns], [distinctPatterns], "memory-detail-layer");
+    const detailLayer = new LayerObject(
+      [distinct, patterns],
+      [distinctPatterns],
+      new LayerLayoutObject([
+        new NodePlacementObject(distinct, 0.5, 0.25),
+        new NodePlacementObject(patterns, 0.5, 0.75),
+      ]),
+      "memory-detail-layer",
+    );
     const rootLayer = new LayerObject(
       [novelty, attention, memory],
       [noveltyAttention, attentionMemory],
+      new LayerLayoutObject([
+        new NodePlacementObject(novelty, 0.2, 0.65),
+        new NodePlacementObject(attention, 0.5, 0.5),
+        new NodePlacementObject(memory, 0.8, 0.35),
+      ]),
       "time-perception-layer",
     );
     await graph.submitLayer(detailLayer);
