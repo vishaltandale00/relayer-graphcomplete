@@ -812,6 +812,12 @@ export async function invokeAction(action) {
       && navigationEntryKey(currentNavigationEntry()) === sourceLocationKey
     );
     if (durable?.resultInteractionId && sourceIsStillSelected) {
+      onboardingTutorialController()?.actionSucceeded({
+        threadId,
+        interactionId: sourceInteractionId,
+        actionId: action.id,
+        resultInteractionId: durable.resultInteractionId,
+      });
       supersedePendingHistory({ presentationChanged: true });
       viewState.currentInteractionId = durable.resultInteractionId;
       await refreshState(threadId, { historyMode: "push" }).catch(() => {});
@@ -839,6 +845,12 @@ export async function invokeAction(action) {
     && navigationEntryKey(currentNavigationEntry()) === sourceLocationKey
   );
   if (response.created && response.interaction?.id && sourceIsStillSelected) {
+    onboardingTutorialController()?.actionSucceeded({
+      threadId,
+      interactionId: sourceInteractionId,
+      actionId: action.id,
+      resultInteractionId: response.interaction.id,
+    });
     supersedePendingHistory({ presentationChanged: true });
     viewState.currentInteractionId = response.interaction.id;
   }

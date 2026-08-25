@@ -165,6 +165,7 @@ function bindEvents() {
   };
   $("#disconnectCodex").onclick = async () => {
     await desktop?.account.logout();
+    await onboardingTutorialController()?.leave();
     await refreshAccount();
     await refreshProviderModelUi();
   };
@@ -227,8 +228,10 @@ async function boot() {
       let account;
       if (event?.status === "unavailable") showAuth(event.error || "Codex is unavailable.");
       else account = await refreshAccount();
+      const providerConnected = account?.status === "connected";
+      if (!providerConnected) await onboardingTutorialController()?.leave();
       await refreshProviderModelUi();
-      await maybeStartAutomaticTutorial(account?.status === "connected");
+      await maybeStartAutomaticTutorial(providerConnected);
     })().catch((error) => toast(error.message));
   });
   desktop?.updater.onChanged(renderUpdate);

@@ -202,6 +202,7 @@ async function startAndCreateThread(test, { interactionId = 11, threadId = 7 } =
   test.controller.threadCreated({ interactionId, threadId });
   test.viewState.mainView = "thread";
   test.viewState.currentThreadId = threadId;
+  test.viewState.currentInteractionId = interactionId;
 }
 
 function acceptedInteraction({ actions, interactionId = 11, threadId = 7 }) {
@@ -324,6 +325,38 @@ describe("onboarding tutorial controller", () => {
     expect(coachmark(test).querySelector(".tutorial-done").classList.contains("hidden")).toBe(false);
   });
 
+  it("transitions an invoke before its result interaction becomes visible", async () => {
+    const test = fixture();
+    await startAndCreateThread(test);
+    test.appState.interactions = [acceptedInteraction({
+      actions: [{ id: 41, kind: "invoke", sourceNodeId: 31, interactionText: "Go deeper" }],
+    })];
+    test.controller.syncWorkspace();
+    test.controller.nodeSelected({ threadId: 7, interactionId: 11, nodeId: 31 });
+
+    test.controller.actionSucceeded({
+      threadId: 7,
+      interactionId: 11,
+      actionId: 41,
+      resultInteractionId: 12,
+    });
+    expect(test.controller.snapshot()).toMatchObject({
+      phase: "awaiting-accepted-response",
+      threadId: 7,
+      interactionId: 12,
+    });
+
+    test.viewState.currentInteractionId = 12;
+    test.appState.interactions.push(acceptedInteraction({
+      interactionId: 12,
+      actions: [{ id: 42, kind: "navigate", sourceNodeId: 31, targetLayerId: 23 }],
+    }));
+    test.controller.syncWorkspace();
+
+    expect(test.controller.isActive()).toBe(true);
+    expect(test.controller.snapshot().phase).toBe("select-node");
+  });
+
   it.each([
     ["no action", acceptedInteraction({ actions: [] }), "no-action"],
     ["failed response", { id: 11, threadId: 7, completionStatus: "failed" }, "response-failed"],
@@ -350,6 +383,58 @@ describe("onboarding tutorial controller", () => {
     expect(test.controller.isActive()).toBe(false);
   });
 
+  it("dismisses when another interaction in the tutorial thread becomes visible", async () => {
+    const test = fixture();
+    await startAndCreateThread(test);
+    test.viewState.currentInteractionId = 12;
+    test.controller.syncWorkspace();
+
+    await vi.waitFor(() => expect(test.lifecycle.dismiss).toHaveBeenCalledOnce());
+    expect(test.controller.isActive()).toBe(false);
+  });
+
+  it("allows the tutorial thread's transient unhydrated interaction during load", async () => {
+    const test = fixture();
+    await test.controller.startManual();
+    test.controller.threadCreated({ threadId: 7, interactionId: 11 });
+    test.viewState.mainView = "thread";
+    test.viewState.currentThreadId = 7;
+    test.viewState.currentInteractionId = null;
+
+    test.controller.presentationChanged();
+
+    expect(test.controller.isActive()).toBe(true);
+    expect(test.controller.snapshot()).toMatchObject({
+      phase: "awaiting-accepted-response",
+      interactionId: 11,
+    });
+  });
+
+  it("dismisses explicitly when the provider disconnects", async () => {
+    const test = fixture();
+    await test.controller.startManual();
+
+    await test.controller.leave();
+
+    expect(test.lifecycle.dismiss).toHaveBeenCalledOnce();
+    expect(test.controller.isActive()).toBe(false);
+  });
+
+  it("bounds graph movement tracking after the authored layout settles", async () => {
+    const test = fixture();
+    await startAndCreateThread(test);
+    test.anchors.set('[data-node="31"]', new FakeElement());
+    test.appState.interactions = [acceptedInteraction({
+      actions: [{ id: 41, kind: "navigate", sourceNodeId: 31, targetLayerId: 22 }],
+    })];
+    test.controller.syncWorkspace();
+
+    for (let index = 0; index < 100; index += 1) test.window.runNextFrame();
+
+    expect(test.controller.snapshot().phase).toBe("select-node");
+    expect(test.window.pendingFrames()).toBe(0);
+  });
+
   it("maintains coach copy, ARIA linkage, anchor churn, and cleanup", async () => {
     const test = fixture();
     test.newComposer.setAttribute("aria-describedby", "existing-description");
@@ -367,6 +452,7 @@ describe("onboarding tutorial controller", () => {
     test.controller.threadCreated({ threadId: 7, interactionId: 11 });
     test.viewState.mainView = "thread";
     test.viewState.currentThreadId = 7;
+    test.viewState.currentInteractionId = 11;
     const first = new FakeElement();
     test.anchors.set('[data-node="31"]', first);
     test.appState.interactions = [acceptedInteraction({
@@ -400,8 +486,9 @@ describe("onboarding tutorial controller", () => {
       .toBeLessThan(threads.indexOf("followupSubmitted({"));
     expect(graph).not.toContain("followupSubmitted({");
     expect(graph).toContain("if (navigated === true)");
-    expect(graph.indexOf("const response = await invokeAction(action)"))
-      .toBeLessThan(graph.indexOf("resultInteractionId,"));
+    expect(graph).toContain('onInvokeAction: (action) => import("./threads.js")');
+    expect(threads.indexOf("onboardingTutorialController()?.actionSucceeded({"))
+      .toBeLessThan(threads.indexOf("viewState.currentInteractionId = response.interaction.id"));
     expect(threads.indexOf('const thread = await request("/api/threads", {'))
       .toBeLessThan(threads.indexOf("onboardingTutorialController()?.threadCreated({"));
     expect(threads).toContain("return createdInteraction;");
@@ -409,6 +496,11 @@ describe("onboarding tutorial controller", () => {
     expect(main).toContain("newThreadModelSelectionReady()");
     expect(main.indexOf("if (!ready) return false;"))
       .toBeLessThan(main.indexOf("tutorial.maybeStartAutomatic({"));
+    expect(main).toContain("if (!providerConnected) await onboardingTutorialController()?.leave();");
+    expect(main.indexOf("await desktop?.account.logout();"))
+      .toBeLessThan(main.indexOf("await onboardingTutorialController()?.leave();"));
+    expect(main.indexOf("await onboardingTutorialController()?.leave();"))
+      .toBeLessThan(main.indexOf("await refreshAccount();"));
     expect(onboarding).toContain('role="status" aria-live="polite"');
     expect(onboarding).not.toContain('addEventListener("keydown", escapeHandler, true)');
   });

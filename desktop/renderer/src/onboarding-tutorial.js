@@ -29,6 +29,8 @@ const COPY = Object.freeze({
   },
 });
 
+const GRAPH_SETTLE_FRAMES = 60;
+
 function sameId(left, right) {
   return left != null && right != null && String(left) === String(right);
 }
@@ -76,6 +78,7 @@ export function createOnboardingTutorialController({
   let coachmark = null;
   let linkedTarget = null;
   let positionFrame = null;
+  let graphSettleFramesRemaining = 0;
   let focusFrame = null;
   let completionFocused = false;
 
@@ -138,7 +141,10 @@ export function createOnboardingTutorialController({
       coachmark.style.left = `${Math.round(left)}px`;
       coachmark.style.top = `${Math.round(top)}px`;
     }
-    if (tutorial.phase === "select-node") schedulePositioning();
+    if (tutorial.phase === "select-node" && graphSettleFramesRemaining > 0) {
+      graphSettleFramesRemaining -= 1;
+      schedulePositioning();
+    }
   }
 
   const repositionForViewportChange = () => schedulePositioning();
@@ -176,6 +182,7 @@ export function createOnboardingTutorialController({
     coachmark = null;
     tutorial = null;
     completionFocused = false;
+    graphSettleFramesRemaining = 0;
   }
 
   async function dismiss(eventType = "leave") {
@@ -218,6 +225,7 @@ export function createOnboardingTutorialController({
       });
     }
     stopPositioning();
+    graphSettleFramesRemaining = tutorial.phase === "select-node" ? GRAPH_SETTLE_FRAMES : 0;
     positionCoachmark();
     if (tutorial.phase !== "select-node") schedulePositioning();
   }
@@ -270,6 +278,10 @@ export function createOnboardingTutorialController({
   }
 
   function syncWorkspace() {
+    if (active && !presentationMatchesTutorial()) {
+      void dismiss("leave");
+      return;
+    }
     if (!active || tutorial?.phase !== "awaiting-accepted-response") {
       if (active) render();
       return;
@@ -303,6 +315,18 @@ export function createOnboardingTutorialController({
     });
   }
 
+  function presentationMatchesTutorial() {
+    if (!active || !tutorial) return true;
+    const view = getViewState();
+    if (tutorial.phase === "initial-composer") return view.mainView === "new";
+    if (view.mainView !== "thread" || !sameId(view.currentThreadId, tutorial.threadId)) {
+      return false;
+    }
+    if (tutorial.phase === "complete") return true;
+    return view.currentInteractionId == null
+      || sameId(view.currentInteractionId, tutorial.interactionId);
+  }
+
   async function followupSubmitted({ threadId, interactionId }) {
     if (!active || !tutorial) return false;
     const next = reduceOnboardingTutorial(tutorial, {
@@ -322,11 +346,7 @@ export function createOnboardingTutorialController({
 
   function presentationChanged() {
     if (!active || !tutorial) return;
-    const view = getViewState();
-    const allowed = tutorial.phase === "initial-composer"
-      ? view.mainView === "new"
-      : view.mainView === "thread" && sameId(view.currentThreadId, tutorial.threadId);
-    if (!allowed) void dismiss("leave");
+    if (!presentationMatchesTutorial()) void dismiss("leave");
   }
 
   function actionSucceeded(event) {
@@ -336,9 +356,7 @@ export function createOnboardingTutorialController({
       void dismiss("leave");
       return null;
     }
-    const next = dispatch({ type: "action-succeeded", ...event });
-    if (next?.phase === "awaiting-accepted-response") syncWorkspace();
-    return next;
+    return dispatch({ type: "action-succeeded", ...event });
   }
 
   return Object.freeze({
@@ -359,6 +377,7 @@ export function createOnboardingTutorialController({
     followupSubmitted,
     syncWorkspace,
     presentationChanged,
+    leave: () => dismiss("leave"),
     skip: () => dismiss("skip"),
     dispose() {
       hide();

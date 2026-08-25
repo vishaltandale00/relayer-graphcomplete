@@ -76,23 +76,7 @@ function workspace() {
       return navigated;
     },
     onNavigateResolvedInvoke: (action) => import("./threads.js").then(({ navigateResolvedInvoke }) => navigateResolvedInvoke(action)),
-    onInvokeAction: async (action) => {
-      const { invokeAction } = await import("./threads.js");
-      const source = {
-        threadId: viewState.currentThreadId,
-        interactionId: viewState.currentInteractionId,
-      };
-      const response = await invokeAction(action);
-      const resultInteractionId = response?.interaction?.id;
-      if (resultInteractionId != null) {
-        onboardingTutorialController()?.actionSucceeded({
-          ...source,
-          actionId: action.id,
-          resultInteractionId,
-        });
-      }
-      return response;
-    },
+    onInvokeAction: (action) => import("./threads.js").then(({ invokeAction }) => invokeAction(action)),
     onDecideApproval: (requestId, decision) => import("./threads.js").then(({ decideApproval }) => decideApproval(requestId, decision)),
   });
   return productWorkspace;
