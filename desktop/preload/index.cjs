@@ -28,6 +28,13 @@ contextBridge.exposeInMainWorld("relayerDesktop", {
     read: () => ipcRenderer.invoke("relayer:appearance-read"),
     set: (appearance) => ipcRenderer.invoke("relayer:appearance-set", appearance),
   },
+  tutorial: {
+    read: (context) => ipcRenderer.invoke("relayer:tutorial-read", context),
+    beginAutomatic: (context) => ipcRenderer.invoke("relayer:tutorial-begin-automatic", context),
+    beginManual: () => ipcRenderer.invoke("relayer:tutorial-begin-manual"),
+    dismiss: () => ipcRenderer.invoke("relayer:tutorial-dismiss"),
+    complete: () => ipcRenderer.invoke("relayer:tutorial-complete"),
+  },
   updater: {
     status: () => ipcRenderer.invoke("relayer:update-status"),
     check: () => ipcRenderer.invoke("relayer:update-check"),

@@ -4,6 +4,8 @@ let requestImplementation;
 let rendered;
 let renderObserver;
 let throwOnRender;
+let tutorialActionSucceeded;
+let tutorialFollowupSubmitted;
 
 function rootLayer(id, nodeId) {
   return {
@@ -50,6 +52,8 @@ async function loadModules(url = "http://127.0.0.1:43123/") {
   rendered = 0;
   renderObserver = null;
   throwOnRender = null;
+  tutorialActionSucceeded = vi.fn();
+  tutorialFollowupSubmitted = vi.fn();
   Object.assign(globalThis, {
     document: { querySelector: () => null },
     location: new URL(url),
@@ -74,6 +78,13 @@ async function loadModules(url = "http://127.0.0.1:43123/") {
     renderScopeMenu: vi.fn(),
     renderSidebar: vi.fn(),
     setMainView: vi.fn(),
+  }));
+  vi.doMock("../desktop/renderer/src/onboarding-tutorial.js", () => ({
+    onboardingTutorialController: () => ({
+      actionSucceeded: tutorialActionSucceeded,
+      followupSubmitted: tutorialFollowupSubmitted,
+      threadCreated: vi.fn(),
+    }),
   }));
   const state = await import("../desktop/renderer/src/state.js");
   const threads = await import("../desktop/renderer/src/threads.js");
@@ -120,6 +131,59 @@ describe("workspace navigation integration", () => {
       canGoForward: true,
       pendingDirection: null,
     });
+  });
+
+  it("waits for tutorial completion persistence before refreshing to the submitted follow-up", async () => {
+    const root = rootLayer(101, 11);
+    const source = interaction(1, 10, root);
+    const followup = {
+      id: 2,
+      threadId: 10,
+      sequence: 2,
+      text: "A follow-up",
+      completionStatus: "submitted",
+    };
+    const beforeSubmit = productState([{ id: 10, title: "Tutorial" }], [source]);
+    const afterSubmit = productState([{ id: 10, title: "Tutorial" }], [source, followup]);
+    const completionPersistence = deferred();
+    let submitted = false;
+    let stateReads = 0;
+    requestImplementation = vi.fn(async (path, options) => {
+      if (path.startsWith("/api/state?threadId=10")) {
+        stateReads += 1;
+        return submitted ? afterSubmit : beforeSubmit;
+      }
+      if (path === "/api/threads/10/interactions") {
+        expect(options).toEqual({
+          method: "POST",
+          body: JSON.stringify({
+            text: "A follow-up",
+            modelSelection: { providerId: "openai", modelId: "gpt-5" },
+          }),
+        });
+        submitted = true;
+        return followup;
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(10);
+    tutorialFollowupSubmitted = vi.fn(() => completionPersistence.promise);
+
+    const submitting = controller.submitInteraction(
+      "A follow-up",
+      { providerId: "openai", modelId: "gpt-5" },
+    );
+    await vi.waitFor(() => expect(tutorialFollowupSubmitted).toHaveBeenCalledOnce());
+
+    expect(tutorialFollowupSubmitted).toHaveBeenCalledWith({ threadId: 10, interactionId: 2 });
+    expect(stateReads).toBe(1);
+    expect(controller.viewState.currentInteractionId).toBe(1);
+
+    completionPersistence.resolve(true);
+    await expect(submitting).resolves.toEqual(followup);
+    expect(stateReads).toBe(2);
+    expect(controller.viewState.currentInteractionId).toBe(2);
   });
 
   it("lets a newer turn choice cancel a slower history restoration", async () => {
@@ -559,6 +623,68 @@ describe("workspace navigation integration", () => {
       );
       expect(controller.appState.actionInvocations[0].resultCompletionStatus).toBe("running");
       expect(controller.viewState).toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["submitted", false, 1],
+    ["running", true, 100],
+  ])("advances the invoke tutorial only for a non-retryable %s result", async (
+    resultCompletionStatus,
+    shouldAdvance,
+    expectedInteractionId,
+  ) => {
+    vi.useFakeTimers();
+    try {
+      const root = rootLayer(101, 11);
+      const action = {
+        id: 777,
+        kind: "invoke",
+        sourceNodeId: 11,
+        targetLayerId: null,
+        interactionText: "Explore this node",
+      };
+      root.actions = [action];
+      const source = interaction(1, 10, root);
+      const result = {
+        id: 100,
+        threadId: 10,
+        completionStatus: resultCompletionStatus,
+      };
+      const beforeInvoke = productState([{ id: 10, title: "Tutorial" }], [source]);
+      const afterInvoke = productState([{ id: 10, title: "Tutorial" }], [source, result]);
+      afterInvoke.actionInvocations = [{
+        sourceInteractionId: 1,
+        actionId: 777,
+        resultInteractionId: 100,
+        resultCompletionStatus,
+      }];
+      let invoked = false;
+      requestImplementation = vi.fn(async (path, options) => {
+        if (path.startsWith("/api/state?threadId=10")) return invoked ? afterInvoke : beforeInvoke;
+        if (path.endsWith("/layers/101")) return root;
+        if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
+          expect(options).toEqual({ method: "POST" });
+          invoked = true;
+          return {
+            created: true,
+            invocation: afterInvoke.actionInvocations[0],
+            interaction: result,
+          };
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const controller = await loadModules();
+
+      await controller.loadThread(10);
+      await controller.invokeAction(action);
+
+      expect(tutorialActionSucceeded).toHaveBeenCalledTimes(shouldAdvance ? 1 : 0);
+      expect(controller.viewState.currentInteractionId).toBe(expectedInteractionId);
+      expect(controller.appState.actionInvocations[0].resultCompletionStatus)
+        .toBe(resultCompletionStatus);
     } finally {
       vi.useRealTimers();
     }

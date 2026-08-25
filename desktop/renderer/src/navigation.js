@@ -1,4 +1,5 @@
 import { appState, desktop, viewState } from "./state.js";
+import { onboardingTutorialController } from "./onboarding-tutorial.js";
 import { $, $$, escapeHtml } from "./ui.js";
 import { evalSidebarHeading } from "./navigation-model.js";
 
@@ -7,6 +8,7 @@ const settingsTabs = {
   appearance: "Appearance",
   codex: "Codex",
   updates: "Application updates",
+  advanced: "Advanced",
 };
 
 export function setMainView(view, { moveFocus = false } = {}) {
@@ -26,6 +28,7 @@ export function setMainView(view, { moveFocus = false } = {}) {
     if (view === "settings") $(`[data-settings-tab="${viewState.settingsTab}"]`)?.focus();
     else $("#settingsButton").focus();
   }
+  onboardingTutorialController()?.presentationChanged();
 }
 
 export function setSettingsTab(tab) {
@@ -85,7 +88,8 @@ export function renderSidebar() {
   }).join("");
 }
 
-export function selectScope(scope) {
+export function selectScope(scope, { userInitiated = false } = {}) {
+  if (userInitiated) onboardingTutorialController()?.cancelPendingAutomatic();
   viewState.selectedScope = scope;
   $("#scopeLabel").textContent = scope.label;
   const summary = $("#folderSummary");
@@ -106,7 +110,7 @@ export async function chooseFolder() {
   }
   if (!folder) return;
   const label = folder.path.split("/").filter(Boolean).at(-1) || folder.path;
-  selectScope({ kind: "folder", label, ...folder });
+  selectScope({ kind: "folder", label, ...folder }, { userInitiated: true });
 }
 
 export function renderScopeMenu() {
@@ -114,10 +118,17 @@ export function renderScopeMenu() {
   $("#scopeMenu").innerHTML = `<button data-scope="standalone"><span>No folder</span><small>Start without a project folder</small></button>${projectItems}<button data-scope="folder"><span>Open another folder…</span><small>Create a local project when you send</small></button>`;
   $$('[data-scope]', $("#scopeMenu")).forEach((button) => {
     button.onclick = async () => {
-      if (button.dataset.scope === "standalone") selectScope({ kind: "standalone", label: "No folder" });
+      if (button.dataset.scope === "standalone") {
+        selectScope({ kind: "standalone", label: "No folder" }, { userInitiated: true });
+      }
       if (button.dataset.scope === "project") {
         const project = appState.projects.find((item) => String(item.id) === button.dataset.project);
-        if (project) selectScope({ kind: "project", projectId: project.id, label: project.name, path: project.path });
+        if (project) {
+          selectScope(
+            { kind: "project", projectId: project.id, label: project.name, path: project.path },
+            { userInitiated: true },
+          );
+        }
       }
       if (button.dataset.scope === "folder") await chooseFolder();
       $("#scopeMenu").classList.add("hidden");

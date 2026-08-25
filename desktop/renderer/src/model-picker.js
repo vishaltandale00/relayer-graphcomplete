@@ -120,6 +120,7 @@ export function createModelPicker({
   settings = null,
   pinnedHarnessId = null,
   selection = null,
+  onUserTakeover = () => {},
   onSelectionChange = () => {},
   onOpenSettings = () => {},
   prepareHarnessChange = async () => () => {},
@@ -177,6 +178,7 @@ export function createModelPicker({
       }
       panel.innerHTML = `<div class="model-picker-empty"><strong>No available models</strong><button type="button" class="secondary" data-model-picker-settings>Open Settings</button></div>`;
       panel.querySelector("[data-model-picker-settings]").onclick = () => {
+        onUserTakeover();
         close();
         onOpenSettings();
       };
@@ -191,6 +193,7 @@ export function createModelPicker({
         return `<button type="button" role="radio" aria-checked="${checked}" data-model-option data-provider-id="${escapeHtmlAttribute(member.providerId)}" data-model-id="${escapeHtmlAttribute(member.modelId)}"><span><strong>${escapeHtml(model?.label ?? member.modelId)}</strong><small>${escapeHtml(provider?.label ?? member.providerId)}</small></span><i aria-hidden="true">${checked ? "✓" : ""}</i></button>`;
       }).join("")}</div>`;
     panel.querySelector("[data-model-family]").onchange = (event) => {
+      onUserTakeover();
       const nextFamily = families.find((family) => String(family.id) === event.target.value);
       const member = nextFamily?.availableMembers[0];
       if (!member) return;
@@ -204,6 +207,7 @@ export function createModelPicker({
     };
     panel.querySelectorAll("[data-model-option]").forEach((button) => {
       button.onclick = () => {
+        onUserTakeover();
         const providerId = button.dataset.providerId;
         const modelId = button.dataset.modelId;
         commit({
@@ -243,11 +247,13 @@ export function createModelPicker({
       }).join("")}</div>`
       : `<div class="model-picker-empty"><strong>No available harnesses</strong><button type="button" class="secondary" data-model-picker-settings>Open Settings</button></div>`;
     panel.querySelector("[data-model-picker-settings]")?.addEventListener("click", () => {
+      onUserTakeover();
       close();
       onOpenSettings();
     });
     panel.querySelectorAll("[data-harness-option]").forEach((button) => {
       button.onclick = async () => {
+        onUserTakeover();
         const candidateHarnessId = button.dataset.harnessOption;
         const validationSequence = harnessValidationGate.begin();
         validatingHarness = true;
@@ -351,6 +357,7 @@ export function createModelPicker({
   }
 
   trigger.onclick = () => {
+    onUserTakeover();
     if (popover.classList.contains("hidden")) open();
     else close();
   };

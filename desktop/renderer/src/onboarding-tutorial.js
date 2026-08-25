@@ -1,0 +1,557 @@
+import {
+  ONBOARDING_TUTORIAL_PROMPT,
+  createOnboardingTutorialState,
+  reduceOnboardingTutorial,
+} from "./onboarding-tutorial-state.js";
+
+let sharedController = null;
+
+const COPY = Object.freeze({
+  "initial-composer": {
+    title: "Start a thread",
+    body: "Edit the question or send it as written.",
+  },
+  "select-node": {
+    title: "Select a node",
+    body: "Open this node to see its details.",
+  },
+  "use-action": {
+    title: "Use an action",
+    body: "Select this action to continue exploring.",
+  },
+  "write-follow-up": {
+    title: "Ask a follow-up",
+    body: "Write a question about what you explored, then send it.",
+  },
+  complete: {
+    title: "Tutorial complete.",
+    body: "",
+  },
+});
+
+const GRAPH_SETTLE_FRAMES = 60;
+
+function sameId(left, right) {
+  return left != null && right != null && String(left) === String(right);
+}
+
+function escapeSelector(value) {
+  const string = String(value);
+  return globalThis.CSS?.escape
+    ? globalThis.CSS.escape(string)
+    : string.replace(/["\\]/g, "\\$&");
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
+}
+
+export function coachmarkViewportPosition(targetRect, coachRect, {
+  viewportWidth,
+  viewportHeight,
+  margin = 10,
+}) {
+  const below = targetRect.bottom + margin;
+  const above = targetRect.top - coachRect.height - margin;
+  const roomBelow = viewportHeight - margin - targetRect.bottom;
+  const roomAbove = targetRect.top - margin;
+  let preferredTop = below;
+  if (roomBelow < coachRect.height
+    && (roomAbove >= coachRect.height || roomAbove >= roomBelow)) {
+    preferredTop = above;
+  }
+  const centered = targetRect.left + targetRect.width / 2 - coachRect.width / 2;
+
+  return {
+    left: clamp(centered, margin, viewportWidth - coachRect.width - margin),
+    top: clamp(preferredTop, margin, viewportHeight - coachRect.height - margin),
+  };
+}
+
+function tutorialAnchorSelector(state) {
+  if (state.phase === "initial-composer") return ".new-composer";
+  if (state.phase === "select-node") return `[data-node="${escapeSelector(state.target.nodeId)}"]`;
+  if (state.phase === "use-action") return `[data-action-id="${escapeSelector(state.target.actionId)}"]`;
+  if (state.phase === "write-follow-up" || state.phase === "complete") return "#threadComposer";
+  return null;
+}
+
+function tutorialHighlightSelector(state) {
+  if (state.phase === "write-follow-up") return "#threadPrompt";
+  if (state.phase === "complete") return null;
+  return tutorialAnchorSelector(state);
+}
+
+function invokedActionIds(appState, interactionId) {
+  return [
+    ...(appState.actionInvocations || []),
+    ...(appState.pendingActionInvocations || []),
+  ].filter((invocation) => sameId(invocation.sourceInteractionId, interactionId))
+    .map((invocation) => invocation.actionId);
+}
+
+export function createOnboardingTutorialController({
+  document: tutorialDocument = document,
+  window: tutorialWindow = window,
+  lifecycle,
+  getAppState,
+  getViewState,
+  isComposerReady = () => true,
+  openNewThread,
+}) {
+  if (!lifecycle || typeof getAppState !== "function" || typeof getViewState !== "function") {
+    throw new TypeError("Onboarding tutorial requires lifecycle and product state dependencies.");
+  }
+  if (typeof openNewThread !== "function") {
+    throw new TypeError("Onboarding tutorial requires the ordinary New Thread flow.");
+  }
+
+  let active = false;
+  let tutorial = null;
+  let coachmark = null;
+  let linkedTarget = null;
+  let positionFrame = null;
+  let graphSettleFramesRemaining = 0;
+  let focusFrame = null;
+  let completionFocused = false;
+  let startAttempt = 0;
+  let pendingStart = null;
+  const startCleanup = new Map();
+
+  function removeDescription(target) {
+    if (!target) return;
+    const ids = (target.getAttribute("aria-describedby") || "")
+      .split(/\s+/)
+      .filter((id) => id && id !== "onboardingTutorialCopy");
+    if (ids.length) target.setAttribute("aria-describedby", ids.join(" "));
+    else target.removeAttribute("aria-describedby");
+    target.classList.remove("tutorial-target");
+  }
+
+  function linkTarget(target) {
+    if (linkedTarget === target) return;
+    removeDescription(linkedTarget);
+    linkedTarget = target;
+    if (!target) return;
+    const ids = new Set((target.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+    ids.add("onboardingTutorialCopy");
+    target.setAttribute("aria-describedby", [...ids].join(" "));
+    target.classList.add("tutorial-target");
+  }
+
+  function stopPositioning() {
+    if (positionFrame != null) tutorialWindow.cancelAnimationFrame(positionFrame);
+    positionFrame = null;
+  }
+
+  function schedulePositioning() {
+    if (!active || positionFrame != null) return;
+    positionFrame = tutorialWindow.requestAnimationFrame(positionCoachmark);
+  }
+
+  function positionCoachmark() {
+    positionFrame = null;
+    if (!active || !coachmark || !tutorial) return;
+    const anchorSelector = tutorialAnchorSelector(tutorial);
+    const highlightSelector = tutorialHighlightSelector(tutorial);
+    const anchor = anchorSelector ? tutorialDocument.querySelector(anchorSelector) : null;
+    const highlight = highlightSelector ? tutorialDocument.querySelector(highlightSelector) : null;
+    linkTarget(highlight);
+    if (!anchor || !anchor.isConnected) {
+      coachmark.hidden = true;
+    } else {
+      coachmark.hidden = false;
+      const targetRect = anchor.getBoundingClientRect();
+      const coachRect = coachmark.getBoundingClientRect();
+      const { left, top } = coachmarkViewportPosition(targetRect, coachRect, {
+        viewportWidth: tutorialWindow.innerWidth,
+        viewportHeight: tutorialWindow.innerHeight,
+      });
+      coachmark.style.left = `${Math.round(left)}px`;
+      coachmark.style.top = `${Math.round(top)}px`;
+    }
+    if (tutorial.phase === "select-node" && graphSettleFramesRemaining > 0) {
+      graphSettleFramesRemaining -= 1;
+      schedulePositioning();
+    }
+  }
+
+  const repositionForViewportChange = () => schedulePositioning();
+  tutorialWindow.addEventListener?.("resize", repositionForViewportChange);
+  tutorialDocument.addEventListener?.("scroll", repositionForViewportChange, true);
+
+  function ensureCoachmark() {
+    if (coachmark) return coachmark;
+    coachmark = tutorialDocument.createElement("section");
+    coachmark.className = "tutorial-coachmark";
+    coachmark.setAttribute("role", "region");
+    coachmark.setAttribute("aria-label", "Tutorial");
+    coachmark.innerHTML = `
+      <div id="onboardingTutorialCopy" role="status" aria-live="polite">
+        <div class="tutorial-eyebrow">Tutorial</div>
+        <h2></h2>
+        <p></p>
+      </div>
+      <div class="tutorial-coachmark-actions">
+        <button type="button" class="tutorial-skip">Skip tutorial</button>
+        <button type="button" class="tutorial-done hidden">Done</button>
+      </div>`;
+    coachmark.querySelector(".tutorial-skip").onclick = () => void dismiss("skip");
+    coachmark.querySelector(".tutorial-done").onclick = hide;
+    tutorialDocument.body.append(coachmark);
+    return coachmark;
+  }
+
+  function hide() {
+    active = false;
+    stopPositioning();
+    if (focusFrame != null) tutorialWindow.cancelAnimationFrame(focusFrame);
+    focusFrame = null;
+    linkTarget(null);
+    coachmark?.remove();
+    coachmark = null;
+    tutorial = null;
+    completionFocused = false;
+    graphSettleFramesRemaining = 0;
+  }
+
+  async function dismiss(eventType = "leave", { revokeStart = true } = {}) {
+    if (revokeStart) revokePendingStart();
+    if (!active || !tutorial) return;
+    tutorial = reduceOnboardingTutorial(tutorial, { type: eventType });
+    try {
+      await lifecycle.dismiss();
+    } finally {
+      hide();
+    }
+  }
+
+  function render() {
+    if (!active || !tutorial) return;
+    if (tutorial.phase === "dismissed") {
+      hide();
+      return;
+    }
+    const copy = COPY[tutorial.phase];
+    if (!copy) {
+      stopPositioning();
+      coachmark?.setAttribute("hidden", "");
+      linkTarget(null);
+      return;
+    }
+    const element = ensureCoachmark();
+    element.querySelector("h2").textContent = copy.title;
+    const paragraph = element.querySelector("p");
+    paragraph.textContent = copy.body;
+    paragraph.classList.toggle("hidden", !copy.body);
+    const complete = tutorial.phase === "complete";
+    element.classList.toggle("tutorial-complete", complete);
+    element.querySelector(".tutorial-skip").classList.toggle("hidden", complete);
+    const done = element.querySelector(".tutorial-done");
+    done.classList.toggle("hidden", !complete);
+    if (complete && !completionFocused) {
+      completionFocused = true;
+      focusFrame = tutorialWindow.requestAnimationFrame(() => {
+        focusFrame = null;
+        done.focus({ preventScroll: true });
+      });
+    }
+    stopPositioning();
+    graphSettleFramesRemaining = tutorial.phase === "select-node" ? GRAPH_SETTLE_FRAMES : 0;
+    positionCoachmark();
+    if (tutorial.phase !== "select-node") schedulePositioning();
+  }
+
+  async function start(source, context = null, ownedAttempt = null) {
+    if (source === "manual" && !isComposerReady()) return false;
+    const attempt = ownedAttempt ?? claimStart(source);
+    if (!ownsStart(attempt)) return false;
+    if (active) {
+      try {
+        await dismiss("leave", { revokeStart: false });
+      } catch (error) {
+        clearStart(attempt);
+        throw error;
+      }
+    }
+    if (!ownsStart(attempt)) return false;
+    let result;
+    try {
+      result = source === "automatic"
+        ? await lifecycle.beginAutomatic(context)
+        : await lifecycle.beginManual();
+    } catch (error) {
+      await cleanupOwnedStart(attempt, { suppressError: true });
+      throw error;
+    }
+    if (!result?.started) {
+      clearStart(attempt);
+      return false;
+    }
+    if (!ownsStart(attempt)) {
+      await cleanupOwnedStart(attempt, { suppressError: true });
+      return false;
+    }
+    if (source === "automatic" && (active || liveThreadCount(context?.threadCount) !== 0)) {
+      await cleanupOwnedStart(attempt);
+      return false;
+    }
+    const canOpen = () => (
+      ownsStart(attempt)
+      && !active
+      && isComposerReady()
+      && (source !== "automatic" || liveThreadCount(context?.threadCount) === 0)
+    );
+    if (!canOpen()) {
+      await cleanupOwnedStart(attempt);
+      return false;
+    }
+    let opened;
+    try {
+      opened = await openNewThread({
+        prompt: ONBOARDING_TUTORIAL_PROMPT,
+        source,
+        guard: canOpen,
+      });
+    } catch (error) {
+      await cleanupOwnedStart(attempt, { suppressError: true });
+      throw error;
+    }
+    if (opened === false || !canOpen()) {
+      await cleanupOwnedStart(attempt);
+      return false;
+    }
+    active = true;
+    tutorial = createOnboardingTutorialState();
+    completionFocused = false;
+    clearStart(attempt);
+    render();
+    return true;
+  }
+
+  function claimStart(source) {
+    const attempt = ++startAttempt;
+    pendingStart = { attempt, source };
+    return attempt;
+  }
+
+  function ownsStart(attempt) {
+    return pendingStart?.attempt === attempt;
+  }
+
+  function clearStart(attempt) {
+    if (ownsStart(attempt)) pendingStart = null;
+  }
+
+  async function settleRegisteredCleanup(attempt) {
+    const existingCleanup = startCleanup.get(attempt);
+    if (!existingCleanup) return false;
+    await existingCleanup;
+    startCleanup.delete(attempt);
+    return true;
+  }
+
+  async function cleanupOwnedStart(attempt, { suppressError = false } = {}) {
+    if (await settleRegisteredCleanup(attempt)) return;
+    const owned = ownsStart(attempt);
+    if (!owned && (pendingStart || active)) return;
+    try {
+      await lifecycle.dismiss();
+    } catch (error) {
+      if (!suppressError) throw error;
+    } finally {
+      if (owned) clearStart(attempt);
+    }
+  }
+
+  function revokePendingStart() {
+    startAttempt += 1;
+    pendingStart = null;
+  }
+
+  function cancelPendingAutomatic() {
+    if (active || pendingStart?.source !== "automatic") return false;
+    const attempt = pendingStart.attempt;
+    revokePendingStart();
+    const cleanup = Promise.resolve()
+      .then(() => lifecycle.dismiss())
+      .catch(() => undefined);
+    startCleanup.set(attempt, cleanup);
+    return true;
+  }
+
+  function liveThreadCount(fallback) {
+    const latestAppState = getAppState();
+    return Array.isArray(latestAppState?.threads) ? latestAppState.threads.length : fallback;
+  }
+
+  async function maybeStartAutomatic({ providerConnected, threadCount }) {
+    if (active || pendingStart) return false;
+    const context = {
+      surface: "product",
+      providerConnected: Boolean(providerConnected),
+      threadCount,
+    };
+    const attempt = claimStart("automatic");
+    let current;
+    try {
+      current = await lifecycle.read(context);
+    } catch (error) {
+      if (!await settleRegisteredCleanup(attempt)) clearStart(attempt);
+      throw error;
+    }
+    if (!ownsStart(attempt)) {
+      await settleRegisteredCleanup(attempt);
+      return false;
+    }
+    if (active) {
+      clearStart(attempt);
+      return false;
+    }
+    if (!current.automaticEligible) {
+      clearStart(attempt);
+      return false;
+    }
+    const latestThreadCount = liveThreadCount(threadCount);
+    if (latestThreadCount !== 0) {
+      clearStart(attempt);
+      return false;
+    }
+    return start("automatic", { ...context, threadCount: latestThreadCount }, attempt);
+  }
+
+  function dispatch(event) {
+    if (!active || !tutorial) return tutorial;
+    tutorial = reduceOnboardingTutorial(tutorial, event);
+    if (tutorial.phase === "dismissed") {
+      void lifecycle.dismiss();
+      hide();
+      return null;
+    }
+    render();
+    return tutorial;
+  }
+
+  function syncWorkspace() {
+    if (active && !presentationMatchesTutorial()) {
+      void dismiss("leave");
+      return;
+    }
+    if (!active || tutorial?.phase !== "awaiting-accepted-response") {
+      if (active) render();
+      return;
+    }
+    const appState = getAppState();
+    const viewState = getViewState();
+    if (!sameId(viewState.currentThreadId, tutorial.threadId)) return;
+    const interaction = (appState.interactions || []).find((candidate) => (
+      sameId(candidate.threadId, tutorial.threadId)
+      && sameId(candidate.id, tutorial.interactionId)
+    ));
+    if (!interaction) return;
+    if (["failed", "cancelled", "stopped"].includes(interaction.completionStatus)) {
+      dispatch({
+        type: "response-terminal",
+        threadId: tutorial.threadId,
+        interactionId: tutorial.interactionId,
+        status: interaction.completionStatus,
+      });
+      return;
+    }
+    if (interaction.completionStatus !== "accepted") return;
+    const layer = interaction.completionOutput?.rootLayer;
+    if (!layer) return;
+    dispatch({
+      type: "response-accepted",
+      threadId: tutorial.threadId,
+      interactionId: tutorial.interactionId,
+      layer,
+      invokedActionIds: invokedActionIds(appState, tutorial.interactionId),
+    });
+  }
+
+  function presentationMatchesTutorial() {
+    if (!active || !tutorial) return true;
+    const view = getViewState();
+    if (tutorial.phase === "initial-composer") return view.mainView === "new";
+    if (view.mainView !== "thread" || !sameId(view.currentThreadId, tutorial.threadId)) {
+      return false;
+    }
+    if (tutorial.phase === "complete") return true;
+    return view.currentInteractionId == null
+      || sameId(view.currentInteractionId, tutorial.interactionId);
+  }
+
+  async function followupSubmitted({ threadId, interactionId }) {
+    if (!active || !tutorial) return false;
+    const current = tutorial;
+    const next = reduceOnboardingTutorial(current, {
+      type: "followup-submitted",
+      threadId,
+      interactionId,
+    });
+    if (next.phase !== "complete") return false;
+    await lifecycle.complete();
+    if (!active || tutorial !== current) return false;
+    tutorial = next;
+    render();
+    return true;
+  }
+
+  function presentationChanged() {
+    if (!active || !tutorial) return;
+    if (!presentationMatchesTutorial()) void dismiss("leave");
+  }
+
+  function actionSucceeded(event) {
+    if (!active || !tutorial) return null;
+    const expectedActionId = tutorial.phase === "use-action" ? tutorial.target?.actionId : null;
+    if (expectedActionId != null && !sameId(expectedActionId, event.actionId)) {
+      void dismiss("leave");
+      return null;
+    }
+    return dispatch({ type: "action-succeeded", ...event });
+  }
+
+  return Object.freeze({
+    maybeStartAutomatic,
+    cancelPendingAutomatic,
+    startManual: () => start("manual"),
+    threadCreated: ({ threadId, interactionId }) => dispatch({
+      type: "thread-created",
+      threadId,
+      interactionId,
+    }),
+    nodeSelected: ({ threadId, interactionId, nodeId }) => dispatch({
+      type: "node-selected",
+      threadId,
+      interactionId,
+      nodeId,
+    }),
+    actionSucceeded,
+    followupSubmitted,
+    syncWorkspace,
+    presentationChanged,
+    leave: () => dismiss("leave"),
+    skip: () => dismiss("skip"),
+    dispose() {
+      revokePendingStart();
+      startCleanup.clear();
+      hide();
+      tutorialWindow.removeEventListener?.("resize", repositionForViewportChange);
+      tutorialDocument.removeEventListener?.("scroll", repositionForViewportChange, true);
+    },
+    snapshot: () => tutorial,
+    isActive: () => active,
+  });
+}
+
+export function installOnboardingTutorialController(dependencies) {
+  sharedController?.dispose();
+  sharedController = createOnboardingTutorialController(dependencies);
+  return sharedController;
+}
+
+export function onboardingTutorialController() {
+  return sharedController;
+}

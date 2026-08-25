@@ -53,6 +53,7 @@ import {
   pendingApprovalsForThread,
   validApprovalDecision,
 } from "./approval-model.js";
+import { onboardingTutorialController } from "./onboarding-tutorial.js";
 
 let creatingFirstThread = false;
 let pendingRefreshTimer;
@@ -171,6 +172,10 @@ function layerContainsRefreshableInvokedAction(layer, invocations = appState.act
       || NONTERMINAL_INVOCATION_STATUSES.has(resultCompletionStatus)
     )),
   );
+}
+
+function invokeResultIsRetryable(completionStatus) {
+  return completionStatus === "submitted";
 }
 
 function invalidateResolvedInvokeLayerCache(invocations) {
@@ -399,8 +404,9 @@ export async function submitInteraction(text, modelSelection) {
     setMainView("settings");
     throw new Error("Choose an available model in Settings before sending.");
   }
+  let createdInteraction;
   try {
-    await request(`/api/threads/${encodeURIComponent(threadId)}/interactions`, {
+    createdInteraction = await request(`/api/threads/${encodeURIComponent(threadId)}/interactions`, {
       method: "POST",
       body: JSON.stringify(followupRequestBody(text, modelSelection)),
     });
@@ -408,11 +414,20 @@ export async function submitInteraction(text, modelSelection) {
     await refreshAfterModelSelectionRejection(error, true);
     throw error;
   }
+  try {
+    await onboardingTutorialController()?.followupSubmitted({
+      threadId,
+      interactionId: createdInteraction?.id,
+    });
+  } catch (error) {
+    console.error("Tutorial completion failed:", error);
+  }
   const current = currentNavigationEntry();
-  if (!current || navigationEntryKey(current) !== sourceLocationKey) return;
+  if (!current || navigationEntryKey(current) !== sourceLocationKey) return createdInteraction;
   supersedePendingHistory({ presentationChanged: true });
   viewState.currentInteractionId = null;
   await refreshState(threadId, { historyMode: "push" });
+  return createdInteraction;
 }
 
 async function refreshAfterModelSelectionRejection(error, renderOngoingPicker = false) {
@@ -503,6 +518,7 @@ export async function navigateLayer(layerId, navigation = {}) {
     hydrateWorkspace(interaction, layer, { layerPath });
     recordCurrentNavigation("push");
     renderThread();
+    return true;
   } finally {
     const stillOwnsSource = layerNavigationCoordinator.isCurrent(pendingNavigation, {
       threadId: viewState.currentThreadId,
@@ -758,13 +774,13 @@ export async function navigateHistory(deltaOrDirection) {
 export async function invokeAction(action) {
   const threadId = viewState.currentThreadId;
   const sourceInteractionId = viewState.currentInteractionId;
-  if (!threadId || !sourceInteractionId || action?.kind !== "invoke" || !action.id) return;
+  if (!threadId || !sourceInteractionId || action?.kind !== "invoke" || !action.id) return null;
   if (actionWasInvoked(
     appState.actionInvocations,
     appState.pendingActionInvocations,
     sourceInteractionId,
     action.id,
-  )) return;
+  )) return null;
   appState.pendingActionInvocations.push({
     sourceInteractionId,
     actionId: action.id,
@@ -785,7 +801,7 @@ export async function invokeAction(action) {
         sourceInteractionId,
         action.id,
       );
-      return;
+      return null;
     }
     await refreshAfterModelSelectionRejection(error, true);
     await refreshState(threadId).catch(() => {});
@@ -802,15 +818,26 @@ export async function invokeAction(action) {
       currentNavigationEntry()
       && navigationEntryKey(currentNavigationEntry()) === sourceLocationKey
     );
-    if (durable?.resultInteractionId && sourceIsStillSelected) {
+    if (
+      durable?.resultInteractionId
+      && !invokeResultIsRetryable(durable.resultCompletionStatus)
+      && sourceIsStillSelected
+    ) {
+      onboardingTutorialController()?.actionSucceeded({
+        threadId,
+        interactionId: sourceInteractionId,
+        actionId: action.id,
+        resultInteractionId: durable.resultInteractionId,
+      });
       supersedePendingHistory({ presentationChanged: true });
       viewState.currentInteractionId = durable.resultInteractionId;
       await refreshState(threadId, { historyMode: "push" }).catch(() => {});
+      return { interaction: { id: durable.resultInteractionId }, recovered: true };
     } else {
       renderThread();
       toast(error.message);
     }
-    return;
+    return null;
   }
   if (response.invocation) {
     appState.actionInvocations = appState.actionInvocations.filter((invocation) => !(
@@ -828,17 +855,26 @@ export async function invokeAction(action) {
     currentNavigationEntry()
     && navigationEntryKey(currentNavigationEntry()) === sourceLocationKey
   );
-  if (response.created && response.interaction?.id && sourceIsStillSelected) {
+  const createdResultCanAdvance = response.created
+    && response.interaction?.id
+    && !invokeResultIsRetryable(response.interaction.completionStatus)
+    && sourceIsStillSelected;
+  if (createdResultCanAdvance) {
+    onboardingTutorialController()?.actionSucceeded({
+      threadId,
+      interactionId: sourceInteractionId,
+      actionId: action.id,
+      resultInteractionId: response.interaction.id,
+    });
     supersedePendingHistory({ presentationChanged: true });
     viewState.currentInteractionId = response.interaction.id;
   }
   if (String(viewState.currentThreadId) === String(threadId)) {
     await refreshState(threadId, {
-      historyMode: response.created && response.interaction?.id && sourceIsStillSelected
-        ? "push"
-        : "replace",
+      historyMode: createdResultCanAdvance ? "push" : "replace",
     });
   }
+  return response;
 }
 
 async function createOrReuseProject(selectedScope) {
@@ -861,6 +897,7 @@ async function createOrReuseProject(selectedScope) {
 }
 
 export async function createFirstThread(pickerPayloadOverride = null) {
+  onboardingTutorialController()?.cancelPendingAutomatic();
   const input = $("#newThreadPrompt");
   const promptText = input.value.trim();
   const permissionProfileId = viewState.selectedPermissionProfileId;
@@ -912,6 +949,10 @@ export async function createFirstThread(pickerPayloadOverride = null) {
       })),
     });
     viewState.currentThreadId = thread.id;
+    onboardingTutorialController()?.threadCreated({
+      threadId: thread.id,
+      interactionId: thread.rootInteractionId,
+    });
     input.value = "";
     await loadThread(thread.id);
   } catch (error) {
