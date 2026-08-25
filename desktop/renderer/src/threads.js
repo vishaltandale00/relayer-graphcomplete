@@ -55,10 +55,12 @@ import {
 } from "./approval-model.js";
 import {
   createPostFlightRefreshQueue,
+  createEnvironmentRefreshScheduler,
   environmentBackoffAfterFailure,
   environmentRefreshNeeded,
   interactionReachedTerminal,
   latestInteractionForThread,
+  resolveEnvironmentSnapshot,
 } from "./environment-context.js";
 
 let creatingFirstThread = false;
@@ -80,6 +82,7 @@ let pendingResolvedInvokeNavigation = false;
 let environmentRequestSequence = 0;
 const environmentRefreshRecords = new Map();
 let environmentRequestInFlight = null;
+const environmentRefreshScheduler = createEnvironmentRefreshScheduler();
 const environmentPostFlightQueue = createPostFlightRefreshQueue();
 
 function activeProjectId() {
@@ -88,7 +91,43 @@ function activeProjectId() {
   ))?.projectId ?? null;
 }
 
+function clearEnvironmentRefreshTimer() {
+  environmentRefreshScheduler.clear();
+}
+
+function environmentWorkspaceFocused() {
+  return viewState.mainView === "thread"
+    && activeProjectId() != null
+    && document.visibilityState !== "hidden"
+    && (typeof document.hasFocus !== "function" || document.hasFocus());
+}
+
+function scheduleEnvironmentRefresh() {
+  clearEnvironmentRefreshTimer();
+  if (!environmentWorkspaceFocused()) return;
+  const projectId = activeProjectId();
+  const refreshRecord = environmentRefreshRecords.get(String(projectId)) ?? {
+    lastRequestedAt: 0,
+    nextAttemptAt: 0,
+  };
+  environmentRefreshScheduler.schedule({
+    eligible: true,
+    projectId,
+    lastRequestedAt: refreshRecord.lastRequestedAt,
+    nextAttemptAt: refreshRecord.nextAttemptAt,
+    now: Date.now(),
+    refresh: (scheduledProjectId) => {
+      if (
+        !environmentWorkspaceFocused()
+        || String(activeProjectId()) !== String(scheduledProjectId)
+      ) return;
+      void refreshCurrentEnvironment().catch(() => scheduleEnvironmentRefresh());
+    },
+  });
+}
+
 export async function refreshCurrentEnvironment({ force = false, minimumAgeMs = 0 } = {}) {
+  clearEnvironmentRefreshTimer();
   if (viewState.mainView !== "thread") {
     stopEnvironmentRefresh();
     return false;
@@ -124,7 +163,10 @@ export async function refreshCurrentEnvironment({ force = false, minimumAgeMs = 
     force,
     minimumAgeMs,
     nextAttemptAt: refreshRecord.nextAttemptAt,
-  })) return false;
+  })) {
+    scheduleEnvironmentRefresh();
+    return false;
+  }
   if (environmentRequestInFlight?.projectId === String(projectId)) {
     environmentPostFlightQueue.queue(projectId, force);
     return environmentRequestInFlight.promise;
@@ -148,9 +190,22 @@ export async function refreshCurrentEnvironment({ force = false, minimumAgeMs = 
     if (requestSequence !== environmentRequestSequence || String(activeProjectId()) !== String(projectId)) {
       return false;
     }
-    appState.environment = { projectId, status: "ready", snapshot, error: null };
-    refreshRecord.failureCount = 0;
-    refreshRecord.nextAttemptAt = 0;
+    const resolved = resolveEnvironmentSnapshot(snapshot, previousSnapshot);
+    appState.environment = {
+      projectId,
+      status: resolved.status,
+      snapshot: resolved.snapshot,
+      error: resolved.error,
+    };
+    if (resolved.retryable) {
+      Object.assign(
+        refreshRecord,
+        environmentBackoffAfterFailure(refreshRecord.failureCount, Date.now()),
+      );
+    } else {
+      refreshRecord.failureCount = 0;
+      refreshRecord.nextAttemptAt = 0;
+    }
   } catch (error) {
     if (requestSequence !== environmentRequestSequence || String(activeProjectId()) !== String(projectId)) {
       return false;
@@ -181,12 +236,15 @@ export async function refreshCurrentEnvironment({ force = false, minimumAgeMs = 
         viewState.mainView === "thread",
       )) {
         void refreshCurrentEnvironment({ force: true }).catch(() => {});
+      } else {
+        scheduleEnvironmentRefresh();
       }
     }
   }
 }
 
 export function stopEnvironmentRefresh() {
+  clearEnvironmentRefreshTimer();
   environmentRequestSequence += 1;
   environmentRequestInFlight = null;
   environmentPostFlightQueue.clear();

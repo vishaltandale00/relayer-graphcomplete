@@ -4,12 +4,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   ENVIRONMENT_REFRESH_INTERVAL_MS,
+  createEnvironmentRefreshScheduler,
   createPostFlightRefreshQueue,
   desktopRailGeometry,
   environmentBackoffAfterFailure,
+  environmentRefreshDelay,
   environmentRefreshNeeded,
   interactionReachedTerminal,
   latestInteractionForThread,
+  resolveEnvironmentSnapshot,
 } from "../desktop/renderer/src/environment-context.js";
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
 import {
@@ -185,7 +188,7 @@ describe("desktop environment rail", () => {
     expect(environmentRefreshNeeded({ requestedProjectId: null, now, lastRequestedAt: 0 })).toBe(false);
   });
 
-  it("applies capped exponential error backoff while allowing bounded focus override", () => {
+  it("applies capped exponential error backoff to background and focus refreshes", () => {
     const now = 100_000;
     const first = environmentBackoffAfterFailure(0, now);
     const second = environmentBackoffAfterFailure(first.failureCount, first.nextAttemptAt);
@@ -215,7 +218,113 @@ describe("desktop environment rail", () => {
       now: 105_000,
       force: true,
       minimumAgeMs: 1_000,
+    })).toBe(false);
+    expect(environmentRefreshNeeded({
+      currentProjectId: 7,
+      requestedProjectId: 7,
+      lastRequestedAt: 103_000,
+      nextAttemptAt: 160_000,
+      now: 160_000,
+      force: true,
+      minimumAgeMs: 1_000,
     })).toBe(true);
+    expect(environmentRefreshDelay({
+      lastRequestedAt: 103_000,
+      nextAttemptAt: 160_000,
+      now: 105_000,
+    })).toBe(55_000);
+    expect(environmentRefreshDelay({
+      lastRequestedAt: 103_000,
+      nextAttemptAt: 0,
+      now: 110_000,
+    })).toBe(0);
+  });
+
+  it("schedules one active refresh at the throttle or backoff boundary", () => {
+    const scheduled = [];
+    const cleared = [];
+    const scheduler = createEnvironmentRefreshScheduler({
+      setTimer(callback, delayMs) {
+        const timer = { callback, delayMs };
+        scheduled.push(timer);
+        return timer;
+      },
+      clearTimer(timer) {
+        cleared.push(timer);
+      },
+    });
+    const refreshed = [];
+    expect(scheduler.schedule({
+      eligible: true,
+      projectId: 7,
+      lastRequestedAt: 100_000,
+      nextAttemptAt: 120_000,
+      now: 105_000,
+      refresh: (projectId) => refreshed.push(projectId),
+    })).toBe(15_000);
+    expect(scheduler.schedule({
+      eligible: true,
+      projectId: 7,
+      lastRequestedAt: 110_000,
+      nextAttemptAt: 0,
+      now: 112_000,
+      refresh: (projectId) => refreshed.push(projectId),
+    })).toBe(3_000);
+    expect(cleared).toEqual([scheduled[0]]);
+    scheduled[1].callback();
+    expect(refreshed).toEqual([7]);
+    expect(scheduler.schedule({
+      eligible: false,
+      projectId: 7,
+      lastRequestedAt: 0,
+      nextAttemptAt: 0,
+      now: 0,
+      refresh: () => {},
+    })).toBe(false);
+    expect(cleared).toHaveLength(1);
+  });
+
+  it("retains the last good snapshot for retryable unavailable responses", () => {
+    const good = {
+      kind: "git",
+      worktreeLabel: "8bf2",
+      branch: "main",
+      changes: { additions: 3, deletions: 1, trackedFiles: 1, untrackedFiles: 0 },
+    };
+    expect(resolveEnvironmentSnapshot({
+      kind: "unavailable",
+      unavailableReason: { code: "git_timeout", message: "Git inspection timed out" },
+    }, good)).toEqual({
+      status: "error",
+      snapshot: good,
+      error: "Git inspection timed out",
+      retryable: true,
+    });
+    expect(resolveEnvironmentSnapshot({
+      kind: "unavailable",
+      unavailableReason: { code: "inspection_capacity", message: "Inspector is busy" },
+    })).toMatchObject({
+      status: "error",
+      snapshot: { kind: "unavailable" },
+      retryable: true,
+    });
+  });
+
+  it("replaces stale context for durable missing and retargeted folder states", () => {
+    const good = { kind: "git", worktreeLabel: "8bf2", branch: "main" };
+    for (const code of ["path_unavailable", "path_retargeted"]) {
+      const unavailable = {
+        kind: "unavailable",
+        worktreeLabel: "relayer-graphcomplete",
+        unavailableReason: { code, message: "Folder identity changed" },
+      };
+      expect(resolveEnvironmentSnapshot(unavailable, good)).toEqual({
+        status: "ready",
+        snapshot: unavailable,
+        error: null,
+        retryable: false,
+      });
+    }
   });
 
   it("recognizes exactly one latest-interaction terminal transition", () => {

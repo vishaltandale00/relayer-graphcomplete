@@ -17,6 +17,7 @@ import {
   shouldActivateGraphNodeAfterPointerGesture,
   shouldFitInspectorDock,
   shouldFitInspectorOpen,
+  shouldRevealStackedInspector,
   zoomGraphCameraAt,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
@@ -34,6 +35,13 @@ describe("product workspace graph camera", () => {
     expect(shouldFitInspectorDock(true, false, false)).toBe(false);
     expect(shouldFitInspectorDock(false, false, true)).toBe(false);
     expect(shouldFitInspectorDock(false, true, true)).toBe(false);
+  });
+
+  it("reveals every user-selected node in stacked layouts without scrolling restored state", () => {
+    expect(shouldRevealStackedInspector(1100, true)).toBe(true);
+    expect(shouldRevealStackedInspector(760, true)).toBe(true);
+    expect(shouldRevealStackedInspector(1101, true)).toBe(false);
+    expect(shouldRevealStackedInspector(960, false)).toBe(false);
   });
 
   it("does not activate a graph node from the click generated after dragging it", () => {

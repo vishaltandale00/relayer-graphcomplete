@@ -30,12 +30,69 @@ export function environmentRefreshNeeded({
   nextAttemptAt = 0,
 }) {
   if (requestedProjectId == null) return false;
-  return (force && now - lastRequestedAt >= minimumAgeMs)
+  return (force && now >= nextAttemptAt && now - lastRequestedAt >= minimumAgeMs)
     || String(currentProjectId) !== String(requestedProjectId)
     || (
       now >= nextAttemptAt
       && now - lastRequestedAt >= ENVIRONMENT_REFRESH_INTERVAL_MS
     );
+}
+
+export function environmentRefreshDelay({
+  lastRequestedAt,
+  nextAttemptAt = 0,
+  now,
+}) {
+  return Math.max(
+    0,
+    Math.max(lastRequestedAt + ENVIRONMENT_REFRESH_INTERVAL_MS, nextAttemptAt) - now,
+  );
+}
+
+export function createEnvironmentRefreshScheduler({
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+} = {}) {
+  let timer = null;
+  return Object.freeze({
+    schedule({ eligible, projectId, lastRequestedAt, nextAttemptAt, now, refresh }) {
+      if (timer !== null) clearTimer(timer);
+      timer = null;
+      if (!eligible || projectId == null) return false;
+      const delayMs = environmentRefreshDelay({ lastRequestedAt, nextAttemptAt, now });
+      timer = setTimer(() => {
+        timer = null;
+        refresh(projectId);
+      }, delayMs);
+      return delayMs;
+    },
+    clear() {
+      if (timer !== null) clearTimer(timer);
+      timer = null;
+    },
+  });
+}
+
+const DURABLE_UNAVAILABLE_REASONS = new Set(["path_unavailable", "path_retargeted"]);
+
+export function resolveEnvironmentSnapshot(snapshot, previousSnapshot = null) {
+  const unavailableCode = snapshot?.kind === "unavailable"
+    ? snapshot.unavailableReason?.code
+    : null;
+  if (snapshot?.kind !== "unavailable" || DURABLE_UNAVAILABLE_REASONS.has(unavailableCode)) {
+    return {
+      status: "ready",
+      snapshot,
+      error: null,
+      retryable: false,
+    };
+  }
+  return {
+    status: "error",
+    snapshot: previousSnapshot ?? snapshot,
+    error: snapshot?.unavailableReason?.message || "Project context is temporarily unavailable.",
+    retryable: true,
+  };
 }
 
 export function environmentBackoffAfterFailure(failureCount, now) {

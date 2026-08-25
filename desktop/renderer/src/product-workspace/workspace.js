@@ -160,6 +160,10 @@ export function shouldFitInspectorDock(previousOverlay, nextOverlay, inspectorOp
   return false;
 }
 
+export function shouldRevealStackedInspector(viewportWidth, userInitiated = true) {
+  return userInitiated && viewportWidth > 0 && viewportWidth <= 1100;
+}
+
 export function shouldActivateGraphNodeAfterPointerGesture(moved) {
   return !moved;
 }
@@ -2045,6 +2049,9 @@ export function createProductWorkspace({
     });
     renderAnnotationList();
     renderBreadcrumb(state, getThread());
+    if (shouldRevealStackedInspector(viewportWidth, notify)) {
+      inspector.scrollIntoView({ block: "start" });
+    }
   }
 
   function dispose() {

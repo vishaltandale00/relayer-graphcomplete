@@ -1,7 +1,7 @@
 use command_group::{CommandGroup, GroupChild};
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::{OsStr, OsString},
     io::{self, Read},
     path::{Path, PathBuf},
@@ -27,6 +27,8 @@ const MAX_STDOUT_BYTES: usize = 256 * 1024;
 const MAX_STDERR_BYTES: usize = 32 * 1024;
 static ACTIVE_COMMANDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static STUCK_CLEANUPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(test)]
+static TEST_COMMAND_SERIALIZATION: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -278,24 +280,66 @@ fn inspection_timeout(label: String) -> EnvironmentSnapshot {
 }
 
 trait GitRunner {
+    fn protected_safe_directories(
+        &self,
+        _path: &Path,
+        _deadline: Instant,
+    ) -> Result<Vec<OsString>, GitRunError> {
+        Ok(Vec::new())
+    }
+
+    fn local_filter_drivers(
+        &self,
+        _repository: &Path,
+        _safe_directories: &[OsString],
+        _deadline: Instant,
+    ) -> Result<Vec<OsString>, GitRunError> {
+        Ok(Vec::new())
+    }
+
     fn run(
         &self,
         path: &Path,
         arguments: &[&str],
+        safety: &GitSafetyOverrides,
         timeout: Duration,
     ) -> Result<GitOutput, GitRunError>;
+}
+
+#[derive(Default)]
+struct GitSafetyOverrides {
+    safe_directories: Vec<OsString>,
+    disabled_filter_drivers: Vec<OsString>,
 }
 
 struct SystemGitRunner;
 
 impl GitRunner for SystemGitRunner {
+    fn protected_safe_directories(
+        &self,
+        path: &Path,
+        deadline: Instant,
+    ) -> Result<Vec<OsString>, GitRunError> {
+        read_protected_safe_directories(path, deadline)
+    }
+
     fn run(
         &self,
         path: &Path,
         arguments: &[&str],
+        safety: &GitSafetyOverrides,
         timeout: Duration,
     ) -> Result<GitOutput, GitRunError> {
-        run_bounded_command(OsStr::new("git"), path, arguments, timeout)
+        run_bounded_command_with_safety(OsStr::new("git"), path, arguments, safety, timeout, |_| {})
+    }
+
+    fn local_filter_drivers(
+        &self,
+        repository: &Path,
+        safe_directories: &[OsString],
+        deadline: Instant,
+    ) -> Result<Vec<OsString>, GitRunError> {
+        read_local_filter_drivers(repository, safe_directories, deadline)
     }
 }
 
@@ -345,11 +389,19 @@ fn inspect_with(
         return *snapshot;
     }
     let fallback_label = folder_label(path, project_name);
+    let mut safety = match git.protected_safe_directories(path, deadline) {
+        Ok(safe_directories) => GitSafetyOverrides {
+            safe_directories,
+            disabled_filter_drivers: Vec::new(),
+        },
+        Err(error) => return unavailable_from_error(fallback_label, error),
+    };
 
     let repository = match run_git(
         git,
         path,
         &["rev-parse", "--path-format=absolute", "--show-toplevel"],
+        &safety,
         deadline,
     ) {
         Ok(output) if output.status.success => match repository_path(&output.stdout) {
@@ -375,11 +427,17 @@ fn inspect_with(
         Err(error) => return unavailable_from_error(fallback_label, error),
     };
     let worktree_label = folder_label(&repository, project_name);
+    safety.disabled_filter_drivers =
+        match git.local_filter_drivers(&repository, &safety.safe_directories, deadline) {
+            Ok(drivers) => drivers,
+            Err(error) => return unavailable_from_error(worktree_label, error),
+        };
 
     let branch_output = match run_git(
         git,
         &repository,
         &["symbolic-ref", "--quiet", "--short", "HEAD"],
+        &safety,
         deadline,
     ) {
         Ok(output) => output,
@@ -401,6 +459,7 @@ fn inspect_with(
         git,
         &repository,
         &["rev-parse", "--verify", "HEAD"],
+        &safety,
         deadline,
     ) {
         Ok(output) => output,
@@ -413,6 +472,7 @@ fn inspect_with(
             git,
             &repository,
             &["hash-object", "-t", "tree", "--stdin"],
+            &safety,
             deadline,
         ) {
             Ok(output) if output.status.success => output,
@@ -428,17 +488,20 @@ fn inspect_with(
         trimmed(&empty_tree.stdout)
     };
 
-    let diff_output = match run_git(
+    let staged_output = match run_git(
         git,
         &repository,
         &[
             "diff",
-            "--shortstat",
+            "--numstat",
+            "-z",
             "--no-ext-diff",
             "--no-textconv",
+            "--cached",
             &baseline,
             "--",
         ],
+        &safety,
         deadline,
     ) {
         Ok(output) if output.status.success => output,
@@ -451,9 +514,32 @@ fn inspect_with(
         }
         Err(error) => return unavailable_from_error(worktree_label, error),
     };
-    let (tracked_files, additions, deletions) = match parse_shortstat(&trimmed(&diff_output.stdout))
-    {
-        Some(counts) => counts,
+    let worktree_output = match run_git(
+        git,
+        &repository,
+        &[
+            "diff",
+            "--numstat",
+            "-z",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--",
+        ],
+        &safety,
+        deadline,
+    ) {
+        Ok(output) if output.status.success => output,
+        Ok(output) => {
+            return EnvironmentSnapshot::unavailable(
+                worktree_label,
+                "git_failed",
+                git_failure_message(&output),
+            );
+        }
+        Err(error) => return unavailable_from_error(worktree_label, error),
+    };
+    let changes = match parse_numstat_changes(&[&staged_output.stdout, &worktree_output.stdout]) {
+        Some(changes) => changes,
         None => {
             return EnvironmentSnapshot::unavailable(
                 worktree_label,
@@ -467,6 +553,7 @@ fn inspect_with(
         git,
         &repository,
         &["ls-files", "--others", "--exclude-standard", "-z"],
+        &safety,
         deadline,
     ) {
         Ok(output) if output.status.success => output,
@@ -491,9 +578,9 @@ fn inspect_with(
         branch,
         detached,
         changes: EnvironmentChanges {
-            tracked_files,
-            additions,
-            deletions,
+            tracked_files: changes.tracked_files,
+            additions: changes.additions,
+            deletions: changes.deletions,
             untracked_files,
         },
         observed_at: observed_at(),
@@ -572,13 +659,14 @@ fn run_git(
     git: &impl GitRunner,
     path: &Path,
     arguments: &[&str],
+    safety: &GitSafetyOverrides,
     deadline: Instant,
 ) -> Result<GitOutput, GitRunError> {
     let remaining = deadline
         .checked_duration_since(Instant::now())
         .filter(|remaining| !remaining.is_zero())
         .ok_or(GitRunError::Timeout(SNAPSHOT_TIMEOUT))?;
-    git.run(path, arguments, remaining)
+    git.run(path, arguments, safety, remaining)
 }
 
 fn folder_label(path: &Path, fallback: &str) -> String {
@@ -620,24 +708,59 @@ fn git_failure_message(output: &GitOutput) -> String {
     }
 }
 
-fn parse_shortstat(summary: &str) -> Option<(u64, u64, u64)> {
-    if summary.is_empty() {
-        return Some((0, 0, 0));
-    }
-    let mut tracked_files = None;
-    let mut additions = 0;
-    let mut deletions = 0;
-    for part in summary.split(',').map(str::trim) {
-        let count = part.split_whitespace().next()?.parse::<u64>().ok()?;
-        if part.contains("file changed") || part.contains("files changed") {
-            tracked_files = Some(count);
-        } else if part.contains("insertion") {
-            additions = count;
-        } else if part.contains("deletion") {
-            deletions = count;
+fn parse_numstat_changes(outputs: &[&[u8]]) -> Option<EnvironmentChanges> {
+    let mut paths = HashSet::new();
+    let mut additions = 0_u64;
+    let mut deletions = 0_u64;
+    for output in outputs {
+        if output.is_empty() {
+            continue;
+        }
+        if !output.ends_with(&[0]) {
+            return None;
+        }
+        let mut records = output[..output.len() - 1].split(|byte| *byte == 0);
+        while let Some(record) = records.next() {
+            let mut fields = record.splitn(3, |byte| *byte == b'\t');
+            let inserted = parse_numstat_count(fields.next()?)?;
+            let deleted = parse_numstat_count(fields.next()?)?;
+            let inline_path = fields.next()?;
+            let path = if inline_path.is_empty() {
+                // With -z, rename/copy records put the old and new paths in the next two
+                // NUL-delimited fields. The destination is the changed path represented by
+                // this record; consuming both also keeps the parser synchronized.
+                let old_path = records.next()?;
+                let new_path = records.next()?;
+                if old_path.is_empty() || new_path.is_empty() {
+                    return None;
+                }
+                new_path
+            } else {
+                inline_path
+            };
+            if path.is_empty() {
+                return None;
+            }
+            additions = additions.checked_add(inserted)?;
+            deletions = deletions.checked_add(deleted)?;
+            paths.insert(path.to_vec());
         }
     }
-    Some((tracked_files?, additions, deletions))
+    Some(EnvironmentChanges {
+        tracked_files: paths.len().try_into().ok()?,
+        additions,
+        deletions,
+        untracked_files: 0,
+    })
+}
+
+fn parse_numstat_count(field: &[u8]) -> Option<u64> {
+    if field == b"-" {
+        // Git uses '-' for binary changes. They still count as a changed tracked file, but
+        // do not have a meaningful line count.
+        return Some(0);
+    }
+    std::str::from_utf8(field).ok()?.parse().ok()
 }
 
 fn observed_at() -> String {
@@ -646,6 +769,7 @@ fn observed_at() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into())
 }
 
+#[cfg(test)]
 fn run_bounded_command(
     executable: &OsStr,
     path: &Path,
@@ -655,6 +779,7 @@ fn run_bounded_command(
     run_bounded_command_with(executable, path, arguments, timeout, |_| {})
 }
 
+#[cfg(test)]
 fn run_bounded_command_with(
     executable: &OsStr,
     path: &Path,
@@ -662,12 +787,43 @@ fn run_bounded_command_with(
     timeout: Duration,
     configure: impl FnOnce(&mut Command),
 ) -> Result<GitOutput, GitRunError> {
+    run_bounded_command_with_safety(
+        executable,
+        path,
+        arguments,
+        &GitSafetyOverrides::default(),
+        timeout,
+        configure,
+    )
+}
+
+fn run_bounded_command_with_safety(
+    executable: &OsStr,
+    path: &Path,
+    arguments: &[&str],
+    safety: &GitSafetyOverrides,
+    timeout: Duration,
+    configure: impl FnOnce(&mut Command),
+) -> Result<GitOutput, GitRunError> {
     let mut command = Command::new(executable);
     configure(&mut command);
     sanitize_git_environment(&mut command);
+    isolate_git_configuration(&mut command);
+    command.env("GIT_OPTIONAL_LOCKS", "0").env("LC_ALL", "C");
+    for directory in &safety.safe_directories {
+        let mut setting = OsString::from("safe.directory=");
+        setting.push(directory);
+        command.arg("-c").arg(setting);
+    }
+    for driver in &safety.disabled_filter_drivers {
+        for (suffix, value) in [(".clean=", ""), (".process=", ""), (".required=", "false")] {
+            let mut setting = driver.clone();
+            setting.push(suffix);
+            setting.push(value);
+            command.arg("-c").arg(setting);
+        }
+    }
     command
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("LC_ALL", "C")
         .arg("-c")
         .arg("core.fsmonitor=false")
         .arg("-c")
@@ -679,10 +835,174 @@ fn run_bounded_command_with(
     run_prepared_command(command, timeout)
 }
 
+fn read_protected_safe_directories(
+    path: &Path,
+    deadline: Instant,
+) -> Result<Vec<OsString>, GitRunError> {
+    read_protected_safe_directories_with(path, deadline, |_| {})
+}
+
+fn read_protected_safe_directories_with(
+    path: &Path,
+    deadline: Instant,
+    mut configure: impl FnMut(&mut Command),
+) -> Result<Vec<OsString>, GitRunError> {
+    let mut directories = Vec::new();
+    for scope in ["--system", "--global"] {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(GitRunError::Timeout(SNAPSHOT_TIMEOUT))?;
+        let mut command = Command::new("git");
+        configure(&mut command);
+        sanitize_git_environment(&mut command);
+        command
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("LC_ALL", "C")
+            .current_dir(path)
+            .args([
+                "config",
+                scope,
+                "--includes",
+                "--null",
+                "--get-all",
+                "safe.directory",
+            ])
+            .stdin(Stdio::null());
+        let output = run_prepared_command(command, remaining)?;
+        if !output.status.success {
+            if output.status.code == Some(1) && output.stdout.is_empty() {
+                continue;
+            }
+            return Err(GitRunError::Output(io::Error::other(
+                "Git could not read protected safe.directory configuration",
+            )));
+        }
+        if !output.stdout.is_empty() && !output.stdout.ends_with(&[0]) {
+            return Err(GitRunError::Output(io::Error::other(
+                "Git returned malformed protected safe.directory configuration",
+            )));
+        }
+        if !output.stdout.is_empty() {
+            for value in output.stdout[..output.stdout.len() - 1].split(|byte| *byte == 0) {
+                directories.push(os_string_from_bytes(value)?);
+            }
+        }
+        let total_bytes = directories
+            .iter()
+            .try_fold(0_usize, |total, value| {
+                total.checked_add(value.as_os_str().as_encoded_bytes().len())
+            })
+            .ok_or(GitRunError::OutputTooLarge)?;
+        if total_bytes > MAX_STDOUT_BYTES {
+            return Err(GitRunError::OutputTooLarge);
+        }
+    }
+    Ok(directories)
+}
+
+fn read_local_filter_drivers(
+    repository: &Path,
+    safe_directories: &[OsString],
+    deadline: Instant,
+) -> Result<Vec<OsString>, GitRunError> {
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or(GitRunError::Timeout(SNAPSHOT_TIMEOUT))?;
+    let mut command = Command::new("git");
+    sanitize_git_environment(&mut command);
+    isolate_git_configuration(&mut command);
+    for directory in safe_directories {
+        let mut setting = OsString::from("safe.directory=");
+        setting.push(directory);
+        command.arg("-c").arg(setting);
+    }
+    command
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("LC_ALL", "C")
+        .current_dir(repository)
+        .args([
+            "config",
+            "--includes",
+            "--null",
+            "--name-only",
+            "--get-regexp",
+            "^filter\\.",
+        ])
+        .stdin(Stdio::null());
+    let output = run_prepared_command(command, remaining)?;
+    if !output.status.success {
+        if output.status.code == Some(1) && output.stdout.is_empty() {
+            return Ok(Vec::new());
+        }
+        return Err(GitRunError::Output(io::Error::other(
+            "Git could not enumerate repository filter configuration",
+        )));
+    }
+    parse_local_filter_drivers(&output.stdout).ok_or_else(|| {
+        GitRunError::Output(io::Error::other(
+            "Git returned malformed local filter configuration",
+        ))
+    })
+}
+
+fn parse_local_filter_drivers(output: &[u8]) -> Option<Vec<OsString>> {
+    if output.is_empty() {
+        return Some(Vec::new());
+    }
+    if !output.ends_with(&[0]) {
+        return None;
+    }
+    let mut seen = HashSet::new();
+    let mut drivers = Vec::new();
+    for key in output[..output.len() - 1].split(|byte| *byte == 0) {
+        let separator = key.iter().rposition(|byte| *byte == b'.')?;
+        let driver = &key[..separator];
+        let property = &key[separator + 1..];
+        if driver.len() <= b"filter.".len()
+            || !driver[..b"filter.".len()].eq_ignore_ascii_case(b"filter.")
+            || !(property.eq_ignore_ascii_case(b"clean")
+                || property.eq_ignore_ascii_case(b"process")
+                || property.eq_ignore_ascii_case(b"required"))
+        {
+            continue;
+        }
+        // Command-scope overrides use Git's `-c key=value` syntax, whose first '=' is the
+        // delimiter. A subsection containing '=' cannot be encoded without changing the
+        // key, so fail closed before any diff rather than claim that driver was neutralized.
+        if driver.contains(&b'=') {
+            return None;
+        }
+        if seen.insert(driver.to_vec()) {
+            drivers.push(os_string_from_bytes(driver).ok()?);
+        }
+    }
+    Some(drivers)
+}
+
+fn os_string_from_bytes(bytes: &[u8]) -> Result<OsString, GitRunError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        Ok(OsString::from_vec(bytes.to_vec()))
+    }
+    #[cfg(not(unix))]
+    {
+        String::from_utf8(bytes.to_vec())
+            .map(OsString::from)
+            .map_err(|_| GitRunError::Output(io::Error::other("Git returned non-UTF-8 config")))
+    }
+}
+
 #[cfg(unix)]
 fn run_prepared_command(mut command: Command, timeout: Duration) -> Result<GitOutput, GitRunError> {
     use std::os::fd::AsRawFd;
 
+    #[cfg(test)]
+    let _test_serialization = TEST_COMMAND_SERIALIZATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let slot = CommandSlot::acquire()?;
     let child = command
         .stdout(Stdio::piped())
@@ -729,6 +1049,10 @@ fn run_prepared_command(mut command: Command, timeout: Duration) -> Result<GitOu
 
 #[cfg(not(unix))]
 fn run_prepared_command(mut command: Command, timeout: Duration) -> Result<GitOutput, GitRunError> {
+    #[cfg(test)]
+    let _test_serialization = TEST_COMMAND_SERIALIZATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut stdout_file = tempfile::tempfile().map_err(GitRunError::Output)?;
     let mut stderr_file = tempfile::tempfile().map_err(GitRunError::Output)?;
     let slot = CommandSlot::acquire()?;
@@ -882,7 +1206,10 @@ fn sanitize_git_environment(command: &mut Command) {
         "GIT_DISCOVERY_ACROSS_FILESYSTEM",
         "GIT_CONFIG",
         "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_NOSYSTEM",
         "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_SYSTEM",
         "GIT_EXEC_PATH",
         "GIT_TEMPLATE_DIR",
         "GIT_TRACE",
@@ -905,12 +1232,15 @@ fn sanitize_git_environment(command: &mut Command) {
     ] {
         command.env_remove(variable);
     }
+    command.env("GIT_ATTR_NOSYSTEM", "1");
+}
+
+fn isolate_git_configuration(command: &mut Command) {
     let null_config = if cfg!(windows) { "NUL" } else { "/dev/null" };
     command
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_SYSTEM", null_config)
-        .env("GIT_CONFIG_GLOBAL", null_config)
-        .env("GIT_ATTR_NOSYSTEM", "1");
+        .env("GIT_CONFIG_GLOBAL", null_config);
 }
 
 struct CommandSlot;
@@ -1209,6 +1539,7 @@ mod tests {
             &self,
             _path: &Path,
             _arguments: &[&str],
+            _safety: &GitSafetyOverrides,
             _timeout: Duration,
         ) -> Result<GitOutput, GitRunError> {
             self.0.lock().unwrap().pop_front().expect("fake output")
@@ -1230,6 +1561,65 @@ mod tests {
         std::fs::canonicalize(directory.path()).unwrap()
     }
 
+    fn run_bounded_git_test(
+        path: &Path,
+        arguments: &[&str],
+        safety: &GitSafetyOverrides,
+        mut configure: impl FnMut(&mut Command),
+    ) -> Result<GitOutput, GitRunError> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match run_bounded_command_with_safety(
+                OsStr::new("git"),
+                path,
+                arguments,
+                safety,
+                SNAPSHOT_TIMEOUT,
+                |command| configure(command),
+            ) {
+                Err(GitRunError::CleanupBusy { .. }) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                result => return result,
+            }
+        }
+    }
+
+    fn read_protected_safe_directories_test(
+        path: &Path,
+        mut configure: impl FnMut(&mut Command),
+    ) -> Result<Vec<OsString>, GitRunError> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match read_protected_safe_directories_with(
+                path,
+                Instant::now() + SNAPSHOT_TIMEOUT,
+                |command| configure(command),
+            ) {
+                Err(GitRunError::CleanupBusy { .. } | GitRunError::Timeout(_))
+                    if Instant::now() < deadline =>
+                {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                result => return result,
+            }
+        }
+    }
+
+    fn read_local_filter_drivers_test(repository: &Path) -> Result<Vec<OsString>, GitRunError> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match read_local_filter_drivers(repository, &[], Instant::now() + SNAPSHOT_TIMEOUT) {
+                Err(GitRunError::CleanupBusy { .. } | GitRunError::Timeout(_))
+                    if Instant::now() < deadline =>
+                {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                result => return result,
+            }
+        }
+    }
+
     #[test]
     fn parses_git_snapshot_and_keeps_untracked_separate() {
         let directory = tempfile::tempdir().unwrap();
@@ -1238,11 +1628,8 @@ mod tests {
             output(0, path.to_str().unwrap(), ""),
             output(0, "codex/environment-panel\n", ""),
             output(0, "abc123\n", ""),
-            output(
-                0,
-                " 3 files changed, 18 insertions(+), 4 deletions(-)\n",
-                "",
-            ),
+            output(0, "10\t3\tfirst.rs\u{0}6\t0\tsecond.rs\u{0}", ""),
+            output(0, "2\t1\tfirst.rs\u{0}0\t0\tthird.rs\u{0}", ""),
             output(0, "first.txt\0folder/second.txt\0", ""),
         ]);
         let snapshot = inspect_with(&path, "project", &git, Instant::now() + SNAPSHOT_TIMEOUT);
@@ -1263,6 +1650,7 @@ mod tests {
             output(0, path.to_str().unwrap(), ""),
             output(1, "", ""),
             output(0, "abc123\n", ""),
+            output(0, "", ""),
             output(0, "", ""),
             output(0, "", ""),
         ]);
@@ -1336,6 +1724,7 @@ mod tests {
             output(0, "main", ""),
             output(0, "abc123", ""),
             output(0, "unexpected", ""),
+            output(0, "", ""),
         ]);
         let snapshot = inspect_with(&path, "project", &git, Instant::now() + SNAPSHOT_TIMEOUT);
         assert_eq!(snapshot.kind, EnvironmentKind::Unavailable);
@@ -1354,8 +1743,9 @@ mod tests {
             output(0, "main", ""),
             output(128, "", "fatal: Needed a single revision"),
             output(0, "empty-tree-id", ""),
-            output(0, " 1 file changed, 2 insertions(+)", ""),
-            output(0, "new.txt\0", ""),
+            output(0, "2\t0\tnew.txt\0", ""),
+            output(0, "", ""),
+            output(0, "other.txt\0", ""),
         ]);
         let snapshot = inspect_with(&path, "project", &git, Instant::now() + SNAPSHOT_TIMEOUT);
         assert_eq!(snapshot.kind, EnvironmentKind::Git);
@@ -1363,6 +1753,106 @@ mod tests {
         assert_eq!(snapshot.changes.tracked_files, 1);
         assert_eq!(snapshot.changes.additions, 2);
         assert_eq!(snapshot.changes.untracked_files, 1);
+    }
+
+    #[test]
+    fn staged_and_worktree_reversals_do_not_cancel_change_counts() {
+        let changes = parse_numstat_changes(&[
+            b"1\t1\tsame.txt\0".as_slice(),
+            b"1\t1\tsame.txt\0".as_slice(),
+        ])
+        .unwrap();
+        assert_eq!(changes.tracked_files, 1);
+        assert_eq!(changes.additions, 2);
+        assert_eq!(changes.deletions, 2);
+    }
+
+    #[test]
+    fn real_git_snapshot_keeps_staged_change_and_worktree_reversal() {
+        struct DirectGitRunner;
+
+        impl GitRunner for DirectGitRunner {
+            fn run(
+                &self,
+                path: &Path,
+                arguments: &[&str],
+                _safety: &GitSafetyOverrides,
+                _timeout: Duration,
+            ) -> Result<GitOutput, GitRunError> {
+                let output = Command::new("git")
+                    .arg("-C")
+                    .arg(path)
+                    .args(arguments)
+                    .output()
+                    .map_err(GitRunError::Start)?;
+                Ok(GitOutput {
+                    status: output.status.into(),
+                    stdout: output.stdout,
+                    stderr: output.stderr,
+                })
+            }
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = canonical_temp(&directory);
+        let run = |arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&path)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&["init", "--initial-branch=main"]);
+        run(&["config", "user.email", "relayer-test@example.invalid"]);
+        run(&["config", "user.name", "Relayer test"]);
+        std::fs::write(path.join("same.txt"), "original\n").unwrap();
+        run(&["add", "same.txt"]);
+        run(&["commit", "-m", "baseline"]);
+        std::fs::write(path.join("same.txt"), "staged\n").unwrap();
+        run(&["add", "same.txt"]);
+        std::fs::write(path.join("same.txt"), "original\n").unwrap();
+
+        let snapshot = inspect_with(
+            &path,
+            "project",
+            &DirectGitRunner,
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        );
+        assert_eq!(snapshot.kind, EnvironmentKind::Git);
+        assert_eq!(snapshot.changes.tracked_files, 1);
+        assert_eq!(snapshot.changes.additions, 2);
+        assert_eq!(snapshot.changes.deletions, 2);
+    }
+
+    #[test]
+    fn numstat_parser_handles_binary_and_rename_records() {
+        let changes = parse_numstat_changes(&[
+            b"-\t-\tbinary.dat\x000\t0\t\x00old name\x00new name\x00".as_slice(),
+        ])
+        .unwrap();
+        assert_eq!(changes.tracked_files, 2);
+        assert_eq!(changes.additions, 0);
+        assert_eq!(changes.deletions, 0);
+    }
+
+    #[test]
+    fn local_filter_parser_deduplicates_clean_process_and_required_keys() {
+        let drivers = parse_local_filter_drivers(
+            b"filter.attack.clean\0filter.attack.process\0filter.attack.required\0filter.other.process\0filter.smudge-only.smudge\0",
+        )
+        .unwrap();
+        assert_eq!(
+            drivers,
+            [
+                OsString::from("filter.attack"),
+                OsString::from("filter.other")
+            ]
+        );
+        assert!(parse_local_filter_drivers(b"filter.evil=x.clean\0").is_none());
     }
 
     #[test]
@@ -1377,6 +1867,7 @@ mod tests {
                 &self,
                 path: &Path,
                 _arguments: &[&str],
+                _safety: &GitSafetyOverrides,
                 timeout: Duration,
             ) -> Result<GitOutput, GitRunError> {
                 self.timeouts.lock().unwrap().push(timeout);
@@ -1814,6 +2305,349 @@ mod tests {
         assert!(git_output.status.success);
         assert!(!trace.exists());
         assert!(!trace2.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn repository_commands_forward_only_protected_safe_directories() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        fs::create_dir(&home).unwrap();
+        let repository = directory.path().join("repository");
+        fs::create_dir(&repository).unwrap();
+        let run = |arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repository)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&["init", "--initial-branch=main"]);
+        run(&["config", "user.email", "relayer-test@example.invalid"]);
+        run(&["config", "user.name", "Relayer test"]);
+        fs::write(repository.join(".gitattributes"), "*.txt filter=attack\n").unwrap();
+        fs::write(repository.join("tracked.txt"), "baseline\n").unwrap();
+        run(&["add", ".gitattributes", "tracked.txt"]);
+        run(&["commit", "-m", "baseline"]);
+
+        let marker = directory.path().join("global-filter-executed");
+        let filter = directory.path().join("global-clean-filter");
+        fs::write(
+            &filter,
+            format!("#!/bin/sh\ntouch '{}'\ncat\n", marker.display()),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&filter).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&filter, permissions).unwrap();
+        let included = home.join("safe-directory.inc");
+        fs::write(
+            &included,
+            format!(
+                "[safe]\n\tdirectory =\n\tdirectory = {}\n",
+                repository.display()
+            ),
+        )
+        .unwrap();
+        fs::write(
+            home.join(".gitconfig"),
+            format!(
+                "[include]\n\tpath = {}\n[filter \"attack\"]\n\tclean = {}\n",
+                included.display(),
+                filter.display()
+            ),
+        )
+        .unwrap();
+        let injected = directory.path().join("injected.gitconfig");
+        fs::write(
+            &injected,
+            "[safe]\n\tdirectory = /environment/injected/repository\n",
+        )
+        .unwrap();
+
+        let safe_directories = read_protected_safe_directories_test(&repository, |command| {
+            command
+                .env("HOME", &home)
+                .env("GIT_CONFIG_GLOBAL", &injected);
+        })
+        .unwrap();
+        assert_eq!(
+            safe_directories,
+            [OsString::new(), repository.as_os_str().to_owned()]
+        );
+        assert!(
+            !marker.exists(),
+            "protected-config discovery executed an unrelated global helper"
+        );
+        let safety = GitSafetyOverrides {
+            safe_directories,
+            disabled_filter_drivers: Vec::new(),
+        };
+
+        fs::write(repository.join("tracked.txt"), "changed\n").unwrap();
+        let unisolated = Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args([
+                "diff",
+                "--numstat",
+                "-z",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--",
+            ])
+            .env("HOME", &home)
+            .env_remove("GIT_CONFIG_GLOBAL")
+            .env_remove("GIT_CONFIG_NOSYSTEM")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(unisolated.success());
+        assert!(
+            marker.exists(),
+            "regression fixture did not reproduce the global clean-filter execution"
+        );
+        fs::remove_file(&marker).unwrap();
+
+        let output = run_bounded_git_test(
+            &repository,
+            &[
+                "diff",
+                "--numstat",
+                "-z",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--",
+            ],
+            &safety,
+            |command| {
+                command
+                    .env("HOME", &home)
+                    .env("GIT_CONFIG_GLOBAL", &injected);
+            },
+        )
+        .unwrap();
+        assert!(output.status.success);
+        assert!(!output.stdout.is_empty());
+        assert!(
+            !marker.exists(),
+            "repository diff executed a globally configured clean filter"
+        );
+
+        let forwarded = run_bounded_git_test(
+            &repository,
+            &["config", "--null", "--get-all", "safe.directory"],
+            &safety,
+            |command| {
+                command.env("HOME", &home);
+            },
+        )
+        .unwrap();
+        assert!(forwarded.status.success);
+        assert_eq!(
+            forwarded.stdout,
+            [
+                b"\0".as_slice(),
+                repository.as_os_str().as_encoded_bytes(),
+                b"\0"
+            ]
+            .concat()
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn repository_commands_neutralize_local_clean_filter_commands() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("repository");
+        fs::create_dir(&repository).unwrap();
+        let run = |arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repository)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&["init", "--initial-branch=main"]);
+        run(&["config", "user.email", "relayer-test@example.invalid"]);
+        run(&["config", "user.name", "Relayer test"]);
+        fs::write(
+            repository.join(".gitattributes"),
+            "*.txt filter=localattack\n",
+        )
+        .unwrap();
+        fs::write(repository.join("tracked.txt"), "baseline\n").unwrap();
+        run(&["add", ".gitattributes", "tracked.txt"]);
+        run(&["commit", "-m", "baseline"]);
+
+        let marker = directory.path().join("local-filter-executed");
+        let filter = directory.path().join("local-clean-filter");
+        fs::write(
+            &filter,
+            format!("#!/bin/sh\ntouch '{}'\ncat\n", marker.display()),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&filter).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&filter, permissions).unwrap();
+        run(&[
+            "config",
+            "filter.localattack.clean",
+            filter.to_str().unwrap(),
+        ]);
+        run(&["config", "filter.localattack.required", "true"]);
+        fs::write(repository.join("tracked.txt"), "changed\n").unwrap();
+
+        let arguments = [
+            "diff",
+            "--numstat",
+            "-z",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--",
+        ];
+        let unguarded = Command::new("git")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .arg("-c")
+            .arg("core.fsmonitor=false")
+            .arg("-c")
+            .arg("core.untrackedCache=false")
+            .arg("-C")
+            .arg(&repository)
+            .args(arguments)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(unguarded.success());
+        assert!(
+            marker.exists(),
+            "regression fixture did not reproduce local clean-filter execution"
+        );
+        fs::remove_file(&marker).unwrap();
+
+        let disabled_filter_drivers = read_local_filter_drivers_test(&repository).unwrap();
+        assert_eq!(
+            disabled_filter_drivers,
+            [OsString::from("filter.localattack")]
+        );
+        assert!(
+            !marker.exists(),
+            "repository filter enumeration executed the configured helper"
+        );
+        let guarded = run_bounded_git_test(
+            &repository,
+            &arguments,
+            &GitSafetyOverrides {
+                safe_directories: Vec::new(),
+                disabled_filter_drivers,
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert!(guarded.status.success, "{}", trimmed(&guarded.stderr));
+        assert!(!guarded.stdout.is_empty());
+        assert!(
+            !marker.exists(),
+            "repository diff executed a locally configured clean filter"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn unrepresentable_local_filter_driver_fails_closed_before_diff() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let repository = canonical_temp(&directory);
+        let run = |arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repository)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&["init", "--initial-branch=main"]);
+        run(&["config", "user.email", "relayer-test@example.invalid"]);
+        run(&["config", "user.name", "Relayer test"]);
+        fs::write(repository.join(".gitattributes"), "*.txt filter=evil=x\n").unwrap();
+        fs::write(repository.join("tracked.txt"), "baseline\n").unwrap();
+        run(&["add", ".gitattributes", "tracked.txt"]);
+        run(&["commit", "-m", "baseline"]);
+
+        let marker = repository.join("equals-filter-executed");
+        let filter = repository.join("equals-clean-filter");
+        fs::write(
+            &filter,
+            format!("#!/bin/sh\ntouch '{}'\ncat\n", marker.display()),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&filter).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&filter, permissions).unwrap();
+        run(&["config", "filter.evil=x.clean", filter.to_str().unwrap()]);
+        run(&["config", "filter.evil=x.required", "true"]);
+        fs::write(repository.join("tracked.txt"), "changed\n").unwrap();
+
+        let unguarded = Command::new("git")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .arg("-C")
+            .arg(&repository)
+            .args([
+                "diff",
+                "--numstat",
+                "-z",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(unguarded.success());
+        assert!(
+            marker.exists(),
+            "regression fixture did not execute the equals-sign filter driver"
+        );
+        fs::remove_file(&marker).unwrap();
+
+        let snapshot = inspect_with(
+            &repository,
+            "project",
+            &SystemGitRunner,
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        );
+        assert_eq!(snapshot.kind, EnvironmentKind::Unavailable);
+        assert_eq!(
+            snapshot.unavailable_reason.unwrap().code,
+            "git_output_failed"
+        );
+        assert!(
+            !marker.exists(),
+            "inspection reached diff after an unrepresentable filter driver"
+        );
     }
 
     #[test]
