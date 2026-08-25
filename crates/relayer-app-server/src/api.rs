@@ -6,7 +6,6 @@ mod state;
 mod threads;
 mod types;
 
-use crate::provider_catalog_refresh::ProviderCatalogRefreshClient;
 use crate::runtime::RuntimeClient;
 use crate::{permissions::PermissionCatalog, product::ProductService};
 use auth::DesktopSessionAuthenticator;
@@ -24,7 +23,6 @@ pub(crate) struct ApiState {
     pub(crate) permission_catalog: PermissionCatalog,
     pub(crate) default_harness_configuration: String,
     pub(crate) allow_harness_override: bool,
-    pub(crate) provider_catalog_refresh: Option<ProviderCatalogRefreshClient>,
     pub(crate) standalone_workspaces_directory: PathBuf,
 }
 
@@ -33,7 +31,6 @@ pub(crate) struct ApiRuntime {
     pub(crate) permission_catalog: PermissionCatalog,
     pub(crate) default_harness_configuration: String,
     pub(crate) allow_harness_override: bool,
-    pub(crate) provider_catalog_refresh: Option<ProviderCatalogRefreshClient>,
     pub(crate) standalone_workspaces_directory: PathBuf,
 }
 
@@ -51,7 +48,6 @@ pub(crate) fn router(
         permission_catalog: runtime.permission_catalog,
         default_harness_configuration: runtime.default_harness_configuration,
         allow_harness_override: runtime.allow_harness_override,
-        provider_catalog_refresh: runtime.provider_catalog_refresh,
         standalone_workspaces_directory: runtime.standalone_workspaces_directory,
     };
     Router::new()
@@ -84,8 +80,21 @@ pub(crate) fn router(
             get(model_settings::default_selection),
         )
         .route(
+            "/api/harness-configurations/{id}/model-rules",
+            axum::routing::put(model_settings::update_harness_model_rules),
+        )
+        .route(
             "/api/internal/provider-catalog",
             axum::routing::put(model_settings::publish_provider_catalog),
+        )
+        .route(
+            "/api/internal/provider-definitions",
+            get(model_settings::provider_definitions)
+                .put(model_settings::sync_provider_definitions),
+        )
+        .route(
+            "/api/internal/provider-definitions/staged",
+            axum::routing::post(model_settings::create_provider_with_catalog),
         )
         .route("/api/state", get(state::product_state))
         .route("/api/projects", get(projects::list).post(projects::create))
@@ -94,6 +103,10 @@ pub(crate) fn router(
         .route(
             "/api/threads/{id}/interactions",
             get(threads::list_interactions).post(threads::create_interaction),
+        )
+        .route(
+            "/api/threads/{thread_id}/interactions/{interaction_id}/retry",
+            axum::routing::post(threads::retry_interaction),
         )
         .route(
             "/api/threads/{thread_id}/interactions/{interaction_id}/layers/{layer_id}",

@@ -75,6 +75,7 @@ describe("product workspace keyboard behavior", () => {
     expect(composerSubmissionReady("  \n ")).toBe(false);
     expect(composerSubmissionReady("Ask a follow-up", true)).toBe(false);
     expect(composerDisabledForState("running")).toBe(true);
+    expect(composerDisabledForState("not_started", true, true)).toBe(false);
     expect(composerDisabledForState("accepted")).toBe(false);
     expect(composerDisabledForState("accepted", false)).toBe(true);
   });

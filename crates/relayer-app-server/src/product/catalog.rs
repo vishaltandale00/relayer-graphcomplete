@@ -67,6 +67,10 @@ pub(crate) struct ProductHarness {
     pub(crate) unavailable_reason: Option<UnavailableReason>,
     pub(crate) compatible_provider_ids: Vec<ProviderId>,
     pub(crate) model_compatibility: Vec<HarnessModelCompatibility>,
+    pub(crate) configuration_revision: u32,
+    pub(crate) model_rules: Option<HarnessModelRules>,
+    pub(crate) execution_access_contracts: Vec<String>,
+    pub(crate) family_policy: Option<FamilyPolicyReference>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,7 +86,109 @@ pub(crate) struct HarnessModelCompatibility {
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeProductHarness {
     pub(crate) id: String,
+    pub(crate) configuration_digest: String,
     pub(crate) model_compatibility: Vec<HarnessModelCompatibility>,
+    pub(crate) configuration_revision: u32,
+    pub(crate) model_rules: Option<HarnessModelRules>,
+    pub(crate) execution_access_contracts: Vec<String>,
+    pub(crate) family_policy: Option<FamilyPolicyReference>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExecutionHarnessPolicy {
+    pub(crate) configuration_revision: u32,
+    pub(crate) configuration_digest: String,
+    pub(crate) model_rules: Option<HarnessModelRules>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HarnessModelRule {
+    pub(crate) adapter_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) model_id_exact: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) model_id_regex: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HarnessModelRules {
+    #[serde(default)]
+    pub(crate) allow: Vec<HarnessModelRule>,
+    #[serde(default)]
+    pub(crate) deny: Vec<HarnessModelRule>,
+}
+
+#[derive(Debug)]
+pub(crate) struct UpdateHarnessModelRulesCommand {
+    pub(crate) harness_id: String,
+    pub(crate) expected_revision: u32,
+    pub(crate) rules: HarnessModelRules,
+}
+
+pub(crate) fn validate_harness_model_rules(rules: &HarnessModelRules) -> Result<(), CatalogError> {
+    if rules.allow.len() + rules.deny.len() > 100 {
+        return Err(CatalogError::invalid(
+            "harness_model_rules_too_large",
+            "A harness configuration cannot contain more than 100 model rules.",
+        ));
+    }
+    let mut unique = HashSet::new();
+    for (effect, entries) in [("allow", &rules.allow), ("deny", &rules.deny)] {
+        for rule in entries {
+            validate_stable_id(&rule.adapter_id, "adapterId")?;
+            let (kind, pattern) = match (&rule.model_id_exact, &rule.model_id_regex) {
+                (Some(exact), None) => {
+                    validate_stable_id(exact, "modelIdExact")?;
+                    ("exact", exact.as_str())
+                }
+                (None, Some(pattern)) if !pattern.is_empty() && pattern.len() <= 500 => {
+                    if pattern.contains("(?")
+                        || [
+                            "\\1", "\\2", "\\3", "\\4", "\\5", "\\6", "\\7", "\\8", "\\9", "\\k",
+                            "\\A", "\\z", "\\Z", "\\G",
+                        ]
+                        .iter()
+                        .any(|unsupported| pattern.contains(unsupported))
+                    {
+                        return Err(CatalogError::invalid(
+                            "harness_model_regex_invalid",
+                            "A model regex uses syntax outside the supported cross-runtime subset.",
+                        ));
+                    }
+                    regex::Regex::new(pattern).map_err(|error| {
+                        CatalogError::invalid(
+                            "harness_model_regex_invalid",
+                            format!("Invalid model regex: {error}"),
+                        )
+                    })?;
+                    ("regex", pattern.as_str())
+                }
+                _ => {
+                    return Err(CatalogError::invalid(
+                        "harness_model_rule_invalid",
+                        "Each model rule requires exactly one exact or regex matcher.",
+                    ));
+                }
+            };
+            if !unique.insert((effect, rule.adapter_id.as_str(), kind, pattern)) {
+                return Err(CatalogError::invalid(
+                    "harness_model_rule_duplicate",
+                    "A harness configuration cannot contain duplicate model rules.",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FamilyPolicyReference {
+    pub(crate) id: String,
+    pub(crate) version: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -132,6 +238,19 @@ pub(crate) struct ProviderCatalogSnapshot {
     pub(crate) system_family: Option<SystemFamilySnapshot>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderDefinition {
+    pub(crate) id: ProviderId,
+    pub(crate) adapter_id: String,
+    pub(crate) label: String,
+    pub(crate) endpoint: Option<String>,
+    pub(crate) access_contract: String,
+    pub(crate) credential_reference: Option<String>,
+    pub(crate) lifecycle_state: String,
+    pub(crate) removed_at: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Provider {
@@ -176,6 +295,8 @@ pub(crate) struct ModelFamily {
     pub(crate) id: ModelFamilyId,
     pub(crate) name: String,
     pub(crate) kind: ModelFamilyKind,
+    pub(crate) revision: u32,
+    pub(crate) managed_policy: Option<ManagedFamilyPolicy>,
     pub(crate) enabled: bool,
     pub(crate) position: usize,
     pub(crate) members: Vec<ModelFamilyMember>,
@@ -183,9 +304,18 @@ pub(crate) struct ModelFamily {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ManagedFamilyPolicy {
+    pub(crate) provider_id: ProviderId,
+    pub(crate) policy_id: String,
+    pub(crate) policy_version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ModelSettingsDefaults {
     pub(crate) harness_id: String,
     pub(crate) provider_id: ProviderId,
+    pub(crate) family_id: Option<ModelFamilyId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -214,6 +344,15 @@ pub(crate) struct InteractionModelSelection {
     pub(crate) model_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExecutionModelSelection {
+    pub(crate) family_id: ModelFamilyId,
+    pub(crate) provider_id: ProviderId,
+    pub(crate) adapter_id: String,
+    pub(crate) access_contract: String,
+    pub(crate) model_id: String,
+}
+
 impl From<ModelSelection> for InteractionModelSelection {
     fn from(selection: ModelSelection) -> Self {
         Self {
@@ -228,6 +367,7 @@ impl From<ModelSelection> for InteractionModelSelection {
 pub(crate) struct UpdateModelSettingsDefaultsCommand {
     pub(crate) harness_id: Option<String>,
     pub(crate) provider_id: Option<ProviderId>,
+    pub(crate) family_id: Option<ModelFamilyId>,
 }
 
 #[derive(Debug)]
@@ -428,6 +568,41 @@ mod tests {
             .unwrap_err()
             .code(),
             "model_family_too_large"
+        );
+    }
+
+    #[test]
+    fn harness_rule_validation_rejects_invalid_regex_and_duplicate_entries() {
+        let valid = HarnessModelRule {
+            adapter_id: "openai-api".into(),
+            model_id_exact: None,
+            model_id_regex: Some("^gpt-[0-9]+$".into()),
+        };
+        validate_harness_model_rules(&HarnessModelRules {
+            allow: vec![valid.clone()],
+            deny: Vec::new(),
+        })
+        .unwrap();
+        assert_eq!(
+            validate_harness_model_rules(&HarnessModelRules {
+                allow: vec![HarnessModelRule {
+                    model_id_regex: Some("(".into()),
+                    ..valid.clone()
+                }],
+                deny: Vec::new(),
+            })
+            .unwrap_err()
+            .code(),
+            "harness_model_regex_invalid"
+        );
+        assert_eq!(
+            validate_harness_model_rules(&HarnessModelRules {
+                allow: vec![valid.clone(), valid],
+                deny: Vec::new(),
+            })
+            .unwrap_err()
+            .code(),
+            "harness_model_rule_duplicate"
         );
     }
 }

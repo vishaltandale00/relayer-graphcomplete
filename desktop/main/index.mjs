@@ -1,15 +1,20 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import { readFileSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 
-import { CodexCredentialAdapter } from "./credentials/codex-credential-adapter.mjs";
-import { CodexModelCatalogAdapter } from "./models/codex-model-catalog-adapter.mjs";
-import { startModelCatalogRefreshServer } from "./models/model-catalog-refresh-server.mjs";
-import { ModelCatalogService } from "./models/model-catalog-service.mjs";
+import {
+  productionProviderAdapterRegistry,
+  productionProviderRuntimeDependencies,
+} from "./providers/provider-adapter-registry.mjs";
+import { createProviderComposition } from "./providers/provider-composition.mjs";
+import { createProviderDiagnosticsLog } from "./providers/provider-diagnostics-log.mjs";
+import { createProviderRuntimeStateRemover } from "./providers/provider-runtime-state.mjs";
+import {
+  createEncryptedCredentialStore,
+} from "./providers/provider-definition-store.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
@@ -38,7 +43,7 @@ const releaseArtifact = packagedRelease !== null;
 app.setName(metadata.relayerProductName || "Relayer Dev");
 
 const userDataPath = app.getPath("userData");
-const codexHome = process.env.RELAYER_CODEX_HOME || join(userDataPath, "codex-home");
+const providerRuntimeRoot = join(userDataPath, "provider-runtimes");
 const updateBaseUrl = packagedRelease?.updateBaseUrl || (
   app.isPackaged ? null : process.env.RELAYER_DESKTOP_UPDATE_BASE_URL || DESKTOP_UPDATE_BASE_URL
 );
@@ -76,7 +81,6 @@ const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => main
 if (primaryInstance) {
   let appearance = "dark";
   const settings = createSettingsStore(userDataPath);
-  process.env.CODEX_HOME = codexHome;
   const graphRuntime = new GraphCompleteRuntimeService({
     userDataDirectory: userDataPath,
     graphServerBinary: relayerGraphServerBinary,
@@ -84,9 +88,14 @@ if (primaryInstance) {
       defaultHarnessConfiguration,
       "codex-basic",
       "codex-basic-high",
+      "claude-basic",
     ])].map((name) => join(harnessDirectory, `${name}.yaml`)),
     codexBasicClientModuleUrl: graphClientModuleUrl,
     codexPathOverride: bundledCodexBinary,
+    acquireProviderExecution: (providerId) => {
+      if (!providerSetup) throw new Error("Provider execution broker is not ready.");
+      return providerSetup.acquireExecution(providerId);
+    },
     onUnexpectedStop: () => {
       dialog.showErrorBox(
         "Relayer graph service stopped",
@@ -97,25 +106,15 @@ if (primaryInstance) {
   });
   let productServer;
   let modelCatalog;
-  let modelCatalogRefreshServer;
-
-  const credentials = new CodexCredentialAdapter({
-    environment: { ...process.env, CODEX_HOME: codexHome, RELAYER_CODEX_BINARY: bundledCodexBinary },
-    onAccountChanged: (event) => {
-      void (async () => {
-        await modelCatalog?.providerChanged("codex");
-        const account = event?.status === "unavailable" ? event : await credentials.account();
-        mainWindow?.webContents.send("relayer:account-changed", account);
-      })().catch((error) => {
-        console.error("Codex model catalog refresh failed:", error);
-        mainWindow?.webContents.send("relayer:account-changed", { status: "unavailable", error: error.message });
-      });
-    },
-  });
+  let providerSetup;
+  let providerComposition;
 
   const canaryEvidenceLog = createCanaryEvidenceLog({
     appIsPackaged: app.isPackaged,
     releaseMetadata: packagedRelease,
+  });
+  const providerDiagnostics = createProviderDiagnosticsLog({
+    path: join(userDataPath, "logs", "providers.jsonl"),
   });
 
   const updater = createDesktopUpdater({
@@ -150,13 +149,8 @@ if (primaryInstance) {
       } catch (error) {
         results.push({ status: "rejected", reason: error });
       }
-      try {
-        await modelCatalogRefreshServer?.close();
-      } catch (error) {
-        results.push({ status: "rejected", reason: error });
-      }
       results.push(...await Promise.allSettled([
-        credentials.close(),
+        providerComposition?.close(),
         graphRuntime.close(),
       ]));
       const failures = results.filter((result) => result.status === "rejected");
@@ -168,30 +162,18 @@ if (primaryInstance) {
   }
 
   app.whenReady().then(async () => {
-    await mkdir(codexHome, { recursive: true });
     const saved = await settings.read();
     appearance = saved.appearance === "light" ? "light" : "dark";
     nativeTheme.themeSource = appearance;
     const channel = resolveUpdateChannel(saved.updateChannel);
     if (channel === "preview") updater.setChannel("preview");
     const runtimeSession = await graphRuntime.start();
-    modelCatalog = new ModelCatalogService({
-      adapters: [new CodexModelCatalogAdapter({ credentials })],
-      publishSnapshot: (snapshot, { signal } = {}) => {
-        if (!productServer) throw new Error("Relayer app server is not ready to accept a provider catalog.");
-        return productServer.publishProviderCatalog(snapshot, { signal });
-      },
-    });
-    modelCatalogRefreshServer = await startModelCatalogRefreshServer({
-      refresh: ({ signal, providerId }) => modelCatalog.beforeInference({ signal, providerId }),
-    });
     productServer = new RelayerAppServerService({
       userDataDirectory: userDataPath,
       binaryPath: relayerAppServerBinary,
       webDirectory: rendererDirectory,
       permissionCatalogPath,
       runtimeSession,
-      providerCatalogRefreshSession: modelCatalogRefreshServer.session,
       defaultHarnessConfiguration,
       allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-"),
       onUnexpectedStop: () => {
@@ -203,15 +185,42 @@ if (primaryInstance) {
       },
     });
     const productSession = await productServer.start();
-    await modelCatalog.startup();
+    const publishCatalog = (snapshot, { signal } = {}) => (
+      productServer.publishProviderCatalog(snapshot, { signal })
+    );
+    providerComposition = createProviderComposition({
+      registry: productionProviderAdapterRegistry,
+      definitionStore: productServer.providerDefinitionStore(),
+      credentialStore: createEncryptedCredentialStore({
+        path: join(userDataPath, "provider-credentials.json"),
+        encrypt: async (value) => safeStorage.encryptString(value).toString("base64"),
+        decrypt: async (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
+      }),
+      diagnostics: providerDiagnostics,
+      removeRuntimeState: createProviderRuntimeStateRemover({
+        runtimeRoot: providerRuntimeRoot,
+        registry: productionProviderAdapterRegistry,
+      }),
+      providerStatuses: () => productServer.providerStatuses(),
+      runtimeDependencies: (definition) => productionProviderRuntimeDependencies(definition, {
+        runtimeRoot: providerRuntimeRoot,
+        environment: process.env,
+        codexBinary: bundledCodexBinary,
+        claudeBinary: process.env.RELAYER_CLAUDE_BINARY,
+      }),
+      publishCatalog,
+    });
+    ({ modelCatalog, providerDefinitions: providerSetup } = providerComposition);
+    await providerComposition.start();
 
     registerDesktopIpc({
       ipcMain,
       dialog,
       shell,
       nativeTheme,
-      credentials,
       modelCatalog,
+      providerDefinitions: providerSetup,
+      validateProviderOnboarding: () => productServer.validateProviderOnboarding(defaultHarnessConfiguration),
       settings,
       updater,
       getWindow: () => mainWindow,

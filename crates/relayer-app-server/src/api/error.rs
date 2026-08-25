@@ -1,7 +1,6 @@
 use super::types::ProjectResponse;
 use crate::permissions::PermissionError;
 use crate::product::{CatalogError, InvalidProductId, ProductError};
-use crate::provider_catalog_refresh::ProviderCatalogRefreshError;
 use crate::runtime::RuntimeError;
 use crate::storage::StorageError;
 use axum::{
@@ -53,18 +52,6 @@ impl ApiError {
 impl From<RuntimeError> for ApiError {
     fn from(error: RuntimeError) -> Self {
         Self::internal(&error.to_string())
-    }
-}
-
-impl From<ProviderCatalogRefreshError> for ApiError {
-    fn from(error: ProviderCatalogRefreshError) -> Self {
-        Self(
-            StatusCode::SERVICE_UNAVAILABLE,
-            json!({
-                "code": "provider_catalog_refresh_failed",
-                "error": error.to_string(),
-            }),
-        )
     }
 }
 

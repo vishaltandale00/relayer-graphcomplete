@@ -1,4 +1,4 @@
-import { connectCodex, refreshAccount, showApplication, showAuth } from "./auth.js";
+import { refreshAccount, showApplication } from "./auth.js";
 import { returnFromSettings, selectScope, setMainView, setSettingsTab } from "./navigation.js";
 import {
   closePermissionMenu,
@@ -30,6 +30,7 @@ import {
   refreshModelFamilySettings,
 } from "./model-family-settings.js";
 import { createReviewPresentationAdapter } from "./review-tools.js";
+import { initializeProviderSettings, refreshProviderSettings } from "./provider-settings.js";
 import { $, applyAppearance, toast } from "./ui.js";
 import { renderUpdate, updateAction } from "./updates.js";
 
@@ -50,7 +51,6 @@ async function refreshProviderModelUi() {
 }
 
 function bindEvents() {
-  $("#connectCodex").onclick = connectCodex;
   $("#newThread").onclick = async () => {
     try {
       const applyPermissionProfiles = await preparePermissionProfiles(
@@ -101,6 +101,7 @@ function bindEvents() {
     try {
       if (productApiAvailable) {
         await desktop?.models?.settingsOpened?.();
+        await refreshProviderSettings();
         await refreshModelFamilySettings();
         refreshNewThreadModelPicker();
       }
@@ -108,13 +109,16 @@ function bindEvents() {
       toast(error.message);
     }
   };
-  $("#settingsBackButton").onclick = async () => {
+  const leaveSettings = async () => {
     try {
       await returnFromSettings(refreshState);
     } catch (error) {
       toast(error.message);
     }
   };
+  $("#settingsBackButton").onclick = leaveSettings;
+  $("#settingsCompactBackButton").onclick = leaveSettings;
+  $("#settingsCompactSelect").onchange = (event) => setSettingsTab(event.target.value);
   $("#settingsTabs").onclick = (event) => {
     const tab = event.target.closest("[data-settings-tab]");
     if (tab) setSettingsTab(tab.dataset.settingsTab);
@@ -132,11 +136,6 @@ function bindEvents() {
         : (currentIndex + (event.key === "ArrowDown" ? 1 : -1) + tabs.length) % tabs.length;
     setSettingsTab(tabs[nextIndex].dataset.settingsTab);
     tabs[nextIndex].focus();
-  };
-  $("#disconnectCodex").onclick = async () => {
-    await desktop?.account.logout();
-    await refreshAccount();
-    await refreshProviderModelUi();
   };
   $("#updateButton").onclick = () => $("#updatePopover").classList.toggle("hidden");
   $("#closeUpdate").onclick = () => $("#updatePopover").classList.add("hidden");
@@ -194,8 +193,7 @@ async function boot() {
   bindEvents();
   desktop?.account.onChanged((event) => {
     void (async () => {
-      if (event?.status === "unavailable") showAuth(event.error || "Codex is unavailable.");
-      else await refreshAccount();
+      await refreshAccount();
       await refreshProviderModelUi();
     })().catch((error) => toast(error.message));
   });
@@ -204,6 +202,7 @@ async function boot() {
   else applyAppearance(document.documentElement.dataset.theme);
   if (desktop) renderUpdate(await desktop.updater.status());
   await refreshAccount();
+  await initializeProviderSettings();
   if (productApiAvailable) await initializeModelFamilySettings();
   await loadPermissionProfiles(appState.modelSettings?.defaults?.harnessId);
   if (productApiAvailable) {

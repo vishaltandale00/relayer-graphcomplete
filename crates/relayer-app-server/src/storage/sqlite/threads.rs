@@ -35,7 +35,6 @@ impl SqliteProductStore {
                 model_id: selection.model_id.clone(),
             };
             catalog::validate_model_selection_on(&mut transaction, &command).await?;
-            catalog::validate_provider_catalog_freshness_on(&mut transaction, &command).await?;
         }
         let thread = sqlx::query(
             "INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (?1,?2,?3,?3,?4,?5)",

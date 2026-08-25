@@ -44,6 +44,14 @@ pub(super) struct CreateInteractionRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct RetryInteractionRequest {
+    attempt_id: i64,
+    text: String,
+    model_selection: ModelSelectionRequest,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ModelSelectionRequest {
     family_id: i64,
     provider_id: String,
@@ -112,11 +120,6 @@ pub(super) async fn create(
                 .product
                 .harness_uses_configuration_model(&harness_configuration_name)
                 .await?);
-    refresh_provider_catalog(
-        &state,
-        model_selection.as_ref().map(|model| &model.provider_id),
-    )
-    .await?;
     let thread = state
         .product
         .create_thread(CreateThreadCommand {
@@ -195,16 +198,6 @@ pub(super) async fn create_interaction(
         .model_selection
         .map(InteractionModelSelection::try_from)
         .transpose()?;
-    let provider_id = model_selection
-        .as_ref()
-        .map(|model| model.provider_id.clone())
-        .or_else(|| {
-            thread_detail
-                .interactions
-                .last()
-                .and_then(|interaction| interaction.model_selection.as_ref())
-                .map(|model| model.provider_id.clone())
-        });
     let thread = thread_detail.thread;
     let allow_unselected_model = privileged_model_less_thread
         || (state.allow_harness_override
@@ -212,7 +205,6 @@ pub(super) async fn create_interaction(
                 .product
                 .harness_uses_configuration_model(&thread.harness_configuration_name)
                 .await?);
-    refresh_provider_catalog(&state, provider_id.as_ref()).await?;
     let interaction = state
         .product
         .create_interaction(
@@ -224,6 +216,51 @@ pub(super) async fn create_interaction(
         .await?;
     let interaction = start_interaction(&state, &thread, interaction).await?;
     Ok((StatusCode::CREATED, Json(interaction.into())))
+}
+
+pub(super) async fn retry_interaction(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, interaction_id)): Path<(i64, i64)>,
+    Json(request): Json<RetryInteractionRequest>,
+) -> Result<Json<InteractionResponse>, ApiError> {
+    authorize_write(&state, &headers)?;
+    if request.attempt_id <= 0 {
+        return Err(ApiError::invalid("attemptId must be a positive integer"));
+    }
+    if state.runtime.is_none() {
+        return Err(ApiError::invalid("GraphComplete runtime is unavailable"));
+    }
+    let thread_id = ThreadId::try_from(thread_id)?;
+    let interaction_id = InteractionId::try_from(interaction_id)?;
+    let thread = state.product.get_thread(thread_id).await?.thread;
+    let existing = state.product.get_interaction(interaction_id).await?;
+    if existing.thread_id != thread_id {
+        return Err(ApiError::invalid(
+            "interaction does not belong to this thread",
+        ));
+    }
+    let model_selection = InteractionModelSelection::try_from(request.model_selection)?;
+    let claimed = state
+        .product
+        .claim_interaction_retry(
+            interaction_id,
+            request.attempt_id,
+            &request.text,
+            &model_selection,
+            &thread.harness_configuration_name,
+        )
+        .await?;
+    let interaction = state.product.get_interaction(interaction_id).await?;
+    if claimed {
+        let state = state.clone();
+        let thread = thread.clone();
+        let execution = interaction.clone();
+        tokio::spawn(async move {
+            execute_interaction(state, thread, execution).await;
+        });
+    }
+    Ok(Json(interaction.into()))
 }
 
 pub(super) async fn get_layer(
@@ -291,17 +328,6 @@ async fn invoke_action_with_authority(
         .get_action_invocation(source_interaction_id, action_id)
         .await?
     {
-        if outcome.interaction.completion_status == "not_started" {
-            refresh_provider_catalog(
-                state,
-                outcome
-                    .interaction
-                    .model_selection
-                    .as_ref()
-                    .map(|model| &model.provider_id),
-            )
-            .await?;
-        }
         return spawn_action_handoff(state.clone(), thread, outcome).await;
     }
     let graph_node_id = source
@@ -330,15 +356,6 @@ async fn invoke_action_with_authority(
         .as_deref()
         .ok_or_else(|| ApiError::invalid("invoke action has no interaction text"))?
         .to_owned();
-    refresh_provider_catalog(
-        state,
-        source
-            .model_selection
-            .as_ref()
-            .map(|model| &model.provider_id),
-    )
-    .await?;
-
     // One-shot invocation is a temporary UX simplification. The durable product record is
     // intentionally shaped so future retryable or repeatable action semantics can replace it.
     let owned_state = state.clone();
@@ -350,16 +367,6 @@ async fn invoke_action_with_authority(
         finish_action_handoff(&owned_state, &thread, outcome).await
     });
     await_action_handoff(handoff).await
-}
-
-async fn refresh_provider_catalog(
-    state: &ApiState,
-    provider_id: Option<&ProviderId>,
-) -> Result<(), ApiError> {
-    if let (Some(refresh), Some(provider_id)) = (&state.provider_catalog_refresh, provider_id) {
-        refresh.refresh(provider_id).await?;
-    }
-    Ok(())
 }
 
 async fn spawn_action_handoff(
@@ -584,15 +591,40 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
             }
         }
     }
-    if let Some(model_selection) = interaction.model_selection.as_ref()
-        && let Err(error) = state
+    let execution_model_selection = if let Some(model_selection) =
+        interaction.model_selection.as_ref()
+    {
+        match state
             .product
             .validate_execution_model_selection(&thread.harness_configuration_name, model_selection)
             .await
-    {
-        record_background_failure(&state, &thread, &interaction, error.to_string()).await;
-        return;
-    }
+        {
+            Ok(selection) => Some(selection),
+            Err(error) => {
+                return_model_failure_to_unsent(&state, &thread, &interaction, error.to_string())
+                    .await;
+                return;
+            }
+        }
+    } else {
+        None
+    };
+    let harness_policy = if execution_model_selection.is_some() {
+        match state
+            .product
+            .execution_harness_policy(&thread.harness_configuration_name)
+            .await
+        {
+            Ok(policy) => Some(policy),
+            Err(error) => {
+                return_model_failure_to_unsent(&state, &thread, &interaction, error.to_string())
+                    .await;
+                return;
+            }
+        }
+    } else {
+        None
+    };
     let working_directory = match thread.project_id {
         Some(project_id) => match state.product.project_path(project_id).await {
             Ok(path) => path,
@@ -617,7 +649,81 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
         .await;
         return;
     }
-    match runtime
+    let permission_profile = match state
+        .permission_catalog
+        .profile(&thread.permission_profile_id)
+    {
+        Ok(profile) => profile,
+        Err(error) => {
+            record_background_failure(&state, &thread, &interaction, error.to_string()).await;
+            return;
+        }
+    };
+    let admission = if execution_model_selection.is_some() {
+        match runtime
+            .admit_provider_execution(&CompleteInteraction {
+                project_id: thread.project_id.map(ProjectId::value),
+                product_interaction_id: interaction.id.value(),
+                thread_id: thread.id.value(),
+                text: &interaction.text,
+                working_directory: &working_directory,
+                harness_configuration_name: &thread.harness_configuration_name,
+                permission_profile,
+                model_selection: execution_model_selection.as_ref(),
+                execution_lease_id: None,
+                harness_policy: harness_policy.as_ref(),
+            })
+            .await
+        {
+            Ok(admission) => Some(admission),
+            Err(error) => {
+                return_model_failure_to_unsent(
+                    &state,
+                    &thread,
+                    &interaction,
+                    error.safe_failure_message().into(),
+                )
+                .await;
+                return;
+            }
+        }
+    } else {
+        None
+    };
+    let attempt = if let (Some(selection), Some(admission)) =
+        (execution_model_selection.as_ref(), admission.as_ref())
+    {
+        match state
+            .product
+            .begin_interaction_attempt(
+                interaction.id,
+                &thread.harness_configuration_name,
+                selection,
+                admission.adapter_implementation_version,
+                harness_policy
+                    .as_ref()
+                    .expect("provider admission requires a harness policy"),
+            )
+            .await
+        {
+            Ok(attempt) => Some(attempt),
+            Err(error) => {
+                if let Err(release_error) = runtime
+                    .release_provider_execution(thread.id.value(), &admission.execution_lease_id)
+                    .await
+                {
+                    let _ = release_error;
+                    eprintln!("could not release rejected provider execution admission");
+                }
+                return_model_failure_to_unsent(&state, &thread, &interaction, error.to_string())
+                    .await;
+                return;
+            }
+        }
+    } else {
+        None
+    };
+    let completion = runtime
         .complete(CompleteInteraction {
             project_id: thread.project_id.map(ProjectId::value),
             product_interaction_id: interaction.id.value(),
@@ -625,57 +731,162 @@ async fn execute_interaction(state: ApiState, thread: Thread, interaction: Inter
             text: &interaction.text,
             working_directory: &working_directory,
             harness_configuration_name: &thread.harness_configuration_name,
-            permission_profile: match state
-                .permission_catalog
-                .profile(&thread.permission_profile_id)
-            {
-                Ok(profile) => profile,
-                Err(error) => {
-                    record_background_failure(&state, &thread, &interaction, error.to_string())
-                        .await;
-                    return;
-                }
-            },
-            model_selection: interaction.model_selection.as_ref(),
+            permission_profile,
+            model_selection: execution_model_selection.as_ref(),
+            execution_lease_id: admission
+                .as_ref()
+                .map(|admission| admission.execution_lease_id.as_str()),
+            harness_policy: harness_policy.as_ref(),
         })
-        .await
-    {
+        .await;
+    match completion {
         Ok(completion) => {
             if completion.permission_profile_id != thread.permission_profile_id {
-                record_background_failure(
-                    &state,
-                    &thread,
-                    &interaction,
-                    format!(
-                        "runtime returned permission profile {} for thread pinned to {}",
-                        completion.permission_profile_id, thread.permission_profile_id
-                    ),
-                )
-                .await;
+                let error = format!(
+                    "runtime returned permission profile {} for thread pinned to {}",
+                    completion.permission_profile_id, thread.permission_profile_id
+                );
+                if let Some(attempt) = attempt {
+                    let terminalized = match state
+                        .product
+                        .fail_interaction_completion_with_attempt(
+                            crate::product::FailedInteractionCompletion {
+                                attempt_id: attempt,
+                                interaction_id: interaction.id,
+                                harness_configuration_name: &thread.harness_configuration_name,
+                                error: &error,
+                                outcome: "execution_failed",
+                                failure_category: "permission_receipt_mismatch",
+                                effect_boundary: "unknown",
+                                return_to_unsent: false,
+                                graph_node_id: None,
+                            },
+                        )
+                        .await
+                    {
+                        Ok(()) => true,
+                        Err(persistence_error) => {
+                            eprintln!(
+                                "could not atomically reject attempt {attempt} with a mismatched permission receipt: {persistence_error}"
+                            );
+                            false
+                        }
+                    };
+                    if terminalized {
+                        release_terminal_admission(runtime, &thread, admission.as_ref()).await;
+                    }
+                } else {
+                    record_background_failure(&state, &thread, &interaction, error).await;
+                }
                 return;
             }
-            if let Err(error) = state
-                .product
-                .accept_interaction_completion(AcceptedInteractionCompletion {
-                    interaction_id: interaction.id,
-                    graph_node_id: completion.graph_node_id,
-                    harness_configuration_name: &completion.harness_configuration_name,
-                    harness_configuration_digest: &completion.harness_configuration_digest,
-                    effective_execution_digest: &completion.effective_execution_digest,
-                    effective_permission_receipt: &completion.effective_permission_receipt,
-                    output: &completion.output,
-                })
-                .await
-            {
+            let accepted = AcceptedInteractionCompletion {
+                interaction_id: interaction.id,
+                graph_node_id: completion.graph_node_id,
+                harness_configuration_name: &completion.harness_configuration_name,
+                harness_configuration_digest: &completion.harness_configuration_digest,
+                effective_execution_digest: &completion.effective_execution_digest,
+                effective_permission_receipt: &completion.effective_permission_receipt,
+                output: &completion.output,
+            };
+            let result = match attempt {
+                Some(attempt) => {
+                    state
+                        .product
+                        .accept_interaction_completion_with_attempt(attempt, accepted)
+                        .await
+                }
+                None => state.product.accept_interaction_completion(accepted).await,
+            };
+            if let Err(error) = result {
                 eprintln!(
                     "could not persist accepted interaction {}: {error}",
                     interaction.id
                 );
+            } else {
+                release_terminal_admission(runtime, &thread, admission.as_ref()).await;
             }
         }
         Err(error) => {
-            record_background_failure(&state, &thread, &interaction, error.to_string()).await;
+            let (category, effect_boundary, model_related) = error.attempt_failure();
+            let error_message = error.safe_failure_message().to_owned();
+            let graph_node_id = error.graph_node_id();
+            if let Some(attempt) = attempt {
+                let terminalized = match state
+                    .product
+                    .fail_interaction_completion_with_attempt(
+                        crate::product::FailedInteractionCompletion {
+                            attempt_id: attempt,
+                            interaction_id: interaction.id,
+                            harness_configuration_name: &thread.harness_configuration_name,
+                            error: &error_message,
+                            outcome: if model_related {
+                                "model_failed"
+                            } else {
+                                "execution_failed"
+                            },
+                            failure_category: category,
+                            effect_boundary,
+                            return_to_unsent: model_related && effect_boundary == "none",
+                            graph_node_id,
+                        },
+                    )
+                    .await
+                {
+                    Ok(()) => true,
+                    Err(persistence_error) => {
+                        eprintln!(
+                            "could not atomically finalize failed attempt {attempt}: {persistence_error}"
+                        );
+                        false
+                    }
+                };
+                if terminalized {
+                    release_terminal_admission(runtime, &thread, admission.as_ref()).await;
+                }
+            } else if model_related && effect_boundary == "none" {
+                return_model_failure_to_unsent(&state, &thread, &interaction, error_message).await;
+            } else {
+                record_background_failure(&state, &thread, &interaction, error_message).await;
+            }
         }
+    }
+}
+
+async fn release_terminal_admission(
+    runtime: &crate::runtime::RuntimeClient,
+    thread: &Thread,
+    admission: Option<&crate::runtime::RuntimeExecutionAdmission>,
+) {
+    let Some(admission) = admission else { return };
+    if runtime
+        .release_provider_execution(thread.id.value(), &admission.execution_lease_id)
+        .await
+        .is_err()
+    {
+        eprintln!("could not release terminal provider execution admission");
+    }
+}
+
+async fn return_model_failure_to_unsent(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: &Interaction,
+    error: String,
+) {
+    eprintln!(
+        "interaction {} model resolution failed without a durable effect; returning it to unsent: {error}",
+        interaction.id
+    );
+    if let Err(persistence_error) = state
+        .product
+        .return_interaction_to_unsent(interaction.id, &thread.harness_configuration_name)
+        .await
+    {
+        eprintln!(
+            "could not return interaction {} to unsent: {persistence_error}; original failure: {error}",
+            interaction.id
+        );
     }
 }
 

@@ -38,7 +38,7 @@ export function productWorkspaceMarkup() {
             <button id="recenterGraph" data-review-ref="recenter-graph" title="Recenter graph" aria-label="Recenter graph">⌾</button>
           </div>
         </div>
-        <div class="thread-composer" id="threadComposer"><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div></div>
+        <div class="thread-composer" id="threadComposer"><p class="composer-retry-message hidden" id="composerRetryMessage" role="alert"></p><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div></div>
       </div>
       <aside class="inspector hidden" id="inspector" data-review-capture="node-detail" aria-label="Selected node detail">
         <div class="inspector-header"><span>Node details</span><button class="icon-button" id="closeInspector" data-review-ref="close-node-detail" aria-label="Close node details">×</button></div>

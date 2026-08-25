@@ -178,8 +178,8 @@ describe("CodexBasicHarness", () => {
         configuration: codexBasicConfiguration,
       }, { createCodex });
 
-    await harness.complete({ ...runContext(1, "first-token"), model: { providerId: "codex", modelId: "gpt-first" } });
-    await harness.complete({ ...runContext(2, "second-token"), model: { providerId: "codex", modelId: "gpt-second" } });
+    await harness.complete({ ...runContext(1, "first-token"), model: { providerId: "codex", modelId: "gpt-first" }, access: codexAccess() });
+    await harness.complete({ ...runContext(2, "second-token"), model: { providerId: "codex", modelId: "gpt-second" }, access: codexAccess() });
 
     expect(createCodex).toHaveBeenCalledTimes(2);
     expect(environments.map((environment) => [environment.RELAYER_GRAPH_TOKEN, environment.RELAYER_NODE_ID])).toEqual([
@@ -260,6 +260,17 @@ function runContext(id: number, token: string, trace: HarnessTraceSink = createN
       acquireCapability: () => ({ url: "http://127.0.0.1:43123", token, nodeId: id }),
     },
     trace,
+  };
+}
+
+function codexAccess() {
+  return {
+    kind: "managed-runtime" as const,
+    contract: "managed-runtime@1" as const,
+    providerId: "codex",
+    adapterId: "codex-subscription",
+    adapterImplementationVersion: "1",
+    environment: {},
   };
 }
 

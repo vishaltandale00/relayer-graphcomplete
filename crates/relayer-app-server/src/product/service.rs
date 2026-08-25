@@ -1,10 +1,10 @@
 use super::{
-    ActionInvocation, CatalogError, CreateModelFamilyCommand, Interaction, InteractionId,
-    InteractionModelSelection, ModelFamily, ModelFamilyId, ModelFamilyKind, ModelSelection,
-    ModelSettings, ModelSettingsDefaults, ProductCapabilities, ProductState, Project, ProjectId,
-    ProviderCatalogSnapshot, ReorderModelFamiliesCommand, Thread, ThreadId, ThreadView,
-    UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand, ValidateModelSelectionCommand,
-    validate_family,
+    ActionInvocation, CatalogError, CreateModelFamilyCommand, FamilyPolicyReference, Interaction,
+    InteractionId, InteractionModelSelection, ModelFamily, ModelFamilyId, ModelFamilyKind,
+    ModelSelection, ModelSettings, ModelSettingsDefaults, ProductCapabilities, ProductState,
+    Project, ProjectId, ProviderCatalogSnapshot, ReorderModelFamiliesCommand, SystemFamilySnapshot,
+    Thread, ThreadId, ThreadView, UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand,
+    ValidateModelSelectionCommand, validate_family,
 };
 use crate::storage::{
     ActionInvocationInsertOutcome, NewThreadRecord, SqliteProductStore, StorageError,
@@ -38,6 +38,18 @@ pub(crate) struct AcceptedInteractionCompletion<'a> {
     pub(crate) effective_execution_digest: &'a str,
     pub(crate) effective_permission_receipt: &'a serde_json::Value,
     pub(crate) output: &'a serde_json::Value,
+}
+
+pub(crate) struct FailedInteractionCompletion<'a> {
+    pub(crate) attempt_id: i64,
+    pub(crate) interaction_id: InteractionId,
+    pub(crate) harness_configuration_name: &'a str,
+    pub(crate) error: &'a str,
+    pub(crate) outcome: &'a str,
+    pub(crate) failure_category: &'a str,
+    pub(crate) effect_boundary: &'a str,
+    pub(crate) return_to_unsent: bool,
+    pub(crate) graph_node_id: Option<i64>,
 }
 
 pub(crate) struct ProjectWriteOutcome {
@@ -80,6 +92,87 @@ pub(crate) struct ProductService {
 }
 
 impl ProductService {
+    pub(crate) async fn update_harness_model_rules(
+        &self,
+        command: super::UpdateHarnessModelRulesCommand,
+    ) -> Result<u32, ProductError> {
+        super::validate_stable_id(&command.harness_id, "harnessId")?;
+        super::validate_harness_model_rules(&command.rules)?;
+        self.storage
+            .update_harness_model_rules(&command)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn provider_definitions(
+        &self,
+    ) -> Result<Vec<super::ProviderDefinition>, ProductError> {
+        self.storage
+            .load_provider_definitions()
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn sync_provider_definitions(
+        &self,
+        definitions: Vec<super::ProviderDefinition>,
+    ) -> Result<(), ProductError> {
+        let mut ids = std::collections::HashSet::new();
+        for definition in &definitions {
+            super::validate_stable_id(definition.id.as_str(), "providerId")?;
+            super::validate_stable_id(&definition.adapter_id, "adapterId")?;
+            if definition.label.trim().is_empty() || !ids.insert(definition.id.as_str()) {
+                return Err(super::CatalogError::invalid(
+                    "provider_definition_invalid",
+                    "Provider definitions require unique ids and non-empty labels.",
+                )
+                .into());
+            }
+        }
+        self.storage
+            .sync_provider_definitions(&definitions)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn create_provider_with_catalog(
+        &self,
+        definition: super::ProviderDefinition,
+        mut snapshot: ProviderCatalogSnapshot,
+    ) -> Result<(), ProductError> {
+        if definition.id != snapshot.provider_id || definition.lifecycle_state != "active" {
+            return Err(super::CatalogError::invalid(
+                "provider_definition_invalid",
+                "Staged provider identity must match its catalog and be active.",
+            )
+            .into());
+        }
+        super::validate_stable_id(definition.id.as_str(), "providerId")?;
+        super::validate_stable_id(&definition.adapter_id, "adapterId")?;
+        if !snapshot.connected {
+            return Err(super::CatalogError::invalid(
+                "provider_disconnected",
+                "A provider must be connected before it can be created.",
+            )
+            .into());
+        }
+        if !snapshot.models.iter().any(|model| model.visible) {
+            return Err(super::CatalogError::invalid(
+                "provider_catalog_empty",
+                "A provider must expose at least one visible model before it can be created.",
+            )
+            .into());
+        }
+        let managed_policy = self
+            .apply_default_harness_family_policy(&definition, &mut snapshot)
+            .await?;
+        validate_provider_snapshot(&snapshot)?;
+        self.storage
+            .create_provider_with_catalog(&definition, &snapshot, managed_policy.as_ref(), &now())
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) fn new(storage: SqliteProductStore, runtime_available: bool) -> Self {
         Self {
             storage,
@@ -97,6 +190,16 @@ impl ProductService {
 
     pub(crate) async fn model_settings(&self) -> Result<ModelSettings, ProductError> {
         self.storage.load_model_settings().await.map_err(Into::into)
+    }
+
+    pub(crate) async fn execution_harness_policy(
+        &self,
+        harness_id: &str,
+    ) -> Result<super::ExecutionHarnessPolicy, ProductError> {
+        self.storage
+            .load_execution_harness_policy(harness_id)
+            .await
+            .map_err(Into::into)
     }
 
     pub(crate) async fn harness_uses_configuration_model(
@@ -163,11 +266,97 @@ impl ProductService {
                 message: "The provider is not connected.".into(),
             });
         }
+        let definition = self
+            .storage
+            .load_provider_definitions()
+            .await?
+            .into_iter()
+            .find(|definition| definition.id == snapshot.provider_id)
+            .ok_or_else(|| {
+                ProductError::NotFound(format!("provider {}", snapshot.provider_id.as_str()))
+            })?;
+        if definition.lifecycle_state != "active" {
+            return Err(super::CatalogError::invalid(
+                "provider_not_active",
+                "Only active provider definitions can publish model catalogs.",
+            )
+            .into());
+        }
+        let managed_policy = self
+            .apply_default_harness_family_policy(&definition, &mut snapshot)
+            .await?;
         validate_provider_snapshot(&snapshot)?;
-        self.storage
-            .publish_provider_catalog(&snapshot, &now())
+        match self
+            .storage
+            .publish_provider_catalog(&snapshot, managed_policy.as_ref(), &now())
             .await
-            .map_err(Into::into)
+        {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                eprintln!(
+                    "managed catalog reconciliation for provider {} failed; the prior family/default transaction was retained and the next refresh will retry: {error}",
+                    snapshot.provider_id.as_str()
+                );
+                Err(error.into())
+            }
+        }
+    }
+
+    async fn apply_default_harness_family_policy(
+        &self,
+        definition: &super::ProviderDefinition,
+        snapshot: &mut ProviderCatalogSnapshot,
+    ) -> Result<Option<FamilyPolicyReference>, ProductError> {
+        // Provider adapters may report normalized metadata, but never author family membership.
+        snapshot.system_family = None;
+        if !snapshot.connected {
+            return Ok(None);
+        }
+        let settings = self.storage.load_model_settings().await?;
+        let policy = settings
+            .harnesses
+            .iter()
+            .find(|harness| harness.id == settings.defaults.harness_id)
+            .and_then(|harness| harness.family_policy.clone());
+        let Some(policy) = policy.filter(|policy| {
+            super::model_policy::applies_to_adapter(policy, &definition.adapter_id)
+        }) else {
+            return Ok(None);
+        };
+        let members = match super::model_policy::derive_managed_family_members(&policy, snapshot) {
+            Ok(members) => members,
+            Err(error) => {
+                eprintln!(
+                    "managed family policy {}@{} for provider {} could not be applied; the prior family/default remains and the next refresh will retry: {error}",
+                    policy.id,
+                    policy.version,
+                    snapshot.provider_id.as_str()
+                );
+                return Err(error.into());
+            }
+        };
+        if members.is_empty() {
+            let error = super::CatalogError::invalid(
+                "family_policy_empty",
+                format!(
+                    "Model-family policy {}@{} did not resolve any visible default models.",
+                    policy.id, policy.version
+                ),
+            );
+            eprintln!(
+                "managed family policy {}@{} for provider {} produced no members; the prior family/default remains and the next refresh will retry",
+                policy.id,
+                policy.version,
+                snapshot.provider_id.as_str()
+            );
+            return Err(error.into());
+        }
+        snapshot.system_family = Some(SystemFamilySnapshot {
+            key: format!("{}@{}", policy.id, policy.version),
+            name: format!("{} defaults", snapshot.label),
+            model_ids: members.into_iter().map(|member| member.model_id).collect(),
+        });
+        Ok(Some(policy))
     }
 
     pub(crate) async fn create_model_family(
@@ -217,6 +406,9 @@ impl ProductService {
                 if let Some(members) = &mut command.members {
                     normalize_member_positions(members);
                     self.ensure_known_models(members).await?;
+                    if *members == current.members {
+                        command.members = None;
+                    }
                 }
             }
         }
@@ -288,7 +480,7 @@ impl ProductService {
         &self,
         harness_id: &str,
         selection: &InteractionModelSelection,
-    ) -> Result<(), ProductError> {
+    ) -> Result<super::ExecutionModelSelection, ProductError> {
         self.storage
             .validate_execution_model_selection(harness_id, selection)
             .await
@@ -300,7 +492,14 @@ impl ProductService {
         harness_id: &str,
     ) -> Result<Option<ModelSelection>, ProductError> {
         let settings = self.storage.load_model_settings().await?;
-        for family in settings.families.iter().filter(|family| family.enabled) {
+        let Some(default_id) = settings.defaults.family_id else {
+            return Ok(None);
+        };
+        let families = settings
+            .families
+            .iter()
+            .filter(move |family| family.id == default_id && family.enabled);
+        for family in families {
             for member in &family.members {
                 let command = ValidateModelSelectionCommand {
                     harness_id: harness_id.to_owned(),
@@ -653,12 +852,54 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn claim_interaction_retry(
+        &self,
+        interaction_id: super::InteractionId,
+        expected_attempt_id: i64,
+        text: &str,
+        model_selection: &super::InteractionModelSelection,
+        harness_configuration_name: &str,
+    ) -> Result<bool, ProductError> {
+        let text = required(text, "text")?;
+        self.storage
+            .claim_interaction_retry(
+                interaction_id,
+                expected_attempt_id,
+                text,
+                model_selection,
+                harness_configuration_name,
+            )
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn accept_interaction_completion(
         &self,
         completion: AcceptedInteractionCompletion<'_>,
     ) -> Result<(), ProductError> {
         self.storage
             .accept_interaction_completion(completion)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn accept_interaction_completion_with_attempt(
+        &self,
+        attempt_id: i64,
+        completion: AcceptedInteractionCompletion<'_>,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .accept_interaction_completion_with_attempt(attempt_id, completion, &now())
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn fail_interaction_completion_with_attempt(
+        &self,
+        failure: FailedInteractionCompletion<'_>,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .fail_interaction_completion_with_attempt(failure, &now())
             .await
             .map_err(Into::into)
     }
@@ -671,6 +912,40 @@ impl ProductService {
     ) -> Result<(), ProductError> {
         self.storage
             .fail_interaction_completion(interaction_id, harness_configuration_name, error)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn begin_interaction_attempt(
+        &self,
+        interaction_id: super::InteractionId,
+        harness_name: &str,
+        route: &super::ExecutionModelSelection,
+        adapter_version: u32,
+        harness_policy: &super::ExecutionHarnessPolicy,
+    ) -> Result<i64, ProductError> {
+        self.storage
+            .begin_interaction_attempt(
+                super::BeginInteractionAttempt {
+                    interaction_id,
+                    harness_name,
+                    route,
+                    adapter_version,
+                    expected_harness_policy: Some(harness_policy),
+                },
+                &now(),
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn return_interaction_to_unsent(
+        &self,
+        interaction_id: super::InteractionId,
+        harness_configuration_name: &str,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .return_interaction_to_unsent(interaction_id, harness_configuration_name)
             .await
             .map_err(Into::into)
     }
@@ -719,7 +994,6 @@ fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), 
     }
     let mut ids = std::collections::HashSet::new();
     let mut orders = std::collections::HashSet::new();
-    let mut provider_defaults = 0;
     for model in &snapshot.models {
         super::catalog::validate_stable_id(&model.id, "modelId")?;
         if !ids.insert(model.id.as_str()) {
@@ -752,14 +1026,9 @@ fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), 
                 "an unavailable model must include an unavailable reason",
             ));
         }
-        provider_defaults += usize::from(model.provider_default);
     }
-    if provider_defaults > 1 {
-        return Err(CatalogError::invalid(
-            "provider_default_duplicate",
-            "provider snapshot cannot declare more than one default model",
-        ));
-    }
+    // Multiple normalized defaults are valid. Product-owned family policies
+    // decide which ordered subset becomes a managed family.
     if let Some(family) = &snapshot.system_family {
         if family.model_ids.len() > 5 {
             return Err(CatalogError::invalid(
@@ -768,12 +1037,6 @@ fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), 
             ));
         }
         if family.model_ids.is_empty() {
-            if snapshot.connected && snapshot.models.iter().any(|model| model.visible) {
-                return Err(CatalogError::invalid(
-                    "system_family_size_invalid",
-                    "a connected provider with visible models must publish its system family",
-                ));
-            }
             return Ok(());
         }
         if family.key.trim().is_empty() || family.name.trim().is_empty() {
@@ -782,17 +1045,17 @@ fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), 
                 "system family key and name must be non-empty",
             ));
         }
-        let mut visible = snapshot
+        let mut defaults = snapshot
             .models
             .iter()
-            .filter(|model| model.visible)
+            .filter(|model| model.visible && model.provider_default)
             .collect::<Vec<_>>();
-        visible.sort_by_key(|model| model.order);
-        let expected = visible.into_iter().take(5).map(|model| model.id.as_str());
+        defaults.sort_by_key(|model| model.order);
+        let expected = defaults.into_iter().take(5).map(|model| model.id.as_str());
         if !family.model_ids.iter().map(String::as_str).eq(expected) {
             return Err(CatalogError::invalid(
                 "system_family_members_invalid",
-                "system family must contain the first five visible provider models in provider order",
+                "managed family must contain visible provider-default models in provider order",
             ));
         }
     }
@@ -802,7 +1065,14 @@ fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::product::{HarnessModelCompatibility, ProviderId, RuntimeProductHarness};
+    use crate::product::{
+        CatalogModelSnapshot, FamilyPolicyReference, HarnessModelCompatibility, HarnessModelRule,
+        HarnessModelRules, ModelFamilyMember, ProviderDefinition, ProviderId,
+        RuntimeProductHarness, UnavailableReason,
+    };
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static MANAGED_POLICY_TEST_ID: AtomicU64 = AtomicU64::new(0);
 
     #[tokio::test]
     async fn configuration_model_exemption_is_scoped_to_the_selected_harness() {
@@ -882,6 +1152,7 @@ mod tests {
             .update_model_settings_defaults(&UpdateModelSettingsDefaultsCommand {
                 harness_id: Some("prime-agent-basic".into()),
                 provider_id: None,
+                family_id: None,
             })
             .await
             .unwrap();
@@ -903,19 +1174,382 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 
+    #[tokio::test]
+    async fn staged_provider_requires_connected_catalog_with_a_visible_model() {
+        let (path, storage, service) = managed_policy_service(1).await;
+        let (definition, snapshot) = staged_codex_catalog();
+
+        let mut disconnected = snapshot.clone();
+        disconnected.connected = false;
+        disconnected.unavailable_reason = Some(UnavailableReason {
+            code: "credentials_revoked".into(),
+            message: "Reconnect this provider.".into(),
+        });
+        assert!(
+            service
+                .create_provider_with_catalog(definition.clone(), disconnected)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("must be connected")
+        );
+
+        let mut hidden = snapshot;
+        for model in &mut hidden.models {
+            model.visible = false;
+        }
+        assert!(
+            service
+                .create_provider_with_catalog(definition, hidden)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("at least one visible model")
+        );
+        assert!(
+            service
+                .provider_definitions()
+                .await
+                .unwrap()
+                .iter()
+                .all(|provider| provider.id.as_str() != "onboarding-codex")
+        );
+
+        drop(service);
+        drop(storage);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn staged_codex_provider_gets_managed_default_and_policy_version_migrates_it() {
+        let (path, storage, service) = managed_policy_service(1).await;
+        let (definition, snapshot) = staged_codex_catalog();
+        service
+            .create_provider_with_catalog(definition, snapshot.clone())
+            .await
+            .unwrap();
+        let first = service.model_settings().await.unwrap();
+        let first_default = first
+            .defaults
+            .family_id
+            .expect("managed onboarding default");
+        assert_eq!(first.defaults.provider_id.as_str(), "onboarding-codex");
+        assert_eq!(
+            first
+                .families
+                .iter()
+                .find(|family| family.id == first_default)
+                .unwrap()
+                .managed_policy
+                .as_ref()
+                .unwrap()
+                .policy_version,
+            1
+        );
+
+        let mut empty_policy_output = snapshot.clone();
+        for model in &mut empty_policy_output.models {
+            model.provider_default = false;
+        }
+        assert!(
+            service
+                .publish_provider_catalog(empty_policy_output)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            service.model_settings().await.unwrap().defaults.family_id,
+            Some(first_default)
+        );
+
+        storage
+            .initialize_model_catalog("codex-basic", &managed_runtime_harnesses(99))
+            .await
+            .unwrap();
+        assert!(
+            service
+                .publish_provider_catalog(snapshot.clone())
+                .await
+                .is_err()
+        );
+        let retained = service.model_settings().await.unwrap();
+        assert_eq!(retained.defaults.family_id, Some(first_default));
+        assert_eq!(
+            retained
+                .families
+                .iter()
+                .find(|family| family.id == first_default)
+                .unwrap()
+                .managed_policy
+                .as_ref()
+                .unwrap()
+                .policy_version,
+            1
+        );
+
+        storage
+            .initialize_model_catalog("codex-basic", &managed_runtime_harnesses(2))
+            .await
+            .unwrap();
+        service.publish_provider_catalog(snapshot).await.unwrap();
+        let migrated = service.model_settings().await.unwrap();
+        let migrated_default = migrated.defaults.family_id.unwrap();
+        assert_ne!(migrated_default, first_default);
+        assert_eq!(
+            migrated
+                .families
+                .iter()
+                .find(|family| family.id == migrated_default)
+                .unwrap()
+                .managed_policy
+                .as_ref()
+                .unwrap()
+                .policy_version,
+            2
+        );
+        assert!(
+            !migrated
+                .families
+                .iter()
+                .any(|family| family.id == first_default)
+        );
+
+        drop(service);
+        drop(storage);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn policy_version_change_never_replaces_a_custom_default() {
+        let (path, storage, service) = managed_policy_service(1).await;
+        let (definition, snapshot) = staged_codex_catalog();
+        service
+            .create_provider_with_catalog(definition, snapshot.clone())
+            .await
+            .unwrap();
+        let custom = service
+            .create_model_family(CreateModelFamilyCommand {
+                name: "My models".into(),
+                enabled: true,
+                members: vec![ModelFamilyMember {
+                    provider_id: ProviderId::parse("onboarding-codex").unwrap(),
+                    model_id: "second".into(),
+                    position: 0,
+                }],
+            })
+            .await
+            .unwrap();
+        let unchanged = service
+            .update_model_family(UpdateModelFamilyCommand {
+                id: custom.id,
+                name: None,
+                enabled: custom.enabled,
+                members: Some(custom.members.clone()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(unchanged.revision, custom.revision);
+        service
+            .update_model_settings_defaults(UpdateModelSettingsDefaultsCommand {
+                harness_id: None,
+                provider_id: None,
+                family_id: Some(custom.id),
+            })
+            .await
+            .unwrap();
+        storage
+            .initialize_model_catalog("codex-basic", &managed_runtime_harnesses(2))
+            .await
+            .unwrap();
+        service.publish_provider_catalog(snapshot).await.unwrap();
+        assert_eq!(
+            service.model_settings().await.unwrap().defaults.family_id,
+            Some(custom.id)
+        );
+
+        drop(service);
+        drop(storage);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn managed_policy_never_replaces_an_explicit_provider_default() {
+        let (path, storage, service) = managed_policy_service(1).await;
+        let (mut custom_definition, mut custom_snapshot) = staged_codex_catalog();
+        custom_definition.id = ProviderId::parse("custom-openai").unwrap();
+        custom_definition.adapter_id = "openai-api".into();
+        custom_definition.label = "Custom OpenAI".into();
+        custom_definition.endpoint = Some("https://api.openai.com/v1".into());
+        custom_definition.access_contract = "secret@1".into();
+        custom_definition.credential_reference = Some("provider:custom-openai".into());
+        custom_snapshot.provider_id = custom_definition.id.clone();
+        custom_snapshot.label = custom_definition.label.clone();
+        custom_snapshot.system_family = None;
+        service
+            .create_provider_with_catalog(custom_definition, custom_snapshot)
+            .await
+            .unwrap();
+        service
+            .update_model_settings_defaults(UpdateModelSettingsDefaultsCommand {
+                harness_id: None,
+                provider_id: Some(ProviderId::parse("custom-openai").unwrap()),
+                family_id: None,
+            })
+            .await
+            .unwrap();
+        let (definition, snapshot) = staged_codex_catalog();
+        service
+            .create_provider_with_catalog(definition, snapshot.clone())
+            .await
+            .unwrap();
+        let first = service.model_settings().await.unwrap();
+        assert_eq!(first.defaults.family_id, None);
+        assert_eq!(first.defaults.provider_id.as_str(), "custom-openai");
+
+        storage
+            .initialize_model_catalog("codex-basic", &managed_runtime_harnesses(2))
+            .await
+            .unwrap();
+        service.publish_provider_catalog(snapshot).await.unwrap();
+        let migrated = service.model_settings().await.unwrap();
+        assert_eq!(migrated.defaults.provider_id.as_str(), "custom-openai");
+        assert_eq!(migrated.defaults.family_id, None);
+        assert!(migrated.families.iter().any(|family| {
+            family
+                .managed_policy
+                .as_ref()
+                .is_some_and(|policy| policy.policy_version == 2)
+        }));
+
+        drop(service);
+        drop(storage);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    async fn managed_policy_service(
+        version: u32,
+    ) -> (std::path::PathBuf, SqliteProductStore, ProductService) {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_id = MANAGED_POLICY_TEST_ID.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "relayer-managed-policy-{}-{unique}-{test_id}.sqlite3",
+            std::process::id()
+        ));
+        let storage = SqliteProductStore::open(&path).await.unwrap();
+        storage
+            .initialize_model_catalog("codex-basic", &managed_runtime_harnesses(version))
+            .await
+            .unwrap();
+        let service = ProductService::new(storage.clone(), true);
+        (path, storage, service)
+    }
+
+    fn staged_codex_catalog() -> (ProviderDefinition, ProviderCatalogSnapshot) {
+        let provider_id = ProviderId::parse("onboarding-codex").unwrap();
+        (
+            ProviderDefinition {
+                id: provider_id.clone(),
+                adapter_id: "codex-subscription".into(),
+                label: "Work Codex".into(),
+                endpoint: None,
+                access_contract: "managed-runtime@1".into(),
+                credential_reference: None,
+                lifecycle_state: "active".into(),
+                removed_at: None,
+            },
+            ProviderCatalogSnapshot {
+                provider_id,
+                label: "Work Codex".into(),
+                connected: true,
+                unavailable_reason: None,
+                models: vec![
+                    CatalogModelSnapshot {
+                        id: "default".into(),
+                        label: "Default".into(),
+                        order: 0,
+                        visible: true,
+                        available: true,
+                        unavailable_reason: None,
+                        provider_default: true,
+                        replacement_model_id: None,
+                        metadata: serde_json::json!({}),
+                    },
+                    CatalogModelSnapshot {
+                        id: "second".into(),
+                        label: "Second".into(),
+                        order: 1,
+                        visible: true,
+                        available: true,
+                        unavailable_reason: None,
+                        provider_default: false,
+                        replacement_model_id: None,
+                        metadata: serde_json::json!({}),
+                    },
+                ],
+                system_family: Some(SystemFamilySnapshot {
+                    key: "adapter-authored-ignored".into(),
+                    name: "Adapter family".into(),
+                    model_ids: vec!["second".into()],
+                }),
+            },
+        )
+    }
+
+    fn managed_runtime_harnesses(version: u32) -> Vec<RuntimeProductHarness> {
+        vec![RuntimeProductHarness {
+            id: "codex-basic".into(),
+            configuration_digest: format!("sha256:codex-basic-{version}"),
+            model_compatibility: vec![],
+            configuration_revision: version,
+            model_rules: Some(HarnessModelRules {
+                allow: vec![
+                    HarnessModelRule {
+                        adapter_id: "codex-subscription".into(),
+                        model_id_exact: None,
+                        model_id_regex: Some(".*".into()),
+                    },
+                    HarnessModelRule {
+                        adapter_id: "openai-api".into(),
+                        model_id_exact: None,
+                        model_id_regex: Some(".*".into()),
+                    },
+                ],
+                deny: vec![],
+            }),
+            execution_access_contracts: vec!["managed-runtime@1".into()],
+            family_policy: Some(FamilyPolicyReference {
+                id: super::super::model_policy::CODEX_DEFAULT_FAMILY_POLICY_ID.into(),
+                version,
+            }),
+        }]
+    }
+
     fn runtime_harnesses() -> Vec<RuntimeProductHarness> {
         vec![
             RuntimeProductHarness {
                 id: "prime-agent-basic".into(),
+                configuration_digest: "sha256:prime-agent-basic".into(),
                 model_compatibility: vec![],
+                configuration_revision: 1,
+                model_rules: None,
+                execution_access_contracts: vec![],
+                family_policy: None,
             },
             RuntimeProductHarness {
                 id: "codex-basic".into(),
+                configuration_digest: "sha256:codex-basic".into(),
                 model_compatibility: vec![HarnessModelCompatibility {
                     provider_id: ProviderId::parse("codex").unwrap(),
                     model_ids: None,
                     preferred_model_id: None,
                 }],
+                configuration_revision: 1,
+                model_rules: None,
+                execution_access_contracts: vec![],
+                family_policy: None,
             },
         ]
     }

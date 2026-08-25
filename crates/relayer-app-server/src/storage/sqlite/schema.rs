@@ -44,6 +44,26 @@ const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("provider_model_id", "TEXT", false, 0),
     ("model_family_id", "INTEGER", false, 0),
 ];
+const INTERACTION_ATTEMPT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("id", "INTEGER", false, 1),
+    ("interaction_id", "INTEGER", true, 0),
+    ("attempt_number", "INTEGER", true, 0),
+    ("started_at", "TEXT", true, 0),
+    ("finished_at", "TEXT", false, 0),
+    ("family_id", "INTEGER", true, 0),
+    ("family_revision", "INTEGER", true, 0),
+    ("harness_configuration_name", "TEXT", true, 0),
+    ("harness_configuration_revision", "INTEGER", true, 0),
+    ("harness_configuration_digest", "TEXT", true, 0),
+    ("provider_id", "TEXT", true, 0),
+    ("adapter_id", "TEXT", true, 0),
+    ("adapter_implementation_version", "INTEGER", true, 0),
+    ("model_id", "TEXT", true, 0),
+    ("access_contract", "TEXT", true, 0),
+    ("outcome", "TEXT", true, 0),
+    ("failure_category", "TEXT", false, 0),
+    ("effect_boundary", "TEXT", true, 0),
+];
 const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("source_interaction_id", "INTEGER", true, 1),
     ("action_id", "INTEGER", true, 2),
@@ -57,6 +77,12 @@ const MODEL_PROVIDER_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("unavailable_reason_code", "TEXT", false, 0),
     ("unavailable_reason_message", "TEXT", false, 0),
     ("refreshed_at", "TEXT", true, 0),
+    ("adapter_id", "TEXT", true, 0),
+    ("access_contract", "TEXT", true, 0),
+    ("endpoint", "TEXT", false, 0),
+    ("credential_reference", "TEXT", false, 0),
+    ("lifecycle_state", "TEXT", true, 0),
+    ("removed_at", "TEXT", false, 0),
 ];
 const PROVIDER_MODEL_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("provider_id", "TEXT", true, 1),
@@ -78,6 +104,21 @@ const PRODUCT_HARNESS_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("available", "INTEGER", true, 0),
     ("unavailable_reason_code", "TEXT", false, 0),
     ("unavailable_reason_message", "TEXT", false, 0),
+    ("configuration_revision", "INTEGER", true, 0),
+    ("configuration_digest", "TEXT", true, 0),
+    ("model_rules_present", "INTEGER", true, 0),
+    ("execution_access_contracts_json", "TEXT", true, 0),
+    ("family_policy_id", "TEXT", false, 0),
+    ("family_policy_version", "INTEGER", false, 0),
+    ("model_rules_modified", "INTEGER", true, 0),
+];
+const HARNESS_MODEL_RULE_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("harness_configuration_name", "TEXT", true, 1),
+    ("effect", "TEXT", true, 2),
+    ("position", "INTEGER", true, 3),
+    ("adapter_id", "TEXT", true, 0),
+    ("match_kind", "TEXT", true, 0),
+    ("model_pattern", "TEXT", true, 0),
 ];
 const HARNESS_PROVIDER_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("harness_configuration_name", "TEXT", true, 1),
@@ -97,6 +138,12 @@ const MODEL_FAMILY_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("system_key", "TEXT", false, 0),
     ("enabled", "INTEGER", true, 0),
     ("position", "INTEGER", true, 0),
+    ("revision", "INTEGER", true, 0),
+    ("managed_provider_id", "TEXT", false, 0),
+    ("policy_id", "TEXT", false, 0),
+    ("policy_version", "INTEGER", false, 0),
+    ("lifecycle_state", "TEXT", true, 0),
+    ("removed_at", "TEXT", false, 0),
 ];
 const MODEL_FAMILY_MEMBER_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("family_id", "INTEGER", true, 1),
@@ -109,6 +156,7 @@ const PRODUCT_MODEL_PREFERENCE_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("default_harness_configuration_name", "TEXT", true, 0),
     ("default_provider_id", "TEXT", true, 0),
     ("defaults_modified", "INTEGER", true, 0),
+    ("default_family_id", "INTEGER", false, 0),
 ];
 
 pub(super) async fn validate_existing_or_empty(pool: &SqlitePool) -> Result<(), StorageError> {
@@ -137,10 +185,12 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "projects", PROJECT_COLUMNS).await?;
     validate_columns(pool, "threads", THREAD_COLUMNS).await?;
     validate_columns(pool, "interactions", INTERACTION_COLUMNS).await?;
+    validate_columns(pool, "interaction_attempts", INTERACTION_ATTEMPT_COLUMNS).await?;
     validate_columns(pool, "action_invocations", ACTION_INVOCATION_COLUMNS).await?;
     validate_columns(pool, "model_providers", MODEL_PROVIDER_COLUMNS).await?;
     validate_columns(pool, "provider_models", PROVIDER_MODEL_COLUMNS).await?;
     validate_columns(pool, "product_harnesses", PRODUCT_HARNESS_COLUMNS).await?;
+    validate_columns(pool, "harness_model_rules", HARNESS_MODEL_RULE_COLUMNS).await?;
     validate_columns(
         pool,
         "harness_provider_compatibility",
@@ -158,6 +208,13 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     .await?;
     validate_index(pool, "projects", &["path"], true).await?;
     validate_index(pool, "interactions", &["thread_id", "sequence"], true).await?;
+    validate_index(
+        pool,
+        "interaction_attempts",
+        &["interaction_id", "attempt_number"],
+        true,
+    )
+    .await?;
     validate_index(
         pool,
         "action_invocations",
@@ -186,6 +243,13 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_index(pool, "model_families", &["name"], true).await?;
     validate_index(
         pool,
+        "model_families",
+        &["managed_provider_id", "policy_id", "policy_version"],
+        true,
+    )
+    .await?;
+    validate_index(
+        pool,
         "model_family_members",
         &["family_id", "position"],
         true,
@@ -210,11 +274,47 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     .await?;
     validate_foreign_key(
         pool,
+        "interaction_attempts",
+        "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "harness_model_rules",
+        "harness_configuration_name",
+        "product_harnesses",
+        "configuration_name",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
         "provider_models",
         "provider_id",
         "model_providers",
         "id",
         "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "model_families",
+        "managed_provider_id",
+        "model_providers",
+        "id",
+        "RESTRICT",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "product_model_preferences",
+        "default_family_id",
+        "model_families",
+        "id",
+        "RESTRICT",
     )
     .await?;
     validate_foreign_key(

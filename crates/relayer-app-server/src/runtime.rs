@@ -1,7 +1,8 @@
 use crate::{
     permissions::PermissionProfile,
     product::{
-        HarnessModelCompatibility, InteractionModelSelection, RuntimeProductHarness,
+        ExecutionHarnessPolicy, ExecutionModelSelection, FamilyPolicyReference,
+        HarnessModelCompatibility, HarnessModelRule, HarnessModelRules, RuntimeProductHarness,
         validate_stable_id,
     },
 };
@@ -19,10 +20,28 @@ pub(crate) struct HarnessConfiguration {
     pub(crate) name: String,
     implementation: String,
     implementation_version: u32,
+    #[serde(default = "default_configuration_revision")]
+    revision: u32,
     permission_bindings: Map<String, Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     model_compatibility: Vec<HarnessModelCompatibility>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model_rules: Option<HarnessModelRules>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    execution_access_contracts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model_defaults: Option<HarnessModelDefaults>,
     settings: Value,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HarnessModelDefaults {
+    family_policy: FamilyPolicyReference,
+}
+
+const fn default_configuration_revision() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -57,7 +76,15 @@ pub(crate) struct CompleteInteraction<'a> {
     pub(crate) working_directory: &'a str,
     pub(crate) harness_configuration_name: &'a str,
     pub(crate) permission_profile: &'a PermissionProfile,
-    pub(crate) model_selection: Option<&'a InteractionModelSelection>,
+    pub(crate) model_selection: Option<&'a ExecutionModelSelection>,
+    pub(crate) execution_lease_id: Option<&'a str>,
+    pub(crate) harness_policy: Option<&'a ExecutionHarnessPolicy>,
+}
+
+#[derive(Debug)]
+pub(crate) struct RuntimeExecutionAdmission {
+    pub(crate) execution_lease_id: String,
+    pub(crate) adapter_implementation_version: u32,
 }
 
 #[derive(Debug)]
@@ -131,7 +158,16 @@ impl RuntimeClient {
             .values()
             .map(|entry| RuntimeProductHarness {
                 id: entry.configuration.name.clone(),
+                configuration_digest: entry.digest.clone(),
                 model_compatibility: entry.configuration.model_compatibility.clone(),
+                configuration_revision: entry.configuration.revision,
+                model_rules: entry.configuration.model_rules.clone(),
+                execution_access_contracts: entry.configuration.execution_access_contracts.clone(),
+                family_policy: entry
+                    .configuration
+                    .model_defaults
+                    .as_ref()
+                    .map(|defaults| defaults.family_policy.clone()),
             })
             .collect::<Vec<_>>();
         harnesses.sort_by(|left, right| left.id.cmp(&right.id));
@@ -212,8 +248,15 @@ impl RuntimeClient {
             if let Some(model_selection) = command.model_selection {
                 complete_body["model"] = serde_json::json!({
                     "providerId": model_selection.provider_id.as_str(),
+                    "adapterId": &model_selection.adapter_id,
                     "modelId": &model_selection.model_id,
                 });
+            }
+            if let Some(execution_lease_id) = command.execution_lease_id {
+                complete_body["executionLeaseId"] = Value::String(execution_lease_id.to_owned());
+            }
+            if let Some(harness_policy) = command.harness_policy {
+                complete_body["harnessPolicy"] = serde_json::to_value(harness_policy)?;
             }
             self.post(
                 self.harness_url
@@ -228,17 +271,34 @@ impl RuntimeClient {
         let revocation = self.revoke_capability(&interaction.graph_token).await;
         let completed: CompleteResponse = match (completion, revocation) {
             (Ok(completed), Ok(())) => completed,
-            (Err(operation), Ok(())) => return Err(operation),
-            (Ok(_), Err(cleanup)) => return Err(cleanup),
-            (Err(operation), Err(cleanup)) => {
-                return Err(RuntimeError::Cleanup {
+            (Err(operation), Ok(())) => {
+                return Err(RuntimeError::Completion {
+                    graph_node_id: interaction.node.id,
                     operation: Box::new(operation),
-                    cleanup: Box::new(cleanup),
+                });
+            }
+            (Ok(_), Err(cleanup)) => {
+                return Err(RuntimeError::Completion {
+                    graph_node_id: interaction.node.id,
+                    operation: Box::new(cleanup),
+                });
+            }
+            (Err(operation), Err(cleanup)) => {
+                return Err(RuntimeError::Completion {
+                    graph_node_id: interaction.node.id,
+                    operation: Box::new(RuntimeError::Cleanup {
+                        operation: Box::new(operation),
+                        cleanup: Box::new(cleanup),
+                    }),
                 });
             }
         };
+        let harness_configuration_digest = command
+            .harness_policy
+            .map(|policy| policy.configuration_digest.as_str())
+            .unwrap_or(&selected.digest);
         let effective_execution_digest = effective_execution_digest(
-            &selected.digest,
+            harness_configuration_digest,
             &command.permission_profile.id,
             command.model_selection,
         );
@@ -246,7 +306,7 @@ impl RuntimeClient {
         Ok(RuntimeCompletion {
             graph_node_id: interaction.node.id,
             harness_configuration_name: selected.configuration.name.clone(),
-            harness_configuration_digest: selected.digest.clone(),
+            harness_configuration_digest: harness_configuration_digest.to_owned(),
             permission_profile_id: command.permission_profile.id.clone(),
             effective_execution_digest,
             effective_permission_receipt: serde_json::json!({
@@ -261,6 +321,94 @@ impl RuntimeClient {
             }),
             output: completed.output,
         })
+    }
+
+    pub(crate) async fn admit_provider_execution(
+        &self,
+        command: &CompleteInteraction<'_>,
+    ) -> Result<RuntimeExecutionAdmission, RuntimeError> {
+        let selected = self
+            .configurations
+            .get(command.harness_configuration_name)
+            .ok_or_else(|| {
+                RuntimeError::Configuration(format!(
+                    "unknown harness configuration {}",
+                    command.harness_configuration_name
+                ))
+            })?;
+        let model = command.model_selection.ok_or_else(|| {
+            RuntimeError::Configuration(
+                "provider execution admission requires a model selection".into(),
+            )
+        })?;
+        let harness_policy = command.harness_policy.ok_or_else(|| {
+            RuntimeError::Configuration(
+                "provider execution admission requires a current harness policy".into(),
+            )
+        })?;
+        let _: Value = self
+            .post(
+                self.harness_url.join("sessions")?,
+                &serde_json::json!({
+                    "threadId": command.thread_id,
+                    "configuration": selected.configuration,
+                    "permissionProfileId": command.permission_profile.id,
+                    "workingDirectory": command.working_directory,
+                }),
+                &self.harness_control_token,
+                StatusCode::CREATED,
+            )
+            .await?;
+        let admitted: ExecutionAdmissionResponse = self
+            .post(
+                self.harness_url
+                    .join(&format!("sessions/{}/execution-leases", command.thread_id))?,
+                &serde_json::json!({
+                    "model": {
+                        "providerId": model.provider_id.as_str(),
+                        "adapterId": &model.adapter_id,
+                        "modelId": &model.model_id,
+                    },
+                    "harnessPolicy": harness_policy,
+                }),
+                &self.harness_control_token,
+                StatusCode::CREATED,
+            )
+            .await?;
+        let adapter_implementation_version = admitted
+            .adapter_implementation_version
+            .parse::<u32>()
+            .ok()
+            .filter(|version| *version > 0);
+        let Some(adapter_implementation_version) = adapter_implementation_version else {
+            let _ = self
+                .release_provider_execution(command.thread_id, &admitted.execution_lease_id)
+                .await;
+            return Err(RuntimeError::Configuration(
+                "provider broker returned an invalid adapter implementation version".into(),
+            ));
+        };
+        Ok(RuntimeExecutionAdmission {
+            execution_lease_id: admitted.execution_lease_id,
+            adapter_implementation_version,
+        })
+    }
+
+    pub(crate) async fn release_provider_execution(
+        &self,
+        thread_id: i64,
+        execution_lease_id: &str,
+    ) -> Result<(), RuntimeError> {
+        let response = self
+            .client
+            .delete(self.harness_url.join(&format!(
+                "sessions/{thread_id}/execution-leases/{execution_lease_id}"
+            ))?)
+            .bearer_auth(&self.harness_control_token)
+            .send()
+            .await?;
+        response_json(response, StatusCode::OK).await?;
+        Ok(())
     }
 
     pub(crate) async fn get_layer(
@@ -364,6 +512,13 @@ struct CompleteResponse {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ExecutionAdmissionResponse {
+    execution_lease_id: String,
+    adapter_implementation_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RemintCapabilityResponse {
     graph_token: String,
 }
@@ -397,6 +552,7 @@ fn validate_configuration(entry: &CatalogEntry) -> Result<(), RuntimeError> {
     let configuration = &entry.configuration;
     if configuration.schema_version != 1
         || configuration.implementation_version < 1
+        || configuration.revision < 1
         || configuration.name.trim().is_empty()
         || configuration.implementation.trim().is_empty()
         || configuration.permission_bindings.is_empty()
@@ -410,6 +566,40 @@ fn validate_configuration(entry: &CatalogEntry) -> Result<(), RuntimeError> {
         return Err(RuntimeError::Configuration(
             "invalid harness configuration catalog entry".into(),
         ));
+    }
+    if configuration
+        .execution_access_contracts
+        .iter()
+        .any(|contract| !versioned_identifier(contract))
+        || configuration
+            .execution_access_contracts
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            != configuration.execution_access_contracts.len()
+    {
+        return Err(RuntimeError::Configuration(
+            "invalid harness execution access contracts".into(),
+        ));
+    }
+    if let Some(defaults) = &configuration.model_defaults
+        && (defaults.family_policy.version < 1 || defaults.family_policy.id.trim().is_empty())
+    {
+        return Err(RuntimeError::Configuration(
+            "invalid harness model-family policy reference".into(),
+        ));
+    }
+    if (!configuration.model_compatibility.is_empty() || configuration.model_rules.is_some())
+        && configuration.execution_access_contracts.is_empty()
+    {
+        return Err(RuntimeError::Configuration(
+            "model-selecting harness configurations require execution access contracts".into(),
+        ));
+    }
+    if let Some(rules) = &configuration.model_rules {
+        for rule in rules.allow.iter().chain(&rules.deny) {
+            validate_model_rule(rule)?;
+        }
     }
     let mut providers = std::collections::HashSet::new();
     for compatibility in &configuration.model_compatibility {
@@ -454,10 +644,51 @@ fn validate_configuration(entry: &CatalogEntry) -> Result<(), RuntimeError> {
     Ok(())
 }
 
+fn validate_model_rule(rule: &HarnessModelRule) -> Result<(), RuntimeError> {
+    validate_stable_id(&rule.adapter_id, "adapterId")
+        .map_err(|error| RuntimeError::Configuration(error.to_string()))?;
+    match (&rule.model_id_exact, &rule.model_id_regex) {
+        (Some(exact), None) => validate_stable_id(exact, "modelIdExact")
+            .map_err(|error| RuntimeError::Configuration(error.to_string())),
+        (None, Some(pattern)) if !pattern.is_empty() && pattern.len() <= 500 => {
+            if pattern.contains("(?")
+                || [
+                    "\\1", "\\2", "\\3", "\\4", "\\5", "\\6", "\\7", "\\8", "\\9", "\\k", "\\A",
+                    "\\z", "\\Z", "\\G",
+                ]
+                .iter()
+                .any(|unsupported| pattern.contains(unsupported))
+            {
+                return Err(RuntimeError::Configuration(
+                    "harness model regex uses syntax outside the supported cross-runtime subset"
+                        .into(),
+                ));
+            }
+            regex::Regex::new(pattern).map(|_| ()).map_err(|error| {
+                RuntimeError::Configuration(format!("invalid harness model regex: {error}"))
+            })
+        }
+        _ => Err(RuntimeError::Configuration(
+            "harness model rule requires exactly one exact or regex matcher".into(),
+        )),
+    }
+}
+
+fn versioned_identifier(value: &str) -> bool {
+    let Some((id, version)) = value.rsplit_once('@') else {
+        return false;
+    };
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
+        && version.parse::<u32>().is_ok_and(|version| version > 0)
+}
+
 fn effective_execution_digest(
     configuration_digest: &str,
     permission_profile_id: &str,
-    model_selection: Option<&InteractionModelSelection>,
+    model_selection: Option<&ExecutionModelSelection>,
 ) -> String {
     let mut digest = Sha256::new();
     digest.update(b"relayer.effective-execution.v2");
@@ -495,6 +726,11 @@ pub(crate) enum RuntimeError {
         operation: Box<RuntimeError>,
         cleanup: Box<RuntimeError>,
     },
+    #[error("runtime completion for graph node {graph_node_id} failed: {operation}")]
+    Completion {
+        graph_node_id: i64,
+        operation: Box<RuntimeError>,
+    },
     #[error(
         "harness configuration {configuration_name} does not support permission profile {profile_id}"
     )]
@@ -510,6 +746,91 @@ pub(crate) enum RuntimeError {
     Http(#[from] reqwest::Error),
     #[error(transparent)]
     Url(#[from] url::ParseError),
+}
+
+impl RuntimeError {
+    pub(crate) fn attempt_failure(&self) -> (&str, &str, bool) {
+        if let Self::Completion { operation, .. } = self {
+            return operation.attempt_failure();
+        }
+        if let Self::Remote { body, .. } = self {
+            let reported_category = body
+                .get("failureCategory")
+                .and_then(Value::as_str)
+                .unwrap_or("execution");
+            let category = match reported_category {
+                "authentication"
+                | "model_not_found"
+                | "rate_limit"
+                | "provider_5xx"
+                | "provider_timeout"
+                | "transport"
+                | "provider_disconnected"
+                | "model_unavailable"
+                | "configuration"
+                | "permission_receipt_mismatch"
+                | "application_restart"
+                | "execution" => reported_category,
+                _ => "execution",
+            };
+            let reported_boundary = body
+                .get("effectBoundary")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            // The harness is outside the product database's trust boundary. Unknown or
+            // malformed effect claims must fail closed rather than leaving a running attempt
+            // behind because a database CHECK rejected the value.
+            let boundary = match reported_boundary {
+                "none" | "partial_output" | "graph_write" | "tool_effect" | "unknown" => {
+                    reported_boundary
+                }
+                _ => "unknown",
+            };
+            let model_related = matches!(
+                category,
+                "authentication"
+                    | "model_not_found"
+                    | "rate_limit"
+                    | "provider_5xx"
+                    | "provider_timeout"
+                    | "transport"
+                    | "provider_disconnected"
+                    | "model_unavailable"
+            );
+            return (category, boundary, model_related);
+        }
+        ("execution", "unknown", false)
+    }
+
+    pub(crate) fn graph_node_id(&self) -> Option<i64> {
+        match self {
+            Self::Completion { graph_node_id, .. } => Some(*graph_node_id),
+            Self::Cleanup { operation, .. } => operation.graph_node_id(),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn safe_failure_message(&self) -> &'static str {
+        let (category, _, _) = self.attempt_failure();
+        match category {
+            "authentication" | "provider_disconnected" => {
+                "The selected provider is not connected. Reconnect it or choose another model."
+            }
+            "model_not_found" | "model_unavailable" => {
+                "The selected model is no longer available. Choose another model and send again."
+            }
+            "rate_limit" => {
+                "The selected provider is rate limited. Choose another model or try again later."
+            }
+            "provider_5xx" | "provider_timeout" | "transport" => {
+                "The selected provider could not complete this turn. Choose an available model and send again."
+            }
+            "configuration" => "The selected harness or provider configuration is unavailable.",
+            "permission_receipt_mismatch" => "The runtime returned an invalid permission receipt.",
+            "application_restart" => "The attempt was interrupted by an application restart.",
+            _ => "The harness could not complete this attempt.",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -533,6 +854,51 @@ mod tests {
     };
 
     #[test]
+    fn harness_effect_boundary_is_allowlisted_and_unknown_values_fail_closed() {
+        for boundary in [
+            "none",
+            "partial_output",
+            "graph_write",
+            "tool_effect",
+            "unknown",
+        ] {
+            let error = super::RuntimeError::Remote {
+                status: 500,
+                body: json!({
+                    "failureCategory": "provider_timeout",
+                    "effectBoundary": boundary,
+                }),
+            };
+            assert_eq!(
+                error.attempt_failure(),
+                ("provider_timeout", boundary, true)
+            );
+        }
+        let invalid = super::RuntimeError::Remote {
+            status: 500,
+            body: json!({
+                "failureCategory": "provider_timeout",
+                "effectBoundary": "definitely_safe",
+            }),
+        };
+        assert_eq!(
+            invalid.attempt_failure(),
+            ("provider_timeout", "unknown", true)
+        );
+        let invalid_category = super::RuntimeError::Remote {
+            status: 500,
+            body: json!({
+                "failureCategory": "secret value from an untrusted harness",
+                "effectBoundary": "none",
+            }),
+        };
+        assert_eq!(
+            invalid_category.attempt_failure(),
+            ("execution", "none", false)
+        );
+    }
+
+    #[test]
     fn configuration_owned_model_omits_empty_compatibility_when_forwarded() {
         let configuration: HarnessConfiguration = serde_json::from_value(json!({
             "schemaVersion": 1,
@@ -547,6 +913,9 @@ mod tests {
         let forwarded = serde_json::to_value(configuration).unwrap();
 
         assert!(forwarded.get("modelCompatibility").is_none());
+        assert!(forwarded.get("modelRules").is_none());
+        assert!(forwarded.get("executionAccessContracts").is_none());
+        assert!(forwarded.get("modelDefaults").is_none());
     }
 
     #[tokio::test]
@@ -655,6 +1024,8 @@ mod tests {
                 harness_configuration_name: "test",
                 permission_profile: &permission_profile,
                 model_selection: None,
+                execution_lease_id: None,
+                harness_policy: None,
             })
             .await;
 
@@ -760,6 +1131,8 @@ mod tests {
                 harness_configuration_name: "test",
                 permission_profile: &permission_profile,
                 model_selection: None,
+                execution_lease_id: None,
+                harness_policy: None,
             })
             .await
             .unwrap();

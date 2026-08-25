@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { HarnessHost, startHarnessHost } from "../src/host.js";
+import { HarnessExecutionFailure, HarnessHost, startHarnessHost } from "../src/host.js";
 import type { HarnessConfiguration, HarnessFactoryContext, HarnessSessionState } from "../src/types.js";
 
 const completion = {
@@ -31,6 +31,170 @@ const legacyConfiguration = (configuration: HarnessConfiguration) => {
 };
 
 describe("HarnessHost", () => {
+  it("classifies and preserves partial streamed output without making the attempt replayable", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-partial-output-"));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : url.endsWith("/neighbors")
+        ? new Response(JSON.stringify({ nodes: [] }), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control",
+        trace: {
+          directory: join(directory, "traces"),
+          policy: { mode: "required", requiredFeatures: {}, includeNativeArtifacts: false, maxBytesPerTurn: 10_000, maxEventsPerTurn: 100 },
+        },
+        implementations: { test: () => ({ async complete(context) {
+          context.trace.emit({ type: "message", data: { text: "inspectable partial answer" } });
+          throw new Error("stream disconnected");
+        }, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+      await expect(host.complete(1, graph(), undefined, undefined, { productInteractionId: 31 }))
+        .rejects.toMatchObject({ effectBoundary: "partial_output" });
+      const exported = join(directory, "exported");
+      await host.exportCandidateTrace(31, exported, {
+        runId: "run", executionId: "execution", interactionId: "31", harnessConfigurationName: "test-default",
+      });
+      expect(await readFile(join(exported, "events.jsonl"), "utf8")).toContain("inspectable partial answer");
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("classifies an observable partial graph as a protected graph write", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-partial-graph-"));
+    let wroteGraph = false;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : url.endsWith("/neighbors")
+        ? new Response(JSON.stringify({ nodes: wroteGraph ? [{ id: 2 }] : [] }), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control",
+        implementations: { test: () => ({ async complete() { wroteGraph = true; throw new Error("crash after write"); }, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+      await expect(host.complete(1, graph())).rejects.toMatchObject({ effectBoundary: "graph_write" });
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("classifies a started tool call as protected even when later graph inspection is empty", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-tool-effect-"));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : url.endsWith("/neighbors")
+        ? new Response(JSON.stringify({ nodes: [] }), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control",
+        implementations: { test: () => ({ async complete(context) {
+          context.trace.emit({ type: "tool.call.started", data: { name: "write-file" } });
+          throw new Error("tool result connection lost");
+        }, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+      await expect(host.complete(1, graph())).rejects.toMatchObject({ effectBoundary: "tool_effect" });
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("adopts an accepted graph after a harness unwind failure and never repeats execution", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-accepted-recovery-"));
+    let accepted = false;
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? accepted
+        ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control",
+        implementations: { test: () => ({ async complete() {
+          calls += 1;
+          accepted = true;
+          throw new Error("crash after graph.submit");
+        }, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+      await expect(host.complete(1, graph())).resolves.toMatchObject({ output: completion });
+      await expect(host.complete(1, graph())).resolves.toMatchObject({ output: completion });
+      expect(calls).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("allows an adapter to attest a no-effect failure before provider execution", () => {
+    expect(new HarnessExecutionFailure("not started", "authentication", "none"))
+      .toMatchObject({ failureCategory: "authentication", effectBoundary: "none" });
+  });
+
+  it("fails closed for an untyped provider failure after execution starts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-no-effect-"));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : url.endsWith("/neighbors")
+        ? new Response(JSON.stringify({ nodes: [] }), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const configuration = {
+        ...testConfiguration,
+        modelRules: { allow: [{ adapterId: "openai-api", modelIdExact: "gpt-test" }], deny: [] },
+        executionAccessContracts: ["secret@1"],
+      } as HarnessConfiguration;
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control",
+        accessBroker: { async acquire() { return { access: { kind: "secret", contract: "secret@1", providerId: "provider", adapterId: "openai-api", adapterImplementationVersion: "1", endpoint: "https://api.openai.com/v1", fields: { "api-key": "secret" } }, async release() {} }; } },
+        implementations: { test: () => ({ async complete() { throw new Error("model not found"); }, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration, workingDirectory: directory });
+      await expect(host.complete(1, graph(), { providerId: "provider", adapterId: "openai-api", modelId: "gpt-test" }))
+        .rejects.toMatchObject({ effectBoundary: "unknown" });
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a selected model when the harness omits access contracts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-missing-access-contract-"));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : url.endsWith("/neighbors")
+        ? new Response(JSON.stringify({ nodes: [] }), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control",
+        implementations: { test: () => ({ async complete() {}, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+      await expect(host.complete(1, graph(), { providerId: "provider", adapterId: "openai-api", modelId: "gpt-test" }))
+        .rejects.toMatchObject({ failureCategory: "configuration", effectBoundary: "none" });
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("persists resumable harness state even when completion fails", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-host-"));
     const stateFile = join(directory, "sessions.json");
@@ -504,6 +668,7 @@ describe("HarnessHost", () => {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
         controlToken: "control",
+        accessBroker: { async acquire(model) { return { access: { kind: "managed-runtime", contract: "managed-runtime@1", providerId: model.providerId, adapterId: model.adapterId!, adapterImplementationVersion: "1", environment: {} }, async release() {} }; } },
         implementations: { test: () => {
           factoryCalls += 1;
           return {
@@ -518,18 +683,18 @@ describe("HarnessHost", () => {
         } },
       });
       await host.initialize();
-      const base = { threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory };
+      const base = { threadId: 1, permissionProfileId: "auto", configuration: { ...testConfiguration, executionAccessContracts: ["managed-runtime@1"] }, workingDirectory: directory };
       await host.createSession(base);
 
-      await host.complete(1, graph(1, "first-token"), { providerId: "codex", modelId: "gpt-first" });
-      await expect(host.complete(1, graph(2, "second-token"), { providerId: "codex", modelId: "gpt-second" })).resolves.toMatchObject({
+      await host.complete(1, graph(1, "first-token"), { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-first" });
+      await expect(host.complete(1, graph(2, "second-token"), { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-second" })).resolves.toMatchObject({
         output: { nodeId: 2 },
       });
       expect(factoryCalls).toBe(1);
       expect(adopted.map(({ token, nodeId }) => [token, nodeId])).toEqual([["first-token", 1], ["second-token", 2]]);
       expect(models).toEqual([
-        { providerId: "codex", modelId: "gpt-first" },
-        { providerId: "codex", modelId: "gpt-second" },
+        { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-first" },
+        { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-second" },
       ]);
       expect(revocationRequests).toBe(0);
       expect(() => scopes[0]!.acquireCapability()).toThrow("no longer active");
@@ -556,6 +721,7 @@ describe("HarnessHost", () => {
         configuration: {
           ...testConfiguration,
           modelCompatibility: [{ providerId: "codex", modelIds: ["allowed"] }],
+          executionAccessContracts: ["managed-runtime@1"],
         },
         workingDirectory: directory,
       });
@@ -564,6 +730,322 @@ describe("HarnessHost", () => {
         .rejects.toThrow("not compatible with this configuration");
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("defensively enforces adapter model rules before graph access", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-model-rules-"));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({ async complete() {}, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: {
+          ...testConfiguration,
+          modelRules: {
+            allow: [{ adapterId: "openai-api", modelIdRegex: "^gpt-" }],
+            deny: [{ adapterId: "openai-api", modelIdExact: "gpt-preview" }],
+          },
+          executionAccessContracts: ["secret@1"],
+        },
+        workingDirectory: directory,
+      });
+
+      await expect(host.complete(1, graph(), {
+        providerId: "openai-work",
+        adapterId: "openai-api",
+        modelId: "gpt-preview",
+      })).rejects.toThrow("not compatible with this configuration");
+      await expect(host.complete(1, graph(), {
+        providerId: "openai-work",
+        modelId: "gpt-5.2",
+      })).rejects.toThrow("not compatible with this configuration");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("defensively applies the current saved rule policy on the very next send", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-current-policy-"));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control",
+        implementations: { test: () => ({ async complete() {}, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({
+        threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: {
+          ...testConfiguration,
+          revision: 1,
+          executionAccessContracts: ["secret@1"],
+          modelRules: { allow: [{ adapterId: "openai-api", modelIdExact: "gpt-5.2" }], deny: [] },
+        },
+      });
+      await expect(host.complete(
+        1,
+        graph(),
+        { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+        undefined,
+        undefined,
+        undefined,
+        {
+          configurationRevision: 2,
+          configurationDigest: `sha256:${"a".repeat(64)}`,
+          modelRules: {
+            allow: [{ adapterId: "openai-api", modelIdExact: "gpt-5.2" }],
+            deny: [{ adapterId: "openai-api", modelIdExact: "gpt-5.2" }],
+          },
+        },
+      )).rejects.toThrow("not compatible with this configuration");
+      await expect(host.complete(
+        1,
+        graph(),
+        { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+      )).rejects.toThrow("Current harness execution policy is required");
+      expect(fetchMock).not.toHaveBeenCalled();
+      await host.close();
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects admission policy omission after observing a dynamic policy", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-current-admission-policy-"));
+    const release = vi.fn();
+    const acquire = vi.fn(async () => ({
+      access: {
+        kind: "secret" as const,
+        contract: "secret@1" as const,
+        providerId: "openai-work",
+        adapterId: "openai-api",
+        adapterImplementationVersion: "1",
+        endpoint: "https://api.openai.test",
+        fields: { "api-key": "secret" },
+      },
+      release,
+    }));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control", accessBroker: { acquire },
+        implementations: { test: () => ({ async complete() {}, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({
+        threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: {
+          ...testConfiguration,
+          revision: 1,
+          executionAccessContracts: ["secret@1"],
+          modelRules: { allow: [{ adapterId: "openai-api", modelIdExact: "gpt-5.2" }], deny: [] },
+        },
+      });
+      const model = { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" };
+      const policy = {
+        configurationRevision: 2,
+        configurationDigest: `sha256:${"a".repeat(64)}`,
+        modelRules: { allow: [{ adapterId: "openai-api", modelIdExact: "gpt-5.2" }], deny: [] },
+      };
+      const admission = await host.admitProviderExecution(1, model, new AbortController().signal, policy);
+      await host.releaseProviderExecution(admission.executionLeaseId);
+
+      await expect(host.admitProviderExecution(1, model, new AbortController().signal))
+        .rejects.toThrow("Current harness execution policy is required");
+      expect(acquire).toHaveBeenCalledOnce();
+      expect(release).toHaveBeenCalledOnce();
+      await host.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("leases execution-scoped provider access and releases it when the harness fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-access-broker-"));
+    const release = vi.fn();
+    const acquire = vi.fn(async () => ({
+      access: {
+        kind: "secret" as const,
+        contract: "secret@1" as const,
+        providerId: "openai-work",
+        adapterId: "openai-api",
+        adapterImplementationVersion: "1",
+        endpoint: "https://api.openai.test",
+        fields: { "api-key": "never-persist-me" },
+      },
+      release,
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control", accessBroker: { acquire },
+        implementations: { test: () => ({ async complete(context) {
+          expect(context.access?.kind).toBe("secret");
+          throw new Error("provider failed");
+        }, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({
+        threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: {
+          ...testConfiguration,
+          // Migrated configurations can retain this projection for old readers;
+          // adapter-aware modelRules are authoritative in the host.
+          modelCompatibility: [{ providerId: "codex" }],
+          modelRules: { allow: [{ adapterId: "openai-api", modelIdRegex: ".*" }], deny: [] },
+          executionAccessContracts: ["secret@1"],
+        },
+      });
+      await expect(host.complete(1, graph(), { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" }))
+        .rejects.toThrow("provider failed");
+      expect(acquire).toHaveBeenCalledWith(
+        { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+        ["secret@1"],
+        expect.any(AbortSignal),
+      );
+      expect(release).toHaveBeenCalledOnce();
+      expect(await readFile(join(directory, "sessions.json"), "utf8")).not.toContain("never-persist-me");
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("holds trusted pre-admission through attempt setup and consumes its effective adapter version once", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-pre-admission-"));
+    const release = vi.fn();
+    const acquire = vi.fn(async () => ({
+      access: {
+        kind: "secret" as const,
+        contract: "secret@1" as const,
+        providerId: "openai-work",
+        adapterId: "openai-api",
+        adapterImplementationVersion: "7",
+        endpoint: "https://api.openai.test",
+        fields: { "api-key": "secret" },
+      },
+      release,
+    }));
+    let accepted = false;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? accepted
+        ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control", accessBroker: { acquire },
+        implementations: { test: () => ({ async complete(context) {
+          expect(context.access?.adapterImplementationVersion).toBe("7");
+          accepted = true;
+        }, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({
+        threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: {
+          ...testConfiguration,
+          modelRules: { allow: [{ adapterId: "openai-api", modelIdExact: "gpt-5.2" }], deny: [] },
+          executionAccessContracts: ["secret@1"],
+        },
+      });
+      const model = { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" };
+      const admission = await host.admitProviderExecution(1, model, new AbortController().signal);
+      expect(admission.adapterImplementationVersion).toBe("7");
+      expect(release).not.toHaveBeenCalled();
+      await expect(host.complete(1, graph(), model, undefined, undefined, admission.executionLeaseId)).resolves.toMatchObject({ output: completion });
+      expect(acquire).toHaveBeenCalledOnce();
+      expect(release).not.toHaveBeenCalled();
+      accepted = false;
+      await expect(host.complete(1, graph(), model, undefined, undefined, admission.executionLeaseId))
+        .rejects.toThrow("invalid or expired");
+      expect(await host.releaseProviderExecution(admission.executionLeaseId)).toBe(true);
+      expect(release).toHaveBeenCalledOnce();
+      expect(await host.releaseProviderExecution(admission.executionLeaseId)).toBe(false);
+
+      accepted = false;
+      const cancelled = await host.admitProviderExecution(1, model, new AbortController().signal);
+      expect(await host.releaseProviderExecution(cancelled.executionLeaseId)).toBe(true);
+      expect(release).toHaveBeenCalledTimes(2);
+      await expect(host.complete(1, graph(), model, undefined, undefined, cancelled.executionLeaseId))
+        .rejects.toThrow("invalid or expired");
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not expire a claimed lease during a long execution and bounds the terminal acknowledgement", async () => {
+    vi.useFakeTimers();
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-lease-timeouts-"));
+    const release = vi.fn();
+    let finishHarness!: () => void;
+    const harnessFinished = new Promise<void>((resolve) => { finishHarness = resolve; });
+    let harnessStarted!: () => void;
+    const started = new Promise<void>((resolve) => { harnessStarted = resolve; });
+    let accepted = false;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? accepted
+        ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control",
+        accessBroker: { async acquire() {
+          return {
+            access: {
+              kind: "secret", contract: "secret@1", providerId: "openai-work", adapterId: "openai-api",
+              adapterImplementationVersion: "7", endpoint: "https://api.openai.test", fields: { "api-key": "opaque" },
+            },
+            release,
+          };
+        } },
+        implementations: { test: () => ({ async complete() {
+          harnessStarted();
+          await harnessFinished;
+          accepted = true;
+        }, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({
+        threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: {
+          ...testConfiguration,
+          modelRules: { allow: [{ adapterId: "openai-api", modelIdExact: "gpt-5.2" }], deny: [] },
+          executionAccessContracts: ["secret@1"],
+        },
+      });
+      const model = { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" };
+      const admission = await host.admitProviderExecution(1, model, new AbortController().signal);
+      const running = host.complete(1, graph(), model, undefined, undefined, admission.executionLeaseId);
+      await started;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(release).not.toHaveBeenCalled();
+
+      finishHarness();
+      await running;
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(release).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(release).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
     }
@@ -704,6 +1186,7 @@ describe("HarnessHost", () => {
     const currentConfiguration: HarnessConfiguration = {
       ...testConfiguration,
       modelCompatibility: [{ providerId: "codex" }],
+      executionAccessContracts: ["managed-runtime@1"],
     };
     let restoredState: HarnessSessionState | undefined;
     const host = new HarnessHost({
@@ -719,7 +1202,7 @@ describe("HarnessHost", () => {
         schemaVersion: 4,
         sessions: [{
           threadId: 1,
-          configuration: testConfiguration,
+          configuration: { ...testConfiguration, executionAccessContracts: ["managed-runtime@1"] },
           permissionProfileId: "auto",
           workingDirectory: directory,
           state: { providerSessionId: "existing-session" },

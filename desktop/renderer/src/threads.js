@@ -36,7 +36,7 @@ import { appState, productApiAvailable, viewState } from "./state.js";
 import { $, threadTitle, toast } from "./ui.js";
 import { addLocalThread } from "./thread-model.js";
 import { closePermissionMenu } from "./permission-profiles.js";
-import { followupRequestBody, newThreadRequestBody } from "./interaction-request-model.js";
+import { newThreadRequestBody } from "./interaction-request-model.js";
 import {
   closeNewThreadModelPicker,
   newThreadModelSelectionPayload,
@@ -48,6 +48,10 @@ import {
   harnessUsesConfigurationModel,
   isModelSelectionCatalogError,
 } from "./model-picker-model.js";
+import {
+  interactionSubmissionTarget,
+  restoredDraftForInteraction,
+} from "./interaction-failure-model.js";
 
 let creatingFirstThread = false;
 let pendingRefreshTimer;
@@ -152,6 +156,7 @@ function schedulePendingRefresh(threadId) {
   const hasPendingInteraction = appState.interactions.some((interaction) => (
     String(interaction.threadId) === String(threadId)
     && ["not_started", "running", "submitted"].includes(interaction.completionStatus)
+    && !restoredDraftForInteraction(interaction)
   ));
   if (!threadId || !hasPendingInteraction) return;
   pendingRefreshTimer = setTimeout(() => {
@@ -300,9 +305,18 @@ export async function submitInteraction(text, modelSelection) {
     throw new Error("Choose an available model in Settings before sending.");
   }
   try {
-    await request(`/api/threads/${encodeURIComponent(threadId)}/interactions`, {
+    const latestInteraction = appState.interactions
+      .filter((interaction) => String(interaction.threadId) === String(threadId))
+      .at(-1);
+    const { path, body } = interactionSubmissionTarget(
+      threadId,
+      latestInteraction,
+      text,
+      modelSelection,
+    );
+    await request(path, {
       method: "POST",
-      body: JSON.stringify(followupRequestBody(text, modelSelection)),
+      body: JSON.stringify(body),
     });
   } catch (error) {
     await refreshAfterModelSelectionRejection(error, true);

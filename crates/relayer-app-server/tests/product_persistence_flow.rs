@@ -37,6 +37,12 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     let database = root.join("product.sqlite3");
 
     let app = open_app(&database, &root).await;
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE product_harnesses SET family_policy_id='codex-default-family',family_policy_version=1 WHERE configuration_name='codex-basic'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
     let published = app
         .clone()
         .oneshot(provider_publish_request(test_provider_snapshot()))
@@ -131,6 +137,19 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             axum::routing::post(|| async { (StatusCode::CREATED, axum::Json(json!({}))) }),
         )
         .route(
+            "/sessions/{id}/execution-leases",
+            axum::routing::post(|| async {
+                (StatusCode::CREATED, axum::Json(json!({
+                    "executionLeaseId": "00000000-0000-0000-0000-000000000007",
+                    "adapterImplementationVersion": "7"
+                })))
+            }),
+        )
+        .route(
+            "/sessions/{id}/execution-leases/{lease}",
+            axum::routing::delete(|| async { axum::Json(json!({ "released": false })) }),
+        )
+        .route(
             "/sessions/{id}/complete",
             axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let completion_counter = completion_counter.clone();
@@ -163,6 +182,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
                     "implementationVersion": 1,
                     "permissionBindings": { "ask": {}, "auto": {}, "full": {} },
                     "modelCompatibility": [{ "providerId": "codex" }],
+                    "executionAccessContracts": ["managed-runtime@1"],
                     "settings": {}
                 },
                 "digest": "sha256:test"
@@ -201,7 +221,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
             .count(),
         1
     );
-    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 0);
 
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     loop {
@@ -227,7 +247,9 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     assert_eq!(harness_completions.load(Ordering::SeqCst), 1);
     assert_eq!(
         observed_models.lock().unwrap().as_slice(),
-        [json!({ "providerId": "codex", "modelId": "test-model" })]
+        [
+            json!({ "providerId": "codex", "adapterId": "codex-subscription", "modelId": "test-model" })
+        ]
     );
     let action_state = response_json(
         app.clone()
@@ -272,7 +294,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         response_json(ordinary_unselected).await["code"],
         "model_selection_required"
     );
-    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 0);
 
     // A pre-selector accepted interaction has no model columns, but its thread already pins the
     // only harness configuration ordinary Product execution may use.
@@ -323,11 +345,11 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     assert_eq!(
         observed_models.lock().unwrap().as_slice(),
         [
-            json!({ "providerId": "codex", "modelId": "test-model" }),
+            json!({ "providerId": "codex", "adapterId": "codex-subscription", "modelId": "test-model" }),
             Value::Null,
         ]
     );
-    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 0);
 
     // Simulate a request disappearing after its durable one-shot record commits but before the
     // old handler starts execution. Retrying the saved invocation must claim it exactly once and
@@ -452,17 +474,45 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         );
     let observed_models = Arc::new(Mutex::new(Vec::<Value>::new()));
     let harness_models = observed_models.clone();
+    let retryable_failure_seen = Arc::new(AtomicBool::new(false));
+    let harness_retryable_failure_seen = retryable_failure_seen.clone();
     let harness = axum::Router::new()
         .route(
             "/sessions",
             axum::routing::post(|| async { (StatusCode::CREATED, axum::Json(json!({}))) }),
         )
         .route(
+            "/sessions/{id}/execution-leases",
+            axum::routing::post(|| async {
+                (StatusCode::CREATED, axum::Json(json!({
+                    "executionLeaseId": "00000000-0000-0000-0000-000000000007",
+                    "adapterImplementationVersion": "7"
+                })))
+            }),
+        )
+        .route(
+            "/sessions/{id}/execution-leases/{lease}",
+            axum::routing::delete(|| async { axum::Json(json!({ "released": false })) }),
+        )
+        .route(
             "/sessions/{id}/complete",
             axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let harness_models = harness_models.clone();
+                let harness_retryable_failure_seen = harness_retryable_failure_seen.clone();
                 async move {
                     harness_models.lock().unwrap().push(body["model"].clone());
+                    if body["model"]["modelId"] == "retryable-model"
+                        && !harness_retryable_failure_seen.swap(true, Ordering::SeqCst)
+                    {
+                        return (
+                            StatusCode::TOO_MANY_REQUESTS,
+                            axum::Json(json!({
+                                "error": "deterministic provider rate limit",
+                                "failureCategory": "rate_limit",
+                                "effectBoundary": "none"
+                            })),
+                        );
+                    }
                     if body["model"]["modelId"] == "broken-model" {
                         return (
                             StatusCode::INTERNAL_SERVER_ERROR,
@@ -497,6 +547,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
                         "implementationVersion": 1,
                         "permissionBindings": { "ask": {}, "auto": {}, "full": {} },
                         "modelCompatibility": [{ "providerId": "codex" }],
+                        "executionAccessContracts": ["managed-runtime@1"],
                         "settings": {}
                     },
                     "digest": "sha256:model-test"
@@ -509,6 +560,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
                         "implementationVersion": 1,
                         "permissionBindings": { "full": {} },
                         "modelCompatibility": [{ "providerId": "codex" }],
+                        "executionAccessContracts": ["managed-runtime@1"],
                         "settings": {}
                     },
                     "digest": "sha256:full-only"
@@ -557,7 +609,33 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
             .unwrap(),
     )
     .await;
-    let family_id = settings["families"][0]["id"].as_i64().unwrap();
+    assert!(settings["families"].is_array());
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('codex','retryable-model','Retryable model',3,1,1,0,'{}')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let family = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/model-families",
+            Some(json!({
+                "name": "Runtime contract models",
+                "members": [
+                    { "providerId": "codex", "modelId": "test-model" },
+                    { "providerId": "codex", "modelId": "second-model" },
+                    { "providerId": "codex", "modelId": "broken-model" },
+                    { "providerId": "codex", "modelId": "retryable-model" }
+                ]
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(family.status(), StatusCode::CREATED);
+    let family_id = response_json(family).await["id"].as_i64().unwrap();
 
     let raw_override = app
         .clone()
@@ -576,26 +654,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
     assert_eq!(raw_override.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
     provider_refreshes.succeed.store(false, Ordering::SeqCst);
-    let refresh_failed = app
-        .clone()
-        .oneshot(api_request(
-            "POST",
-            "/api/threads",
-            Some(json!({
-                "initialMessage": "Fail closed before persistence",
-                "harnessId": "codex-basic",
-                "modelSelection": model_selection(family_id, "test-model")
-            })),
-            true,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(refresh_failed.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(
-        response_json(refresh_failed).await["code"],
-        "provider_catalog_refresh_failed"
-    );
-    provider_refreshes.succeed.store(true, Ordering::SeqCst);
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 0);
 
     let invalid = app
         .clone()
@@ -680,6 +739,46 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
     assert_eq!(changed.status(), StatusCode::CREATED);
     wait_for_interaction_count_and_terminal(&app, thread_id, 3).await;
 
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE model_providers SET refreshed_at='0' WHERE id='codex'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let stale_selection = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/model-selection/validate",
+            Some(json!({
+                "harnessId": "codex-basic",
+                "familyId": family_id,
+                "providerId": "codex",
+                "modelId": "second-model"
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stale_selection.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(stale_selection).await["modelId"],
+        "second-model"
+    );
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 0);
+    let pool = sqlite_pool(&database).await;
+    let refreshed_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    sqlx::query("UPDATE model_providers SET refreshed_at=?1 WHERE id='codex'")
+        .bind(refreshed_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
     let invalid_follow_up = app
         .clone()
         .oneshot(api_request(
@@ -725,15 +824,164 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         interactions[0]["effectiveExecutionDigest"],
         interactions[2]["effectiveExecutionDigest"]
     );
-    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 7);
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 0);
     assert_eq!(
         observed_models.lock().unwrap().as_slice(),
         [
-            json!({ "providerId": "codex", "modelId": "test-model" }),
-            json!({ "providerId": "codex", "modelId": "test-model" }),
-            json!({ "providerId": "codex", "modelId": "second-model" }),
-            json!({ "providerId": "codex", "modelId": "broken-model" }),
+            json!({ "providerId": "codex", "adapterId": "codex-subscription", "modelId": "test-model" }),
+            json!({ "providerId": "codex", "adapterId": "codex-subscription", "modelId": "test-model" }),
+            json!({ "providerId": "codex", "adapterId": "codex-subscription", "modelId": "second-model" }),
+            json!({ "providerId": "codex", "adapterId": "codex-subscription", "modelId": "broken-model" }),
         ]
+    );
+
+    let retryable = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({
+                "text": "Retry this exact draft",
+                "modelSelection": model_selection(family_id, "retryable-model")
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(retryable.status(), StatusCode::CREATED);
+    let retryable_id = response_json(retryable).await["id"].as_i64().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let (attempt_id, receipt_selection) = loop {
+        let state = response_json(
+            app.clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let retryable = state["interactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|interaction| interaction["id"] == retryable_id)
+            .unwrap();
+        if retryable["completionStatus"] == "not_started"
+            && retryable["latestAttempt"]["outcome"] == "model_failed"
+        {
+            break (
+                retryable["latestAttempt"]["id"].as_i64().unwrap(),
+                retryable["latestAttempt"]["modelSelection"].clone(),
+            );
+        }
+        assert!(std::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert_eq!(
+        receipt_selection,
+        model_selection(family_id, "retryable-model")
+    );
+    let retry_uri = format!("/api/threads/{thread_id}/interactions/{retryable_id}/retry");
+    let retry_body = json!({
+        "attemptId": attempt_id,
+        "text": "Edited but still the same draft",
+        "modelSelection": model_selection(family_id, "second-model")
+    });
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE model_providers SET refreshed_at='0' WHERE id='codex'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let stale_retry_selection = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/model-selection/validate",
+            Some(json!({
+                "harnessId": "codex-basic",
+                "familyId": family_id,
+                "providerId": "codex",
+                "modelId": "second-model"
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stale_retry_selection.status(), StatusCode::OK);
+    let state = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let preserved = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == retryable_id)
+        .unwrap();
+    assert_eq!(preserved["completionStatus"], "not_started");
+    assert_eq!(preserved["text"], "Retry this exact draft");
+    assert_eq!(preserved["latestAttempt"]["id"], attempt_id);
+    assert_eq!(provider_refreshes.calls.load(Ordering::SeqCst), 0);
+    let pool = sqlite_pool(&database).await;
+    let refreshed_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    sqlx::query("UPDATE model_providers SET refreshed_at=?1 WHERE id='codex'")
+        .bind(refreshed_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let first_retry = app.clone().oneshot(api_request(
+        "POST",
+        &retry_uri,
+        Some(retry_body.clone()),
+        true,
+    ));
+    let repeated_retry =
+        app.clone()
+            .oneshot(api_request("POST", &retry_uri, Some(retry_body), true));
+    let (first_retry, repeated_retry) = tokio::join!(first_retry, repeated_retry);
+    assert_eq!(first_retry.unwrap().status(), StatusCode::OK);
+    assert_eq!(repeated_retry.unwrap().status(), StatusCode::OK);
+    let state = wait_for_interaction_count_and_terminal(&app, thread_id, 5).await;
+    let retried = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == retryable_id)
+        .unwrap();
+    assert_eq!(retried["completionStatus"], "accepted");
+    assert_eq!(retried["text"], "Edited but still the same draft");
+    assert_eq!(
+        retried["modelSelection"],
+        model_selection(family_id, "second-model")
+    );
+    assert_eq!(retried["latestAttempt"]["attemptNumber"], 2);
+    assert_eq!(retried["latestAttempt"]["adapterImplementationVersion"], 7);
+    assert_eq!(
+        observed_models
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|model| model["modelId"] == "second-model")
+            .count(),
+        2
     );
 
     graph_task.abort();
@@ -1346,7 +1594,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 5);
+    assert_eq!(applied_migrations, 8);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -1362,8 +1610,6 @@ async fn persists_project_thread_and_interaction_across_restart() {
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: None,
-        provider_catalog_refresh_url: None,
-        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await;
@@ -1389,8 +1635,6 @@ async fn persists_project_thread_and_interaction_across_restart() {
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: None,
-        provider_catalog_refresh_url: None,
-        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await;
@@ -1429,8 +1673,6 @@ async fn persists_project_thread_and_interaction_across_restart() {
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: None,
-        provider_catalog_refresh_url: None,
-        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await;
@@ -1469,8 +1711,6 @@ async fn open_app(database: &Path, web_directory: &Path) -> Router {
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: Some("review".to_owned()),
-        provider_catalog_refresh_url: None,
-        provider_catalog_refresh_token: None,
         runtime: None,
     })
     .await
@@ -1503,33 +1743,13 @@ async fn open_app_with_runtime_observed(
     harness_url: &str,
 ) -> (Router, ProviderRefreshProbe) {
     let provider_refreshes = Arc::new(AtomicUsize::new(0));
-    let observed_refreshes = provider_refreshes.clone();
     let refresh_succeeds = Arc::new(AtomicBool::new(true));
-    let observed_success = refresh_succeeds.clone();
-    let refresh = axum::Router::new().route(
-        "/v1/provider-catalog/refresh",
-        axum::routing::post(move || {
-            let observed_refreshes = observed_refreshes.clone();
-            let observed_success = observed_success.clone();
-            async move {
-                observed_refreshes.fetch_add(1, Ordering::SeqCst);
-                if observed_success.load(Ordering::SeqCst) {
-                    StatusCode::NO_CONTENT
-                } else {
-                    StatusCode::SERVICE_UNAVAILABLE
-                }
-            }
-        }),
-    );
-    let (provider_catalog_refresh_url, _refresh_task) = serve_test_app(refresh).await;
     let app = RelayerAppServer::open(RelayerAppServerConfig {
         database_path: database.to_owned(),
         web_directory: web_directory.to_owned(),
         permission_catalog: permission_catalog(),
         control_token: "control".to_owned(),
         read_only_control_token: Some("review".to_owned()),
-        provider_catalog_refresh_url: Some(provider_catalog_refresh_url),
-        provider_catalog_refresh_token: Some("provider-refresh-control-token-0001".to_owned()),
         runtime: Some(RelayerRuntimeConfig {
             graph_url: graph_url.to_owned(),
             harness_url: harness_url.to_owned(),

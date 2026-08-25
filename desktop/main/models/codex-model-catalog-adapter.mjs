@@ -77,8 +77,13 @@ function normalizeCodexModel(value) {
 }
 
 export class CodexModelCatalogAdapter extends ModelCatalogAdapter {
-  constructor({ credentials, pageSize = DEFAULT_PAGE_SIZE } = {}) {
-    super({ providerId: CODEX_PROVIDER_ID, providerLabel: CODEX_PROVIDER_LABEL });
+  constructor({
+    credentials,
+    providerId = credentials?.providerId ?? CODEX_PROVIDER_ID,
+    providerLabel = CODEX_PROVIDER_LABEL,
+    pageSize = DEFAULT_PAGE_SIZE,
+  } = {}) {
+    super({ providerId, providerLabel });
     if (!credentials || typeof credentials.account !== "function" || typeof credentials.request !== "function") {
       throw new Error("Codex model discovery requires a Codex credential adapter.");
     }
@@ -97,7 +102,7 @@ export class CodexModelCatalogAdapter extends ModelCatalogAdapter {
           id: this.providerId,
           label: this.providerLabel,
           status: "unavailable",
-          unavailableReason: optionalString(account.error) || "Codex is unavailable.",
+          unavailableReason: "Codex subscription is unavailable.",
         },
         models: [],
         systemFamily: { id: this.providerId, label: this.providerLabel, modelIds: [] },
@@ -151,7 +156,10 @@ export class CodexModelCatalogAdapter extends ModelCatalogAdapter {
       systemFamily: {
         id: this.providerId,
         label: this.providerLabel,
-        modelIds: models.filter((model) => model.visible).slice(0, 5).map((model) => model.id),
+        modelIds: models
+          .filter((model) => model.visible && model.isDefault)
+          .slice(0, 5)
+          .map((model) => model.id),
       },
     });
   }

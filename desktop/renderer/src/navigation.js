@@ -2,9 +2,10 @@ import { appState, desktop, viewState } from "./state.js";
 import { $, $$, escapeHtml } from "./ui.js";
 
 const settingsTabs = {
-  models: "Models and harnesses",
+  providers: "Providers",
+  models: "Model families",
+  harnesses: "Harnesses",
   appearance: "Appearance",
-  codex: "Codex",
   updates: "Application updates",
 };
 
@@ -31,6 +32,8 @@ export function setSettingsTab(tab) {
   const selectedTab = Object.hasOwn(settingsTabs, tab) ? tab : "appearance";
   viewState.settingsTab = selectedTab;
   $("#settingsTitle").textContent = settingsTabs[selectedTab];
+  const compactSelect = $("#settingsCompactSelect");
+  if (compactSelect) compactSelect.value = selectedTab;
   $$('[data-settings-tab]').forEach((button) => {
     const active = button.dataset.settingsTab === selectedTab;
     button.classList.toggle("active", active);

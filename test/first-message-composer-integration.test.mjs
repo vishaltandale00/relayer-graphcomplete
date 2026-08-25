@@ -1,11 +1,10 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { startModelCatalogRefreshServer } from "../desktop/main/models/model-catalog-refresh-server.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { bindComposerKeydown } from "../desktop/renderer/src/product-workspace/workspace.js";
@@ -23,38 +22,69 @@ describe("first-message composer integration", () => {
   it("submits on Enter and accepts a graph through the zero-inference fixture harness", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-first-message-test-"));
     directories.push(dataDirectory);
-    const configurationPath = join(repositoryRoot, "harnesses", "fixture-task-system.yaml");
+    const configurationPath = join(dataDirectory, "fixture-task-system.yaml");
+    const fixtureConfiguration = await readFile(
+      join(repositoryRoot, "harnesses", "fixture-task-system.yaml"),
+      "utf8",
+    );
+    await writeFile(configurationPath, fixtureConfiguration);
     const alternateConfigurationPath = join(repositoryRoot, "harnesses", "codex-basic-high.yaml");
+    let providerLeaseAcquisitions = 0;
+    let providerLeaseReleases = 0;
     const runtime = new GraphCompleteRuntimeService({
       userDataDirectory: dataDirectory,
       graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
       configurationPaths: [configurationPath, alternateConfigurationPath],
       additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory },
+      acquireProviderExecution: async (providerId) => {
+        providerLeaseAcquisitions += 1;
+        return {
+          definition: {
+            id: providerId,
+            adapterId: "codex-subscription",
+            accessContract: "managed-runtime@1",
+          },
+          descriptor: { implementationVersion: "1" },
+          runtime: {
+            async executionAccess() {
+              return { kind: "managed-runtime", environment: {} };
+            },
+          },
+          async release() {
+            providerLeaseReleases += 1;
+          },
+        };
+      },
     });
     services.push(runtime);
     const runtimeSession = await runtime.start();
-    let product;
-    const modelCatalogRefreshServer = await startModelCatalogRefreshServer({
-      refresh: () => product.publishProviderCatalog(fixtureCatalogSnapshot()),
-    });
-    services.push(modelCatalogRefreshServer);
-    product = new RelayerAppServerService({
+    const product = new RelayerAppServerService({
       userDataDirectory: dataDirectory,
       binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
       webDirectory: join(repositoryRoot, "desktop", "renderer"),
       permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
       runtimeSession,
-      providerCatalogRefreshSession: modelCatalogRefreshServer.session,
       defaultHarnessConfiguration: "fixture-task-system",
     });
     services.push(product);
     const productSession = await product.start();
     await product.publishProviderCatalog(fixtureCatalogSnapshot());
+    const fixtureFamily = await productRequest(productSession, "/api/model-families", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Fixture models",
+        enabled: true,
+        members: [{ providerId: "codex", modelId: "fixture-model" }],
+      }),
+    });
     const modelSettings = await productRequest(productSession, "/api/model-settings");
     expect(modelSettings.harnesses.map(({ id }) => id)).toEqual([
       "codex-basic",
       "codex-basic-high",
       "fixture-task-system",
+    ]);
+    expect(modelSettings.families).toEqual([
+      expect.objectContaining({ id: fixtureFamily.id, kind: "custom", name: "Fixture models" }),
     ]);
     expect(modelSettings.harnesses.find(({ id }) => id === "codex-basic").available).toBe(false);
     expect(modelSettings.harnesses.filter(({ available }) => available).map(({ id }) => id)).toEqual([
@@ -65,7 +95,7 @@ describe("first-message composer integration", () => {
       { providerId: "codex" },
     ]);
     const modelSelection = {
-      familyId: modelSettings.families[0].id,
+      familyId: fixtureFamily.id,
       providerId: "codex",
       modelId: "fixture-model",
     };
@@ -109,6 +139,8 @@ describe("first-message composer integration", () => {
       "Two-worker pool",
       "Results store",
     ]);
+    expect(providerLeaseAcquisitions).toBe(1);
+    expect(providerLeaseReleases).toBe(1);
   }, 15_000);
 });
 

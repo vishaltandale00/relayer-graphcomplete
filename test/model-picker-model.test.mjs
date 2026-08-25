@@ -168,7 +168,7 @@ describe("composer model picker selection", () => {
       });
   });
 
-  it("inherits an available prior interaction model without replacing a stale selection", () => {
+  it("inherits an available prior model and reselects within its family when stale", () => {
     const catalog = settings();
     expect(selectionForInteraction(catalog, "codex-basic", {
       modelSelection: { familyId: 1, providerId: "codex", modelId: "one" },
@@ -181,7 +181,12 @@ describe("composer model picker selection", () => {
     expect(stale).toMatchObject({ familyId: 1, providerId: "codex", modelId: "two" });
     expect(selectionForNextInteraction(catalog, "codex-basic", {
       modelSelection: { familyId: 1, providerId: "codex", modelId: "two" },
-    })).toEqual(stale);
+    })).toEqual({
+      harnessId: "codex-basic",
+      familyId: 1,
+      providerId: "codex",
+      modelId: "one",
+    });
     expect(pickerSelectionIsAvailable(catalog, stale)).toBe(false);
     expect(normalizePickerSelection(catalog, stale)).toBeNull();
   });

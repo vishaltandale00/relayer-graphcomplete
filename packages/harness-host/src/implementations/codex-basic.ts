@@ -1,14 +1,19 @@
 import { Codex, type ApprovalMode, type CodexOptions, type ModelReasoningEffort, type SandboxMode, type ThreadEvent, type ThreadItem, type ThreadOptions, type WebSearchMode } from "@openai/codex-sdk";
 import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relayer/graph-client";
 import { redactTraceData } from "../trace.js";
-import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState, HarnessTraceSpan, HarnessTraceSupport, JsonObject } from "../types.js";
+import type { Harness, HarnessExecutionAccess, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState, HarnessTraceSpan, HarnessTraceSupport, JsonObject } from "../types.js";
 
 export const CODEX_BASIC_KEY = "codex.basic";
 
 type CodexThread = ReturnType<Codex["startThread"]>;
 
 export interface CodexBasicDependencies {
-  readonly createCodex?: (environment: Record<string, string>, codexPathOverride: string | undefined, config: CodexConfiguration) => Codex;
+  readonly createCodex?: (
+    environment: Record<string, string>,
+    codexPathOverride: string | undefined,
+    config: CodexConfiguration,
+    providerOptions?: Pick<CodexOptions, "apiKey" | "baseUrl">,
+  ) => Codex;
   readonly clientModuleUrl?: string;
   readonly codexPathOverride?: string;
 }
@@ -51,8 +56,11 @@ export class CodexBasicHarness implements Harness {
 
   async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
     const model = this.selectedModel(context);
+    if (context.model !== undefined && context.access === undefined) {
+      throw new Error("codex.basic requires execution-scoped access for the selected provider");
+    }
     const capability = context.graph.acquireCapability();
-    const thread = this.openThread(this.createCodex(capability), model);
+    const thread = this.openThread(this.createCodex(capability, context.access), model);
     try {
       const prompt = this.prompt(context.inputGraph);
       context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
@@ -85,14 +93,31 @@ export class CodexBasicHarness implements Harness {
     return this.codexThreadId === undefined ? {} : { codexThreadId: this.codexThreadId };
   }
 
-  private createCodex(graph: GraphCapability): Codex {
+  private createCodex(graph: GraphCapability, access: HarnessExecutionAccess | undefined): Codex {
     const environment = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    if (access?.kind === "managed-runtime") {
+      if (access.adapterId !== "codex-subscription") throw new Error(`codex.basic cannot consume managed runtime ${access.adapterId}`);
+      Object.assign(environment, access.environment);
+    } else if (access?.kind === "secret") {
+      if (!new Set(["openai-api", "openrouter", "vercel-ai-router"]).has(access.adapterId)) {
+        throw new Error(`codex.basic cannot consume secret provider ${access.adapterId}`);
+      }
+      const apiKey = access.fields["api-key"];
+      if (!apiKey) throw new Error("codex.basic requires the provider API key");
+    }
     environment.RELAYER_GRAPH_URL = graph.url;
     environment.RELAYER_GRAPH_TOKEN = graph.token;
     environment.RELAYER_NODE_ID = String(graph.nodeId);
-    return this.dependencies.createCodex?.(environment, this.dependencies.codexPathOverride, this.codexConfig) ?? new Codex({
+    const providerOptions = access?.kind === "secret"
+      ? { apiKey: access.fields["api-key"]!, baseUrl: access.endpoint }
+      : undefined;
+    const injected = providerOptions === undefined
+      ? this.dependencies.createCodex?.(environment, this.dependencies.codexPathOverride, this.codexConfig)
+      : this.dependencies.createCodex?.(environment, this.dependencies.codexPathOverride, this.codexConfig, providerOptions);
+    return injected ?? new Codex({
       env: environment,
       config: this.codexConfig,
+      ...providerOptions,
       ...(this.dependencies.codexPathOverride === undefined ? {} : {
         codexPathOverride: this.dependencies.codexPathOverride,
       }),
@@ -101,8 +126,10 @@ export class CodexBasicHarness implements Harness {
 
   private selectedModel(context: HarnessRunContext): string | undefined {
     if (context.model === undefined) return this.threadOptions.model;
-    if (context.model.providerId !== "codex") {
-      throw new Error(`codex.basic cannot run provider ${context.model.providerId}`);
+    const adapterId = context.model.adapterId ?? (context.model.providerId === "codex" ? "codex-subscription" : undefined);
+    if (!adapterId) throw new Error(`codex.basic cannot run provider ${context.model.providerId}`);
+    if (!new Set(["codex-subscription", "openai-api", "openrouter", "vercel-ai-router"]).has(adapterId)) {
+      throw new Error(`codex.basic cannot run provider adapter ${adapterId}`);
     }
     return context.model.modelId;
   }
@@ -162,21 +189,19 @@ If a graph call rejects an object, read its error message, repair only that obje
   }
 
   private layeredNavigationPrompt(interactionNode: GraphNode): string {
-    return `You are the Relayer layered-navigation harness. Your task is to answer the current user interaction with a useful graph. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
+    return buildLayeredNavigationPrompt(interactionNode, this.clientModuleUrl);
+  }
+}
+
+export function buildLayeredNavigationPrompt(interactionNode: GraphNode, clientModuleUrl: string): string {
+  return `You are the Relayer layered-navigation harness. Answer the current user interaction with a useful graph. A flat answer is valid; add navigation only when opening it materially improves understanding or support.
 
 Current interaction node: ${interactionNode.id}
 User text: ${interactionNode.detail}
 
-Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a small .mjs file in the system temporary directory, not in the project checkout, and run it with Node.js. Import from:
-${this.clientModuleUrl}
+Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a temporary .mjs file outside the project checkout and run it with Node.js. Import RelayerGraphClient, NodeObject, EdgeObject, and LayerObject from ${clientModuleUrl}, then use RelayerGraphClient.fromEnv(). Author in whatever order fits the task. Keep each object's generated clientKey stable when retrying the same rejected submit; create a new object only for a genuinely new graph record. Submit each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.
 
-The module exports RelayerGraphClient, NodeObject, EdgeObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.
-
-Navigation has two meanings:
-- "expand" continues the explanation with a more detailed layer. Expansion must not point back to an expansion ancestor.
-- "reference" opens supporting evidence or context. References may reuse an accepted layer, may point to other reference layers, and may revisit a layer.
-
-The interaction node must have one root navigate action with relation: "expand" and no sourceLayer. Every action on a response node must include sourceLayer: the LayerObject in which you are authoring that action. Expansion layers may author expand, reference, or invoke actions. A layer reached as a reference may author only reference actions. Do not create both expand and reference actions to the same new target layer.
+Navigation relations are explicit. "expand" continues the explanation with further decomposition and must not point back to an expansion ancestor. "reference" opens supporting evidence or context and may revisit accepted or reference layers. The interaction node has exactly one root navigate action with relation: "expand" and no sourceLayer. Every response-node action includes sourceLayer: the LayerObject where the action is authored. Expansion layers may author expand, reference, or invoke actions; a reference-arrived layer may author only reference actions. Never target the same new layer as both expand and reference.
 
 Examples:
 await graph.addAction(${interactionNode.id}, { kind: "navigate", relation: "expand", label: "Response", target: rootLayer });
@@ -184,15 +209,9 @@ await graph.addAction(node, { kind: "navigate", relation: "expand", sourceLayer:
 await graph.addAction(node, { kind: "navigate", relation: "reference", sourceLayer: rootLayer, label: "View evidence", target: evidenceLayer });
 await graph.addAction(node, { kind: "invoke", sourceLayer: rootLayer, label: "Follow up", interactionText: "Ask a useful follow-up" });
 
-Layers normally contain 1 to 5 nodes. A layer may contain 6 to 8 nodes only when keeping them together is important; pass that private reason as await graph.submitLayer(layer, { sizeJustification: "..." }). Never mention or expose the size justification in user-facing node text. More than 8 nodes must be split into useful layers.
+Layers normally contain 1 to 5 nodes. A layer may contain 6 to 8 nodes only when keeping them together matters; pass a private sizeJustification to submitLayer. Never mention or expose the size justification in user-facing node text. More than 8 nodes must be split. Layer edges are visible and undirected. Every node needs a supported icon, short title, and useful markdown detail. Optional action icons must also be supported: ${RELAYER_ICON_NAMES.join(", ")}.
 
-Layer edges are exactly what the user sees and are undirected. Every node needs a supported icon, a short title, and useful markdown detail. Optional action icons must also use a supported Relayer icon name:
-${RELAYER_ICON_NAMES.join(", ")}
-
-Action variants are "chip", "pill", "wide", or "card". A card requires description; other variants do not accept one. Do not author HTML, CSS, colors, dimensions, or style fields.
-
-The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue, repair the rejected object or missing closure, and retry. A model turn ending is not completion. The task is complete only when the final graph.submit call succeeds.`;
-  }
+Action variants are chip, pill, wide, or card. A card requires description; other variants reject it. Do not author HTML, CSS, colors, dimensions, or style fields. The graph service enforces provenance, target visibility, layer size, expansion cycles, replay identity, and accepted closure. Repair rejected objects using the returned issues. A model turn ending is not completion; only a successful final graph.submit completes the task.`;
 }
 
 function traceCodexEvent(context: HarnessRunContext, event: ThreadEvent, spans: Map<string, HarnessTraceSpan>): void {

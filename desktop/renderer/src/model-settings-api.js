@@ -18,6 +18,10 @@ export function validateModelSelection(selection) {
   });
 }
 
+export function loadDefaultModelSelection(harnessId) {
+  return request(`/api/model-selection/default?harnessId=${encodeURIComponent(harnessId)}`);
+}
+
 export function createModelFamily(family) {
   return request("/api/model-families", {
     method: "POST",
@@ -40,5 +44,12 @@ export function saveModelFamilyOrder(familyIds) {
   return request("/api/model-families/order", {
     method: "PUT",
     body: JSON.stringify({ familyIds }),
+  });
+}
+
+export function saveHarnessModelRules(harnessId, payload) {
+  return request(`/api/harness-configurations/${encodeURIComponent(harnessId)}/model-rules`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
   });
 }

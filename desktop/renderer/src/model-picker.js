@@ -3,6 +3,7 @@ import {
   harnessUsesConfigurationModel,
   pickerSelectionIsAvailable,
   reconcilePickerSelection,
+  resolveUnsentModelIntent,
   validateCandidateHarness,
 } from "./model-picker-model.js";
 import { escapeHtml, escapeHtmlAttribute } from "./ui.js";
@@ -111,7 +112,7 @@ export function interactionModelSelection(interaction) {
 export function selectionForNextInteraction(settings, harnessId, interaction) {
   if (!settings || !harnessId) return null;
   const prior = interactionModelSelection(interaction);
-  return reconcilePickerSelection(settings, { harnessId, ...prior });
+  return resolveUnsentModelIntent(settings, { harnessId, ...prior }).selection;
 }
 
 export function createModelPicker({

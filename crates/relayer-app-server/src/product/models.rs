@@ -1,5 +1,15 @@
-use super::{InteractionId, InteractionModelSelection, ProjectId, ThreadId};
+use super::{
+    ExecutionModelSelection, InteractionId, InteractionModelSelection, ProjectId, ThreadId,
+};
 use serde_json::Value;
+
+pub(crate) struct BeginInteractionAttempt<'a> {
+    pub(crate) interaction_id: InteractionId,
+    pub(crate) harness_name: &'a str,
+    pub(crate) route: &'a ExecutionModelSelection,
+    pub(crate) adapter_version: u32,
+    pub(crate) expected_harness_policy: Option<&'a super::ExecutionHarnessPolicy>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Project {
@@ -23,6 +33,27 @@ pub(crate) struct Thread {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InteractionAttempt {
+    pub(crate) id: i64,
+    pub(crate) attempt_number: i64,
+    pub(crate) started_at: String,
+    pub(crate) finished_at: Option<String>,
+    pub(crate) family_id: super::ModelFamilyId,
+    pub(crate) family_revision: i64,
+    pub(crate) harness_configuration_name: String,
+    pub(crate) harness_configuration_revision: i64,
+    pub(crate) harness_configuration_digest: String,
+    pub(crate) provider_id: super::ProviderId,
+    pub(crate) adapter_id: String,
+    pub(crate) adapter_implementation_version: i64,
+    pub(crate) model_id: String,
+    pub(crate) access_contract: String,
+    pub(crate) outcome: String,
+    pub(crate) failure_category: Option<String>,
+    pub(crate) effect_boundary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Interaction {
     pub(crate) id: InteractionId,
     pub(crate) thread_id: ThreadId,
@@ -38,6 +69,7 @@ pub(crate) struct Interaction {
     pub(crate) effective_permission_receipt: Option<Value>,
     pub(crate) completion_output: Option<Value>,
     pub(crate) completion_error: Option<String>,
+    pub(crate) latest_attempt: Option<InteractionAttempt>,
     pub(crate) created_at: String,
 }
 

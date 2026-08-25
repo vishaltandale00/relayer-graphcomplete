@@ -12,14 +12,27 @@ impl SqliteProductStore {
         &self,
         error: &str,
     ) -> Result<u64, StorageError> {
-        // Ordinary completions cannot resume across a backend restart. Make every remaining
-        // nonterminal row explicit and terminal so thread-level exclusivity does not deadlock.
+        // Ordinary running completions cannot resume across a backend restart. Preserve
+        // not_started rows: they are durable user drafts, including recoverable model failures.
+        // Finalize the attempt in the same transaction: an interrupted harness has an unknown
+        // effect boundary and therefore must never be silently replayed after restart.
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let finished_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time is before unix epoch")
+            .as_millis()
+            .to_string();
+        sqlx::query("UPDATE interaction_attempts SET finished_at=?1,outcome='execution_failed',failure_category='application_restart',effect_boundary='unknown' WHERE outcome='running'")
+            .bind(finished_at)
+            .execute(&mut *transaction)
+            .await?;
         let result = sqlx::query(
-            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('not_started','running','submitted')",
+            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('running','submitted')",
         )
         .bind(error)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
+        transaction.commit().await?;
         Ok(result.rows_affected())
     }
 
@@ -29,7 +42,7 @@ impl SqliteProductStore {
     ) -> Result<Option<Interaction>, StorageError> {
         let mut connection = self.pool.acquire().await?;
         sqlx::query(
-            "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json,model_provider_id,provider_model_id,model_family_id FROM interactions WHERE id=?1",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.id=?1",
         )
         .bind(interaction_id.value())
         .fetch_optional(&mut *connection)
@@ -98,7 +111,6 @@ impl SqliteProductStore {
                 model_id: selection.model_id.clone(),
             };
             catalog::validate_model_selection_on(&mut transaction, &command).await?;
-            catalog::validate_provider_catalog_freshness_on(&mut transaction, &command).await?;
         } else if require_model_selection {
             return Err(StorageError::Catalog(
                 crate::product::CatalogError::invalid(
@@ -148,6 +160,7 @@ impl SqliteProductStore {
             effective_permission_receipt: None,
             completion_output: None,
             completion_error: None,
+            latest_attempt: None,
         };
         transaction.commit().await?;
         Ok(interaction)
@@ -179,6 +192,76 @@ impl SqliteProductStore {
         Ok(result.rows_affected() == 1)
     }
 
+    pub(crate) async fn claim_interaction_retry(
+        &self,
+        interaction_id: InteractionId,
+        expected_attempt_id: i64,
+        text: &str,
+        model_selection: &InteractionModelSelection,
+        harness_configuration_name: &str,
+    ) -> Result<bool, StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let attempt: Option<(String, String)> = sqlx::query_as(
+            "SELECT outcome,effect_boundary FROM interaction_attempts WHERE id=?1 AND interaction_id=?2",
+        )
+        .bind(expected_attempt_id)
+        .bind(interaction_id.value())
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if !matches!(attempt.as_ref(), Some((outcome, boundary)) if outcome == "model_failed" && boundary == "none")
+        {
+            return Err(StorageError::Catalog(
+                crate::product::CatalogError::invalid(
+                    "interaction_retry_not_recoverable",
+                    "Only a model failure with no durable effect can be retried in place.",
+                ),
+            ));
+        }
+        let status: String =
+            sqlx::query_scalar("SELECT completion_status FROM interactions WHERE id=?1")
+                .bind(interaction_id.value())
+                .fetch_one(&mut *transaction)
+                .await?;
+        if status != "not_started" {
+            transaction.commit().await?;
+            return Ok(false);
+        }
+        let latest_attempt_id: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM interaction_attempts WHERE interaction_id=?1 ORDER BY attempt_number DESC LIMIT 1",
+        )
+        .bind(interaction_id.value())
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if latest_attempt_id != Some(expected_attempt_id) {
+            return Err(StorageError::Catalog(
+                crate::product::CatalogError::invalid(
+                    "interaction_retry_stale",
+                    "This draft has a newer attempt. Refresh it before sending again.",
+                ),
+            ));
+        }
+        let command = ValidateModelSelectionCommand {
+            harness_id: harness_configuration_name.to_owned(),
+            family_id: model_selection.family_id,
+            provider_id: model_selection.provider_id.clone(),
+            model_id: model_selection.model_id.clone(),
+        };
+        catalog::validate_model_selection_on(&mut transaction, &command).await?;
+        let result = sqlx::query(
+            "UPDATE interactions SET text=?1,model_provider_id=?2,provider_model_id=?3,model_family_id=?4,completion_status='running',harness_configuration_name=?5,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?6 AND completion_status='not_started' AND NOT EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence)",
+        )
+        .bind(text)
+        .bind(model_selection.provider_id.as_str())
+        .bind(&model_selection.model_id)
+        .bind(model_selection.family_id.value())
+        .bind(harness_configuration_name)
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     pub(crate) async fn accept_interaction_completion(
         &self,
         completion: AcceptedInteractionCompletion<'_>,
@@ -196,6 +279,87 @@ impl SqliteProductStore {
         Ok(())
     }
 
+    pub(crate) async fn accept_interaction_completion_with_attempt(
+        &self,
+        attempt_id: i64,
+        completion: AcceptedInteractionCompletion<'_>,
+        timestamp: &str,
+    ) -> Result<(), StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let attempt = sqlx::query("UPDATE interaction_attempts SET finished_at=?1,outcome='accepted',failure_category=NULL,effect_boundary='graph_write' WHERE id=?2 AND interaction_id=?3 AND outcome='running'")
+            .bind(timestamp)
+            .bind(attempt_id)
+            .bind(completion.interaction_id.value())
+            .execute(&mut *transaction)
+            .await?;
+        if attempt.rows_affected() != 1 {
+            return Err(StorageError::IncompatibleSchema(
+                "interaction attempt was already terminal, missing, or owned by another interaction".into(),
+            ));
+        }
+        let interaction = sqlx::query("UPDATE interactions SET graph_node_id=?1,completion_status='accepted',harness_configuration_name=?2,harness_configuration_digest=?3,effective_execution_digest=?4,effective_permission_receipt_json=?5,completion_output_json=?6,completion_error=NULL WHERE id=?7 AND completion_status='running'")
+            .bind(completion.graph_node_id)
+            .bind(completion.harness_configuration_name)
+            .bind(completion.harness_configuration_digest)
+            .bind(completion.effective_execution_digest)
+            .bind(serde_json::to_string(completion.effective_permission_receipt).map_err(|error| StorageError::Serialization(error.to_string()))?)
+            .bind(serde_json::to_string(completion.output).map_err(|error| StorageError::Serialization(error.to_string()))?)
+            .bind(completion.interaction_id.value())
+            .execute(&mut *transaction)
+            .await?;
+        if interaction.rows_affected() != 1 {
+            return Err(StorageError::IncompatibleSchema(
+                "interaction was not running while accepting its attempt".into(),
+            ));
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    pub(crate) async fn fail_interaction_completion_with_attempt(
+        &self,
+        failure: crate::product::FailedInteractionCompletion<'_>,
+        timestamp: &str,
+    ) -> Result<(), StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let attempt = sqlx::query("UPDATE interaction_attempts SET finished_at=?1,outcome=?2,failure_category=?3,effect_boundary=?4 WHERE id=?5 AND interaction_id=?6 AND outcome='running'")
+            .bind(timestamp)
+            .bind(failure.outcome)
+            .bind(failure.failure_category)
+            .bind(failure.effect_boundary)
+            .bind(failure.attempt_id)
+            .bind(failure.interaction_id.value())
+            .execute(&mut *transaction)
+            .await?;
+        if attempt.rows_affected() != 1 {
+            return Err(StorageError::IncompatibleSchema(
+                "interaction attempt was already terminal, missing, or owned by another interaction".into(),
+            ));
+        }
+        let interaction = if failure.return_to_unsent {
+            sqlx::query("UPDATE interactions SET completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='running'")
+                .bind(failure.harness_configuration_name)
+                .bind(failure.interaction_id.value())
+                .execute(&mut *transaction)
+                .await?
+        } else {
+            sqlx::query("UPDATE interactions SET graph_node_id=?1,completion_status='failed',harness_configuration_name=?2,completion_error=?3 WHERE id=?4 AND completion_status='running'")
+                .bind(failure.graph_node_id)
+                .bind(failure.harness_configuration_name)
+                .bind(failure.error)
+                .bind(failure.interaction_id.value())
+                .execute(&mut *transaction)
+                .await?
+        };
+        if interaction.rows_affected() != 1 {
+            return Err(StorageError::IncompatibleSchema(
+                "interaction was not running while finalizing its attempt".into(),
+            ));
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub(crate) async fn fail_interaction_completion(
         &self,
         interaction_id: InteractionId,
@@ -210,6 +374,16 @@ impl SqliteProductStore {
             .await?;
         Ok(())
     }
+
+    pub(crate) async fn return_interaction_to_unsent(
+        &self,
+        interaction_id: InteractionId,
+        harness_configuration_name: &str,
+    ) -> Result<(), StorageError> {
+        sqlx::query("UPDATE interactions SET completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='running'")
+            .bind(harness_configuration_name).bind(interaction_id.value()).execute(&self.pool).await?;
+        Ok(())
+    }
 }
 
 pub(super) async fn fetch_interactions(
@@ -217,7 +391,7 @@ pub(super) async fn fetch_interactions(
     thread_id: ThreadId,
 ) -> Result<Vec<Interaction>, StorageError> {
     let rows = sqlx::query(
-        "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json,model_provider_id,provider_model_id,model_family_id FROM interactions WHERE thread_id=?1 ORDER BY sequence ASC",
+        "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.thread_id=?1 ORDER BY i.sequence ASC",
     )
     .bind(thread_id.value())
     .fetch_all(connection)
@@ -253,6 +427,30 @@ pub(super) fn interaction_from_row(row: &SqliteRow) -> Result<Interaction, Stora
             .transpose()
             .map_err(|error| StorageError::Serialization(error.to_string()))?,
         completion_error: row.try_get(10)?,
+        latest_attempt: row
+            .try_get::<Option<i64>, _>(17)?
+            .map(|id| {
+                Ok::<_, sqlx::Error>(crate::product::InteractionAttempt {
+                    id,
+                    attempt_number: row.try_get(18)?,
+                    started_at: row.try_get(19)?,
+                    finished_at: row.try_get(20)?,
+                    family_id: ModelFamilyId::from_database(row.try_get(21)?),
+                    family_revision: row.try_get(22)?,
+                    harness_configuration_name: row.try_get(23)?,
+                    harness_configuration_revision: row.try_get(24)?,
+                    harness_configuration_digest: row.try_get(25)?,
+                    provider_id: ProviderId::from_database(row.try_get(26)?),
+                    adapter_id: row.try_get(27)?,
+                    adapter_implementation_version: row.try_get(28)?,
+                    model_id: row.try_get(29)?,
+                    access_contract: row.try_get(30)?,
+                    outcome: row.try_get(31)?,
+                    failure_category: row.try_get(32)?,
+                    effect_boundary: row.try_get(33)?,
+                })
+            })
+            .transpose()?,
         permission_profile_id: row.try_get(11)?,
         effective_execution_digest: row.try_get(12)?,
         effective_permission_receipt: row
@@ -349,7 +547,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_provider_catalog_blocks_thread_and_followup_insertion() {
+    async fn last_successful_catalog_snapshot_remains_usable_until_replaced() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -366,29 +564,9 @@ mod tests {
             .await
             .unwrap();
 
-        let error = store
-            .insert_thread_with_initial_interaction(NewThreadRecord {
-                title: "Blocked stale thread",
-                project_id: None,
-                initial_message: "First",
-                harness_configuration_name: "codex-basic",
-                permission_profile_id: "auto",
-                model_selection: Some(&model),
-                timestamp: "1",
-            })
-            .await
-            .err()
-            .unwrap();
-        match error {
-            StorageError::Catalog(error) => assert_eq!(error.code(), "provider_catalog_stale"),
-            other => panic!("unexpected error: {other}"),
-        }
-        assert!(store.list_threads().await.unwrap().is_empty());
-
-        refresh_test_provider(&store).await;
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
-                title: "Fresh thread",
+                title: "Last-known catalog thread",
                 project_id: None,
                 initial_message: "First",
                 harness_configuration_name: "codex-basic",
@@ -399,20 +577,85 @@ mod tests {
             .await
             .unwrap();
         mark_interaction_accepted(&store, thread.root_interaction_id).await;
-        sqlx::query("UPDATE model_providers SET refreshed_at='0' WHERE id='codex'")
+        store
+            .insert_interaction(thread.id, "Last-known follow-up", None, true, true)
+            .await
+            .unwrap();
+        assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 2);
+
+        store.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn retry_claim_updates_the_same_draft_once_and_preserves_the_failed_receipt() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-interaction-retry-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_models(&store).await;
+        let first_model = selection("first-model");
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Retry in place",
+                project_id: None,
+                initial_message: "Original prompt",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&first_model),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        let attempt_id = sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,failure_category,effect_boundary) VALUES (?1,1,'2','3',1,1,'codex-basic',1,'sha256:old','codex','codex-subscription',1,'first-model','managed-runtime@1','model_failed','model_unavailable','none')")
+            .bind(thread.root_interaction_id.value())
             .execute(&store.pool)
             .await
-            .unwrap();
-        let error = store
-            .insert_interaction(thread.id, "Blocked stale follow-up", None, true, true)
+            .unwrap()
+            .last_insert_rowid();
+        let next_model = selection("second-model");
+        let first = store.claim_interaction_retry(
+            thread.root_interaction_id,
+            attempt_id,
+            "Edited prompt",
+            &next_model,
+            "codex-basic",
+        );
+        let second = store.claim_interaction_retry(
+            thread.root_interaction_id,
+            attempt_id,
+            "Edited prompt",
+            &next_model,
+            "codex-basic",
+        );
+        let (first, second) = tokio::join!(first, second);
+        assert_eq!(
+            [first.unwrap(), second.unwrap()]
+                .into_iter()
+                .filter(|claimed| *claimed)
+                .count(),
+            1
+        );
+
+        let interaction = store
+            .get_interaction(thread.root_interaction_id)
             .await
-            .err()
+            .unwrap()
             .unwrap();
-        match error {
-            StorageError::Catalog(error) => assert_eq!(error.code(), "provider_catalog_stale"),
-            other => panic!("unexpected error: {other}"),
-        }
-        assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 1);
+        assert_eq!(interaction.id, thread.root_interaction_id);
+        assert_eq!(interaction.text, "Edited prompt");
+        assert_eq!(interaction.completion_status, "running");
+        assert_eq!(interaction.model_selection, Some(next_model));
+        let receipt = interaction.latest_attempt.unwrap();
+        assert_eq!(receipt.id, attempt_id);
+        assert_eq!(receipt.model_id, "first-model");
+        assert_eq!(receipt.outcome, "model_failed");
+        assert_eq!(receipt.effect_boundary, "none");
 
         store.pool.close().await;
         std::fs::remove_file(path).unwrap();

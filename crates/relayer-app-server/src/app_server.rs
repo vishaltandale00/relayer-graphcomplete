@@ -1,6 +1,5 @@
 use crate::{
-    api, permissions::PermissionCatalog, product::ProductService,
-    provider_catalog_refresh::ProviderCatalogRefreshClient, runtime::RuntimeClient,
+    api, permissions::PermissionCatalog, product::ProductService, runtime::RuntimeClient,
     storage::SqliteProductStore,
 };
 use axum::Router;
@@ -23,8 +22,6 @@ pub struct RelayerAppServerConfig {
     pub permission_catalog: PathBuf,
     pub control_token: String,
     pub read_only_control_token: Option<String>,
-    pub provider_catalog_refresh_url: Option<String>,
-    pub provider_catalog_refresh_token: Option<String>,
     pub runtime: Option<RelayerRuntimeConfig>,
 }
 
@@ -33,7 +30,6 @@ pub struct RelayerAppServer {
     web_directory: PathBuf,
     control_token: String,
     read_only_control_token: Option<String>,
-    provider_catalog_refresh: Option<ProviderCatalogRefreshClient>,
     runtime: Option<RuntimeClient>,
     permission_catalog: PermissionCatalog,
     default_harness_configuration: String,
@@ -45,18 +41,6 @@ impl RelayerAppServer {
     pub async fn open(config: RelayerAppServerConfig) -> anyhow::Result<Self> {
         if config.read_only_control_token.as_deref() == Some(config.control_token.as_str()) {
             anyhow::bail!("read-only control token must be distinct from write authority");
-        }
-        if config
-            .provider_catalog_refresh_token
-            .as_deref()
-            .is_some_and(|token| {
-                token == config.control_token
-                    || config.read_only_control_token.as_deref() == Some(token)
-            })
-        {
-            anyhow::bail!(
-                "provider catalog refresh token must be distinct from desktop session tokens"
-            );
         }
         let permission_catalog = PermissionCatalog::load(&config.permission_catalog).await?;
         let storage = SqliteProductStore::open(&config.database_path).await?;
@@ -102,19 +86,6 @@ impl RelayerAppServer {
             .runtime
             .as_ref()
             .is_some_and(|runtime| runtime.allow_harness_override);
-        let provider_catalog_refresh = match (
-            config.provider_catalog_refresh_url.as_deref(),
-            config.provider_catalog_refresh_token,
-        ) {
-            (Some(origin), Some(token)) => Some(ProviderCatalogRefreshClient::new(origin, token)?),
-            (None, None) if runtime.is_some() && !allow_harness_override => {
-                anyhow::bail!(
-                    "ordinary product runtime requires a trusted provider catalog refresh service"
-                )
-            }
-            (None, None) => None,
-            _ => anyhow::bail!("provider catalog refresh URL and token must be supplied together"),
-        };
         let standalone_workspaces_directory = config
             .runtime
             .as_ref()
@@ -151,7 +122,6 @@ impl RelayerAppServer {
             web_directory: config.web_directory,
             control_token: config.control_token,
             read_only_control_token: config.read_only_control_token,
-            provider_catalog_refresh,
             runtime,
             permission_catalog,
             default_harness_configuration,
@@ -173,7 +143,6 @@ impl RelayerAppServer {
                 permission_catalog: self.permission_catalog.clone(),
                 default_harness_configuration: self.default_harness_configuration.clone(),
                 allow_harness_override: self.allow_harness_override,
-                provider_catalog_refresh: self.provider_catalog_refresh.clone(),
                 standalone_workspaces_directory: self.standalone_workspaces_directory.clone(),
             },
         )

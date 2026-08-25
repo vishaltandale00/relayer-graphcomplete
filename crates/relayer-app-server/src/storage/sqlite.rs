@@ -1,4 +1,5 @@
 mod action_invocations;
+mod attempts;
 mod catalog;
 mod interactions;
 mod migrations;

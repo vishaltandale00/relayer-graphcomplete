@@ -105,7 +105,7 @@ describe("provider-neutral model catalog", () => {
     });
   });
 
-  it("refreshes fake adapters for every required lifecycle trigger and publishes failures closed", async () => {
+  it("refreshes fake adapters for every required lifecycle trigger and preserves the last snapshot on failure", async () => {
     const published = [];
     let call = 0;
     const adapter = new FakeModelCatalogAdapter(async () => {
@@ -123,10 +123,10 @@ describe("provider-neutral model catalog", () => {
     await service.settingsOpened();
     await service.explicitRefresh("fake");
     await service.beforeInference();
-    const failed = await service.explicitRefresh();
+    await expect(service.explicitRefresh()).rejects.toThrow("provider login expired");
 
     expect(published.map(({ context }) => context.reason)).toEqual([
-      "startup", "provider-change", "settings-open", "explicit", "pre-inference", "explicit",
+      "startup", "provider-change", "settings-open", "explicit", "pre-inference",
     ]);
     expect(published[0].snapshot).toMatchObject({
       providerId: "fake",
@@ -134,10 +134,7 @@ describe("provider-neutral model catalog", () => {
       models: [{ id: "model-1", available: true }],
       systemFamily: { key: "fake", modelIds: ["model-1"] },
     });
-    expect(failed[0]).toMatchObject({
-      provider: { id: "fake", status: "unavailable", unavailableReason: "provider login expired" },
-      models: [],
-    });
+    expect(published.at(-1).snapshot).toMatchObject({ models: [{ id: "model-5" }] });
   });
 
   it("reuses an in-flight catalog refresh for concurrent pre-inference callers", async () => {
@@ -292,7 +289,7 @@ describe("Codex model catalog adapter", () => {
       {
         data: [
           model("one", { isDefault: true }),
-          model("hidden", { hidden: true }),
+          model("hidden", { hidden: true, isDefault: true }),
           model("two", {
             availabilityNux: { message: "Requires workspace access." },
             upgrade: "three",
@@ -303,11 +300,11 @@ describe("Codex model catalog adapter", () => {
               migrationMarkdown: "Use three",
             },
           }),
-          model("three"),
+          model("three", { isDefault: true }),
         ],
         nextCursor: "page-2",
       },
-      { data: [model("four"), model("five"), model("six", { inputModalities: undefined })], nextCursor: null },
+      { data: [model("four"), model("five"), model("six", { inputModalities: undefined, isDefault: true })], nextCursor: null },
     ];
     const credentials = {
       account: vi.fn(async () => ({ status: "connected", account: { email: "private@example.test" } })),
@@ -351,7 +348,7 @@ describe("Codex model catalog adapter", () => {
       id: "codex",
       label: "Codex",
       readOnly: true,
-      modelIds: ["one-execution", "two-execution", "three-execution", "four-execution", "five-execution"],
+      modelIds: ["one-execution", "three-execution", "six-execution"],
     });
     expect(snapshot).not.toHaveProperty("latest");
     expect(JSON.stringify(snapshot)).not.toContain("private@example.test");
@@ -363,12 +360,15 @@ describe("Codex model catalog adapter", () => {
       credentials: { account: async () => ({ status: "disconnected", account: null }), request },
     }).discover();
     const unavailable = await new CodexModelCatalogAdapter({
-      credentials: { account: async () => ({ status: "unavailable", account: null, error: "Codex is missing." }), request },
+      credentials: { account: async () => ({ status: "unavailable", account: null, error: "opaque-private-value" }), request },
     }).discover();
 
     expect(request).not.toHaveBeenCalled();
     expect(disconnected).toMatchObject({ provider: { status: "disconnected" }, models: [] });
-    expect(unavailable).toMatchObject({ provider: { status: "unavailable", unavailableReason: "Codex is missing." }, models: [] });
+    expect(unavailable).toMatchObject({
+      provider: { status: "unavailable", unavailableReason: "Codex subscription is unavailable." }, models: [],
+    });
+    expect(JSON.stringify(unavailable)).not.toContain("opaque-private-value");
   });
 
   it("fails closed on malformed pages or repeated cursors", async () => {

@@ -19,6 +19,7 @@ import { createRelayerIcon } from "./icons.js";
 import { createGraphSimulationController } from "./graph-simulation.js";
 import { renderMarkdown } from "./markdown.js";
 import { productWorkspaceMarkup } from "./view.js";
+import { restoredDraftForInteraction } from "../interaction-failure-model.js";
 
 function hash(value) {
   let result = 0;
@@ -262,8 +263,8 @@ export function composerSubmissionReady(value, disabled = false, modelReady = tr
   return !disabled && modelReady && Boolean(value.trim());
 }
 
-export function composerDisabledForState(status, canCompose = true) {
-  return !canCompose || PENDING_COMPLETION_STATUSES.has(status);
+export function composerDisabledForState(status, canCompose = true, restoredDraft = false) {
+  return !canCompose || (PENDING_COMPLETION_STATUSES.has(status) && !restoredDraft);
 }
 
 const ACTION_VARIANTS = new Set(["chip", "pill", "wide", "card"]);
@@ -532,6 +533,8 @@ export function createProductWorkspace({
   const prompt = $("#threadPrompt");
   const send = $("#sendInteraction");
   let pickerInheritanceKey = null;
+  let restoredDraftInteractionId = null;
+  let restoredDraftActive = false;
   let modelPicker;
   const syncComposer = () => {
     resizeComposerTextarea(prompt);
@@ -573,6 +576,7 @@ export function createProductWorkspace({
       prompt.disabled = composerDisabledForState(
         getState().status,
         capabilities.canCompose,
+        restoredDraftActive,
       );
       syncComposer();
     }
@@ -689,6 +693,15 @@ export function createProductWorkspace({
     renderTurnNavigation(state, thread, interaction);
     const turns = (state.interactions || []).filter((item) => String(item.threadId) === String(thread.id));
     const latestInteraction = turns.at(-1);
+    const restoredDraft = restoredDraftForInteraction(latestInteraction);
+    restoredDraftActive = Boolean(restoredDraft);
+    const retryMessage = $("#composerRetryMessage");
+    retryMessage.classList.toggle("hidden", !restoredDraft);
+    retryMessage.textContent = restoredDraft?.message ?? "";
+    if (restoredDraft && String(restoredDraftInteractionId) !== String(latestInteraction.id)) {
+      prompt.value = restoredDraft.text;
+      restoredDraftInteractionId = latestInteraction.id;
+    }
     const inheritanceKey = `${thread.id}:${latestInteraction?.id ?? "none"}`;
     if (modelPicker) {
       const replaceSelection = inheritanceKey !== pickerInheritanceKey;
@@ -712,7 +725,7 @@ export function createProductWorkspace({
       ? `${identityLabels.provider}: ${identityLabels.model}`
       : "";
     identity.classList.toggle("hidden", !identityLabels);
-    renderRunState(state);
+    renderRunState(state, Boolean(restoredDraft));
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
       selectNode(state, selection.selectedNodeId, { notify: false });
@@ -760,7 +773,7 @@ export function createProductWorkspace({
     breadcrumb.scrollLeft = breadcrumb.scrollWidth;
   }
 
-  function renderRunState(state) {
+  function renderRunState(state, restoredDraft = false) {
     const status = state.status || "idle";
     const pending = PENDING_COMPLETION_STATUSES.has(status);
     const display = status === "accepted" ? "Complete"
@@ -771,7 +784,7 @@ export function createProductWorkspace({
     runState.className = `run-state ${pending ? "running" : ["failed", "cancelled"].includes(status) ? "failed" : ""}`;
     runState.setAttribute("aria-label", pending ? "Waiting for graph" : display);
     runState.querySelector("span").textContent = display;
-    prompt.disabled = composerDisabledForState(status, capabilities.canCompose);
+    prompt.disabled = composerDisabledForState(status, capabilities.canCompose, restoredDraft);
     modelPicker?.setDisabled(prompt.disabled);
     syncComposer();
   }

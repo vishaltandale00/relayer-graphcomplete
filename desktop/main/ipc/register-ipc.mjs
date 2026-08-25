@@ -7,6 +7,8 @@ export function registerDesktopIpc({
   nativeTheme,
   credentials,
   modelCatalog,
+  providerDefinitions = null,
+  validateProviderOnboarding = null,
   settings,
   updater,
   getWindow,
@@ -17,15 +19,83 @@ export function registerDesktopIpc({
 }) {
   const normalizeAppearance = (value) => value === "light" ? "light" : "dark";
 
-  ipcMain.handle("relayer:account-read", () => credentials.account());
-  ipcMain.handle("relayer:account-login", async () => {
-    const result = await credentials.login();
-    if (result?.authUrl) await shell.openExternal(result.authUrl);
-    return { status: "pending", loginId: result?.loginId ?? null };
-  });
-  ipcMain.handle("relayer:account-logout", () => credentials.logout());
+  if (credentials) {
+    ipcMain.handle("relayer:account-read", () => credentials.account());
+    ipcMain.handle("relayer:account-login", async () => {
+      const result = await credentials.login();
+      if (result?.authUrl) await shell.openExternal(result.authUrl);
+      return { status: "pending", loginId: result?.loginId ?? null };
+    });
+    ipcMain.handle("relayer:account-logout", () => credentials.logout());
+  }
   ipcMain.handle("relayer:model-catalog-settings-open", () => modelCatalog.settingsOpened());
   ipcMain.handle("relayer:model-catalog-refresh", (_event, providerId) => modelCatalog.explicitRefresh(providerId));
+  ipcMain.handle("relayer:provider-status", async () => {
+    if (!providerDefinitions) return null;
+    const saved = await settings.read();
+    let hasCompletedOnboarding = saved.providerOnboardingComplete === true;
+    if (saved.providerOnboardingComplete == null && validateProviderOnboarding) {
+      hasCompletedOnboarding = Boolean(await validateProviderOnboarding());
+      if (hasCompletedOnboarding) {
+        await settings.write({ ...saved, providerOnboardingComplete: true });
+      }
+    }
+    return {
+      adapters: providerDefinitions.adapters(),
+      definitions: await providerDefinitions.list(),
+      hasCompletedOnboarding,
+    };
+  });
+  ipcMain.handle("relayer:provider-connect", async (_event, input) => {
+    if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
+    const result = await providerDefinitions.connect(input);
+    if (result.login?.authUrl) await shell.openExternal(result.login.authUrl);
+    getWindow()?.webContents.send("relayer:providers-changed", {
+      kind: result.status === "connected" ? "connected" : "connection_pending",
+      providerId: result.providerDefinition.id,
+    });
+    return result;
+  });
+  ipcMain.handle("relayer:provider-connect-complete", async (_event, { connectionId }) => {
+    if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
+    const result = await providerDefinitions.completeConnection(connectionId);
+    getWindow()?.webContents.send("relayer:providers-changed", {
+      kind: result.status === "connected" ? "connected" : "connection_pending",
+      providerId: result.providerDefinition.id,
+    });
+    return result;
+  });
+  ipcMain.handle("relayer:provider-connect-cancel", async (_event, { connectionId }) => {
+    if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
+    return { cancelled: await providerDefinitions.cancelConnection(connectionId) };
+  });
+  ipcMain.handle("relayer:provider-rename", async (_event, { id, label }) => {
+    if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
+    const definition = await providerDefinitions.rename(id, label);
+    getWindow()?.webContents.send("relayer:providers-changed", { kind: "renamed", providerId: definition.id });
+    return definition;
+  });
+  ipcMain.handle("relayer:provider-logout", async (_event, { id }) => {
+    if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
+    const account = await providerDefinitions.logout(id);
+    getWindow()?.webContents.send("relayer:providers-changed", { kind: "logged_out", providerId: id });
+    return account;
+  });
+  ipcMain.handle("relayer:provider-remove", async (_event, { id }) => {
+    if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
+    const definition = await providerDefinitions.remove(id);
+    getWindow()?.webContents.send("relayer:providers-changed", { kind: "removal_requested", providerId: definition.id });
+    return definition;
+  });
+  ipcMain.handle("relayer:provider-onboarding-complete", async () => {
+    if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
+    if (!validateProviderOnboarding || !await validateProviderOnboarding()) {
+      throw new Error("A working default provider, family, and harness are required to continue.");
+    }
+    const saved = await settings.read();
+    await settings.write({ ...saved, providerOnboardingComplete: true });
+    return { hasCompletedOnboarding: true };
+  });
   ipcMain.handle("relayer:folder-choose", async () => {
     const selection = await dialog.showOpenDialog(getWindow(), {
       properties: ["openDirectory", "createDirectory"],

@@ -55,6 +55,24 @@ Rust product policy defines exactly `ask`, `auto`, and `full`, including their l
 
 The desktop New Thread composer loads profile labels, availability, and the default from the Rust product API. It sends only the selected stable ID during ordinary thread creation and displays the pinned profile on saved threads. Unavailable profiles remain visible but disabled; provider-specific bindings never enter the renderer contract.
 
+## Provider, model-family, and harness boundaries
+
+Provider access, model-family organization, and harness execution are separate product concepts:
+
+1. A code-owned provider-adapter registry defines the runnable adapter types and their versioned execution-access contracts. The registry owns connection flow, endpoint validation, model discovery and normalization, and execution-scoped access. It does not create model families or inspect harness configurations.
+2. A user-owned provider definition identifies one exact access path. Its generated ID, adapter ID, endpoint, and access mode are immutable. Credentials remain in secure desktop storage; product records retain only a credential or managed-runtime reference. Two definitions may use the same adapter, endpoint, and model IDs while remaining distinct identities.
+3. A product-owned model family is an ordered list of exact provider-definition/model pairs. Families contain no credentials or execution behavior and may span providers. Managed read-only families are derived by versioned product policy; custom families remain harness-agnostic.
+4. A named harness configuration declares its versioned execution-access contract and exact or regular-expression model rules over stable adapter ID plus model ID. It never contains a user provider-definition ID or credential.
+5. Product resolution is the only join among the thread-pinned harness configuration, the selected family, current provider/catalog state, and the unsent exact selection. Send atomically pins the resolved provider definition and model to one execution attempt. The harness host defensively revalidates the adapter/model rule and access contract before invoking the selected harness implementation.
+
+Threads pin a harness-configuration identity, not an immutable copy of catalog or family state. Unsent turns resolve lazily against current semantic revisions when the picker opens or Send is pressed. A still-valid exact selection is preserved; an invalid selection may move only within its current family. The product never selects another family implicitly. Once an attempt is sent, its provider/model identity cannot change or fall back mid-flight.
+
+Provider removal uses atomic admission and draining. Marking a definition `removal_pending` immediately blocks new attempts through it while already admitted work finishes. Credential deletion and the non-secret historical tombstone occur only after the last execution reference is released. Family deletion needs no drain because a sent attempt no longer consults family membership.
+
+Every execution attempt has an immutable receipt and a durable effect boundary: `none`, `partial_output`, `graph_write`, `tool_effect`, or fail-closed `unknown`. Only a model-related attempt that terminates with `none` may return the same interaction to an editable unsent state. Partial or unknown attempts remain failed and inspectable; replaying them in place is rejected. Trace events conservatively raise the boundary for streamed output and tool starts, observable graph neighbors raise it for graph writes, and an accepted graph discovered while recovering a harness failure is adopted without rerunning the harness. Attempt finalization and the matching interaction transition commit in one SQLite transaction, while startup converts any interrupted running attempt to terminal `unknown`. These rules prevent silent retry of protected effects without introducing another scheduler; arbitrary uninstrumented external effects remain `unknown` and therefore fail closed.
+
+This contract applies equally to `codex.basic`, `prime.agent`, and future harness implementations. It adds no scheduler and does not change `complete(inputGraph)` or graph acceptance authority.
+
 ## Shared product and Eval workspace
 
 Relayer and Relayer Eval are separate Electron build targets. Relayer exposes the ordinary product window and a fixed production harness configuration. Relayer Eval exposes a test-run dashboard and enables named harness overrides, but executes each case through the same product app server. A case may create one or more ordinary product threads and interactions.
