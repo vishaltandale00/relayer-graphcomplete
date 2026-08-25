@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-25T06:24:28.813Z",
+  "sourceCommit": "e5b64608443914687c472cafd4e80108b7639475",
+  "workingTreeDirty": false,
+  "command": "RELAYER_CAPTURE_HUMAN_ANNOTATION_EVIDENCE=1 electron scripts/capture-human-eval-annotation-evidence.mjs",
+  "paidInferenceCalls": 0,
+  "execution": {
+    "runId": "run-2026-08-25T06-24-24-795Z-a98fa49f",
+    "executionId": "7b38248e-b5e8-4cca-8800-4e79ca74ae96",
+    "threadId": 1,
+    "status": "passed"
+  },
+  "viewport": {
+    "width": 1480,
+    "height": 920
+  },
+  "persistenceReplay": true,
+  "screenshot": {
+    "file": "human-eval-annotations.png",
+    "sha256": "4eb1fac9d528e3456b915ba476bc763d6b7a50901189bb074f0fb1102f06f76d"
+  },
+  "video": {
+    "file": "human-eval-annotations.mp4",
+    "sha256": "9296082a67aea760eacd6dbf97f87425f475558c8e87ca22b59f1198056112c9",
+    "durationSeconds": 20.967,
+    "steps": [
+      "1. Open a fixed Eval execution in the production ProductWorkspace",
+      "2. Node details stay above a compact annotation composer in the bottom-right",
+      "3. Add a sparse comment without changing the accepted graph",
+      "4. Focusing the white thumb expands the same pill and reveals four labels",
+      "5. The collapsed control shows only the selected rating: Great",
+      "6. Submit with the compact arrow; the comment and rating are saved inline",
+      "7. Reopening the Eval review restores the annotation and its exact node anchor"
+    ]
+  }
+}

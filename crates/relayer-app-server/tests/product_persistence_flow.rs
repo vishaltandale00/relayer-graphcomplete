@@ -33,6 +33,376 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tower::ServiceExt;
+const ANNOTATION_COOKIE: &str = "relayer_annotation";
+
+#[tokio::test]
+async fn eval_annotations_are_scoped_append_only_and_durable() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-annotations-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let app = open_app(&database, &root).await;
+    let thread = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Review this fixed turn" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let other_thread = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Outside the annotation session" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let other_thread_id = other_thread["id"].as_i64().unwrap();
+    let token = "annotation-token-with-at-least-thirty-two-bytes";
+    let registered = app.clone().oneshot(api_request(
+        "POST", "/api/internal/annotation-sessions", Some(json!({
+            "token": token, "threadIds": [thread_id], "authorId": "local-vishal", "authorDisplayName": "Vishal"
+        })), true,
+    )).await.unwrap();
+    assert_eq!(registered.status(), StatusCode::NO_CONTENT);
+
+    let state = response_json(
+        app.clone()
+            .oneshot(annotation_request("GET", "/api/state", None, token))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(state["capabilities"]["annotations"], true);
+
+    let annotation_token_only = app
+        .clone()
+        .oneshot(annotation_token_only_request(
+            "GET",
+            &format!("/api/threads/{thread_id}/annotations"),
+            None,
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(annotation_token_only.status(), StatusCode::UNAUTHORIZED);
+
+    let product_write = app
+        .clone()
+        .oneshot(annotation_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({ "text": "Annotation authority is not product authority" })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(product_write.status(), StatusCode::FORBIDDEN);
+
+    let cross_thread = app
+        .clone()
+        .oneshot(annotation_request(
+            "POST",
+            &format!("/api/threads/{other_thread_id}/annotations"),
+            Some(json!({ "anchor": { "kind": "thread" }, "comment": "Forged scope" })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cross_thread.status(), StatusCode::NOT_FOUND);
+
+    let generic_review = app
+        .clone()
+        .oneshot(api_request_with_token(
+            "POST",
+            &format!("/api/threads/{thread_id}/annotations"),
+            Some(json!({ "anchor": { "kind": "thread" }, "comment": "No authority" })),
+            "review",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(generic_review.status(), StatusCode::UNAUTHORIZED);
+
+    let created = response_json(
+        app.clone()
+            .oneshot(annotation_request(
+                "POST",
+                &format!("/api/threads/{thread_id}/annotations"),
+                Some(json!({
+                    "anchor": { "kind": "thread" }, "comment": "Sparse comment with no rating",
+                    "navigationContext": { "threadId": thread_id }
+                })),
+                token,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(created["latestRevision"], 1);
+    assert!(created["revisions"][0]["rating"].is_null());
+    assert_eq!(created["revisions"][0]["authorDisplayName"], "Vishal");
+    let annotation_id = created["id"].as_i64().unwrap();
+
+    let expanded = app.clone().oneshot(api_request(
+        "POST", "/api/internal/annotation-sessions", Some(json!({
+            "token": token, "threadIds": [thread_id, other_thread_id], "authorId": "local-vishal", "authorDisplayName": "Vishal"
+        })), true,
+    )).await.unwrap();
+    assert_eq!(expanded.status(), StatusCode::NO_CONTENT);
+    let other_created = response_json(
+        app.clone()
+            .oneshot(annotation_request(
+                "POST",
+                &format!("/api/threads/{other_thread_id}/annotations"),
+                Some(json!({
+                    "anchor": { "kind": "thread" },
+                    "comment": "Second thread comment"
+                })),
+                token,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let snapshot_set = response_json(
+        app.clone()
+            .oneshot(annotation_request(
+                "POST",
+                "/api/annotations/snapshot",
+                Some(json!({ "threadIds": [other_thread_id, thread_id] })),
+                token,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(snapshot_set["kind"], "relayer_eval_annotation_snapshot_set");
+    assert_eq!(snapshot_set["threads"].as_array().unwrap().len(), 2);
+    assert_eq!(snapshot_set["threads"][0]["threadId"], other_thread_id);
+    assert_eq!(snapshot_set["threads"][1]["threadId"], thread_id);
+    assert_eq!(
+        snapshot_set["threads"][0]["annotations"][0]["id"],
+        other_created["id"]
+    );
+    assert_eq!(
+        snapshot_set["threads"][1]["annotations"][0]["id"],
+        annotation_id
+    );
+
+    let incomplete_snapshot = app
+        .clone()
+        .oneshot(annotation_request(
+            "POST",
+            "/api/annotations/snapshot",
+            Some(json!({ "threadIds": [thread_id] })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(incomplete_snapshot.status(), StatusCode::NOT_FOUND);
+
+    let duplicate_snapshot = app
+        .clone()
+        .oneshot(annotation_request(
+            "POST",
+            "/api/annotations/snapshot",
+            Some(json!({ "threadIds": [thread_id, thread_id] })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        duplicate_snapshot.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let over_limit_ids = (1_i64..=257).collect::<Vec<_>>();
+    let over_limit_snapshot = app
+        .clone()
+        .oneshot(annotation_request(
+            "POST",
+            "/api/annotations/snapshot",
+            Some(json!({ "threadIds": over_limit_ids })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        over_limit_snapshot.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+
+    let revised = response_json(
+        app.clone()
+            .oneshot(annotation_request(
+                "POST",
+                &format!("/api/threads/{thread_id}/annotations/{annotation_id}/revisions"),
+                Some(json!({
+                    "expectedRevision": 1, "comment": "Now with a deliberate rating", "rating": 3
+                })),
+                token,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(revised["revisions"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        revised["revisions"][0]["comment"],
+        "Sparse comment with no rating"
+    );
+    assert_eq!(revised["revisions"][1]["rating"], 3);
+    let before_retraction = response_json(
+        app.clone()
+            .oneshot(annotation_request(
+                "GET",
+                &format!("/api/threads/{thread_id}/annotations/snapshot"),
+                None,
+                token,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        before_retraction["kind"],
+        "relayer_eval_annotation_snapshot"
+    );
+
+    let conflict = app
+        .clone()
+        .oneshot(annotation_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/annotations/{annotation_id}/revisions"),
+            Some(json!({ "expectedRevision": 1, "comment": "Stale edit" })),
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(conflict).await["code"],
+        "annotation_revision_conflict"
+    );
+
+    let retracted = response_json(
+        app.clone()
+            .oneshot(annotation_request(
+                "POST",
+                &format!("/api/threads/{thread_id}/annotations/{annotation_id}/retract"),
+                Some(json!({ "expectedRevision": 2 })),
+                token,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(retracted["latestRevision"], 3);
+    assert_eq!(retracted["revisions"][2]["state"], "retracted");
+
+    let revoked = app
+        .clone()
+        .oneshot(api_request(
+            "DELETE",
+            "/api/internal/annotation-sessions",
+            Some(json!({ "token": token })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(revoked.status(), StatusCode::NO_CONTENT);
+    let denied_after_revoke = app
+        .clone()
+        .oneshot(annotation_request(
+            "GET",
+            &format!("/api/threads/{thread_id}/annotations"),
+            None,
+            token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(denied_after_revoke.status(), StatusCode::UNAUTHORIZED);
+    let state_after_revoke = response_json(
+        app.clone()
+            .oneshot(annotation_request("GET", "/api/state", None, token))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(state_after_revoke["capabilities"]["annotations"], false);
+    let revoked_again = app
+        .clone()
+        .oneshot(api_request(
+            "DELETE",
+            "/api/internal/annotation-sessions",
+            Some(json!({ "token": token })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(revoked_again.status(), StatusCode::NO_CONTENT);
+
+    drop(app);
+    let reopened = open_app(&database, &root).await;
+    reopened.clone().oneshot(api_request(
+        "POST", "/api/internal/annotation-sessions", Some(json!({
+            "token": token, "threadIds": [thread_id], "authorId": "local-vishal", "authorDisplayName": "Vishal"
+        })), true,
+    )).await.unwrap();
+    let restored = response_json(
+        reopened
+            .clone()
+            .oneshot(annotation_request(
+                "GET",
+                &format!("/api/threads/{thread_id}/annotations"),
+                None,
+                token,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(restored["annotations"][0]["latestRevision"], 3);
+    assert_eq!(
+        restored["annotations"][0]["revisions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    let after_retraction = response_json(
+        reopened
+            .oneshot(annotation_request(
+                "GET",
+                &format!("/api/threads/{thread_id}/annotations/snapshot"),
+                None,
+                token,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_ne!(
+        before_retraction["annotationsSha256"],
+        after_retraction["annotationsSha256"]
+    );
+    fs::remove_dir_all(root).unwrap();
+}
 
 fn authored_layout(node_id: NodeId) -> Option<LayerLayout> {
     Some(LayerLayout::v1(vec![NodePlacement {
@@ -3781,7 +4151,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 9);
+    assert_eq!(applied_migrations, 10);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -4077,6 +4447,41 @@ fn api_request_with_token(
     if !token.is_empty() {
         builder = builder.header("cookie", format!("{CONTROL_COOKIE}={token}"));
     }
+    if body.is_some() {
+        builder = builder.header("content-type", "application/json");
+    }
+    builder
+        .body(Body::from(
+            body.map(|value| value.to_string()).unwrap_or_default(),
+        ))
+        .unwrap()
+}
+
+fn annotation_request(method: &str, uri: &str, body: Option<Value>, token: &str) -> Request<Body> {
+    let mut builder = Request::builder().method(method).uri(uri).header(
+        "cookie",
+        format!("{CONTROL_COOKIE}=review; {ANNOTATION_COOKIE}={token}"),
+    );
+    if body.is_some() {
+        builder = builder.header("content-type", "application/json");
+    }
+    builder
+        .body(Body::from(
+            body.map(|value| value.to_string()).unwrap_or_default(),
+        ))
+        .unwrap()
+}
+
+fn annotation_token_only_request(
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: &str,
+) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("cookie", format!("{ANNOTATION_COOKIE}={token}"));
     if body.is_some() {
         builder = builder.header("content-type", "application/json");
     }

@@ -1,4 +1,4 @@
-import { runPanelCopy } from "./run-model.js";
+import { annotatedExecutionExportable, runPanelCopy } from "./run-model.js";
 
 const api = window.relayerEval;
 const $ = (selector) => document.querySelector(selector);
@@ -103,6 +103,19 @@ function renderRun(run) {
       try { await api.openReview(button.dataset.productExecution); } catch (error) { toast(error.message); }
     };
   });
+  document.querySelectorAll("[data-annotation-export]:not(:disabled)").forEach((button) => {
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const exported = await api.exportAnnotations(button.dataset.annotationExport);
+        toast(`Annotation export saved: ${exported.bundleRef}`);
+      } catch (error) {
+        toast(error.message);
+      } finally {
+        button.disabled = false;
+      }
+    };
+  });
   document.querySelectorAll("[data-judge-execution]:not(:disabled)").forEach((button) => {
     button.onclick = async () => {
       try { await api.openJudgeReview(button.dataset.judgeExecution); } catch (error) { toast(error.message); }
@@ -143,10 +156,11 @@ function executionCellMarkup(run, execution, imported) {
   const judgeEligible = imported && execution?.turns?.some((turn) => turn.status === "accepted");
   const hasJudgeOutput = execution?.turns?.some((turn) => turn.deterministicJudge || turn.judgeResults?.length);
   const judgeReviewable = imported ? hasJudgeOutput : Boolean(execution);
+  const annotationExportable = annotatedExecutionExportable(run, execution);
   const judgeActions = imported
     ? `<button class="open-review" data-run-imported-judge="deterministic-graph-contract" data-judge-execution-id="${escapeHtml(execution?.id)}" ${judgeEligible ? "" : "disabled"}>Run deterministic judge</button>${catalog.judges.some((judge) => judge.id === "simulated-user") ? `<button class="open-review" data-run-imported-judge="simulated-user" data-judge-execution-id="${escapeHtml(execution?.id)}" ${judgeEligible ? "" : "disabled"}>Run simulated-user judge</button>` : ""}`
     : `<button class="open-review" data-trace-execution="${escapeHtml(execution?.id)}" ${traceable ? "" : "disabled"}>Candidate trace ↗</button>`;
-  return `<td><div class="execution-cell"><div class="execution" aria-label="Execution status and deterministic score"><b class="${escapeHtml(execution?.status)}">${escapeHtml(execution?.status || "missing")}</b><span>${score}</span>${promotable || imported ? "" : "<small>trace not promotable</small>"}</div><div class="execution-actions">${judgeActions}<button class="open-review" data-judge-execution="${escapeHtml(execution?.id)}" ${judgeReviewable ? "" : "disabled"}>Judge review ↗</button><button class="open-review" data-product-execution="${escapeHtml(execution?.id)}" ${openable ? "" : "disabled"}>Product workspace ↗</button></div></div></td>`;
+  return `<td><div class="execution-cell"><div class="execution" aria-label="Execution status and deterministic score"><b class="${escapeHtml(execution?.status)}">${escapeHtml(execution?.status || "missing")}</b><span>${score}</span>${promotable || imported ? "" : "<small>trace not promotable</small>"}</div><div class="execution-actions">${judgeActions}<button class="open-review" data-judge-execution="${escapeHtml(execution?.id)}" ${judgeReviewable ? "" : "disabled"}>Judge review ↗</button><button class="open-review" data-product-execution="${escapeHtml(execution?.id)}" ${openable ? "" : "disabled"}>Product workspace ↗</button><button class="open-review" data-annotation-export="${escapeHtml(execution?.id)}" ${annotationExportable ? "" : "disabled"}>Export annotations ↓</button></div></div></td>`;
 }
 
 async function boot() {

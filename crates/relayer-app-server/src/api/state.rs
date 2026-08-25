@@ -42,7 +42,10 @@ pub(super) async fn capabilities(
     headers: HeaderMap,
 ) -> Result<Json<CapabilitiesResponse>, ApiError> {
     authorize_read(&state, &headers)?;
-    Ok(Json(state.product.capabilities().into()))
+    let annotations = annotation_capability(&state, &headers);
+    Ok(Json(
+        CapabilitiesResponse::from(state.product.capabilities()).with_annotations(annotations),
+    ))
 }
 
 pub(super) async fn permission_profiles(
@@ -84,7 +87,21 @@ pub(super) async fn product_state(
         &product_state.action_invocations,
     )
     .await;
-    let mut response: ProductStateResponse = product_state.into();
+    let mut response = ProductStateResponse::from(product_state)
+        .with_annotations(annotation_capability(&state, &headers));
     response.mark_stale_interactions(&stale);
     Ok(Json(response))
+}
+
+fn annotation_capability(state: &ApiState, headers: &HeaderMap) -> bool {
+    state
+        .authenticator
+        .annotation_token(headers)
+        .is_some_and(|token| {
+            state
+                .annotation_sessions
+                .lock()
+                .expect("annotation session lock poisoned")
+                .contains_key(token)
+        })
 }

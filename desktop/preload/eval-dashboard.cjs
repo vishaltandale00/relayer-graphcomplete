@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("relayerEval", {
     ipcRenderer.invoke("relayer-eval:judge-imported-conversation", executionId, judgeConfigurationName)
   ),
   openReview: (executionId) => ipcRenderer.invoke("relayer-eval:open-review", executionId),
+  exportAnnotations: (executionId) => ipcRenderer.invoke("relayer-eval:export-annotations", executionId),
   openJudgeReview: (executionId) => ipcRenderer.invoke("relayer-eval:open-judge-review", executionId),
   openCandidateTrace: (executionId, interactionId) => ipcRenderer.invoke("relayer-eval:open-candidate-trace", executionId, interactionId),
   loadJudgeScreenshot: (input) => ipcRenderer.invoke("relayer-eval:load-judge-screenshot", input),
