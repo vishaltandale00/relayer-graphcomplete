@@ -5,16 +5,18 @@ import {
   electronBuilderSigningIdentity,
   loadDesktopReleaseContract,
 } from "../release/contract.mjs";
-import { desktopTargetFromEnvironment } from "../shared/target.mjs";
 
 const desktopRoot = resolve(import.meta.dirname, "..");
 const repositoryRoot = resolve(desktopRoot, "..");
 
-export function createDesktopBuilderConfig(contract) {
+export function createDesktopBuilderConfig(
+  contract,
+  { environment = process.env, argv = process.argv } = {},
+) {
   const release = contract.release;
-  const target = release ? contract : desktopTargetFromEnvironment(process.env);
-  const serverTarget = process.env.RELAYER_DESKTOP_RUST_TARGET || target.rustTarget;
-  if (!release && process.env.CI === "true" && !process.argv.includes("--dir")) {
+  const target = contract;
+  const serverTarget = environment.RELAYER_DESKTOP_RUST_TARGET || target.rustTarget;
+  if (!release && environment.CI === "true" && !argv.includes("--dir")) {
     throw new Error("Distributable desktop builds require the explicit signed release contract.");
   }
 

@@ -68,7 +68,7 @@ describe("provider adapter packaging", () => {
       environment: { RELAYER_DESKTOP_TARGET: "macos-arm64" },
       version: "0.2.12",
     });
-    const config = createDesktopBuilderConfig(contract);
+    const config = createDesktopBuilderConfig(contract, { argv: ["--dir"] });
     const packaged = await buildConfiguredAsar({ source, stage, archive, patterns: config.files });
 
     expect(ACTIVE_PROVIDER_ADAPTER_IDS).toEqual([

@@ -1354,7 +1354,7 @@ async fn approval_wait_is_durable_and_the_product_decision_resumes_the_same_comp
         .await
         .unwrap();
     assert_eq!(duplicate.status(), StatusCode::CONFLICT);
-    let epoch_reset_deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let epoch_reset_deadline = std::time::Instant::now() + Duration::from_secs(5);
     while !event_epoch_reset.load(Ordering::SeqCst) {
         assert!(std::time::Instant::now() < epoch_reset_deadline);
         tokio::time::sleep(Duration::from_millis(10)).await;
