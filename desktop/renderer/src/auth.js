@@ -17,7 +17,7 @@ export function showAuth(message) {
 export async function refreshAccount() {
   if (!desktop) {
     showApplication();
-    return;
+    return { status: "connected" };
   }
   const result = await desktop.account.read();
   if (result.status === "connected") {
@@ -26,9 +26,10 @@ export async function refreshAccount() {
     $("#settingsAccount").textContent = result.account?.planType
       ? `${label} · ${result.account.planType}`
       : label;
-    return;
+    return result;
   }
   showAuth(result.error || "");
+  return result;
 }
 
 export async function connectCodex() {

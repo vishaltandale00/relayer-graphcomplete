@@ -44,6 +44,7 @@
             <button class="entry settings-tab" type="button" role="tab" data-settings-tab="appearance" aria-controls="appearanceSettingsPanel"><span class="entry-icon" aria-hidden="true">◐</span><span>Appearance</span></button>
             <button class="entry settings-tab" type="button" role="tab" data-settings-tab="codex" aria-controls="codexSettingsPanel"><span class="entry-icon" aria-hidden="true">›_</span><span>Codex</span></button>
             <button class="entry settings-tab" type="button" role="tab" data-settings-tab="updates" aria-controls="updatesSettingsPanel"><span class="entry-icon" aria-hidden="true">↓</span><span>Application updates</span></button>
+            <button class="entry settings-tab" type="button" role="tab" data-settings-tab="advanced" aria-controls="advancedSettingsPanel"><span class="entry-icon" aria-hidden="true">⋯</span><span>Advanced</span></button>
           </div>
         </div>
       </div>
@@ -142,6 +143,10 @@
             <h2>Application updates</h2>
             <label class="setting-row"><div><b>Update channel</b><small>Preview receives beta builds before Stable.</small></div><select id="updateChannel"><option value="stable">Stable</option><option value="preview">Preview</option></select></label>
             <div class="setting-row"><div><b id="updateStatus">Up to date</b><small id="currentVersion"></small></div><button type="button" class="secondary" id="checkUpdates">Check for updates</button></div>
+          </section>
+          <section class="settings-section hidden" id="advancedSettingsPanel" role="tabpanel" data-settings-panel="advanced">
+            <h2>Advanced</h2>
+            <div class="setting-row"><div><b>Tutorial</b><small>Learn how to create a thread, explore its graph, and ask a follow-up.</small></div><button type="button" class="secondary" id="startTutorial">Start tutorial</button></div>
           </section>
         </div>
       </section>

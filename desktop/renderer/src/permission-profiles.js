@@ -5,6 +5,7 @@ import {
   resolvePermissionSelection,
 } from "./permission-profile-model.js";
 import { appState, productApiAvailable, viewState } from "./state.js";
+import { onboardingTutorialController } from "./onboarding-tutorial.js";
 import { $, $$, escapeHtml, escapeHtmlAttribute } from "./ui.js";
 
 export function closePermissionMenu() {
@@ -29,6 +30,7 @@ export function renderPermissionPicker() {
     option.onclick = () => {
       const profile = profiles.find((candidate) => candidate.id === option.dataset.permissionProfile);
       if (!profile?.available) return;
+      onboardingTutorialController()?.cancelPendingAutomatic();
       viewState.selectedPermissionProfileId = profile.id;
       renderPermissionPicker();
       closePermissionMenu();

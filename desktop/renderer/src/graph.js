@@ -6,6 +6,7 @@ import {
 } from "./product-workspace/model.js";
 import { activeThread, appState, desktop, evalReview, query, viewState } from "./state.js";
 import { toast } from "./ui.js";
+import { onboardingTutorialController } from "./onboarding-tutorial.js";
 import { createAnnotationApi } from "./annotation-api.js";
 import {
   getNavigationHistory,
@@ -47,7 +48,14 @@ function workspace() {
     },
     onSelectTurn: selectTurn,
     onSelectTurnById: selectTurnById,
-    onSelectionChange: replaceCurrentSelection,
+    onSelectionChange: (nodeId) => {
+      replaceCurrentSelection(nodeId);
+      onboardingTutorialController()?.nodeSelected({
+        threadId: viewState.currentThreadId,
+        interactionId: viewState.currentInteractionId,
+        nodeId,
+      });
+    },
     onExportConversation: desktop?.conversation?.export
       ? (threadId) => desktop.conversation.export(threadId)
       : null,
@@ -56,7 +64,21 @@ function workspace() {
       setSettingsTab("models");
       document.querySelector("#settingsButton")?.click();
     },
-    onNavigateLayer: (layerId, navigation) => import("./threads.js").then(({ navigateLayer }) => navigateLayer(layerId, navigation)),
+    onNavigateLayer: async (layerId, navigation) => {
+      const { navigateLayer } = await import("./threads.js");
+      const source = {
+        threadId: viewState.currentThreadId,
+        interactionId: viewState.currentInteractionId,
+      };
+      const navigated = await navigateLayer(layerId, navigation);
+      if (navigated === true) {
+        onboardingTutorialController()?.actionSucceeded({
+          ...source,
+          actionId: navigation?.action?.id,
+        });
+      }
+      return navigated;
+    },
     onNavigateResolvedInvoke: (action) => import("./threads.js").then(({ navigateResolvedInvoke }) => navigateResolvedInvoke(action)),
     onInvokeAction: (action) => import("./threads.js").then(({ invokeAction }) => invokeAction(action)),
     onDecideApproval: (requestId, decision) => import("./threads.js").then(({ decideApproval }) => decideApproval(requestId, decision)),
@@ -67,6 +89,7 @@ function workspace() {
 
 export function renderThread() {
   workspace().render();
+  onboardingTutorialController()?.syncWorkspace();
 }
 
 export function currentThreadModelSelectionPayload() {

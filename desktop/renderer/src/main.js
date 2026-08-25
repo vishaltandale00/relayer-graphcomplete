@@ -32,6 +32,10 @@ import {
   refreshModelFamilySettings,
 } from "./model-family-settings.js";
 import { createReviewPresentationAdapter } from "./review-tools.js";
+import {
+  installOnboardingTutorialController,
+  onboardingTutorialController,
+} from "./onboarding-tutorial.js";
 import { $, applyAppearance, toast } from "./ui.js";
 import { renderUpdate, updateAction } from "./updates.js";
 
@@ -47,29 +51,70 @@ async function refreshProviderModelUi() {
     await refreshModelFamilySettings();
     refreshNewThreadModelPicker();
     updateCreateThreadAvailability();
+    updateTutorialAvailability();
   }
-  if (viewState.currentThreadId) await refreshState(viewState.currentThreadId);
+  if (productApiAvailable) await refreshState(viewState.currentThreadId);
+}
+
+function tutorialComposerReady() {
+  return Boolean(viewState.selectedPermissionProfileId)
+    && (!productApiAvailable || newThreadModelSelectionReady());
+}
+
+function updateTutorialAvailability() {
+  const ready = Boolean(desktop?.tutorial) && !evalReview && tutorialComposerReady();
+  $("#startTutorial").disabled = !ready;
+  $("#startTutorial").title = ready
+    ? "Start tutorial"
+    : "Choose an available model and permission profile to start the tutorial";
+}
+
+function takeOverPendingAutomaticTutorial() {
+  onboardingTutorialController()?.cancelPendingAutomatic();
+}
+
+async function openNewThreadComposer({ prompt = "", guard = null } = {}) {
+  const applyPermissionProfiles = await preparePermissionProfiles(
+    appState.modelSettings?.defaults?.harnessId,
+  );
+  if (guard && !guard()) return false;
+  applyPermissionProfiles?.();
+  updateTutorialAvailability();
+  if (guard && !guard()) return false;
+  cancelNavigationHistory();
+  viewState.currentThreadId = null;
+  viewState.currentInteractionId = null;
+  selectScope({ kind: "standalone", label: "No folder" });
+  resetNewThreadModelPicker();
+  setMainView("new");
+  $("#newThreadPrompt").value = prompt;
+  updateCreateThreadAvailability();
+  $("#newThreadPrompt").focus();
+  return true;
+}
+
+async function maybeStartAutomaticTutorial(providerConnected) {
+  const tutorial = onboardingTutorialController();
+  if (!tutorial || evalReview) return false;
+  if (!tutorialComposerReady()) return false;
+  return tutorial.maybeStartAutomatic({
+    providerConnected,
+    threadCount: appState.threads.length,
+  });
 }
 
 function bindEvents() {
   $("#connectCodex").onclick = connectCodex;
   $("#newThread").onclick = async () => {
+    takeOverPendingAutomaticTutorial();
     try {
-      const applyPermissionProfiles = await preparePermissionProfiles(
-        appState.modelSettings?.defaults?.harnessId,
-      );
-      applyPermissionProfiles?.();
-      cancelNavigationHistory();
-      viewState.currentThreadId = null;
-      selectScope({ kind: "standalone", label: "No folder" });
-      resetNewThreadModelPicker();
-      setMainView("new");
-      $("#newThreadPrompt").focus();
+      await openNewThreadComposer();
     } catch (error) {
       toast(error.message);
     }
   };
   $("#scopeButton").onclick = () => {
+    takeOverPendingAutomaticTutorial();
     closePermissionMenu();
     closeNewThreadModelPicker();
     const menu = $("#scopeMenu");
@@ -78,6 +123,7 @@ function bindEvents() {
     $("#scopeButton").setAttribute("aria-expanded", String(opening));
   };
   $("#permissionButton").onclick = () => {
+    takeOverPendingAutomaticTutorial();
     $("#scopeMenu").classList.add("hidden");
     $("#scopeButton").setAttribute("aria-expanded", "false");
     closeNewThreadModelPicker();
@@ -85,6 +131,7 @@ function bindEvents() {
   };
   $("#createThread").onclick = () => createFirstThread();
   $("#newThreadPrompt").oninput = () => {
+    takeOverPendingAutomaticTutorial();
     updateCreateThreadAvailability();
   };
   bindComposerKeydown($("#newThreadPrompt"), () => {
@@ -98,6 +145,7 @@ function bindEvents() {
     $("#collapseSidebar").setAttribute("aria-label", label);
   };
   $("#settingsButton").onclick = async () => {
+    takeOverPendingAutomaticTutorial();
     cancelNavigationHistory();
     setMainView("settings", { moveFocus: true });
     try {
@@ -105,6 +153,7 @@ function bindEvents() {
         await desktop?.models?.settingsOpened?.();
         await refreshModelFamilySettings();
         refreshNewThreadModelPicker();
+        updateTutorialAvailability();
       }
     } catch (error) {
       toast(error.message);
@@ -135,8 +184,20 @@ function bindEvents() {
     setSettingsTab(tabs[nextIndex].dataset.settingsTab);
     tabs[nextIndex].focus();
   };
+  $("#startTutorial").onclick = async () => {
+    try {
+      if (!tutorialComposerReady()) {
+        updateTutorialAvailability();
+        return;
+      }
+      await onboardingTutorialController()?.startManual();
+    } catch (error) {
+      toast(error.message);
+    }
+  };
   $("#disconnectCodex").onclick = async () => {
     await desktop?.account.logout();
+    await onboardingTutorialController()?.leave();
     await refreshAccount();
     await refreshProviderModelUi();
   };
@@ -200,21 +261,29 @@ async function boot() {
   window.addEventListener("pagehide", stopEnvironmentRefresh, { once: true });
   desktop?.account.onChanged((event) => {
     void (async () => {
+      let account;
       if (event?.status === "unavailable") showAuth(event.error || "Codex is unavailable.");
-      else await refreshAccount();
+      else account = await refreshAccount();
+      const providerConnected = account?.status === "connected";
+      if (!providerConnected) await onboardingTutorialController()?.leave();
       await refreshProviderModelUi();
+      await maybeStartAutomaticTutorial(providerConnected);
     })().catch((error) => toast(error.message));
   });
   desktop?.updater.onChanged(renderUpdate);
   if (desktop?.appearance) applyAppearance((await desktop.appearance.read()).appearance);
   else applyAppearance(document.documentElement.dataset.theme);
   if (desktop) renderUpdate(await desktop.updater.status());
-  await refreshAccount();
+  const account = await refreshAccount();
   if (productApiAvailable) await initializeModelFamilySettings();
   await loadPermissionProfiles(appState.modelSettings?.defaults?.harnessId);
   if (productApiAvailable) {
     initializeNewThreadModelPicker({
-      onSelectionChange: updateCreateThreadAvailability,
+      onUserTakeover: takeOverPendingAutomaticTutorial,
+      onSelectionChange: () => {
+        updateCreateThreadAvailability();
+        updateTutorialAvailability();
+      },
       onOpenSettings: () => {
         setSettingsTab("models");
         $("#settingsButton").click();
@@ -223,6 +292,19 @@ async function boot() {
   }
   updateCreateThreadAvailability();
   await refreshState(viewState.currentThreadId);
+  if (desktop?.tutorial && !evalReview) {
+    installOnboardingTutorialController({
+      lifecycle: desktop.tutorial,
+      getAppState: () => appState,
+      getViewState: () => viewState,
+      isComposerReady: tutorialComposerReady,
+      openNewThread: openNewThreadComposer,
+    });
+    updateTutorialAvailability();
+    await maybeStartAutomaticTutorial(account?.status === "connected");
+  } else {
+    updateTutorialAvailability();
+  }
   if (evalReview) {
     evalReview.registerPresentationAdapter(createReviewPresentationAdapter({
       executionId: viewState.evalContext.selectedExecutionId,
