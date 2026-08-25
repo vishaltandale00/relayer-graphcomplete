@@ -321,6 +321,21 @@ export function inspectorEscapeShouldClose({
     && inspectorOpen;
 }
 
+export function workspaceBreadcrumbShouldRender(items = []) {
+  const [onlyItem] = items;
+  return items.length > 0 && !(
+    items.length === 1
+    && onlyItem.kind === "layer"
+    && onlyItem.label === "Response"
+    && onlyItem.pathIndex === 0
+    && onlyItem.actionId == null
+  );
+}
+
+export function workspaceRootAnnotationShouldRender(items = [], annotationEnabled = false) {
+  return annotationEnabled && items.length === 1 && !workspaceBreadcrumbShouldRender(items);
+}
+
 export function turnSelectionIntent(turns, currentInteractionId, targetInteractionId) {
   const currentIndex = turns.findIndex((turn) => (
     String(turn.id) === String(currentInteractionId)
@@ -1443,38 +1458,48 @@ export function createProductWorkspace({
   function renderBreadcrumb(state = getState(), thread = getThread()) {
     const breadcrumb = $("#workspaceBreadcrumb");
     const items = workspaceBreadcrumbItems(state, thread, selection);
+    const visible = workspaceBreadcrumbShouldRender(items);
+    const rootAnnotationOnly = workspaceRootAnnotationShouldRender(items, annotationEnabled);
+    breadcrumb.classList.toggle("hidden", !visible && !rootAnnotationOnly);
+    breadcrumb.classList.toggle("root-annotation-only", rootAnnotationOnly);
+    if (!visible && !rootAnnotationOnly) {
+      breadcrumb.replaceChildren();
+      return;
+    }
     const children = [];
     items.forEach((item, index) => {
-      if (index > 0) {
+      if (visible && index > 0) {
         const separator = graphDocument.createElement("span");
         separator.className = "breadcrumb-separator";
         separator.setAttribute("aria-hidden", "true");
         separator.textContent = "/";
         children.push(separator);
       }
-      const segment = graphDocument.createElement(item.interactive ? "button" : "span");
-      segment.className = `breadcrumb-segment breadcrumb-${item.kind}`;
-      segment.append(createRelayerIcon(item.icon, { class: "breadcrumb-icon" }));
-      const label = graphDocument.createElement("span");
-      label.className = "breadcrumb-label";
-      label.textContent = item.label;
-      segment.append(label);
-      segment.title = item.description
-        ? `${item.label}: ${item.description}`
-        : item.label;
-      if (item.current) segment.setAttribute("aria-current", "location");
-      if (item.interactive) {
-        segment.type = "button";
-        segment.setAttribute("aria-label", `Go to ${item.label}`);
-        segment.dataset.reviewRef = `breadcrumb-${item.key}`;
-        segment.dataset.reviewKind = "layer-navigation";
-        segment.dataset.reviewPathIndex = String(item.pathIndex);
-        segment.onclick = () => onNavigateLayer(item.layerId, {
-          restore: true,
-          pathIndex: item.pathIndex,
-        });
+      if (visible) {
+        const segment = graphDocument.createElement(item.interactive ? "button" : "span");
+        segment.className = `breadcrumb-segment breadcrumb-${item.kind}`;
+        segment.append(createRelayerIcon(item.icon, { class: "breadcrumb-icon" }));
+        const label = graphDocument.createElement("span");
+        label.className = "breadcrumb-label";
+        label.textContent = item.label;
+        segment.append(label);
+        segment.title = item.description
+          ? `${item.label}: ${item.description}`
+          : item.label;
+        if (item.current) segment.setAttribute("aria-current", "location");
+        if (item.interactive) {
+          segment.type = "button";
+          segment.setAttribute("aria-label", `Go to ${item.label}`);
+          segment.dataset.reviewRef = `breadcrumb-${item.key}`;
+          segment.dataset.reviewKind = "layer-navigation";
+          segment.dataset.reviewPathIndex = String(item.pathIndex);
+          segment.onclick = () => onNavigateLayer(item.layerId, {
+            restore: true,
+            pathIndex: item.pathIndex,
+          });
+        }
+        children.push(segment);
       }
-      children.push(segment);
       if (annotationEnabled) {
         const anchor = {
           kind: "layer",

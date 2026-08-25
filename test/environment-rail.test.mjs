@@ -13,11 +13,18 @@ import {
 } from "../desktop/renderer/src/environment-context.js";
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
 import {
+  appendLayerPath,
+  rootLayerPath,
+  workspaceBreadcrumbItems,
+} from "../desktop/renderer/src/product-workspace/model.js";
+import {
   environmentPresentation,
   inspectorEscapeShouldClose,
   interactionStatusRenderKey,
   trackedChangesLabel,
   untrackedFilesLabel,
+  workspaceBreadcrumbShouldRender,
+  workspaceRootAnnotationShouldRender,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("desktop environment rail", () => {
@@ -296,7 +303,9 @@ describe("desktop environment rail", () => {
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
     expect(styles).toContain("--inspector:340px");
     expect(styles).toContain("grid-template-columns:minmax(0,1fr) var(--inspector)");
-    expect(styles).toContain("padding:12px 12px 0 0");
+    expect(styles).toContain("padding:0 12px 0 0");
+    expect(styles).toContain("padding:0 12px 12px");
+    expect(styles).toContain('html[data-theme="light"] .workspace-breadcrumb.root-annotation-only{background:transparent}');
     expect(styles).toContain(".environment-panel{grid-column:2;grid-row:1 / 3");
     expect(styles).toContain(".interaction-banner{grid-column:1;grid-row:2;margin:8px 0 12px 12px");
     expect(styles).toContain(".environment-panel{grid-column:2;grid-row:1 / 3;margin:0 0 12px");
@@ -335,5 +344,47 @@ describe("desktop environment rail", () => {
       railWidth: 340,
       leftColumnWidth: 2390,
     });
+  });
+
+  it("removes the root-only Response strip but keeps nested graph navigation", () => {
+    const rootLayer = { layer: { id: 100 }, nodes: [], edges: [], actions: [] };
+    const interaction = {
+      id: 2,
+      threadId: 7,
+      completionOutput: { rootLayer },
+    };
+    const thread = { id: 7 };
+    const state = {
+      interactions: [interaction],
+      currentInteractionId: interaction.id,
+      visibleLayer: rootLayer,
+      nodes: [],
+    };
+    const rootPath = rootLayerPath(interaction);
+    const rootItems = workspaceBreadcrumbItems(state, thread, { layerPath: rootPath });
+
+    expect(rootItems.map((item) => item.label)).toEqual(["Response"]);
+    expect(workspaceBreadcrumbShouldRender(rootItems)).toBe(false);
+    expect(workspaceRootAnnotationShouldRender(rootItems, false)).toBe(false);
+    expect(workspaceRootAnnotationShouldRender(rootItems, true)).toBe(true);
+    expect(workspaceBreadcrumbShouldRender([])).toBe(false);
+    expect(workspaceRootAnnotationShouldRender([], true)).toBe(false);
+
+    const nestedPath = appendLayerPath(rootPath, {
+      id: 501,
+      kind: "navigate",
+      sourceNodeId: 10,
+      targetLayerId: 101,
+    }, { id: 10, title: "Architecture", icon: "network" });
+    state.visibleLayer = { layer: { id: 101 }, nodes: [], edges: [], actions: [] };
+    const nestedItems = workspaceBreadcrumbItems(state, thread, { layerPath: nestedPath });
+    expect(nestedItems.map((item) => item.label)).toEqual(["Response", "Architecture"]);
+    expect(workspaceBreadcrumbShouldRender(nestedItems)).toBe(true);
+
+    state.visibleLayer = { layer: { id: 999 }, nodes: [], edges: [], actions: [] };
+    const fallbackItems = workspaceBreadcrumbItems(state, thread, { layerPath: rootPath });
+    expect(fallbackItems.map((item) => item.label)).toEqual(["Layer"]);
+    expect(workspaceBreadcrumbShouldRender(fallbackItems)).toBe(true);
+    expect(workspaceRootAnnotationShouldRender(fallbackItems, true)).toBe(false);
   });
 });
