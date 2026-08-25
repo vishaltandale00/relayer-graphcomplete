@@ -51,6 +51,10 @@ describe("PrimeAgentHarness", () => {
     expect(prompts[0]!.text).toContain("await graph.submit(11)");
     expect(prompts[0]!.text).toContain("exactly one NodePlacementObject(node, x, y) per member node");
     expect(prompts[0]!.text).toContain("Place a one-node layer at (0.5, 0.5)");
+    expect(prompts[0]!.text).toContain("explicit descriptive client_key");
+    expect(prompts[0]!.text).toContain("rerun the same authoring code with the same client_key values");
+    expect(prompts[0]!.text).toContain("Do not add fake navigation");
+    expect(prompts[0]!.text).toContain("await graph.discard_layer(layer)");
     await expect(graphHandler?.({}, invocation(first))).resolves.toEqual({
       url: "http://127.0.0.1:43123",
       token: "first-token",
@@ -131,6 +135,15 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("Never mention or expose the size justification");
     expect(prompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
     expect(prompt).toContain("align comparisons deliberately");
+    expect(prompt).toContain('NodeObject("info", "Summary", "...", client_key="summary-node")');
+    expect(prompt).not.toContain('NodeObject("lightbulb"');
+    expect(prompt).toContain('client_key="root-response"');
+    expect(prompt).toContain('client_key="node-detail"');
+    expect(prompt).toContain('client_key="node-evidence"');
+    expect(prompt).toContain('client_key="node-follow-up"');
+    expect(prompt).toContain("rerun it with the same client_key values");
+    expect(prompt).toContain("Do not add fake navigate or reference actions");
+    expect(prompt).toContain("await graph.discard_layer(layer)");
   });
 
   it("does not start a prompt when the run was already cancelled", async () => {

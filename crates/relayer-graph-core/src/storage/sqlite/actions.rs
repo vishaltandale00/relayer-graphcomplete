@@ -13,6 +13,11 @@ pub(crate) struct ActionRecord {
     pub action: GraphAction,
 }
 
+pub(crate) struct RootActionIdentity {
+    pub id: ActionId,
+    pub client_key: String,
+}
+
 #[derive(FromRow)]
 struct ActionRow {
     id: i64,
@@ -104,6 +109,25 @@ impl<'connection> ActionTable<'connection> {
         .fetch_optional(&mut *self.connection)
         .await?
         .map(ActionRecord::try_from)
+        .transpose()
+    }
+
+    pub(crate) async fn active_root_identity(
+        &mut self,
+        owner: NodeId,
+    ) -> Result<Option<RootActionIdentity>, GraphError> {
+        let row: Option<(i64, String)> = sqlx::query_as(
+            "SELECT id,client_key FROM actions WHERE owner_interaction_id=?1 AND source_node_id=?1 AND source_layer_id IS NULL AND state IN ('draft','accepted') ORDER BY id LIMIT 1",
+        )
+        .bind(owner.value())
+        .fetch_optional(&mut *self.connection)
+        .await?;
+        row.map(|(id, client_key)| {
+            Ok(RootActionIdentity {
+                id: valid_action_id(id)?,
+                client_key,
+            })
+        })
         .transpose()
     }
 
