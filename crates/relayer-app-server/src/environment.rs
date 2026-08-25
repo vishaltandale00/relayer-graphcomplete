@@ -288,6 +288,24 @@ trait GitRunner {
         Ok(Vec::new())
     }
 
+    fn protected_excludes_file(
+        &self,
+        _path: &Path,
+        _deadline: Instant,
+    ) -> Result<Option<OsString>, GitRunError> {
+        Ok(None)
+    }
+
+    fn validate_repository_selection(
+        &self,
+        _selected_path: &Path,
+        reported_root: &Path,
+        _safety: &GitSafetyOverrides,
+        _deadline: Instant,
+    ) -> Result<PathBuf, GitRunError> {
+        Ok(reported_root.to_owned())
+    }
+
     fn local_filter_drivers(
         &self,
         _repository: &Path,
@@ -309,6 +327,7 @@ trait GitRunner {
 #[derive(Default)]
 struct GitSafetyOverrides {
     safe_directories: Vec<OsString>,
+    excludes_file: Option<OsString>,
     disabled_filter_drivers: Vec<OsString>,
 }
 
@@ -321,6 +340,24 @@ impl GitRunner for SystemGitRunner {
         deadline: Instant,
     ) -> Result<Vec<OsString>, GitRunError> {
         read_protected_safe_directories(path, deadline)
+    }
+
+    fn protected_excludes_file(
+        &self,
+        path: &Path,
+        deadline: Instant,
+    ) -> Result<Option<OsString>, GitRunError> {
+        read_protected_excludes_file(path, deadline)
+    }
+
+    fn validate_repository_selection(
+        &self,
+        selected_path: &Path,
+        reported_root: &Path,
+        safety: &GitSafetyOverrides,
+        deadline: Instant,
+    ) -> Result<PathBuf, GitRunError> {
+        validate_repository_identity(selected_path, reported_root, safety, deadline)
     }
 
     fn run(
@@ -392,8 +429,13 @@ fn inspect_with(
     let mut safety = match git.protected_safe_directories(path, deadline) {
         Ok(safe_directories) => GitSafetyOverrides {
             safe_directories,
+            excludes_file: None,
             disabled_filter_drivers: Vec::new(),
         },
+        Err(error) => return unavailable_from_error(fallback_label, error),
+    };
+    safety.excludes_file = match git.protected_excludes_file(path, deadline) {
+        Ok(excludes_file) => excludes_file,
         Err(error) => return unavailable_from_error(fallback_label, error),
     };
 
@@ -424,6 +466,10 @@ fn inspect_with(
                 git_failure_message(&output),
             );
         }
+        Err(error) => return unavailable_from_error(fallback_label, error),
+    };
+    let repository = match git.validate_repository_selection(path, &repository, &safety, deadline) {
+        Ok(repository) => repository,
         Err(error) => return unavailable_from_error(fallback_label, error),
     };
     let worktree_label = folder_label(&repository, project_name);
@@ -815,6 +861,11 @@ fn run_bounded_command_with_safety(
         setting.push(directory);
         command.arg("-c").arg(setting);
     }
+    if let Some(excludes_file) = &safety.excludes_file {
+        let mut setting = OsString::from("core.excludesFile=");
+        setting.push(excludes_file);
+        command.arg("-c").arg(setting);
+    }
     for driver in &safety.disabled_filter_drivers {
         for (suffix, value) in [(".clean=", ""), (".process=", ""), (".required=", "false")] {
             let mut setting = driver.clone();
@@ -899,6 +950,149 @@ fn read_protected_safe_directories_with(
         }
     }
     Ok(directories)
+}
+
+fn read_protected_excludes_file(
+    path: &Path,
+    deadline: Instant,
+) -> Result<Option<OsString>, GitRunError> {
+    read_protected_excludes_file_with(path, deadline, |_| {})
+}
+
+fn read_protected_excludes_file_with(
+    path: &Path,
+    deadline: Instant,
+    mut configure: impl FnMut(&mut Command),
+) -> Result<Option<OsString>, GitRunError> {
+    read_protected_excludes_file_with_configurers(
+        path,
+        deadline,
+        |command| configure(command),
+        |_| {},
+    )
+}
+
+fn read_protected_excludes_file_with_configurers(
+    path: &Path,
+    deadline: Instant,
+    mut configure_before_sanitization: impl FnMut(&mut Command),
+    mut configure_trusted_scope: impl FnMut(&mut Command),
+) -> Result<Option<OsString>, GitRunError> {
+    let mut effective = None;
+    for scope in ["--system", "--global"] {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(GitRunError::Timeout(SNAPSHOT_TIMEOUT))?;
+        let mut command = Command::new("git");
+        configure_before_sanitization(&mut command);
+        sanitize_git_environment(&mut command);
+        configure_trusted_scope(&mut command);
+        command
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("LC_ALL", "C")
+            .current_dir(path)
+            .args([
+                "config",
+                scope,
+                "--includes",
+                "--path",
+                "--null",
+                "--get-all",
+                "core.excludesFile",
+            ])
+            .stdin(Stdio::null());
+        let output = run_prepared_command(command, remaining)?;
+        if !output.status.success {
+            if output.status.code == Some(1) && output.stdout.is_empty() {
+                continue;
+            }
+            return Err(GitRunError::Output(io::Error::other(
+                "Git could not read protected core.excludesFile configuration",
+            )));
+        }
+        if output.stdout.is_empty() || !output.stdout.ends_with(&[0]) {
+            return Err(GitRunError::Output(io::Error::other(
+                "Git returned malformed protected core.excludesFile configuration",
+            )));
+        }
+        let value = output.stdout[..output.stdout.len() - 1]
+            .split(|byte| *byte == 0)
+            .next_back()
+            .ok_or_else(|| {
+                GitRunError::Output(io::Error::other(
+                    "Git returned malformed protected core.excludesFile configuration",
+                ))
+            })?;
+        effective = Some(os_string_from_bytes(value)?);
+    }
+    // An explicit empty value is not equivalent to absence: Git uses it to disable the
+    // default XDG excludes file. Preserve it so command-scope replay keeps that reset.
+    Ok(effective)
+}
+
+fn validate_repository_identity(
+    selected_path: &Path,
+    reported_root: &Path,
+    safety: &GitSafetyOverrides,
+    deadline: Instant,
+) -> Result<PathBuf, GitRunError> {
+    let selected_git_dir = canonical_git_dir(selected_path, safety, deadline)?;
+    let root = std::fs::canonicalize(reported_root).map_err(GitRunError::Output)?;
+    if !root.is_dir() {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git reported a repository root that is not a directory",
+        )));
+    }
+    let selected = std::fs::canonicalize(selected_path).map_err(GitRunError::Output)?;
+    if !selected.starts_with(&root) {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git repository root does not contain the selected project path",
+        )));
+    }
+    let root_git_dir = canonical_git_dir(&root, safety, deadline)?;
+    if selected_git_dir != root_git_dir {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git repository identity changed while resolving its root",
+        )));
+    }
+    Ok(root)
+}
+
+fn canonical_git_dir(
+    path: &Path,
+    safety: &GitSafetyOverrides,
+    deadline: Instant,
+) -> Result<PathBuf, GitRunError> {
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or(GitRunError::Timeout(SNAPSHOT_TIMEOUT))?;
+    let output = run_bounded_command_with_safety(
+        OsStr::new("git"),
+        path,
+        &["rev-parse", "--path-format=absolute", "--absolute-git-dir"],
+        safety,
+        remaining,
+        |_| {},
+    )?;
+    if !output.status.success {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git could not resolve the repository identity",
+        )));
+    }
+    let git_dir = repository_path(&output.stdout).ok_or_else(|| {
+        GitRunError::Output(io::Error::other(
+            "Git returned an invalid repository identity",
+        ))
+    })?;
+    let git_dir = std::fs::canonicalize(git_dir).map_err(GitRunError::Output)?;
+    if !git_dir.is_dir() {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git repository identity is not a directory",
+        )));
+    }
+    Ok(git_dir)
 }
 
 fn read_local_filter_drivers(
@@ -1606,6 +1800,54 @@ mod tests {
         }
     }
 
+    fn read_protected_excludes_file_test(
+        path: &Path,
+        mut configure: impl FnMut(&mut Command),
+    ) -> Result<Option<OsString>, GitRunError> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match read_protected_excludes_file_with(
+                path,
+                Instant::now() + SNAPSHOT_TIMEOUT,
+                |command| configure(command),
+            ) {
+                Err(GitRunError::CleanupBusy { .. } | GitRunError::Timeout(_))
+                    if Instant::now() < deadline =>
+                {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                result => return result,
+            }
+        }
+    }
+
+    fn read_protected_excludes_file_with_system_test(
+        path: &Path,
+        system_config: &Path,
+        home: &Path,
+    ) -> Result<Option<OsString>, GitRunError> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match read_protected_excludes_file_with_configurers(
+                path,
+                Instant::now() + SNAPSHOT_TIMEOUT,
+                |command| {
+                    command.env("HOME", home);
+                },
+                |command| {
+                    command.env("GIT_CONFIG_SYSTEM", system_config);
+                },
+            ) {
+                Err(GitRunError::CleanupBusy { .. } | GitRunError::Timeout(_))
+                    if Instant::now() < deadline =>
+                {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                result => return result,
+            }
+        }
+    }
+
     fn read_local_filter_drivers_test(repository: &Path) -> Result<Vec<OsString>, GitRunError> {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
@@ -1826,6 +2068,203 @@ mod tests {
         assert_eq!(snapshot.changes.tracked_files, 1);
         assert_eq!(snapshot.changes.additions, 2);
         assert_eq!(snapshot.changes.deletions, 2);
+    }
+
+    #[test]
+    fn repository_identity_allows_selected_subdirectories_and_linked_worktrees() {
+        let directory = tempfile::tempdir().unwrap();
+        let primary = directory.path().join("primary");
+        std::fs::create_dir(&primary).unwrap();
+        let run = |path: &Path, arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&primary, &["init", "--initial-branch=main"]);
+        run(
+            &primary,
+            &["config", "user.email", "relayer-test@example.invalid"],
+        );
+        run(&primary, &["config", "user.name", "Relayer test"]);
+        std::fs::write(primary.join("tracked.txt"), "baseline\n").unwrap();
+        run(&primary, &["add", "tracked.txt"]);
+        run(&primary, &["commit", "-m", "baseline"]);
+
+        let primary_subdir = primary.join("selected-subdir");
+        std::fs::create_dir(&primary_subdir).unwrap();
+        let primary_subdir = std::fs::canonicalize(primary_subdir).unwrap();
+        let primary_snapshot = inspect_with(
+            &primary_subdir,
+            "project",
+            &SystemGitRunner,
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        );
+        assert_eq!(primary_snapshot.kind, EnvironmentKind::Git);
+        assert_eq!(
+            primary_snapshot.worktree_label,
+            primary.file_name().unwrap().to_string_lossy()
+        );
+
+        let linked = directory.path().join("linked");
+        run(
+            &primary,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "linked-test",
+                linked.to_str().unwrap(),
+            ],
+        );
+        let linked_subdir = linked.join("selected-subdir");
+        std::fs::create_dir(&linked_subdir).unwrap();
+        let linked_subdir = std::fs::canonicalize(linked_subdir).unwrap();
+        let linked_snapshot = inspect_with(
+            &linked_subdir,
+            "project",
+            &SystemGitRunner,
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        );
+        assert_eq!(linked_snapshot.kind, EnvironmentKind::Git);
+        assert_eq!(linked_snapshot.branch.as_deref(), Some("linked-test"));
+        assert_eq!(
+            linked_snapshot.worktree_label,
+            linked.file_name().unwrap().to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn repository_identity_rejects_core_worktree_redirect() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("repository");
+        let redirected = directory.path().join("redirected");
+        std::fs::create_dir(&repository).unwrap();
+        std::fs::create_dir(&redirected).unwrap();
+        let run = |arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repository)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&["init", "--initial-branch=main"]);
+        run(&["config", "user.email", "relayer-test@example.invalid"]);
+        run(&["config", "user.name", "Relayer test"]);
+        std::fs::write(repository.join("tracked.txt"), "baseline\n").unwrap();
+        run(&["add", "tracked.txt"]);
+        run(&["commit", "-m", "baseline"]);
+        run(&["config", "core.worktree", redirected.to_str().unwrap()]);
+
+        let repository = std::fs::canonicalize(repository).unwrap();
+        let reported = Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(["rev-parse", "--path-format=absolute", "--show-toplevel"])
+            .output()
+            .unwrap();
+        assert!(reported.status.success());
+        assert_eq!(
+            std::fs::canonicalize(repository_path(&reported.stdout).unwrap()).unwrap(),
+            std::fs::canonicalize(&redirected).unwrap()
+        );
+
+        let snapshot = inspect_with(
+            &repository,
+            "project",
+            &SystemGitRunner,
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        );
+        assert_eq!(snapshot.kind, EnvironmentKind::Unavailable);
+        assert_eq!(
+            snapshot.unavailable_reason.unwrap().code,
+            "git_output_failed"
+        );
+    }
+
+    #[test]
+    fn repository_identity_rejects_ancestor_core_worktree_redirect() {
+        let directory = tempfile::tempdir().unwrap();
+        let ancestor = std::fs::canonicalize(directory.path()).unwrap();
+        let run = |path: &Path, arguments: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .args(arguments)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {arguments:?} failed");
+        };
+        run(&ancestor, &["init", "--initial-branch=main"]);
+        run(
+            &ancestor,
+            &["config", "user.email", "relayer-test@example.invalid"],
+        );
+        run(&ancestor, &["config", "user.name", "Relayer test"]);
+        std::fs::write(ancestor.join("outer.txt"), "outer\n").unwrap();
+        run(&ancestor, &["add", "outer.txt"]);
+        run(&ancestor, &["commit", "-m", "outer baseline"]);
+
+        let repository = ancestor.join("repository");
+        std::fs::create_dir(&repository).unwrap();
+        run(&repository, &["init", "--initial-branch=main"]);
+        run(
+            &repository,
+            &["config", "user.email", "relayer-test@example.invalid"],
+        );
+        run(&repository, &["config", "user.name", "Relayer test"]);
+        std::fs::write(repository.join("tracked.txt"), "baseline\n").unwrap();
+        run(&repository, &["add", "tracked.txt"]);
+        run(&repository, &["commit", "-m", "nested baseline"]);
+        run(
+            &repository,
+            &["config", "core.worktree", ancestor.to_str().unwrap()],
+        );
+
+        let repository = std::fs::canonicalize(repository).unwrap();
+        let reported = Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(["rev-parse", "--path-format=absolute", "--show-toplevel"])
+            .output()
+            .unwrap();
+        assert!(reported.status.success());
+        let reported_root =
+            std::fs::canonicalize(repository_path(&reported.stdout).unwrap()).unwrap();
+        assert_eq!(reported_root, ancestor);
+        assert!(
+            repository.starts_with(&reported_root),
+            "fixture must pass containment so Git-dir identity is the rejecting check"
+        );
+        let safety = GitSafetyOverrides::default();
+        let nested_git_dir =
+            canonical_git_dir(&repository, &safety, Instant::now() + SNAPSHOT_TIMEOUT).unwrap();
+        let ancestor_git_dir =
+            canonical_git_dir(&reported_root, &safety, Instant::now() + SNAPSHOT_TIMEOUT).unwrap();
+        assert_ne!(nested_git_dir, ancestor_git_dir);
+
+        let snapshot = inspect_with(
+            &repository,
+            "project",
+            &SystemGitRunner,
+            Instant::now() + SNAPSHOT_TIMEOUT,
+        );
+        assert_eq!(snapshot.kind, EnvironmentKind::Unavailable);
+        assert_eq!(
+            snapshot.unavailable_reason.unwrap().code,
+            "git_output_failed"
+        );
     }
 
     #[test]
@@ -2346,11 +2785,13 @@ mod tests {
         let mut permissions = fs::metadata(&filter).unwrap().permissions();
         permissions.set_mode(0o700);
         fs::set_permissions(&filter, permissions).unwrap();
+        let excludes_file = home.join("global-ignore");
+        fs::write(&excludes_file, "ignored.tmp\n").unwrap();
         let included = home.join("safe-directory.inc");
         fs::write(
             &included,
             format!(
-                "[safe]\n\tdirectory =\n\tdirectory = {}\n",
+                "[safe]\n\tdirectory =\n\tdirectory = {}\n[core]\n\texcludesFile = ~/global-ignore\n",
                 repository.display()
             ),
         )
@@ -2385,8 +2826,23 @@ mod tests {
             !marker.exists(),
             "protected-config discovery executed an unrelated global helper"
         );
+        let protected_excludes_file = read_protected_excludes_file_test(&repository, |command| {
+            command
+                .env("HOME", &home)
+                .env("GIT_CONFIG_GLOBAL", &injected);
+        })
+        .unwrap();
+        assert_eq!(
+            protected_excludes_file,
+            Some(excludes_file.as_os_str().to_owned())
+        );
+        assert!(
+            !marker.exists(),
+            "protected excludes discovery executed an unrelated global helper"
+        );
         let safety = GitSafetyOverrides {
             safe_directories,
+            excludes_file: protected_excludes_file,
             disabled_filter_drivers: Vec::new(),
         };
 
@@ -2441,6 +2897,21 @@ mod tests {
             "repository diff executed a globally configured clean filter"
         );
 
+        fs::write(repository.join("ignored.tmp"), "ignored\n").unwrap();
+        fs::write(repository.join("visible.tmp"), "visible\n").unwrap();
+        let untracked = run_bounded_git_test(
+            &repository,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+            &safety,
+            |command| {
+                command.env("HOME", &home);
+            },
+        )
+        .unwrap();
+        assert!(untracked.status.success);
+        assert_eq!(untracked.stdout, b"visible.tmp\0");
+        assert!(!marker.exists());
+
         let forwarded = run_bounded_git_test(
             &repository,
             &["config", "--null", "--get-all", "safe.directory"],
@@ -2460,6 +2931,89 @@ mod tests {
             ]
             .concat()
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn protected_excludes_preserve_global_empty_reset_and_system_precedence() {
+        use std::fs;
+
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("repository");
+        fs::create_dir(&repository).unwrap();
+        let initialized = Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(["init", "--initial-branch=main"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(initialized.success());
+        for name in ["system.tmp", "visible.tmp", "xdg.tmp"] {
+            fs::write(repository.join(name), name).unwrap();
+        }
+
+        let system_excludes = directory.path().join("system-ignore");
+        fs::write(&system_excludes, "system.tmp\n").unwrap();
+        let system_config = directory.path().join("system.gitconfig");
+        fs::write(
+            &system_config,
+            format!("[core]\n\texcludesFile = {}\n", system_excludes.display()),
+        )
+        .unwrap();
+        let xdg = directory.path().join("xdg");
+        fs::create_dir_all(xdg.join("git")).unwrap();
+        fs::write(xdg.join("git/ignore"), "xdg.tmp\n").unwrap();
+
+        let empty_home = directory.path().join("empty-home");
+        fs::create_dir(&empty_home).unwrap();
+        let system_value =
+            read_protected_excludes_file_with_system_test(&repository, &system_config, &empty_home)
+                .unwrap();
+        assert_eq!(system_value, Some(system_excludes.as_os_str().to_owned()));
+        let system_result = run_bounded_git_test(
+            &repository,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+            &GitSafetyOverrides {
+                safe_directories: Vec::new(),
+                excludes_file: system_value,
+                disabled_filter_drivers: Vec::new(),
+            },
+            |command| {
+                command
+                    .env("HOME", &empty_home)
+                    .env("XDG_CONFIG_HOME", &xdg);
+            },
+        )
+        .unwrap();
+        assert!(system_result.status.success);
+        assert_eq!(system_result.stdout, b"visible.tmp\0xdg.tmp\0");
+
+        let reset_home = directory.path().join("reset-home");
+        fs::create_dir(&reset_home).unwrap();
+        fs::write(reset_home.join(".gitconfig"), "[core]\n\texcludesFile =\n").unwrap();
+        let reset_value =
+            read_protected_excludes_file_with_system_test(&repository, &system_config, &reset_home)
+                .unwrap();
+        assert_eq!(reset_value, Some(OsString::new()));
+        let reset_result = run_bounded_git_test(
+            &repository,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+            &GitSafetyOverrides {
+                safe_directories: Vec::new(),
+                excludes_file: reset_value,
+                disabled_filter_drivers: Vec::new(),
+            },
+            |command| {
+                command
+                    .env("HOME", &reset_home)
+                    .env("XDG_CONFIG_HOME", &xdg);
+            },
+        )
+        .unwrap();
+        assert!(reset_result.status.success);
+        assert_eq!(reset_result.stdout, b"system.tmp\0visible.tmp\0xdg.tmp\0");
     }
 
     #[test]
@@ -2555,6 +3109,7 @@ mod tests {
             &arguments,
             &GitSafetyOverrides {
                 safe_directories: Vec::new(),
+                excludes_file: None,
                 disabled_filter_drivers,
             },
             |_| {},
