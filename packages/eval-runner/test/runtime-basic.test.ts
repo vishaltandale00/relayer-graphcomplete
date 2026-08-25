@@ -142,6 +142,23 @@ describe("first runtime evaluation", () => {
     };
     const reported = parseReportedReplayRepairEvidence(output);
     expect(reported).toEqual({ passes: [pass, pass], orphanSubmitErrorCode: "orphan_draft_layers", discardedLayerIds: [8, 8] });
+    let sequence = 0;
+    const write = (recordKind: "node" | "edge" | "layer" | "action", recordId: number) => ({
+      sequence: ++sequence,
+      method: "POST",
+      path: `/api/graph/${recordKind === "edge" ? "edges" : `${recordKind}s`}`,
+      status: 200,
+      recordKind,
+      recordId,
+      recordState: "draft",
+    });
+    const replayWrites = ([
+      ["node", 2], ["node", 3], ["edge", 4], ["layer", 5], ["action", 6], ["node", 7], ["layer", 8],
+    ] as const).flatMap(([kind, id]) => [write(kind, id), write(kind, id)]);
+    const failedSubmit = { sequence: ++sequence, method: "POST", path: "/api/graph/submit", status: 422, errorCodes: ["orphan_draft_layers"] };
+    const firstDiscard = { sequence: ++sequence, method: "POST", path: "/api/graph/layers/8/discard", status: 200, recordKind: "layer" as const, recordId: 8, recordState: "stopped" };
+    const secondDiscard = { ...firstDiscard, sequence: ++sequence };
+    const finalSubmit = { sequence: ++sequence, method: "POST", path: "/api/graph/submit", status: 200 };
     const evidence: ReplayRepairEvidence = {
       reported: reported!,
       stoppedLayer: {
@@ -151,10 +168,26 @@ describe("first runtime evaluation", () => {
         actions: [],
       },
       stoppedLayerOwnerNodeId: 1,
+      auditEvents: [...replayWrites, failedSubmit, firstDiscard, secondDiscard, finalSubmit],
     };
 
     expect(checkReplayRepairOutput(output, evidence).every((check) => check.passed)).toBe(true);
     expect(checkReplayRepairOutput(output, { ...evidence, stoppedLayerOwnerNodeId: 99 }).find((check) => check.name === "explicit-stopped-orphan")?.passed).toBe(false);
+    const fabricatedTextOnly = checkReplayRepairOutput(output, { ...evidence, auditEvents: [] });
+    expect(fabricatedTextOnly.find((check) => check.name === "stable-object-replay")?.passed).toBe(false);
+    expect(fabricatedTextOnly.find((check) => check.name === "orphan-validation-observed")?.passed).toBe(false);
+    expect(fabricatedTextOnly.find((check) => check.name === "idempotent-discard")?.passed).toBe(false);
+    const onePassOneDiscard = checkReplayRepairOutput(output, {
+      ...evidence,
+      auditEvents: [
+        ...replayWrites.filter((_, index) => index % 2 === 0),
+        failedSubmit,
+        firstDiscard,
+        finalSubmit,
+      ],
+    });
+    expect(onePassOneDiscard.find((check) => check.name === "stable-object-replay")?.passed).toBe(false);
+    expect(onePassOneDiscard.find((check) => check.name === "idempotent-discard")?.passed).toBe(false);
     expect(parseReportedReplayRepairEvidence({
       ...output,
       rootLayer: { ...output.rootLayer, nodes: output.rootLayer.nodes.map((node) => ({ ...node, detail: "No evidence" })) },

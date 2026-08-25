@@ -2,6 +2,8 @@ import { Codex } from "@openai/codex-sdk";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -89,6 +91,18 @@ export interface ReplayRepairEvidence {
   readonly reported: ReportedReplayRepairEvidence;
   readonly stoppedLayer: ResolvedLayer;
   readonly stoppedLayerOwnerNodeId: number;
+  readonly auditEvents: readonly ReplayRepairAuditEvent[];
+}
+
+export interface ReplayRepairAuditEvent {
+  readonly sequence: number;
+  readonly method: string;
+  readonly path: string;
+  readonly status: number;
+  readonly recordKind?: "node" | "edge" | "layer" | "action";
+  readonly recordId?: number;
+  readonly recordState?: string;
+  readonly errorCodes?: readonly string[];
 }
 
 export async function runBasicRuntimeEval(options: {
@@ -110,9 +124,11 @@ export async function runBasicRuntimeEval(options: {
   const graphControlToken = randomUUID();
   const harnessControlToken = randomUUID();
   let graphProcess: Awaited<ReturnType<typeof startGraphServer>> | undefined;
+  let graphAuditProxy: Awaited<ReturnType<typeof startGraphAuditProxy>> | undefined;
   let harnessHost: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
   try {
     graphProcess = await startGraphServer(options.serverBinary, join(stateDirectory, "graph.sqlite"), graphControlToken, options.serverReadyTimeoutMs);
+    if (options.execution.testCaseId === replayRepairEvalCaseId) graphAuditProxy = await startGraphAuditProxy(graphProcess.url);
     const projectId = 1;
     const threadId = 1;
     let harnessFactoryCalls = 0;
@@ -137,7 +153,7 @@ export async function runBasicRuntimeEval(options: {
       : [basicEvalPrompt, basicEvalFollowUpPrompt];
     for (const prompt of prompts) {
       const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, graphControlToken, { projectId, threadId, text: prompt });
-      const capability = { url: graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
+      const capability = { url: graphAuditProxy?.url ?? graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
       const complete = await completeWithCapabilityCleanup(async () => {
         await requestJson(`${runningHarnessHost.url}/sessions`, harnessControlToken, { threadId, configuration, permissionProfileId, workingDirectory }, 201);
@@ -148,7 +164,7 @@ export async function runBasicRuntimeEval(options: {
       }, capability, graphControlToken);
       const isReplayRepair = options.execution.testCaseId === replayRepairEvalCaseId;
       const repairEvidence = isReplayRepair
-        ? await readReplayRepairEvidence(complete.output, interaction.node.id, graphProcess.url, graphControlToken)
+        ? await readReplayRepairEvidence(complete.output, interaction.node.id, graphProcess.url, graphControlToken, graphAuditProxy?.events() ?? [])
         : undefined;
       const checks = isReplayRepair
         ? checkReplayRepairOutput(complete.output, repairEvidence, interaction.node.id)
@@ -198,6 +214,7 @@ export async function runBasicRuntimeEval(options: {
     return artifact;
   } finally {
     await harnessHost?.close();
+    await graphAuditProxy?.close();
     if (graphProcess !== undefined) {
       graphProcess.process.kill("SIGTERM");
       await onceExit(graphProcess.process);
@@ -292,6 +309,21 @@ export function checkReplayRepairOutput(
   const [first, second] = evidence.reported.passes;
   const replayKeys = Object.keys(first) as (keyof ReplayRepairPass)[];
   const stableReplay = replayKeys.every((key) => first[key] === second[key]);
+  const expectedWrites: readonly [keyof ReplayRepairPass, ReplayRepairAuditEvent["recordKind"]][] = [
+    ["primaryNodeId", "node"],
+    ["secondaryNodeId", "node"],
+    ["edgeId", "edge"],
+    ["rootLayerId", "layer"],
+    ["rootActionId", "action"],
+    ["orphanNodeId", "node"],
+    ["orphanLayerId", "layer"],
+  ];
+  const authoritativeReplay = expectedWrites.every(([key, kind]) => evidence.auditEvents.filter((event) => (
+    event.status >= 200
+    && event.status < 300
+    && event.recordKind === kind
+    && event.recordId === second[key]
+  )).length >= 2);
   const rootMatchesAccepted = second.rootLayerId === output.rootLayer.layer.id
     && second.rootActionId === output.rootAction.id
     && output.rootLayer.layer.nodes.includes(second.primaryNodeId)
@@ -299,6 +331,29 @@ export function checkReplayRepairOutput(
     && output.rootLayer.layer.edges.includes(second.edgeId);
   const discardedIdsMatch = evidence.reported.discardedLayerIds[0] === second.orphanLayerId
     && evidence.reported.discardedLayerIds[1] === second.orphanLayerId;
+  const failedOrphanSubmit = evidence.auditEvents.find((event) => (
+    event.method === "POST"
+    && event.path === "/api/graph/submit"
+    && event.status >= 400
+    && event.errorCodes?.includes("orphan_draft_layers")
+  ));
+  const authoritativeDiscards = failedOrphanSubmit === undefined ? [] : evidence.auditEvents.filter((event) => (
+    event.sequence > failedOrphanSubmit.sequence
+    && event.method === "POST"
+    && event.path === `/api/graph/layers/${second.orphanLayerId}/discard`
+    && event.status >= 200
+    && event.status < 300
+    && event.recordKind === "layer"
+    && event.recordId === second.orphanLayerId
+    && event.recordState === "stopped"
+  ));
+  const successfulFinalSubmit = authoritativeDiscards.length < 2 ? undefined : evidence.auditEvents.find((event) => (
+    event.sequence > authoritativeDiscards[1]!.sequence
+    && event.method === "POST"
+    && event.path === "/api/graph/submit"
+    && event.status >= 200
+    && event.status < 300
+  ));
   const stoppedLayerMatches = evidence.stoppedLayer.layer.id === second.orphanLayerId
     && evidence.stoppedLayer.layer.state === "stopped"
     && evidence.stoppedLayerOwnerNodeId === expectedInteractionNodeId;
@@ -310,11 +365,11 @@ export function checkReplayRepairOutput(
   return [
     ...base,
     { name: "accepted-useful-output", passed: useful, detail: "Accepted connected output explains stable keys and retry after partial persistence." },
-    { name: "stable-object-replay", passed: stableReplay && rootMatchesAccepted, detail: "Two full authoring passes reported the same node, edge, layer, orphan, and action IDs, with accepted root membership matching those IDs." },
-    { name: "single-root-action", passed: first.rootActionId === second.rootActionId && second.rootActionId === output.rootAction.id, detail: "Root-action replay retained one identity and submission accepted that exact root action." },
-    { name: "orphan-validation-observed", passed: evidence.reported.orphanSubmitErrorCode === "orphan_draft_layers", detail: "The recovery program recorded the expected orphan validation before explicit discard." },
+    { name: "stable-object-replay", passed: stableReplay && authoritativeReplay && rootMatchesAccepted, detail: "The audit observed at least two successful writes for every reported stable node, edge, layer, orphan, and action ID, with accepted root membership matching those IDs." },
+    { name: "single-root-action", passed: first.rootActionId === second.rootActionId && second.rootActionId === output.rootAction.id && authoritativeReplay && successfulFinalSubmit !== undefined, detail: "Audited root-action replay retained one identity and a later submission accepted that exact root action." },
+    { name: "orphan-validation-observed", passed: failedOrphanSubmit !== undefined, detail: "The audit observed graph.submit fail with orphan_draft_layers before discard." },
     { name: "explicit-stopped-orphan", passed: stoppedLayerMatches && orphanNodePreserved, detail: "Control-authoritative graph reads show the reported orphan layer stopped under this interaction while its node remains draft." },
-    { name: "idempotent-discard", passed: discardedIdsMatch, detail: "Both discard calls returned the same orphan layer identity." },
+    { name: "idempotent-discard", passed: discardedIdsMatch && authoritativeDiscards.length >= 2 && successfulFinalSubmit !== undefined, detail: "The audit observed two successful post-validation discard calls return the same stopped orphan before final submission." },
   ];
 }
 
@@ -323,6 +378,7 @@ async function readReplayRepairEvidence(
   interactionNodeId: number,
   graphUrl: string,
   graphControlToken: string,
+  auditEvents: readonly ReplayRepairAuditEvent[],
 ): Promise<ReplayRepairEvidence | undefined> {
   const reported = parseReportedReplayRepairEvidence(output);
   if (reported === undefined) return undefined;
@@ -336,7 +392,7 @@ async function readReplayRepairEvidence(
       `${graphUrl}/api/control/interactions/${interactionNodeId}/layers/${discardedLayerId}/owner`,
       graphControlToken,
     );
-    return { reported, stoppedLayer, stoppedLayerOwnerNodeId: owner.ownerInteractionNodeId };
+    return { reported, stoppedLayer, stoppedLayerOwnerNodeId: owner.ownerInteractionNodeId, auditEvents };
   } catch {
     return undefined;
   }
@@ -355,6 +411,111 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+async function startGraphAuditProxy(upstreamUrl: string): Promise<{
+  readonly url: string;
+  readonly events: () => readonly ReplayRepairAuditEvent[];
+  readonly close: () => Promise<void>;
+}> {
+  const auditEvents: ReplayRepairAuditEvent[] = [];
+  let sequence = 0;
+  const server = createServer((request, response) => {
+    void forwardAuditedGraphRequest(request, response, upstreamUrl, (event) => {
+      if (event.path.startsWith("/api/graph/")) auditEvents.push({ ...event, sequence: ++sequence });
+    }).catch((error: unknown) => {
+      if (response.headersSent) {
+        response.destroy(error instanceof Error ? error : undefined);
+        return;
+      }
+      response.writeHead(502, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { code: "audit_proxy_failed", message: error instanceof Error ? error.message : String(error) } }));
+    });
+  });
+  await new Promise<void>((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolveListen();
+    });
+  });
+  const address = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    events: () => structuredClone(auditEvents),
+    close: () => new Promise<void>((resolveClose, reject) => server.close((error) => error === undefined ? resolveClose() : reject(error))),
+  };
+}
+
+async function forwardAuditedGraphRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  upstreamUrl: string,
+  record: (event: Omit<ReplayRepairAuditEvent, "sequence">) => void,
+): Promise<void> {
+  const method = request.method ?? "GET";
+  const requestUrl = new URL(request.url ?? "/", upstreamUrl);
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  const requestBody = Buffer.concat(chunks);
+  const headers = new Headers();
+  for (const name of ["accept", "authorization", "content-type"] as const) {
+    const value = request.headers[name];
+    if (typeof value === "string") headers.set(name, value);
+  }
+  const upstream = await fetch(requestUrl, {
+    method,
+    headers,
+    ...(requestBody.byteLength === 0 || method === "GET" || method === "HEAD" ? {} : { body: requestBody }),
+  });
+  const responseBytes = Buffer.from(await upstream.arrayBuffer());
+  const contentType = upstream.headers.get("content-type");
+  response.writeHead(upstream.status, contentType === null ? {} : { "content-type": contentType });
+  response.end(responseBytes);
+  const responseValue = parseJsonObject(responseBytes);
+  record(sanitizeGraphAuditEvent(method, requestUrl.pathname, upstream.status, responseValue));
+}
+
+function sanitizeGraphAuditEvent(
+  method: string,
+  path: string,
+  status: number,
+  response: Record<string, unknown> | undefined,
+): Omit<ReplayRepairAuditEvent, "sequence"> {
+  const event: Omit<ReplayRepairAuditEvent, "sequence"> = { method, path, status };
+  if (method === "POST" && path === "/api/graph/nodes") return withRecord(event, "node", response?.node);
+  if (method === "POST" && path === "/api/graph/edges") return withRecord(event, "edge", response?.edge);
+  if (method === "POST" && path === "/api/graph/layers") return withRecord(event, "layer", response?.layer);
+  if (method === "POST" && path === "/api/graph/actions") return withRecord(event, "action", response?.action);
+  if (method === "POST" && /^\/api\/graph\/layers\/\d+\/discard$/.test(path)) return withRecord(event, "layer", response?.layer);
+  const error = isRecord(response?.error) ? response.error : undefined;
+  const issues = Array.isArray(error?.issues) ? error.issues : [];
+  const errorCodes = [error?.code, ...issues.map((issue) => isRecord(issue) ? issue.code : undefined)]
+    .filter((code): code is string => typeof code === "string");
+  return errorCodes.length === 0 ? event : { ...event, errorCodes: [...new Set(errorCodes)] };
+}
+
+function withRecord(
+  event: Omit<ReplayRepairAuditEvent, "sequence">,
+  recordKind: NonNullable<ReplayRepairAuditEvent["recordKind"]>,
+  value: unknown,
+): Omit<ReplayRepairAuditEvent, "sequence"> {
+  if (!isRecord(value) || !isPositiveInteger(value.id)) return event;
+  return {
+    ...event,
+    recordKind,
+    recordId: value.id,
+    ...(typeof value.state === "string" ? { recordState: value.state } : {}),
+  };
+}
+
+function parseJsonObject(bytes: Buffer): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(bytes.toString("utf8"));
+    return isRecord(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function checkNodeNavigation(output: CompletionOutput): EvalCheck[] {

@@ -320,7 +320,7 @@ impl CompletionPlan {
             "orphan_draft_layers",
             "layers",
             format!(
-                "Current draft layers are not reachable from the root action: {}. Connect each intended layer with a current expand or reference action, or call graph.discardLayer(layer) for each intentionally abandoned layer.",
+                "Current draft layers are not reachable from the root action: {}. Connect each intended layer with a current expand or reference action, or explicitly discard each intentionally abandoned layer with the client API (discardLayer in TypeScript; discard_layer in Python).",
                 orphaned
                     .iter()
                     .map(ToString::to_string)
