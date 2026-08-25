@@ -106,29 +106,6 @@ impl ApiError {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn nested_graph_validation_keeps_exact_internal_diagnostic() {
-        let error: ApiError = RuntimeError::Remote {
-            status: 422,
-            body: json!({"error":{
-                "code":"invalid_context_occurrence",
-                "path":"contexts[0].target",
-                "message":"exact source occurrence is inaccessible"
-            }}),
-        }
-        .into();
-        assert_eq!(
-            error.internal_diagnostic(),
-            "code=invalid_context_occurrence path=contexts[0].target message=exact source occurrence is inaccessible"
-        );
-        assert_ne!(error.internal_diagnostic(), "unknown API error");
-    }
-}
-
 impl From<RuntimeError> for ApiError {
     fn from(error: RuntimeError) -> Self {
         match error {
@@ -257,5 +234,28 @@ fn catalog_error(error: CatalogError) -> ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (self.0, Json(self.1)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_graph_validation_keeps_exact_internal_diagnostic() {
+        let error: ApiError = RuntimeError::Remote {
+            status: 422,
+            body: json!({"error":{
+                "code":"invalid_context_occurrence",
+                "path":"contexts[0].target",
+                "message":"exact source occurrence is inaccessible"
+            }}),
+        }
+        .into();
+        assert_eq!(
+            error.internal_diagnostic(),
+            "code=invalid_context_occurrence path=contexts[0].target message=exact source occurrence is inaccessible"
+        );
+        assert_ne!(error.internal_diagnostic(), "unknown API error");
     }
 }

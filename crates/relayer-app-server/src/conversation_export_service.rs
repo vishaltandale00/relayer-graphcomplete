@@ -216,16 +216,18 @@ pub(crate) async fn build_conversation_export(
     {
         records.push(ConversationExportRecord::Turn(Box::new(export_turn(
             interaction,
-            closure.as_ref(),
-            context_input.as_ref(),
-            invocations.get(&interaction.id).copied(),
-            ImportedExportContext {
-                turn: imported_turns.get(&interaction.id).copied(),
-                turn_sequences: &imported_turn_sequences,
+            TurnExportContext {
+                closure: closure.as_ref(),
+                context_input: context_input.as_ref(),
+                invocation: invocations.get(&interaction.id).copied(),
+                imported: ImportedExportContext {
+                    turn: imported_turns.get(&interaction.id).copied(),
+                    turn_sequences: &imported_turn_sequences,
+                },
+                turn_sequences: &turn_sequences,
+                redactor: &redactor,
             },
-            &turn_sequences,
             &mut ids,
-            &redactor,
         )?)));
     }
     validate_export_records(&records)?;
@@ -258,16 +260,28 @@ struct RuntimeContextInput {
     actions: Vec<InteractionContextAction>,
 }
 
+struct TurnExportContext<'a> {
+    closure: Option<&'a AcceptedGraphClosure>,
+    context_input: Option<&'a RuntimeContextInput>,
+    invocation: Option<&'a ActionInvocation>,
+    imported: ImportedExportContext<'a>,
+    turn_sequences: &'a HashMap<InteractionId, i64>,
+    redactor: &'a ProjectPathRedactor,
+}
+
 fn export_turn(
     interaction: &Interaction,
-    closure: Option<&AcceptedGraphClosure>,
-    context_input: Option<&RuntimeContextInput>,
-    invocation: Option<&ActionInvocation>,
-    imported: ImportedExportContext<'_>,
-    turn_sequences: &HashMap<InteractionId, i64>,
+    context: TurnExportContext<'_>,
     ids: &mut PortableIds,
-    redactor: &ProjectPathRedactor,
 ) -> Result<ConversationExportTurn, ConversationExportBuildError> {
+    let TurnExportContext {
+        closure,
+        context_input,
+        invocation,
+        imported,
+        turn_sequences,
+        redactor,
+    } = context;
     if let (Some(node_id), Some(imported_turn)) = (
         interaction.graph_node_id,
         imported.turn.map(|record| &record.turn),
@@ -837,7 +851,7 @@ fn next_id(ids: &mut HashMap<i64, String>, raw: i64, kind: &str) -> String {
 mod tests {
     use super::{
         ImportedExportContext, PortableIds, ProjectPathRedactor, RuntimeContextInput,
-        completion_status, export_action, export_contexts, export_turn,
+        TurnExportContext, completion_status, export_action, export_contexts, export_turn,
     };
     use crate::{
         conversation_export::{ExportCompletionStatus, ExportTurnOrigin},
@@ -1000,16 +1014,18 @@ mod tests {
 
         let exported = export_turn(
             &interaction,
-            None,
-            None,
-            Some(&invocation),
-            ImportedExportContext {
-                turn: None,
-                turn_sequences: &Default::default(),
+            TurnExportContext {
+                closure: None,
+                context_input: None,
+                invocation: Some(&invocation),
+                imported: ImportedExportContext {
+                    turn: None,
+                    turn_sequences: &Default::default(),
+                },
+                turn_sequences: &turn_sequences,
+                redactor: &ProjectPathRedactor::new(None),
             },
-            &turn_sequences,
             &mut ids,
-            &ProjectPathRedactor::new(None),
         )
         .unwrap();
 
