@@ -59,6 +59,16 @@ describe("CodexBasicHarness", () => {
     expect(submitted?.prompt).toContain("Place a one-node layer at (0.5, 0.5)");
     expect(submitted?.prompt).toContain("independently of the viewport");
     expect(submitted?.prompt).toContain("square-dashed-kanban");
+    expect(submitted?.prompt).toContain('new NodeObject("info", "Summary", "...", "concept", "summary-node")');
+    expect(submitted?.prompt).not.toContain('new NodeObject("lightbulb"');
+    expect(submitted?.prompt).toContain('new EdgeObject([summaryNode, detailNode], "summary-detail-edge")');
+    expect(submitted?.prompt).toContain('new LayerObject(nodes, edges, "response-layer")');
+    expect(submitted?.prompt).toContain('relation: "expand"');
+    expect(submitted?.prompt).toContain("sourceLayer: layer");
+    expect(submitted?.prompt).toContain('clientKey: "root-response"');
+    expect(submitted?.prompt).toContain("rerun it with the same clientKey values");
+    expect(submitted?.prompt).toContain("Do not add fake navigate or reference actions");
+    expect(submitted?.prompt).toContain("graph.discardLayer(layer)");
     expect(submitted?.threadParams).toEqual({
       cwd: process.cwd(),
       approvalPolicy: "on-request",
@@ -133,6 +143,15 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).toContain("Never mention or expose the size justification");
     expect(submittedPrompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
     expect(submittedPrompt).toContain("align comparisons deliberately");
+    expect(submittedPrompt).toContain('new NodeObject("info", "Summary", "...", "concept", "summary-node")');
+    expect(submittedPrompt).not.toContain('new NodeObject("lightbulb"');
+    expect(submittedPrompt).toContain('clientKey: "root-response"');
+    expect(submittedPrompt).toContain('clientKey: "node-detail"');
+    expect(submittedPrompt).toContain('clientKey: "node-evidence"');
+    expect(submittedPrompt).toContain('clientKey: "node-follow-up"');
+    expect(submittedPrompt).toContain("rerun it with the same clientKey values");
+    expect(submittedPrompt).toContain("Do not add fake navigate or reference actions");
+    expect(submittedPrompt).toContain("graph.discardLayer(layer)");
     expect(submittedPrompt).not.toContain("The required order is:");
   });
 

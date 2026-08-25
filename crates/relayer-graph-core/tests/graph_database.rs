@@ -439,6 +439,112 @@ async fn accept_single_node(
 }
 
 #[tokio::test]
+async fn root_action_replay_updates_same_key_and_rejects_a_different_key_without_persisting_it() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let first = node(&writer, "first-answer").await;
+    let first_layer = single_node_layer(&writer, "first-layer", &first).await;
+
+    let original = root_expand(&writer, &interaction, &first_layer).await;
+    let conflict = writer
+        .add_action(&ActionDraft {
+            client_key: "another-response".into(),
+            source_node_id: interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Conflicting response".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(first_layer.id),
+            interaction_text: None,
+        })
+        .await
+        .unwrap_err();
+    match conflict {
+        GraphError::Validation {
+            code,
+            path,
+            message,
+        } => {
+            assert_eq!(code, "root_action_already_exists");
+            assert_eq!(path, "clientKey");
+            assert!(message.contains(&original.id.to_string()));
+            assert!(message.contains("response"));
+        }
+        other => panic!("expected root-action validation error, got {other:?}"),
+    }
+
+    let replayed = writer
+        .add_action(&ActionDraft {
+            client_key: "response".into(),
+            source_node_id: interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Updated response".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(first_layer.id),
+            interaction_text: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(replayed.id, original.id);
+    assert_eq!(replayed.label, "Updated response");
+
+    let output = writer.complete(interaction.id).await.unwrap();
+    assert_eq!(output.root_layer.layer.id, first_layer.id);
+}
+
+#[tokio::test]
+async fn concurrent_root_action_writes_allow_exactly_one_client_key() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let setup_writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let answer = node(&setup_writer, "answer").await;
+    let layer = single_node_layer(&setup_writer, "root-layer", &answer).await;
+    let first_writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let second_writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let draft = |client_key: &str| ActionDraft {
+        client_key: client_key.into(),
+        source_node_id: interaction.id,
+        source_layer_id: None,
+        kind: ActionKind::Navigate,
+        relation: Some(NavigateRelation::Expand),
+        label: client_key.into(),
+        variant: ActionVariant::default(),
+        icon: None,
+        description: None,
+        target_layer_id: Some(layer.id),
+        interaction_text: None,
+    };
+    let first_draft = draft("first-root");
+    let second_draft = draft("second-root");
+
+    let (first, second) = tokio::join!(
+        first_writer.add_action(&first_draft),
+        second_writer.add_action(&second_draft)
+    );
+    let results = [first, second];
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(
+                result,
+                Err(GraphError::Validation {
+                    code: "root_action_already_exists",
+                    ..
+                })
+            ))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn product_identifiers_are_external_inputs() {
     let (database, interaction) = setup(Some(project(41)), thread(73)).await;
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
@@ -1155,6 +1261,154 @@ async fn completion_rejects_orphan_current_draft_layers() {
         error,
         GraphError::Validation {
             code: "orphan_draft_layers",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn discard_layer_is_non_recursive_idempotent_and_unblocks_completion() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let root_node = node(&writer, "root-node").await;
+    let abandoned_node = node(&writer, "abandoned-node").await;
+    let child_node = node(&writer, "child-node").await;
+    let root = single_node_layer(&writer, "root", &root_node).await;
+    let abandoned = single_node_layer(&writer, "abandoned", &abandoned_node).await;
+    let child = single_node_layer(&writer, "child", &child_node).await;
+    let abandoned_action = navigate(
+        &writer,
+        "abandoned-child",
+        &abandoned_node,
+        &abandoned,
+        &child,
+        NavigateRelation::Expand,
+    )
+    .await;
+    root_expand(&writer, &interaction, &root).await;
+
+    let stopped = writer.discard_layer(abandoned.id).await.unwrap();
+    assert_eq!(stopped.state, RecordState::Stopped);
+    assert_eq!(writer.discard_layer(abandoned.id).await.unwrap(), stopped);
+
+    let preserved = writer.get_layer(abandoned.id).await.unwrap();
+    assert_eq!(preserved.layer.state, RecordState::Stopped);
+    assert_eq!(preserved.nodes[0].state, RecordState::Draft);
+    assert_eq!(preserved.actions[0].id, abandoned_action.id);
+    assert_eq!(preserved.actions[0].state, RecordState::Draft);
+    assert_eq!(
+        writer.get_layer(child.id).await.unwrap().layer.state,
+        RecordState::Draft
+    );
+
+    let error = writer.complete(interaction.id).await.unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation {
+            code: "orphan_draft_layers",
+            ..
+        }
+    ));
+    writer.discard_layer(child.id).await.unwrap();
+    writer.complete(interaction.id).await.unwrap();
+    assert_eq!(
+        writer.get_node(abandoned_node.id).await.unwrap().state,
+        RecordState::Draft
+    );
+}
+
+#[tokio::test]
+async fn discard_layer_rejects_reachable_accepted_and_foreign_layers() {
+    let project_id = project(1);
+    let (database, interaction) = setup(Some(project_id), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let root_node = node(&writer, "root-node").await;
+    let root = single_node_layer(&writer, "root", &root_node).await;
+    root_expand(&writer, &interaction, &root).await;
+
+    let reachable = writer.discard_layer(root.id).await.unwrap_err();
+    assert!(matches!(
+        reachable,
+        GraphError::Validation {
+            code: "reachable_layer",
+            ..
+        }
+    ));
+    writer.complete(interaction.id).await.unwrap();
+    let accepted = writer.discard_layer(root.id).await.unwrap_err();
+    assert!(matches!(
+        accepted,
+        GraphError::Validation {
+            code: "immutable_layer",
+            ..
+        }
+    ));
+
+    let other_interaction = database
+        .create_interaction(Some(project_id), thread(2), "Other")
+        .await
+        .unwrap();
+    let other_writer = database
+        .writer_for_subgraph(other_interaction.id)
+        .await
+        .unwrap();
+    assert!(matches!(
+        other_writer.discard_layer(root.id).await.unwrap_err(),
+        GraphError::Forbidden(_)
+    ));
+}
+
+#[tokio::test]
+async fn discarded_layer_identity_is_terminal() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let abandoned_node = node(&writer, "abandoned-node").await;
+    let abandoned = single_node_layer(&writer, "abandoned", &abandoned_node).await;
+    writer.discard_layer(abandoned.id).await.unwrap();
+
+    let error = writer
+        .submit_layer(&LayerDraft {
+            client_key: "abandoned".into(),
+            nodes: vec![abandoned_node.id],
+            edges: vec![],
+            size_justification: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation {
+            code: "discarded_layer",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn completion_rejects_navigation_to_a_discarded_layer() {
+    let (database, interaction) = setup(Some(project(1)), thread(1)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let root_node = node(&writer, "root-node").await;
+    let discarded_node = node(&writer, "discarded-node").await;
+    let root = single_node_layer(&writer, "root", &root_node).await;
+    let discarded = single_node_layer(&writer, "discarded", &discarded_node).await;
+    navigate(
+        &writer,
+        "discarded-target",
+        &root_node,
+        &root,
+        &discarded,
+        NavigateRelation::Expand,
+    )
+    .await;
+    writer.discard_layer(discarded.id).await.unwrap();
+    root_expand(&writer, &interaction, &root).await;
+
+    let error = writer.complete(interaction.id).await.unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation {
+            code: "discarded_layer_target",
             ..
         }
     ));

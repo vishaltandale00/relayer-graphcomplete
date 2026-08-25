@@ -5,13 +5,26 @@ import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CompletionOutput, GraphCapability, GraphNode } from "@relayer/graph-client";
+import type { CompletionOutput, GraphCapability, GraphNode, ResolvedLayer } from "@relayer/graph-client";
 import { digestHarnessConfiguration, startHarnessHost, type HarnessConfiguration, type HarnessFactory, type HarnessImplementationMap } from "@relayer/harness-host";
 import type { TestExecutionPlan } from "./run-plan.js";
 
 export const basicEvalCaseId = "empty-project.task-system.two-turn";
 export const basicEvalPrompt = "A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.";
 export const basicEvalFollowUpPrompt = "Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.";
+export const replayRepairEvalCaseId = "graph-authoring.replay-repair";
+export const replayRepairEvalPrompt = `Explain, as a useful connected graph answer, why stable idempotency keys make retrying a partially persisted graph-authoring program safe.
+
+This is a live graph-recovery evaluation. In one executable program, use explicit stable clientKey values and perform this exact recovery exercise through the ordinary Relayer graph client:
+1. Define an author() function that creates two connected useful response nodes, their edge and root layer, one root response action, plus a separate one-node orphan draft layer. Return every persisted ID.
+2. Call author() twice from newly constructed graph objects with the same stable keys, retaining both returned ID sets.
+3. Call graph.submit() while the orphan is still draft. Require this call to fail specifically with code orphan_draft_layers; rethrow any other error or an unexpected success.
+4. Call graph.discardLayer() on the orphan layer from the second pass, then call it again and retain both returned layer IDs.
+5. Update one useful response node, using its same stable key, so its detail contains exactly one line beginning GRAPH_REPAIR_EVIDENCE= followed by compact JSON with this shape:
+{"passes":[{"primaryNodeId":1,"secondaryNodeId":2,"edgeId":3,"rootLayerId":4,"rootActionId":5,"orphanNodeId":6,"orphanLayerId":7},{"primaryNodeId":1,"secondaryNodeId":2,"edgeId":3,"rootLayerId":4,"rootActionId":5,"orphanNodeId":6,"orphanLayerId":7}],"orphanSubmitErrorCode":"orphan_draft_layers","discardedLayerIds":[7,7]}
+Use the actual returned numeric IDs, not these example values. Preserve the useful explanation around that evidence line, resubmit the stable-keyed root layer and root action if needed, then finish with a successful graph.submit().
+
+Do not create fake navigation to the orphan. Do not delete graph records. The accepted answer should clearly explain stable client keys, retry after partial persistence, and idempotent recovery.`;
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 
 export function basicEvalPythonPath(existingPythonPath?: string): string {
@@ -41,6 +54,7 @@ export interface RuntimeEvalTurn {
   readonly output: CompletionOutput;
   readonly checks: readonly EvalCheck[];
   readonly judge?: BasicJudge;
+  readonly repairEvidence?: ReplayRepairEvidence;
   readonly passed: boolean;
 }
 export interface RuntimeEvalArtifact {
@@ -55,6 +69,28 @@ export interface RuntimeEvalArtifact {
 export interface BasicJudge { readonly factIds: readonly string[]; readonly graphUseful: boolean; readonly detailsUseful: boolean; readonly problems: readonly string[]; readonly verdict: "pass" | "fail" }
 export interface BasicJudgeConfiguration { readonly name: "none" | "codex-structured" }
 
+export interface ReplayRepairPass {
+  readonly primaryNodeId: number;
+  readonly secondaryNodeId: number;
+  readonly edgeId: number;
+  readonly rootLayerId: number;
+  readonly rootActionId: number;
+  readonly orphanNodeId: number;
+  readonly orphanLayerId: number;
+}
+
+export interface ReportedReplayRepairEvidence {
+  readonly passes: readonly [ReplayRepairPass, ReplayRepairPass];
+  readonly orphanSubmitErrorCode: "orphan_draft_layers";
+  readonly discardedLayerIds: readonly [number, number];
+}
+
+export interface ReplayRepairEvidence {
+  readonly reported: ReportedReplayRepairEvidence;
+  readonly stoppedLayer: ResolvedLayer;
+  readonly stoppedLayerOwnerNodeId: number;
+}
+
 export async function runBasicRuntimeEval(options: {
   outputDirectory: string;
   execution: TestExecutionPlan<BasicJudgeConfiguration>;
@@ -62,7 +98,7 @@ export async function runBasicRuntimeEval(options: {
   serverBinary?: string;
   serverReadyTimeoutMs?: number;
 }): Promise<RuntimeEvalArtifact> {
-  if (options.execution.testCaseId !== basicEvalCaseId) throw new Error(`Unsupported runtime-basic test case: ${options.execution.testCaseId}`);
+  if (![basicEvalCaseId, replayRepairEvalCaseId].includes(options.execution.testCaseId)) throw new Error(`Unsupported runtime-basic test case: ${options.execution.testCaseId}`);
   if (options.execution.harnessConfiguration.name !== options.execution.harnessConfigurationName) {
     throw new Error("Execution harness configuration name does not match its resolved snapshot");
   }
@@ -96,7 +132,10 @@ export async function runBasicRuntimeEval(options: {
 
     const capabilities: GraphCapability[] = [];
     const turns: RuntimeEvalTurn[] = [];
-    for (const prompt of [basicEvalPrompt, basicEvalFollowUpPrompt]) {
+    const prompts = options.execution.testCaseId === replayRepairEvalCaseId
+      ? [replayRepairEvalPrompt]
+      : [basicEvalPrompt, basicEvalFollowUpPrompt];
+    for (const prompt of prompts) {
       const interaction = await requestJson<{ node: GraphNode; graphToken: string }>(`${graphProcess.url}/api/control/interactions`, graphControlToken, { projectId, threadId, text: prompt });
       const capability = { url: graphProcess.url, token: interaction.graphToken, nodeId: interaction.node.id };
       capabilities.push(capability);
@@ -107,9 +146,15 @@ export async function runBasicRuntimeEval(options: {
           graph: capability,
         });
       }, capability, graphControlToken);
-      const checks = checkBasicOutput(complete.output, interaction.node.id);
+      const isReplayRepair = options.execution.testCaseId === replayRepairEvalCaseId;
+      const repairEvidence = isReplayRepair
+        ? await readReplayRepairEvidence(complete.output, interaction.node.id, graphProcess.url, graphControlToken)
+        : undefined;
+      const checks = isReplayRepair
+        ? checkReplayRepairOutput(complete.output, repairEvidence, interaction.node.id)
+        : checkBasicOutput(complete.output, interaction.node.id);
       const deterministicPassed = checks.every((check) => check.passed);
-      const judge = options.execution.judgeConfiguration.name === "codex-structured" && deterministicPassed
+      const judge = options.execution.testCaseId === basicEvalCaseId && options.execution.judgeConfiguration.name === "codex-structured" && deterministicPassed
         ? await judgeOutput(complete.output, prompt, workingDirectory)
         : undefined;
       turns.push({
@@ -117,6 +162,7 @@ export async function runBasicRuntimeEval(options: {
         prompt,
         output: complete.output,
         checks,
+        ...(repairEvidence === undefined ? {} : { repairEvidence }),
         ...(judge === undefined ? {} : { judge }),
         passed: deterministicPassed && (judge === undefined || judge.verdict === "pass"),
       });
@@ -127,9 +173,11 @@ export async function runBasicRuntimeEval(options: {
       });
       return response.status === 401;
     }));
+    const uniqueInteractionNodes = new Set(capabilities.map((capability) => capability.nodeId));
+    const uniqueCapabilityTokens = new Set(capabilities.map((capability) => capability.token));
     const sessionChecks: EvalCheck[] = [
-      { name: "single-harness-object", passed: harnessFactoryCalls === 1, detail: `Harness factory called ${harnessFactoryCalls} time${harnessFactoryCalls === 1 ? "" : "s"} for two interactions.` },
-      { name: "distinct-interaction-capabilities", passed: capabilities.length === 2 && capabilities[0]!.nodeId !== capabilities[1]!.nodeId && capabilities[0]!.token !== capabilities[1]!.token, detail: "Each interaction used a distinct node and opaque capability token." },
+      { name: "single-harness-object", passed: harnessFactoryCalls === 1, detail: `Harness factory called ${harnessFactoryCalls} time${harnessFactoryCalls === 1 ? "" : "s"} for ${prompts.length} interaction${prompts.length === 1 ? "" : "s"}.` },
+      { name: "distinct-interaction-capabilities", passed: capabilities.length === prompts.length && uniqueInteractionNodes.size === prompts.length && uniqueCapabilityTokens.size === prompts.length, detail: "Each interaction used a distinct node and opaque capability token." },
       { name: "revoked-interaction-capabilities", passed: revokedCapabilities.every(Boolean), detail: "The eval runtime revoked every graph capability after its Complete call settled." },
     ];
     const deterministicPassed = sessionChecks.every((check) => check.passed) && turns.every((turn) => turn.checks.every((check) => check.passed));
@@ -200,6 +248,113 @@ export function checkBasicOutput(
     { name: "exact-edges", passed: layer.edges.every((edge) => edge.endpoints[0] !== edge.endpoints[1] && nodeIds.has(edge.endpoints[0]) && nodeIds.has(edge.endpoints[1])), detail: `${layer.edges.length} visible undirected edges stay inside the layer.` },
     { name: "connected", passed: visited.size === layer.nodes.length, detail: `${visited.size}/${layer.nodes.length} nodes connected.` },
   ];
+}
+
+export function parseReportedReplayRepairEvidence(output: CompletionOutput): ReportedReplayRepairEvidence | undefined {
+  const prefix = "GRAPH_REPAIR_EVIDENCE=";
+  const evidenceLines = output.rootLayer.nodes
+    .flatMap((node) => node.detail.split(/\r?\n/))
+    .filter((line) => line.startsWith(prefix));
+  if (evidenceLines.length !== 1) return undefined;
+  try {
+    const value: unknown = JSON.parse(evidenceLines[0]!.slice(prefix.length));
+    if (!isRecord(value) || !Array.isArray(value.passes) || value.passes.length !== 2 || value.orphanSubmitErrorCode !== "orphan_draft_layers" || !Array.isArray(value.discardedLayerIds) || value.discardedLayerIds.length !== 2) return undefined;
+    const passes = value.passes.map(readReplayRepairPass);
+    if (passes.some((pass) => pass === undefined) || !value.discardedLayerIds.every(isPositiveInteger)) return undefined;
+    return {
+      passes: passes as [ReplayRepairPass, ReplayRepairPass],
+      orphanSubmitErrorCode: "orphan_draft_layers",
+      discardedLayerIds: value.discardedLayerIds as [number, number],
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function checkReplayRepairOutput(
+  output: CompletionOutput,
+  evidence: ReplayRepairEvidence | undefined,
+  expectedInteractionNodeId = output.nodeId,
+): EvalCheck[] {
+  const base = checkBasicOutput(output, expectedInteractionNodeId);
+  const text = output.rootLayer.nodes.map((node) => `${node.title}\n${node.detail}`).join("\n");
+  if (evidence === undefined) {
+    return [
+      ...base,
+      { name: "accepted-useful-output", passed: false, detail: "Accepted output must explain stable-key replay and include one machine-readable evidence line." },
+      { name: "stable-object-replay", passed: false, detail: "No valid two-pass replay evidence was found." },
+      { name: "single-root-action", passed: false, detail: "No replayed root-action identity was available." },
+      { name: "orphan-validation-observed", passed: false, detail: "No required orphan_draft_layers validation evidence was found." },
+      { name: "explicit-stopped-orphan", passed: false, detail: "No discarded-layer identity was available for authoritative graph lookup." },
+      { name: "idempotent-discard", passed: false, detail: "No repeated discard result was available." },
+    ];
+  }
+  const [first, second] = evidence.reported.passes;
+  const replayKeys = Object.keys(first) as (keyof ReplayRepairPass)[];
+  const stableReplay = replayKeys.every((key) => first[key] === second[key]);
+  const rootMatchesAccepted = second.rootLayerId === output.rootLayer.layer.id
+    && second.rootActionId === output.rootAction.id
+    && output.rootLayer.layer.nodes.includes(second.primaryNodeId)
+    && output.rootLayer.layer.nodes.includes(second.secondaryNodeId)
+    && output.rootLayer.layer.edges.includes(second.edgeId);
+  const discardedIdsMatch = evidence.reported.discardedLayerIds[0] === second.orphanLayerId
+    && evidence.reported.discardedLayerIds[1] === second.orphanLayerId;
+  const stoppedLayerMatches = evidence.stoppedLayer.layer.id === second.orphanLayerId
+    && evidence.stoppedLayer.layer.state === "stopped"
+    && evidence.stoppedLayerOwnerNodeId === expectedInteractionNodeId;
+  const orphanNodePreserved = evidence.stoppedLayer.layer.nodes.includes(second.orphanNodeId)
+    && evidence.stoppedLayer.nodes.some((node) => node.id === second.orphanNodeId && node.state === "draft");
+  const useful = /stable.{0,30}(client|idempotency).{0,30}key/i.test(text)
+    && /(retry|rerun|replay)/i.test(text)
+    && /(partial|persist|draft)/i.test(text);
+  return [
+    ...base,
+    { name: "accepted-useful-output", passed: useful, detail: "Accepted connected output explains stable keys and retry after partial persistence." },
+    { name: "stable-object-replay", passed: stableReplay && rootMatchesAccepted, detail: "Two full authoring passes reported the same node, edge, layer, orphan, and action IDs, with accepted root membership matching those IDs." },
+    { name: "single-root-action", passed: first.rootActionId === second.rootActionId && second.rootActionId === output.rootAction.id, detail: "Root-action replay retained one identity and submission accepted that exact root action." },
+    { name: "orphan-validation-observed", passed: evidence.reported.orphanSubmitErrorCode === "orphan_draft_layers", detail: "The recovery program recorded the expected orphan validation before explicit discard." },
+    { name: "explicit-stopped-orphan", passed: stoppedLayerMatches && orphanNodePreserved, detail: "Control-authoritative graph reads show the reported orphan layer stopped under this interaction while its node remains draft." },
+    { name: "idempotent-discard", passed: discardedIdsMatch, detail: "Both discard calls returned the same orphan layer identity." },
+  ];
+}
+
+async function readReplayRepairEvidence(
+  output: CompletionOutput,
+  interactionNodeId: number,
+  graphUrl: string,
+  graphControlToken: string,
+): Promise<ReplayRepairEvidence | undefined> {
+  const reported = parseReportedReplayRepairEvidence(output);
+  if (reported === undefined) return undefined;
+  const discardedLayerId = reported.discardedLayerIds[1];
+  try {
+    const stoppedLayer = await requestControlJson<ResolvedLayer>(
+      `${graphUrl}/api/control/interactions/${interactionNodeId}/layers/${discardedLayerId}`,
+      graphControlToken,
+    );
+    const owner = await requestControlJson<{ ownerInteractionNodeId: number }>(
+      `${graphUrl}/api/control/interactions/${interactionNodeId}/layers/${discardedLayerId}/owner`,
+      graphControlToken,
+    );
+    return { reported, stoppedLayer, stoppedLayerOwnerNodeId: owner.ownerInteractionNodeId };
+  } catch {
+    return undefined;
+  }
+}
+
+function readReplayRepairPass(value: unknown): ReplayRepairPass | undefined {
+  if (!isRecord(value)) return undefined;
+  const keys = ["primaryNodeId", "secondaryNodeId", "edgeId", "rootLayerId", "rootActionId", "orphanNodeId", "orphanLayerId"] as const;
+  if (Object.keys(value).length !== keys.length || !keys.every((key) => isPositiveInteger(value[key]))) return undefined;
+  return Object.fromEntries(keys.map((key) => [key, value[key]])) as unknown as ReplayRepairPass;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 export function checkNodeNavigation(output: CompletionOutput): EvalCheck[] {
@@ -286,6 +441,13 @@ async function terminate(child: ChildProcessWithoutNullStreams): Promise<void> {
   }
 }
 async function requestJson<T=unknown>(url:string,token:string,body:unknown,expected=200):Promise<T>{const response=await fetch(url,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify(body)});const value=await response.json();if(response.status!==expected)throw new Error(`Request ${url} failed (${response.status}): ${JSON.stringify(value)}`);return value as T;}
+
+async function requestControlJson<T>(url: string, token: string): Promise<T> {
+  const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  const value: unknown = await response.json();
+  if (!response.ok) throw new Error(`Request ${url} failed (${response.status}): ${JSON.stringify(value)}`);
+  return value as T;
+}
 
 async function completeWithCapabilityCleanup<T>(operation: () => Promise<T>, capability: GraphCapability, controlToken: string): Promise<T> {
   const completion = await settle(operation);

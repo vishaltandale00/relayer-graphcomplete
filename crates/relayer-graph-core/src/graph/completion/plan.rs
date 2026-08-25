@@ -156,6 +156,15 @@ impl CompletionPlan {
                 }
                 continue;
             }
+            if record.layer.state == RecordState::Stopped {
+                return Err(GraphError::validation(
+                    "discarded_layer_target",
+                    "targetLayerId",
+                    format!(
+                        "A navigate action points to discarded layer {layer_id}. Retarget that action to a current draft or visible accepted layer."
+                    ),
+                ));
+            }
             if record.owner != scope.root_node_id {
                 return Err(GraphError::Forbidden(format!(
                     "draft layer {layer_id} belongs to another interaction"
@@ -311,7 +320,7 @@ impl CompletionPlan {
             "orphan_draft_layers",
             "layers",
             format!(
-                "Current draft layers are not reachable from the root action: {}. Connect each layer with a current expand or reference action, or stop authoring the unused layer.",
+                "Current draft layers are not reachable from the root action: {}. Connect each intended layer with a current expand or reference action, or call graph.discardLayer(layer) for each intentionally abandoned layer.",
                 orphaned
                     .iter()
                     .map(ToString::to_string)

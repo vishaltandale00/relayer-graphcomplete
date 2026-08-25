@@ -6,7 +6,7 @@ import { productHarnessImplementations } from "@relayer/harness-host";
 import type { CompletionOutput } from "@relayer/graph-client";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
-import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, executionDirectory, judgeVisibleGraph, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile } from "../src/runtime-basic.js";
+import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, type ReplayRepairEvidence } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -123,6 +123,42 @@ describe("first runtime evaluation", () => {
     expect(checkNodeNavigation(withNavigation)).toEqual([
       expect.objectContaining({ name: "node-navigation", passed: true }),
     ]);
+  });
+
+  it("grades durable replay, singleton-root, and stopped-orphan evidence without inference", () => {
+    const pass = { primaryNodeId: 2, secondaryNodeId: 3, edgeId: 4, rootLayerId: 5, rootActionId: 6, orphanNodeId: 7, orphanLayerId: 8 };
+    const output: CompletionOutput = {
+      nodeId: 1,
+      rootAction: { id: 6, sourceNodeId: 1, sourceLayerId: null, kind: "navigate", relation: "expand", label: "Response", variant: "pill", targetLayerId: 5, state: "accepted" },
+      rootLayer: {
+        layer: { id: 5, nodes: [2, 3], edges: [4], state: "accepted" },
+        nodes: [
+          { id: 2, kind: "concept", icon: "key", title: "Stable client keys", detail: `Retry after partial persistence reuses the draft.\nGRAPH_REPAIR_EVIDENCE=${JSON.stringify({ passes: [pass, pass], orphanSubmitErrorCode: "orphan_draft_layers", discardedLayerIds: [8, 8] })}`, state: "accepted" },
+          { id: 3, kind: "concept", icon: "refresh-cw", title: "Idempotent replay", detail: "Rerun safely without duplicate roots.", state: "accepted" },
+        ],
+        edges: [{ id: 4, endpoints: [2, 3], state: "accepted" }],
+        actions: [],
+      },
+    };
+    const reported = parseReportedReplayRepairEvidence(output);
+    expect(reported).toEqual({ passes: [pass, pass], orphanSubmitErrorCode: "orphan_draft_layers", discardedLayerIds: [8, 8] });
+    const evidence: ReplayRepairEvidence = {
+      reported: reported!,
+      stoppedLayer: {
+        layer: { id: 8, nodes: [7], edges: [], state: "stopped" },
+        nodes: [{ id: 7, kind: "concept", icon: "archive", title: "Abandoned", detail: "Preserved", state: "draft" }],
+        edges: [],
+        actions: [],
+      },
+      stoppedLayerOwnerNodeId: 1,
+    };
+
+    expect(checkReplayRepairOutput(output, evidence).every((check) => check.passed)).toBe(true);
+    expect(checkReplayRepairOutput(output, { ...evidence, stoppedLayerOwnerNodeId: 99 }).find((check) => check.name === "explicit-stopped-orphan")?.passed).toBe(false);
+    expect(parseReportedReplayRepairEvidence({
+      ...output,
+      rootLayer: { ...output.rootLayer, nodes: output.rootLayer.nodes.map((node) => ({ ...node, detail: "No evidence" })) },
+    })).toBeUndefined();
   });
 
   it("runs two interactions through one live harness object and saves both fixture graphs", async () => {

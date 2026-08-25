@@ -48,6 +48,9 @@ class Handler(BaseHTTPRequestHandler):
             self._reply({"edge": {"id": Handler.next_id, "endpoints": body["endpoints"], "state": "draft"}})
         elif self.path.endswith("/layers"):
             self._reply({"layer": {"id": Handler.next_id, "nodes": body["nodes"], "edges": body["edges"], "layout": body["layout"], "state": "draft"}})
+        elif self.path.endswith("/discard"):
+            layer_id = int(self.path.split("/")[-2])
+            self._reply({"layer": {"id": layer_id, "nodes": [1], "edges": [], "state": "stopped"}})
         else:
             self._reply({"ok": True})
 
@@ -106,6 +109,19 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         output = await self.client.get_completion_output()
         self.assertEqual(output["nodeId"], 7)
         self.assertEqual(Handler.requests[-1][0], "/api/graph/nodes/7/output")
+
+    async def test_discard_layer_posts_to_recovery_endpoint_and_refreshes_reference(self):
+        layer = LayerObject((1,), (), client_key="abandoned")
+        await self.client.submit_layer(layer)
+        draft_id = layer.ref.id
+
+        stopped = await self.client.discard_layer(layer)
+
+        self.assertEqual(
+            Handler.requests[-1][0], f"/api/graph/layers/{draft_id}/discard"
+        )
+        self.assertEqual(stopped.state, "stopped")
+        self.assertEqual(layer.ref, stopped)
 
     async def test_action_retries_use_the_caller_owned_key(self):
         await self.client.add_invoke_action(7, "Ask", "Continue", source_layer=8, client_key="ask-again")

@@ -52,3 +52,15 @@ Every newly submitted layer requires a version-1 layout with exactly one
 normalized placement per member node. Coordinates range from `0` through `1`
 and express semantic relative position, independent of the viewport. Accepted
 layers created before layouts were introduced remain readable with `layout=None`.
+
+If submission reports an intentionally abandoned orphan draft layer, discard
+that layer explicitly before retrying submission:
+
+```python
+await graph.discard_layer(abandoned_layer)
+```
+
+Discard preserves the layer as terminal stopped history. It does not delete or
+change the layer's nodes, edges, actions, or child layers, and it rejects layers
+that are accepted, owned by another interaction, or still reachable from the
+current root action.

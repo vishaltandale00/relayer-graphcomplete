@@ -59,3 +59,9 @@ align comparisons, and avoid accidental overlap or edge crossings. Coordinates
 describe the accepted graph and must not depend on the current viewport.
 
 Reuse stable prior node IDs returned by `get_node` or `get_neighbors`. A model turn is complete only after `submit(node_id)` succeeds.
+
+Use `await client.discard_layer(layer)` only to recover from submission guidance
+that identifies a genuinely abandoned orphan draft layer. Discard preserves the
+layer as terminal stopped history and does not cascade to its nodes, edges,
+actions, or child layers. Do not invent navigation merely to make abandoned
+drafts reachable.

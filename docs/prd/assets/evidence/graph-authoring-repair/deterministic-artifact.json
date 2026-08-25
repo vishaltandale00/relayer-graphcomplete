@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "scenario": "graph-authoring-repair-replay-and-discard",
+  "paidInferenceCalls": 0,
+  "interactionNodeId": 1,
+  "stableClientKeys": [
+    "repair-summary",
+    "accepted-result",
+    "repair-detail",
+    "abandoned-node",
+    "repair-result-edge",
+    "repair-root-layer",
+    "repair-detail-layer",
+    "abandoned-layer",
+    "inspect-repair",
+    "root-response"
+  ],
+  "firstProgramRecords": {
+    "nodes": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "edge": 1,
+    "layers": [
+      1,
+      2,
+      3
+    ],
+    "actions": [
+      1,
+      2
+    ]
+  },
+  "replayedProgramRecords": {
+    "nodes": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "edge": 1,
+    "layers": [
+      1,
+      2,
+      3
+    ],
+    "actions": [
+      1,
+      2
+    ]
+  },
+  "initialSubmissionError": {
+    "status": 422,
+    "code": "orphan_draft_layers",
+    "path": "layers",
+    "message": "Current draft layers are not reachable from the root action: 3. Connect each intended layer with a current expand or reference action, or call graph.discardLayer(layer) for each intentionally abandoned layer.",
+    "issues": [
+      {
+        "code": "orphan_draft_layers",
+        "path": "layers",
+        "message": "Current draft layers are not reachable from the root action: 3. Connect each intended layer with a current expand or reference action, or call graph.discardLayer(layer) for each intentionally abandoned layer."
+      }
+    ]
+  },
+  "duplicateRootError": {
+    "status": 422,
+    "code": "root_action_already_exists",
+    "path": "clientKey",
+    "message": "This interaction already has active root action 2 with clientKey \"root-response\". Reuse that clientKey to update the existing draft root action, or call graph.submit(interactionNode) if it is already correct.",
+    "issues": [
+      {
+        "code": "root_action_already_exists",
+        "path": "clientKey",
+        "message": "This interaction already has active root action 2 with clientKey \"root-response\". Reuse that clientKey to update the existing draft root action, or call graph.submit(interactionNode) if it is already correct."
+      }
+    ]
+  },
+  "discard": {
+    "first": {
+      "edges": [],
+      "id": 3,
+      "nodes": [
+        5
+      ],
+      "state": "stopped"
+    },
+    "repeated": {
+      "edges": [],
+      "id": 3,
+      "nodes": [
+        5
+      ],
+      "state": "stopped"
+    },
+    "afterAcceptedSubmission": {
+      "edges": [],
+      "id": 3,
+      "nodes": [
+        5
+      ],
+      "state": "stopped"
+    }
+  },
+  "acceptedOutput": {
+    "rootActionId": 2,
+    "rootLayerId": 1,
+    "nodeTitles": [
+      "Replay-safe repair",
+      "Accepted result"
+    ]
+  },
+  "assertions": {
+    "wholeProgramReplayPreservedRecordIds": true,
+    "orphanSubmissionRejected": true,
+    "duplicateRootRejectedWithoutPersistence": true,
+    "repeatedDiscardReturnedSameStoppedLayer": true,
+    "finalSubmissionAccepted": true
+  },
+  "generatedAt": "2026-08-25T07:02:24.741Z",
+  "sourceCommit": "8681c3af1358749b6e08709599c11432742ef410",
+  "workingTreeDirty": true,
+  "productThreadId": 1,
+  "productInteractionId": 1
+}

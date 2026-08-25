@@ -40,7 +40,7 @@ The implemented basic loop is:
 
 1. A trusted runtime supplies its existing positive-integer project/thread IDs; graph core creates the canonical user-interaction node and activates a capability for that node.
 2. The Node host resolves the thread's harness once and keeps that object alive.
-3. The host supplies the current graph scope only for that `complete()` call. The harness submits node objects, creates undirected edges, packages the exact visible layer with one versioned normalized placement per node, and adds the interaction's response navigate action. It may also attach useful navigate or invoke actions to output nodes; nested layers are an available authoring capability, not a per-node requirement.
+3. The host supplies the current graph scope only for that `complete()` call. Harness-authored programs give every persisted node, edge, layer, and action an explicit stable client key, so editing and rerunning the whole program updates the same current-interaction drafts. The harness submits node objects, creates undirected edges, packages the exact visible layer with one versioned normalized placement per node, and adds the interaction's response navigate action. It may also attach useful navigate or invoke actions to output nodes; nested layers are an available authoring capability, not a per-node requirement. An intentionally abandoned orphan draft layer may be preserved as stopped history with `discardLayer`; authors must not invent navigation merely to make abandoned work reachable.
 4. The host reads the accepted output and closes the turn's in-memory graph scope. The calling runtime that minted the graph capability revokes its token after the Complete call settles. The host has a separate API credential and never receives graph control authority. A cached client from an earlier IPython turn cannot modify a later interaction.
 5. `graph.submit(interactionNode)` recursively validates typed `expand` and `reference` navigation, exact source-layer provenance, layer size, and complete authored layouts, then atomically accepts only the current authored closure. Flat answers remain valid. See [ADR 0005](docs/decisions/0005-layered-navigation-contract.md).
 6. Complete returns the resolved root layer for immediate display; later navigation reads the persisted layer.
@@ -83,6 +83,21 @@ Selecting two configurations expands the same harness-agnostic case into two exe
 ```sh
 npm run eval:basic:live -- --configuration codex-basic --configuration codex-basic-high
 ```
+
+An additional opt-in live case exercises graph-authoring recovery through the
+ordinary Codex harness Complete path. It requires a whole-program stable-key
+replay, observes orphan validation, explicitly discards the orphan twice, and
+then verifies the accepted output plus the stopped layer through graph control:
+
+```sh
+npm run eval:graph-repair:live -- --configuration codex-basic
+```
+
+Its durable `result.json` and viewer are written under
+`.relayer/evals/runtime/<test-run-id>/graph-authoring.replay-repair/<configuration>/`.
+The live command is not part of `npm run check` and is the only part of this
+case that invokes inference; its evidence parser and grader run in the default
+deterministic test suite.
 
 The CLI resolves configuration files before case execution. Every saved execution records its `(testRunId, testCaseId, harnessConfigurationName)` identity, exact resolved configuration snapshot, and stable digest. Live inference is deliberately excluded from `npm test` and `npm run check`. Its saved HTML remains a lower-level debugging artifact; product-faithful review belongs to Relayer Eval.
 
