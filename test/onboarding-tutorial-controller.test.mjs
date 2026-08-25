@@ -184,6 +184,7 @@ function fixture(options = {}) {
     lifecycle: persistence,
     getAppState: () => appState,
     getViewState: () => viewState,
+    isComposerReady: options.isComposerReady,
     openNewThread,
   });
   return {
@@ -273,6 +274,65 @@ describe("onboarding tutorial controller", () => {
       source: "manual",
       guard: expect.any(Function),
     }));
+  });
+
+  it("does not consume manual launch state until the composer is ready", async () => {
+    let ready = false;
+    const test = fixture({ isComposerReady: () => ready });
+
+    await expect(test.controller.startManual()).resolves.toBe(false);
+    expect(test.lifecycle.beginManual).not.toHaveBeenCalled();
+    expect(test.lifecycle.dismiss).not.toHaveBeenCalled();
+    expect(test.openNewThread).not.toHaveBeenCalled();
+    expect(test.controller.isActive()).toBe(false);
+
+    ready = true;
+    await expect(test.controller.startManual()).resolves.toBe(true);
+    expect(test.lifecycle.beginManual).toHaveBeenCalledOnce();
+    expect(test.openNewThread).toHaveBeenCalledOnce();
+    expect(test.controller.isActive()).toBe(true);
+  });
+
+  it("abandons a manual launch when composer readiness is lost during lifecycle begin", async () => {
+    const beginning = deferred();
+    let ready = true;
+    const test = fixture({
+      isComposerReady: () => ready,
+      lifecycle: lifecycle({ beginManual: vi.fn(() => beginning.promise) }),
+    });
+
+    const starting = test.controller.startManual();
+    await vi.waitFor(() => expect(test.lifecycle.beginManual).toHaveBeenCalledOnce());
+    ready = false;
+    beginning.resolve({ started: true, source: "manual" });
+
+    await expect(starting).resolves.toBe(false);
+    expect(test.openNewThread).not.toHaveBeenCalled();
+    expect(test.lifecycle.dismiss).toHaveBeenCalledOnce();
+    expect(test.controller.isActive()).toBe(false);
+  });
+
+  it("guards manual composer mutation when readiness is lost during preparation", async () => {
+    const preparation = deferred();
+    const mutateComposer = vi.fn();
+    let ready = true;
+    const openNewThread = vi.fn(async ({ guard }) => {
+      await preparation.promise;
+      if (!guard()) return false;
+      mutateComposer();
+      return true;
+    });
+    const test = fixture({ isComposerReady: () => ready, openNewThread });
+
+    const starting = test.controller.startManual();
+    await vi.waitFor(() => expect(openNewThread).toHaveBeenCalledOnce());
+    ready = false;
+    preparation.resolve();
+
+    await expect(starting).resolves.toBe(false);
+    expect(mutateComposer).not.toHaveBeenCalled();
+    expect(test.lifecycle.dismiss).toHaveBeenCalledOnce();
+    expect(test.controller.isActive()).toBe(false);
   });
 
   it("does not auto-start when a thread appears during the lifecycle eligibility read", async () => {
@@ -821,16 +881,25 @@ describe("onboarding tutorial controller", () => {
     expect(threads).toContain("return createdInteraction;");
     expect(main).toContain("Boolean(viewState.selectedPermissionProfileId)");
     expect(main).toContain("newThreadModelSelectionReady()");
+    expect(main).toContain("isComposerReady: tutorialComposerReady,");
+    expect(main.indexOf("if (!tutorialComposerReady()) {"))
+      .toBeLessThan(main.indexOf("await onboardingTutorialController()?.startManual();"));
+    expect(main).toContain('$("#startTutorial").disabled = !ready;');
+    expect(onboarding.indexOf('if (source === "manual" && !isComposerReady()) return false;'))
+      .toBeLessThan(onboarding.indexOf("const attempt = ownedAttempt ?? claimStart(source);"));
     expect(main).toContain('async function openNewThreadComposer({ prompt = "", guard = null } = {})');
     expect(main.indexOf("const applyPermissionProfiles = await preparePermissionProfiles("))
       .toBeLessThan(main.indexOf("if (guard && !guard()) return false;"));
     expect(main.indexOf("if (guard && !guard()) return false;"))
       .toBeLessThan(main.indexOf("applyPermissionProfiles?.();"));
     expect(main.indexOf("applyPermissionProfiles?.();"))
+      .toBeLessThan(main.lastIndexOf("if (guard && !guard()) return false;"));
+    expect(main.lastIndexOf("if (guard && !guard()) return false;"))
       .toBeLessThan(main.indexOf("cancelNavigationHistory();"));
     expect(main.indexOf("if (!ready) return false;"))
       .toBeLessThan(main.indexOf("tutorial.maybeStartAutomatic({"));
     expect(onboarding).toContain("guard: canOpen,");
+    expect(onboarding).toContain("&& isComposerReady()");
     expect(main).toContain("if (!providerConnected) await onboardingTutorialController()?.leave();");
     expect(main.indexOf("await desktop?.account.logout();"))
       .toBeLessThan(main.indexOf("await onboardingTutorialController()?.leave();"));

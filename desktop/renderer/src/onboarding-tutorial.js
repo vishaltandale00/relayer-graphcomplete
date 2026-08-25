@@ -96,6 +96,7 @@ export function createOnboardingTutorialController({
   lifecycle,
   getAppState,
   getViewState,
+  isComposerReady = () => true,
   openNewThread,
 }) {
   if (!lifecycle || typeof getAppState !== "function" || typeof getViewState !== "function") {
@@ -261,6 +262,7 @@ export function createOnboardingTutorialController({
   }
 
   async function start(source, context = null, ownedAttempt = null) {
+    if (source === "manual" && !isComposerReady()) return false;
     const attempt = ownedAttempt ?? claimStart(source);
     if (!ownsStart(attempt)) return false;
     if (active) {
@@ -296,8 +298,13 @@ export function createOnboardingTutorialController({
     const canOpen = () => (
       ownsStart(attempt)
       && !active
+      && isComposerReady()
       && (source !== "automatic" || liveThreadCount(context?.threadCount) === 0)
     );
+    if (!canOpen()) {
+      await cleanupOwnedStart(attempt);
+      return false;
+    }
     let opened;
     try {
       opened = await openNewThread({

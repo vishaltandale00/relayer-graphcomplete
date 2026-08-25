@@ -49,8 +49,22 @@ async function refreshProviderModelUi() {
     await refreshModelFamilySettings();
     refreshNewThreadModelPicker();
     updateCreateThreadAvailability();
+    updateTutorialAvailability();
   }
   if (productApiAvailable) await refreshState(viewState.currentThreadId);
+}
+
+function tutorialComposerReady() {
+  return Boolean(viewState.selectedPermissionProfileId)
+    && (!productApiAvailable || newThreadModelSelectionReady());
+}
+
+function updateTutorialAvailability() {
+  const ready = Boolean(desktop?.tutorial) && !evalReview && tutorialComposerReady();
+  $("#startTutorial").disabled = !ready;
+  $("#startTutorial").title = ready
+    ? "Start tutorial"
+    : "Choose an available model and permission profile to start the tutorial";
 }
 
 async function openNewThreadComposer({ prompt = "", guard = null } = {}) {
@@ -59,6 +73,8 @@ async function openNewThreadComposer({ prompt = "", guard = null } = {}) {
   );
   if (guard && !guard()) return false;
   applyPermissionProfiles?.();
+  updateTutorialAvailability();
+  if (guard && !guard()) return false;
   cancelNavigationHistory();
   viewState.currentThreadId = null;
   viewState.currentInteractionId = null;
@@ -74,9 +90,7 @@ async function openNewThreadComposer({ prompt = "", guard = null } = {}) {
 async function maybeStartAutomaticTutorial(providerConnected) {
   const tutorial = onboardingTutorialController();
   if (!tutorial || evalReview) return false;
-  const ready = Boolean(viewState.selectedPermissionProfileId)
-    && (!productApiAvailable || newThreadModelSelectionReady());
-  if (!ready) return false;
+  if (!tutorialComposerReady()) return false;
   return tutorial.maybeStartAutomatic({
     providerConnected,
     threadCount: appState.threads.length,
@@ -128,6 +142,7 @@ function bindEvents() {
         await desktop?.models?.settingsOpened?.();
         await refreshModelFamilySettings();
         refreshNewThreadModelPicker();
+        updateTutorialAvailability();
       }
     } catch (error) {
       toast(error.message);
@@ -160,6 +175,10 @@ function bindEvents() {
   };
   $("#startTutorial").onclick = async () => {
     try {
+      if (!tutorialComposerReady()) {
+        updateTutorialAvailability();
+        return;
+      }
       await onboardingTutorialController()?.startManual();
     } catch (error) {
       toast(error.message);
@@ -245,7 +264,10 @@ async function boot() {
   await loadPermissionProfiles(appState.modelSettings?.defaults?.harnessId);
   if (productApiAvailable) {
     initializeNewThreadModelPicker({
-      onSelectionChange: updateCreateThreadAvailability,
+      onSelectionChange: () => {
+        updateCreateThreadAvailability();
+        updateTutorialAvailability();
+      },
       onOpenSettings: () => {
         setSettingsTab("models");
         $("#settingsButton").click();
@@ -259,11 +281,13 @@ async function boot() {
       lifecycle: desktop.tutorial,
       getAppState: () => appState,
       getViewState: () => viewState,
+      isComposerReady: tutorialComposerReady,
       openNewThread: openNewThreadComposer,
     });
+    updateTutorialAvailability();
     await maybeStartAutomaticTutorial(account?.status === "connected");
   } else {
-    $("#startTutorial").disabled = true;
+    updateTutorialAvailability();
   }
   if (evalReview) {
     evalReview.registerPresentationAdapter(createReviewPresentationAdapter({
