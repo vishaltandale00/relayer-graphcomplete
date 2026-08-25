@@ -66,6 +66,12 @@ export function resolveInteractionContextNode(nodeId, nodes, contexts, overrides
     || overrides?.get(String(nodeId));
 }
 
+export function hasHistoricalContextSelection(nodeId, contextTarget, overrides) {
+  return contextTarget != null
+    && String(contextTarget.nodeId) === String(nodeId)
+    && overrides?.has(String(nodeId));
+}
+
 export function turnReviewKind(current) {
   return current ? "control" : "turn";
 }
@@ -2145,9 +2151,14 @@ export function createProductWorkspace({
     const responseNodes = responseNodesForThread(state, thread);
     const nextViewKey = graphCameraViewKey(state, thread, responseNodes);
     const enteringView = nextViewKey !== graphViewKey;
+    const preserveHistoricalSelection = hasHistoricalContextSelection(
+      selection.selectedNodeId,
+      selectedContextTarget,
+      contextNodeOverrides,
+    );
     if (enteringView) {
       cancelInspectorFit();
-      $("#inspector").classList.add("hidden");
+      if (!preserveHistoricalSelection) $("#inspector").classList.add("hidden");
       saveGraphView();
     }
     $("#graphEmpty").classList.toggle("hidden", responseNodes.length > 0);
@@ -2287,7 +2298,9 @@ export function createProductWorkspace({
         node.y = canonical.y;
       }
     }
-    if (enteringView && !ids.has(String(selection.selectedNodeId))) {
+    if (enteringView
+      && !ids.has(String(selection.selectedNodeId))
+      && !preserveHistoricalSelection) {
       selection.selectedNodeId = null;
       $("#inspector").classList.add("hidden");
     }

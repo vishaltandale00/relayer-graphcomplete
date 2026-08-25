@@ -17,6 +17,7 @@ import {
   contextEditorPresentation,
   contextStagingDisabledFor,
   graphTurnNavigationDelta,
+  hasHistoricalContextSelection,
   handleComposerKeydown,
   resizeComposerTextarea,
   interactionContextPayload,
@@ -152,6 +153,9 @@ describe("product workspace keyboard behavior", () => {
       target: { nodeId: 8 },
       node: attached,
     }], overrides)).toBe(attached);
+    expect(hasHistoricalContextSelection(7, { nodeId: 7 }, overrides)).toBe(true);
+    expect(hasHistoricalContextSelection(7, null, overrides)).toBe(false);
+    expect(hasHistoricalContextSelection(8, { nodeId: 8 }, overrides)).toBe(false);
   });
 
   it("keeps context controls symbol-first and accessible", () => {

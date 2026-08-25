@@ -345,9 +345,16 @@ pub(super) async fn project_interaction(
     let has_durable_context = durable_input
         .as_ref()
         .is_some_and(|input| !input.contexts.is_empty());
-    if (has_durable_context || imported_thread)
-        && let (Some(runtime), Some(graph_node_id)) = (state.runtime.as_ref(), graph_node_id)
-    {
+    if has_durable_context || imported_thread {
+        let Some((runtime, graph_node_id)) = state.runtime.as_ref().zip(graph_node_id) else {
+            if has_durable_context {
+                response.mark_projection_stale();
+                eprintln!(
+                    "could not project context for interaction {id}: graph input is unavailable"
+                );
+            }
+            return Ok(response);
+        };
         match runtime.interaction_input(graph_node_id).await {
             Ok(input) => {
                 let projected = if input.contexts.is_empty() {
@@ -373,15 +380,19 @@ pub(super) async fn project_interaction(
                             eprintln!(
                                 "could not read context actions for interaction {id}: {error}"
                             );
-                            Ok(())
+                            Err("graph context actions are unavailable")
                         }
                     }
                 };
                 if let Err(error) = projected {
+                    response.mark_projection_stale();
                     eprintln!("could not project context for interaction {id}: {error}");
                 }
             }
-            Err(error) => eprintln!("could not project context for interaction {id}: {error}"),
+            Err(error) => {
+                response.mark_projection_stale();
+                eprintln!("could not project context for interaction {id}: {error}");
+            }
         }
     }
     Ok(response)

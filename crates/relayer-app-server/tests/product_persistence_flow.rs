@@ -4530,6 +4530,10 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
     let digest = observed_digest.lock().unwrap().clone();
     let metadata_digest = digest.clone();
     let create_digest = digest.clone();
+    let input_reads = Arc::new(AtomicUsize::new(0));
+    let observed_input_reads = input_reads.clone();
+    let context_action_reads = Arc::new(AtomicUsize::new(0));
+    let observed_context_action_reads = context_action_reads.clone();
     let graph = Router::new()
         .route("/api/control/interactions", axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
             let create_digest = create_digest.clone();
@@ -4547,18 +4551,32 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
         .route("/api/control/interactions/77/output", axum::routing::get(|| async {
             (StatusCode::NOT_FOUND, axum::Json(json!({"error":{"code":"completion_not_found"}})))
         }))
-        .route("/api/control/interactions/77/input", axum::routing::get(|| async {
-            axum::Json(json!({
-                "interaction":{"id":77,"kind":"user-interaction","icon":"user","title":"Use this context","detail":"Use this context","state":"accepted"},
-                "contexts":[{"type":"interaction.context","targetNode":{"id":7,"kind":"concept","icon":"box","title":"Target","detail":"Immutable target","state":"accepted"},"annotations":["raw note"]}]
-            }))
+        .route("/api/control/interactions/77/input", axum::routing::get(move || {
+            let observed_input_reads = observed_input_reads.clone();
+            async move {
+                if observed_input_reads.fetch_add(1, Ordering::SeqCst) + 1 == 3 {
+                    return (StatusCode::SERVICE_UNAVAILABLE, "transient input failure")
+                        .into_response();
+                }
+                axum::Json(json!({
+                    "interaction":{"id":77,"kind":"user-interaction","icon":"user","title":"Use this context","detail":"Use this context","state":"accepted"},
+                    "contexts":[{"type":"interaction.context","targetNode":{"id":7,"kind":"concept","icon":"box","title":"Target","detail":"Immutable target","state":"accepted"},"annotations":["raw note"]}]
+                })).into_response()
+            }
         }))
-        .route("/api/control/interactions/77/context-actions", axum::routing::get(|| async {
-            axum::Json(json!({"actions":[{
-                "id":88,"type":"interaction.context","sourceNodeId":77,
-                "target":{"nodeId":7,"sourceInteractionNodeId":3,"sourceLayerId":5},
-                "annotations":["raw note"],"state":"accepted"
-            }]}))
+        .route("/api/control/interactions/77/context-actions", axum::routing::get(move || {
+            let observed_context_action_reads = observed_context_action_reads.clone();
+            async move {
+                if observed_context_action_reads.fetch_add(1, Ordering::SeqCst) + 1 == 2 {
+                    return (StatusCode::SERVICE_UNAVAILABLE, "transient action failure")
+                        .into_response();
+                }
+                axum::Json(json!({"actions":[{
+                    "id":88,"type":"interaction.context","sourceNodeId":77,
+                    "target":{"nodeId":7,"sourceInteractionNodeId":3,"sourceLayerId":5},
+                    "annotations":["raw note"],"state":"accepted"
+                }]})).into_response()
+            }
         }))
         .route("/api/control/capabilities", axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
             axum::Json(json!({"graphToken":body["graphToken"]}))
@@ -4631,11 +4649,24 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
             .unwrap(),
     )
     .await;
-    assert_eq!(
-        hydrated["interactions"][1]["contexts"],
-        listed["interactions"][1]["contexts"]
-    );
-    let detail = response_json(
+    assert_eq!(hydrated["interactions"][1]["contexts"], json!([]));
+    assert_eq!(hydrated["interactions"][1]["projectionFresh"], false);
+    let stale_detail = response_json(
+        resumed
+            .clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/threads/{thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(stale_detail["interactions"][1]["contexts"], json!([]));
+    assert_eq!(stale_detail["interactions"][1]["projectionFresh"], false);
+    let recovered_detail = response_json(
         resumed
             .clone()
             .oneshot(api_request(
@@ -4649,9 +4680,10 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
     )
     .await;
     assert_eq!(
-        detail["interactions"][1]["contexts"],
+        recovered_detail["interactions"][1]["contexts"],
         listed["interactions"][1]["contexts"]
     );
+    assert_eq!(recovered_detail["interactions"][1]["projectionFresh"], true);
     let replay = resumed
         .clone()
         .oneshot(api_request(
