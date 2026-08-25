@@ -1,6 +1,7 @@
 mod annotations;
 mod auth;
 mod conversation_imports;
+mod environment;
 mod error;
 mod model_settings;
 mod projects;
@@ -44,6 +45,7 @@ pub(crate) struct ApiState {
     pub(crate) approval_decisions: Arc<Mutex<HashMap<String, ApprovalDecision>>>,
     pub(crate) annotation_sessions: Arc<Mutex<HashMap<String, AnnotationSession>>>,
     pub(crate) annotations_enabled: bool,
+    pub(crate) environment_inspector: crate::environment::EnvironmentInspector,
 }
 
 pub(crate) struct ApiRuntime {
@@ -79,6 +81,7 @@ pub(crate) fn router(
         approval_decisions: Arc::new(Mutex::new(HashMap::new())),
         annotation_sessions: Arc::new(Mutex::new(HashMap::new())),
         annotations_enabled,
+        environment_inspector: crate::environment::EnvironmentInspector::new(),
     };
     Router::new()
         .route("/health", get(state::health))
@@ -125,6 +128,10 @@ pub(crate) fn router(
         )
         .route("/api/state", get(state::product_state))
         .route("/api/projects", get(projects::list).post(projects::create))
+        .route(
+            "/api/projects/{id}/environment",
+            get(environment::get),
+        )
         .route("/api/threads", get(threads::list).post(threads::create))
         .route("/api/threads/{id}", get(threads::get))
         .route("/api/threads/{id}/export", get(threads::export))

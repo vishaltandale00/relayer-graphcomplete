@@ -97,6 +97,16 @@ async function waitFor(label, window, expression, timeoutMs = 15_000) {
   throw new Error(`Timed out waiting for ${label}: ${JSON.stringify(diagnostic)}`);
 }
 
+async function clickElement(window, selector) {
+  const point = await window.webContents.executeJavaScript(`(() => {
+    const rect = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect();
+    return rect ? { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) } : null;
+  })()`);
+  if (!point) throw new Error(`Cannot click missing element ${selector}.`);
+  window.webContents.sendInputEvent({ type: "mouseDown", ...point, button: "left", clickCount: 1 });
+  window.webContents.sendInputEvent({ type: "mouseUp", ...point, button: "left", clickCount: 1 });
+}
+
 async function createAnnotationSession(threadIds) {
   const token = randomBytes(32).toString("hex");
   const username = userInfo().username;
@@ -151,8 +161,16 @@ async function openReview(execution, token) {
   await waitFor(
     "annotation-capable ProductWorkspace",
     window,
-    `Boolean(document.querySelector('.graph-node') && document.querySelector('#annotationPanel'))`,
+    `Boolean(document.querySelector('.graph-node') && document.querySelector('#annotationPanel') && !document.querySelector('#threadAnnotationBadge')?.classList.contains('hidden'))`,
   );
+  app.focus({ steal: true });
+  window.focus();
+  window.webContents.focus();
+  await waitFor("focused annotation review", window, "document.hasFocus() === true");
+  window.webContents.invalidate();
+  await sleep(100);
+  window.webContents.invalidate();
+  await sleep(100);
   return window;
 }
 
@@ -292,11 +310,11 @@ async function run() {
     "3. Add a sparse comment without changing the accepted graph",
     "#annotationComment",
   );
-  await reviewWindow.webContents.executeJavaScript(`document.querySelector('#annotationRatingInput')?.focus()`);
+  await clickElement(reviewWindow, "#annotationRatingInput");
   await waitFor(
     "expanded rating surface",
     reviewWindow,
-    `document.querySelector('#annotationRating')?.classList.contains('expanded') === true`,
+    `document.hasFocus() && document.querySelector('#annotationRating')?.classList.contains('expanded') === true`,
   );
   await captureStep(
     reviewWindow,

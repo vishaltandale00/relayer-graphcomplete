@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-08-25T06:24:28.813Z",
-  "sourceCommit": "e5b64608443914687c472cafd4e80108b7639475",
-  "workingTreeDirty": false,
+  "capturedAt": "2026-08-25T08:07:52.986Z",
+  "sourceCommit": "04c8040913059027b713be7e9c7351c7aef1eea0",
+  "workingTreeDirty": true,
   "command": "RELAYER_CAPTURE_HUMAN_ANNOTATION_EVIDENCE=1 electron scripts/capture-human-eval-annotation-evidence.mjs",
   "paidInferenceCalls": 0,
   "execution": {
-    "runId": "run-2026-08-25T06-24-24-795Z-a98fa49f",
-    "executionId": "7b38248e-b5e8-4cca-8800-4e79ca74ae96",
+    "runId": "run-2026-08-25T08-07-48-582Z-d908a501",
+    "executionId": "0077fccc-a551-462f-bfda-0a132bbe5573",
     "threadId": 1,
     "status": "passed"
   },
@@ -18,11 +18,11 @@
   "persistenceReplay": true,
   "screenshot": {
     "file": "human-eval-annotations.png",
-    "sha256": "4eb1fac9d528e3456b915ba476bc763d6b7a50901189bb074f0fb1102f06f76d"
+    "sha256": "9517fcbdefcf745cc0c1c0489aac8483bd8cb2c245d3a2ba47c31326f36473cb"
   },
   "video": {
     "file": "human-eval-annotations.mp4",
-    "sha256": "9296082a67aea760eacd6dbf97f87425f475558c8e87ca22b59f1198056112c9",
+    "sha256": "0e94cd7888349c55756c60bb07fd77a662b092363ec3f814cee1c91df8ddf82c",
     "durationSeconds": 20.967,
     "steps": [
       "1. Open a fixed Eval execution in the production ProductWorkspace",

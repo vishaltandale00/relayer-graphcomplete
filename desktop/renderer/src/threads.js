@@ -53,6 +53,15 @@ import {
   pendingApprovalsForThread,
   validApprovalDecision,
 } from "./approval-model.js";
+import {
+  createPostFlightRefreshQueue,
+  createEnvironmentRefreshScheduler,
+  environmentBackoffAfterFailure,
+  environmentRefreshNeeded,
+  interactionReachedTerminal,
+  latestInteractionForThread,
+  resolveEnvironmentSnapshot,
+} from "./environment-context.js";
 import { onboardingTutorialController } from "./onboarding-tutorial.js";
 
 let creatingFirstThread = false;
@@ -71,6 +80,177 @@ let pendingHistoryTransition = null;
 const refreshGate = createLatestRequestGate();
 const resolvedInvokeNavigationGate = createLatestRequestGate();
 let pendingResolvedInvokeNavigation = false;
+let environmentRequestSequence = 0;
+const environmentRefreshRecords = new Map();
+let environmentRequestInFlight = null;
+const environmentRefreshScheduler = createEnvironmentRefreshScheduler();
+const environmentPostFlightQueue = createPostFlightRefreshQueue();
+
+function activeProjectId() {
+  return appState.threads.find((thread) => (
+    String(thread.id) === String(viewState.currentThreadId)
+  ))?.projectId ?? null;
+}
+
+function clearEnvironmentRefreshTimer() {
+  environmentRefreshScheduler.clear();
+}
+
+function environmentWorkspaceFocused() {
+  return viewState.mainView === "thread"
+    && activeProjectId() != null
+    && document.visibilityState !== "hidden"
+    && (typeof document.hasFocus !== "function" || document.hasFocus());
+}
+
+function scheduleEnvironmentRefresh() {
+  clearEnvironmentRefreshTimer();
+  if (!environmentWorkspaceFocused()) return;
+  const projectId = activeProjectId();
+  const refreshRecord = environmentRefreshRecords.get(String(projectId)) ?? {
+    lastRequestedAt: 0,
+    nextAttemptAt: 0,
+  };
+  environmentRefreshScheduler.schedule({
+    eligible: true,
+    projectId,
+    lastRequestedAt: refreshRecord.lastRequestedAt,
+    nextAttemptAt: refreshRecord.nextAttemptAt,
+    now: Date.now(),
+    refresh: (scheduledProjectId) => {
+      if (
+        !environmentWorkspaceFocused()
+        || String(activeProjectId()) !== String(scheduledProjectId)
+      ) return;
+      void refreshCurrentEnvironment().catch(() => scheduleEnvironmentRefresh());
+    },
+  });
+}
+
+export async function refreshCurrentEnvironment({ force = false, minimumAgeMs = 0 } = {}) {
+  clearEnvironmentRefreshTimer();
+  if (viewState.mainView !== "thread") {
+    stopEnvironmentRefresh();
+    return false;
+  }
+  const projectId = activeProjectId();
+  if (projectId == null) {
+    environmentRequestSequence += 1;
+    environmentRequestInFlight = null;
+    appState.environment = null;
+    if (viewState.mainView === "thread") renderThread();
+    return false;
+  }
+  const now = Date.now();
+  const projectKey = String(projectId);
+  if (String(appState.environment?.projectId) !== projectKey) {
+    environmentRefreshRecords.set(projectKey, {
+      lastRequestedAt: 0,
+      failureCount: 0,
+      nextAttemptAt: 0,
+    });
+  }
+  const refreshRecord = environmentRefreshRecords.get(projectKey) ?? {
+    lastRequestedAt: 0,
+    failureCount: 0,
+    nextAttemptAt: 0,
+  };
+  environmentRefreshRecords.set(projectKey, refreshRecord);
+  if (!environmentRefreshNeeded({
+    currentProjectId: appState.environment?.projectId,
+    requestedProjectId: projectId,
+    lastRequestedAt: refreshRecord.lastRequestedAt,
+    now,
+    force,
+    minimumAgeMs,
+    nextAttemptAt: refreshRecord.nextAttemptAt,
+  })) {
+    scheduleEnvironmentRefresh();
+    return false;
+  }
+  if (environmentRequestInFlight?.projectId === String(projectId)) {
+    environmentPostFlightQueue.queue(projectId, force);
+    return environmentRequestInFlight.promise;
+  }
+  environmentPostFlightQueue.discardExcept(projectId);
+  const requestSequence = ++environmentRequestSequence;
+  refreshRecord.lastRequestedAt = now;
+  const previousSnapshot = String(appState.environment?.projectId) === String(projectId)
+    ? appState.environment?.snapshot ?? null
+    : null;
+  appState.environment = {
+    projectId,
+    status: "loading",
+    snapshot: previousSnapshot,
+    error: null,
+  };
+  if (!previousSnapshot && viewState.mainView === "thread") renderThread();
+  const completion = (async () => {
+  try {
+    const snapshot = await request(`/api/projects/${encodeURIComponent(projectId)}/environment`);
+    if (requestSequence !== environmentRequestSequence || String(activeProjectId()) !== String(projectId)) {
+      return false;
+    }
+    const resolved = resolveEnvironmentSnapshot(snapshot, previousSnapshot);
+    appState.environment = {
+      projectId,
+      status: resolved.status,
+      snapshot: resolved.snapshot,
+      error: resolved.error,
+    };
+    if (resolved.retryable) {
+      Object.assign(
+        refreshRecord,
+        environmentBackoffAfterFailure(refreshRecord.failureCount, Date.now()),
+      );
+    } else {
+      refreshRecord.failureCount = 0;
+      refreshRecord.nextAttemptAt = 0;
+    }
+  } catch (error) {
+    if (requestSequence !== environmentRequestSequence || String(activeProjectId()) !== String(projectId)) {
+      return false;
+    }
+    appState.environment = {
+      projectId,
+      status: "error",
+      snapshot: previousSnapshot,
+      error: error?.message || "Project context is temporarily unavailable.",
+    };
+    Object.assign(
+      refreshRecord,
+      environmentBackoffAfterFailure(refreshRecord.failureCount, Date.now()),
+    );
+  }
+  if (viewState.mainView === "thread") renderThread();
+  return true;
+  })();
+  environmentRequestInFlight = { projectId: String(projectId), promise: completion };
+  try {
+    return await completion;
+  } finally {
+    if (environmentRequestInFlight?.promise === completion) {
+      environmentRequestInFlight = null;
+      if (environmentPostFlightQueue.consume(
+        projectId,
+        activeProjectId(),
+        viewState.mainView === "thread",
+      )) {
+        void refreshCurrentEnvironment({ force: true }).catch(() => {});
+      } else {
+        scheduleEnvironmentRefresh();
+      }
+    }
+  }
+}
+
+export function stopEnvironmentRefresh() {
+  clearEnvironmentRefreshTimer();
+  environmentRequestSequence += 1;
+  environmentRequestInFlight = null;
+  environmentPostFlightQueue.clear();
+  environmentRefreshRecords.clear();
+}
 
 export function updateCreateThreadAvailability() {
   $("#createThread").disabled = creatingFirstThread
@@ -247,6 +427,8 @@ export async function refreshState(
     || (requestedThreadId && String(viewState.currentThreadId) !== String(requestedThreadId))
   ) return false;
   const previousInteractionId = viewState.currentInteractionId;
+  const previousLiveInteraction = latestInteractionForThread(appState.interactions, threadId);
+  const previousProjectId = activeProjectId();
   const previousVisibleLayer = appState.visibleLayer;
   const nextProjects = state.projects || [];
   const nextThreads = state.threads || [];
@@ -314,6 +496,11 @@ export async function refreshState(
   if (viewState.mainView === "settings") setMainView("settings");
   else if (viewState.currentThreadId) renderThread();
   else setMainView("new");
+  const nextProjectId = activeProjectId();
+  const projectChanged = String(previousProjectId) !== String(nextProjectId);
+  const nextLiveInteraction = latestInteractionForThread(nextInteractions, nextThreadId);
+  const terminalTransition = interactionReachedTerminal(previousLiveInteraction, nextLiveInteraction);
+  void refreshCurrentEnvironment({ force: projectChanged || terminalTransition }).catch(() => {});
   schedulePendingRefresh(viewState.currentThreadId, { force: canonicalRefreshFailed });
   return true;
 }

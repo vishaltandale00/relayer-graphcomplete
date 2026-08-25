@@ -2,13 +2,14 @@ import { modelPickerMarkup } from "../model-picker.js";
 
 export function productWorkspaceMarkup() {
   return `
+    <div class="workspace-layout" data-review-capture="workspace" role="region" aria-label="Thread workspace">
     <header class="thread-header">
       <nav class="history-navigation" aria-label="Workspace history">
         <button id="historyBack" data-review-ref="history-back" data-review-kind="history" disabled title="Back" aria-label="Back"><span aria-hidden="true">←</span><i class="history-spinner hidden" aria-hidden="true"></i></button>
         <button id="historyForward" data-review-ref="history-forward" data-review-kind="history" disabled title="Forward" aria-label="Forward"><span aria-hidden="true">→</span><i class="history-spinner hidden" aria-hidden="true"></i></button>
       </nav>
       <div class="thread-title-group">
-        <div class="thread-title-copy"><div class="thread-title-row"><h2 id="threadTitle">New thread</h2><button class="annotation-count-badge hidden" id="threadAnnotationBadge" type="button" aria-label="Open thread comments"></button></div><p id="threadScope">No folder</p></div>
+        <div class="thread-title-copy"><div class="thread-title-row"><h2 id="threadTitle">New thread</h2><button class="annotation-count-badge hidden" id="threadAnnotationBadge" type="button" aria-label="Open thread comments"></button></div><span class="sr-only" id="threadScope">No folder</span></div>
         <div class="conversation-settings hidden" id="conversationSettings">
           <button class="conversation-settings-button" id="conversationSettingsButton" type="button" title="Conversation settings" aria-label="Conversation settings" aria-expanded="false" aria-controls="conversationSettingsMenu">•••</button>
           <div class="conversation-settings-menu hidden" id="conversationSettingsMenu" role="menu" aria-label="Conversation settings">
@@ -17,26 +18,37 @@ export function productWorkspaceMarkup() {
         </div>
       </div>
     </header>
-    <div class="thread-workspace" data-review-capture="workspace" role="region" aria-label="Thread workspace">
-      <div class="graph-column">
-        <div class="interaction-banner" id="interactionBanner">
+    <div class="interaction-banner" id="interactionBanner">
           <span class="interaction-icon">›_</span>
           <div class="interaction-copy">
-            <div class="interaction-copy-header">
-              <small>Your interaction<span class="interaction-model-identity hidden" id="interactionModelIdentity"></span></small>
-              <div class="turn-picker" id="turnPicker">
-                <button class="annotation-count-badge hidden" id="turnAnnotationBadge" type="button" aria-label="Open turn comments"></button>
-                <div class="turn-stepper" role="group" aria-label="Turn navigation">
-                  <button id="previousTurn" data-review-ref="previous-turn" data-review-kind="turn" disabled title="Previous turn" aria-label="Previous turn">←</button>
-                  <button id="turnPickerButton" class="turn-picker-button" type="button" aria-expanded="false" aria-controls="turnPopover" disabled>Turn 0 of 0</button>
-                  <button id="nextTurn" data-review-ref="next-turn" data-review-kind="turn" disabled title="Next turn" aria-label="Next turn">→</button>
-                </div>
-                <div class="turn-popover hidden" id="turnPopover" role="group" aria-label="Choose a turn"></div>
-              </div>
-            </div>
             <p id="interactionText"></p>
           </div>
-        </div>
+          <div class="turn-picker" id="turnPicker">
+            <button class="annotation-count-badge hidden" id="turnAnnotationBadge" type="button" aria-label="Open turn comments"></button>
+            <div class="turn-stepper" role="group" aria-label="Turn navigation">
+              <button id="previousTurn" data-review-ref="previous-turn" data-review-kind="turn" disabled title="Previous turn" aria-label="Previous turn">←</button>
+              <button id="turnPickerButton" class="turn-picker-button" type="button" aria-expanded="false" aria-controls="turnPopover" disabled>Turn 0 of 0</button>
+              <button id="nextTurn" data-review-ref="next-turn" data-review-kind="turn" disabled title="Next turn" aria-label="Next turn">→</button>
+            </div>
+            <div class="turn-popover hidden" id="turnPopover" role="group" aria-label="Choose a turn"></div>
+          </div>
+          <span class="interaction-status" id="interactionStatus" role="status"></span>
+    </div>
+    <aside class="environment-panel" id="environmentPanel" aria-labelledby="environmentTitle">
+      <div class="environment-header"><h2 id="environmentTitle">Environment</h2><span class="environment-observed" id="environmentObserved"></span></div>
+      <div class="environment-body" id="environmentBody" aria-busy="false">
+        <div class="environment-loading" id="environmentLoading"><span class="environment-spinner" aria-hidden="true"></span><span>Loading project context…</span></div>
+        <dl class="environment-facts hidden" id="environmentFacts">
+          <div><dt>Worktree</dt><dd id="environmentWorktree"></dd></div>
+          <div id="environmentBranchRow"><dt id="environmentBranchLabel">Branch</dt><dd id="environmentBranch"></dd></div>
+          <div id="environmentChangesRow"><dt>Changes</dt><dd><span class="environment-additions" id="environmentAdditions"></span><span class="environment-deletions" id="environmentDeletions"></span><span class="environment-tracked hidden" id="environmentTracked"></span></dd></div>
+          <div id="environmentUntrackedRow"><dt>Untracked</dt><dd id="environmentUntracked"></dd></div>
+        </dl>
+        <p class="environment-message hidden" id="environmentMessage"></p>
+      </div>
+    </aside>
+    <div class="thread-workspace">
+      <div class="graph-column">
         <nav class="workspace-breadcrumb" id="workspaceBreadcrumb" data-review-capture="breadcrumb" aria-label="Graph layer path"></nav>
         <div class="graph-empty" id="graphEmpty"><div class="thinking-dots" id="thinkingDots" role="status" aria-label="Waiting for graph"><i></i><i></i><i></i></div><p id="graphEmptyMessage">This interaction has no accepted graph yet.</p></div>
         <div class="graph-stage hidden" id="graphStage" tabindex="-1" data-review-capture="layer-viewport" role="region" aria-label="Visible graph layer">
@@ -108,6 +120,7 @@ export function productWorkspaceMarkup() {
           </form>
         </section>
       </aside>
+    </div>
     </div>
   `;
 }
