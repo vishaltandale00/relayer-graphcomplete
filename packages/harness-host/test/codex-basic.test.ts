@@ -67,6 +67,8 @@ describe("CodexBasicHarness", () => {
     expect(submitted?.prompt).toContain("sourceLayer: layer");
     expect(submitted?.prompt).toContain('clientKey: "root-response"');
     expect(submitted?.prompt).toContain("rerun it with the same clientKey values");
+    expect(submitted?.prompt).toContain("An action's clientKey is scoped to its source node");
+    expect(submitted?.prompt).toContain("keep every draft action on the same source node during repair");
     expect(submitted?.prompt).toContain("Do not add fake navigate or reference actions");
     expect(submitted?.prompt).toContain("graph.discardLayer(layer)");
     expect(submitted?.threadParams).toEqual({
@@ -150,6 +152,8 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).toContain('clientKey: "node-evidence"');
     expect(submittedPrompt).toContain('clientKey: "node-follow-up"');
     expect(submittedPrompt).toContain("rerun it with the same clientKey values");
+    expect(submittedPrompt).toContain("An action's clientKey is scoped to its source node");
+    expect(submittedPrompt).toContain("keep every draft action on the same source node during repair");
     expect(submittedPrompt).toContain("Do not add fake navigate or reference actions");
     expect(submittedPrompt).toContain("graph.discardLayer(layer)");
     expect(submittedPrompt).not.toContain("The required order is:");
