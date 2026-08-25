@@ -758,6 +758,131 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn create_identified_interaction(
+        &self,
+        thread_id: ThreadId,
+        text: &str,
+        input_identity: &str,
+        contexts: &[super::InteractionContextIntent],
+        model_selection: Option<&InteractionModelSelection>,
+        allow_unselected_model: bool,
+    ) -> Result<crate::storage::InteractionInputInsertOutcome, ProductError> {
+        let input_identity = required(input_identity, "inputId")?;
+        if text.trim().is_empty()
+            && !contexts
+                .iter()
+                .flat_map(|context| &context.annotations)
+                .any(|annotation| !annotation.trim().is_empty())
+        {
+            return Err(ProductError::Invalid(
+                "An interaction needs message text or at least one context annotation.".into(),
+            ));
+        }
+        let mut targets = std::collections::HashSet::new();
+        for context in contexts {
+            if context.target.node_id <= 0
+                || context.target.source_interaction_node_id <= 0
+                || context.target.source_layer_id <= 0
+            {
+                return Err(ProductError::Invalid(
+                    "context provenance IDs must be positive".into(),
+                ));
+            }
+            if !targets.insert(context.target.node_id) {
+                return Err(ProductError::Invalid(
+                    "a context target can only be attached once".into(),
+                ));
+            }
+            if context
+                .annotations
+                .iter()
+                .any(|annotation| annotation.trim().is_empty())
+            {
+                return Err(ProductError::Invalid(
+                    "context annotations must contain non-whitespace text".into(),
+                ));
+            }
+        }
+        if self.storage.thread_is_imported(thread_id).await? {
+            return Err(ProductError::Invalid(
+                "imported conversations are immutable".into(),
+            ));
+        }
+        let graph_contexts = contexts
+            .iter()
+            .map(|context| relayer_graph_core::InteractionContextDraft {
+                target: relayer_graph_core::InteractionContextTarget {
+                    node_id: relayer_graph_core::NodeId::new(context.target.node_id)
+                        .expect("validated positive node ID"),
+                    source_interaction_node_id: relayer_graph_core::NodeId::new(
+                        context.target.source_interaction_node_id,
+                    )
+                    .expect("validated positive source node ID"),
+                    source_layer_id: relayer_graph_core::LayerId::new(
+                        context.target.source_layer_id,
+                    )
+                    .expect("validated positive layer ID"),
+                },
+                annotations: context.annotations.clone(),
+            })
+            .collect::<Vec<_>>();
+        let input_digest = relayer_graph_core::interaction_input_digest(text, &graph_contexts)
+            .map_err(|error| ProductError::Invalid(error.to_string()))?;
+        self.storage
+            .insert_interaction_input(
+                thread_id,
+                crate::storage::NewInteractionInput {
+                    text,
+                    input_identity,
+                    input_digest: &input_digest,
+                    contexts,
+                },
+                model_selection,
+                self.runtime_available && !allow_unselected_model,
+                self.runtime_available,
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn interaction_input(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<Option<super::DurableInteractionInput>, ProductError> {
+        self.storage
+            .interaction_input(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn interrupted_interactions(&self) -> Result<Vec<Interaction>, ProductError> {
+        self.storage
+            .interrupted_interactions()
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn restore_identified_interaction_submitted(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .restore_identified_interaction_submitted(interaction_id, error)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn discard_unbound_interaction_input(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .discard_unbound_interaction_input(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn invoke_action(
         &self,
         source_interaction_id: InteractionId,

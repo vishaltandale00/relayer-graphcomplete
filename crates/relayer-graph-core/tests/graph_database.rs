@@ -449,27 +449,82 @@ async fn interaction_context_is_control_authored_ordered_and_excluded_from_compl
     let target = node(&source_writer, "accepted-target").await;
     let source_layer = accept_single_node(&source_writer, source.clone(), target.clone()).await;
 
+    let drafts = [InteractionContextDraft {
+        target: InteractionContextTarget {
+            node_id: target.id,
+            source_interaction_node_id: source.id,
+            source_layer_id: source_layer.id,
+        },
+        annotations: vec![
+            "  preserve exact whitespace  ".into(),
+            "Second\nline".into(),
+        ],
+    }];
+    let input_digest =
+        relayer_graph_core::interaction_input_digest("Compare this", &drafts).unwrap();
     let (interaction, actions) = database
-        .create_interaction_with_context(
+        .create_identified_interaction_with_context(
             Some(project(1)),
             thread(2),
             "Compare this",
-            &[InteractionContextDraft {
-                target: InteractionContextTarget {
-                    node_id: target.id,
-                    source_interaction_node_id: source.id,
-                    source_layer_id: source_layer.id,
-                },
-                annotations: vec![
-                    "  preserve exact whitespace  ".into(),
-                    "Second\nline".into(),
-                ],
-            }],
+            "product:41",
+            &input_digest,
+            &drafts,
         )
         .await
         .unwrap();
     assert_eq!(actions.len(), 1);
     assert_eq!(actions[0].type_id, "interaction.context");
+    let (replayed, replayed_actions) = database
+        .create_identified_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Compare this",
+            "product:41",
+            &input_digest,
+            &drafts,
+        )
+        .await
+        .unwrap();
+    assert_eq!(replayed.id, interaction.id);
+    assert_eq!(replayed_actions, actions);
+    let changed_digest = relayer_graph_core::interaction_input_digest("Changed", &drafts).unwrap();
+    let conflict = database
+        .create_identified_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Changed",
+            "product:41",
+            &changed_digest,
+            &drafts,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        conflict,
+        GraphError::Validation {
+            code: "interaction_input_conflict",
+            ..
+        }
+    ));
+    let forged_digest = database
+        .create_identified_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Compare this",
+            "product:42",
+            "sha256:v1:forged",
+            &drafts,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        forged_digest,
+        GraphError::Validation {
+            code: "interaction_input_digest_mismatch",
+            ..
+        }
+    ));
 
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
     let input = writer.interaction_input().await.unwrap();

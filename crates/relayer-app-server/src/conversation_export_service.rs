@@ -365,6 +365,7 @@ fn seed_imported_action_ids(
             let expected_kind = match action.kind {
                 ActionKind::Navigate => ExportActionKind::Navigate,
                 ActionKind::Invoke => ExportActionKind::Invoke,
+                ActionKind::InteractionContext => continue,
             };
             if imported_action.kind != expected_kind {
                 return Err(ConversationExportBuildError::Invalid(format!(
@@ -498,6 +499,11 @@ fn export_action(
     let kind = match action.kind {
         ActionKind::Navigate => ExportActionKind::Navigate,
         ActionKind::Invoke => ExportActionKind::Invoke,
+        ActionKind::InteractionContext => {
+            return Err(ConversationExportBuildError::Invalid(
+                "interaction context actions are not exported as graph actions".into(),
+            ));
+        }
     };
     let relation = action.relation.map(|relation| match relation {
         NavigateRelation::Expand => ExportNavigateRelation::Expand,

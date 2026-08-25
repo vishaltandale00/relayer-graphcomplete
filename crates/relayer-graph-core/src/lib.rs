@@ -13,5 +13,5 @@ pub use graph::{
     InteractionContextTarget, InteractionInput, InteractionInvocation, LayerDraft, LayerId,
     LayerLayout, NavigateRelation, NodeDraft, NodeId, NodePlacement, ProjectId,
     RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState, ResolvedLayer, ThreadId,
-    is_supported_icon, normalize_icon_name, resolve_icon_name,
+    interaction_input_digest, is_supported_icon, normalize_icon_name, resolve_icon_name,
 };

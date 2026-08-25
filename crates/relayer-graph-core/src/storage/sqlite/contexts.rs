@@ -21,6 +21,7 @@ struct ContextRow {
     target_node_id: i64,
     source_interaction_node_id: i64,
     source_layer_id: i64,
+    position: Option<i64>,
 }
 
 impl<'connection> ContextTable<'connection> {
@@ -152,13 +153,14 @@ impl<'connection> ContextTable<'connection> {
         .await?;
         let action_id = valid_action_id(inserted.last_insert_rowid())?;
         sqlx::query(
-            "INSERT INTO interaction_context_actions(action_id,interaction_node_id,target_node_id,source_interaction_node_id,source_layer_id) VALUES (?1,?2,?3,?4,?5)",
+            "INSERT INTO interaction_context_actions(action_id,interaction_node_id,target_node_id,source_interaction_node_id,source_layer_id,position) VALUES (?1,?2,?3,?4,?5,?6)",
         )
         .bind(action_id.value())
         .bind(scope.root_node_id.value())
         .bind(draft.target.node_id.value())
         .bind(draft.target.source_interaction_node_id.value())
         .bind(draft.target.source_layer_id.value())
+        .bind(i64::try_from(position).map_err(|_| GraphError::Internal("context position exceeds SQLite range".into()))?)
         .execute(&mut *self.connection)
         .await?;
         for (annotation_position, annotation) in draft.annotations.iter().enumerate() {
@@ -208,13 +210,18 @@ impl<'connection> ContextTable<'connection> {
         scope: &InteractionScope,
     ) -> Result<Vec<InteractionContextAction>, GraphError> {
         let rows = sqlx::query_as::<_, ContextRow>(
-            "SELECT action.id AS action_id,action.source_node_id,context.target_node_id,context.source_interaction_node_id,context.source_layer_id FROM actions action JOIN interaction_context_actions context ON context.action_id=action.id WHERE context.interaction_node_id=?1 AND action.source_node_id=?1 AND action.owner_interaction_id=?1 AND action.type_id='interaction.context' AND action.state='accepted' ORDER BY action.id",
+            "SELECT action.id AS action_id,action.source_node_id,context.target_node_id,context.source_interaction_node_id,context.source_layer_id,context.position FROM actions action JOIN interaction_context_actions context ON context.action_id=action.id WHERE context.interaction_node_id=?1 AND action.source_node_id=?1 AND action.owner_interaction_id=?1 AND action.type_id='interaction.context' AND action.state='accepted' ORDER BY context.position",
         )
         .bind(scope.root_node_id.value())
         .fetch_all(&mut *self.connection)
         .await?;
         let mut actions = Vec::with_capacity(rows.len());
-        for row in rows {
+        for (expected_position, row) in rows.into_iter().enumerate() {
+            if row.position != i64::try_from(expected_position).ok() {
+                return Err(GraphError::Internal(
+                    "stored interaction context positions are not contiguous".into(),
+                ));
+            }
             let action_id = valid_action_id(row.action_id)?;
             let annotations = sqlx::query_scalar::<_, String>(
                 "SELECT text FROM interaction_context_annotations WHERE action_id=?1 ORDER BY position",

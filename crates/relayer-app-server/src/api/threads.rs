@@ -13,9 +13,9 @@ use crate::{
         ApprovalOutcome, ApprovalReceipt, ApprovalRequest, ApprovalResolution,
     },
     product::{
-        AcceptedInteractionCompletion, CreateThreadCommand, Interaction, InteractionId,
-        InteractionModelSelection, InvokeActionOutcome, ModelFamilyId, PreparedInteractionBinding,
-        ProjectId, ProviderId, Thread, ThreadId, ThreadView,
+        AcceptedInteractionCompletion, CreateThreadCommand, Interaction, InteractionContextIntent,
+        InteractionId, InteractionModelSelection, InvokeActionOutcome, ModelFamilyId,
+        PreparedInteractionBinding, ProjectId, ProviderId, Thread, ThreadId, ThreadView,
     },
     runtime::{
         ApprovalEvent, ApprovalEventSnapshot, CompleteInteraction, PreparedInteraction,
@@ -51,6 +51,9 @@ pub(super) struct CreateThreadRequest {
 #[serde(rename_all = "camelCase")]
 pub(super) struct CreateInteractionRequest {
     text: String,
+    input_id: Option<String>,
+    #[serde(default)]
+    contexts: Vec<InteractionContextIntent>,
     model_selection: Option<ModelSelectionRequest>,
 }
 
@@ -361,17 +364,130 @@ pub(super) async fn create_interaction(
                 .harness_uses_configuration_model(&thread.harness_configuration_name)
                 .await?);
     refresh_provider_catalog(&state, provider_id.as_ref()).await?;
-    let interaction = state
-        .product
-        .create_interaction(
-            thread_id,
-            &request.text,
-            model_selection.as_ref(),
-            allow_unselected_model,
-        )
-        .await?;
-    let interaction = start_interaction(&state, &thread, interaction).await?;
+    if !request.contexts.is_empty() && request.input_id.is_none() {
+        eprintln!("rejected context-bearing interaction without a stable inputId");
+        return Err(ApiError::internal(
+            "Relayer could not send this message. Your draft was preserved.",
+        ));
+    }
+    let identified = request.input_id.is_some() || !request.contexts.is_empty();
+    let interaction = if identified {
+        let input_id = request
+            .input_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let created = state
+            .product
+            .create_identified_interaction(
+                thread_id,
+                &request.text,
+                &input_id,
+                &request.contexts,
+                model_selection.as_ref(),
+                allow_unselected_model,
+            )
+            .await;
+        match created {
+            Err(crate::product::ProductError::Catalog(error)) => return Err(error.into()),
+            Err(crate::product::ProductError::Storage(crate::storage::StorageError::Catalog(
+                error,
+            ))) => return Err(error.into()),
+            Err(error) if !request.contexts.is_empty() => {
+                eprintln!(
+                    "context-bearing interaction was rejected before graph preparation: {error}"
+                );
+                return Err(ApiError::internal(
+                    "Relayer could not send this message. Your draft was preserved.",
+                ));
+            }
+            Err(error) => return Err(error.into()),
+            Ok(crate::storage::InteractionInputInsertOutcome::Created(interaction))
+            | Ok(crate::storage::InteractionInputInsertOutcome::Existing(interaction)) => {
+                interaction
+            }
+        }
+    } else {
+        state
+            .product
+            .create_interaction(
+                thread_id,
+                &request.text,
+                model_selection.as_ref(),
+                allow_unselected_model,
+            )
+            .await?
+    };
+    let interaction_id = interaction.id;
+    let interaction = match start_interaction(&state, &thread, interaction).await {
+        Ok(interaction) => interaction,
+        Err(error) if !request.contexts.is_empty() => {
+            let diagnostic = error.internal_diagnostic();
+            eprintln!(
+                "interaction context send {interaction_id} failed before graph binding: {diagnostic}"
+            );
+            if error.is_deterministic_input_failure()
+                && let Err(cleanup) = state
+                    .product
+                    .discard_unbound_interaction_input(interaction_id)
+                    .await
+            {
+                eprintln!(
+                    "could not discard invalid interaction context send {interaction_id}: {cleanup}"
+                );
+            }
+            return Err(ApiError::internal(
+                "Relayer could not send this message. Your draft was preserved.",
+            ));
+        }
+        Err(error) => return Err(error),
+    };
     Ok((StatusCode::CREATED, Json(interaction.into())))
+}
+
+pub(crate) async fn resume_recovered_identified_interactions(state: ApiState) {
+    let interactions = match state.product.interrupted_interactions().await {
+        Ok(interactions) => interactions,
+        Err(error) => {
+            eprintln!("could not list recovered identified interactions: {error}");
+            return;
+        }
+    };
+    for interaction in interactions {
+        if interaction.completion_status != "submitted" {
+            continue;
+        }
+        let identified = match state.product.interaction_input(interaction.id).await {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(error) => {
+                eprintln!(
+                    "could not read recovered interaction {} input identity: {error}",
+                    interaction.id
+                );
+                false
+            }
+        };
+        if !identified {
+            continue;
+        }
+        let thread = match state.product.get_thread(interaction.thread_id).await {
+            Ok(detail) => detail.thread,
+            Err(error) => {
+                eprintln!(
+                    "could not read recovered interaction {} thread: {error}",
+                    interaction.id
+                );
+                continue;
+            }
+        };
+        if let Err(error) = start_interaction(&state, &thread, interaction.clone()).await {
+            eprintln!(
+                "could not resume recovered identified interaction {}: {}",
+                interaction.id,
+                error.message()
+            );
+        }
+    }
 }
 
 pub(super) async fn get_layer(
@@ -964,7 +1080,7 @@ async fn start_interaction(
     let prepared = match prepare_and_claim_interaction(state, thread, &interaction).await {
         Ok(prepared) => prepared,
         Err(error) => {
-            record_background_failure(state, thread, &interaction, error.message().to_owned())
+            record_background_failure(state, thread, &interaction, error.internal_diagnostic())
                 .await;
             return Err(error);
         }
@@ -999,13 +1115,18 @@ async fn prepare_and_claim_interaction(
         .await?;
     if !claimed_preparation {
         let current = state.product.get_interaction(interaction.id).await?;
-        let recoverable_invoke = current.completion_status == "submitted"
-            && state
+        let recoverable_input = current.completion_status == "submitted"
+            && (state
                 .product
                 .invocation_graph_source(interaction.id)
                 .await?
-                .is_some();
-        if !recoverable_invoke {
+                .is_some()
+                || state
+                    .product
+                    .interaction_input(interaction.id)
+                    .await?
+                    .is_some());
+        if !recoverable_input {
             return Ok(None);
         }
     }
@@ -1063,6 +1184,7 @@ async fn prepare_and_claim_interaction(
                 source_action_id,
             },
         );
+    let durable_input = state.product.interaction_input(interaction.id).await?;
     let command = CompleteInteraction {
         project_id: thread.project_id.map(ProjectId::value),
         product_interaction_id: interaction.id.value(),
@@ -1074,13 +1196,25 @@ async fn prepare_and_claim_interaction(
         permission_profile,
         model_selection: interaction.model_selection.as_ref(),
         invocation,
+        input_identity: durable_input
+            .as_ref()
+            .map(|input| input.input_identity.as_str()),
+        input_digest: durable_input
+            .as_ref()
+            .map(|input| input.input_digest.as_str()),
+        contexts: durable_input
+            .as_ref()
+            .map(|input| input.contexts.as_slice())
+            .unwrap_or(&[]),
     };
     let mut binding_attempt = 0;
     let prepared = loop {
         binding_attempt += 1;
         let prepared = match runtime.prepare(&command).await {
             Ok(prepared) => prepared,
-            Err(error) if invocation.is_some() && binding_attempt > 1 => {
+            Err(error)
+                if (invocation.is_some() || durable_input.is_some()) && binding_attempt > 1 =>
+            {
                 eprintln!(
                     "preserving submitted invoke interaction {} after idempotent graph preparation retry failed: {error}",
                     interaction.id
@@ -1091,7 +1225,7 @@ async fn prepare_and_claim_interaction(
                 error @ (RuntimeError::Http(_)
                 | RuntimeError::ResponseDecode(_)
                 | RuntimeError::Timeout(_)),
-            ) if invocation.is_some() => {
+            ) if invocation.is_some() || durable_input.is_some() => {
                 eprintln!(
                     "preserving submitted invoke interaction {} after graph preparation ended ambiguously: {error}",
                     interaction.id
@@ -1115,7 +1249,7 @@ async fn prepare_and_claim_interaction(
             Ok(true) => break prepared,
             Ok(false) => {
                 let current = state.product.get_interaction(interaction.id).await?;
-                let matches_existing_binding = invocation.is_some()
+                let matches_existing_binding = (invocation.is_some() || durable_input.is_some())
                     && current.completion_status == "submitted"
                     && current.graph_node_id == Some(prepared.graph_node_id)
                     && current.harness_configuration_name.as_deref()
@@ -1132,7 +1266,7 @@ async fn prepare_and_claim_interaction(
                 runtime.discard_prepared(prepared).await?;
                 return Ok(None);
             }
-            Err(error) if invocation.is_some() => {
+            Err(error) if invocation.is_some() || durable_input.is_some() => {
                 let cleanup = runtime.discard_prepared(prepared).await;
                 if binding_attempt < 3 {
                     if let Err(cleanup) = cleanup {
@@ -1194,13 +1328,20 @@ async fn prepare_and_claim_interaction(
                 .map(|cleanup| format!("; capability cleanup also failed: {cleanup}"))
                 .unwrap_or_default()
         );
-        if invocation.is_some()
-            && retryable
-            && state
+        let restored = if invocation.is_some() {
+            state
                 .product
                 .restore_leased_interaction_submitted(interaction.id, &message)
                 .await?
-        {
+        } else if durable_input.is_some() {
+            state
+                .product
+                .restore_identified_interaction_submitted(interaction.id, &message)
+                .await?
+        } else {
+            false
+        };
+        if retryable && restored {
             eprintln!(
                 "preserving submitted invoke interaction {} after retryable capability activation failure: {message}",
                 interaction.id
@@ -1276,6 +1417,13 @@ async fn execute_prepared_interaction(
             return;
         }
     };
+    let durable_input = match state.product.interaction_input(interaction.id).await {
+        Ok(value) => value,
+        Err(error) => {
+            record_background_failure(&state, &thread, &interaction, error.to_string()).await;
+            return;
+        }
+    };
     let command = CompleteInteraction {
         project_id: thread.project_id.map(ProjectId::value),
         product_interaction_id: interaction.id.value(),
@@ -1287,6 +1435,16 @@ async fn execute_prepared_interaction(
         permission_profile,
         model_selection: interaction.model_selection.as_ref(),
         invocation,
+        input_identity: durable_input
+            .as_ref()
+            .map(|input| input.input_identity.as_str()),
+        input_digest: durable_input
+            .as_ref()
+            .map(|input| input.input_digest.as_str()),
+        contexts: durable_input
+            .as_ref()
+            .map(|input| input.contexts.as_slice())
+            .unwrap_or(&[]),
     };
     let expected_invocation = invocation;
     let prepared_graph_node_id = prepared.graph_node_id;

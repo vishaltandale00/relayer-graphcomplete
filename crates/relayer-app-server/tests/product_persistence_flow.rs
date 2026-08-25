@@ -4156,7 +4156,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 10);
+    assert_eq!(applied_migrations, 11);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -4227,7 +4227,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
         "DROP TABLE projects",
         "CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,path TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
         "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto',conversation_import_id TEXT)",
-        "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL,graph_node_id INTEGER,completion_status TEXT NOT NULL DEFAULT 'not_started',harness_configuration_name TEXT,harness_configuration_digest TEXT,completion_output_json TEXT,completion_error TEXT,permission_profile_id TEXT NOT NULL DEFAULT 'auto',effective_execution_digest TEXT,effective_permission_receipt_json TEXT,model_provider_id TEXT,provider_model_id TEXT,model_family_id INTEGER)",
+        "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL,graph_node_id INTEGER,completion_status TEXT NOT NULL DEFAULT 'not_started',harness_configuration_name TEXT,harness_configuration_digest TEXT,completion_output_json TEXT,completion_error TEXT,permission_profile_id TEXT NOT NULL DEFAULT 'auto',effective_execution_digest TEXT,effective_permission_receipt_json TEXT,model_provider_id TEXT,provider_model_id TEXT,model_family_id INTEGER,input_identity TEXT,input_digest TEXT)",
         "CREATE UNIQUE INDEX projects_path_partial ON projects(path) WHERE id > 0",
         "CREATE UNIQUE INDEX interactions_sequence_partial ON interactions(thread_id,sequence) WHERE id > 0",
     ] {
@@ -4259,6 +4259,367 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .to_string()
             .contains("missing its required unique index")
     );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn invalid_context_provenance_is_generic_and_leaves_no_product_intent_or_timestamp_change() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-invalid-context-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let offline = open_app(&database, &root).await;
+    let thread = response_json(
+        offline
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({"initialMessage":"Seed"})),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    drop(offline);
+    let pool = sqlite_pool(&database).await;
+    let original_timestamp: String =
+        sqlx::query_scalar("SELECT updated_at FROM threads WHERE id=?1")
+            .bind(thread_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    pool.close().await;
+
+    let graph = Router::new().route(
+        "/api/control/interactions",
+        axum::routing::post(|| async {
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                axum::Json(json!({"error":{
+                    "code":"invalid_context_occurrence",
+                    "path":"contexts[0].target",
+                    "message":"forged provenance sourceInteractionNodeId=991 sourceLayerId=992"
+                }})),
+            )
+        }),
+    );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,
+            "configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},
+                "settings":{"model":"test-model"}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let app =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
+    for invalid in [
+        json!({"text":"Missing identity","contexts":[{"target":{"nodeId":1,"sourceInteractionNodeId":2,"sourceLayerId":3},"annotations":["note"]}]}),
+        json!({"text":"Blank annotation","inputId":"invalid-blank","contexts":[{"target":{"nodeId":1,"sourceInteractionNodeId":2,"sourceLayerId":3},"annotations":["   "]}]}),
+        json!({"text":"","inputId":"invalid-empty","contexts":[{"target":{"nodeId":1,"sourceInteractionNodeId":2,"sourceLayerId":3},"annotations":[]}]}),
+        json!({"text":"Duplicate","inputId":"invalid-duplicate","contexts":[
+            {"target":{"nodeId":1,"sourceInteractionNodeId":2,"sourceLayerId":3},"annotations":["one"]},
+            {"target":{"nodeId":1,"sourceInteractionNodeId":2,"sourceLayerId":3},"annotations":["two"]}
+        ]}),
+    ] {
+        let rejected = app
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                &format!("/api/threads/{thread_id}/interactions"),
+                Some(invalid),
+                true,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response_json(rejected).await,
+            json!({
+                "error":"Relayer could not send this message. Your draft was preserved."
+            })
+        );
+    }
+    let response = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({
+                "text":"Use this",
+                "inputId":"send-invalid-1",
+                "contexts":[{"target":{
+                    "nodeId":990,"sourceInteractionNodeId":991,"sourceLayerId":992
+                },"annotations":["exact note"]}]
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let outward = response_json(response).await;
+    assert_eq!(
+        outward,
+        json!({"error":"Relayer could not send this message. Your draft was preserved."})
+    );
+    let encoded = outward.to_string();
+    assert!(!encoded.contains("invalid_context_occurrence"));
+    assert!(!encoded.contains("991"));
+    assert!(!encoded.contains("992"));
+
+    let pool = sqlite_pool(&database).await;
+    let interaction_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM interactions WHERE thread_id=?1")
+            .bind(thread_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let context_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM interaction_context_intents")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let annotation_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM interaction_context_annotations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let updated_at: String = sqlx::query_scalar("SELECT updated_at FROM threads WHERE id=?1")
+        .bind(thread_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(interaction_count, 1);
+    assert_eq!(context_count, 0);
+    assert_eq!(annotation_count, 0);
+    assert_eq!(updated_at, original_timestamp);
+    pool.close().await;
+    graph_task.abort();
+    harness_task.abort();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn identified_context_replays_after_response_loss_and_resumes_bound_input_after_restart() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-context-recovery-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let offline = open_app(&database, &root).await;
+    let thread = response_json(
+        offline
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({"initialMessage":"Seed"})),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    drop(offline);
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,"configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},
+                "settings":{"model":"test-model"}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let creates = Arc::new(AtomicUsize::new(0));
+    let observed_creates = creates.clone();
+    let observed_digest = Arc::new(Mutex::new(String::new()));
+    let captured_digest = observed_digest.clone();
+    let graph = Router::new()
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let observed_creates = observed_creates.clone();
+                let captured_digest = captured_digest.clone();
+                async move {
+                    assert_eq!(body["inputIdentity"], "send-recover-1");
+                    *captured_digest.lock().unwrap() =
+                        body["inputDigest"].as_str().unwrap().to_owned();
+                    observed_creates.fetch_add(1, Ordering::SeqCst);
+                    (StatusCode::OK, "lost graph create response").into_response()
+                }
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::post(|| async {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    axum::Json(json!({"error":"activation unavailable"})),
+                )
+            })
+            .delete(|| async { axum::Json(json!({"revoked":true})) }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+    let app =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
+    let request_body = json!({
+        "text":"Use this context","inputId":"send-recover-1",
+        "contexts":[{"target":{"nodeId":7,"sourceInteractionNodeId":3,"sourceLayerId":5},
+            "annotations":["raw note"]}]
+    });
+    let first = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(request_body.clone()),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first_id = response_json(first).await["id"].as_i64().unwrap();
+    assert_eq!(creates.load(Ordering::SeqCst), 4);
+    let pool = sqlite_pool(&database).await;
+    let counts: (i64, i64, i64) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM interactions WHERE thread_id=?1 AND input_identity='send-recover-1'),(SELECT COUNT(*) FROM interaction_context_intents),(SELECT COUNT(*) FROM interaction_context_annotations)",
+    ).bind(thread_id).fetch_one(&pool).await.unwrap();
+    assert_eq!(counts, (1, 1, 1));
+    let bound: (String, Option<i64>) =
+        sqlx::query_as("SELECT completion_status,graph_node_id FROM interactions WHERE id=?1")
+            .bind(first_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(bound, ("submitted".into(), None));
+    pool.close().await;
+    drop(app);
+    graph_task.abort();
+    harness_task.abort();
+
+    let digest = observed_digest.lock().unwrap().clone();
+    let metadata_digest = digest.clone();
+    let create_digest = digest.clone();
+    let graph = Router::new()
+        .route("/api/control/interactions", axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+            let create_digest = create_digest.clone();
+            async move { axum::Json(json!({
+                "node":{"id":77},"graphToken":"","inputIdentity":"send-recover-1",
+                "inputDigest":create_digest,"contextActions":[],"echo":body
+            })) }
+        }))
+        .route("/api/control/interactions/77", axum::routing::get(move || {
+            let metadata_digest = metadata_digest.clone();
+            async move { axum::Json(json!({
+                "nodeId":77,"invocation":null,"inputIdentity":"send-recover-1","inputDigest":metadata_digest
+            })) }
+        }))
+        .route("/api/control/interactions/77/output", axum::routing::get(|| async {
+            (StatusCode::NOT_FOUND, axum::Json(json!({"error":{"code":"completion_not_found"}})))
+        }))
+        .route("/api/control/capabilities", axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+            axum::Json(json!({"graphToken":body["graphToken"]}))
+        }).delete(|| async { axum::Json(json!({"revoked":true})) }));
+    let harness = Router::new()
+        .route("/sessions", axum::routing::post(|| async { (StatusCode::CREATED, axum::Json(json!({}))) }))
+        .route(&format!("/sessions/{thread_id}/complete"), axum::routing::post(|| async {
+            axum::Json(json!({"output":{"nodeId":77,"rootLayer":{"id":1,"nodes":[],"edges":[],"actions":[]}}}))
+        }));
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(harness).await;
+    let resumed =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
+    for _ in 0..100 {
+        let pool = sqlite_pool(&database).await;
+        let status: String =
+            sqlx::query_scalar("SELECT completion_status FROM interactions WHERE id=?1")
+                .bind(first_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        pool.close().await;
+        if status == "accepted" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let pool = sqlite_pool(&database).await;
+    let status: String =
+        sqlx::query_scalar("SELECT completion_status FROM interactions WHERE id=?1")
+            .bind(first_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "accepted");
+    pool.close().await;
+    let replay = resumed
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(request_body),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(replay.status(), StatusCode::CREATED);
+    assert_eq!(response_json(replay).await["id"].as_i64(), Some(first_id));
+    let conflict = resumed.clone().oneshot(api_request(
+        "POST", &format!("/api/threads/{thread_id}/interactions"), Some(json!({
+            "text":"Changed payload","inputId":"send-recover-1",
+            "contexts":[{"target":{"nodeId":8,"sourceInteractionNodeId":3,"sourceLayerId":5},"annotations":["changed"]}]
+        })), true,
+    )).await.unwrap();
+    assert_eq!(conflict.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let conflict_body = response_json(conflict).await;
+    assert_eq!(
+        conflict_body,
+        json!({"error":"Relayer could not send this message. Your draft was preserved."})
+    );
+    assert!(!conflict_body.to_string().contains("different content"));
+    let pool = sqlite_pool(&database).await;
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM interactions WHERE input_identity='send-recover-1'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1);
+    pool.close().await;
+    drop(resumed);
+    graph_task.abort();
+    harness_task.abort();
     fs::remove_dir_all(root).unwrap();
 }
 

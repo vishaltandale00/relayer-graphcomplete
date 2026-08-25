@@ -182,6 +182,10 @@ struct CreateInteractionRequest {
     invocation: Option<InteractionInvocation>,
     #[serde(default)]
     contexts: Vec<InteractionContextDraft>,
+    #[serde(default)]
+    input_identity: Option<String>,
+    #[serde(default)]
+    input_digest: Option<String>,
     #[serde(default = "default_mint_capability")]
     mint_capability: bool,
 }
@@ -197,6 +201,10 @@ pub struct CreateInteractionResponse {
     pub graph_token: String,
     #[serde(default)]
     pub context_actions: Vec<InteractionContextAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_identity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_digest: Option<String>,
 }
 
 async fn create_interaction(
@@ -210,7 +218,31 @@ async fn create_interaction(
             "invocation and contexts cannot be prepared together yet",
         ));
     }
-    let (interaction, context_actions) = if input.contexts.is_empty() {
+    let (interaction, context_actions) = if let (Some(identity), Some(digest)) = (
+        input.input_identity.as_deref(),
+        input.input_digest.as_deref(),
+    ) {
+        if input.invocation.is_some() {
+            return Err(ApiError::invalid(
+                "identified context input cannot also be an invocation",
+            ));
+        }
+        state
+            .graph
+            .create_identified_interaction_with_context(
+                input.project_id,
+                input.thread_id,
+                &input.text,
+                identity,
+                digest,
+                &input.contexts,
+            )
+            .await?
+    } else if input.input_identity.is_some() || input.input_digest.is_some() {
+        return Err(ApiError::invalid(
+            "inputIdentity and inputDigest must be supplied together",
+        ));
+    } else if input.contexts.is_empty() {
         (
             state
                 .graph
@@ -242,6 +274,8 @@ async fn create_interaction(
         node: interaction,
         graph_token: graph_token.unwrap_or_default(),
         context_actions,
+        input_identity: input.input_identity,
+        input_digest: input.input_digest,
     }))
 }
 
@@ -279,7 +313,13 @@ async fn interaction_metadata(
 ) -> Result<Json<Value>, ApiError> {
     require_bearer(&headers, &state.control_token)?;
     let invocation = state.graph.interaction_invocation(id).await?;
-    Ok(Json(json!({ "nodeId": id, "invocation": invocation })))
+    let input = state.graph.interaction_input_identity(id).await?;
+    Ok(Json(json!({
+        "nodeId": id,
+        "invocation": invocation,
+        "inputIdentity": input.as_ref().map(|value| value.0.as_str()),
+        "inputDigest": input.as_ref().map(|value| value.1.as_str()),
+    })))
 }
 
 async fn control_output(

@@ -37,7 +37,12 @@ import { appState, productApiAvailable, viewState } from "./state.js";
 import { $, threadTitle, toast } from "./ui.js";
 import { addLocalThread } from "./thread-model.js";
 import { closePermissionMenu } from "./permission-profiles.js";
-import { followupRequestBody, newThreadRequestBody } from "./interaction-request-model.js";
+import {
+  followupRequestBody,
+  markFollowupSendSucceeded,
+  newThreadRequestBody,
+  stableFollowupInputId,
+} from "./interaction-request-model.js";
 import {
   closeNewThreadModelPicker,
   newThreadModelSelectionPayload,
@@ -578,7 +583,7 @@ export function selectTurnById(interactionId) {
   schedulePendingRefresh(viewState.currentThreadId);
 }
 
-export async function submitInteraction(text, modelSelection) {
+export async function submitInteraction(text, modelSelection, contexts = []) {
   if (!viewState.currentThreadId) throw new Error("Select a thread before sending a follow-up.");
   const threadId = viewState.currentThreadId;
   recordCurrentNavigation();
@@ -592,15 +597,17 @@ export async function submitInteraction(text, modelSelection) {
     throw new Error("Choose an available model in Settings before sending.");
   }
   let createdInteraction;
+  const inputId = stableFollowupInputId(threadId, text, modelSelection, contexts);
   try {
     createdInteraction = await request(`/api/threads/${encodeURIComponent(threadId)}/interactions`, {
       method: "POST",
-      body: JSON.stringify(followupRequestBody(text, modelSelection)),
+      body: JSON.stringify(followupRequestBody(text, modelSelection, inputId, contexts)),
     });
   } catch (error) {
     await refreshAfterModelSelectionRejection(error, true);
     throw error;
   }
+  markFollowupSendSucceeded(inputId);
   try {
     await onboardingTutorialController()?.followupSubmitted({
       threadId,
