@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "passed": true,
-  "capturedAt": "2026-08-25T19:42:27.216Z",
-  "sourceCommit": "37e0e852e499a2ff966c6c7d4fd4ea21b6e3d243",
+  "capturedAt": "2026-08-25T19:46:28.235Z",
+  "sourceCommit": "4aac482f83ca40c2ac408b5da735b901e493c5a6",
   "workingTreeDirty": false,
   "command": "npm run build && RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE=1 electron scripts/capture-interaction-context-evidence.mjs",
   "paidInferenceCalls": 0,
@@ -40,16 +40,16 @@
   "screenshots": [
     {
       "file": "grouped-composer.png",
-      "sha256": "860b3dc60d653706a65efe7f36ccc3be10f58d15c398bf4ead7f5a82eab33bc2"
+      "sha256": "b35b8a8015e2783a54f52b2a39148d48e85377439280a906e0acbd0b65d82b46"
     },
     {
       "file": "restarted-context.png",
-      "sha256": "4edf8c117da95a9a04a45b73df02e4a5a977e37758f3e754517cc5a3dfb12ee2"
+      "sha256": "0d5dc84627f4b6be0a621dd93b8515ddf0e26c379a263f73907b34428aa7e80d"
     }
   ],
   "video": {
     "file": "interaction-context.mp4",
-    "sha256": "f34ebe788608424eef6ab95dccd7da766a74c75989cf5910e69bb61aed3c6055",
+    "sha256": "9687c6f7deba4319cc14a22029740d59ac4748fd89481868e9595ab9df37d8ab",
     "durationSeconds": 26.367,
     "stream": {
       "codec_name": "h264",
