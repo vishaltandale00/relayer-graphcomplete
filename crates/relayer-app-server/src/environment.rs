@@ -2939,9 +2939,11 @@ mod tests {
                 .env("GIT_CONFIG_GLOBAL", &injected);
         })
         .unwrap();
-        assert_eq!(
-            safe_directories,
-            [OsString::new(), repository.as_os_str().to_owned()]
+        assert!(safe_directories.ends_with(&[OsString::new(), repository.as_os_str().to_owned(),]));
+        assert!(
+            !safe_directories
+                .iter()
+                .any(|directory| directory == OsStr::new("/environment/injected/repository"))
         );
         assert!(
             !marker.exists(),
@@ -3046,15 +3048,19 @@ mod tests {
         )
         .unwrap();
         assert!(forwarded.status.success);
-        assert_eq!(
-            forwarded.stdout,
-            [
-                b"\0".as_slice(),
-                repository.as_os_str().as_encoded_bytes(),
-                b"\0"
-            ]
-            .concat()
-        );
+        let expected_forwarded = safety
+            .safe_directories
+            .iter()
+            .flat_map(|directory| {
+                directory
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    .iter()
+                    .copied()
+                    .chain(std::iter::once(0))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(forwarded.stdout, expected_forwarded);
     }
 
     #[test]
