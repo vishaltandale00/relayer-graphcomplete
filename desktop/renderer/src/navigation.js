@@ -1,4 +1,5 @@
 import { appState, desktop, viewState } from "./state.js";
+import { onboardingTutorialController } from "./onboarding-tutorial.js";
 import { $, $$, escapeHtml } from "./ui.js";
 
 const settingsTabs = {
@@ -6,6 +7,7 @@ const settingsTabs = {
   appearance: "Appearance",
   codex: "Codex",
   updates: "Application updates",
+  advanced: "Advanced",
 };
 
 export function setMainView(view, { moveFocus = false } = {}) {
@@ -25,6 +27,7 @@ export function setMainView(view, { moveFocus = false } = {}) {
     if (view === "settings") $(`[data-settings-tab="${viewState.settingsTab}"]`)?.focus();
     else $("#settingsButton").focus();
   }
+  onboardingTutorialController()?.presentationChanged();
 }
 
 export function setSettingsTab(tab) {

@@ -16,6 +16,7 @@ import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
 import { GraphCompleteRuntimeService } from "./services/graphcomplete-runtime.mjs";
 import { resolveDesktopHarnessConfiguration } from "./services/desktop-harness-configuration.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
+import { createTutorialLifecycle } from "./services/tutorial-lifecycle.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
 import { claimPrimaryDesktopInstance } from "./single-instance.mjs";
 import { createWindowFactory } from "./window.mjs";
@@ -76,6 +77,7 @@ const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => main
 if (primaryInstance) {
   let appearance = "dark";
   const settings = createSettingsStore(userDataPath);
+  const tutorial = createTutorialLifecycle({ settings });
   process.env.CODEX_HOME = codexHome;
   const graphRuntime = new GraphCompleteRuntimeService({
     userDataDirectory: userDataPath,
@@ -213,6 +215,7 @@ if (primaryInstance) {
       credentials,
       modelCatalog,
       settings,
+      tutorial,
       updater,
       getWindow: () => mainWindow,
       getAppearance: () => appearance,

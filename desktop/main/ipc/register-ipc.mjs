@@ -8,6 +8,7 @@ export function registerDesktopIpc({
   credentials,
   modelCatalog,
   settings,
+  tutorial,
   updater,
   getWindow,
   getAppearance,
@@ -39,9 +40,14 @@ export function registerDesktopIpc({
     setAppearance(appearance);
     nativeTheme.themeSource = appearance;
     getWindow()?.setBackgroundColor(appearance === "light" ? "#fafafa" : "#0b0c0d");
-    await settings.write({ ...(await settings.read()), appearance });
+    await settings.update((current) => ({ ...current, appearance }));
     return { appearance };
   });
+  ipcMain.handle("relayer:tutorial-read", (_event, context) => tutorial.read(context));
+  ipcMain.handle("relayer:tutorial-begin-automatic", (_event, context) => tutorial.beginAutomatic(context));
+  ipcMain.handle("relayer:tutorial-begin-manual", () => tutorial.beginManual());
+  ipcMain.handle("relayer:tutorial-dismiss", () => tutorial.dismiss());
+  ipcMain.handle("relayer:tutorial-complete", () => tutorial.complete());
   ipcMain.handle("relayer:update-status", () => updater.status());
   ipcMain.handle("relayer:update-check", () => updater.check());
   ipcMain.handle("relayer:update-download", () => updater.download());
@@ -58,7 +64,7 @@ export function registerDesktopIpc({
   });
   ipcMain.handle("relayer:update-channel", async (_event, channel) => {
     const state = updater.setChannel(channel);
-    await settings.write({ ...(await settings.read()), updateChannel: channel });
+    await settings.update((current) => ({ ...current, updateChannel: channel }));
     return state;
   });
 }

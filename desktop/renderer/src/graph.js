@@ -2,6 +2,7 @@ import { setMainView, setSettingsTab } from "./navigation.js";
 import { createProductWorkspace } from "./product-workspace/index.js";
 import { activeThread, appState, evalReview, query, viewState } from "./state.js";
 import { toast } from "./ui.js";
+import { onboardingTutorialController } from "./onboarding-tutorial.js";
 import {
   getNavigationHistory,
   navigateHistory,
@@ -30,14 +31,54 @@ function workspace() {
     },
     onSelectTurn: selectTurn,
     onSelectTurnById: selectTurnById,
-    onSelectionChange: replaceCurrentSelection,
-    onSubmitInteraction: (text, modelSelection) => import("./threads.js").then(({ submitInteraction }) => submitInteraction(text, modelSelection)),
+    onSelectionChange: (nodeId) => {
+      replaceCurrentSelection(nodeId);
+      onboardingTutorialController()?.nodeSelected({
+        threadId: viewState.currentThreadId,
+        interactionId: viewState.currentInteractionId,
+        nodeId,
+      });
+    },
+    onSubmitInteraction: async (text, modelSelection) => {
+      const { submitInteraction } = await import("./threads.js");
+      return submitInteraction(text, modelSelection);
+    },
     onOpenSettings: () => {
       setSettingsTab("models");
       document.querySelector("#settingsButton")?.click();
     },
-    onNavigateLayer: (layerId, navigation) => import("./threads.js").then(({ navigateLayer }) => navigateLayer(layerId, navigation)),
-    onInvokeAction: (action) => import("./threads.js").then(({ invokeAction }) => invokeAction(action)),
+    onNavigateLayer: async (layerId, navigation) => {
+      const { navigateLayer } = await import("./threads.js");
+      const source = {
+        threadId: viewState.currentThreadId,
+        interactionId: viewState.currentInteractionId,
+      };
+      const navigated = await navigateLayer(layerId, navigation);
+      if (navigated === true) {
+        onboardingTutorialController()?.actionSucceeded({
+          ...source,
+          actionId: navigation?.action?.id,
+        });
+      }
+      return navigated;
+    },
+    onInvokeAction: async (action) => {
+      const { invokeAction } = await import("./threads.js");
+      const source = {
+        threadId: viewState.currentThreadId,
+        interactionId: viewState.currentInteractionId,
+      };
+      const response = await invokeAction(action);
+      const resultInteractionId = response?.interaction?.id;
+      if (resultInteractionId != null) {
+        onboardingTutorialController()?.actionSucceeded({
+          ...source,
+          actionId: action.id,
+          resultInteractionId,
+        });
+      }
+      return response;
+    },
     onDecideApproval: (requestId, decision) => import("./threads.js").then(({ decideApproval }) => decideApproval(requestId, decision)),
   });
   return productWorkspace;
@@ -45,6 +86,7 @@ function workspace() {
 
 export function renderThread() {
   workspace().render();
+  onboardingTutorialController()?.syncWorkspace();
 }
 
 export function currentThreadModelSelectionPayload() {
