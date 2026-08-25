@@ -88,6 +88,7 @@ export class HarnessHost {
   private legacySaved = new Map<number, LegacyPersistedHarnessSessionDescriptor>();
   private persistTail: Promise<void> = Promise.resolve();
   private closed = false;
+  private closeAbandoned = false;
   private readonly traceStore: HarnessTraceStore | undefined;
 
   constructor(private readonly options: HarnessHostOptions) {
@@ -399,12 +400,18 @@ export class HarnessHost {
       }
     }));
     this.sessions.clear();
-    try {
-      await this.persist();
-    } catch (error) {
-      errors.push(error);
+    if (!this.closeAbandoned) {
+      try {
+        await this.persist();
+      } catch (error) {
+        errors.push(error);
+      }
     }
     if (errors.length > 0) throw new AggregateError(errors, "Harness host did not close cleanly");
+  }
+
+  abandonClose(): void {
+    this.closeAbandoned = true;
   }
 
   sessionCount(): number { return this.sessions.size; }
@@ -501,6 +508,7 @@ export async function startHarnessHost(options: HarnessHostOptions): Promise<Run
     url: `http://${boundHost}:${address.port}`,
     host,
     forceClose: () => {
+      host.abandonClose();
       server.close();
       for (const socket of sockets) socket.destroy();
       server.closeAllConnections();

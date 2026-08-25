@@ -15,6 +15,7 @@ export const basicEvalCaseId = "empty-project.task-system.two-turn";
 export const basicEvalPrompt = "A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.";
 export const basicEvalFollowUpPrompt = "Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.";
 export const replayRepairEvalCaseId = "graph-authoring.replay-repair";
+const DEFAULT_EVAL_HARNESS_CLOSE_GRACE_MS = 30_000;
 export const replayRepairEvalPrompt = `Explain, as a useful connected graph answer, why stable idempotency keys make retrying a partially persisted graph-authoring program safe.
 
 This is a live graph-recovery evaluation. In one executable program, use explicit stable clientKey values and perform this exact recovery exercise through the ordinary Relayer graph client:
@@ -220,7 +221,15 @@ export async function runBasicRuntimeEval(options: {
   } finally {
     const cleanupErrors: unknown[] = [];
     for (const cleanup of [
-      async () => { if (harnessHost !== undefined) await closeHarnessHostForEval(harnessHost, options.harnessCloseGraceMs ?? 1_000); },
+      async () => {
+        if (harnessHost !== undefined) {
+          await closeHarnessHostForEval(
+            harnessHost,
+            options.harnessCloseGraceMs ?? DEFAULT_EVAL_HARNESS_CLOSE_GRACE_MS,
+            workingDirectory,
+          );
+        }
+      },
       async () => graphAuditProxy?.close(),
       async () => { if (graphProcess !== undefined) await terminate(graphProcess.process); },
       async () => rm(workingDirectory, { recursive: true, force: true }),
@@ -238,10 +247,13 @@ export async function runBasicRuntimeEval(options: {
   }
 }
 
-async function closeHarnessHostForEval(host: RunningHarnessHost, closeGraceMs: number): Promise<void> {
+async function closeHarnessHostForEval(host: RunningHarnessHost, closeGraceMs: number, workingDirectory: string): Promise<void> {
   const closing = settle(() => host.close());
   if (!(await settlesWithin(closing.then(() => {}), closeGraceMs))) {
     host.forceClose();
+    void closing.then(async () => {
+      await rm(workingDirectory, { recursive: true, force: true });
+    }).catch(() => undefined);
     throw new Error(`Harness host did not close within ${closeGraceMs}ms and was forcibly disconnected`);
   }
   const result = await closing;

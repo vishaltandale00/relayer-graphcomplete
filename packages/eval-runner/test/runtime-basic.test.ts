@@ -246,13 +246,20 @@ describe("first runtime evaluation", () => {
     const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-stalled-dispose-"));
     temporary.push(outputDirectory);
     let runtimeDirectory: string | undefined;
+    let releaseDispose!: () => void;
+    let markDisposeFinished!: () => void;
+    const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
+    const disposeFinished = new Promise<void>((resolveFinished) => { markDisposeFinished = resolveFinished; });
     const stalledFactory: HarnessFactory = async (context) => {
       runtimeDirectory = context.workingDirectory;
       const fixture = await taskSystemFixtureFactory(context);
       return {
         complete: (runContext, signal) => fixture.complete(runContext, signal),
         state: () => fixture.state(),
-        dispose: () => new Promise<void>(() => {}),
+        async dispose() {
+          await disposeGate;
+          markDisposeFinished();
+        },
       };
     };
     const startedAt = Date.now();
@@ -267,6 +274,37 @@ describe("first runtime evaluation", () => {
     expect(Date.now() - startedAt).toBeLessThan(2_000);
     expect(runtimeDirectory).toBeDefined();
     await expect(stat(runtimeDirectory!)).rejects.toMatchObject({ code: "ENOENT" });
+    releaseDispose();
+    await disposeFinished;
+    await new Promise((resolveTurn) => setTimeout(resolveTurn, 20));
+    await expect(stat(runtimeDirectory!)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("allows a slow successful harness disposal to finish within the configured grace period", async () => {
+    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-slow-dispose-"));
+    temporary.push(outputDirectory);
+    let disposed = false;
+    const slowFactory: HarnessFactory = async (context) => {
+      const fixture = await taskSystemFixtureFactory(context);
+      return {
+        complete: (runContext, signal) => fixture.complete(runContext, signal),
+        state: () => fixture.state(),
+        async dispose() {
+          await new Promise((resolveDispose) => setTimeout(resolveDispose, 40));
+          disposed = true;
+        },
+      };
+    };
+
+    const artifact = await runBasicRuntimeEval({
+      outputDirectory,
+      execution: fixtureExecution(),
+      implementations: { "fixture.task-system": slowFactory },
+      harnessCloseGraceMs: 250,
+    });
+
+    expect(artifact.passed).toBe(true);
+    expect(disposed).toBe(true);
   });
 
   it("runs two interactions through one live harness object and saves both fixture graphs", async () => {
