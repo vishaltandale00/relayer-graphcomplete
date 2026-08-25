@@ -53,17 +53,62 @@ pub struct InteractionContextAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InteractionInput {
-    pub interaction: GraphNode,
+    pub interaction: InteractionInputNode,
     pub contexts: Vec<InteractionContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InteractionInputNode {
+    pub id: NodeId,
+    pub kind: String,
+    pub icon: String,
+    pub title: String,
+    pub detail: String,
+    pub state: RecordState,
+}
+
+impl From<GraphNode> for InteractionInputNode {
+    fn from(node: GraphNode) -> Self {
+        Self {
+            id: node.id,
+            kind: node.kind,
+            icon: node.icon,
+            title: node.title,
+            detail: node.detail,
+            state: node.state,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InteractionContext {
-    pub id: ActionId,
     #[serde(rename = "type")]
     pub type_id: String,
-    pub source_node_id: NodeId,
-    pub target_node: GraphNode,
+    pub target_node: InteractionInputNode,
     pub annotations: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InteractionInputNode;
+    use crate::{ActionId, GraphNode, NodeId, RecordState};
+
+    #[test]
+    fn normalized_input_nodes_omit_invoke_lease_authority() {
+        let normalized = InteractionInputNode::from(GraphNode {
+            id: NodeId::new(1).unwrap(),
+            leased_action_id: Some(ActionId::new(2).unwrap()),
+            kind: "user-interaction".into(),
+            icon: "user".into(),
+            title: "Question".into(),
+            detail: "Compare these".into(),
+            state: RecordState::Accepted,
+        });
+
+        let value = serde_json::to_value(normalized).unwrap();
+        assert!(value.get("leasedActionId").is_none());
+        assert_eq!(value["detail"], "Compare these");
+    }
 }

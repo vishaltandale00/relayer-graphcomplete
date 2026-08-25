@@ -34,6 +34,21 @@ class GraphNode:
 
 
 @dataclass(frozen=True, slots=True)
+class InteractionInputNode:
+    id: int
+    kind: str
+    icon: str
+    title: str
+    detail: str
+    state: str
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "InteractionInputNode":
+        return cls(int(value["id"]), str(value["kind"]), str(value["icon"]),
+                   str(value["title"]), str(value["detail"]), str(value["state"]))
+
+
+@dataclass(frozen=True, slots=True)
 class GraphEdge:
     id: int
     endpoints: tuple[int, int]
@@ -47,30 +62,27 @@ class GraphEdge:
 
 @dataclass(frozen=True, slots=True)
 class InteractionContext:
-    id: int
-    source_node_id: int
-    target_node: GraphNode
+    target_node: InteractionInputNode
     annotations: tuple[str, ...]
     type: Literal["interaction.context"] = "interaction.context"
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "InteractionContext":
         return cls(
-            int(value["id"]), int(value["sourceNodeId"]),
-            GraphNode.from_dict(value["targetNode"]),
+            InteractionInputNode.from_dict(value["targetNode"]),
             tuple(str(annotation) for annotation in value.get("annotations", ())),
         )
 
 
 @dataclass(frozen=True, slots=True)
 class InteractionInput:
-    interaction: GraphNode
+    interaction: InteractionInputNode
     contexts: tuple[InteractionContext, ...]
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "InteractionInput":
         return cls(
-            GraphNode.from_dict(value["interaction"]),
+            InteractionInputNode.from_dict(value["interaction"]),
             tuple(InteractionContext.from_dict(item) for item in value.get("contexts", ())),
         )
 

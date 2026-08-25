@@ -10,7 +10,7 @@ mod record_state;
 pub use action::{ActionDraft, ActionKind, ActionVariant, GraphAction, NavigateRelation};
 pub use context::{
     InteractionContext, InteractionContextAction, InteractionContextDraft,
-    InteractionContextTarget, InteractionInput, interaction_input_digest,
+    InteractionContextTarget, InteractionInput, InteractionInputNode, interaction_input_digest,
 };
 pub use edge::{EdgeDraft, GraphEdge};
 pub use icon::{

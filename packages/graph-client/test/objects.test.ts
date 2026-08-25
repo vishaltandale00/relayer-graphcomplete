@@ -105,9 +105,7 @@ describe("agent-facing graph objects", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       interaction: { id: 10, kind: "user-interaction", icon: "user", title: "Compare", detail: "Compare", state: "accepted" },
       contexts: [{
-        id: 51,
         type: "interaction.context",
-        sourceNodeId: 10,
         targetNode: { id: 7, kind: "concept", icon: "box", title: "Boundary", detail: "Evidence", state: "accepted" },
         annotations: ["First", "Second"],
       }],
@@ -117,12 +115,12 @@ describe("agent-facing graph objects", () => {
     const input = await graph.getInteractionInput();
 
     expect(input.contexts[0]).toMatchObject({
-      id: 51,
       type: "interaction.context",
-      sourceNodeId: 10,
       targetNode: { id: 7, title: "Boundary" },
       annotations: ["First", "Second"],
     });
+    expect(input.contexts[0]).not.toHaveProperty("id");
+    expect(input.contexts[0]).not.toHaveProperty("sourceNodeId");
     expect(fetch).toHaveBeenCalledWith(
       "http://127.0.0.1:1/api/graph/input",
       expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer token" }) }),

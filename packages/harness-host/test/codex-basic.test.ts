@@ -185,6 +185,26 @@ describe("CodexBasicHarness", () => {
     expect(prompts[1]).toBe(`${prompts[0]}\n\n${delegationGuidance}`);
   });
 
+  it("delivers ordered normalized context and child re-read guidance without occurrence authority", async () => {
+    let prompt = "";
+    const harness = harnessFixture("auto", async (options) => {
+      prompt = options.prompt;
+      options.onThreadId("context-thread");
+      return { threadId: "context-thread", turnId: "turn-1", status: "completed" };
+    });
+
+    await harness.complete(attachedRunContext(1, "token"));
+
+    expect(prompt).toContain('"message": "Question"');
+    expect(prompt.indexOf('"title": "First target"')).toBeLessThan(prompt.indexOf('"title": "Second target"'));
+    expect(prompt.indexOf('"first annotation"')).toBeLessThan(prompt.indexOf('"second annotation"'));
+    expect(prompt).toContain("product assigns no semantic precedence");
+    expect(prompt).toContain("including in native child agents");
+    expect(prompt).toContain("graph.getInteractionInput()");
+    expect(prompt).not.toContain("sourceNodeId");
+    expect(prompt).not.toContain("sourceLayerId");
+  });
+
   it("uses the picker-selected root model with the actual multi-agent configuration", async () => {
     const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-multi-agent-layered-navigation.yaml"));
     let submitted: CodexAppServerTurnOptions | undefined;
@@ -482,14 +502,38 @@ function harnessFixture(
 }
 
 function runContext(id: number, token: string, trace: HarnessTraceSink = createNoopHarnessTraceSink()): HarnessRunContext {
+  const inputGraph = { id, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" as const };
   return {
-    inputGraph: { id, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" },
+    inputGraph,
+    interactionInput: { interaction: inputGraph, contexts: [] },
     graph: {
       interactionNodeId: id,
       acquireCapability: () => ({ url: "http://127.0.0.1:43123", token, nodeId: id }),
     },
     trace,
     approvals: { request: async () => { throw new Error("unused approval channel"); } },
+  };
+}
+
+function attachedRunContext(id: number, token: string): HarnessRunContext {
+  const context = runContext(id, token);
+  return {
+    ...context,
+    interactionInput: {
+      interaction: context.inputGraph,
+      contexts: [
+        {
+          type: "interaction.context",
+          targetNode: { id: 20, kind: "concept", icon: "box", title: "First target", detail: "First detail", state: "accepted" },
+          annotations: ["first annotation", "second annotation"],
+        },
+        {
+          type: "interaction.context",
+          targetNode: { id: 21, kind: "concept", icon: "box", title: "Second target", detail: "Second detail", state: "accepted" },
+          annotations: ["third annotation"],
+        },
+      ],
+    },
   };
 }
 

@@ -72,16 +72,24 @@ export interface CompletionOutput {
 }
 
 export interface InteractionContext {
-  readonly id: GraphId;
   readonly type: "interaction.context";
-  readonly sourceNodeId: GraphId;
-  readonly targetNode: GraphNode;
+  readonly targetNode: InteractionInputNode;
   readonly annotations: readonly string[];
 }
 
 export interface InteractionInput {
-  readonly interaction: GraphNode;
+  readonly interaction: InteractionInputNode;
   readonly contexts: readonly InteractionContext[];
+}
+
+/** Model-visible node contents without invocation or occurrence authority. */
+export interface InteractionInputNode {
+  readonly id: GraphId;
+  readonly kind: string;
+  readonly icon: string;
+  readonly title: string;
+  readonly detail: string;
+  readonly state: RecordState;
 }
 
 export interface GraphCapability {

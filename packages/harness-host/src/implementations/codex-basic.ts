@@ -1,5 +1,6 @@
 import type { ApprovalMode, ModelReasoningEffort, SandboxMode, WebSearchMode } from "@openai/codex-sdk";
-import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relayer/graph-client";
+import { RELAYER_ICON_NAMES, type GraphCapability } from "@relayer/graph-client";
+import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import { redactTraceData } from "../trace.js";
 import {
   runCodexAppServerTurn,
@@ -88,7 +89,7 @@ export class CodexBasicHarness implements Harness {
     const environment = this.graphEnvironment(capability);
     const sandboxPolicy = this.sandboxPolicy();
     const run = this.dependencies.runAppServerTurn ?? runCodexAppServerTurn;
-    const prompt = this.prompt(context.inputGraph);
+    const prompt = this.prompt(context);
     context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
     const traceState: CodexTraceState = { collaborationSpans: new Map() };
     try {
@@ -188,19 +189,23 @@ export class CodexBasicHarness implements Harness {
     };
   }
 
-  private prompt(interactionNode: GraphNode): string {
+  private prompt(context: HarnessRunContext): string {
+    const interactionNode = context.inputGraph;
     if (this.resolved.promptProfile === "layered-navigation-v1") {
-      return this.layeredNavigationPrompt(interactionNode);
+      return this.layeredNavigationPrompt(context);
     }
     if (this.resolved.promptProfile === "layered-navigation-multi-agent-v1") {
-      return `${this.layeredNavigationPrompt(interactionNode)}
+      return `${this.layeredNavigationPrompt(context)}
 
 Codex native subagents are available when useful. Subagents may directly author, revise, and submit graph objects using the available graph capability. Use the configured model family as appropriate; coordination remains native to Codex.`;
     }
     return `You are the basic Relayer graph harness. Answer the current user interaction by authoring and accepting a useful graph layer.
 
 Current interaction node: ${interactionNode.id}
-User text: ${interactionNode.detail}
+Normalized interaction input:
+${renderInteractionInput(context.interactionInput)}
+
+${INTERACTION_INPUT_GUIDANCE} In JavaScript, call graph.getInteractionInput() to re-read it.
 
 Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a small .mjs file in the system temporary directory, not in the project checkout, and run it with Node.js. Import from:
 ${this.clientModuleUrl}
@@ -240,11 +245,15 @@ Navigate and invoke actions are first-class options, not requirements for every 
 If a graph call rejects an object or graph.submit reports a repairable issue, edit the same program and rerun it with the same clientKey values. Stable keys make the whole-program rerun update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. The graph is complete only after graph.submit succeeds.`;
   }
 
-  private layeredNavigationPrompt(interactionNode: GraphNode): string {
+  private layeredNavigationPrompt(context: HarnessRunContext): string {
+    const interactionNode = context.inputGraph;
     return `You are the Relayer layered-navigation harness. Your task is to answer the current user interaction with a useful graph. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 Current interaction node: ${interactionNode.id}
-User text: ${interactionNode.detail}
+Normalized interaction input:
+${renderInteractionInput(context.interactionInput)}
+
+${INTERACTION_INPUT_GUIDANCE} In JavaScript, call graph.getInteractionInput() to re-read it.
 
 Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a small .mjs file in the system temporary directory, not in the project checkout, and run it with Node.js. Import from:
 ${this.clientModuleUrl}

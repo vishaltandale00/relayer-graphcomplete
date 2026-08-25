@@ -192,15 +192,13 @@ impl<'connection> ContextTable<'connection> {
                 .visible(scope, action.target.node_id)
                 .await?;
             contexts.push(InteractionContext {
-                id: action.id,
                 type_id: ActionKind::InteractionContext.as_str().into(),
-                source_node_id: action.source_node_id,
-                target_node,
+                target_node: target_node.into(),
                 annotations: action.annotations,
             });
         }
         Ok(InteractionInput {
-            interaction,
+            interaction: interaction.into(),
             contexts,
         })
     }
