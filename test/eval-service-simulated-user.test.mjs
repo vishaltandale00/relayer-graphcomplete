@@ -336,7 +336,13 @@ function fakeAcceptedProduct() {
 
 function acceptedOutput() {
   const node = { id: 2, kind: "concept", icon: "queue", title: "Queue", detail: "Tasks wait here.", state: "accepted" };
-  const layer = { id: 10, nodes: [node.id], edges: [], state: "accepted" };
+  const layer = {
+    id: 10,
+    nodes: [node.id],
+    edges: [],
+    layout: { version: 1, placements: [{ nodeId: node.id, x: 0.5, y: 0.5 }] },
+    state: "accepted",
+  };
   return {
     nodeId: 1,
     rootAction: {

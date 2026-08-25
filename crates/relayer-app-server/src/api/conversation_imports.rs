@@ -370,6 +370,7 @@ mod tests {
                 id: layer_id.into(),
                 nodes: vec![node_id.into()],
                 edges: vec![],
+                layout: None,
                 state: ExportRecordState::Accepted,
             },
             nodes: vec![ExportNode {

@@ -16,7 +16,7 @@ import {
   workspaceTurns,
 } from "./model.js";
 import { createRelayerIcon } from "./icons.js";
-import { createGraphSimulationController } from "./graph-simulation.js";
+import { graphLayoutSignature, projectLayerNodePositions } from "./graph-layout.js";
 import { renderMarkdown } from "./markdown.js";
 import { productWorkspaceMarkup } from "./view.js";
 import {
@@ -29,14 +29,6 @@ import {
   resolvedApprovalHistoryForThread,
   selectedPendingApproval,
 } from "../approval-model.js";
-
-function hash(value) {
-  let result = 0;
-  for (const character of String(value)) {
-    result = ((result << 5) - result + character.charCodeAt(0)) | 0;
-  }
-  return Math.abs(result);
-}
 
 export const GRAPH_NODE_ICON_RADIUS = 24;
 export const GRAPH_MIN_ZOOM = 0.4;
@@ -151,15 +143,6 @@ export function graphCameraViewKey(state, thread, responseNodes) {
     ?? interaction?.completionOutput?.rootLayer?.layer?.id
     ?? responseNodes.map((node) => node.id).join(",");
   return `${thread.id}:${interaction?.id ?? ""}:${layerId}`;
-}
-
-export function shouldAutoFitSettledGraph(
-  autoFitViewKey,
-  currentViewKey,
-  autoFitRevision,
-  currentRevision,
-) {
-  return autoFitViewKey === currentViewKey && autoFitRevision === currentRevision;
 }
 
 export function shouldFitInspectorOpen(previousOpen, nextOpen, viewportWidth) {
@@ -372,7 +355,6 @@ export function captureGraphViewState(
   nodes,
   camera,
   signature,
-  settled,
   cameraRevision,
 ) {
   return {
@@ -382,11 +364,9 @@ export function captureGraphViewState(
       id: node.id,
       x: node.x,
       y: node.y,
-      vx: node.vx,
-      vy: node.vy,
       pinned: node.pinned,
     })),
-    settled,
+    settled: true,
     signature,
   };
 }
@@ -423,12 +403,10 @@ export function createProductWorkspace({
   onDecideApproval = async () => {},
 }) {
   const capabilities = workspaceModeCapabilities(mode);
-  const graphSimulation = createGraphSimulationController();
   let graphNodes = [];
   let graphEdges = [];
   let graphSignature = "";
   let graphViewKey = "";
-  let graphLayoutSettled = false;
   let dragging = null;
   let panning = null;
   let pinching = null;
@@ -546,7 +524,7 @@ export function createProductWorkspace({
         return;
       }
       updateCamera(fitGraphCamera(graphNodes, graphStage.getBoundingClientRect()), false);
-      if (graphLayoutSettled) inspectorFitRequest = null;
+      inspectorFitRequest = null;
     }) ?? null;
   };
   const handleInspectorLayoutChange = (event) => {
@@ -1143,7 +1121,6 @@ export function createProductWorkspace({
       cancelInspectorFit();
       $("#inspector").classList.add("hidden");
       saveGraphView();
-      graphSimulation.cancel();
     }
     $("#graphEmpty").classList.toggle("hidden", responseNodes.length > 0);
     $("#graphStage").classList.toggle("hidden", responseNodes.length === 0);
@@ -1152,7 +1129,6 @@ export function createProductWorkspace({
       graphNodes = [];
       graphEdges = [];
       graphSignature = "";
-      graphLayoutSettled = false;
       selection.selectedNodeId = null;
       $("#inspector").classList.add("hidden");
       const pending = thread?.imported !== true && PENDING_COMPLETION_STATUSES.has(state.status);
@@ -1166,46 +1142,28 @@ export function createProductWorkspace({
       return;
     }
 
-    const bounds = $("#graphStage").getBoundingClientRect();
     const cachedView = enteringView ? graphViewCache.get(nextViewKey) : null;
     const previous = new Map(
       (cachedView?.nodes ?? (!enteringView ? graphNodes : []))
-        .map((node) => [node.id, node]),
+        .map((node) => [String(node.id), node]),
     );
     graphViewKey = nextViewKey;
-    graphNodes = responseNodes.map((node, index) => {
-      const prior = previous.get(node.id);
-      return prior ? {
-        ...node,
-        x: prior.x,
-        y: prior.y,
-        vx: prior.vx,
-        vy: prior.vy,
-        pinned: prior.pinned,
-        index,
-      } : {
-        ...node,
-        x: Math.max(120, bounds.width / 2 + ((hash(node.id) % 300) - 150)),
-        y: Math.max(90, bounds.height / 2 + ((hash(`${node.id}-y`) % 220) - 110)),
-        vx: 0,
-        vy: 0,
-        pinned: false,
-        index,
-      };
-    });
+    graphNodes = responseNodes.map((node, index) => ({
+      ...node,
+      x: 0,
+      y: 0,
+      pinned: false,
+      index,
+    }));
     const ids = graphNodeIdentitySet(graphNodes);
     graphEdges = (state.edges || []).filter((edge) => {
       const [source, target] = edge.endpoints || [edge.source, edge.target];
       return ids.has(String(source)) && ids.has(String(target));
     });
-    const nextSignature = JSON.stringify({
-      viewKey: graphViewKey,
-      nodes: graphNodes.map((node) => node.id),
-      edges: graphEdges.map((edge) => edge.endpoints || [edge.source, edge.target]),
-    });
-    const topologyChanged = cachedView
-      ? cachedView.signature !== nextSignature || !cachedView.settled
-      : nextSignature !== graphSignature;
+    const nextSignature = graphLayoutSignature(state.visibleLayer, graphNodes, graphEdges);
+    const cachedLayoutMatches = cachedView
+      ? cachedView.signature === nextSignature
+      : !enteringView && graphSignature === nextSignature;
     graphSignature = nextSignature;
     $("#nodeLayer").innerHTML = graphNodes.map((node) => `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}" data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}"><div class="glyph"></div><div class="copy"><b>${escapeHtml(node.title)}</b></div></div>`).join("");
     $$('[data-node]').forEach((element) => {
@@ -1260,8 +1218,6 @@ export function createProductWorkspace({
         }, camera);
         dragging.node.x = point.x;
         dragging.node.y = point.y;
-        dragging.node.vx = 0;
-        dragging.node.vy = 0;
         if (dragging.moved) dragging.node.pinned = true;
         drawGraph();
       };
@@ -1274,105 +1230,34 @@ export function createProductWorkspace({
       };
       element.onpointercancel = () => { dragging = null; };
     });
+    const projected = projectLayerNodePositions(state.visibleLayer, graphNodes);
+    for (const node of graphNodes) {
+      const canonical = projected.positions.get(String(node.id));
+      if (!canonical) throw new Error(`Visible graph layout is missing node ${String(node.id)}.`);
+      node.canonicalX = canonical.x;
+      node.canonicalY = canonical.y;
+      node.layoutSource = projected.source;
+      const prior = previous.get(String(node.id));
+      if (cachedLayoutMatches && prior?.pinned) {
+        node.x = prior.x;
+        node.y = prior.y;
+        node.pinned = true;
+      } else {
+        node.x = canonical.x;
+        node.y = canonical.y;
+      }
+    }
     if (enteringView && !ids.has(String(selection.selectedNodeId))) {
       selection.selectedNodeId = null;
       $("#inspector").classList.add("hidden");
     }
-    if (cachedView) {
+    if (cachedView && cachedLayoutMatches) {
       camera = { ...cachedView.camera };
       cameraRevision = cachedView.cameraRevision;
-      graphLayoutSettled = cachedView.settled;
-    } else if (enteringView) {
-      camera = { x: 0, y: 0, zoom: 1 };
-      graphLayoutSettled = false;
+    } else if (enteringView || !cachedLayoutMatches) {
+      camera = fitGraphCamera(graphNodes, graphStage.getBoundingClientRect());
     }
-    if (!topologyChanged) {
-      drawGraph();
-      return;
-    }
-    graphLayoutSettled = false;
-    const autoFitRevision = cameraRevision;
-    const autoFitViewKey = enteringView ? graphViewKey : null;
-    let ticks = 0;
-    graphSimulation.start(() => {
-      physicsStep(bounds);
-      drawGraph();
-      if (++ticks < 220) {
-        return true;
-      }
-      graphLayoutSettled = true;
-      if (shouldAutoFitSettledGraph(
-        autoFitViewKey,
-        graphViewKey,
-        autoFitRevision,
-        cameraRevision,
-      )) {
-        const fitBounds = inspectorFitRequestIsCurrent(inspectorFitRequest, {
-          cameraRevision,
-          graphViewKey,
-          inspectorOpen: !$("#inspector").classList.contains("hidden"),
-          viewportWidth: graphDocument.defaultView?.innerWidth ?? 0,
-        }) ? graphStage.getBoundingClientRect() : bounds;
-        updateCamera(fitGraphCamera(graphNodes, fitBounds), false);
-        inspectorFitRequest = null;
-      } else {
-        saveGraphView();
-      }
-      return false;
-    });
-  }
-
-  function physicsStep(bounds) {
-    const centerX = bounds.width / 2;
-    const centerY = bounds.height / 2;
-    const anchored = (node) => node.pinned || dragging?.node.id === node.id;
-    for (let i = 0; i < graphNodes.length; i++) {
-      for (let j = i + 1; j < graphNodes.length; j++) {
-        const a = graphNodes[i];
-        const b = graphNodes[j];
-        const dx = b.x - a.x || 0.1;
-        const dy = b.y - a.y || 0.1;
-        const distance2 = Math.max(400, dx * dx + dy * dy);
-        const force = 950 / distance2;
-        if (!anchored(a)) {
-          a.vx -= dx * force;
-          a.vy -= dy * force;
-        }
-        if (!anchored(b)) {
-          b.vx += dx * force;
-          b.vy += dy * force;
-        }
-      }
-    }
-    for (const edge of graphEdges) {
-      const [source, target] = edge.endpoints || [edge.source, edge.target];
-      const a = graphNodes.find((node) => node.id === source);
-      const b = graphNodes.find((node) => node.id === target);
-      if (!a || !b) continue;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const distance = Math.hypot(dx, dy) || 1;
-      const force = (distance - 150) * 0.002;
-      if (!anchored(a)) {
-        a.vx += dx * force;
-        a.vy += dy * force;
-      }
-      if (!anchored(b)) {
-        b.vx -= dx * force;
-        b.vy -= dy * force;
-      }
-    }
-    for (const node of graphNodes) {
-      if (anchored(node)) {
-        node.vx = 0;
-        node.vy = 0;
-        continue;
-      }
-      node.vx = (node.vx + (centerX - node.x) * 0.0014) * 0.88;
-      node.vy = (node.vy + (centerY - node.y) * 0.0014) * 0.88;
-      node.x += node.vx;
-      node.y += node.vy;
-    }
+    drawGraph();
   }
 
   function drawGraph() {
@@ -1383,6 +1268,11 @@ export function createProductWorkspace({
         element.style.left = `${point.x}px`;
         element.style.top = `${point.y}px`;
         element.style.setProperty("--graph-zoom", camera.zoom);
+        element.dataset.worldX = String(node.x);
+        element.dataset.worldY = String(node.y);
+        element.dataset.canonicalWorldX = String(node.canonicalX);
+        element.dataset.canonicalWorldY = String(node.canonicalY);
+        element.dataset.layoutSource = node.layoutSource;
       }
     }
     $("#edgeCanvas").innerHTML = graphEdges.map((edge) => {
@@ -1411,7 +1301,6 @@ export function createProductWorkspace({
       graphNodes,
       camera,
       graphSignature,
-      graphLayoutSettled,
       cameraRevision,
     ));
   }
@@ -1511,7 +1400,6 @@ export function createProductWorkspace({
   function dispose() {
     modelPicker?.dispose();
     cancelInspectorFit();
-    graphSimulation.cancel();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     graphDocument.removeEventListener("pointerdown", closeTurnPopoverFromOutside, true);
     graphDocument.removeEventListener("pointerdown", closeSettingsMenuFromOutside, true);

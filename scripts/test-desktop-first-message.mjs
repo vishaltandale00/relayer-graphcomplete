@@ -80,7 +80,18 @@ async function graphPresentation(webContents) {
     const inspector = document.querySelector("#inspector")?.getBoundingClientRect();
     const nodes = [...document.querySelectorAll("[data-node]")].map((node) => {
       const rect = node.getBoundingClientRect();
-      return { id: node.dataset.node, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+      return {
+        id: node.dataset.node,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        worldX: Number(node.dataset.worldX),
+        worldY: Number(node.dataset.worldY),
+        canonicalWorldX: Number(node.dataset.canonicalWorldX),
+        canonicalWorldY: Number(node.dataset.canonicalWorldY),
+        layoutSource: node.dataset.layoutSource,
+      };
     });
     return {
       innerWidth: window.innerWidth,
@@ -114,6 +125,28 @@ function nodeRectSignature(presentation) {
     Math.round(top),
     Math.round(bottom),
   ]);
+}
+
+function canonicalLayoutSignature(presentation) {
+  return [...presentation.nodes]
+    .sort((left, right) => String(left.id).localeCompare(String(right.id)))
+    .map(({ id, canonicalWorldX, canonicalWorldY, layoutSource }) => [
+      id,
+      canonicalWorldX,
+      canonicalWorldY,
+      layoutSource,
+    ]);
+}
+
+function requireAuthoredLayout(label, presentation) {
+  if (!presentation.nodes.length || presentation.nodes.some((node) => (
+    node.layoutSource !== "authored"
+    || !Number.isFinite(node.canonicalWorldX)
+    || !Number.isFinite(node.canonicalWorldY)
+  ))) {
+    throw new Error(`${label} did not expose a complete authored canonical layout.`);
+  }
+  return canonicalLayoutSignature(presentation);
 }
 
 async function waitForStableGraph(label, webContents) {
@@ -419,6 +452,9 @@ async function run() {
   });
   const productStableOpen = await waitForStableGraph("the stable Product inspector view", webContents);
   const productOpenSignature = nodeRectSignature(productStableOpen);
+  const productRootLayout = requireAuthoredLayout("Product root", productStableOpen);
+  await mkdir(dirname(screenshotPath), { recursive: true });
+  await writeFile(screenshotPath, (await webContents.capturePage()).toPNG());
   await webContents.executeJavaScript(`document.querySelector('[data-node]:not([data-node="${navigateAction.sourceNodeId}"])')?.click()`);
   await waitFor("the second Product node detail", () => webContents.executeJavaScript(
     `document.querySelector(".graph-node.selected")?.dataset.node !== "${navigateAction.sourceNodeId}"`,
@@ -477,6 +513,7 @@ async function run() {
     const presentation = await graphPresentation(webContents);
     return presentation.inspectorOpen && nodesAreContained(presentation) ? presentation : false;
   });
+  const productChildLayout = requireAuthoredLayout("Product child", restoredInspectorFit);
   await webContents.executeJavaScript(`document.querySelector("#turnPickerButton")?.click()`);
   const productNavigationState = await waitFor("the scrolling turn picker", () => webContents.executeJavaScript(`(() => {
     const popover = document.querySelector("#turnPopover");
@@ -497,9 +534,6 @@ async function run() {
     closePreserved: true,
     dragSelectionSuppressed,
   };
-  await mkdir(dirname(screenshotPath), { recursive: true });
-  await writeFile(screenshotPath, (await webContents.capturePage()).toPNG());
-
   reviewContext = {
     ...reviewContext,
     cases: [{
@@ -537,6 +571,11 @@ async function run() {
     document.querySelector("#threadView")?.dataset.workspaceMode === "review"
     && document.querySelector("#turnPickerButton")?.textContent === "Turn 4 of 4"
   ))()`));
+  const evalRootStable = await waitForStableGraph("the stable Eval root graph", evalContents);
+  const evalRootLayout = requireAuthoredLayout("Eval root", evalRootStable);
+  if (JSON.stringify(evalRootLayout) !== JSON.stringify(productRootLayout)) {
+    throw new Error("Product and read-only Eval projected different canonical positions for the same accepted root layer.");
+  }
   await evalContents.executeJavaScript(`import("./src/threads.js").then(({ selectTurnById }) => selectTurnById(${sourceInteraction.id}))`);
   await evalContents.executeJavaScript(`document.querySelector('[data-node="${invokeAction.sourceNodeId}"]')?.click()`);
   await waitFor("the Eval resolved invoke action", () => evalContents.executeJavaScript(`(() => {
@@ -550,6 +589,16 @@ async function run() {
   invokeEvidencePaths.evalCrossInteraction = await captureEvidence(evalContents, "06-eval-cross-interaction-destination");
   await evalContents.executeJavaScript(`import("./src/threads.js").then(({ selectTurnById }) => selectTurnById(${latest.id}))`);
   await evalContents.executeJavaScript(`document.querySelector('[data-node="${navigateAction.sourceNodeId}"]')?.click()`);
+  const evalRootInspectorFit = await waitFor("the Eval root inspector fit", async () => {
+    const presentation = await graphPresentation(evalContents);
+    return presentation.inspectorOpen && nodesAreContained(presentation) ? presentation : false;
+  });
+  if (JSON.stringify(requireAuthoredLayout("Eval root inspector", evalRootInspectorFit)) !== JSON.stringify(evalRootLayout)) {
+    throw new Error("Opening the Eval inspector changed canonical root positions.");
+  }
+  await waitForPaint(evalContents);
+  await mkdir(dirname(evalScreenshotPath), { recursive: true });
+  await writeFile(evalScreenshotPath, (await evalContents.capturePage()).toPNG());
   await waitFor("the Eval navigate action", () => evalContents.executeJavaScript(
     `Boolean(document.querySelector('[data-action-id="${navigateAction.id}"]'))`,
   ));
@@ -562,8 +611,10 @@ async function run() {
     const presentation = await graphPresentation(evalContents);
     return presentation.inspectorOpen && nodesAreContained(presentation) ? presentation : false;
   });
-  await mkdir(dirname(evalScreenshotPath), { recursive: true });
-  await writeFile(evalScreenshotPath, (await evalContents.capturePage()).toPNG());
+  const evalChildLayout = requireAuthoredLayout("Eval child", evalInspectorFit);
+  if (JSON.stringify(evalChildLayout) !== JSON.stringify(productChildLayout)) {
+    throw new Error("Product and read-only Eval projected different canonical positions for the same accepted child layer.");
+  }
 
   await evalContents.executeJavaScript(`document.querySelector("#closeInspector")?.click()`);
   evalWindow.setContentSize(760, 920);
@@ -593,6 +644,9 @@ async function run() {
   }
   if (JSON.stringify(nodeRectSignature(evalNarrowInspector)) !== JSON.stringify(narrowClosedSignature)) {
     throw new Error("The 760px inspector changed the Eval graph camera.");
+  }
+  if (JSON.stringify(requireAuthoredLayout("narrow Eval child", evalNarrowInspector)) !== JSON.stringify(evalChildLayout)) {
+    throw new Error("The narrow Eval viewport changed canonical child positions.");
   }
   await waitForPaint(evalContents);
   await writeFile(evalNarrowScreenshotPath, (await evalContents.capturePage()).toPNG());
@@ -639,6 +693,13 @@ async function run() {
     evalNarrowScreenshotPath,
     productNavigationState,
     evalNavigationState,
+    layoutEvidence: {
+      rootProductEvalParity: true,
+      childProductEvalParity: true,
+      narrowViewportPreservedCanonicalLayout: true,
+      productRootLayout,
+      productChildLayout,
+    },
     invokeResultInteractionId: invokedResult.id,
     invokeEvidencePaths,
   };

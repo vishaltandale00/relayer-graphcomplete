@@ -2,7 +2,14 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { LayerObject, NodeObject, RelayerGraphClient } from "@relayer/graph-client";
+import {
+  EdgeObject,
+  LayerLayoutObject,
+  LayerObject,
+  NodeObject,
+  NodePlacementObject,
+  RelayerGraphClient,
+} from "@relayer/graph-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EvalService } from "../desktop/eval-main/eval-service.mjs";
@@ -139,6 +146,14 @@ describe("conversation export to Eval end to end", () => {
     ]);
     expect(records[1].acceptedView.layers.map((layer) => layer.layer.id)).toHaveLength(5);
     expect(records[1].acceptedView.layers.flatMap((layer) => layer.actions).filter((action) => action.relation === "reference")).toHaveLength(4);
+    const exportedRoot = records[1].acceptedView.layers.find(
+      (layer) => layer.layer.id === records[1].acceptedView.rootLayerId,
+    );
+    expect(exportedRoot.layer.layout).toMatchObject({ version: 1 });
+    expect(exportedRoot.layer.layout.placements.map(({ x, y }) => [x, y])).toEqual([
+      [0.2, 0.35],
+      [0.8, 0.65],
+    ]);
     const exportedText = exactExportBytes.toString("utf8");
     expect(exportedText).not.toContain(canonicalProjectPath);
     expect(exportedText).not.toMatch(/relayer_control|graphControlToken|harnessControlToken|privateRationale|draft/i);
@@ -180,6 +195,11 @@ describe("conversation export to Eval end to end", () => {
       ))
     ))).toBe(true);
     const rootLayer = importedFirst.completionOutput.rootLayer;
+    expect(rootLayer.layer.layout).toMatchObject({ version: 1 });
+    expect(rootLayer.layer.layout.placements.map(({ x, y }) => [x, y])).toEqual([
+      [0.2, 0.35],
+      [0.8, 0.65],
+    ]);
     const rootExpand = rootLayer.actions.find((action) => action.relation === "expand");
     const rootReference = rootLayer.actions.find((action) => action.relation === "reference");
     const expanded = await loadLayer(productSession, importedDetail.thread.id, importedFirst.id, rootExpand.targetLayerId);
@@ -303,6 +323,9 @@ describe("conversation export to Eval end to end", () => {
 });
 
 function complexConversationFactory(projectPath) {
+  const centeredLayout = (node) => new LayerLayoutObject([
+    new NodePlacementObject(node, 0.5, 0.5),
+  ]);
   return () => ({
     traceSupport: () => ({
       prompt: "none", messages: "none", reasoningSummaries: "none", modelCalls: "none",
@@ -319,23 +342,34 @@ function complexConversationFactory(projectPath) {
       if (context.inputGraph.detail === "Explain the imported-safe follow-up") {
         const followup = new NodeObject("info", "Action-created follow-up", "The invoke action created this accepted turn.", "concept", "followup");
         await graph.submitNode(followup);
-        const layer = new LayerObject([followup], [], "followup-layer");
+        const layer = new LayerObject([followup], [], centeredLayout(followup), "followup-layer");
         await graph.submitLayer(layer);
         await graph.addAction(context.inputGraph.id, { kind: "navigate", relation: "expand", label: "Response", target: layer, clientKey: "followup-root" });
         await graph.submit(context.inputGraph.id);
         return;
       }
       const rootNode = new NodeObject("info", "Root answer", `Portable detail replaces ${projectPath}.`, "concept", "root");
+      const rootEvidenceNode = new NodeObject("link", "Root evidence", "Portable layout keeps this evidence offset from the answer.", "evidence", "root-evidence");
       const expandedNode = new NodeObject("info", "Expanded detail", "First expansion.", "detail", "expanded");
       const nestedNode = new NodeObject("info", "Nested expansion", "Second expansion.", "detail", "nested");
       const sharedNode = new NodeObject("info", "Shared reference", "Referenced from root and expansion.", "evidence", "shared");
       const cycleNode = new NodeObject("info", "Reference cycle", "References the shared layer again.", "evidence", "cycle");
-      for (const node of [rootNode, expandedNode, nestedNode, sharedNode, cycleNode]) await graph.submitNode(node);
-      const root = new LayerObject([rootNode], [], "root-layer");
-      const expanded = new LayerObject([expandedNode], [], "expanded-layer");
-      const nested = new LayerObject([nestedNode], [], "nested-layer");
-      const shared = new LayerObject([sharedNode], [], "shared-layer");
-      const cycle = new LayerObject([cycleNode], [], "cycle-layer");
+      for (const node of [rootNode, rootEvidenceNode, expandedNode, nestedNode, sharedNode, cycleNode]) await graph.submitNode(node);
+      const rootEdge = new EdgeObject([rootNode, rootEvidenceNode], "root-evidence-edge");
+      await graph.createEdge(rootEdge);
+      const root = new LayerObject(
+        [rootNode, rootEvidenceNode],
+        [rootEdge],
+        new LayerLayoutObject([
+          new NodePlacementObject(rootNode, 0.2, 0.35),
+          new NodePlacementObject(rootEvidenceNode, 0.8, 0.65),
+        ]),
+        "root-layer",
+      );
+      const expanded = new LayerObject([expandedNode], [], centeredLayout(expandedNode), "expanded-layer");
+      const nested = new LayerObject([nestedNode], [], centeredLayout(nestedNode), "nested-layer");
+      const shared = new LayerObject([sharedNode], [], centeredLayout(sharedNode), "shared-layer");
+      const cycle = new LayerObject([cycleNode], [], centeredLayout(cycleNode), "cycle-layer");
       for (const layer of [root, expanded, nested, shared, cycle]) await graph.submitLayer(layer);
       await graph.addAction(rootNode, { kind: "navigate", relation: "expand", sourceLayer: root, label: "Expand", target: expanded, clientKey: "root-expand" });
       await graph.addAction(expandedNode, { kind: "navigate", relation: "expand", sourceLayer: expanded, label: "Expand again", target: nested, clientKey: "nested-expand" });

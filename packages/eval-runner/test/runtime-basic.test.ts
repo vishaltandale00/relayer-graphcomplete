@@ -135,6 +135,8 @@ describe("first runtime evaluation", () => {
     expect(artifact.turns.map((turn) => turn.output.nodeId)).toEqual(artifact.turns.map((turn) => turn.interactionNodeId));
     expect(artifact.turns.every((turn) => turn.output.rootLayer.nodes.length === 3)).toBe(true);
     expect(artifact.turns.every((turn) => turn.output.rootLayer.edges.length === 2)).toBe(true);
+    expect(artifact.turns.every((turn) => turn.output.rootLayer.layer.layout?.version === 1)).toBe(true);
+    expect(artifact.turns.every((turn) => turn.output.rootLayer.layer.layout?.placements.length === 3)).toBe(true);
     expect(artifact.turns.every((turn) => turn.checks.every((check) => check.passed))).toBe(true);
     expect(artifact.turns.every((turn) => checkBasicFacts(turn.output).every((check) => check.passed))).toBe(true);
     expect(artifact.sessionChecks).toEqual(expect.arrayContaining([
@@ -173,6 +175,7 @@ describe("first runtime evaluation", () => {
     const html = renderArtifact(unsafe);
     expect(html).not.toContain('<img src=x onerror="alert');
     expect(html).toContain("title.textContent=node.title");
+    expect(html).toContain("110+placement.x*740");
   }, 15_000);
 
   it("reports a controlled failure when the graph server cannot be executed", async () => {

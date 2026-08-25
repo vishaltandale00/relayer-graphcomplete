@@ -143,7 +143,7 @@ pub struct ExportPermissionReceipt {
     pub disclosure: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportAcceptedView {
     pub interaction_node_id: String,
@@ -152,7 +152,7 @@ pub struct ExportAcceptedView {
     pub layers: Vec<ExportResolvedLayer>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportResolvedLayer {
     pub layer: ExportLayer,
@@ -161,13 +161,30 @@ pub struct ExportResolvedLayer {
     pub actions: Vec<ExportAction>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportLayer {
     pub id: String,
     pub nodes: Vec<String>,
     pub edges: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<ExportLayerLayout>,
     pub state: ExportRecordState,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportLayerLayout {
+    pub version: u32,
+    pub placements: Vec<ExportNodePlacement>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportNodePlacement {
+    pub node_id: String,
+    pub x: f64,
+    pub y: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -997,6 +1014,57 @@ fn validate_layer(resolved: &ExportResolvedLayer, path: &str) -> Result<(), Expo
         ));
     }
     let members = node_ids.iter().map(String::as_str).collect::<HashSet<_>>();
+    if let Some(layout) = &resolved.layer.layout {
+        if layout.version != 1 {
+            return Err(ExportValidationError::new(
+                "unsupported_layout_version",
+                format!("{path}.layer.layout.version"),
+                format!(
+                    "V1 exports support graph layout version 1, received {}.",
+                    layout.version
+                ),
+            ));
+        }
+        if layout.placements.len() != node_ids.len() {
+            return Err(ExportValidationError::new(
+                "layout_placement_count",
+                format!("{path}.layer.layout.placements"),
+                "An authored layout must contain exactly one placement for every layer node.",
+            ));
+        }
+        let mut placed = HashSet::new();
+        for (index, placement) in layout.placements.iter().enumerate() {
+            let placement_path = format!("{path}.layer.layout.placements[{index}]");
+            require_id(
+                &placement.node_id,
+                "node",
+                format!("{placement_path}.nodeId"),
+            )?;
+            if !members.contains(placement.node_id.as_str()) {
+                return Err(ExportValidationError::new(
+                    "layout_node_outside_layer",
+                    format!("{placement_path}.nodeId"),
+                    "An authored placement must reference a node in its layer.",
+                ));
+            }
+            if !placed.insert(placement.node_id.as_str()) {
+                return Err(ExportValidationError::new(
+                    "duplicate_layout_node",
+                    format!("{placement_path}.nodeId"),
+                    "A layer node may be placed only once.",
+                ));
+            }
+            for (coordinate, value) in [("x", placement.x), ("y", placement.y)] {
+                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                    return Err(ExportValidationError::new(
+                        "layout_coordinate_invalid",
+                        format!("{placement_path}.{coordinate}"),
+                        "Layout coordinates must be finite normalized numbers from 0 through 1.",
+                    ));
+                }
+            }
+        }
+    }
     for (index, node) in resolved.nodes.iter().enumerate() {
         require_id(&node.id, "node", format!("{path}.nodes[{index}].id"))?;
         require_string(&node.kind, format!("{path}.nodes[{index}].kind"))?;

@@ -61,6 +61,14 @@ Relayer and Relayer Eval are separate Electron build targets. Relayer exposes th
 
 Opening one case × harness execution creates a separate review window using the exact production renderer and `ProductWorkspace` component. The review preload supplies only Eval navigation context: the run's cases and product thread IDs for the selected harness. Product graph reads, accepted-layer navigation, turn navigation, layout, and node inspection remain owned by the ordinary product API and workspace. The same app server issues the review window a read-only session capability and rejects writes at the API boundary; workspace review mode also removes composition and mutating controls. See [ADR 0003](decisions/0003-shared-product-eval-workspace.md).
 
+Every newly authored layer carries a versioned layout with exactly one normalized
+placement per member node. Graph core validates and persists those placements as
+part of the draft and accepted layer snapshot. The shared Product/Eval renderer
+projects normalized coordinates into a stable world plane; responsive fitting,
+panning, zooming, and inspector changes affect only the camera. Historical
+accepted layers without layout data remain readable through one deterministic,
+viewport-independent renderer fallback and are never rewritten during reads.
+
 Each product or Eval review window owns one bounded renderer-side navigation history for thread, turn, authored layer path, and remembered node selection. Restoration resolves accepted product data before committing the presentation and cursor together. Eval's judge history command delegates to this controller; the Eval main process records and validates the result but does not own a second stack. Hierarchy breadcrumbs and direct chronological turn controls remain separate presentations of layer ancestry and durable interaction order.
 
 ## Base graph-completion invariants
@@ -74,9 +82,10 @@ Each product or Eval review window owns one bounded renderer-side navigation his
 7. Prior stable nodes and layers may be referenced across turns rather than duplicated. A reference destination is an accepted boundary, not a request to reaccept historical records.
 8. Draft records remain distinct from atomically accepted completion closures. Accepted layers snapshot their exact node, edge, and action membership so later graph writes cannot rewrite prior output. The only accepted-action mutation is the one-shot leased-invoke transition defined below.
 9. An invoke-created user-interaction node may carry one immutable nullable `leased_action_id`, unique when present, plus a private immutable nullable `lease_source_interaction_id`; both are null or both non-null, preserving the exact accepted source/action pair for retries even when a node-owned action is reused. Neighbor reads derive its accepted source node through the leased action without persisting a semantic `GraphEdge`; pre-lease invocations remain unleased and are not backfilled.
-10. A model turn ending is not completion; the root must explicitly submit or stop. Submission validates authored closure, expansion cycles, reference visibility, orphan drafts, and layer size. For a leased interaction, the same submission transaction also changes the exact accepted source action's `target_layer_id` once from `null` to the accepted result root layer. Its kind remains `invoke`; no `resolveAction` authoring API or resolution table exists.
-11. A resolved invoke is project-visible cross-interaction navigation wherever its node-owned action is reused, not an `expand` or `reference` relation. Generic renderer navigation history remains an independent product concern.
-12. The selected harness owns model execution. Prime Agent owns recursive child scheduling. GraphComplete does not add a model-call or recursive-agent scheduler. See [ADR 0005](decisions/0005-layered-navigation-contract.md) and [ADR 0006](decisions/0006-harness-provider-agnostic-product-boundary.md).
+10. New layer submissions include complete versioned normalized placement data. Layout integrity is deterministic graph validation; spatial meaning remains model judgment. Legacy accepted layers may lack layout, but reads never infer and persist replacement graph content.
+11. A model turn ending is not completion; the root must explicitly submit or stop. Submission validates authored closure, expansion cycles, reference visibility, orphan drafts, layer size, and current-draft layout completeness. For a leased interaction, the same submission transaction also changes the exact accepted source action's `target_layer_id` once from `null` to the accepted result root layer. Its kind remains `invoke`; no `resolveAction` authoring API or resolution table exists.
+12. A resolved invoke is project-visible cross-interaction navigation wherever its node-owned action is reused, not an `expand` or `reference` relation. Generic renderer navigation history remains an independent product concern.
+13. The selected harness owns model execution. Prime Agent owns recursive child scheduling. GraphComplete does not add a model-call or recursive-agent scheduler. See [ADR 0005](decisions/0005-layered-navigation-contract.md) and [ADR 0006](decisions/0006-harness-provider-agnostic-product-boundary.md).
 
 ## Target self-assessing policy invariants
 

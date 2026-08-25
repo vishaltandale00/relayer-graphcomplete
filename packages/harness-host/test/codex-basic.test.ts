@@ -48,6 +48,9 @@ describe("CodexBasicHarness", () => {
     expect(submitted?.prompt).toContain("Relayer graph affordances:");
     expect(submitted?.prompt).toContain("system temporary directory, not in the project checkout");
     expect(submitted?.prompt).toContain("must use exactly one supported Relayer icon name");
+    expect(submitted?.prompt).toContain("exactly one NodePlacementObject(node, x, y) per layer node");
+    expect(submitted?.prompt).toContain("Place a one-node layer at (0.5, 0.5)");
+    expect(submitted?.prompt).toContain("independently of the viewport");
     expect(submitted?.prompt).toContain("square-dashed-kanban");
     expect(submitted?.threadParams).toEqual({
       cwd: process.cwd(),
@@ -121,6 +124,8 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).toContain("ordinary graph.submit(1) automatically fulfills any lease");
     expect(submittedPrompt).toContain("There is no separate resolveAction call");
     expect(submittedPrompt).toContain("Never mention or expose the size justification");
+    expect(submittedPrompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
+    expect(submittedPrompt).toContain("align comparisons deliberately");
     expect(submittedPrompt).not.toContain("The required order is:");
   });
 

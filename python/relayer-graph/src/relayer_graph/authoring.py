@@ -46,16 +46,45 @@ class GraphEdge:
 
 
 @dataclass(frozen=True, slots=True)
+class NodePlacement:
+    node_id: int
+    x: float
+    y: float
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "NodePlacement":
+        return cls(int(value["nodeId"]), float(value["x"]), float(value["y"]))
+
+
+@dataclass(frozen=True, slots=True)
+class LayerLayout:
+    version: int
+    placements: tuple[NodePlacement, ...]
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "LayerLayout":
+        return cls(
+            int(value["version"]),
+            tuple(NodePlacement.from_dict(item) for item in value["placements"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class GraphLayer:
     id: int
     nodes: tuple[int, ...]
     edges: tuple[int, ...]
     state: str
+    layout: LayerLayout | None = None
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "GraphLayer":
-        return cls(int(value["id"]), tuple(map(int, value["nodes"])),
-                   tuple(map(int, value["edges"])), str(value["state"]))
+        layout = value.get("layout")
+        return cls(
+            int(value["id"]), tuple(map(int, value["nodes"])),
+            tuple(map(int, value["edges"])), str(value["state"]),
+            None if layout is None else LayerLayout.from_dict(layout),
+        )
 
 
 @dataclass(slots=True)
@@ -76,9 +105,23 @@ class EdgeObject:
 
 
 @dataclass(slots=True)
+class NodePlacementObject:
+    node: "NodeReference"
+    x: float
+    y: float
+
+
+@dataclass(slots=True)
+class LayerLayoutObject:
+    placements: Sequence[NodePlacementObject]
+    version: Literal[1] = field(default=1, init=False)
+
+
+@dataclass(slots=True)
 class LayerObject:
     nodes: Sequence["NodeReference"]
     edges: Sequence["EdgeReference"]
+    layout: LayerLayoutObject
     client_key: str = field(default_factory=lambda: str(uuid.uuid4()))
     ref: GraphLayer | None = field(default=None, init=False)
 
@@ -144,6 +187,13 @@ class RelayerGraphClient:
             "clientKey": layer.client_key,
             "nodes": [_node_id(item) for item in layer.nodes],
             "edges": [_edge_id(item) for item in layer.edges],
+            "layout": {
+                "version": layer.layout.version,
+                "placements": [
+                    {"nodeId": _node_id(item.node), "x": item.x, "y": item.y}
+                    for item in layer.layout.placements
+                ],
+            },
             "sizeJustification": size_justification,
         })
         layer.ref = GraphLayer.from_dict(value["layer"])

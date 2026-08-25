@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "capturedFromCommit": "5f09e5f5642762d7e76bf9f8d106fed79815f775",
+  "capturedAt": "2026-08-24T15:34:58-04:00",
+  "harness": "fixture-task-system",
+  "inferenceCalls": 0,
+  "command": "npm run test:desktop:first-message",
+  "assertions": {
+    "completionStatus": "accepted",
+    "rootProductEvalCanonicalParity": true,
+    "childProductEvalCanonicalParity": true,
+    "narrowViewportPreservedCanonicalLayout": true,
+    "desktopInspectorContainedNodes": true,
+    "narrowInspectorPreservedStageAndCamera": true
+  },
+  "canonicalWorldCoordinates": {
+    "root": [
+      { "nodeId": "20", "x": 223.8, "y": 298, "source": "authored" },
+      { "nodeId": "21", "x": 480, "y": 298, "source": "authored" },
+      { "nodeId": "22", "x": 736.2, "y": 298, "source": "authored" }
+    ],
+    "child": [
+      { "nodeId": "23", "x": 297, "y": 298, "source": "authored" },
+      { "nodeId": "24", "x": 663, "y": 298, "source": "authored" }
+    ]
+  },
+  "files": [
+    {
+      "path": "product-root-inspector.png",
+      "sha256": "5e02f94f6d58dad730529636b88a0c6cd714ad2319c852ff22498a40abf433e5",
+      "pixelWidth": 2840,
+      "pixelHeight": 1800,
+      "surface": "product",
+      "layer": "root",
+      "inspector": "docked"
+    },
+    {
+      "path": "eval-root-inspector.png",
+      "sha256": "1b1302bdb88a9079e96d264ddebfe41942c9f263e7e0ef6e8a9e20f0ec5c6d27",
+      "pixelWidth": 2960,
+      "pixelHeight": 1776,
+      "surface": "eval-read-only",
+      "layer": "root",
+      "inspector": "docked"
+    },
+    {
+      "path": "eval-narrow-child.png",
+      "sha256": "d523ec2c642a47e4b02b721ec70af83ffc2fb2abd92c7ef8f69fe2eee384687c",
+      "pixelWidth": 1520,
+      "pixelHeight": 1840,
+      "cssViewportWidth": 760,
+      "surface": "eval-read-only",
+      "layer": "child",
+      "inspector": "overlay"
+    }
+  ]
+}

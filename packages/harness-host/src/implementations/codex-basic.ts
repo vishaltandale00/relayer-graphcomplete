@@ -167,15 +167,17 @@ User text: ${interactionNode.detail}
 Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a small .mjs file in the system temporary directory, not in the project checkout, and run it with Node.js. Import from:
 ${this.clientModuleUrl}
 
-The module exports RelayerGraphClient, NodeObject, EdgeObject, and LayerObject. Use RelayerGraphClient.fromEnv(). The required order is:
+The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). The required order is:
 1. create NodeObject values with icon, title, and useful markdown detail;
 2. await graph.submitNode(node) for each node;
 3. await graph.createEdge(leftNode, rightNode) for each visible undirected connection;
-4. create and await graph.submitLayer(new LayerObject(nodes, edges));
+4. create a version-1 LayerLayoutObject with exactly one NodePlacementObject(node, x, y) per layer node, then await graph.submitLayer(new LayerObject(nodes, edges, layout));
 5. await graph.addAction(${interactionNode.id}, { kind: "navigate", label: "Response", target: layer, response: true });
 6. await graph.submit(${interactionNode.id}).
 
 The visible layer must contain 1 to 8 nodes and must be connected. Layer edges are exactly what the user sees.
+
+Every new layer, including every child layer, requires an intentional authored layout. Coordinates are normalized numbers from 0 through 1 and describe semantic relative position independently of the viewport. Place a one-node layer at (0.5, 0.5). Keep flow or time moving consistently, use a parent or summary node to anchor hierarchy, group related nodes spatially, align comparisons deliberately, and avoid accidental overlap or edge crossings where a clearer arrangement is available. The renderer changes the camera for the viewport; do not derive coordinates from pixels, window size, or inspector state.
 
 Every node icon, and every optional action icon, must use exactly one supported Relayer icon name. Unsupported names are rejected so that you can repair the object. Choose the closest semantic name from:
 ${RELAYER_ICON_NAMES.join(", ")}
@@ -207,7 +209,7 @@ User text: ${interactionNode.detail}
 Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a small .mjs file in the system temporary directory, not in the project checkout, and run it with Node.js. Import from:
 ${this.clientModuleUrl}
 
-The module exports RelayerGraphClient, NodeObject, EdgeObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.
+The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.
 
 The current interaction may carry an invoke lease created by the product. Before authoring, use graph.getNode(${interactionNode.id}) and graph.getNeighbors(${interactionNode.id}) to inspect the current node and any relevant source context exposed by the graph. Treat that context as input to your answer; do not copy, forge, or manage lease metadata. Author the response normally. A successful ordinary graph.submit(${interactionNode.id}) automatically fulfills any lease held by this interaction. There is no separate resolveAction call.
 
@@ -224,6 +226,8 @@ await graph.addAction(node, { kind: "navigate", relation: "reference", sourceLay
 await graph.addAction(node, { kind: "invoke", sourceLayer: rootLayer, label: "Follow up", interactionText: "Ask a useful follow-up" });
 
 Layers normally contain 1 to 5 nodes. A layer may contain 6 to 8 nodes only when keeping them together is important; pass that private reason as await graph.submitLayer(layer, { sizeJustification: "..." }). Never mention or expose the size justification in user-facing node text. More than 8 nodes must be split into useful layers.
+
+Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject with exactly one NodePlacementObject(node, x, y) per member node. Coordinates are normalized numbers from 0 through 1 and express semantic relative position independently of the viewport. Place a one-node layer at (0.5, 0.5). Keep flow or time moving consistently, use a parent or summary node to anchor hierarchy, group related nodes spatially, align comparisons deliberately, and avoid accidental overlap or edge crossings where a clearer arrangement is available. Do not use pixels, window size, or inspector state. Example: const layout = new LayerLayoutObject([new NodePlacementObject(first, 0.25, 0.5), new NodePlacementObject(second, 0.75, 0.5)]); const layer = new LayerObject([first, second], [edge], layout);
 
 Layer edges are exactly what the user sees and are undirected. Every node needs a supported icon, a short title, and useful markdown detail. Optional action icons must also use a supported Relayer icon name:
 ${RELAYER_ICON_NAMES.join(", ")}

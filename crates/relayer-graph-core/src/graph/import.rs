@@ -66,6 +66,23 @@ pub struct ImportedLayer {
     pub id: String,
     pub nodes: Vec<String>,
     pub edges: Vec<String>,
+    #[serde(default)]
+    pub layout: Option<ImportedLayerLayout>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedLayerLayout {
+    pub version: u32,
+    pub placements: Vec<ImportedNodePlacement>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedNodePlacement {
+    pub node_id: String,
+    pub x: f64,
+    pub y: f64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -263,6 +280,7 @@ impl crate::GraphDatabase {
                 if !seen_layers.insert(resolved.layer.id.clone()) {
                     continue;
                 }
+                validate_imported_layout(&resolved.layer)?;
                 for edge in &resolved.edges {
                     if edge_ids.contains_key(&edge.id) {
                         continue;
@@ -275,8 +293,10 @@ impl crate::GraphDatabase {
                         .bind(owner).bind(&edge.id).execute(&mut *tx).await?;
                     edge_ids.insert(edge.id.clone(), result.last_insert_rowid());
                 }
-                let result = sqlx::query("INSERT INTO layers(project_id,thread_id,state,owner_interaction_id,client_key) VALUES (?1,?2,'accepted',?3,?4)")
-                    .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value()).bind(owner).bind(&resolved.layer.id)
+                let result = sqlx::query("INSERT INTO layers(project_id,thread_id,layout_schema_version,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,'accepted',?4,?5)")
+                    .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value())
+                    .bind(resolved.layer.layout.as_ref().map(|layout| i64::from(layout.version)))
+                    .bind(owner).bind(&resolved.layer.id)
                     .execute(&mut *tx).await?;
                 layer_ids.insert(resolved.layer.id, result.last_insert_rowid());
             }
@@ -312,6 +332,20 @@ impl crate::GraphDatabase {
                     .bind(index as i64)
                     .execute(&mut *tx)
                     .await?;
+                }
+                if let Some(layout) = &resolved.layer.layout {
+                    for (index, placement) in layout.placements.iter().enumerate() {
+                        sqlx::query(
+                            "INSERT INTO layer_placements(layer_id,node_id,position,x,y) VALUES (?1,?2,?3,?4,?5)",
+                        )
+                        .bind(layer)
+                        .bind(node_ids[&placement.node_id])
+                        .bind(index as i64)
+                        .bind(placement.x)
+                        .bind(placement.y)
+                        .execute(&mut *tx)
+                        .await?;
+                    }
                 }
             }
         }
@@ -527,6 +561,45 @@ impl crate::GraphDatabase {
         tx.commit().await?;
         Ok(())
     }
+}
+
+fn validate_imported_layout(layer: &ImportedLayer) -> Result<(), GraphError> {
+    let Some(layout) = &layer.layout else {
+        return Ok(());
+    };
+    if layout.version != 1 {
+        return Err(GraphError::Internal(format!(
+            "imported layer {} has unsupported layout version {}",
+            layer.id, layout.version
+        )));
+    }
+    if layout.placements.len() != layer.nodes.len() {
+        return Err(GraphError::Internal(format!(
+            "imported layer {} layout does not place every node exactly once",
+            layer.id
+        )));
+    }
+    let members = layer
+        .nodes
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let mut placed = HashSet::new();
+    for placement in &layout.placements {
+        if !members.contains(placement.node_id.as_str())
+            || !placed.insert(placement.node_id.as_str())
+            || !placement.x.is_finite()
+            || !(0.0..=1.0).contains(&placement.x)
+            || !placement.y.is_finite()
+            || !(0.0..=1.0).contains(&placement.y)
+        {
+            return Err(GraphError::Internal(format!(
+                "imported layer {} has an invalid authored layout",
+                layer.id
+            )));
+        }
+    }
+    Ok(())
 }
 
 async fn source_turn_position(

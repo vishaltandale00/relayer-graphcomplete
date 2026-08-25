@@ -46,6 +46,14 @@ fn layer(id: &str, node_id: &str, actions: Vec<ExportAction>) -> ExportResolvedL
             id: id.into(),
             nodes: vec![node_id.into()],
             edges: vec![],
+            layout: Some(ExportLayerLayout {
+                version: 1,
+                placements: vec![ExportNodePlacement {
+                    node_id: node_id.into(),
+                    x: 0.5,
+                    y: 0.5,
+                }],
+            }),
             state: ExportRecordState::Accepted,
         },
         nodes: vec![ExportNode {
@@ -237,6 +245,54 @@ fn serializes_exactly_header_and_turn_records_and_round_trips() {
     assert!(
         serde_json::from_str::<ConversationExportRecord>(r#"{"recordType":"artifact"}"#).is_err()
     );
+}
+
+#[test]
+fn preserves_legacy_missing_layout_and_rejects_invalid_portable_layouts() {
+    let mut legacy = records();
+    let ConversationExportRecord::Turn(turn) = &mut legacy[1] else {
+        unreachable!()
+    };
+    turn.accepted_view.as_mut().unwrap().layers[0].layer.layout = None;
+    validate_export_records(&legacy).unwrap();
+
+    let mut unsupported = records();
+    let ConversationExportRecord::Turn(turn) = &mut unsupported[1] else {
+        unreachable!()
+    };
+    turn.accepted_view.as_mut().unwrap().layers[0]
+        .layer
+        .layout
+        .as_mut()
+        .unwrap()
+        .version = 2;
+    assert_rejected_with_parity(&unsupported, "unsupported_layout_version");
+
+    let mut outside = records();
+    let ConversationExportRecord::Turn(turn) = &mut outside[1] else {
+        unreachable!()
+    };
+    turn.accepted_view.as_mut().unwrap().layers[0]
+        .layer
+        .layout
+        .as_mut()
+        .unwrap()
+        .placements[0]
+        .node_id = "node:outside".into();
+    assert_rejected_with_parity(&outside, "layout_node_outside_layer");
+
+    let mut invalid_coordinate = records();
+    let ConversationExportRecord::Turn(turn) = &mut invalid_coordinate[1] else {
+        unreachable!()
+    };
+    turn.accepted_view.as_mut().unwrap().layers[0]
+        .layer
+        .layout
+        .as_mut()
+        .unwrap()
+        .placements[0]
+        .x = 1.1;
+    assert_rejected_with_parity(&invalid_coordinate, "layout_coordinate_invalid");
 }
 
 #[test]
