@@ -447,6 +447,13 @@ describe("desktop skeleton", () => {
       window: { GRAPHCOMPLETE_CONFIG: null, relayerDesktop: undefined },
     });
     vi.useFakeTimers();
+    const cancelPendingAutomatic = vi.fn();
+    vi.doMock("../desktop/renderer/src/onboarding-tutorial.js", () => ({
+      onboardingTutorialController: () => ({
+        cancelPendingAutomatic,
+        threadCreated: vi.fn(),
+      }),
+    }));
     try {
       const { viewState } = await import("../desktop/renderer/src/state.js");
       viewState.selectedPermissionProfileId = "auto";
@@ -457,7 +464,10 @@ describe("desktop skeleton", () => {
       };
       const first = createFirstThread(pickerPayload);
       const repeated = createFirstThread(pickerPayload);
+      expect(cancelPendingAutomatic).toHaveBeenCalledTimes(2);
       expect(fetch).toHaveBeenCalledOnce();
+      expect(cancelPendingAutomatic.mock.invocationCallOrder[0])
+        .toBeLessThan(fetch.mock.invocationCallOrder[0]);
       expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({
         permissionProfileId: "auto",
         ...pickerPayload,
@@ -472,6 +482,7 @@ describe("desktop skeleton", () => {
       expect(button.disabled).toBe(true);
       expect(toastElement.textContent).toBe("test request stopped");
     } finally {
+      vi.doUnmock("../desktop/renderer/src/onboarding-tutorial.js");
       vi.clearAllTimers();
       vi.useRealTimers();
       for (const [name, descriptor] of originalGlobals) {

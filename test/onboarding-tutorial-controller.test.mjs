@@ -499,6 +499,76 @@ describe("onboarding tutorial controller", () => {
     expect(test.controller.snapshot()).toMatchObject({ phase: "initial-composer" });
   });
 
+  it("lets a Settings takeover revoke an automatic start during lifecycle begin", async () => {
+    const automaticBegin = deferred();
+    const dismiss = vi.fn()
+      .mockResolvedValueOnce({ status: "dismissed" })
+      .mockRejectedValueOnce(new Error("redundant cleanup must not run"));
+    const test = fixture({
+      lifecycle: lifecycle({
+        beginAutomatic: vi.fn(() => automaticBegin.promise),
+        dismiss,
+      }),
+    });
+
+    const starting = test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    });
+    await vi.waitFor(() => expect(test.lifecycle.beginAutomatic).toHaveBeenCalledOnce());
+
+    expect(test.controller.cancelPendingAutomatic()).toBe(true);
+    await vi.waitFor(() => expect(test.lifecycle.dismiss).toHaveBeenCalledOnce());
+    automaticBegin.resolve({ started: true, source: "automatic" });
+
+    await expect(starting).resolves.toBe(false);
+    expect(test.lifecycle.dismiss).toHaveBeenCalledOnce();
+    expect(test.openNewThread).not.toHaveBeenCalled();
+    expect(test.controller.isActive()).toBe(false);
+  });
+
+  it("guards composer mutation when prompt typing takes over during automatic preparation", async () => {
+    const preparation = deferred();
+    const mutateComposer = vi.fn();
+    const openNewThread = vi.fn(async ({ guard }) => {
+      await preparation.promise;
+      if (!guard()) return false;
+      mutateComposer();
+      return true;
+    });
+    const test = fixture({ openNewThread });
+
+    const starting = test.controller.maybeStartAutomatic({
+      providerConnected: true,
+      threadCount: 0,
+    });
+    await vi.waitFor(() => expect(openNewThread).toHaveBeenCalledOnce());
+
+    expect(test.controller.cancelPendingAutomatic()).toBe(true);
+    preparation.resolve();
+
+    await expect(starting).resolves.toBe(false);
+    expect(mutateComposer).not.toHaveBeenCalled();
+    expect(test.controller.isActive()).toBe(false);
+  });
+
+  it("does not let automatic takeover cancellation revoke a pending manual start", async () => {
+    const manualBegin = deferred();
+    const test = fixture({
+      lifecycle: lifecycle({ beginManual: vi.fn(() => manualBegin.promise) }),
+    });
+
+    const starting = test.controller.startManual();
+    await vi.waitFor(() => expect(test.lifecycle.beginManual).toHaveBeenCalledOnce());
+    expect(test.controller.cancelPendingAutomatic()).toBe(false);
+    expect(test.lifecycle.dismiss).not.toHaveBeenCalled();
+
+    manualBegin.resolve({ started: true, source: "manual" });
+    await expect(starting).resolves.toBe(true);
+    expect(test.openNewThread).toHaveBeenCalledOnce();
+    expect(test.controller.isActive()).toBe(true);
+  });
+
   it("releases automatic ownership when the lifecycle eligibility read rejects", async () => {
     const test = fixture({
       lifecycle: lifecycle({
@@ -863,11 +933,15 @@ describe("onboarding tutorial controller", () => {
   });
 
   it("wires tutorial transitions only after successful renderer operations", async () => {
-    const [graph, main, onboarding, threads] = await Promise.all([
+    const [graph, main, onboarding, threads, picker, composerPicker, permissions, navigation] = await Promise.all([
       readFile(new URL("../desktop/renderer/src/graph.js", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/src/main.js", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/src/onboarding-tutorial.js", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/src/threads.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/model-picker.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/composer-model-picker.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/permission-profiles.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/navigation.js", import.meta.url), "utf8"),
     ]);
     expect(threads.indexOf("createdInteraction = await request"))
       .toBeLessThan(threads.indexOf("followupSubmitted({"));
@@ -900,6 +974,19 @@ describe("onboarding tutorial controller", () => {
       .toBeLessThan(main.indexOf("tutorial.maybeStartAutomatic({"));
     expect(onboarding).toContain("guard: canOpen,");
     expect(onboarding).toContain("&& isComposerReady()");
+    expect(onboarding).toContain("cancelPendingAutomatic,");
+    expect(main.match(/takeOverPendingAutomaticTutorial\(\);/g)).toHaveLength(5);
+    expect(main).toContain(`$("#newThreadPrompt").oninput = () => {
+    takeOverPendingAutomaticTutorial();`);
+    expect(main).toContain(`$("#settingsButton").onclick = async () => {
+    takeOverPendingAutomaticTutorial();`);
+    expect(main).toContain("onUserTakeover: takeOverPendingAutomaticTutorial,");
+    expect(composerPicker).toContain("onUserTakeover,");
+    expect(picker).toContain("onUserTakeover();");
+    expect(permissions).toContain("onboardingTutorialController()?.cancelPendingAutomatic();");
+    expect(navigation).toContain("if (userInitiated) onboardingTutorialController()?.cancelPendingAutomatic();");
+    expect(threads.indexOf("onboardingTutorialController()?.cancelPendingAutomatic();"))
+      .toBeLessThan(threads.indexOf('const input = $("#newThreadPrompt");'));
     expect(main).toContain("if (!providerConnected) await onboardingTutorialController()?.leave();");
     expect(main.indexOf("await desktop?.account.logout();"))
       .toBeLessThan(main.indexOf("await onboardingTutorialController()?.leave();"));

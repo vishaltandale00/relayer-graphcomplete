@@ -116,6 +116,7 @@ export function createOnboardingTutorialController({
   let completionFocused = false;
   let startAttempt = 0;
   let pendingStart = null;
+  const startCleanup = new Map();
 
   function removeDescription(target) {
     if (!target) return;
@@ -342,7 +343,16 @@ export function createOnboardingTutorialController({
     if (ownsStart(attempt)) pendingStart = null;
   }
 
+  async function settleRegisteredCleanup(attempt) {
+    const existingCleanup = startCleanup.get(attempt);
+    if (!existingCleanup) return false;
+    await existingCleanup;
+    startCleanup.delete(attempt);
+    return true;
+  }
+
   async function cleanupOwnedStart(attempt, { suppressError = false } = {}) {
+    if (await settleRegisteredCleanup(attempt)) return;
     const owned = ownsStart(attempt);
     if (!owned && (pendingStart || active)) return;
     try {
@@ -357,6 +367,17 @@ export function createOnboardingTutorialController({
   function revokePendingStart() {
     startAttempt += 1;
     pendingStart = null;
+  }
+
+  function cancelPendingAutomatic() {
+    if (active || pendingStart?.source !== "automatic") return false;
+    const attempt = pendingStart.attempt;
+    revokePendingStart();
+    const cleanup = Promise.resolve()
+      .then(() => lifecycle.dismiss())
+      .catch(() => undefined);
+    startCleanup.set(attempt, cleanup);
+    return true;
   }
 
   function liveThreadCount(fallback) {
@@ -376,10 +397,13 @@ export function createOnboardingTutorialController({
     try {
       current = await lifecycle.read(context);
     } catch (error) {
-      clearStart(attempt);
+      if (!await settleRegisteredCleanup(attempt)) clearStart(attempt);
       throw error;
     }
-    if (!ownsStart(attempt)) return false;
+    if (!ownsStart(attempt)) {
+      await settleRegisteredCleanup(attempt);
+      return false;
+    }
     if (active) {
       clearStart(attempt);
       return false;
@@ -491,6 +515,7 @@ export function createOnboardingTutorialController({
 
   return Object.freeze({
     maybeStartAutomatic,
+    cancelPendingAutomatic,
     startManual: () => start("manual"),
     threadCreated: ({ threadId, interactionId }) => dispatch({
       type: "thread-created",
@@ -511,6 +536,7 @@ export function createOnboardingTutorialController({
     skip: () => dismiss("skip"),
     dispose() {
       revokePendingStart();
+      startCleanup.clear();
       hide();
       tutorialWindow.removeEventListener?.("resize", repositionForViewportChange);
       tutorialDocument.removeEventListener?.("scroll", repositionForViewportChange, true);

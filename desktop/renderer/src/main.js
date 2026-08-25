@@ -67,6 +67,10 @@ function updateTutorialAvailability() {
     : "Choose an available model and permission profile to start the tutorial";
 }
 
+function takeOverPendingAutomaticTutorial() {
+  onboardingTutorialController()?.cancelPendingAutomatic();
+}
+
 async function openNewThreadComposer({ prompt = "", guard = null } = {}) {
   const applyPermissionProfiles = await preparePermissionProfiles(
     appState.modelSettings?.defaults?.harnessId,
@@ -100,6 +104,7 @@ async function maybeStartAutomaticTutorial(providerConnected) {
 function bindEvents() {
   $("#connectCodex").onclick = connectCodex;
   $("#newThread").onclick = async () => {
+    takeOverPendingAutomaticTutorial();
     try {
       await openNewThreadComposer();
     } catch (error) {
@@ -107,6 +112,7 @@ function bindEvents() {
     }
   };
   $("#scopeButton").onclick = () => {
+    takeOverPendingAutomaticTutorial();
     closePermissionMenu();
     closeNewThreadModelPicker();
     const menu = $("#scopeMenu");
@@ -115,6 +121,7 @@ function bindEvents() {
     $("#scopeButton").setAttribute("aria-expanded", String(opening));
   };
   $("#permissionButton").onclick = () => {
+    takeOverPendingAutomaticTutorial();
     $("#scopeMenu").classList.add("hidden");
     $("#scopeButton").setAttribute("aria-expanded", "false");
     closeNewThreadModelPicker();
@@ -122,6 +129,7 @@ function bindEvents() {
   };
   $("#createThread").onclick = () => createFirstThread();
   $("#newThreadPrompt").oninput = () => {
+    takeOverPendingAutomaticTutorial();
     updateCreateThreadAvailability();
   };
   bindComposerKeydown($("#newThreadPrompt"), () => {
@@ -135,6 +143,7 @@ function bindEvents() {
     $("#collapseSidebar").setAttribute("aria-label", label);
   };
   $("#settingsButton").onclick = async () => {
+    takeOverPendingAutomaticTutorial();
     cancelNavigationHistory();
     setMainView("settings", { moveFocus: true });
     try {
@@ -264,6 +273,7 @@ async function boot() {
   await loadPermissionProfiles(appState.modelSettings?.defaults?.harnessId);
   if (productApiAvailable) {
     initializeNewThreadModelPicker({
+      onUserTakeover: takeOverPendingAutomaticTutorial,
       onSelectionChange: () => {
         updateCreateThreadAvailability();
         updateTutorialAvailability();

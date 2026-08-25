@@ -897,6 +897,7 @@ async function createOrReuseProject(selectedScope) {
 }
 
 export async function createFirstThread(pickerPayloadOverride = null) {
+  onboardingTutorialController()?.cancelPendingAutomatic();
   const input = $("#newThreadPrompt");
   const promptText = input.value.trim();
   const permissionProfileId = viewState.selectedPermissionProfileId;
