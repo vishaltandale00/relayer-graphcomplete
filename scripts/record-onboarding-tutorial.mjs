@@ -237,7 +237,20 @@ async function click(webContents, selector) {
 
 async function typeText(webContents, selector, value) {
   await click(webContents, selector);
-  webContents.insertText(value);
+  for (const character of value) {
+    await webContents.executeJavaScript(`(() => {
+      const element = document.querySelector(${JSON.stringify(selector)});
+      if (!element) return false;
+      element.value += ${JSON.stringify(character)};
+      element.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        data: ${JSON.stringify(character)},
+        inputType: "insertText",
+      }));
+      return true;
+    })()`);
+    await pause(35);
+  }
   await waitFor(`text in ${selector}`, () => webContents.executeJavaScript(
     `document.querySelector(${JSON.stringify(selector)})?.value?.includes(${JSON.stringify(value)})`,
   ));
@@ -446,8 +459,6 @@ async function run() {
   });
   mainWindow.setAlwaysOnTop(true);
   mainWindow.show();
-  app.focus({ steal: true });
-  mainWindow.focus();
   mainWindow.moveTop();
   await waitFor("the visible Electron window", () => mainWindow.isVisible());
   await pause(500);
