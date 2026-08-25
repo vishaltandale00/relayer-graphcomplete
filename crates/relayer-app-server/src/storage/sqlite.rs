@@ -1,4 +1,5 @@
 mod action_invocations;
+mod annotations;
 mod approvals;
 mod catalog;
 mod conversation_imports;

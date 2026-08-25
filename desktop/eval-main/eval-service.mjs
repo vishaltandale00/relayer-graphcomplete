@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { link, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -61,9 +61,46 @@ const deterministicJudgeId = "deterministic-graph-contract";
 const simulatedUserJudgeId = "simulated-user";
 const simulatedUserJudgeIds = new Set([simulatedUserJudgeId, "simulated-user-sol-high"]);
 const MAX_CONVERSATION_IMPORT_BYTES = 256 * 1024 * 1024;
+const ANNOTATION_EXPORT_EXECUTION_STATUSES = new Set(["passed", "failed", "imported"]);
+const ANNOTATION_EXPORT_TURN_STATUSES = new Set(["accepted", "failed", "stopped"]);
 
 function copy(value) {
   return structuredClone(value);
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item === undefined ? null : item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .filter((key) => value[key] !== undefined)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sha256(value) {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function finalizedAnnotationCoverage(execution) {
+  if (!ANNOTATION_EXPORT_EXECUTION_STATUSES.has(execution?.status)) return false;
+  const threadIds = [...new Set(execution.threadIds || [])];
+  if (!threadIds.length || !(execution.turns?.length > 0)) return false;
+  const covered = new Set();
+  for (const turn of execution.turns) {
+    if (
+      turn?.threadId == null
+      || turn?.interactionId == null
+      || !threadIds.some((threadId) => String(threadId) === String(turn.threadId))
+      || !ANNOTATION_EXPORT_TURN_STATUSES.has(turn.status)
+    ) return false;
+    covered.add(String(turn.threadId));
+  }
+  return threadIds.every((threadId) => covered.has(String(threadId)));
 }
 
 function summarize(run) {
@@ -101,6 +138,7 @@ export class EvalService {
     candidateTraceRequired = false,
     conversationImportEnabled = false,
     conversationImportMaxBytes = MAX_CONVERSATION_IMPORT_BYTES,
+    annotationSnapshotLoader = null,
     platform = process.platform,
   }) {
     this.stateFile = stateFile;
@@ -116,6 +154,7 @@ export class EvalService {
     this.candidateTraceRequired = candidateTraceRequired;
     this.conversationImportEnabled = conversationImportEnabled;
     this.conversationImportMaxBytes = conversationImportMaxBytes;
+    this.annotationSnapshotLoader = annotationSnapshotLoader;
     this.platform = platform;
     this.runs = [];
     this.configurations = new Map();
@@ -623,6 +662,127 @@ export class EvalService {
     }
   }
 
+  async exportAnnotatedExecution(executionId) {
+    if (typeof this.annotationSnapshotLoader !== "function") {
+      throw new Error("Annotation export is unavailable in this EvalService.");
+    }
+    const run = this.runs.find((candidate) => (
+      candidate.executions.some((execution) => execution.id === executionId)
+    ));
+    const execution = run?.executions.find((candidate) => candidate.id === executionId);
+    if (!run || !execution) throw new Error(`Unknown execution: ${executionId}`);
+    if (!finalizedAnnotationCoverage(execution)) {
+      throw new Error("Annotation export requires a terminal execution with finalized thread and turn coverage.");
+    }
+    const durableExecution = await this.#durableExecutionForAnnotationExport(run, executionId);
+    if (!finalizedAnnotationCoverage(durableExecution)) {
+      throw new Error("The durable source run bundle does not contain finalized execution coverage.");
+    }
+    const threadIds = [...new Set(durableExecution.threadIds)];
+    if (canonicalJson(threadIds) !== canonicalJson([...new Set(execution.threadIds)])) {
+      throw new Error("The execution thread coverage does not match its durable source run bundle.");
+    }
+    const annotationSnapshot = await this.annotationSnapshotLoader(threadIds);
+    if (
+      annotationSnapshot?.schemaVersion !== 1
+      || annotationSnapshot?.kind !== "relayer_eval_annotation_snapshot_set"
+      || typeof annotationSnapshot?.annotationsSha256 !== "string"
+      || !annotationSnapshot.annotationsSha256.startsWith("sha256:")
+    ) {
+      throw new Error("Annotation snapshot loader returned an invalid atomic snapshot set.");
+    }
+    const annotationThreads = annotationSnapshot?.threads;
+    if (!Array.isArray(annotationThreads) || annotationThreads.length !== threadIds.length) {
+      throw new Error("Annotation snapshot loader returned incomplete thread coverage.");
+    }
+    const missingThreadIds = new Set(threadIds.map(String));
+    for (const snapshot of annotationThreads) {
+      if (!missingThreadIds.delete(String(snapshot?.threadId))) {
+        throw new Error("Annotation snapshot loader returned an unexpected or duplicate thread.");
+      }
+    }
+    if (missingThreadIds.size) {
+      throw new Error("Annotation snapshot loader omitted an execution thread.");
+    }
+
+    const exportedAt = new Date().toISOString();
+    // The backend hashes only the ordered thread histories, not exportedAt.
+    // Preserve that transaction-bound digest so identical histories have an
+    // identical material identity even when captured at different times.
+    const annotationMaterialSha256 = annotationSnapshot.annotationsSha256;
+    const fixedGraphReferences = durableExecution.turns.map((turn) => ({
+      threadId: turn.threadId,
+      interactionId: turn.interactionId,
+      graphNodeId: turn.graphNodeId,
+      rootLayerId: turn.rootLayerId,
+      completionStatus: turn.status,
+    }));
+    const unsigned = {
+      bundleSchemaVersion: 1,
+      kind: "relayer_eval_annotated_execution_bundle",
+      testRunId: run.id,
+      executionId: execution.id,
+      exportedAt,
+      sourceRunBundleRef: run.bundleRef,
+      execution: copy(durableExecution),
+      fixedGraphReferences,
+      annotationMaterialSha256,
+      annotationSnapshot: copy(annotationSnapshot),
+    };
+    const bundle = {
+      ...unsigned,
+      integritySha256: sha256(canonicalJson(unsigned)),
+    };
+    const exportId = `${exportedAt.replace(/[:.]/g, "-")}-${randomUUID()}`;
+    const bundleRef = [
+      "runs",
+      encodeURIComponent(run.id),
+      "annotation-exports",
+      encodeURIComponent(execution.id),
+      exportId,
+      "bundle.json",
+    ].join("/");
+    const bundleFile = join(dirname(this.stateFile), ...bundleRef.split("/"));
+    await mkdir(dirname(bundleFile), { recursive: true });
+    await writeFile(bundleFile, `${JSON.stringify(bundle, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+      flag: "wx",
+    });
+    return copy({
+      bundleRef,
+      exportedAt,
+      annotationMaterialSha256,
+      integritySha256: bundle.integritySha256,
+    });
+  }
+
+  async #durableExecutionForAnnotationExport(run, executionId) {
+    const expectedBundleRef = ["runs", encodeURIComponent(run.id), "bundle.json"].join("/");
+    if (run.bundleRef !== expectedBundleRef) {
+      throw new Error("Annotation export requires a durable source run bundle.");
+    }
+    let bundle;
+    try {
+      bundle = JSON.parse(await readFile(
+        join(dirname(this.stateFile), ...expectedBundleRef.split("/")),
+        "utf8",
+      ));
+    } catch {
+      throw new Error("Annotation export could not read the durable source run bundle.");
+    }
+    if (
+      bundle?.kind !== "relayer_eval_run_bundle"
+      || bundle?.testRunId !== run.id
+      || bundle?.run?.bundleRef !== expectedBundleRef
+    ) {
+      throw new Error("Annotation export found an invalid durable source run bundle.");
+    }
+    const execution = bundle.run.executions?.find((candidate) => candidate.id === executionId);
+    if (!execution) throw new Error("The durable source run bundle omits this execution.");
+    return execution;
+  }
+
   async #run(run) {
     run.status = "running";
     await this.#changed();
@@ -630,11 +790,12 @@ export class EvalService {
       await this.#execute(execution);
       await this.#changed();
     }
-    run.status = run.executions.some((execution) => execution.status === "error")
+    const terminalStatus = run.executions.some((execution) => execution.status === "error")
       ? "error"
       : run.executions.every((execution) => execution.status === "passed") ? "passed" : "failed";
     run.completedAt = new Date().toISOString();
-    await this.#writeRunBundle(run);
+    await this.#writeRunBundle(run, terminalStatus);
+    run.status = terminalStatus;
     await this.#changed();
   }
 
@@ -1078,7 +1239,7 @@ export class EvalService {
     }
   }
 
-  async #writeRunBundle(run) {
+  async #writeRunBundle(run, durableStatus = run.status) {
     if (run.bundleRef) return;
     const bundleRef = ["runs", encodeURIComponent(run.id), "bundle.json"].join("/");
     const bundleFile = join(dirname(this.stateFile), ...bundleRef.split("/"));
@@ -1086,7 +1247,7 @@ export class EvalService {
       bundleSchemaVersion: 1,
       kind: "relayer_eval_run_bundle",
       testRunId: run.id,
-      run: { ...copy(run), bundleRef },
+      run: { ...copy(run), status: durableStatus, bundleRef },
     };
     await mkdir(dirname(bundleFile), { recursive: true });
     try {

@@ -8,7 +8,7 @@ export function productWorkspaceMarkup() {
         <button id="historyForward" data-review-ref="history-forward" data-review-kind="history" disabled title="Forward" aria-label="Forward"><span aria-hidden="true">→</span><i class="history-spinner hidden" aria-hidden="true"></i></button>
       </nav>
       <div class="thread-title-group">
-        <div class="thread-title-copy"><h2 id="threadTitle">New thread</h2><p id="threadScope">No folder</p></div>
+        <div class="thread-title-copy"><div class="thread-title-row"><h2 id="threadTitle">New thread</h2><button class="annotation-count-badge hidden" id="threadAnnotationBadge" type="button" aria-label="Open thread comments"></button></div><p id="threadScope">No folder</p></div>
         <div class="conversation-settings hidden" id="conversationSettings">
           <button class="conversation-settings-button" id="conversationSettingsButton" type="button" title="Conversation settings" aria-label="Conversation settings" aria-expanded="false" aria-controls="conversationSettingsMenu">•••</button>
           <div class="conversation-settings-menu hidden" id="conversationSettingsMenu" role="menu" aria-label="Conversation settings">
@@ -25,6 +25,7 @@ export function productWorkspaceMarkup() {
             <div class="interaction-copy-header">
               <small>Your interaction<span class="interaction-model-identity hidden" id="interactionModelIdentity"></span></small>
               <div class="turn-picker" id="turnPicker">
+                <button class="annotation-count-badge hidden" id="turnAnnotationBadge" type="button" aria-label="Open turn comments"></button>
                 <div class="turn-stepper" role="group" aria-label="Turn navigation">
                   <button id="previousTurn" data-review-ref="previous-turn" data-review-kind="turn" disabled title="Previous turn" aria-label="Previous turn">←</button>
                   <button id="turnPickerButton" class="turn-picker-button" type="button" aria-expanded="false" aria-controls="turnPopover" disabled>Turn 0 of 0</button>
@@ -39,7 +40,7 @@ export function productWorkspaceMarkup() {
         <nav class="workspace-breadcrumb" id="workspaceBreadcrumb" data-review-capture="breadcrumb" aria-label="Graph layer path"></nav>
         <div class="graph-empty" id="graphEmpty"><div class="thinking-dots" id="thinkingDots" role="status" aria-label="Waiting for graph"><i></i><i></i><i></i></div><p id="graphEmptyMessage">This interaction has no accepted graph yet.</p></div>
         <div class="graph-stage hidden" id="graphStage" tabindex="-1" data-review-capture="layer-viewport" role="region" aria-label="Visible graph layer">
-          <svg id="edgeCanvas" aria-hidden="true"></svg>
+          <svg id="edgeCanvas" aria-label="Graph relationships"></svg>
           <div id="nodeLayer"></div>
           <div class="graph-hint">Scroll or pinch to zoom · Drag canvas to pan · Drag nodes for this view</div>
           <div class="graph-controls" role="toolbar" aria-label="Graph view controls">
@@ -83,9 +84,29 @@ export function productWorkspaceMarkup() {
       </div>
       <aside class="inspector hidden" id="inspector" data-review-capture="node-detail" aria-label="Selected node detail">
         <div class="inspector-header"><span>Node details</span><button class="icon-button" id="closeInspector" data-review-ref="close-node-detail" aria-label="Close node details">×</button></div>
-        <div class="node-heading"><div class="node-icon" id="detailIcon">N</div><div><small id="detailKind">CONCEPT</small><h2 id="detailTitle"></h2></div></div>
-        <div class="node-content" id="detailContent"></div>
-        <div class="inline-actions hidden" id="detailActions"></div>
+        <div class="inspector-content" id="inspectorContent">
+          <div class="node-heading"><div class="node-icon" id="detailIcon">N</div><div><small id="detailKind">CONCEPT</small><h2 id="detailTitle"></h2></div></div>
+          <div class="node-content" id="detailContent"></div>
+          <div class="inline-actions hidden" id="detailActions"></div>
+        </div>
+        <section class="annotation-panel hidden" id="annotationPanel" aria-labelledby="annotationHeading">
+          <div class="annotation-heading"><span id="annotationHeading">Comments</span><span id="annotationCount">0</span></div>
+          <div class="annotation-list" id="annotationList"></div>
+          <form class="annotation-composer" id="annotationComposer">
+            <textarea id="annotationComment" rows="2" maxlength="8000" placeholder="Leave a comment…" aria-label="Comment"></textarea>
+            <div class="annotation-composer-footer">
+              <div class="annotation-rating" id="annotationRating">
+                <div class="annotation-rating-labels">
+                  <button type="button" data-rating="1">Bad</button><button type="button" data-rating="2">Needs work</button><button type="button" data-rating="3">Good</button><button type="button" data-rating="4">Great</button>
+                </div>
+                <input id="annotationRatingInput" type="range" min="1" max="4" step="1" value="2" aria-label="Comment rating" aria-valuetext="No rating selected">
+                <output id="annotationRatingOutput" aria-live="polite"></output>
+              </div>
+              <button class="annotation-submit" id="submitAnnotation" type="submit" aria-label="Post comment" title="Post comment" disabled>↑</button>
+            </div>
+            <p class="annotation-error hidden" id="annotationError" role="alert"></p>
+          </form>
+        </section>
       </aside>
     </div>
   `;

@@ -2,6 +2,8 @@ use super::{ApiState, CONTROL_COOKIE, error::ApiError};
 use axum::http::HeaderMap;
 use std::sync::Arc;
 
+pub const ANNOTATION_COOKIE: &str = "relayer_annotation";
+
 #[derive(Clone)]
 pub(crate) struct DesktopSessionAuthenticator {
     control_token: Arc<str>,
@@ -20,17 +22,31 @@ impl DesktopSessionAuthenticator {
     }
 
     fn supplied_token<'a>(&self, headers: &'a HeaderMap) -> Option<&'a str> {
-        headers
-            .get("cookie")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|cookies| {
-                cookies.split(';').find_map(|cookie| {
-                    let (name, value) = cookie.trim().split_once('=')?;
-                    (name == CONTROL_COOKIE).then_some(value)
-                })
-            })
+        cookie(headers, CONTROL_COOKIE)
     }
 
+    pub(crate) fn annotation_token<'a>(&self, headers: &'a HeaderMap) -> Option<&'a str> {
+        cookie(headers, ANNOTATION_COOKIE)
+    }
+
+    pub(crate) fn is_control(&self, headers: &HeaderMap) -> bool {
+        self.supplied_token(headers) == Some(self.control_token.as_ref())
+    }
+}
+
+fn cookie<'a>(headers: &'a HeaderMap, expected_name: &str) -> Option<&'a str> {
+    headers
+        .get("cookie")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|cookies| {
+            cookies.split(';').find_map(|cookie| {
+                let (name, value) = cookie.trim().split_once('=')?;
+                (name == expected_name).then_some(value)
+            })
+        })
+}
+
+impl DesktopSessionAuthenticator {
     pub(crate) fn authorize_read(&self, headers: &HeaderMap) -> Result<(), ApiError> {
         let supplied = self.supplied_token(headers);
         if supplied == Some(self.control_token.as_ref())

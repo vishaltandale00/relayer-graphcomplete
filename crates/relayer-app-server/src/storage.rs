@@ -103,4 +103,6 @@ pub(crate) enum StorageError {
     Catalog(#[from] crate::product::CatalogError),
     #[error("stored approval conflicts with an existing durable record: {0}")]
     ApprovalConflict(String),
+    #[error("annotation write conflicts with durable history: {0}")]
+    AnnotationConflict(String),
 }
