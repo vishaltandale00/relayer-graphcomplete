@@ -2321,20 +2321,23 @@ async function failedTraceDiagnostics(interaction, threadId, label) {
     const item = event.data?.params?.item;
     return event.type === "run.failed"
       || (event.type === "provider.event" && event.data?.method === "turn/failed")
+      || (event.type === "provider.event" && String(event.data?.method || "").endsWith("/requestApproval"))
       || (event.type === "provider.event"
         && event.data?.method === "item/completed"
         && ["commandExecution", "agentMessage"].includes(item?.type));
   });
   const commandEvents = relevantEvents.filter((event) => event.data?.params?.item?.type === "commandExecution").slice(-8);
+  const approvalEvents = relevantEvents.filter((event) => String(event.data?.method || "").endsWith("/requestApproval")).slice(-8);
   const messageEvents = relevantEvents.filter((event) => event.data?.params?.item?.type === "agentMessage").slice(-8);
   const terminalEvents = relevantEvents.filter((event) => !["commandExecution", "agentMessage"].includes(event.data?.params?.item?.type)).slice(-4);
-  const relevant = [...commandEvents, ...messageEvents, ...terminalEvents].map((event) => {
+  const relevant = [...approvalEvents, ...commandEvents, ...messageEvents, ...terminalEvents].map((event) => {
     const item = event.data?.params?.item;
     return sanitizeEvidence({
       sequence: event.sequence,
       type: event.type,
       method: event.data?.method,
       message: event.data?.message ?? event.data?.params?.error?.message,
+      params: String(event.data?.method || "").endsWith("/requestApproval") ? event.data?.params : undefined,
       item: item === undefined ? undefined : {
         type: item.type,
         status: item.status,

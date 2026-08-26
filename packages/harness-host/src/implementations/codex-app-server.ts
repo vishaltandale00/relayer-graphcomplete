@@ -34,6 +34,7 @@ export interface CodexAppServerTurnOptions {
   readonly spawnProcess?: CodexAppServerSpawn;
   readonly onThreadId: (threadId: string) => void;
   readonly onNotification?: (method: string, params: unknown) => void;
+  readonly onServerRequest?: (method: string, params: unknown) => void;
 }
 
 export interface CodexAppServerTurnResult {
@@ -325,6 +326,7 @@ class CodexAppServerConnection {
       this.fail(new Error(`Codex app-server repeated server request ID: ${String(request.id)}`));
       return;
     }
+    this.options.onServerRequest?.(request.method, request.params);
     const active = this.activeTurn;
     if (active === undefined) {
       this.write({ id: request.id, error: { code: -32600, message: "No active Codex turn" } });

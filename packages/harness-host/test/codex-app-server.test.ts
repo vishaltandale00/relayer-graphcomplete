@@ -96,6 +96,7 @@ describe("Codex app-server transport", () => {
   });
 
   it("bridges a server command approval and never sends acceptForSession", async () => {
+    const onServerRequest = vi.fn();
     const request = vi.fn(async () => ({
       requestId: "request-1",
       decision: "approve_always" as const,
@@ -130,9 +131,14 @@ describe("Codex app-server transport", () => {
       }
     });
 
-    await runCodexAppServerTurn(options(fake, { approvals: { request } }));
+    await runCodexAppServerTurn(options(fake, { approvals: { request }, onServerRequest }));
 
     expect(request).toHaveBeenCalledOnce();
+    expect(onServerRequest).toHaveBeenCalledWith("item/commandExecution/requestApproval", expect.objectContaining({
+      itemId: "item-1",
+      command: "npm test",
+      cwd: "/workspace",
+    }));
     const providerResponse = fake.messages.find(({ id }) => id === "provider-1" && "result" in (fake.messages.find(({ id }) => id === "provider-1") ?? {}));
     expect(providerResponse).toEqual({ id: "provider-1", result: { decision: "accept" } });
     expect(JSON.stringify(fake.messages)).not.toContain("acceptForSession");

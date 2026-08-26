@@ -116,6 +116,7 @@ export class CodexBasicHarness implements Harness {
         ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
         onThreadId: (threadId) => { this.codexThreadId = threadId; },
         onNotification: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
+        onServerRequest: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
       });
     } finally {
       this.activeForceShutdowns.delete(forceShutdown);
