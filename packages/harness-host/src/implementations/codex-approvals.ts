@@ -331,6 +331,33 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
   const item = itemId === undefined ? undefined : context.items.get(itemId);
   if (item?.type !== "commandExecution") return { decision: "decline" };
 
+  const trustedCommand = optionalString(params.command) ?? string(item.command);
+  const trustedCwd = optionalString(params.cwd) ?? string(item.cwd);
+  const trustedAbsoluteCwd = validAbsolutePath(trustedCwd);
+  const trustedAdditionalPermissions = params.additionalPermissions === undefined
+    ? null
+    : jsonValue(params.additionalPermissions);
+  const trustedFieldsMatch = !(optionalString(params.command) !== undefined
+      && string(item.command) !== undefined
+      && params.command !== item.command)
+    && !(optionalString(params.cwd) !== undefined
+      && string(item.cwd) !== undefined
+      && params.cwd !== item.cwd);
+  // Codex may classify the fixed launcher as unified exec, PTY, or a network
+  // request because its inner sandbox connects to the graph server. Recognize
+  // the exact launcher before those transport-specific generic branches. Its
+  // zero-argument script replaces the environment and narrows network access
+  // to the pinned graph endpoint before authored stdin runs.
+  if (trustedCommand !== undefined
+    && trustedAbsoluteCwd === resolve(context.workingDirectory)
+    && trustedFieldsMatch
+    && supportsOneRequestDecision(params.availableDecisions)
+    && (params.additionalPermissions === undefined || trustedAdditionalPermissions !== undefined)
+    && context.trustedGraphAuthoringLauncher !== undefined
+    && isExactGraphAuthoringLauncherCommand(trustedCommand, context.trustedGraphAuthoringLauncher)) {
+    return { decision: "accept" };
+  }
+
   const network = optionalRecord(params.networkApprovalContext);
   if (network !== undefined) {
     const host = string(network.host);
@@ -376,16 +403,6 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
     ? null
     : jsonValue(params.additionalPermissions);
   if (params.additionalPermissions !== undefined && additionalPermissions === undefined) return { decision: "decline" };
-  // Codex may request this through unified exec or a PTY and need an outer
-  // filesystem/network overlay to start a launcher outside its workspace
-  // sandbox. The exact no-argument launcher replaces the environment and
-  // applies its own narrower sandbox before stdin runs, so those outer
-  // transport details cannot broaden authored graph code.
-  if (absoluteCwd === resolve(context.workingDirectory)
-    && context.trustedGraphAuthoringLauncher !== undefined
-    && isExactGraphAuthoringLauncherCommand(command, context.trustedGraphAuthoringLauncher)) {
-    return { decision: "accept" };
-  }
   const source = string(item.source);
   // Unified exec can be PTY-backed, but this approval shape carries no tty bit.
   // Reusing ordinary command authority would silently broaden it across modes.
