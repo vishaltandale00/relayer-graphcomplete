@@ -237,7 +237,10 @@ describe("model family settings layout", () => {
       readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8"),
     ]);
-    expect(html).toContain("Models and harnesses");
+    expect(html).toContain('data-settings-tab="providers"');
+    expect(html).toContain('data-settings-tab="models"');
+    expect(html).toContain('data-settings-tab="harnesses"');
+    expect(html).toContain("Model families");
     expect(html).toContain("<h3>Defaults</h3>");
     expect(html).toContain("<b>Harness</b>");
     expect(html).toContain("<b>Provider</b>");

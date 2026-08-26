@@ -29,9 +29,9 @@ impl SqliteProductStore {
         })?;
 
         if let Some(row) = sqlx::query(
-            "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json,model_provider_id,provider_model_id,model_family_id,input_digest FROM interactions WHERE thread_id=?1 AND input_identity=?2",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,i.input_digest FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.thread_id=?1 AND i.input_identity=?2",
         ).bind(thread_id.value()).bind(input.input_identity).fetch_optional(&mut *tx).await? {
-            let stored_digest: String = row.try_get(17)?;
+            let stored_digest: String = row.try_get("input_digest")?;
             if stored_digest != input.input_digest {
                 return Err(StorageError::IncompatibleSchema(
                     "interaction input identity was reused with different content".into(),
@@ -76,7 +76,6 @@ impl SqliteProductStore {
                 model_id: selection.model_id.clone(),
             };
             super::catalog::validate_model_selection_on(&mut tx, &command).await?;
-            super::catalog::validate_provider_catalog_freshness_on(&mut tx, &command).await?;
         } else if require_model_selection {
             return Err(StorageError::Catalog(
                 crate::product::CatalogError::invalid(
@@ -129,6 +128,7 @@ impl SqliteProductStore {
             effective_permission_receipt: None,
             completion_output: None,
             completion_error: None,
+            latest_attempt: None,
         };
         tx.commit().await?;
         Ok(InteractionInputInsertOutcome::Created(interaction))

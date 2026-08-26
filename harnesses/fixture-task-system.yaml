@@ -8,4 +8,5 @@ permissionBindings:
   full: {}
 modelCompatibility:
   - providerId: codex
+executionAccessContracts: [managed-runtime@1]
 settings: {}

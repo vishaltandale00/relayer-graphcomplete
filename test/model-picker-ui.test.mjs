@@ -13,8 +13,10 @@ import {
   interactionModelSelection,
   modelPickerClickIsOutside,
   modelPickerCycleIndex,
+  modelPickerFamilyPresentation,
   modelPickerKeyIntent,
   modelPickerMarkup,
+  modelPickerMemberIsSelected,
   modelSelectionLabels,
 } from "../desktop/renderer/src/model-picker.js";
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
@@ -50,6 +52,34 @@ describe("composer model picker UI contract", () => {
       expect(markup).toContain('data-model-picker-tab="advanced"');
       expect(markup).toContain(`data-model-picker="${mode}"`);
     }
+  });
+
+  it("presents another family for explicit choice when the prior family is invalid", () => {
+    const catalog = {
+      defaults: { harnessId: "codex-basic", familyId: 99 },
+      harnesses: [{ id: "codex-basic", available: true, compatibleProviderIds: ["codex"] }],
+      providers: [{
+        id: "codex",
+        connected: true,
+        models: [{ id: "gpt-5", label: "GPT-5", available: true, visible: true }],
+      }],
+      families: [{
+        id: 7,
+        name: "Codex latest",
+        enabled: true,
+        position: 0,
+        members: [{ providerId: "codex", modelId: "gpt-5", position: 0 }],
+      }],
+    };
+    const presentation = modelPickerFamilyPresentation(catalog, "codex-basic", null);
+    expect(presentation.selectedFamily.id).toBe(7);
+    expect(presentation.requiresExplicitSelection).toBe(true);
+    const member = presentation.selectedFamily.availableMembers[0];
+    expect(modelPickerMemberIsSelected(7, {
+      familyId: 99,
+      providerId: "codex",
+      modelId: "gpt-5",
+    }, member)).toBe(false);
   });
 
   it("maps escape, tab arrows, and option arrows deterministically", () => {

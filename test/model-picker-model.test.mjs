@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   availablePickerFamilies,
+  defaultFamilySelection,
+  defaultFamilySelectionForProvider,
   firstAvailableSelection,
   harnessUsesConfigurationModel,
   isModelSelectionCatalogError,
@@ -14,7 +16,11 @@ import {
   selectionForInteraction,
   validateCandidateHarness,
 } from "../desktop/renderer/src/model-picker-model.js";
-import { modelSelectionLabels, selectionForNextInteraction } from "../desktop/renderer/src/model-picker.js";
+import {
+  modelPickerFamilyPresentation,
+  modelSelectionLabels,
+  selectionForNextInteraction,
+} from "../desktop/renderer/src/model-picker.js";
 
 function settings() {
   return {
@@ -53,6 +59,16 @@ function settings() {
 }
 
 describe("composer model picker selection", () => {
+  it("requires an explicit model whenever a harness declares model rules", () => {
+    const catalog = settings();
+    const harness = catalog.harnesses.find((item) => item.id === "codex-basic");
+    harness.modelRules = { allow: [], deny: [] };
+    harness.modelCompatibility = [];
+    harness.compatibleProviderIds = [];
+
+    expect(harnessUsesConfigurationModel(catalog, "codex-basic")).toBe(false);
+  });
+
   it("recognizes typed catalog rejections that require picker reconciliation", () => {
     expect(isModelSelectionCatalogError({ code: "model_unavailable" })).toBe(true);
     expect(isModelSelectionCatalogError({ code: "harness_model_incompatible" })).toBe(true);
@@ -168,7 +184,7 @@ describe("composer model picker selection", () => {
       });
   });
 
-  it("inherits an available prior interaction model without replacing a stale selection", () => {
+  it("inherits an available prior model and reselects within its family when stale", () => {
     const catalog = settings();
     expect(selectionForInteraction(catalog, "codex-basic", {
       modelSelection: { familyId: 1, providerId: "codex", modelId: "one" },
@@ -181,9 +197,37 @@ describe("composer model picker selection", () => {
     expect(stale).toMatchObject({ familyId: 1, providerId: "codex", modelId: "two" });
     expect(selectionForNextInteraction(catalog, "codex-basic", {
       modelSelection: { familyId: 1, providerId: "codex", modelId: "two" },
-    })).toEqual(stale);
+    })).toEqual({
+      harnessId: "codex-basic",
+      familyId: 1,
+      providerId: "codex",
+      modelId: "one",
+    });
     expect(pickerSelectionIsAvailable(catalog, stale)).toBe(false);
     expect(normalizePickerSelection(catalog, stale)).toBeNull();
+  });
+
+  it("preserves a removed family as blocked intent until the user explicitly chooses again", () => {
+    const catalog = settings();
+    catalog.families = [{
+      id: 3,
+      name: "Replacement",
+      enabled: true,
+      position: 0,
+      members: [{ providerId: "codex", modelId: "one", position: 0 }],
+    }];
+    const blocked = selectionForNextInteraction(catalog, "codex-basic", {
+      modelSelection: { familyId: 99, providerId: "codex", modelId: "removed" },
+    });
+    expect(blocked).toEqual({
+      harnessId: "codex-basic",
+      familyId: 99,
+      providerId: "codex",
+      modelId: "removed",
+    });
+    const presentation = modelPickerFamilyPresentation(catalog, "codex-basic", blocked);
+    expect(presentation.selectedFamily.id).toBe(3);
+    expect(presentation.requiresExplicitSelection).toBe(true);
   });
 
   it("uses first available only when no explicit model was selected", () => {
@@ -203,6 +247,23 @@ describe("composer model picker selection", () => {
       familyId: 99,
       providerId: "codex",
       modelId: "removed",
+    });
+  });
+
+  it("resolves only the configured default family without falling through to another family", () => {
+    const catalog = settings();
+    catalog.defaults.familyId = 2;
+    expect(defaultFamilySelection(catalog, "codex-basic")).toBeNull();
+    catalog.defaults.familyId = 1;
+    expect(defaultFamilySelection(catalog, "codex-basic")).toMatchObject({
+      familyId: 1,
+      providerId: "codex",
+      modelId: "one",
+    });
+    expect(defaultFamilySelectionForProvider(catalog, "codex-basic", "other-provider")).toBeNull();
+    expect(defaultFamilySelectionForProvider(catalog, "codex-basic", "codex")).toMatchObject({
+      familyId: 1,
+      providerId: "codex",
     });
   });
 

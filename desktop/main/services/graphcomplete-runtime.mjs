@@ -36,6 +36,7 @@ export class GraphCompleteRuntimeService {
     codexBasicClientModuleUrl,
     codexPathOverride,
     candidateTrace,
+    acquireProviderExecution,
     spawnProcess = spawn,
     startupTimeoutMs = 10_000,
     shutdownTimeoutMs = 2_000,
@@ -48,6 +49,7 @@ export class GraphCompleteRuntimeService {
     this.codexBasicClientModuleUrl = codexBasicClientModuleUrl;
     this.codexPathOverride = codexPathOverride;
     this.candidateTrace = candidateTrace;
+    this.acquireProviderExecution = acquireProviderExecution;
     this.spawnProcess = spawnProcess;
     this.startupTimeoutMs = startupTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
@@ -102,6 +104,34 @@ export class GraphCompleteRuntimeService {
         stateFile: join(runtimeDirectory, "harness-sessions.json"),
         controlToken: harnessControlToken,
         ...(this.candidateTrace ? { trace: this.candidateTrace } : {}),
+        ...(this.acquireProviderExecution ? {
+          accessBroker: {
+            acquire: async (selection, acceptedContracts, signal) => {
+              const lease = await this.acquireProviderExecution(selection.providerId);
+              try {
+                const { definition, descriptor, runtime } = lease;
+                if (definition.adapterId !== selection.adapterId || !acceptedContracts.includes(definition.accessContract)) {
+                  throw new Error("Selected provider does not satisfy the harness execution contract.");
+                }
+                const resolved = await runtime.executionAccess?.({ signal });
+                if (!resolved) throw new Error("Provider adapter does not expose executable access.");
+                return Object.freeze({
+                  access: Object.freeze({
+                    ...resolved,
+                    contract: definition.accessContract,
+                    providerId: definition.id,
+                    adapterId: definition.adapterId,
+                    adapterImplementationVersion: descriptor.implementationVersion,
+                  }),
+                  release: lease.release,
+                });
+              } catch (error) {
+                await lease.release();
+                throw error;
+              }
+            },
+          },
+        } : {}),
       });
       this.session = Object.freeze({
         graphUrl,

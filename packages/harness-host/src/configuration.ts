@@ -1,7 +1,15 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { parse } from "yaml";
-import type { HarnessConfiguration, HarnessModelCompatibility, JsonObject, JsonValue } from "./types.js";
+import type {
+  HarnessConfiguration,
+  HarnessModelCompatibility,
+  HarnessModelRule,
+  HarnessModelRules,
+  InteractionModelSelection,
+  JsonObject,
+  JsonValue,
+} from "./types.js";
 
 export async function loadHarnessConfiguration(path: string): Promise<HarnessConfiguration> {
   return parseHarnessConfiguration(parse(await readFile(path, "utf8")));
@@ -19,12 +27,27 @@ export async function loadHarnessConfigurations(paths: readonly string[]): Promi
 
 export function parseHarnessConfiguration(value: unknown): HarnessConfiguration {
   if (!isRecord(value)) throw new Error("Harness configuration must be an object");
-  const { schemaVersion, name, implementation, implementationVersion, permissionBindings, modelCompatibility, settings } = value;
+  const {
+    schemaVersion,
+    name,
+    implementation,
+    implementationVersion,
+    revision,
+    permissionBindings,
+    modelCompatibility,
+    modelRules,
+    executionAccessContracts,
+    modelDefaults,
+    settings,
+  } = value;
   if (schemaVersion !== 1) throw new Error(`Unsupported harness configuration schema version: ${String(schemaVersion)}`);
   if (!isIdentifier(name)) throw new Error("Harness configuration name must be a non-empty machine identifier");
   if (!isIdentifier(implementation)) throw new Error("Harness implementation must be a non-empty machine identifier");
   if (typeof implementationVersion !== "number" || !Number.isSafeInteger(implementationVersion) || implementationVersion < 1) {
     throw new Error("Harness implementation version must be a positive integer");
+  }
+  if (revision !== undefined && (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1)) {
+    throw new Error("Harness configuration revision must be a positive integer");
   }
   if (!isRecord(permissionBindings) || Object.keys(permissionBindings).length === 0) {
     throw new Error("Harness permissionBindings must be a non-empty object");
@@ -35,16 +58,127 @@ export function parseHarnessConfiguration(value: unknown): HarnessConfiguration 
     return [profileId, binding];
   }));
   const parsedModelCompatibility = parseModelCompatibility(modelCompatibility);
+  const parsedModelRules = parseModelRules(modelRules);
+  const parsedAccessContracts = parseAccessContracts(executionAccessContracts);
+  if ((parsedModelRules !== undefined || parsedModelCompatibility !== undefined)
+    && parsedAccessContracts === undefined) {
+    throw new Error("Model-selecting harness configurations require executionAccessContracts so a selected provider cannot fall back to ambient credentials");
+  }
+  const parsedModelDefaults = parseModelDefaults(modelDefaults);
   if (!isJsonObject(settings)) throw new Error("Harness implementation settings must be a JSON object");
   return {
     schemaVersion,
     name,
     implementation,
     implementationVersion,
+    ...(revision === undefined ? {} : { revision }),
     permissionBindings: parsedBindings,
     ...(parsedModelCompatibility ? { modelCompatibility: parsedModelCompatibility } : {}),
+    ...(parsedModelRules ? { modelRules: parsedModelRules } : {}),
+    ...(parsedAccessContracts ? { executionAccessContracts: parsedAccessContracts } : {}),
+    ...(parsedModelDefaults ? { modelDefaults: parsedModelDefaults } : {}),
     settings,
   };
+}
+
+function parseModelRules(value: unknown): HarnessModelRules | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error("Harness modelRules must be an object");
+  for (const key of Object.keys(value)) {
+    if (key !== "allow" && key !== "deny") throw new Error(`Unknown harness modelRules field: ${key}`);
+  }
+  return {
+    allow: parseRuleList(value.allow, "allow"),
+    deny: parseRuleList(value.deny, "deny"),
+  };
+}
+
+function parseRuleList(value: unknown, list: "allow" | "deny"): readonly HarnessModelRule[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error(`Harness modelRules.${list} must be an array`);
+  return value.map((entry, index) => {
+    const path = `Harness modelRules.${list}[${index}]`;
+    if (!isRecord(entry) || !isIdentifier(entry.adapterId)) {
+      throw new Error(`${path}.adapterId must be a machine identifier`);
+    }
+    for (const key of Object.keys(entry)) {
+      if (key !== "adapterId" && key !== "modelIdExact" && key !== "modelIdRegex") {
+        throw new Error(`Unknown ${path} field: ${key}`);
+      }
+    }
+    const hasExact = entry.modelIdExact !== undefined;
+    const hasRegex = entry.modelIdRegex !== undefined;
+    if (hasExact === hasRegex) {
+      throw new Error(`${path} must contain exactly one of modelIdExact or modelIdRegex`);
+    }
+    if (hasExact && !isStableModelId(entry.modelIdExact)) {
+      throw new Error(`${path}.modelIdExact must be a model ID`);
+    }
+    if (hasRegex) validateModelIdRegex(entry.modelIdRegex, path);
+    return {
+      adapterId: entry.adapterId,
+      ...(hasExact ? { modelIdExact: entry.modelIdExact as string } : {}),
+      ...(hasRegex ? { modelIdRegex: entry.modelIdRegex as string } : {}),
+    };
+  });
+}
+
+function validateModelIdRegex(value: unknown, path: string): asserts value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 500) {
+    throw new Error(`${path}.modelIdRegex must be a non-empty regex of at most 500 characters`);
+  }
+  // Harness rules are evaluated independently by the trusted Rust product and the
+  // JavaScript host. Keep the accepted syntax to their common, deterministic subset.
+  // In particular, JavaScript lookarounds/named groups and engine-specific escapes
+  // must never be admitted by only one boundary.
+  if (value.includes("(?") || /\\\\(?:[1-9]|k|A|z|Z|G)/u.test(value)) {
+    throw new Error(`${path}.modelIdRegex uses syntax outside the supported cross-runtime subset`);
+  }
+  try {
+    new RegExp(value, "u");
+  } catch (error) {
+    throw new Error(`${path}.modelIdRegex is invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function parseAccessContracts(value: unknown): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0 || !value.every((entry) => (
+    typeof entry === "string" && /^[a-z0-9][a-z0-9._-]*@[1-9][0-9]*$/i.test(entry)
+  ))) {
+    throw new Error("Harness executionAccessContracts must be versioned identifiers such as secret@1");
+  }
+  if (new Set(value).size !== value.length) throw new Error("Harness executionAccessContracts contains a duplicate");
+  return [...value] as string[];
+}
+
+function parseModelDefaults(value: unknown): HarnessConfiguration["modelDefaults"] | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value) || !isRecord(value.familyPolicy)) {
+    throw new Error("Harness modelDefaults.familyPolicy must be an object");
+  }
+  const { id, version } = value.familyPolicy;
+  if (!isIdentifier(id) || typeof version !== "number" || !Number.isSafeInteger(version) || version < 1) {
+    throw new Error("Harness modelDefaults.familyPolicy requires an identifier and positive integer version");
+  }
+  return { familyPolicy: { id, version } };
+}
+
+export function harnessAllowsModel(
+  rules: HarnessModelRules | undefined,
+  selection: Pick<InteractionModelSelection, "adapterId" | "modelId">,
+): boolean {
+  if (rules === undefined) return true;
+  if (selection.adapterId === undefined) return false;
+  if (rules.deny.some((rule) => ruleMatches(rule, selection.adapterId!, selection.modelId))) return false;
+  return rules.allow.length === 0
+    || rules.allow.some((rule) => ruleMatches(rule, selection.adapterId!, selection.modelId));
+}
+
+function ruleMatches(rule: HarnessModelRule, adapterId: string, modelId: string): boolean {
+  if (rule.adapterId !== adapterId) return false;
+  if (rule.modelIdExact !== undefined) return rule.modelIdExact === modelId;
+  return new RegExp(rule.modelIdRegex!, "u").test(modelId);
 }
 
 function parseModelCompatibility(value: unknown): readonly HarnessModelCompatibility[] | undefined {
@@ -97,8 +231,20 @@ export function sameHarnessExecutionConfiguration(
   left: HarnessConfiguration,
   right: HarnessConfiguration,
 ): boolean {
-  const { modelCompatibility: _leftModelCompatibility, ...leftExecution } = left;
-  const { modelCompatibility: _rightModelCompatibility, ...rightExecution } = right;
+  const {
+    revision: _leftRevision,
+    modelCompatibility: _leftModelCompatibility,
+    modelRules: _leftModelRules,
+    modelDefaults: _leftModelDefaults,
+    ...leftExecution
+  } = left;
+  const {
+    revision: _rightRevision,
+    modelCompatibility: _rightModelCompatibility,
+    modelRules: _rightModelRules,
+    modelDefaults: _rightModelDefaults,
+    ...rightExecution
+  } = right;
   return canonicalJson(leftExecution) === canonicalJson(rightExecution);
 }
 

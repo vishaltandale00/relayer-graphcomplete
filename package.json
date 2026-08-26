@@ -40,6 +40,7 @@
     "test": "cargo build -p relayer-app-server -p relayer-graph-server && npm run build:packages && vitest run",
     "test:desktop:first-message": "npm run build && electron scripts/test-desktop-first-message.mjs",
     "evidence:model-selector": "RELAYER_CAPTURE_MODEL_SELECTOR_EVIDENCE=1 electron scripts/capture-model-selector-evidence.mjs",
+    "evidence:provider-ux": "node scripts/capture-provider-ux-video.mjs",
     "evidence:human-eval-annotations": "npm run build && RELAYER_CAPTURE_HUMAN_ANNOTATION_EVIDENCE=1 electron scripts/capture-human-eval-annotation-evidence.mjs",
     "test:desktop:approval": "npm run build && electron scripts/test-desktop-approval.mjs",
     "prd": "node docs/prd/server.mjs",

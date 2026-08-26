@@ -26,6 +26,7 @@ async fn default_selection_uses_family_and_member_order_not_harness_preference()
     fs::create_dir_all(&root).unwrap();
     let database = root.join("product.sqlite3");
     let app = open_app(&database, &root).await;
+    configure_codex_policy(&database).await;
 
     let published = app
         .clone()
@@ -96,6 +97,20 @@ async fn default_selection_uses_family_and_member_order_not_harness_preference()
         .await
         .unwrap();
     assert_eq!(reordered.status(), StatusCode::NO_CONTENT);
+    let defaults_updated = app
+        .clone()
+        .oneshot(cookie_request(
+            "PUT",
+            "/api/model-settings/defaults",
+            Some(json!({
+                "harnessId": "codex-basic",
+                "providerId": "codex",
+                "familyId": first_family_id
+            })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(defaults_updated.status(), StatusCode::OK);
 
     let default = response_json(
         app.clone()
@@ -128,6 +143,7 @@ async fn model_catalog_families_defaults_and_selection_are_typed_and_durable() {
     fs::create_dir_all(&root).unwrap();
     let database = root.join("product.sqlite3");
     let app = open_app(&database, &root).await;
+    configure_codex_policy(&database).await;
 
     let snapshot = provider_snapshot(None);
     let renderer_cannot_publish = app
@@ -458,7 +474,10 @@ fn provider_snapshot(unavailable: Option<&str>) -> Value {
                     "code": "account_restricted",
                     "message": "This model is unavailable for the connected account."
                 })),
-                "providerDefault": order == 0,
+                // The managed Codex family policy consumes normalized providerDefault
+                // metadata (rather than the legacy systemFamily payload) and caps the
+                // resulting ordered family at five members.
+                "providerDefault": order < 5,
                 "metadata": { "executionModel": id }
             })
         }).collect::<Vec<_>>(),
@@ -478,8 +497,6 @@ async fn open_app(database: &Path, web_directory: &Path) -> Router {
             .join("../../permissions/desktop.json"),
         control_token: "control".to_owned(),
         read_only_control_token: None,
-        provider_catalog_refresh_url: None,
-        provider_catalog_refresh_token: None,
         runtime: None,
         allow_conversation_import: false,
         export_producer: relayer_app_server::conversation_export::ExportProducer {
@@ -504,6 +521,15 @@ async fn sqlite_pool(database: &Path) -> sqlx::SqlitePool {
         )
         .await
         .unwrap()
+}
+
+async fn configure_codex_policy(database: &Path) {
+    let pool = sqlite_pool(database).await;
+    sqlx::query("UPDATE product_harnesses SET family_policy_id='codex-default-family',family_policy_version=1 WHERE configuration_name='codex-basic'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
 }
 
 async fn response_json(response: Response<Body>) -> Value {

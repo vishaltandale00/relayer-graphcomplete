@@ -18,6 +18,7 @@ permissionBindings:
     approvalPolicy: never
 modelCompatibility:
   - providerId: codex
+executionAccessContracts: [managed-runtime@1]
 settings:
   modelReasoningEffort: medium
   promptProfile: layered-navigation-multi-agent-v1

@@ -7,7 +7,6 @@ mod conversation_import_service;
 mod environment;
 mod permissions;
 mod product;
-mod provider_catalog_refresh;
 mod storage;
 
 pub use api::CONTROL_COOKIE;

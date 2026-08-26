@@ -3,6 +3,7 @@ import {
   harnessUsesConfigurationModel,
   pickerSelectionIsAvailable,
   reconcilePickerSelection,
+  resolveUnsentModelIntent,
   validateCandidateHarness,
 } from "./model-picker-model.js";
 import { escapeHtml, escapeHtmlAttribute } from "./ui.js";
@@ -21,6 +22,24 @@ function familyFor(settings, familyId) {
 
 function harnessFor(settings, harnessId) {
   return settings?.harnesses?.find((harness) => harness.id === harnessId);
+}
+
+export function modelPickerFamilyPresentation(settings, harnessId, selection) {
+  const families = settings ? availablePickerFamilies(settings, harnessId) : [];
+  const selectedFamily = families.find((family) => (
+    String(family.id) === String(selection?.familyId)
+  )) ?? families[0] ?? null;
+  return {
+    families,
+    selectedFamily,
+    requiresExplicitSelection: Boolean(selectedFamily) && !pickerSelectionIsAvailable(settings, selection),
+  };
+}
+
+export function modelPickerMemberIsSelected(familyId, selection, member) {
+  return String(familyId) === String(selection?.familyId)
+    && member.providerId === selection?.providerId
+    && member.modelId === selection?.modelId;
 }
 
 export function modelPickerMarkup({ mode = "new" } = {}) {
@@ -111,7 +130,9 @@ export function interactionModelSelection(interaction) {
 export function selectionForNextInteraction(settings, harnessId, interaction) {
   if (!settings || !harnessId) return null;
   const prior = interactionModelSelection(interaction);
-  return reconcilePickerSelection(settings, { harnessId, ...prior });
+  const resolution = resolveUnsentModelIntent(settings, { harnessId, ...prior });
+  if (resolution.selection) return resolution.selection;
+  return resolution.blockedFamilyId != null && prior ? { harnessId, ...prior } : null;
 }
 
 export function createModelPicker({
@@ -165,13 +186,12 @@ export function createModelPicker({
 
   function renderModelPanel() {
     const panel = root.querySelector('[data-model-picker-panel="model"]');
-    const families = currentSettings
-      ? availablePickerFamilies(currentSettings, selectedHarnessId())
-      : [];
-    const selectedFamily = families.find((family) => (
-      String(family.id) === String(currentSelection?.familyId)
-    )) ?? families[0];
-    if (!selectedFamily || !currentSelection) {
+    const { families, selectedFamily } = modelPickerFamilyPresentation(
+      currentSettings,
+      selectedHarnessId(),
+      currentSelection,
+    );
+    if (!selectedFamily) {
       if (harnessUsesConfigurationModel(currentSettings, selectedHarnessId())) {
         panel.innerHTML = `<div class="model-picker-empty"><strong>Harness default</strong><span>The model is set by this harness configuration.</span></div>`;
         return;
@@ -188,8 +208,7 @@ export function createModelPicker({
       <div class="model-option-list" role="radiogroup" aria-label="Models in ${escapeHtmlAttribute(selectedFamily.name)}">${selectedFamily.availableMembers.map((member) => {
         const model = modelFor(currentSettings, member.providerId, member.modelId);
         const provider = currentSettings.providers.find((item) => item.id === member.providerId);
-        const checked = member.providerId === currentSelection.providerId
-          && member.modelId === currentSelection.modelId;
+        const checked = modelPickerMemberIsSelected(selectedFamily.id, currentSelection, member);
         return `<button type="button" role="radio" aria-checked="${checked}" data-model-option data-provider-id="${escapeHtmlAttribute(member.providerId)}" data-model-id="${escapeHtmlAttribute(member.modelId)}"><span><strong>${escapeHtml(model?.label ?? member.modelId)}</strong><small>${escapeHtml(provider?.label ?? member.providerId)}</small></span><i aria-hidden="true">${checked ? "✓" : ""}</i></button>`;
       }).join("")}</div>`;
     panel.querySelector("[data-model-family]").onchange = (event) => {

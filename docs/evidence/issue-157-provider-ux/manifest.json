@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "generator": "scripts/capture-provider-ux-video.mjs",
+  "inference": false,
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "recording": {
+    "kind": "cdp-interaction-frames",
+    "frameCount": 130,
+    "captureFps": 6,
+    "frameWidth": 1280,
+    "frameHeight": 800,
+    "frameBytes": 7046586,
+    "framesSha256": "cac5f5d306cad4ae957f85d6d60926c34d330e952d586d5d2582c905afb2183d",
+    "interactions": [
+      "click",
+      "type",
+      "validate",
+      "save",
+      "logout",
+      "refresh",
+      "select",
+      "retry"
+    ],
+    "mockedBoundaries": [
+      "provider registry",
+      "provider authentication",
+      "model catalog",
+      "product API",
+      "retry execution"
+    ]
+  },
+  "scenes": {
+    "onboarding": {
+      "caption": "Choose a provider",
+      "file": "frames/onboarding.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 43017,
+      "sha256": "df05f2e8f92e1f46128b5369290fdb7666618f09629e559b224f18e81659ecb7"
+    },
+    "endpoint": {
+      "caption": "Configure an editable API endpoint",
+      "file": "frames/endpoint.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 43168,
+      "sha256": "aca99a7124bbb69d9d0283af9e7530814d65791b7c9e84709384f18661a2cd0d"
+    },
+    "family": {
+      "caption": "Choose the default model family",
+      "file": "frames/family.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 43418,
+      "sha256": "0673811d471ee04f3d49ccd22d661785b2667ef5232847f43788af0e92763581"
+    },
+    "providers": {
+      "caption": "Manage independent provider connections",
+      "file": "frames/providers.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 60210,
+      "sha256": "4fbedee95037de63b6d93bf4ceb538e58ac2aa29995c931948c0c9804020129f"
+    },
+    "families": {
+      "caption": "Configure harness-agnostic model families",
+      "file": "frames/families.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 56298,
+      "sha256": "0d0dc39d867b6c7c089e701e4bfecab25725527782e59a1c8f33e327c4bff6e6"
+    },
+    "harnesses": {
+      "caption": "Inspect separate harness rules",
+      "file": "frames/harnesses.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 63660,
+      "sha256": "d9d3ec747235d4a1b284094aa592fcf4359ddb7830255af3de6ad9c3ff2ef9e1"
+    },
+    "recovery": {
+      "caption": "Recover the same unsent turn with an explicit model choice",
+      "file": "frames/recovery.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 43580,
+      "sha256": "2dff54bbd6c93fccb4fe8a003fdedc17422b515c9e5365dd4f238fbfae078d39"
+    }
+  },
+  "variants": {
+    "light": {
+      "caption": "Light appearance",
+      "file": "variants/light.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 59325,
+      "sha256": "d08f5b91c09413a190a9e079deb78241eb6dff8964bfc4a0435c545fb461ac08"
+    },
+    "narrow": {
+      "caption": "Narrow responsive settings",
+      "file": "variants/narrow.png",
+      "width": 620,
+      "height": 800,
+      "bytes": 46030,
+      "sha256": "05b4a3d2639ff44f4ed5946e80ff19ffe45d92ea90faaf621ff93757c1cd9f0f"
+    },
+    "long-label": {
+      "caption": "Long provider identity",
+      "file": "variants/long-label.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 64746,
+      "sha256": "5473f0ed71f9887d218f0cc6ce21887a59c74124b67968cfa582e4c93e4bfb1b"
+    },
+    "loading": {
+      "caption": "Connecting and discovering models",
+      "file": "variants/loading.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 42412,
+      "sha256": "58618bc4387a32d50828775aa78009a0657621fbfad0e87e0854dfb02816e8e5"
+    },
+    "error": {
+      "caption": "Authentication error",
+      "file": "variants/error.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 43582,
+      "sha256": "78017ecaf84167fa169d765eca0c8d6eeeac21a6b4c82b4ed12582a1e37f269f"
+    },
+    "unavailable": {
+      "caption": "Unavailable provider",
+      "file": "variants/unavailable.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 60746,
+      "sha256": "cb0fb8a5e17b37a86acbc110b2273b844fa1b83cdbdd614fcded65e8ba26194d"
+    },
+    "authorization": {
+      "caption": "Authorization pending",
+      "file": "variants/authorization.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 38921,
+      "sha256": "16e90401903f6d295beaadd53d543d0fbeb60c2d3f4c75b408e725a5e5bc0267"
+    }
+  },
+  "poster": {
+    "file": "provider-ux-poster.png",
+    "width": 1280,
+    "height": 800,
+    "bytes": 60210,
+    "sha256": "4fbedee95037de63b6d93bf4ceb538e58ac2aa29995c931948c0c9804020129f"
+  },
+  "video": {
+    "file": "provider-ux-demo.mp4",
+    "codec": "h264",
+    "width": 1280,
+    "height": 800,
+    "bytes": 328426,
+    "sha256": "d11ce7fd73e863dcd1f9f514a4ce58c435b7ddd21f0c0cb670c6736c79c27c5d"
+  }
+}

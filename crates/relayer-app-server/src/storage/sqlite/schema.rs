@@ -77,6 +77,26 @@ const INTERACTION_CONTEXT_ANNOTATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("position", "INTEGER", true, 3),
     ("text", "TEXT", true, 0),
 ];
+const INTERACTION_ATTEMPT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("id", "INTEGER", false, 1),
+    ("interaction_id", "INTEGER", true, 0),
+    ("attempt_number", "INTEGER", true, 0),
+    ("started_at", "TEXT", true, 0),
+    ("finished_at", "TEXT", false, 0),
+    ("family_id", "INTEGER", true, 0),
+    ("family_revision", "INTEGER", true, 0),
+    ("harness_configuration_name", "TEXT", true, 0),
+    ("harness_configuration_revision", "INTEGER", true, 0),
+    ("harness_configuration_digest", "TEXT", true, 0),
+    ("provider_id", "TEXT", true, 0),
+    ("adapter_id", "TEXT", true, 0),
+    ("adapter_implementation_version", "INTEGER", true, 0),
+    ("model_id", "TEXT", true, 0),
+    ("access_contract", "TEXT", true, 0),
+    ("outcome", "TEXT", true, 0),
+    ("failure_category", "TEXT", false, 0),
+    ("effect_boundary", "TEXT", true, 0),
+];
 const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("source_interaction_id", "INTEGER", true, 1),
     ("action_id", "INTEGER", true, 2),
@@ -92,6 +112,12 @@ const MODEL_PROVIDER_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("unavailable_reason_code", "TEXT", false, 0),
     ("unavailable_reason_message", "TEXT", false, 0),
     ("refreshed_at", "TEXT", true, 0),
+    ("adapter_id", "TEXT", true, 0),
+    ("access_contract", "TEXT", true, 0),
+    ("endpoint", "TEXT", false, 0),
+    ("credential_reference", "TEXT", false, 0),
+    ("lifecycle_state", "TEXT", true, 0),
+    ("removed_at", "TEXT", false, 0),
 ];
 const PROVIDER_MODEL_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("provider_id", "TEXT", true, 1),
@@ -113,6 +139,23 @@ const PRODUCT_HARNESS_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("available", "INTEGER", true, 0),
     ("unavailable_reason_code", "TEXT", false, 0),
     ("unavailable_reason_message", "TEXT", false, 0),
+    ("configuration_revision", "INTEGER", true, 0),
+    ("configuration_digest", "TEXT", true, 0),
+    ("model_rules_present", "INTEGER", true, 0),
+    ("execution_access_contracts_json", "TEXT", true, 0),
+    ("family_policy_id", "TEXT", false, 0),
+    ("family_policy_version", "INTEGER", false, 0),
+    ("model_rules_modified", "INTEGER", true, 0),
+    ("runtime_configuration_revision", "INTEGER", true, 0),
+    ("runtime_configuration_digest", "TEXT", true, 0),
+];
+const HARNESS_MODEL_RULE_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("harness_configuration_name", "TEXT", true, 1),
+    ("effect", "TEXT", true, 2),
+    ("position", "INTEGER", true, 3),
+    ("adapter_id", "TEXT", true, 0),
+    ("match_kind", "TEXT", true, 0),
+    ("model_pattern", "TEXT", true, 0),
 ];
 const HARNESS_PROVIDER_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("harness_configuration_name", "TEXT", true, 1),
@@ -132,6 +175,12 @@ const MODEL_FAMILY_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("system_key", "TEXT", false, 0),
     ("enabled", "INTEGER", true, 0),
     ("position", "INTEGER", true, 0),
+    ("revision", "INTEGER", true, 0),
+    ("managed_provider_id", "TEXT", false, 0),
+    ("policy_id", "TEXT", false, 0),
+    ("policy_version", "INTEGER", false, 0),
+    ("lifecycle_state", "TEXT", true, 0),
+    ("removed_at", "TEXT", false, 0),
 ];
 const MODEL_FAMILY_MEMBER_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("family_id", "INTEGER", true, 1),
@@ -144,6 +193,7 @@ const PRODUCT_MODEL_PREFERENCE_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("default_harness_configuration_name", "TEXT", true, 0),
     ("default_provider_id", "TEXT", true, 0),
     ("defaults_modified", "INTEGER", true, 0),
+    ("default_family_id", "INTEGER", false, 0),
 ];
 const APPROVAL_REQUEST_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("request_id", "TEXT", true, 1),
@@ -212,6 +262,7 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "projects", PROJECT_COLUMNS).await?;
     validate_columns(pool, "threads", THREAD_COLUMNS).await?;
     validate_columns(pool, "interactions", INTERACTION_COLUMNS).await?;
+    validate_columns(pool, "interaction_attempts", INTERACTION_ATTEMPT_COLUMNS).await?;
     validate_columns(
         pool,
         "interaction_context_intents",
@@ -230,6 +281,7 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "model_providers", MODEL_PROVIDER_COLUMNS).await?;
     validate_columns(pool, "provider_models", PROVIDER_MODEL_COLUMNS).await?;
     validate_columns(pool, "product_harnesses", PRODUCT_HARNESS_COLUMNS).await?;
+    validate_columns(pool, "harness_model_rules", HARNESS_MODEL_RULE_COLUMNS).await?;
     validate_columns(
         pool,
         "harness_provider_compatibility",
@@ -262,6 +314,13 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_index(pool, "imported_turns", &["product_interaction_id"], true).await?;
     validate_index(
         pool,
+        "interaction_attempts",
+        &["interaction_id", "attempt_number"],
+        true,
+    )
+    .await?;
+    validate_index(
+        pool,
         "action_invocations",
         &["source_interaction_id", "action_id"],
         true,
@@ -285,7 +344,14 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     .await?;
     validate_index(pool, "model_families", &["system_key"], true).await?;
     validate_index(pool, "model_families", &["position"], true).await?;
-    validate_index(pool, "model_families", &["name"], true).await?;
+    validate_active_family_name_index(pool).await?;
+    validate_index(
+        pool,
+        "model_families",
+        &["managed_provider_id", "policy_id", "policy_version"],
+        true,
+    )
+    .await?;
     validate_index(
         pool,
         "model_family_members",
@@ -326,6 +392,15 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     .await?;
     validate_foreign_key(
         pool,
+        "interaction_attempts",
+        "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
         "threads",
         "conversation_import_id",
         "conversation_imports",
@@ -353,11 +428,38 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     .await?;
     validate_foreign_key(
         pool,
+        "harness_model_rules",
+        "harness_configuration_name",
+        "product_harnesses",
+        "configuration_name",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
         "provider_models",
         "provider_id",
         "model_providers",
         "id",
         "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "model_families",
+        "managed_provider_id",
+        "model_providers",
+        "id",
+        "RESTRICT",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "product_model_preferences",
+        "default_family_id",
+        "model_families",
+        "id",
+        "RESTRICT",
     )
     .await?;
     validate_foreign_key(
@@ -598,6 +700,56 @@ fn column_from_row(row: &SqliteRow) -> Result<Column, StorageError> {
     })
 }
 
+async fn validate_active_family_name_index(pool: &SqlitePool) -> Result<(), StorageError> {
+    let indexes = sqlx::query("PRAGMA index_list(model_families)")
+        .fetch_all(pool)
+        .await?;
+    for index in indexes {
+        if index.try_get::<i64, _>("unique")? != 1 || index.try_get::<i64, _>("partial")? != 1 {
+            continue;
+        }
+        let name: String = index.try_get("name")?;
+        let escaped = name.replace('"', "\"\"");
+        let columns = sqlx::query(&format!("PRAGMA index_xinfo(\"{escaped}\")"))
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .filter_map(|row| match row.try_get::<i64, _>("key") {
+                Ok(1) => Some(Ok((
+                    row.try_get::<String, _>("name"),
+                    row.try_get::<String, _>("coll"),
+                ))),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .map(|entry| {
+                let (name, collation) = entry?;
+                Ok((name?, collation?))
+            })
+            .collect::<Result<Vec<_>, sqlx::Error>>()?;
+        if columns != [("name".to_owned(), "NOCASE".to_owned())] {
+            continue;
+        }
+        let sql: String =
+            sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type='index' AND name=?1")
+                .bind(&name)
+                .fetch_one(pool)
+                .await?;
+        let normalized = sql
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>()
+            .to_ascii_lowercase();
+        let predicates = normalized.split("where").collect::<Vec<_>>();
+        if predicates.len() == 2 && predicates[1] == "lifecycle_state='active'" {
+            return Ok(());
+        }
+    }
+    Err(incompatible(
+        "table model_families is missing its active-only unique name index",
+    ))
+}
+
 async fn validate_index(
     pool: &SqlitePool,
     table: &str,
@@ -682,6 +834,44 @@ fn incompatible(message: &str) -> StorageError {
 #[cfg(test)]
 mod tests {
     use super::super::SqliteProductStore;
+
+    #[tokio::test]
+    async fn malformed_active_family_name_index_fails_current_schema_open() {
+        for (label, index_sql) in [
+            (
+                "false-predicate",
+                "CREATE UNIQUE INDEX model_families_name_nocase ON model_families(name COLLATE NOCASE) WHERE 1=0 AND lifecycle_state='active'",
+            ),
+            (
+                "binary-collation",
+                "CREATE UNIQUE INDEX model_families_name_nocase ON model_families(name) WHERE lifecycle_state='active'",
+            ),
+        ] {
+            let path = std::env::temp_dir().join(format!(
+                "relayer-malformed-family-name-index-{label}-{}-{}.sqlite3",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+            ));
+            let store = SqliteProductStore::open(&path).await.unwrap();
+            let mut connection = store.pool.acquire().await.unwrap();
+            sqlx::query("DROP INDEX model_families_name_nocase")
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+            sqlx::query(index_sql)
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+            drop(connection);
+            store.pool.close().await;
+            let error = SqliteProductStore::open(&path).await.err().unwrap();
+            assert!(error.to_string().contains("active-only unique name index"));
+            std::fs::remove_file(path).unwrap();
+        }
+    }
 
     #[tokio::test]
     async fn malformed_interaction_context_table_fails_current_schema_open() {

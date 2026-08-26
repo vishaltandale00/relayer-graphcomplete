@@ -107,6 +107,7 @@ function sanitizeModel(model, providerId, index) {
     supportsPersonality: boolean(model?.supportsPersonality, `${field}.supportsPersonality`),
     serviceTiers: sanitizeServiceTiers(model?.serviceTiers, `${field}.serviceTiers`),
     defaultServiceTier: optionalString(model?.defaultServiceTier, `${field}.defaultServiceTier`),
+    catalogSource: optionalString(model?.catalogSource, `${field}.catalogSource`),
   });
 }
 
@@ -234,12 +235,15 @@ export function toProductCatalogSnapshot(snapshot) {
         supportsPersonality: model.supportsPersonality,
         serviceTiers: model.serviceTiers,
         defaultServiceTier: model.defaultServiceTier,
+        catalogSource: model.catalogSource,
       }),
     }))),
-    systemFamily: Object.freeze({
-      key: sanitized.systemFamily.id,
-      name: sanitized.systemFamily.label,
-      modelIds: sanitized.systemFamily.modelIds,
+    ...(sanitized.systemFamily.modelIds.length === 0 ? {} : {
+      systemFamily: Object.freeze({
+        key: sanitized.systemFamily.id,
+        name: sanitized.systemFamily.label,
+        modelIds: sanitized.systemFamily.modelIds,
+      }),
     }),
   });
 }

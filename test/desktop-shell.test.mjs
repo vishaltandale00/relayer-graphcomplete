@@ -25,6 +25,7 @@ import {
   packagedDesktopReleaseMetadata,
 } from "../desktop/shared/release-metadata.mjs";
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
+import { ACTIVE_PROVIDER_ADAPTER_MODULES } from "../desktop/main/providers/provider-adapter-registry.mjs";
 import { verifyBundledAppServer } from "../desktop/packaging/verify-bundled-app-server.mjs";
 import { codexBinaryPath, desktopTarget } from "../desktop/shared/target.mjs";
 import {
@@ -177,7 +178,8 @@ describe("desktop skeleton", () => {
     );
     const prdServer = await readFile(new URL("../docs/prd/server.mjs", import.meta.url), "utf8");
     expect(html).toContain("Connect a provider");
-    expect(html).toContain("Codex");
+    expect(html).toContain('id="providerSetupOptions"');
+    expect(html).toContain('id="newProviderDefinition"');
     expect(html).toContain("New thread");
     expect(html).toContain("Application updates");
     expect(html).toContain('id="appearanceSelect"');
@@ -189,11 +191,12 @@ describe("desktop skeleton", () => {
     expect(html).toContain('id="newModelControl"');
     expect(html).toContain('data-model-picker-tab="advanced"');
     expect(html).toContain('id="createThread" title="Create thread and send" disabled');
-    expect(html).toContain('id="disconnectCodex"');
+    expect(html).toContain('id="providerDefinitionList"');
     expect(html).toContain('id="updateChannel"');
     expect(html).toContain('id="newThreadShortcut"');
     expect(html).toContain('id="appearanceDescription"');
     expect(html).toContain('id="settingsTabs" role="tablist" aria-label="Settings sections" aria-orientation="vertical"');
+    expect(html).toContain('<option value="advanced">Advanced</option>');
     expect(html.indexOf('id="settingsSidebarContent"')).toBeLessThan(html.indexOf('id="updateButton"'));
     expect(html).toContain("relayer-logo");
     expect(html).toContain('class="settings-view hidden"');
@@ -203,7 +206,8 @@ describe("desktop skeleton", () => {
     expect(html).not.toContain('id="stopRun"');
     expect(html).not.toContain('id="retryRun"');
     expect(apiUrl("/api/state")).toBe("/api/state");
-    expect(html).not.toContain("<dialog");
+    expect(html).toContain('<dialog class="provider-dialog"');
+    expect(html).toContain('aria-labelledby="providerDialogTitle"');
     expect(html.toLowerCase()).not.toContain("harness selector");
     expect(desktopMain).not.toContain("PrimeAgentThreadRunner");
     expect(rendererMain).toContain('import { bindComposerKeydown } from "./product-workspace/workspace.js";');
@@ -213,8 +217,8 @@ describe("desktop skeleton", () => {
     expect(desktopMain).toContain('allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-")');
     expect(desktopMain).toContain("productServer.start()");
     expect(desktopMain).toContain("productServer.close()");
-    expect(desktopMain).toContain("startModelCatalogRefreshServer");
-    expect(desktopMain).toContain("providerCatalogRefreshSession: modelCatalogRefreshServer.session");
+    expect(desktopMain).not.toContain("startModelCatalogRefreshServer");
+    expect(desktopMain).not.toContain("providerCatalogRefreshSession");
     expect(desktopPreload).not.toContain("provider-catalog/refresh");
     expect(desktopPreload).not.toContain("providerCatalogRefresh");
     expect(desktopPreload).toContain('export: (threadId) => ipcRenderer.invoke("relayer:conversation-export", threadId)');
@@ -515,10 +519,6 @@ describe("desktop skeleton", () => {
       binaryPath: "/test/bin/relayer-app-server",
       webDirectory: "/test/renderer",
       permissionCatalogPath: "/test/permissions/desktop.json",
-      providerCatalogRefreshSession: {
-        origin: "http://127.0.0.1:43122",
-        token: "ab".repeat(32),
-      },
       enableReadOnlySession: true,
       spawnProcess: (binary, args, options) => {
         invocations.push({ binary, args, options });
@@ -556,14 +556,11 @@ describe("desktop skeleton", () => {
         "--producer-platform", process.platform,
         "--producer-architecture", process.arch,
         "--read-only-control-token-stdin",
-        "--provider-catalog-refresh-url", "http://127.0.0.1:43122",
-        "--provider-catalog-refresh-token-stdin",
       ]);
-      expect(suppliedToken).toBe(`${session.cookie.value}\n${session.readOnlyCookie.value}\n${"ab".repeat(32)}\n`);
+      expect(suppliedToken).toBe(`${session.cookie.value}\n${session.readOnlyCookie.value}\n`);
       expect(child.stdin.writableEnded).toBe(false);
       expect(invocations[0].args).not.toContain(session.cookie.value);
       expect(invocations[0].args).not.toContain(session.readOnlyCookie.value);
-      expect(invocations[0].args).not.toContain("ab".repeat(32));
       expect((await stat(join(directory, "product-data"))).mode & 0o777).toBe(0o700);
       expect(await service.start()).toBe(session);
       const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(null, { status: 204 }));
@@ -899,8 +896,12 @@ describe("desktop skeleton", () => {
         return failedChild;
       },
     });
-    expect(await failingClient.account()).toMatchObject({ status: "unavailable", error: "initialize failed" });
-    expect(await failingClient.account()).toMatchObject({ status: "unavailable", error: "initialize failed" });
+    expect(await failingClient.account()).toMatchObject({
+      status: "unavailable", error: "Codex subscription is unavailable.",
+    });
+    expect(await failingClient.account()).toMatchObject({
+      status: "unavailable", error: "Codex subscription is unavailable.",
+    });
     expect(failedStarts).toBe(2);
 
     const stubbornCodex = Object.assign(new EventEmitter(), {
@@ -945,7 +946,7 @@ describe("desktop skeleton", () => {
     await closedWhileDiscovering.close();
     await expect(pendingAccount).resolves.toMatchObject({
       status: "unavailable",
-      error: "Codex app-server is shutting down.",
+      error: "Codex subscription is unavailable.",
     });
     expect(neverSpawned).not.toHaveBeenCalled();
 
@@ -970,7 +971,7 @@ describe("desktop skeleton", () => {
     });
     await expect(spawnFailure.account()).resolves.toMatchObject({
       status: "unavailable",
-      error: "spawn EACCES",
+      error: "Codex subscription is unavailable.",
     });
     expect(spawnErrorChild.kill).toHaveBeenCalledWith("SIGTERM");
   });
@@ -1506,6 +1507,12 @@ describe("desktop skeleton", () => {
     // this native flag is enabled. Version monotonicity remains enforced by the
     // application updater above and by Preview publication.
     expect(builder.mac.extendInfo).toBeUndefined();
+    expect(builder.extraResources).toContainEqual(expect.objectContaining({
+      to: "harnesses/claude-basic.yaml",
+    }));
+    expect(builder.files).toEqual(expect.arrayContaining(
+      Object.values(ACTIVE_PROVIDER_ADAPTER_MODULES).map((modulePath) => `main/${modulePath}`),
+    ));
 
     const development = resolveDesktopReleaseContract({
       environment: { RELAYER_DESKTOP_TARGET: "macos-arm64" },

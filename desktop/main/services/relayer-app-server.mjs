@@ -4,34 +4,9 @@ import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { terminateChildProcess } from "./child-process.mjs";
+import { toProductCatalogSnapshot } from "../models/model-catalog-adapter.mjs";
 
 export const RELAYER_CONTROL_COOKIE = "relayer_control";
-
-function validateProviderCatalogRefreshSession(session) {
-  if (session === null) return null;
-  let origin;
-  try {
-    origin = new URL(session?.origin);
-  } catch {
-    throw new Error("Provider catalog refresh server returned an invalid origin.");
-  }
-  if (
-    origin.protocol !== "http:"
-    || origin.hostname !== "127.0.0.1"
-    || !origin.port
-    || origin.username
-    || origin.password
-    || origin.pathname !== "/"
-    || origin.search
-    || origin.hash
-  ) {
-    throw new Error("Provider catalog refresh server must use an authenticated 127.0.0.1 origin.");
-  }
-  if (!/^[a-f0-9]{64}$/.test(session?.token)) {
-    throw new Error("Provider catalog refresh server returned an invalid bearer token.");
-  }
-  return Object.freeze({ origin: origin.origin, token: session.token });
-}
 
 function distinctToken(excludedTokens) {
   let token;
@@ -72,7 +47,6 @@ export class RelayerAppServerService {
     webDirectory,
     permissionCatalogPath,
     runtimeSession = null,
-    providerCatalogRefreshSession = null,
     defaultHarnessConfiguration = "codex-basic",
     allowHarnessOverride = false,
     allowConversationImport = false,
@@ -93,7 +67,6 @@ export class RelayerAppServerService {
     this.webDirectory = webDirectory;
     this.permissionCatalogPath = permissionCatalogPath;
     this.runtimeSession = runtimeSession;
-    this.providerCatalogRefreshSession = validateProviderCatalogRefreshSession(providerCatalogRefreshSession);
     this.defaultHarnessConfiguration = defaultHarnessConfiguration;
     this.allowHarnessOverride = allowHarnessOverride;
     this.allowConversationImport = allowConversationImport;
@@ -132,7 +105,7 @@ export class RelayerAppServerService {
     await mkdir(dataDirectory, { recursive: true });
     await chmod(dataDirectory, 0o700);
     if (this.closing) throw new Error("Relayer app server is shutting down.");
-    const excludedTokens = new Set(this.providerCatalogRefreshSession ? [this.providerCatalogRefreshSession.token] : []);
+    const excludedTokens = new Set();
     const controlToken = distinctToken(excludedTokens);
     excludedTokens.add(controlToken);
     const readOnlyControlToken = this.enableReadOnlySession
@@ -161,12 +134,6 @@ export class RelayerAppServerService {
       if (this.allowConversationImport) serverArguments.push("--allow-conversation-import");
     }
     if (readOnlyControlToken) serverArguments.push("--read-only-control-token-stdin");
-    if (this.providerCatalogRefreshSession) {
-      serverArguments.push(
-        "--provider-catalog-refresh-url", this.providerCatalogRefreshSession.origin,
-        "--provider-catalog-refresh-token-stdin",
-      );
-    }
     const child = this.spawnProcess(this.binaryPath, serverArguments, {
       env: { ...process.env },
       stdio: ["pipe", "pipe", "pipe"],
@@ -178,7 +145,6 @@ export class RelayerAppServerService {
       child.stdin?.write([
         controlToken,
         ...(readOnlyControlToken ? [readOnlyControlToken] : []),
-        ...(this.providerCatalogRefreshSession ? [this.providerCatalogRefreshSession.token] : []),
       ].map((value) => `${value}\n`).join(""));
       child.stderr?.on("data", (chunk) => {
         stderr.push(String(chunk));
@@ -259,6 +225,85 @@ export class RelayerAppServerService {
       detail = null;
     }
     throw new Error(detail?.error?.message || detail?.error || `Provider catalog publish failed (${response.status}).`);
+  }
+
+  async validateProviderOnboarding({ signal } = {}) {
+    const session = await this.start();
+    const settingsResponse = await fetch(new URL("/api/model-settings", session.origin), {
+      headers: { Cookie: `${session.cookie.name}=${session.cookie.value}` },
+      signal,
+    });
+    if (!settingsResponse.ok) return false;
+    const settings = await settingsResponse.json();
+    const harnessId = settings?.defaults?.harnessId;
+    if (!harnessId) return false;
+    const url = new URL("/api/model-selection/default", session.origin);
+    url.searchParams.set("harnessId", harnessId);
+    const response = await fetch(url, {
+      headers: { Cookie: `${session.cookie.name}=${session.cookie.value}` },
+      signal,
+    });
+    if (!response.ok) return false;
+    const selection = await response.json();
+    return Boolean(selection?.providerId && selection?.modelId && selection?.familyId);
+  }
+
+  async providerStatuses({ signal } = {}) {
+    const session = await this.start();
+    const response = await fetch(new URL("/api/model-settings", session.origin), {
+      headers: { Cookie: `${session.cookie.name}=${session.cookie.value}` },
+      signal,
+    });
+    if (!response.ok) throw new Error(`Provider status read failed (${response.status}).`);
+    const settings = await response.json();
+    return new Map((settings.providers ?? []).map((provider) => [provider.id, {
+      connected: provider.connected === true,
+      unavailableReason: provider.unavailableReason ?? null,
+    }]));
+  }
+
+  providerDefinitionStore() {
+    return Object.freeze({
+      load: async () => {
+        const session = await this.start();
+        const response = await fetch(new URL("/api/internal/provider-definitions", session.origin), {
+          headers: { Authorization: `Bearer ${session.cookie.value}` },
+        });
+        if (!response.ok) throw new Error(`Provider definition read failed (${response.status}).`);
+        return response.json();
+      },
+      save: async (definitions) => {
+        const session = await this.start();
+        const response = await fetch(new URL("/api/internal/provider-definitions", session.origin), {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${session.cookie.value}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(definitions),
+        });
+        if (response.ok) return;
+        let detail = null;
+        try { detail = await response.json(); } catch { /* use status fallback */ }
+        throw new Error(detail?.error?.message || detail?.error || `Provider definition write failed (${response.status}).`);
+      },
+      createWithCatalog: async (definition, catalog, { signal } = {}) => {
+        const session = await this.start();
+        const response = await fetch(new URL("/api/internal/provider-definitions/staged", session.origin), {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.cookie.value}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ definition, catalog: toProductCatalogSnapshot(catalog) }),
+          signal,
+        });
+        if (response.ok) return;
+        let detail = null;
+        try { detail = await response.json(); } catch { /* use status fallback */ }
+        throw new Error(detail?.error?.message || detail?.error || `Provider creation failed (${response.status}).`);
+      },
+    });
   }
 
   async exportConversation(threadId, { signal } = {}) {

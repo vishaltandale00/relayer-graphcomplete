@@ -8,19 +8,14 @@ use super::{
     },
 };
 use crate::{
-    approval::{
-        ApprovalActor, ApprovalCorrelation, ApprovalDecision, ApprovalDecisionSubmission,
-        ApprovalOutcome, ApprovalReceipt, ApprovalRequest, ApprovalResolution,
-    },
+    approval::{ApprovalDecision, ApprovalDecisionSubmission, ApprovalReceipt},
     product::{
-        AcceptedInteractionCompletion, CreateThreadCommand, Interaction, InteractionContextIntent,
-        InteractionId, InteractionModelSelection, InvokeActionOutcome, ModelFamilyId,
-        PreparedInteractionBinding, ProjectId, ProviderId, Thread, ThreadId, ThreadView,
+        CreateThreadCommand, Interaction, InteractionContextIntent, InteractionId,
+        InteractionModelSelection, InvokeActionOutcome, ModelFamilyId, PreparedInteractionBinding,
+        ProjectId, ProviderId, RECONCILIATION_PENDING_PREFIX, Thread, ThreadId, ThreadView,
+        record_background_failure, validate_decision_resolution,
     },
-    runtime::{
-        ApprovalEvent, ApprovalEventSnapshot, CompleteInteraction, PreparedInteraction,
-        PreparedInvocation, RuntimeCompletion, RuntimeError,
-    },
+    runtime::{CompleteInteraction, PreparedInteraction, PreparedInvocation, RuntimeError},
 };
 use axum::{
     Json,
@@ -31,9 +26,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-pub(crate) const RECONCILIATION_PENDING_PREFIX: &str = "Canonical reconciliation pending:";
-const LIVE_RECONCILIATION_ATTEMPTS: u64 = 4;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +47,14 @@ pub(super) struct CreateInteractionRequest {
     #[serde(default)]
     contexts: Vec<InteractionContextIntent>,
     model_selection: Option<ModelSelectionRequest>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RetryInteractionRequest {
+    attempt_id: i64,
+    text: String,
+    model_selection: ModelSelectionRequest,
 }
 
 #[derive(Deserialize)]
@@ -86,6 +86,21 @@ pub(super) struct InvokeActionResponse {
 #[derive(Serialize)]
 pub(super) struct ApprovalDecisionResponse {
     approval: ApprovalReceipt,
+}
+
+struct ApprovalDecisionReservation {
+    decisions:
+        std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, ApprovalDecision>>>,
+    request_id: String,
+}
+
+impl Drop for ApprovalDecisionReservation {
+    fn drop(&mut self) {
+        self.decisions
+            .lock()
+            .expect("approval decision lock poisoned")
+            .remove(&self.request_id);
+    }
 }
 
 pub(super) async fn decide_approval(
@@ -214,11 +229,12 @@ pub(super) async fn create(
                 .product
                 .harness_uses_configuration_model(&harness_configuration_name)
                 .await?);
-    refresh_provider_catalog(
-        &state,
-        model_selection.as_ref().map(|model| &model.provider_id),
-    )
-    .await?;
+    if let Some(selection) = model_selection.as_ref() {
+        state
+            .product
+            .validate_interaction_model_selection(&harness_configuration_name, selection)
+            .await?;
+    }
     let thread = state
         .product
         .create_thread(CreateThreadCommand {
@@ -430,16 +446,6 @@ pub(super) async fn create_interaction(
         .model_selection
         .map(InteractionModelSelection::try_from)
         .transpose()?;
-    let provider_id = model_selection
-        .as_ref()
-        .map(|model| model.provider_id.clone())
-        .or_else(|| {
-            thread_detail
-                .interactions
-                .last()
-                .and_then(|interaction| interaction.model_selection.as_ref())
-                .map(|model| model.provider_id.clone())
-        });
     let thread = thread_detail.thread;
     let allow_unselected_model = privileged_model_less_thread
         || (state.allow_harness_override
@@ -447,7 +453,12 @@ pub(super) async fn create_interaction(
                 .product
                 .harness_uses_configuration_model(&thread.harness_configuration_name)
                 .await?);
-    refresh_provider_catalog(&state, provider_id.as_ref()).await?;
+    if let Some(selection) = model_selection.as_ref() {
+        state
+            .product
+            .validate_interaction_model_selection(&thread.harness_configuration_name, selection)
+            .await?;
+    }
     if !request.contexts.is_empty() && request.input_id.is_none() {
         eprintln!("rejected context-bearing interaction without a stable inputId");
         return Err(ApiError::internal(
@@ -572,6 +583,70 @@ pub(crate) async fn resume_recovered_identified_interactions(state: ApiState) {
             );
         }
     }
+}
+
+pub(super) async fn retry_interaction(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, interaction_id)): Path<(i64, i64)>,
+    Json(request): Json<RetryInteractionRequest>,
+) -> Result<Json<InteractionResponse>, ApiError> {
+    authorize_write(&state, &headers)?;
+    if request.attempt_id <= 0 {
+        return Err(ApiError::invalid("attemptId must be a positive integer"));
+    }
+    if state.runtime.is_none() {
+        return Err(ApiError::invalid("GraphComplete runtime is unavailable"));
+    }
+    let thread_id = ThreadId::try_from(thread_id)?;
+    let interaction_id = InteractionId::try_from(interaction_id)?;
+    let thread = state.product.get_thread(thread_id).await?.thread;
+    let existing = state.product.get_interaction(interaction_id).await?;
+    if existing.thread_id != thread_id {
+        return Err(ApiError::invalid(
+            "interaction does not belong to this thread",
+        ));
+    }
+    let model_selection = InteractionModelSelection::try_from(request.model_selection)?;
+    let claimed = state
+        .product
+        .claim_interaction_retry(
+            interaction_id,
+            request.attempt_id,
+            &request.text,
+            &model_selection,
+            &thread.harness_configuration_name,
+        )
+        .await?;
+    let interaction = state.product.get_interaction(interaction_id).await?;
+    if claimed {
+        let state = state.clone();
+        let thread = thread.clone();
+        let execution = interaction.clone();
+        tokio::spawn(async move {
+            match prepare_and_claim_interaction(&state, &thread, &execution, true).await {
+                Ok(Some(prepared)) => {
+                    state
+                        .interaction_execution
+                        .as_ref()
+                        .expect("runtime-backed interaction execution service")
+                        .execute_prepared_interaction(thread, execution, prepared)
+                        .await;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    record_background_failure(
+                        &state.product,
+                        &thread,
+                        &execution,
+                        error.message().to_owned(),
+                    )
+                    .await;
+                }
+            }
+        });
+    }
+    Ok(Json(interaction.into()))
 }
 
 pub(super) async fn get_layer(
@@ -927,28 +1002,8 @@ async fn invoke_action_with_authority(
         .get_action_invocation(source_interaction_id, action_id)
         .await?
     {
-        if outcome.interaction.completion_status == "not_started" {
-            refresh_provider_catalog(
-                state,
-                outcome
-                    .interaction
-                    .model_selection
-                    .as_ref()
-                    .map(|model| &model.provider_id),
-            )
-            .await?;
-        }
         return spawn_action_handoff(state.clone(), thread, outcome).await;
     }
-    refresh_provider_catalog(
-        state,
-        source
-            .model_selection
-            .as_ref()
-            .map(|model| &model.provider_id),
-    )
-    .await?;
-
     // One-shot invocation is a temporary UX simplification. The durable product record is
     // intentionally shaped so future retryable or repeatable action semantics can replace it.
     let owned_state = state.clone();
@@ -960,16 +1015,6 @@ async fn invoke_action_with_authority(
         finish_action_handoff(&owned_state, &thread, outcome).await
     });
     await_action_handoff(handoff).await
-}
-
-async fn refresh_provider_catalog(
-    state: &ApiState,
-    provider_id: Option<&ProviderId>,
-) -> Result<(), ApiError> {
-    if let (Some(refresh), Some(provider_id)) = (&state.provider_catalog_refresh, provider_id) {
-        refresh.refresh(provider_id).await?;
-    }
-    Ok(())
 }
 
 async fn spawn_action_handoff(
@@ -1035,14 +1080,19 @@ async fn claim_and_start_action_interaction(
 ) -> Result<Interaction, ApiError> {
     if state.runtime.is_none() {
         let message = "GraphComplete runtime is unavailable";
-        record_background_failure(state, thread, &interaction, message.into()).await;
+        record_background_failure(&state.product, thread, &interaction, message.into()).await;
         return Err(ApiError::invalid(message));
     }
-    let prepared = match prepare_and_claim_interaction(state, thread, &interaction).await {
+    let prepared = match prepare_and_claim_interaction(state, thread, &interaction, false).await {
         Ok(prepared) => prepared,
         Err(error) => {
-            record_background_failure(state, thread, &interaction, error.message().to_owned())
-                .await;
+            record_background_failure(
+                &state.product,
+                thread,
+                &interaction,
+                error.message().to_owned(),
+            )
+            .await;
             return Err(error);
         }
     };
@@ -1060,7 +1110,12 @@ async fn claim_and_start_action_interaction(
     let state = state.clone();
     let thread = thread.clone();
     tokio::spawn(async move {
-        execute_prepared_interaction(state, thread, interaction, prepared).await;
+        state
+            .interaction_execution
+            .as_ref()
+            .expect("runtime-backed interaction execution service")
+            .execute_prepared_interaction(thread, interaction, prepared)
+            .await;
     });
     Ok(running)
 }
@@ -1161,11 +1216,16 @@ async fn start_interaction(
     if state.runtime.is_none() {
         return Ok(interaction);
     }
-    let prepared = match prepare_and_claim_interaction(state, thread, &interaction).await {
+    let prepared = match prepare_and_claim_interaction(state, thread, &interaction, false).await {
         Ok(prepared) => prepared,
         Err(error) => {
-            record_background_failure(state, thread, &interaction, error.internal_diagnostic())
-                .await;
+            record_background_failure(
+                &state.product,
+                thread,
+                &interaction,
+                error.internal_diagnostic(),
+            )
+            .await;
             return Err(error);
         }
     };
@@ -1180,7 +1240,12 @@ async fn start_interaction(
     let state = state.clone();
     let thread = thread.clone();
     tokio::spawn(async move {
-        execute_prepared_interaction(state, thread, interaction, prepared).await;
+        state
+            .interaction_execution
+            .as_ref()
+            .expect("runtime-backed interaction execution service")
+            .execute_prepared_interaction(thread, interaction, prepared)
+            .await;
     });
     Ok(running)
 }
@@ -1189,14 +1254,19 @@ async fn prepare_and_claim_interaction(
     state: &ApiState,
     thread: &Thread,
     interaction: &Interaction,
+    already_claimed_running: bool,
 ) -> Result<Option<PreparedInteraction>, ApiError> {
     let Some(runtime) = &state.runtime else {
         return Ok(None);
     };
-    let claimed_preparation = state
-        .product
-        .claim_interaction_preparing(interaction.id)
-        .await?;
+    let claimed_preparation = if already_claimed_running {
+        true
+    } else {
+        state
+            .product
+            .claim_interaction_preparing(interaction.id)
+            .await?
+    };
     if !claimed_preparation {
         let current = state.product.get_interaction(interaction.id).await?;
         let recoverable_input = current.completion_status == "submitted"
@@ -1229,14 +1299,71 @@ async fn prepare_and_claim_interaction(
             }
         }
     }
-    if let Some(model_selection) = interaction.model_selection.as_ref()
-        && let Err(error) = state
+    let execution_model_selection = if let Some(model_selection) =
+        interaction.model_selection.as_ref()
+    {
+        match state
             .product
             .validate_execution_model_selection(&thread.harness_configuration_name, model_selection)
             .await
-    {
-        return Err(error.into());
-    }
+        {
+            Ok(selection) => Some(selection),
+            Err(error) => {
+                state
+                    .product
+                    .record_pre_execution_model_failure(crate::product::PreExecutionModelFailure {
+                        interaction_id: interaction.id,
+                        harness_name: &thread.harness_configuration_name,
+                        selection: model_selection,
+                        route: None,
+                        policy: None,
+                        adapter_version: None,
+                        failure_category: "model_unavailable",
+                    })
+                    .await?;
+                eprintln!(
+                    "interaction {} model selection became invalid before graph preparation; restored the sent turn with a failed attempt receipt: {error}",
+                    interaction.id
+                );
+                return Ok(None);
+            }
+        }
+    } else {
+        None
+    };
+    let harness_policy = if let Some(selection) = execution_model_selection.as_ref() {
+        match state
+            .product
+            .execution_harness_policy(&thread.harness_configuration_name)
+            .await
+        {
+            Ok(policy) => Some(policy),
+            Err(error) => {
+                state
+                    .product
+                    .record_pre_execution_model_failure(crate::product::PreExecutionModelFailure {
+                        interaction_id: interaction.id,
+                        harness_name: &thread.harness_configuration_name,
+                        selection: interaction
+                            .model_selection
+                            .as_ref()
+                            .expect("execution route requires a selected model"),
+                        route: Some(selection),
+                        policy: None,
+                        adapter_version: None,
+                        failure_category: "model_unavailable",
+                    })
+                    .await?;
+                eprintln!(
+                    "interaction {} harness policy became invalid before graph preparation; restored the sent turn with a failed attempt receipt: {error}",
+                    interaction.id
+                );
+                return Ok(None);
+            }
+        }
+    } else {
+        None
+    };
     let working_directory = match thread.project_id {
         Some(project_id) => match state.product.project_path(project_id).await {
             Ok(path) => path,
@@ -1278,7 +1405,9 @@ async fn prepare_and_claim_interaction(
         working_directory: &working_directory,
         harness_configuration_name: &thread.harness_configuration_name,
         permission_profile,
-        model_selection: interaction.model_selection.as_ref(),
+        model_selection: execution_model_selection.as_ref(),
+        execution_lease_id: None,
+        harness_policy: harness_policy.as_ref(),
         invocation,
         input_identity: durable_input
             .as_ref()
@@ -1442,452 +1571,6 @@ async fn prepare_and_claim_interaction(
     Ok(Some(prepared))
 }
 
-async fn execute_prepared_interaction(
-    state: ApiState,
-    thread: Thread,
-    interaction: Interaction,
-    prepared: PreparedInteraction,
-) {
-    let Some(runtime) = &state.runtime else {
-        return;
-    };
-    let working_directory = match thread.project_id {
-        Some(project_id) => match state.product.project_path(project_id).await {
-            Ok(path) => path,
-            Err(error) => {
-                let message = match runtime.discard_prepared(prepared).await {
-                    Ok(()) => error.to_string(),
-                    Err(cleanup) => format!("{error}; capability cleanup also failed: {cleanup}"),
-                };
-                record_background_failure(&state, &thread, &interaction, message).await;
-                return;
-            }
-        },
-        None => state
-            .standalone_workspaces_directory
-            .join(thread.id.value().to_string())
-            .to_string_lossy()
-            .into_owned(),
-    };
-    let permission_profile = match state
-        .permission_catalog
-        .profile(&thread.permission_profile_id)
-    {
-        Ok(profile) => profile,
-        Err(error) => {
-            let message = match runtime.discard_prepared(prepared).await {
-                Ok(()) => error.to_string(),
-                Err(cleanup) => format!("{error}; capability cleanup also failed: {cleanup}"),
-            };
-            record_background_failure(&state, &thread, &interaction, message).await;
-            return;
-        }
-    };
-    let invocation = match state.product.invocation_graph_source(interaction.id).await {
-        Ok(value) => {
-            value.map(
-                |(source_interaction_node_id, source_action_id)| PreparedInvocation {
-                    source_interaction_node_id,
-                    source_action_id,
-                },
-            )
-        }
-        Err(error) => {
-            let message = match runtime.discard_prepared(prepared).await {
-                Ok(()) => error.to_string(),
-                Err(cleanup) => format!("{error}; capability cleanup also failed: {cleanup}"),
-            };
-            record_background_failure(&state, &thread, &interaction, message).await;
-            return;
-        }
-    };
-    let durable_input = match state.product.interaction_input(interaction.id).await {
-        Ok(value) => value,
-        Err(error) => {
-            record_background_failure(&state, &thread, &interaction, error.to_string()).await;
-            return;
-        }
-    };
-    let command = CompleteInteraction {
-        project_id: thread.project_id.map(ProjectId::value),
-        product_interaction_id: interaction.id.value(),
-        thread_id: thread.id.value(),
-        interaction_id: interaction.id.value(),
-        text: &interaction.text,
-        working_directory: &working_directory,
-        harness_configuration_name: &thread.harness_configuration_name,
-        permission_profile,
-        model_selection: interaction.model_selection.as_ref(),
-        invocation,
-        input_identity: durable_input
-            .as_ref()
-            .map(|input| input.input_identity.as_str()),
-        input_digest: durable_input
-            .as_ref()
-            .map(|input| input.input_digest.as_str()),
-        contexts: durable_input
-            .as_ref()
-            .map(|input| input.contexts.as_slice())
-            .unwrap_or(&[]),
-    };
-    let expected_invocation = invocation;
-    let prepared_graph_node_id = prepared.graph_node_id;
-    let completion = runtime.complete_prepared(&command, prepared);
-    tokio::pin!(completion);
-    let mut cursor = 0;
-    let mut harness_session_id = None;
-    let mut complete_call_id = None;
-    let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let completion_result: Result<RuntimeCompletion, String> = loop {
-        tokio::select! {
-            result = &mut completion => {
-                match runtime.approval_events(thread.id.value(), cursor).await {
-                    Ok(snapshot) => {
-                        if let Err(error) = persist_approval_snapshot(
-                            &state,
-                            thread.id,
-                            interaction.id,
-                            &mut cursor,
-                            &mut harness_session_id,
-                            &mut complete_call_id,
-                            snapshot,
-                        ).await {
-                            break Err(error);
-                        }
-                        let acknowledgement = match runtime
-                            .approval_events(thread.id.value(), cursor)
-                            .await
-                        {
-                            Ok(snapshot) => snapshot,
-                            Err(error) => break Err(format!(
-                                "could not acknowledge final approval event cursor: {error}"
-                            )),
-                        };
-                        match final_approval_acknowledgement(cursor, &acknowledgement) {
-                            Ok(true) => {
-                                if let Err(error) = persist_approval_snapshot(
-                                    &state,
-                                    thread.id,
-                                    interaction.id,
-                                    &mut cursor,
-                                    &mut harness_session_id,
-                                    &mut complete_call_id,
-                                    acknowledgement,
-                                ).await {
-                                    break Err(error);
-                                }
-                            }
-                            Ok(false) => {}
-                            Err(error) => break Err(error),
-                        }
-                    }
-                    Err(RuntimeError::Remote { status: 404, .. }) if harness_session_id.is_none() => {}
-                    Err(error) => break Err(format!(
-                        "could not perform final approval reconciliation: {error}"
-                    )),
-                }
-                break result.map_err(|error| error.to_string());
-            }
-            _ = interval.tick() => {
-                match runtime.approval_events(thread.id.value(), cursor).await {
-                    Ok(snapshot) => {
-                        if let Err(error) = persist_approval_snapshot(
-                            &state,
-                            thread.id,
-                            interaction.id,
-                            &mut cursor,
-                            &mut harness_session_id,
-                            &mut complete_call_id,
-                            snapshot,
-                        ).await {
-                            let cancellation = runtime.cancel_completion(thread.id.value()).await;
-                            let cleanup = tokio::time::timeout(
-                                std::time::Duration::from_secs(2),
-                                &mut completion,
-                            ).await;
-                            let mut message = format!(
-                                "could not reconcile approval events for thread {}: {error}",
-                                thread.id
-                            );
-                            if let Err(cancel_error) = cancellation {
-                                message.push_str(&format!("; cancellation failed: {cancel_error}"));
-                            }
-                            if cleanup.is_err() {
-                                message.push_str("; runtime cleanup timed out");
-                            }
-                            break Err(message);
-                        }
-                    }
-                    Err(RuntimeError::Remote { status: 404, .. }) if harness_session_id.is_none() => {}
-                    Err(error) => {
-                        eprintln!("could not poll approval events for thread {}: {error}", thread.id);
-                    }
-                }
-            }
-        }
-    };
-    let aborted = match state
-        .product
-        .abort_pending_approvals(
-            Some(interaction.id),
-            "Approval request was aborted because the harness completion ended without a terminal approval event.",
-        )
-        .await
-    {
-        Ok(count) => count,
-        Err(error) => {
-            record_background_failure(&state, &thread, &interaction, error.to_string()).await;
-            return;
-        }
-    };
-    let completion_result = if aborted > 0 {
-        Err("harness completion ended with unresolved approval requests".into())
-    } else {
-        completion_result
-    };
-    match completion_result {
-        Ok(completion) => {
-            if let Err(error) = verify_canonical_interaction(
-                runtime,
-                prepared_graph_node_id,
-                expected_invocation,
-                &completion.output,
-            )
-            .await
-            {
-                record_reconciliation_pending(&state, &thread, &interaction, &error).await;
-                return;
-            }
-            if completion.permission_profile_id != thread.permission_profile_id {
-                record_background_failure(
-                    &state,
-                    &thread,
-                    &interaction,
-                    format!(
-                        "runtime returned permission profile {} for thread pinned to {}",
-                        completion.permission_profile_id, thread.permission_profile_id
-                    ),
-                )
-                .await;
-                return;
-            }
-            if let Err(error) = state
-                .product
-                .accept_interaction_completion(AcceptedInteractionCompletion {
-                    interaction_id: interaction.id,
-                    graph_node_id: completion.graph_node_id,
-                    harness_configuration_name: &completion.harness_configuration_name,
-                    harness_configuration_digest: &completion.harness_configuration_digest,
-                    effective_execution_digest: &completion.effective_execution_digest,
-                    effective_permission_receipt: &completion.effective_permission_receipt,
-                    output: &completion.output,
-                })
-                .await
-            {
-                record_reconciliation_pending(
-                    &state,
-                    &thread,
-                    &interaction,
-                    &format!("could not persist accepted interaction: {error}"),
-                )
-                .await;
-            }
-        }
-        Err(error) => {
-            if let Err(invalidation_error) = runtime
-                .invalidate_node_capabilities(prepared_graph_node_id)
-                .await
-            {
-                record_reconciliation_pending(
-                    &state,
-                    &thread,
-                    &interaction,
-                    &format!(
-                        "runtime failed ({error}); node capability invalidation failed: {invalidation_error}"
-                    ),
-                )
-                .await;
-                return;
-            }
-            let recovered_output =
-                wait_for_completion_output(runtime, prepared_graph_node_id, interaction.id).await;
-            if let Ok(Some(output)) = recovered_output {
-                if let Err(verify_error) = verify_canonical_interaction(
-                    runtime,
-                    prepared_graph_node_id,
-                    expected_invocation,
-                    &output,
-                )
-                .await
-                {
-                    record_reconciliation_pending(
-                        &state,
-                        &thread,
-                        &interaction,
-                        &format!("runtime failed ({error}); {verify_error}"),
-                    )
-                    .await;
-                    return;
-                }
-                match state.product.get_interaction(interaction.id).await {
-                    Ok(bound) => {
-                        let accepted = match (
-                            bound.harness_configuration_name.as_deref(),
-                            bound.harness_configuration_digest.as_deref(),
-                            bound.effective_execution_digest.as_deref(),
-                            bound.effective_permission_receipt.as_ref(),
-                        ) {
-                            (Some(name), Some(digest), Some(execution), Some(receipt)) => {
-                                state
-                                    .product
-                                    .accept_interaction_completion(AcceptedInteractionCompletion {
-                                        interaction_id: interaction.id,
-                                        graph_node_id: prepared_graph_node_id,
-                                        harness_configuration_name: name,
-                                        harness_configuration_digest: digest,
-                                        effective_execution_digest: execution,
-                                        effective_permission_receipt: receipt,
-                                        output: &output,
-                                    })
-                                    .await
-                            }
-                            _ => {
-                                eprintln!(
-                                    "bound interaction {} lost its prepared execution receipt",
-                                    interaction.id
-                                );
-                                return;
-                            }
-                        };
-                        if let Err(persistence_error) = accepted {
-                            record_reconciliation_pending(
-                                &state,
-                                &thread,
-                                &interaction,
-                                &persistence_error.to_string(),
-                            )
-                            .await;
-                        }
-                        return;
-                    }
-                    Err(read_error) => {
-                        eprintln!(
-                            "could not read interaction {} after runtime response loss: {read_error}",
-                            interaction.id
-                        );
-                        return;
-                    }
-                }
-            }
-            match recovered_output {
-                Ok(None) => {
-                    record_background_failure(&state, &thread, &interaction, error.to_string())
-                        .await;
-                }
-                Err(read_error) => {
-                    record_reconciliation_pending(
-                        &state,
-                        &thread,
-                        &interaction,
-                        &format!(
-                            "runtime failed ({error}); canonical output read failed: {read_error}"
-                        ),
-                    )
-                    .await;
-                }
-                Ok(Some(_)) => unreachable!("accepted output returned above"),
-            }
-        }
-    }
-}
-
-async fn verify_canonical_interaction(
-    runtime: &crate::runtime::RuntimeClient,
-    graph_node_id: i64,
-    expected_invocation: Option<PreparedInvocation>,
-    output: &Value,
-) -> Result<(), String> {
-    if output.get("nodeId").and_then(Value::as_i64) != Some(graph_node_id) {
-        return Err(
-            "completion output nodeId does not match the prepared graph interaction".into(),
-        );
-    }
-    let mut attempt = 0_u64;
-    let metadata = loop {
-        match runtime.interaction_metadata(graph_node_id).await {
-            Ok(metadata) => break metadata,
-            Err(error) if attempt + 1 < LIVE_RECONCILIATION_ATTEMPTS => {
-                attempt += 1;
-                eprintln!(
-                    "canonical metadata read failed for graph interaction {graph_node_id}: {error}; retrying"
-                );
-                tokio::time::sleep(std::time::Duration::from_millis((attempt * 25).min(1_000)))
-                    .await;
-            }
-            Err(error) => return Err(error.to_string()),
-        }
-    };
-    if metadata.node_id != graph_node_id || metadata.invocation != expected_invocation {
-        return Err("graph interaction lease provenance does not match product history".into());
-    }
-    Ok(())
-}
-
-async fn wait_for_completion_output(
-    runtime: &crate::runtime::RuntimeClient,
-    graph_node_id: i64,
-    product_interaction_id: InteractionId,
-) -> Result<Option<Value>, RuntimeError> {
-    let mut attempt = 0_u64;
-    loop {
-        match runtime.completion_output(graph_node_id).await {
-            Ok(output) => return Ok(output),
-            Err(error) if attempt + 1 < LIVE_RECONCILIATION_ATTEMPTS => {
-                attempt += 1;
-                eprintln!(
-                    "canonical output read failed for product interaction {product_interaction_id}: {error}; retrying"
-                );
-                tokio::time::sleep(std::time::Duration::from_millis((attempt * 25).min(1_000)))
-                    .await;
-            }
-            Err(error) => return Err(error),
-        }
-    }
-}
-
-async fn record_reconciliation_pending(
-    state: &ApiState,
-    thread: &Thread,
-    interaction: &Interaction,
-    error: &str,
-) {
-    let error = format!("{RECONCILIATION_PENDING_PREFIX} {error}");
-    for attempt in 1..=LIVE_RECONCILIATION_ATTEMPTS {
-        match state
-            .product
-            .fail_interaction_completion(interaction.id, &thread.harness_configuration_name, &error)
-            .await
-        {
-            Ok(_) => return,
-            Err(persistence_error) if attempt < LIVE_RECONCILIATION_ATTEMPTS => {
-                eprintln!(
-                    "could not quarantine interaction {}: {persistence_error}; retrying",
-                    interaction.id
-                );
-                tokio::time::sleep(std::time::Duration::from_millis(attempt * 25)).await;
-            }
-            Err(persistence_error) => {
-                eprintln!(
-                    "could not quarantine interaction {} after bounded retries: {persistence_error}; original failure: {error}",
-                    interaction.id
-                );
-                return;
-            }
-        }
-    }
-}
-
 impl TryFrom<ModelSelectionRequest> for InteractionModelSelection {
     type Error = ApiError;
 
@@ -1900,228 +1583,17 @@ impl TryFrom<ModelSelectionRequest> for InteractionModelSelection {
     }
 }
 
-fn final_approval_acknowledgement(
-    cursor: u64,
-    snapshot: &ApprovalEventSnapshot,
-) -> Result<bool, String> {
-    if !snapshot.events.is_empty() || !snapshot.pending_requests.is_empty() {
-        return Err("harness did not return an empty final approval acknowledgement".into());
-    }
-    if snapshot.latest_sequence == cursor {
-        return Ok(true);
-    }
-    if cursor > 0 && snapshot.latest_sequence == 0 {
-        return Ok(false);
-    }
-    Err("harness did not acknowledge the exact final approval event cursor".into())
-}
-
-async fn persist_approval_snapshot(
-    state: &ApiState,
-    thread_id: ThreadId,
-    interaction_id: InteractionId,
-    cursor: &mut u64,
-    harness_session_id: &mut Option<String>,
-    complete_call_id: &mut Option<String>,
-    snapshot: ApprovalEventSnapshot,
-) -> Result<(), String> {
-    if snapshot.harness_session_id.trim().is_empty() {
-        return Err("harness returned an empty approval session ID".into());
-    }
-    if let Some(previous) = harness_session_id.as_deref()
-        && previous != snapshot.harness_session_id
-    {
-        return Err("harness approval session changed while completion was active".into());
-    }
-    *harness_session_id = Some(snapshot.harness_session_id.clone());
-    for event in snapshot.events {
-        if event.sequence() != *cursor + 1 {
-            return Err(format!(
-                "harness approval event sequence jumped from {} to {}",
-                *cursor,
-                event.sequence()
-            ));
-        }
-        match event {
-            ApprovalEvent::Requested { request, .. } => {
-                validate_approval_correlation(
-                    thread_id,
-                    interaction_id,
-                    &snapshot.harness_session_id,
-                    complete_call_id,
-                    &request.correlation,
-                )?;
-                state
-                    .product
-                    .record_approval_request(&request)
-                    .await
-                    .map_err(|error| error.to_string())?;
-            }
-            ApprovalEvent::Resolved { resolution, .. } => {
-                validate_approval_correlation(
-                    thread_id,
-                    interaction_id,
-                    &snapshot.harness_session_id,
-                    complete_call_id,
-                    &resolution.correlation,
-                )?;
-                validate_event_resolution_authority(state, &resolution).await?;
-                state
-                    .product
-                    .record_approval_resolution(&resolution, true)
-                    .await
-                    .map_err(|error| error.to_string())?;
-            }
-        }
-        *cursor += 1;
-    }
-    if snapshot.latest_sequence != *cursor {
-        return Err(format!(
-            "harness approval event snapshot ended at {} but reported latest sequence {}",
-            *cursor, snapshot.latest_sequence
-        ));
-    }
-    for request in snapshot.pending_requests {
-        validate_approval_correlation(
-            thread_id,
-            interaction_id,
-            &snapshot.harness_session_id,
-            complete_call_id,
-            &request.correlation,
-        )?;
-        state
-            .product
-            .record_approval_request(&request)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-fn validate_approval_correlation(
-    thread_id: ThreadId,
-    interaction_id: InteractionId,
-    snapshot_session_id: &str,
-    complete_call_id: &mut Option<String>,
-    correlation: &ApprovalCorrelation,
-) -> Result<(), String> {
-    if correlation.thread_id != thread_id.value() {
-        return Err("harness approval event belongs to a different thread".into());
-    }
-    if correlation.interaction_id != interaction_id.value() {
-        return Err("harness approval event belongs to a different interaction".into());
-    }
-    if correlation.harness_session_id != snapshot_session_id {
-        return Err("harness approval event belongs to a different live session".into());
-    }
-    if let Some(expected) = complete_call_id.as_deref() {
-        if correlation.complete_call_id != expected {
-            return Err("harness approval event belongs to a different completion call".into());
-        }
-    } else {
-        *complete_call_id = Some(correlation.complete_call_id.clone());
-    }
-    Ok(())
-}
-
-fn validate_decision_resolution(
-    request: &ApprovalRequest,
-    decision: ApprovalDecision,
-    resolution: &ApprovalResolution,
-) -> Result<(), String> {
-    if resolution.request_id != request.request_id || resolution.correlation != request.correlation
-    {
-        return Err("harness returned an approval resolution for a different request".into());
-    }
-    if resolution.actor != ApprovalActor::User || resolution.decision != Some(decision) {
-        return Err("harness approval resolution did not match the user's decision".into());
-    }
-    let expected_outcome = match decision {
-        ApprovalDecision::ApproveOnce | ApprovalDecision::ApproveAlways => {
-            ApprovalOutcome::Approved
-        }
-        ApprovalDecision::Deny => ApprovalOutcome::Denied,
-    };
-    if resolution.outcome != expected_outcome || resolution.source_request_id.is_some() {
-        return Err("harness approval resolution did not match the user's decision".into());
-    }
-    Ok(())
-}
-
-async fn validate_event_resolution_authority(
-    state: &ApiState,
-    resolution: &ApprovalResolution,
-) -> Result<(), String> {
-    if resolution.actor != ApprovalActor::User {
-        return Ok(());
-    }
-    let stored = state
-        .product
-        .get_approval(&resolution.request_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    if stored.resolution.as_ref() == Some(resolution) {
-        return Ok(());
-    }
-    let decision = state
-        .approval_decisions
-        .lock()
-        .expect("approval decision lock poisoned")
-        .get(&resolution.request_id)
-        .copied()
-        .ok_or_else(|| {
-            "harness returned a user approval resolution without a product decision in flight"
-                .to_owned()
-        })?;
-    validate_decision_resolution(&stored.request, decision, resolution)
-}
-
-struct ApprovalDecisionReservation {
-    decisions:
-        std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, ApprovalDecision>>>,
-    request_id: String,
-}
-
-impl Drop for ApprovalDecisionReservation {
-    fn drop(&mut self) {
-        self.decisions
-            .lock()
-            .expect("approval decision lock poisoned")
-            .remove(&self.request_id);
-    }
-}
-
-async fn record_background_failure(
-    state: &ApiState,
-    thread: &Thread,
-    interaction: &Interaction,
-    error: String,
-) {
-    eprintln!(
-        "interaction {} completion failed in the backend: {error}",
-        interaction.id
-    );
-    match state
-        .product
-        .fail_interaction_completion(interaction.id, &thread.harness_configuration_name, &error)
-        .await
-    {
-        Ok(true) => {}
-        Ok(false) => eprintln!(
-            "interaction {} became terminal before its failure could be recorded",
-            interaction.id
-        ),
-        Err(persistence_error) => eprintln!(
-            "could not persist failed interaction {}: {persistence_error}; original failure: {error}",
-            interaction.id
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::approval::ApprovalAction;
+    use crate::{
+        approval::{
+            ApprovalAction, ApprovalActor, ApprovalCorrelation, ApprovalOutcome, ApprovalRequest,
+            ApprovalResolution,
+        },
+        product::{final_approval_acknowledgement, validate_approval_correlation},
+        runtime::ApprovalEventSnapshot,
+    };
 
     #[test]
     fn action_invocation_request_errors_include_identifiers_in_the_backend_log() {

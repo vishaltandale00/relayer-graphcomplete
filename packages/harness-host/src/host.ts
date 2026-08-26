@@ -14,6 +14,7 @@ import {
 import {
   isJsonObject,
   parseHarnessConfiguration,
+  harnessAllowsModel,
   sameHarnessExecutionConfiguration,
 } from "./configuration.js";
 import { resolveHarnessFactory } from "./registry.js";
@@ -35,7 +36,10 @@ import type {
   HarnessSessionRegistration,
   HarnessSessionState,
   HarnessCompletionTraceContext,
+  HarnessExecutionAccessBroker,
+  HarnessExecutionAccessLease,
   HarnessTraceDescriptor,
+  HarnessTraceSink,
 } from "./types.js";
 
 interface LiveSession {
@@ -48,6 +52,26 @@ interface LiveSession {
     readonly interactionId: number;
     readonly controller: AbortController;
   };
+  currentPolicyRevision?: number;
+  currentPolicyIdentity?: string;
+}
+
+interface HarnessExecutionPolicy {
+  readonly configurationRevision: number;
+  readonly configurationDigest: string;
+  readonly modelRules?: HarnessConfiguration["modelRules"];
+}
+
+const EXECUTION_ADMISSION_TIMEOUT_MS = 30_000;
+const EXECUTION_TERMINAL_ACK_TIMEOUT_MS = 30_000;
+
+export type HarnessEffectBoundary = "none" | "partial_output" | "graph_write" | "tool_effect" | "unknown";
+
+export class HarnessExecutionFailure extends Error {
+  constructor(message: string, readonly failureCategory: string, readonly effectBoundary: HarnessEffectBoundary, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "HarnessExecutionFailure";
+  }
 }
 
 interface PersistedHarnessSessionDescriptor {
@@ -72,6 +96,7 @@ export interface HarnessHostOptions {
   readonly host?: string;
   readonly port?: number;
   readonly trace?: HarnessTraceStoreOptions;
+  readonly accessBroker?: HarnessExecutionAccessBroker;
 }
 
 export interface RunningHarnessHost {
@@ -87,6 +112,15 @@ export class HarnessHost {
   private saved = new Map<number, PersistedHarnessSessionDescriptor>();
   private legacySaved = new Map<number, LegacyPersistedHarnessSessionDescriptor>();
   private persistTail: Promise<void> = Promise.resolve();
+  private readonly pendingExecutionAccess = new Map<string, {
+    readonly threadId: number;
+    readonly model: InteractionModelSelection;
+    readonly policyIdentity?: string;
+    readonly lease: HarnessExecutionAccessLease;
+    timeout: NodeJS.Timeout | undefined;
+    releasePromise: Promise<void> | undefined;
+    state: "admitted" | "claimed" | "awaiting-terminal";
+  }>();
   private closed = false;
   private closeAbandoned = false;
   private readonly traceStore: HarnessTraceStore | undefined;
@@ -210,6 +244,8 @@ export class HarnessHost {
     model: InteractionModelSelection | undefined,
     signal?: AbortSignal,
     traceContext?: HarnessCompletionTraceContext,
+    executionLeaseId?: string,
+    harnessPolicy?: HarnessExecutionPolicy,
   ): Promise<HarnessCompleteResult>;
   async complete(
     threadId: number,
@@ -218,6 +254,8 @@ export class HarnessHost {
     modelOrSignal?: InteractionModelSelection | AbortSignal,
     trailingSignal?: AbortSignal,
     traceContext?: HarnessCompletionTraceContext,
+    executionLeaseId?: string,
+    harnessPolicy?: HarnessExecutionPolicy,
   ): Promise<HarnessCompleteResult> {
     if (this.closed) throw new Error("Harness host is closed");
     if (!Number.isSafeInteger(interactionId) || interactionId < 1) throw new Error("Harness interactionId must be a positive integer");
@@ -226,7 +264,8 @@ export class HarnessHost {
     const signal = isAbortSignal(modelOrSignal) ? modelOrSignal : trailingSignal;
     if (model !== undefined) validateInteractionModelSelection(model);
     const session = this.liveSession(threadId);
-    if (model !== undefined) validateConfiguredModelSelection(session.descriptor.configuration, model);
+    const effectiveConfiguration = executionConfiguration(session, harnessPolicy);
+    if (model !== undefined) validateConfiguredModelSelection(effectiveConfiguration, model);
     return this.withSessionLock(session, async () => {
       const controller = new AbortController();
       const detachSignal = forwardAbort(signal, controller);
@@ -252,6 +291,8 @@ export class HarnessHost {
           approvals,
           controller.signal,
           traceContext,
+          executionLeaseId,
+          harnessPolicy,
         );
       } catch (error) {
         operationError = error;
@@ -272,10 +313,82 @@ export class HarnessHost {
       } catch (error) {
         errors.push(error);
       }
+      if (executionLeaseId !== undefined) this.awaitTerminalAcknowledgement(executionLeaseId);
       if (errors.length === 1) throw errors[0];
       if (errors.length > 1) throw new AggregateError(errors, "Harness completion and cleanup failed");
       return result!;
     });
+  }
+
+  async admitProviderExecution(
+    threadId: number,
+    model: InteractionModelSelection,
+    signal: AbortSignal,
+    harnessPolicy?: HarnessExecutionPolicy,
+  ): Promise<{
+    executionLeaseId: string;
+    adapterImplementationVersion: string;
+  }> {
+    if (this.closed) throw new Error("Harness host is closed");
+    validateInteractionModelSelection(model);
+    const session = this.liveSession(threadId);
+    validateConfiguredModelSelection(executionConfiguration(session, harnessPolicy), model);
+    const acceptedContracts = session.descriptor.configuration.executionAccessContracts;
+    if (acceptedContracts === undefined || this.options.accessBroker === undefined) {
+      throw new HarnessExecutionFailure("Harness execution access is unavailable", "configuration", "none");
+    }
+    const lease = await this.options.accessBroker.acquire(model, acceptedContracts, signal);
+    try {
+      if (!acceptedContracts.includes(lease.access.contract)
+        || lease.access.providerId !== model.providerId
+        || lease.access.adapterId !== model.adapterId) {
+        throw new Error("Harness execution access does not match the selected provider or contract");
+      }
+      const executionLeaseId = randomUUID();
+      const timeout = this.releaseAfter(executionLeaseId, EXECUTION_ADMISSION_TIMEOUT_MS);
+      this.pendingExecutionAccess.set(executionLeaseId, {
+        threadId, model, lease, timeout, releasePromise: undefined, state: "admitted",
+        ...(harnessPolicy === undefined ? {} : { policyIdentity: executionPolicyIdentity(harnessPolicy) }),
+      });
+      return { executionLeaseId, adapterImplementationVersion: lease.access.adapterImplementationVersion };
+    } catch (error) {
+      await lease.release();
+      throw error;
+    }
+  }
+
+  async releaseProviderExecution(executionLeaseId: string): Promise<boolean> {
+    const pending = this.pendingExecutionAccess.get(executionLeaseId);
+    if (pending === undefined) return false;
+    if (pending.timeout !== undefined) clearTimeout(pending.timeout);
+    pending.timeout = undefined;
+    pending.releasePromise ??= Promise.resolve(pending.lease.release()).then(() => {
+      this.pendingExecutionAccess.delete(executionLeaseId);
+    });
+    try {
+      await pending.releasePromise;
+    } catch (error) {
+      pending.releasePromise = undefined;
+      pending.timeout = this.releaseAfter(
+        executionLeaseId,
+        pending.state === "admitted" ? EXECUTION_ADMISSION_TIMEOUT_MS : EXECUTION_TERMINAL_ACK_TIMEOUT_MS,
+      );
+      throw error;
+    }
+    return true;
+  }
+
+  private releaseAfter(executionLeaseId: string, delay: number): NodeJS.Timeout {
+    return setTimeout(() => {
+      void this.releaseProviderExecution(executionLeaseId).catch(() => {});
+    }, delay);
+  }
+
+  private awaitTerminalAcknowledgement(executionLeaseId: string): void {
+    const pending = this.pendingExecutionAccess.get(executionLeaseId);
+    if (pending?.state !== "claimed") return;
+    pending.state = "awaiting-terminal";
+    pending.timeout = this.releaseAfter(executionLeaseId, EXECUTION_TERMINAL_ACK_TIMEOUT_MS);
   }
 
   private async executeCompletion(
@@ -286,6 +399,8 @@ export class HarnessHost {
     approvals: HarnessApprovalChannel,
     signal: AbortSignal,
     traceContext?: HarnessCompletionTraceContext,
+    executionLeaseId?: string,
+    harnessPolicy?: HarnessExecutionPolicy,
   ): Promise<HarnessCompleteResult> {
     const graph = new RelayerGraphClient(capability);
     const interactionNodeId = capability.nodeId;
@@ -310,22 +425,95 @@ export class HarnessHost {
       support,
     });
     const traceSink = trace?.sink ?? createNoopHarnessTraceSink();
-    let completionError: unknown;
+    const observedTrace = new EffectObservingTraceSink(traceSink);
+    let completionError: HarnessExecutionFailure | undefined;
+    let accessLease: HarnessExecutionAccessLease | undefined;
+    let releaseAccessAfterCompletion = false;
+    let harnessStarted = false;
     try {
+      const acceptedContracts = session.descriptor.configuration.executionAccessContracts;
+      if (executionLeaseId !== undefined) {
+        const pending = this.pendingExecutionAccess.get(executionLeaseId);
+        if (pending === undefined || pending.state !== "admitted" || pending.threadId !== threadId || model === undefined
+          || pending.model.providerId !== model.providerId || pending.model.adapterId !== model.adapterId
+          || pending.model.modelId !== model.modelId
+          || pending.policyIdentity !== (harnessPolicy === undefined ? undefined : executionPolicyIdentity(harnessPolicy))) {
+          throw new HarnessExecutionFailure("Execution access admission is invalid or expired", "configuration", "none");
+        }
+        pending.state = "claimed";
+        if (pending.timeout !== undefined) clearTimeout(pending.timeout);
+        pending.timeout = undefined;
+        accessLease = pending.lease;
+      } else if (model !== undefined && acceptedContracts === undefined) {
+        throw new HarnessExecutionFailure(
+          "A model-using harness must declare execution access contracts",
+          "configuration",
+          "none",
+        );
+      }
+      if (executionLeaseId === undefined && acceptedContracts !== undefined && model !== undefined) {
+        if (this.options.accessBroker === undefined) throw new Error("Harness execution access broker is unavailable");
+        accessLease = await this.options.accessBroker.acquire(model, acceptedContracts, signal);
+        releaseAccessAfterCompletion = true;
+        if (!acceptedContracts.includes(accessLease.access.contract)
+          || accessLease.access.providerId !== model.providerId
+          || accessLease.access.adapterId !== model.adapterId) {
+          throw new Error("Harness execution access does not match the selected provider or contract");
+        }
+      }
+      harnessStarted = true;
       await session.harness.complete({
         inputGraph: interaction,
         interactionInput,
         graph: scope,
         approvals,
-        trace: traceSink,
+        trace: observedTrace,
         ...(model === undefined ? {} : { model }),
+        ...(accessLease === undefined ? {} : { access: accessLease.access }),
       }, signal);
     } catch (error) {
-      completionError = error;
+      completionError = normalizeHarnessFailure(error, harnessStarted, observedTrace.effectBoundary());
     } finally {
       scope.close();
+      if (releaseAccessAfterCompletion) {
+        try {
+          await accessLease?.release();
+        } catch (error) {
+          completionError ??= normalizeHarnessFailure(error, true, observedTrace.effectBoundary());
+        }
+      }
     }
     if (completionError !== undefined) {
+      // A harness can successfully accept the graph and then fail while unwinding. The accepted
+      // graph is authoritative and idempotent, so surface it as the completion instead of asking
+      // the user to repeat an execution that may already have produced effects.
+      try {
+        const output = await graph.getCompletionOutput(interactionNodeId);
+        const traceDescriptor = await sealTrace(trace, "partial", errorMessage(completionError));
+        return { threadId, configurationName: session.descriptor.configuration.name, output, trace: traceDescriptor };
+      } catch (error) {
+        if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) {
+          completionError = new HarnessExecutionFailure(
+            errorMessage(completionError),
+            classifyHarnessFailure(completionError),
+            "unknown",
+            { cause: new AggregateError([completionError, error], "Completion failure and graph recovery inspection failed") },
+          );
+        }
+      }
+      if (completionError.effectBoundary !== "tool_effect") {
+        const hasGraphWrites = await graph.getNeighbors(interactionNodeId)
+          .then((neighbors) => neighbors.length > 0)
+          .catch(() => false);
+        if (hasGraphWrites) {
+          completionError = new HarnessExecutionFailure(
+            completionError.message,
+            completionError.failureCategory,
+            "graph_write",
+            { cause: completionError },
+          );
+        }
+      }
       traceSink.emit({
         type: signal.aborted ? "cancelled" : "error",
         data: { message: errorMessage(completionError) },
@@ -384,6 +572,7 @@ export class HarnessHost {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    await Promise.all([...this.pendingExecutionAccess.keys()].map((id) => this.releaseProviderExecution(id)));
     for (const session of this.sessions.values()) {
       session.approvals.close("Harness host closed before the approval was resolved.");
       session.activeCompletion?.controller.abort(new Error("Harness host closed"));
@@ -495,6 +684,99 @@ export class HarnessHost {
   }
 }
 
+function normalizeHarnessFailure(
+  error: unknown,
+  harnessStarted: boolean,
+  observedBoundary: HarnessEffectBoundary,
+): HarnessExecutionFailure {
+  if (error instanceof HarnessExecutionFailure) {
+    return new HarnessExecutionFailure(
+      error.message,
+      error.failureCategory,
+      observedBoundary === "unknown"
+        ? error.effectBoundary
+        : strongestEffectBoundary(error.effectBoundary, observedBoundary),
+      { cause: error },
+    );
+  }
+  const effectBoundary = !harnessStarted
+    ? "none"
+    : observedBoundary === "none" ? "unknown" : observedBoundary;
+  return new HarnessExecutionFailure(
+    errorMessage(error),
+    classifyHarnessFailure(error),
+    effectBoundary,
+    { cause: error },
+  );
+}
+
+const EFFECT_BOUNDARY_RANK: Readonly<Record<HarnessEffectBoundary, number>> = {
+  none: 0,
+  partial_output: 1,
+  graph_write: 2,
+  tool_effect: 3,
+  unknown: 4,
+};
+
+function strongestEffectBoundary(left: HarnessEffectBoundary, right: HarnessEffectBoundary): HarnessEffectBoundary {
+  return EFFECT_BOUNDARY_RANK[left] >= EFFECT_BOUNDARY_RANK[right] ? left : right;
+}
+
+class EffectObservingTraceSink implements HarnessTraceSink {
+  // No observed output, graph write, or tool call is affirmative no-effect evidence.
+  // Unknown is reserved for process loss where the host cannot make that observation.
+  private boundary: HarnessEffectBoundary = "none";
+
+  constructor(private readonly delegate: HarnessTraceSink) {}
+
+  get policy(): HarnessTraceSink["policy"] { return this.delegate.policy; }
+  get rootStreamId(): string { return this.delegate.rootStreamId; }
+
+  effectBoundary(): HarnessEffectBoundary { return this.boundary; }
+
+  emit(event: Parameters<HarnessTraceSink["emit"]>[0]): void | Promise<void> {
+    this.observe(event.type);
+    return this.delegate.emit(event);
+  }
+
+  openStream(input: Parameters<HarnessTraceSink["openStream"]>[0]): ReturnType<HarnessTraceSink["openStream"]> {
+    return this.observeStream(this.delegate.openStream(input));
+  }
+
+  openSpan(input: Parameters<HarnessTraceSink["openSpan"]>[0]): ReturnType<HarnessTraceSink["openSpan"]> {
+    return this.observeSpan(this.delegate.openSpan(input));
+  }
+
+  attach(input: Parameters<HarnessTraceSink["attach"]>[0]): ReturnType<HarnessTraceSink["attach"]> {
+    return this.delegate.attach(input);
+  }
+
+  private observe(type: string): void {
+    if (type === "tool.call.started" || type === "tool.call.completed") {
+      this.boundary = "tool_effect";
+    } else if (this.boundary !== "tool_effect" && (type === "message" || type === "provider.event" || type === "model.call.completed")) {
+      this.boundary = "partial_output";
+    }
+  }
+
+  private observeStream(stream: ReturnType<HarnessTraceSink["openStream"]>): ReturnType<HarnessTraceSink["openStream"]> {
+    return {
+      id: stream.id,
+      emit: (event) => { this.observe(event.type); return stream.emit(event); },
+      openSpan: (input) => this.observeSpan(stream.openSpan(input)),
+      close: (status, data) => stream.close(status, data),
+    };
+  }
+
+  private observeSpan(span: ReturnType<HarnessTraceSink["openSpan"]>): ReturnType<HarnessTraceSink["openSpan"]> {
+    return {
+      id: span.id,
+      emit: (event) => { this.observe(event.type); return span.emit(event); },
+      end: (status, data) => span.end(status, data),
+    };
+  }
+}
+
 export async function startHarnessHost(options: HarnessHostOptions): Promise<RunningHarnessHost> {
   const host = new HarnessHost(options);
   await host.initialize();
@@ -535,6 +817,29 @@ async function route(host: HarnessHost, token: string, request: IncomingMessage,
     if (request.method === "POST" && url.pathname === "/sessions") {
       await host.createSession(await body(request) as HarnessSessionRegistration);
       return reply(response, 201, { ok: true });
+    }
+    const leaseMatch = /^\/sessions\/([^/]+)\/execution-leases(?:\/([^/]+))?$/.exec(url.pathname);
+    if (leaseMatch?.[1] !== undefined) {
+      const threadId = Number(decodeURIComponent(leaseMatch[1]));
+      if (!Number.isSafeInteger(threadId) || threadId < 1) return reply(response, 400, { error: "invalid_thread_id" });
+      if (request.method === "POST" && leaseMatch[2] === undefined) {
+        const input = await body(request);
+        const model = readInteractionModelSelection(input);
+        if (model === undefined) return reply(response, 400, { error: "model_selection_required" });
+        const controller = new AbortController();
+        const abort = () => controller.abort(new Error("Execution admission request disconnected"));
+        request.once("aborted", abort);
+        try {
+          return reply(response, 201, await host.admitProviderExecution(
+            threadId, model, controller.signal, readHarnessExecutionPolicy(input),
+          ));
+        } finally {
+          request.off("aborted", abort);
+        }
+      }
+      if (request.method === "DELETE" && leaseMatch[2] !== undefined) {
+        return reply(response, 200, { released: await host.releaseProviderExecution(decodeURIComponent(leaseMatch[2])) });
+      }
     }
     const cancelMatch = /^\/sessions\/([^/]+)\/cancel$/.exec(url.pathname);
     if (request.method === "POST" && cancelMatch?.[1] !== undefined) {
@@ -577,6 +882,8 @@ async function route(host: HarnessHost, token: string, request: IncomingMessage,
           input.model,
           controller.signal,
           input.traceContext,
+          readExecutionLeaseId(input),
+          readHarnessExecutionPolicy(input),
         );
         return reply(response, 200, completed);
       } finally {
@@ -595,8 +902,17 @@ async function route(host: HarnessHost, token: string, request: IncomingMessage,
           : 409;
       return reply(response, status, { error: error.code, message: error.message });
     }
-    return reply(response, 500, { error: error instanceof Error ? error.message : String(error) });
+    return reply(response, 500, error instanceof HarnessExecutionFailure
+      ? { error: error.message, failureCategory: error.failureCategory, effectBoundary: error.effectBoundary }
+      : { error: error instanceof Error ? error.message : String(error), failureCategory: "application", effectBoundary: "unknown" });
   }
+}
+
+function readExecutionLeaseId(input: unknown): string | undefined {
+  if (typeof input !== "object" || input === null || !("executionLeaseId" in input)) return undefined;
+  const value = (input as { executionLeaseId?: unknown }).executionLeaseId;
+  if (typeof value !== "string" || !/^[0-9a-f-]{36}$/iu.test(value)) throw new Error("invalid execution lease ID");
+  return value;
 }
 
 async function body(request: IncomingMessage): Promise<unknown> {
@@ -739,20 +1055,28 @@ function readCompleteInput(value: unknown): {
   readonly graph: GraphCapability;
   readonly model?: InteractionModelSelection;
   readonly traceContext?: HarnessCompletionTraceContext;
+  readonly executionLeaseId?: string;
+  readonly harnessPolicy?: HarnessExecutionPolicy;
 } {
   if (!isRecord(value)) throw new Error("Harness completion input must be an object");
-  const unknown = Object.keys(value).filter((key) => !["interactionId", "graph", "model", "traceContext"].includes(key));
+  const unknown = Object.keys(value).filter((key) => ![
+    "interactionId", "graph", "model", "traceContext", "executionLeaseId", "harnessPolicy",
+  ].includes(key));
   if (unknown.length > 0) throw new Error(`Harness completion contains unsupported fields: ${unknown.join(", ")}`);
   if (!Number.isSafeInteger(value.interactionId) || (value.interactionId as number) < 1) {
     throw new Error("Harness completion requires a positive interactionId");
   }
   const model = readInteractionModelSelection(value);
   const traceContext = readTraceContext(value);
+  const executionLeaseId = readExecutionLeaseId(value);
+  const harnessPolicy = readHarnessExecutionPolicy(value);
   return {
     interactionId: value.interactionId as number,
     graph: readGraphCapability(value),
     ...(model === undefined ? {} : { model }),
     ...(traceContext === undefined ? {} : { traceContext }),
+    ...(executionLeaseId === undefined ? {} : { executionLeaseId }),
+    ...(harnessPolicy === undefined ? {} : { harnessPolicy }),
   };
 }
 
@@ -770,8 +1094,8 @@ function readGraphCapability(value: unknown): GraphCapability {
 function readInteractionModelSelection(value: unknown): InteractionModelSelection | undefined {
   if (!isRecord(value) || value.model === undefined) return undefined;
   if (!isRecord(value.model)) throw new Error("Harness completion contains an invalid model selection");
-  const { providerId, modelId } = value.model;
-  const selection = { providerId, modelId };
+  const { providerId, adapterId, modelId } = value.model;
+  const selection = { providerId, ...(adapterId === undefined ? {} : { adapterId }), modelId };
   validateInteractionModelSelection(selection);
   return selection;
 }
@@ -779,6 +1103,7 @@ function readInteractionModelSelection(value: unknown): InteractionModelSelectio
 function validateInteractionModelSelection(value: unknown): asserts value is InteractionModelSelection {
   if (!isRecord(value)
     || !isStableId(value.providerId)
+    || (value.adapterId !== undefined && !isStableId(value.adapterId))
     || !isStableId(value.modelId)) {
     throw new Error("Harness completion contains an invalid model selection");
   }
@@ -788,12 +1113,74 @@ function validateConfiguredModelSelection(
   configuration: HarnessConfiguration,
   selection: InteractionModelSelection,
 ): void {
-  const compatibility = configuration.modelCompatibility;
-  if (compatibility === undefined) return;
-  const provider = compatibility.find((entry) => entry.providerId === selection.providerId);
-  if (!provider || (provider.modelIds !== undefined && !provider.modelIds.includes(selection.modelId))) {
+  // modelRules is the adapter-aware replacement contract. Keep legacy provider-ID
+  // compatibility only for configurations that have not migrated to modelRules;
+  // enforcing both would reject valid models from custom provider definitions.
+  const compatibility = configuration.modelRules === undefined
+    ? configuration.modelCompatibility
+    : undefined;
+  if (compatibility !== undefined) {
+    const provider = compatibility.find((entry) => entry.providerId === selection.providerId);
+    if (!provider || (provider.modelIds !== undefined && !provider.modelIds.includes(selection.modelId))) {
+      throw new Error("Harness completion model is not compatible with this configuration");
+    }
+  }
+  if (!harnessAllowsModel(configuration.modelRules, selection)) {
     throw new Error("Harness completion model is not compatible with this configuration");
   }
+}
+
+function executionConfiguration(
+  session: LiveSession,
+  policy: HarnessExecutionPolicy | undefined,
+): HarnessConfiguration {
+  const configuration = session.descriptor.configuration;
+  if (policy === undefined) {
+    if (session.currentPolicyRevision !== undefined) {
+      throw new Error("Current harness execution policy is required after a dynamic policy update");
+    }
+    return configuration;
+  }
+  const identity = executionPolicyIdentity(policy);
+  if ((session.currentPolicyRevision ?? 0) > policy.configurationRevision
+    || (session.currentPolicyRevision === policy.configurationRevision
+      && session.currentPolicyIdentity !== undefined && session.currentPolicyIdentity !== identity)) {
+    throw new Error("Harness execution policy is stale or conflicts with the current semantic revision");
+  }
+  const candidate = parseHarnessConfiguration({
+    ...configuration,
+    revision: policy.configurationRevision,
+    ...(policy.modelRules === undefined ? { modelRules: undefined } : { modelRules: policy.modelRules }),
+  });
+  if (!sameHarnessExecutionConfiguration(configuration, candidate)) {
+    throw new Error("Current harness policy cannot change the pinned execution configuration");
+  }
+  session.currentPolicyRevision = policy.configurationRevision;
+  session.currentPolicyIdentity = identity;
+  return candidate;
+}
+
+function executionPolicyIdentity(policy: HarnessExecutionPolicy): string {
+  return JSON.stringify(policy);
+}
+
+function readHarnessExecutionPolicy(value: unknown): HarnessExecutionPolicy | undefined {
+  if (!isRecord(value) || value.harnessPolicy === undefined) return undefined;
+  const policy = value.harnessPolicy;
+  if (!isRecord(policy)) throw new Error("Harness execution policy is invalid");
+  const { configurationRevision, configurationDigest, modelRules } = policy;
+  if (typeof configurationRevision !== "number" || !Number.isSafeInteger(configurationRevision) || configurationRevision < 1
+    || typeof configurationDigest !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(configurationDigest)
+    || (modelRules !== undefined && modelRules !== null && !isRecord(modelRules))) {
+    throw new Error("Harness execution policy is invalid");
+  }
+  return {
+    configurationRevision,
+    configurationDigest,
+    ...(modelRules === undefined || modelRules === null
+      ? {}
+      : { modelRules: modelRules as unknown as HarnessConfiguration["modelRules"] }),
+  };
 }
 
 function isStableId(value: unknown): value is string {
@@ -848,6 +1235,18 @@ async function sealTrace(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function classifyHarnessFailure(error: unknown): string {
+  const status = isRecord(error) && typeof error.status === "number" ? error.status : undefined;
+  const message = errorMessage(error).toLowerCase();
+  if (status === 401 || status === 403 || /auth|api key|credential/.test(message)) return "authentication";
+  if (status === 404 || /model.*not found|unknown model/.test(message)) return "model_not_found";
+  if (status === 429 || /rate.?limit/.test(message)) return "rate_limit";
+  if (status !== undefined && status >= 500) return "provider_5xx";
+  if (/timeout/.test(message)) return "provider_timeout";
+  if (/transport|network|connection/.test(message)) return "transport";
+  return "execution";
 }
 
 function validateGraphCapability(capability: GraphCapability): void {

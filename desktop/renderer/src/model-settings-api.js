@@ -4,6 +4,17 @@ export function loadModelSettings() {
   return request("/api/model-settings");
 }
 
+export function loadProviderOnboardingProjection(providerId) {
+  return request(`/api/provider-onboarding?providerId=${encodeURIComponent(providerId)}`);
+}
+
+export function completeProviderOnboarding(input) {
+  return request("/api/provider-onboarding", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export function saveModelDefaults(defaults) {
   return request("/api/model-settings/defaults", {
     method: "PUT",
@@ -16,6 +27,10 @@ export function validateModelSelection(selection) {
     method: "POST",
     body: JSON.stringify(selection),
   });
+}
+
+export function loadDefaultModelSelection(harnessId) {
+  return request(`/api/model-selection/default?harnessId=${encodeURIComponent(harnessId)}`);
 }
 
 export function createModelFamily(family) {
@@ -40,5 +55,12 @@ export function saveModelFamilyOrder(familyIds) {
   return request("/api/model-families/order", {
     method: "PUT",
     body: JSON.stringify({ familyIds }),
+  });
+}
+
+export function saveHarnessModelRules(harnessId, payload) {
+  return request(`/api/harness-configurations/${encodeURIComponent(harnessId)}/model-rules`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
   });
 }

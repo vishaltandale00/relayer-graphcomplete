@@ -1,10 +1,11 @@
 import {
   sanitizeModelCatalogSnapshot,
   toProductCatalogSnapshot,
-  unavailableModelCatalogSnapshot,
 } from "./model-catalog-adapter.mjs";
+import { withProviderRetry } from "../providers/provider-retry.mjs";
+import { providerDiagnosticDetails } from "../providers/provider-diagnostics-log.mjs";
 
-const REFRESH_REASONS = new Set(["startup", "provider-change", "settings-open", "explicit", "pre-inference"]);
+const REFRESH_REASONS = new Set(["startup", "background", "provider-change", "settings-open", "explicit", "pre-inference"]);
 
 function throwIfAborted(signal) {
   if (!signal?.aborted) return;
@@ -46,8 +47,16 @@ function waitForRefresh(entry, signal) {
 }
 
 export class ModelCatalogService {
-  constructor({ adapters, publishSnapshot }) {
-    if (!Array.isArray(adapters) || adapters.length === 0) throw new Error("ModelCatalogService requires at least one adapter.");
+  constructor({
+    adapters,
+    publishSnapshot,
+    retry = {},
+    diagnostics = null,
+    backgroundIntervalMs = 15 * 60 * 1000,
+    setTimer = setTimeout,
+    clearTimer = clearTimeout,
+  }) {
+    if (!Array.isArray(adapters)) throw new Error("ModelCatalogService requires an adapter array.");
     if (typeof publishSnapshot !== "function") throw new Error("ModelCatalogService requires a snapshot publisher.");
     this.adapters = new Map();
     for (const adapter of adapters) {
@@ -56,8 +65,24 @@ export class ModelCatalogService {
       this.adapters.set(adapter.providerId, adapter);
     }
     this.publishSnapshot = publishSnapshot;
+    this.retry = retry;
+    this.diagnostics = diagnostics;
     this.refreshQueues = new Map();
+    this.backgroundIntervalMs = backgroundIntervalMs;
+    this.setTimer = setTimer;
+    this.clearTimer = clearTimer;
+    this.backgroundTimer = null;
+    this.closed = false;
   }
+
+  register(adapter) {
+    if (!adapter?.providerId || typeof adapter.discover !== "function") throw new Error("Invalid model catalog adapter.");
+    const existing = this.adapters.get(adapter.providerId);
+    if (existing && existing !== adapter) throw new Error(`Duplicate model catalog adapter: ${adapter.providerId}`);
+    this.adapters.set(adapter.providerId, adapter);
+  }
+
+  unregister(providerId) { this.adapters.delete(providerId); }
 
   async refresh(providerId, reason = "explicit", { signal } = {}) {
     throwIfAborted(signal);
@@ -77,10 +102,18 @@ export class ModelCatalogService {
       throwIfAborted(operationSignal);
       let snapshot;
       try {
-        snapshot = sanitizeModelCatalogSnapshot(await adapter.discover({ signal: operationSignal }));
+        snapshot = sanitizeModelCatalogSnapshot(await withProviderRetry(
+          ({ signal }) => adapter.discover({ signal }),
+          { ...this.retry, signal: operationSignal },
+        ));
       } catch (error) {
-        throwIfAborted(operationSignal);
-        snapshot = unavailableModelCatalogSnapshot(adapter, error);
+        await this.diagnostics?.write({
+          category: "provider_catalog_refresh_failed",
+          providerId,
+          reason,
+          ...providerDiagnosticDetails(error),
+        }).catch(() => undefined);
+        throw error;
       }
       throwIfAborted(operationSignal);
       await this.publishSnapshot(
@@ -104,7 +137,36 @@ export class ModelCatalogService {
     )));
   }
 
-  startup() { return this.refreshAll("startup"); }
+  async startup() {
+    const results = await Promise.allSettled([...this.adapters.keys()].map((providerId) => (
+      this.refresh(providerId, "startup")
+    )));
+    this.#scheduleBackgroundRefresh();
+    return results;
+  }
+
+  #scheduleBackgroundRefresh() {
+    if (this.closed || this.backgroundTimer !== null) return;
+    this.backgroundTimer = this.setTimer(async () => {
+      this.backgroundTimer = null;
+      if (this.closed) return;
+      await Promise.allSettled([...this.adapters.keys()].map((providerId) => (
+        this.refresh(providerId, "background")
+      )));
+      this.#scheduleBackgroundRefresh();
+    }, this.backgroundIntervalMs);
+    this.backgroundTimer?.unref?.();
+  }
+
+  async close() {
+    this.closed = true;
+    if (this.backgroundTimer !== null) this.clearTimer(this.backgroundTimer);
+    this.backgroundTimer = null;
+    for (const entry of this.refreshQueues.values()) entry.controller.abort(new Error("Model catalog service closed."));
+    await Promise.allSettled([...this.refreshQueues.values()].map(({ promise }) => promise));
+  }
+
+  /** @deprecated Send admission resolves persisted catalog state; use background or explicit refresh. */
   beforeInference({ providerId, signal } = {}) {
     return providerId
       ? this.refresh(providerId, "pre-inference", { signal })

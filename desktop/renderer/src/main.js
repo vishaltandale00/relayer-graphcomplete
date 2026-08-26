@@ -1,4 +1,4 @@
-import { connectCodex, refreshAccount, showApplication, showAuth } from "./auth.js";
+import { refreshAccount, showApplication } from "./auth.js";
 import { returnFromSettings, selectScope, setMainView, setSettingsTab } from "./navigation.js";
 import {
   closePermissionMenu,
@@ -32,6 +32,7 @@ import {
   refreshModelFamilySettings,
 } from "./model-family-settings.js";
 import { createReviewPresentationAdapter } from "./review-tools.js";
+import { initializeProviderSettings, refreshProviderSettings } from "./provider-settings.js";
 import {
   installOnboardingTutorialController,
   onboardingTutorialController,
@@ -104,7 +105,6 @@ async function maybeStartAutomaticTutorial(providerConnected) {
 }
 
 function bindEvents() {
-  $("#connectCodex").onclick = connectCodex;
   $("#newThread").onclick = async () => {
     takeOverPendingAutomaticTutorial();
     try {
@@ -151,6 +151,7 @@ function bindEvents() {
     try {
       if (productApiAvailable) {
         await desktop?.models?.settingsOpened?.();
+        await refreshProviderSettings();
         await refreshModelFamilySettings();
         refreshNewThreadModelPicker();
         updateTutorialAvailability();
@@ -159,13 +160,16 @@ function bindEvents() {
       toast(error.message);
     }
   };
-  $("#settingsBackButton").onclick = async () => {
+  const leaveSettings = async () => {
     try {
       await returnFromSettings(refreshState);
     } catch (error) {
       toast(error.message);
     }
   };
+  $("#settingsBackButton").onclick = leaveSettings;
+  $("#settingsCompactBackButton").onclick = leaveSettings;
+  $("#settingsCompactSelect").onchange = (event) => setSettingsTab(event.target.value);
   $("#settingsTabs").onclick = (event) => {
     const tab = event.target.closest("[data-settings-tab]");
     if (tab) setSettingsTab(tab.dataset.settingsTab);
@@ -195,12 +199,15 @@ function bindEvents() {
       toast(error.message);
     }
   };
-  $("#disconnectCodex").onclick = async () => {
-    await desktop?.account.logout();
-    await onboardingTutorialController()?.leave();
-    await refreshAccount();
-    await refreshProviderModelUi();
-  };
+  const disconnectCodex = $("#disconnectCodex");
+  if (disconnectCodex) {
+    disconnectCodex.onclick = async () => {
+      await desktop?.account.logout();
+      await onboardingTutorialController()?.leave();
+      await refreshAccount();
+      await refreshProviderModelUi();
+    };
+  }
   $("#updateButton").onclick = () => $("#updatePopover").classList.toggle("hidden");
   $("#closeUpdate").onclick = () => $("#updatePopover").classList.add("hidden");
   $("#updateAction").onclick = updateAction;
@@ -259,11 +266,9 @@ async function boot() {
     void refreshCurrentEnvironment({ force: true, minimumAgeMs: 1_000 }).catch(() => {});
   });
   window.addEventListener("pagehide", stopEnvironmentRefresh, { once: true });
-  desktop?.account.onChanged((event) => {
+  desktop?.account.onChanged(() => {
     void (async () => {
-      let account;
-      if (event?.status === "unavailable") showAuth(event.error || "Codex is unavailable.");
-      else account = await refreshAccount();
+      const account = await refreshAccount();
       const providerConnected = account?.status === "connected";
       if (!providerConnected) await onboardingTutorialController()?.leave();
       await refreshProviderModelUi();
@@ -275,6 +280,7 @@ async function boot() {
   else applyAppearance(document.documentElement.dataset.theme);
   if (desktop) renderUpdate(await desktop.updater.status());
   const account = await refreshAccount();
+  await initializeProviderSettings();
   if (productApiAvailable) await initializeModelFamilySettings();
   await loadPermissionProfiles(appState.modelSettings?.defaults?.harnessId);
   if (productApiAvailable) {

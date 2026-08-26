@@ -17,6 +17,7 @@ import { createRelayerIcon } from "./icons.js";
 import { graphLayoutSignature, projectLayerNodePositions } from "./graph-layout.js";
 import { renderMarkdown } from "./markdown.js";
 import { productWorkspaceMarkup } from "./view.js";
+import { restoredDraftForInteraction } from "../interaction-failure-model.js";
 import {
   annotationNavigationContext,
   annotationRatingLabel,
@@ -534,22 +535,81 @@ export function interactionContextDraftTransition(draft, event) {
 export function composerDraftMatchesSubmission({
   currentThreadId,
   submittedThreadId,
+  currentDraftScopeKey,
+  submittedDraftScopeKey,
   currentPromptValue,
   submittedPromptValue,
   currentContexts,
   submittedContexts,
 }) {
   return String(currentThreadId) === String(submittedThreadId)
+    && currentDraftScopeKey === submittedDraftScopeKey
     && currentPromptValue === submittedPromptValue
     && currentContexts === submittedContexts;
+}
+
+export function composerDraftScopeKey(threadId, interactionId) {
+  return `${String(threadId)}:${interactionId == null ? "none" : String(interactionId)}`;
+}
+
+export function createComposerDraftScopeState() {
+  return { activeScopeKey: null, drafts: new Map() };
+}
+
+export function transitionComposerDraftScope(state, {
+  threadId,
+  interactionId,
+  currentPromptValue,
+  restoredDraft = null,
+}) {
+  const nextScopeKey = composerDraftScopeKey(threadId, interactionId);
+  if (state.activeScopeKey === nextScopeKey) {
+    const currentDraft = state.drafts.get(nextScopeKey) ?? {
+      promptValue: currentPromptValue,
+      restoredDraftInteractionId: null,
+    };
+    const restorationArrived = restoredDraft
+      && String(currentDraft.restoredDraftInteractionId) !== String(interactionId);
+    const promptValue = restorationArrived ? restoredDraft.text : currentPromptValue;
+    const drafts = new Map(state.drafts);
+    drafts.set(nextScopeKey, {
+      promptValue,
+      restoredDraftInteractionId: restorationArrived
+        ? interactionId
+        : currentDraft.restoredDraftInteractionId,
+    });
+    return {
+      state: { activeScopeKey: nextScopeKey, drafts },
+      promptValue,
+    };
+  }
+
+  const drafts = new Map(state.drafts);
+  if (state.activeScopeKey !== null) {
+    drafts.set(state.activeScopeKey, {
+      promptValue: currentPromptValue,
+      restoredDraftInteractionId: state.drafts.get(state.activeScopeKey)
+        ?.restoredDraftInteractionId ?? null,
+    });
+  }
+  if (!drafts.has(nextScopeKey)) {
+    drafts.set(nextScopeKey, {
+      promptValue: restoredDraft?.text ?? "",
+      restoredDraftInteractionId: restoredDraft ? interactionId : null,
+    });
+  }
+  return {
+    state: { activeScopeKey: nextScopeKey, drafts },
+    promptValue: drafts.get(nextScopeKey).promptValue,
+  };
 }
 
 export function contextStagingDisabledFor(status, canCompose = true, requestDisabled = false) {
   return requestDisabled || composerDisabledForState(status, canCompose);
 }
 
-export function composerDisabledForState(status, canCompose = true) {
-  return !canCompose || PENDING_COMPLETION_STATUSES.has(status);
+export function composerDisabledForState(status, canCompose = true, restoredDraft = false) {
+  return !canCompose || (PENDING_COMPLETION_STATUSES.has(status) && !restoredDraft);
 }
 
 export function composerStatusForThread(state, thread) {
@@ -1403,6 +1463,8 @@ export function createProductWorkspace({
   const prompt = $("#threadPrompt");
   const send = $("#sendInteraction");
   let pickerInheritanceKey = null;
+  let composerDraftScopeState = createComposerDraftScopeState();
+  let restoredDraftActive = false;
   let modelPicker;
   const contextForNode = (nodeId) => composerContexts.find((context) => (
     String(context.target.nodeId) === String(nodeId)
@@ -1746,6 +1808,7 @@ export function createProductWorkspace({
     const text = prompt.value.trim();
     if (send.disabled) return;
     const submittedThreadId = getThread()?.id;
+    const submittedDraftScopeKey = composerDraftScopeState.activeScopeKey;
     const submittedPromptValue = prompt.value;
     const submittedContexts = composerContexts;
     prompt.disabled = true;
@@ -1758,6 +1821,8 @@ export function createProductWorkspace({
       if (composerDraftMatchesSubmission({
         currentThreadId: getThread()?.id,
         submittedThreadId,
+        currentDraftScopeKey: composerDraftScopeState.activeScopeKey,
+        submittedDraftScopeKey,
         currentPromptValue: prompt.value,
         submittedPromptValue,
         currentContexts: composerContexts,
@@ -1776,6 +1841,7 @@ export function createProductWorkspace({
       prompt.disabled = composerDisabledForState(
         getState().status,
         capabilities.canCompose,
+        restoredDraftActive,
       );
       renderComposerContexts();
       updateAttachContextControl();
@@ -2062,6 +2128,19 @@ export function createProductWorkspace({
     renderHistoricalContexts(state, interaction);
     const turns = (state.interactions || []).filter((item) => String(item.threadId) === String(thread.id));
     const latestInteraction = turns.at(-1);
+    const restoredDraft = restoredDraftForInteraction(latestInteraction);
+    restoredDraftActive = Boolean(restoredDraft);
+    const retryMessage = $("#composerRetryMessage");
+    retryMessage.classList.toggle("hidden", !restoredDraft);
+    retryMessage.textContent = restoredDraft?.message ?? "";
+    const draftTransition = transitionComposerDraftScope(composerDraftScopeState, {
+      threadId,
+      interactionId: latestInteraction?.id,
+      currentPromptValue: prompt.value,
+      restoredDraft,
+    });
+    composerDraftScopeState = draftTransition.state;
+    prompt.value = draftTransition.promptValue;
     const inheritanceKey = `${thread.id}:${latestInteraction?.id ?? "none"}`;
     if (modelPicker) {
       const replaceSelection = inheritanceKey !== pickerInheritanceKey;
@@ -2075,7 +2154,7 @@ export function createProductWorkspace({
       });
       pickerInheritanceKey = inheritanceKey;
     }
-    renderInteractionState(state, interaction);
+    renderInteractionState(state, interaction, Boolean(restoredDraft));
     renderApprovalDock(state, thread);
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
@@ -2172,7 +2251,7 @@ export function createProductWorkspace({
     breadcrumb.scrollLeft = breadcrumb.scrollWidth;
   }
 
-  function renderInteractionState(state, interaction) {
+  function renderInteractionState(state, interaction, restoredDraft = false) {
     const viewedStatus = interaction?.completionStatus || state.status || "idle";
     const presentation = turnStatusPresentation(viewedStatus);
     const statusElement = $("#interactionStatus");
@@ -2187,6 +2266,7 @@ export function createProductWorkspace({
     prompt.disabled = composerDisabledForState(
       composerStatusForThread(state, getThread()),
       capabilities.canCompose,
+      restoredDraft,
     );
     modelPicker?.setDisabled(prompt.disabled);
     renderComposerContexts();

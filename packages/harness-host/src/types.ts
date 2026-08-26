@@ -11,13 +11,38 @@ export interface HarnessModelCompatibility {
   readonly preferredModelId?: string;
 }
 
+export interface HarnessModelRule {
+  readonly adapterId: string;
+  readonly modelIdExact?: string;
+  readonly modelIdRegex?: string;
+}
+
+export interface HarnessModelRules {
+  readonly allow: readonly HarnessModelRule[];
+  readonly deny: readonly HarnessModelRule[];
+}
+
+export interface HarnessFamilyPolicyReference {
+  readonly id: string;
+  readonly version: number;
+}
+
+export interface HarnessModelDefaults {
+  readonly familyPolicy: HarnessFamilyPolicyReference;
+}
+
 export interface HarnessConfiguration {
   readonly schemaVersion: 1;
   readonly name: string;
   readonly implementation: string;
   readonly implementationVersion: number;
+  readonly revision?: number;
   readonly permissionBindings: Readonly<Record<string, JsonObject>>;
+  /** Legacy provider-definition compatibility retained while stored configurations migrate. */
   readonly modelCompatibility?: readonly HarnessModelCompatibility[];
+  readonly modelRules?: HarnessModelRules;
+  readonly executionAccessContracts?: readonly string[];
+  readonly modelDefaults?: HarnessModelDefaults;
   readonly settings: JsonObject;
 }
 
@@ -170,11 +195,49 @@ export interface HarnessRunContext {
   readonly graph: HarnessGraphScope;
   readonly approvals: HarnessApprovalChannel;
   readonly model?: InteractionModelSelection;
+  /** Execution-scoped and never persisted in harness session state or receipts. */
+  readonly access?: HarnessExecutionAccess;
   readonly trace: HarnessTraceSink;
 }
 
+export type HarnessExecutionAccess =
+  | {
+      readonly kind: "secret";
+      readonly contract: "secret@1";
+      readonly providerId: string;
+      readonly adapterId: string;
+      readonly adapterImplementationVersion: string;
+      readonly endpoint: string;
+      readonly fields: Readonly<Record<string, string>>;
+    }
+  | {
+      readonly kind: "managed-runtime";
+      readonly contract: "managed-runtime@1";
+      readonly providerId: string;
+      readonly adapterId: string;
+      readonly adapterImplementationVersion: string;
+      readonly executable?: string;
+      readonly environment: Readonly<Record<string, string>>;
+    };
+
+export interface HarnessExecutionAccessLease {
+  readonly access: HarnessExecutionAccess;
+  release(): void | Promise<void>;
+}
+
+export interface HarnessExecutionAccessBroker {
+  acquire(
+    selection: InteractionModelSelection,
+    acceptedContracts: readonly string[],
+    signal: AbortSignal,
+  ): Promise<HarnessExecutionAccessLease>;
+}
+
 export interface InteractionModelSelection {
+  /** Exact user-owned provider definition. */
   readonly providerId: string;
+  /** Stable adapter type used by harness rules, for example `openai-api`. */
+  readonly adapterId?: string;
   readonly modelId: string;
 }
 

@@ -87,12 +87,13 @@ export async function findCodexExecutable(environment = process.env) {
 
 export class CodexCredentialAdapter extends CredentialAdapter {
   constructor({
+    providerDefinitionId = "codex",
     environment = process.env,
     onAccountChanged = () => {},
     spawnProcess = spawn,
     shutdownTimeoutMs = 2_000,
   } = {}) {
-    super("codex");
+    super(providerDefinitionId);
     this.environment = environment;
     this.onAccountChanged = onAccountChanged;
     this.spawnProcess = spawnProcess;
@@ -112,13 +113,13 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     this.startPromise = this.#start();
     try {
       await this.startPromise;
-    } catch (error) {
+    } catch {
       const child = this.process;
       await terminateChildProcess(child, { gracePeriodMs: this.shutdownTimeoutMs });
       if (this.process === child) this.process = null;
       this.startPromise = null;
       this.activeLoginId = null;
-      throw error;
+      throw new Error("Codex subscription is unavailable.");
     }
   }
 
@@ -135,10 +136,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     this.process = child;
     child.stdin.on("error", () => {});
     createInterface({ input: child.stdout }).on("line", (line) => this.#handleLine(line));
-    child.stderr.on("data", (chunk) => {
-      const message = String(chunk).trim();
-      if (message) console.info(`[codex app-server] ${message}`);
-    });
+    child.stderr.on("data", () => {});
     child.once("exit", (code, signal) => {
       if (this.process !== child) return;
       const error = new Error(`Codex app-server stopped (${signal || code || "unknown"}).`);
@@ -150,8 +148,8 @@ export class CodexCredentialAdapter extends CredentialAdapter {
       this.activeLoginId = null;
       if (!this.closing) this.onAccountChanged({ status: "unavailable", error: error.message });
     });
-    child.once("error", (error) => {
-      if (this.process === child) this.onAccountChanged({ status: "unavailable", error: error.message });
+    child.once("error", () => {
+      if (this.process === child) this.onAccountChanged({ status: "unavailable", error: "Codex subscription is unavailable." });
     });
     await waitForSpawn(child);
     await this.request("initialize", {
@@ -171,7 +169,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
     if (message.id !== undefined && ("result" in message || "error" in message)) {
       const pending = this.#takePending(message.id);
       if (!pending) return;
-      if (message.error) pending.reject(new Error(message.error.message || "Codex request failed."));
+      if (message.error) pending.reject(new Error("Codex request failed."));
       else pending.resolve(message.result);
       return;
     }
@@ -230,7 +228,7 @@ export class CodexCredentialAdapter extends CredentialAdapter {
       return { status: result.account ? "connected" : "disconnected", account: result.account ?? null };
     } catch (error) {
       if (signal?.aborted) throw abortReason(signal);
-      return { status: "unavailable", account: null, error: error.message };
+      return { status: "unavailable", account: null, error: "Codex subscription is unavailable." };
     }
   }
 

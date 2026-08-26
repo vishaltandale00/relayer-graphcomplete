@@ -20,7 +20,6 @@ import {
   appendLayerPath,
   createLayerNavigationCoordinator,
   layerPathForVisibleLayer,
-  shouldPollThreadInteractions,
   workspaceTurns,
 } from "./product-workspace/model.js";
 import {
@@ -54,6 +53,10 @@ import {
   harnessUsesConfigurationModel,
   isModelSelectionCatalogError,
 } from "./model-picker-model.js";
+import {
+  interactionSubmissionTarget,
+  restoredDraftForInteraction,
+} from "./interaction-failure-model.js";
 import {
   pendingApprovalsForThread,
   validApprovalDecision,
@@ -401,8 +404,15 @@ function schedulePendingRefresh(threadId, { force = false } = {}) {
     && interaction.projectionFresh === false
   ));
   if (thread.imported === true && !hasStaleProjection) return;
-  const hasPendingInteraction = shouldPollThreadInteractions(thread, appState.interactions)
-    || hasStaleProjection
+  const hasPendingInteraction = appState.interactions.some((interaction) => (
+    String(interaction.threadId) === String(threadId)
+    && (
+      interaction.projectionFresh === false
+      || (thread.imported !== true
+        && ["not_started", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
+        && !restoredDraftForInteraction(interaction))
+    )
+  ))
     || layerContainsPendingInvokedAction(
       appState.visibleLayer,
       appState.actionInvocations,
@@ -601,10 +611,22 @@ export async function submitInteraction(text, modelSelection, contexts = []) {
   let createdInteraction;
   const inputId = stableFollowupInputId(threadId, text, modelSelection, contexts);
   try {
-    createdInteraction = await request(`/api/threads/${encodeURIComponent(threadId)}/interactions`, {
+    const latestInteraction = appState.interactions
+      .filter((interaction) => String(interaction.threadId) === String(threadId))
+      .at(-1);
+    const { path, body } = interactionSubmissionTarget(
+      threadId,
+      latestInteraction,
+      text,
+      modelSelection,
+    );
+    const response = await request(path, {
       method: "POST",
-      body: JSON.stringify(followupRequestBody(text, modelSelection, inputId, contexts)),
+      body: JSON.stringify(path.endsWith("/retry")
+        ? body
+        : followupRequestBody(text, modelSelection, inputId, contexts)),
     });
+    createdInteraction = response?.interaction ?? response;
   } catch (error) {
     await refreshAfterModelSelectionRejection(error, true);
     throw error;
