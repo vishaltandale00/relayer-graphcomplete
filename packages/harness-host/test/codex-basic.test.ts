@@ -136,35 +136,40 @@ describe("CodexBasicHarness", () => {
   });
 
   it("pins the minimal-environment graph-authoring launcher in every authoring prompt", async () => {
-    for (const promptProfile of [undefined, "layered-navigation-v1"] as const) {
-      let submittedPrompt = "";
-      let submittedEnvironment: Record<string, string> = {};
-      const harness = new CodexBasicHarness({
-        ...context("auto"),
-        configuration: {
-          ...codexBasicConfiguration,
-          settings: { ...codexBasicConfiguration.settings, ...(promptProfile ? { promptProfile } : {}) },
-        },
-      }, {
-        graphAuthoringLauncherPath: "/immutable/runtime/graph-authoring-launcher",
-        runAppServerTurn: async (options) => {
-          submittedPrompt = options.prompt;
-          submittedEnvironment = options.environment;
-          options.onThreadId("codex-thread");
-          return { threadId: "codex-thread", turnId: "turn-1", status: "completed" };
-        },
-      });
+    vi.stubEnv("RELAYER_GRAPH_AUTHORING_NODE", "/stale/raw/node");
+    try {
+      for (const promptProfile of [undefined, "layered-navigation-v1"] as const) {
+        let submittedPrompt = "";
+        let submittedEnvironment: Record<string, string> = {};
+        const harness = new CodexBasicHarness({
+          ...context("auto"),
+          configuration: {
+            ...codexBasicConfiguration,
+            settings: { ...codexBasicConfiguration.settings, ...(promptProfile ? { promptProfile } : {}) },
+          },
+        }, {
+          graphAuthoringLauncherPath: "/immutable/runtime/graph-authoring-launcher",
+          runAppServerTurn: async (options) => {
+            submittedPrompt = options.prompt;
+            submittedEnvironment = options.environment;
+            options.onThreadId("codex-thread");
+            return { threadId: "codex-thread", turnId: "turn-1", status: "completed" };
+          },
+        });
 
-      await harness.complete(runContext(1, "token"));
+        await harness.complete(runContext(1, "token"));
 
-      expect(submittedPrompt).toContain('Run exactly "/immutable/runtime/graph-authoring-launcher" with no arguments');
-      expect(submittedPrompt).toContain("including the displayed double quotes");
-      expect(submittedPrompt).toContain("shell-native single-quoted here-document");
-      expect(submittedPrompt).toContain("delimited by exactly RELAYER_GRAPH_PROGRAM");
-      expect(submittedPrompt).toContain("do not resolve the launcher or Node.js from PATH");
-      expect(submittedPrompt).toContain("Request Codex sandbox escalation for this exact launcher command");
-      expect(submittedPrompt).toContain("applies its own narrower graph sandbox");
-      expect(submittedEnvironment.RELAYER_GRAPH_AUTHORING_NODE).toBeUndefined();
+        expect(submittedPrompt).toContain('Run exactly "/immutable/runtime/graph-authoring-launcher" with no arguments');
+        expect(submittedPrompt).toContain("including the displayed double quotes");
+        expect(submittedPrompt).toContain("shell-native single-quoted here-document");
+        expect(submittedPrompt).toContain("delimited by exactly RELAYER_GRAPH_PROGRAM");
+        expect(submittedPrompt).toContain("do not resolve the launcher or Node.js from PATH");
+        expect(submittedPrompt).toContain("Request Codex sandbox escalation for this exact launcher command");
+        expect(submittedPrompt).toContain("applies its own narrower graph sandbox");
+        expect(submittedEnvironment.RELAYER_GRAPH_AUTHORING_NODE).toBeUndefined();
+      }
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 

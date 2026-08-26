@@ -147,6 +147,10 @@ export class CodexBasicHarness implements Harness {
 
   private graphEnvironment(graph: GraphCapability): Record<string, string> {
     const environment = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    // Older Relayer builds exposed the raw Node executable through this name.
+    // Never let a stale parent environment silently restore that broader
+    // authoring path now that graph execution uses the zero-argument launcher.
+    delete environment.RELAYER_GRAPH_AUTHORING_NODE;
     environment.RELAYER_GRAPH_URL = graph.url;
     environment.RELAYER_GRAPH_TOKEN = graph.token;
     environment.RELAYER_NODE_ID = String(graph.nodeId);

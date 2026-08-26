@@ -1853,7 +1853,7 @@ function isExactPinnedGraphLauncherHeredoc(action, allowedGraphAuthoringLauncher
   const opening = normalized.slice(expectedPrefix.length).match(/^<<'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\r?\n/);
   if (!opening) return false;
   const delimiter = opening[1];
-  const bodyAndClose = normalized.slice(opening[0].length);
+  const bodyAndClose = normalized.slice(expectedPrefix.length + opening[0].length);
   const lines = bodyAndClose.split(/\r?\n/);
   const closingLine = lines.pop();
   const earlierDelimiter = lines.some((line) => line.trimEnd() === delimiter);

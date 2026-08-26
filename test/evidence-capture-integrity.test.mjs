@@ -2266,7 +2266,7 @@ describe("evidence capture integrity", () => {
 
   it("rejects mixing the pinned graph command with a read-only action", () => {
     const commandActions = [
-      { command: pinnedGraphCommand() },
+      { command: pinnedGraphCommand("await graph.submit(node);") },
       { command: "sed -n '1,20p' desktop/renderer/index.html" },
     ];
     const event = {
