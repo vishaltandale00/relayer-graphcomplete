@@ -353,7 +353,7 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
   if (trustedCommand !== undefined
     && trustedAbsoluteCwd === resolve(context.workingDirectory)
     && trustedFieldsMatch
-    && supportsOneRequestDecision(params.availableDecisions)
+    && supportsAcceptDecision(params.availableDecisions)
     && (params.additionalPermissions === undefined || trustedAdditionalPermissions !== undefined)
     && context.trustedGraphAuthoringLauncher !== undefined) {
     return { decision: "accept" };
@@ -399,7 +399,8 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
   if (optionalString(params.cwd) !== undefined && string(item.cwd) !== undefined && params.cwd !== item.cwd) {
     return { decision: "decline" };
   }
-  if (!supportsOneRequestDecision(params.availableDecisions)) return { decision: "decline" };
+  const advertisedDecisions = commandDecisionCapabilities(params.availableDecisions);
+  if (advertisedDecisions === undefined) return { decision: "decline" };
   const additionalPermissions = params.additionalPermissions === undefined
     ? null
     : jsonValue(params.additionalPermissions);
@@ -426,7 +427,7 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
     } satisfies JsonObject)],
     scopeDescription: `Run ${command} in ${absoluteCwd} with the displayed Codex sandbox authority for this session.`,
   };
-  return answerV2Decision(input, context);
+  return answerV2Decision(input, context, advertisedDecisions.reject);
 }
 
 export function isExactGraphAuthoringLauncherCommand(command: string, launcherPath: string): boolean {
@@ -609,10 +610,14 @@ async function answerToolUserInput(request: CodexServerRequest, context: CodexAp
   }
 }
 
-async function answerV2Decision(input: HarnessApprovalRequestInput, context: CodexApprovalBridgeContext): Promise<unknown> {
+async function answerV2Decision(
+  input: HarnessApprovalRequestInput,
+  context: CodexApprovalBridgeContext,
+  reject: "decline" | "cancel" = "decline",
+): Promise<unknown> {
   try {
     const decision = await requestApproval(input, context);
-    return { decision: decision.decision === "deny" ? "decline" : "accept" };
+    return { decision: decision.decision === "deny" ? reject : "accept" };
   } catch (error) {
     if (error instanceof HarnessApprovalRequestTerminatedError) return { decision: "cancel" };
     throw error;
@@ -700,10 +705,16 @@ function approvalOptionLabels(value: unknown): { readonly accept: string; readon
   return accept === undefined || decline === undefined ? undefined : { accept, decline, ...(cancel === undefined ? {} : { cancel }) };
 }
 
-function supportsOneRequestDecision(value: unknown): boolean {
+function supportsAcceptDecision(value: unknown): boolean {
   if (value === undefined || value === null) return true;
-  if (!Array.isArray(value)) return false;
-  return value.includes("accept") && value.includes("decline");
+  return Array.isArray(value) && value.includes("accept");
+}
+
+function commandDecisionCapabilities(value: unknown): { readonly reject: "decline" | "cancel" } | undefined {
+  if (value === undefined || value === null) return { reject: "decline" };
+  if (!Array.isArray(value) || !value.includes("accept")) return undefined;
+  if (value.includes("decline")) return { reject: "decline" };
+  return value.includes("cancel") ? { reject: "cancel" } : undefined;
 }
 
 function sameTurn(params: Record<string, unknown>, context: CodexApprovalBridgeContext): boolean {

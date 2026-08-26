@@ -57,6 +57,20 @@ describe("Codex approval bridge", () => {
     await expect(answerCodexServerRequest(v2Command(), cancelled.context)).resolves.toEqual({ decision: "cancel" });
   });
 
+  it("maps user denial to the advertised non-grant command decision", async () => {
+    const fixture = bridgeFixture("deny");
+    fixture.items.set("item-1", commandItem());
+
+    await expect(answerCodexServerRequest(v2Command({
+      availableDecisions: [
+        "accept",
+        { acceptWithExecpolicyAmendment: { execpolicy_amendment: ["npm", "test"] } },
+        "cancel",
+      ],
+    }), fixture.context)).resolves.toEqual({ decision: "cancel" });
+    expect(fixture.request).toHaveBeenCalledOnce();
+  });
+
   it("accepts only the exact pinned internal graph launcher without creating a product approval", async () => {
     const fixture = bridgeFixture("deny");
     const launcher = "/immutable/runtime/graph-authoring-launcher";
@@ -201,6 +215,20 @@ describe("Codex approval bridge", () => {
     await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
       threadId: "thread-1", turnId: "turn-1", itemId: "item-1", cwd: "/workspace/project",
       commandActions: [{ type: "unknown", command }],
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      cwd: "/workspace/project",
+      commandActions: [{ type: "unknown", command }],
+      availableDecisions: [
+        "accept",
+        { acceptWithExecpolicyAmendment: { execpolicy_amendment: ["/bin/zsh", "-c", command] } },
+        "cancel",
+      ],
     }), context)).resolves.toEqual({ decision: "accept" });
     expect(fixture.request).not.toHaveBeenCalled();
 
@@ -640,7 +668,7 @@ function commandItem(): JsonObject {
   return { type: "commandExecution", id: "item-1", command: "npm test", cwd: "/workspace/project", source: "agent" };
 }
 
-function v2Command() {
+function v2Command(overrides: Readonly<Record<string, unknown>> = {}) {
   return serverRequest("item/commandExecution/requestApproval", {
     threadId: "thread-1",
     turnId: "turn-1",
@@ -648,5 +676,6 @@ function v2Command() {
     environmentId: "local",
     command: "npm test",
     cwd: "/workspace/project",
+    ...overrides,
   });
 }
