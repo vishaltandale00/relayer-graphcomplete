@@ -19,6 +19,7 @@ import {
 import {
   createPinnedProviderWrapperScript,
   createPinnedGraphAuthoringLauncherScript,
+  createPinnedGraphAuthoringExecPolicy,
   createPinnedGraphAuthoringNetworkProfile,
   createPinnedFreshBuildSandboxProfile,
   captureExactRegularFileIdentity,
@@ -449,6 +450,7 @@ let freshBuildOutputSpecs = [];
 let freshBuildSourceSpec;
 let freshBuildExpectedSource = [];
 let freshBuildReadOnlyDirectoryAuthorities = [];
+let runtimeSnapshotReadOnlyDirectoryAuthorities = [];
 
 function sealedSystemHardlinkPolicy(path) {
   const resolvedPath = realpathSync(path);
@@ -540,8 +542,12 @@ let graphAuthoringLauncher;
 let graphAuthoringNetworkProfileSource;
 let graphAuthoringNetworkProfile;
 function cleanupInitializedDirectoriesSync() {
-  const sourceRestored = freshBuildReadOnlyDirectoryAuthorities.length === 0
-    || restoreDirectoryWritesSync(freshBuildReadOnlyDirectoryAuthorities);
+  const cleanupAuthorities = [
+    ...freshBuildReadOnlyDirectoryAuthorities,
+    ...runtimeSnapshotReadOnlyDirectoryAuthorities,
+  ];
+  const sourceRestored = cleanupAuthorities.length === 0
+    || restoreDirectoryWritesSync(cleanupAuthorities);
   for (const directory of [outputDirectory, markerDirectory, projectDirectory]) {
     if (directory) rmSync(directory, { recursive: true, force: true });
   }
@@ -1759,6 +1765,10 @@ async function prepareIsolatedCodexHome() {
   const targetAuth = join(isolatedCodexHome, "auth.json");
   await copyFile(sourceAuth, targetAuth);
   await chmod(targetAuth, 0o600);
+  const rulesDirectory = join(isolatedCodexHome, "rules");
+  await mkdir(rulesDirectory, { recursive: true, mode: 0o700 });
+  const graphAuthoringRules = join(rulesDirectory, "graph-authoring.rules");
+  await writeFile(graphAuthoringRules, createPinnedGraphAuthoringExecPolicy(graphAuthoringLauncher), { mode: 0o600 });
   process.env.CODEX_HOME = isolatedCodexHome;
   process.env.RELAYER_CODEX_HOME = isolatedCodexHome;
 }
@@ -1906,6 +1916,7 @@ async function prepareImmutableRuntime(sourceInventory) {
     }
     if (details.isDirectory()) {
       await cp(sourceSpec.source, target, { recursive: true, preserveTimestamps: true });
+      await captureReadOnlyDirectoryAuthorities(target, runtimeSnapshotReadOnlyDirectoryAuthorities);
     } else if (details.isFile()) {
       await copyFile(sourceSpec.source, target);
       await chmod(target, details.mode & 0o777);
@@ -1944,6 +1955,21 @@ async function prepareImmutableRuntime(sourceInventory) {
   graphClientModuleUrl = pathToFileURL(join(specs.find((spec) => spec.key === "graph-client-dist").source, "index.js")).href;
   harnessHostModuleUrl = pathToFileURL(join(specs.find((spec) => spec.key === "harness-host-dist").source, "index.js")).href;
   return { sourceRuntimeArtifacts: sourceInventory, runtimeArtifacts: snapshotInventory };
+}
+
+async function captureReadOnlyDirectoryAuthorities(path, authorities) {
+  const details = await lstat(path, { bigint: true });
+  if (details.isSymbolicLink()) return;
+  if (!details.isDirectory()) return;
+  for (const name of await readdir(path)) {
+    await captureReadOnlyDirectoryAuthorities(join(path, name), authorities);
+  }
+  if ((details.mode & 0o200n) !== 0n) return;
+  const canonicalPath = join(realpathSync(dirname(path)), basename(path));
+  if (realpathSync(path) !== canonicalPath) {
+    throw new Error(`Runtime snapshot directory changed while cleanup authority was recorded: ${path}`);
+  }
+  authorities.push({ path, dev: details.dev, ino: details.ino });
 }
 
 async function loadImmutableDesktopModules() {
@@ -2961,9 +2987,13 @@ function shutdown() {
       exitCode = 1;
     }
     try {
-      if (freshBuildReadOnlyDirectoryAuthorities.length > 0
-        && !restoreDirectoryWritesSync(freshBuildReadOnlyDirectoryAuthorities)) {
-        throw new Error("Fresh build source directory authority changed before cleanup.");
+      const cleanupAuthorities = [
+        ...freshBuildReadOnlyDirectoryAuthorities,
+        ...runtimeSnapshotReadOnlyDirectoryAuthorities,
+      ];
+      if (cleanupAuthorities.length > 0
+        && !restoreDirectoryWritesSync(cleanupAuthorities)) {
+        throw new Error("Fresh build or runtime snapshot directory authority changed before cleanup.");
       }
       await shutdownStep("evidence directory cleanup", () => Promise.all([
         rm(outputDirectory, { recursive: true, force: true }),

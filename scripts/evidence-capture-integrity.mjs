@@ -1354,6 +1354,17 @@ export function createPinnedGraphAuthoringNetworkProfile() {
   ].join("\n");
 }
 
+export function createPinnedGraphAuthoringExecPolicy(launcherPath) {
+  if (typeof launcherPath !== "string"
+    || !isAbsolute(launcherPath)
+    || launcherPath.includes("\0")
+    || launcherPath.includes("\n")
+    || launcherPath.includes("\r")) {
+    throw new Error("Pinned graph-authoring exec policy requires a safe absolute launcher path.");
+  }
+  return `prefix_rule(pattern=[${JSON.stringify(launcherPath)}], decision="allow")\n`;
+}
+
 export function createPinnedGraphAuthoringLauncherScript({
   nodePath,
   graphClientRoot,

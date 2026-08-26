@@ -16,6 +16,7 @@ import {
   createPinnedFreshBuildSandboxProfile,
   createPinnedGraphAuthoringNetworkProfile,
   createPinnedGraphAuthoringLauncherScript,
+  createPinnedGraphAuthoringExecPolicy,
   createPinnedProviderWrapperScript,
   discoverNonSystemMachODependencies,
   expandMachORuntimePath,
@@ -945,6 +946,23 @@ describe("evidence capture integrity", () => {
     );
     expect(capture).toContain('providerWrapper = specs.find((spec) => spec.key === "codex-provider-wrapper").source;');
     expect(capture).toContain("codexPathOverride: providerWrapper");
+  });
+
+  it("preauthorizes only the pinned no-argument graph-authoring launcher", () => {
+    expect(createPinnedGraphAuthoringExecPolicy("/private/tmp/runtime/graph-authoring-launcher")).toBe(
+      'prefix_rule(pattern=["/private/tmp/runtime/graph-authoring-launcher"], decision="allow")\n',
+    );
+    expect(() => createPinnedGraphAuthoringExecPolicy("relative/launcher")).toThrow(/safe absolute launcher path/);
+    const capture = readFileSync(join(import.meta.dirname, "..", "scripts", "capture-ask-profile-evidence.mjs"), "utf8");
+    expect(capture).toContain('createPinnedGraphAuthoringExecPolicy(graphAuthoringLauncher)');
+    expect(capture).not.toContain('prefix_rule(pattern=["/bin/zsh", "-lc"]');
+  });
+
+  it("restores copied read-only runtime directories before deleting the evidence workspace", () => {
+    const capture = readFileSync(join(import.meta.dirname, "..", "scripts", "capture-ask-profile-evidence.mjs"), "utf8");
+    expect(capture).toContain("await captureReadOnlyDirectoryAuthorities(target, runtimeSnapshotReadOnlyDirectoryAuthorities);");
+    expect(capture).toContain("...runtimeSnapshotReadOnlyDirectoryAuthorities");
+    expect(capture).toContain("Fresh build or runtime snapshot directory authority changed before cleanup.");
   });
 
   it("binds immutable runtime copies to a pre-copy clean source revision and inventory", () => {
