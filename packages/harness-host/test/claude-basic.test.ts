@@ -37,6 +37,29 @@ function fakeSpawn(output: object, capture: (args: readonly unknown[]) => void):
   }) as typeof spawn;
 }
 
+function sequentialFakeSpawn(
+  outputs: readonly object[],
+  capture: (args: readonly unknown[]) => void,
+): typeof spawn {
+  let index = 0;
+  return fakeSpawnProxy((args) => {
+    capture(args);
+    return outputs[index++] ?? outputs.at(-1) ?? {};
+  });
+}
+
+function fakeSpawnProxy(output: (args: readonly unknown[]) => object): typeof spawn {
+  return ((...args: unknown[]) => {
+    const child = new EventEmitter() as ChildProcess;
+    Object.assign(child, { stdout: new PassThrough(), stderr: new PassThrough(), kill: vi.fn(() => true) });
+    queueMicrotask(() => {
+      (child.stdout as PassThrough).end(JSON.stringify(output(args)));
+      child.emit("exit", 0, null);
+    });
+    return child;
+  }) as typeof spawn;
+}
+
 function failingSpawn(stderr: string): typeof spawn {
   return (() => {
     const child = new EventEmitter() as ChildProcess;
@@ -57,7 +80,7 @@ function runContext(access: HarnessRunContext["access"]): HarnessRunContext {
     interactionInput: { interaction: inputGraph, contexts: [] },
     graph: { interactionNodeId: 4, acquireCapability: () => ({ url: "http://127.0.0.1:9", token: "token", nodeId: 4 }) },
     approvals: { request: async () => { throw new Error("unused approval channel"); } },
-    model: { providerId: "anthropic-work", adapterId: access.adapterId, modelId: "claude-sonnet-4" },
+    model: { providerId: access.providerId, adapterId: access.adapterId, modelId: "claude-sonnet-4" },
     access,
     trace: createNoopHarnessTraceSink(),
   };
@@ -95,7 +118,10 @@ describe("ClaudeBasicHarness", () => {
       expect(options.env.ANTHROPIC_BASE_URL).toBe("https://gateway.test/anthropic");
       expect(options.env).not.toHaveProperty("OPENAI_API_KEY");
       expect(options.env).not.toHaveProperty("CLAUDE_CONFIG_DIR");
-      expect(harness.state()).toEqual({ claudeSessionId: "session-1" });
+      expect(harness.state()).toEqual({
+        claudeSessionId: "session-1",
+        claudeSessionProviderDefinitionId: "anthropic-work",
+      });
     } finally {
       vi.unstubAllEnvs();
     }
@@ -103,7 +129,10 @@ describe("ClaudeBasicHarness", () => {
 
   it("uses definition-scoped managed runtime state and explicit bypass only for full access", async () => {
     let call: readonly unknown[] = [];
-    const harness = new ClaudeBasicHarness(factoryContext("bypassPermissions", { claudeSessionId: "prior" }), {
+    const harness = new ClaudeBasicHarness(factoryContext("bypassPermissions", {
+      claudeSessionId: "prior",
+      claudeSessionProviderDefinitionId: "claude-work",
+    }), {
       spawnProcess: fakeSpawn({ result: "done" }, (args) => { call = args; }),
     });
     await harness.complete(runContext({
@@ -120,6 +149,90 @@ describe("ClaudeBasicHarness", () => {
     expect(environment.CLAUDE_CONFIG_DIR).toBe("/isolated");
     expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(environment.RELAYER_GRAPH_TOKEN).toBe("token");
+  });
+
+  it("resumes a session only for repeated turns through the same provider definition", async () => {
+    const calls: (readonly unknown[])[] = [];
+    const harness = new ClaudeBasicHarness(factoryContext("ask"), {
+      spawnProcess: sequentialFakeSpawn(
+        [{ result: "first", session_id: "session-1" }, { result: "second", session_id: "session-1" }],
+        (args) => calls.push(args),
+      ),
+    });
+    const access = {
+      kind: "secret" as const,
+      contract: "secret@1" as const,
+      providerId: "anthropic-work",
+      adapterId: "anthropic-api",
+      adapterImplementationVersion: "1",
+      endpoint: "https://api.anthropic.com/v1",
+      fields: { "api-key": "secret" },
+    };
+
+    await harness.complete(runContext(access));
+    await harness.complete(runContext(access));
+
+    expect(calls[0]?.[1]).not.toEqual(expect.arrayContaining(["--resume"]));
+    expect(calls[1]?.[1]).toEqual(expect.arrayContaining(["--resume", "session-1"]));
+  });
+
+  it.each([
+    {
+      name: "subscription to API",
+      next: {
+        kind: "secret" as const, contract: "secret@1" as const, providerId: "anthropic-personal",
+        adapterId: "anthropic-api", adapterImplementationVersion: "1",
+        endpoint: "https://api.anthropic.com/v1", fields: { "api-key": "secret" },
+      },
+    },
+    {
+      name: "API to subscription",
+      savedProviderDefinitionId: "anthropic-work",
+      next: {
+        kind: "managed-runtime" as const, contract: "managed-runtime@1" as const,
+        providerId: "claude-work", adapterId: "claude-subscription",
+        adapterImplementationVersion: "1", executable: "/managed/claude", environment: {},
+      },
+    },
+    {
+      name: "one subscription definition to another",
+      next: {
+        kind: "managed-runtime" as const, contract: "managed-runtime@1" as const,
+        providerId: "claude-personal", adapterId: "claude-subscription",
+        adapterImplementationVersion: "1", executable: "/managed/claude", environment: {},
+      },
+    },
+  ])("does not resume when switching from a saved provider definition: $name", async ({ next, ...fixture }) => {
+    let call: readonly unknown[] = [];
+    const harness = new ClaudeBasicHarness(factoryContext("ask", {
+      claudeSessionId: "prior",
+      claudeSessionProviderDefinitionId: fixture.savedProviderDefinitionId ?? "claude-work",
+    }), {
+      spawnProcess: fakeSpawn({ result: "done", session_id: "replacement" }, (args) => { call = args; }),
+    });
+
+    await harness.complete(runContext(next));
+
+    expect(call[1]).not.toEqual(expect.arrayContaining(["--resume"]));
+    expect(harness.state()).toEqual({
+      claudeSessionId: "replacement",
+      claudeSessionProviderDefinitionId: next.providerId,
+    });
+  });
+
+  it("ignores legacy unscoped saved state because its provider identity cannot be proven", async () => {
+    let call: readonly unknown[] = [];
+    const harness = new ClaudeBasicHarness(factoryContext("ask", { claudeSessionId: "legacy" }), {
+      spawnProcess: fakeSpawn({ result: "done" }, (args) => { call = args; }),
+    });
+
+    await harness.complete(runContext({
+      kind: "secret", contract: "secret@1", providerId: "anthropic-work", adapterId: "anthropic-api",
+      adapterImplementationVersion: "1", endpoint: "https://api.anthropic.com/v1", fields: { "api-key": "secret" },
+    }));
+
+    expect(call[1]).not.toEqual(expect.arrayContaining(["--resume"]));
+    expect(harness.state()).toEqual({});
   });
 
   it("never surfaces provider stderr from a failed Claude process", async () => {

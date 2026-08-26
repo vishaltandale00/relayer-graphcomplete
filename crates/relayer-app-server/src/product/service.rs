@@ -2,11 +2,11 @@ use super::{
     ActionInvocation, Annotation, AnnotationAnchor, AnnotationState, CatalogError,
     CreateModelFamilyCommand, FamilyPolicyReference, Interaction, InteractionId,
     InteractionModelSelection, MAX_ANNOTATION_SNAPSHOT_THREADS, ModelFamily, ModelFamilyId,
-    ModelFamilyKind, ModelSelection, ModelSettings, ModelSettingsDefaults, NewAnnotationRevision,
-    ProductCapabilities, ProductState, Project, ProjectId, ProviderCatalogSnapshot,
-    ReorderModelFamiliesCommand, SystemFamilySnapshot, Thread, ThreadId, ThreadView,
-    UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand, ValidateModelSelectionCommand,
-    validate_family, validate_revision_content,
+    ModelFamilyKind, ModelFamilyMember, ModelSelection, ModelSettings, ModelSettingsDefaults,
+    NewAnnotationRevision, ProductCapabilities, ProductState, Project, ProjectId,
+    ProviderCatalogSnapshot, ProviderId, ReorderModelFamiliesCommand, SystemFamilySnapshot, Thread,
+    ThreadId, ThreadView, UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand,
+    ValidateModelSelectionCommand, validate_family, validate_revision_content, validate_stable_id,
 };
 use crate::approval::{ApprovalReceipt, ApprovalRequest, ApprovalResolution};
 use crate::storage::{
@@ -401,6 +401,86 @@ impl ProductService {
 
     pub(crate) async fn model_settings(&self) -> Result<ModelSettings, ProductError> {
         self.storage.load_model_settings().await.map_err(Into::into)
+    }
+
+    pub(crate) async fn provider_onboarding_projection(
+        &self,
+        provider_id: ProviderId,
+    ) -> Result<super::ProviderOnboardingProjection, ProductError> {
+        let settings = self.storage.load_model_settings().await?;
+        let provider = settings
+            .providers
+            .iter()
+            .find(|provider| provider.id == provider_id)
+            .ok_or_else(|| ProductError::NotFound(format!("provider {}", provider_id.as_str())))?;
+        if !provider.connected {
+            return Err(super::CatalogError::invalid(
+                "provider_disconnected",
+                "The selected provider is not connected.",
+            )
+            .into());
+        }
+        let mut harnesses = Vec::new();
+        for harness in settings
+            .harnesses
+            .iter()
+            .filter(|harness| harness.available)
+        {
+            let mut models = Vec::new();
+            for model in &provider.models {
+                if self
+                    .storage
+                    .provider_onboarding_model_compatible(&harness.id, &provider_id, &model.id)
+                    .await?
+                {
+                    models.push(super::ProviderOnboardingModel {
+                        id: model.id.clone(),
+                        label: model.label.clone(),
+                    });
+                }
+            }
+            if !models.is_empty() {
+                harnesses.push(super::ProviderOnboardingHarness {
+                    id: harness.id.clone(),
+                    label: harness.label.clone(),
+                    is_app_default: harness.id == settings.defaults.harness_id,
+                    models,
+                });
+            }
+        }
+        harnesses.sort_by_key(|harness| (!harness.is_app_default, harness.label.clone()));
+        Ok(super::ProviderOnboardingProjection {
+            provider_id,
+            app_default_harness_id: settings.defaults.harness_id,
+            harnesses,
+        })
+    }
+
+    pub(crate) async fn complete_provider_onboarding(
+        &self,
+        mut command: super::CompleteProviderOnboardingCommand,
+    ) -> Result<super::ProviderOnboardingCompletion, ProductError> {
+        validate_stable_id(&command.harness_id, "harnessId")?;
+        validate_stable_id(&command.model_id, "modelId")?;
+        command.family_name = validate_family(
+            &command.family_name,
+            &[ModelFamilyMember {
+                provider_id: command.provider_id.clone(),
+                model_id: command.model_id.clone(),
+                position: 0,
+            }],
+        )?;
+        let (defaults, family) = self.storage.complete_provider_onboarding(&command).await?;
+        Ok(super::ProviderOnboardingCompletion {
+            selection: ModelSelection {
+                harness_id: command.harness_id,
+                family_id: family.id,
+                provider_id: command.provider_id,
+                model_id: command.model_id,
+            },
+            defaults,
+            family,
+        })
     }
 
     pub(crate) async fn execution_harness_policy(
@@ -1314,11 +1394,40 @@ impl ProductService {
         harness_configuration_name: &str,
     ) -> Result<bool, ProductError> {
         let text = required(text, "text")?;
+        let input_digest = match self.storage.interaction_input(interaction_id).await? {
+            Some(input) => {
+                let contexts = input
+                    .contexts
+                    .iter()
+                    .map(|context| relayer_graph_core::InteractionContextDraft {
+                        target: relayer_graph_core::InteractionContextTarget {
+                            node_id: relayer_graph_core::NodeId::new(context.target.node_id)
+                                .expect("stored context node ID is positive"),
+                            source_interaction_node_id: relayer_graph_core::NodeId::new(
+                                context.target.source_interaction_node_id,
+                            )
+                            .expect("stored source interaction node ID is positive"),
+                            source_layer_id: relayer_graph_core::LayerId::new(
+                                context.target.source_layer_id,
+                            )
+                            .expect("stored source layer ID is positive"),
+                        },
+                        annotations: context.annotations.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                Some(
+                    relayer_graph_core::interaction_input_digest(text, &contexts)
+                        .map_err(|error| ProductError::Invalid(error.to_string()))?,
+                )
+            }
+            None => None,
+        };
         self.storage
             .claim_interaction_retry(
                 interaction_id,
                 expected_attempt_id,
                 text,
+                input_digest.as_deref(),
                 model_selection,
                 harness_configuration_name,
             )
@@ -1464,6 +1573,41 @@ impl ProductService {
                 },
                 &now(),
             )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn record_model_attempt_admission_failure(
+        &self,
+        interaction_id: super::InteractionId,
+        harness_name: &str,
+        route: &super::ExecutionModelSelection,
+        adapter_version: u32,
+        harness_policy: &super::ExecutionHarnessPolicy,
+        failure_category: &str,
+    ) -> Result<i64, ProductError> {
+        self.storage
+            .record_model_attempt_admission_failure(
+                super::BeginInteractionAttempt {
+                    interaction_id,
+                    harness_name,
+                    route,
+                    adapter_version,
+                    expected_harness_policy: Some(harness_policy),
+                },
+                failure_category,
+                &now(),
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn record_pre_execution_model_failure(
+        &self,
+        failure: super::PreExecutionModelFailure<'_>,
+    ) -> Result<i64, ProductError> {
+        self.storage
+            .record_pre_execution_model_failure(failure, &now())
             .await
             .map_err(Into::into)
     }
@@ -1663,9 +1807,9 @@ fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), 
 mod tests {
     use super::*;
     use crate::product::{
-        CatalogModelSnapshot, FamilyPolicyReference, HarnessModelCompatibility, HarnessModelRule,
-        HarnessModelRules, ModelFamilyMember, ProviderDefinition, ProviderId,
-        RuntimeProductHarness, UnavailableReason,
+        CatalogModelSnapshot, CompleteProviderOnboardingCommand, FamilyPolicyReference,
+        HarnessModelCompatibility, HarnessModelRule, HarnessModelRules, ModelFamilyMember,
+        ProviderDefinition, ProviderId, RuntimeProductHarness, UnavailableReason,
     };
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1715,6 +1859,166 @@ mod tests {
                 .await
                 .unwrap()
         );
+
+        drop(service);
+        drop(storage);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn onboarding_projects_compatible_models_and_commits_family_and_defaults_atomically() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-provider-onboarding-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let storage = SqliteProductStore::open(&path).await.unwrap();
+        storage
+            .initialize_model_catalog("codex-basic", &managed_runtime_harnesses(1))
+            .await
+            .unwrap();
+        let service = ProductService::new(storage.clone(), true);
+        let (definition, snapshot) = staged_codex_catalog();
+        service
+            .create_provider_with_catalog(definition, snapshot)
+            .await
+            .unwrap();
+
+        let projection = service
+            .provider_onboarding_projection(ProviderId::parse("onboarding-codex").unwrap())
+            .await
+            .unwrap();
+        assert_eq!(projection.app_default_harness_id, "codex-basic");
+        assert_eq!(projection.harnesses.len(), 1);
+        assert!(projection.harnesses[0].is_app_default);
+        assert_eq!(
+            projection.harnesses[0]
+                .models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["default", "second"]
+        );
+
+        service
+            .create_model_family(CreateModelFamilyCommand {
+                name: "Explicit onboarding choice".into(),
+                enabled: true,
+                members: vec![ModelFamilyMember {
+                    provider_id: ProviderId::parse("onboarding-codex").unwrap(),
+                    model_id: "default".into(),
+                    position: 0,
+                }],
+            })
+            .await
+            .unwrap();
+
+        let completed = service
+            .complete_provider_onboarding(CompleteProviderOnboardingCommand {
+                provider_id: ProviderId::parse("onboarding-codex").unwrap(),
+                harness_id: "codex-basic".into(),
+                family_name: "Explicit onboarding choice".into(),
+                model_id: "second".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(completed.defaults.harness_id, "codex-basic");
+        assert_eq!(completed.defaults.family_id, Some(completed.family.id));
+        assert_eq!(completed.selection.model_id, "second");
+        assert_eq!(completed.family.members[0].model_id, "second");
+        assert_eq!(completed.family.name, "Explicit onboarding choice (2)");
+
+        let retried = service
+            .complete_provider_onboarding(CompleteProviderOnboardingCommand {
+                provider_id: ProviderId::parse("onboarding-codex").unwrap(),
+                harness_id: "codex-basic".into(),
+                family_name: "Explicit onboarding choice".into(),
+                model_id: "second".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(retried.family.id, completed.family.id);
+        assert_eq!(retried.defaults, completed.defaults);
+
+        drop(service);
+        drop(storage);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn onboarding_requires_an_explicit_compatible_alternate_harness() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-provider-onboarding-alternate-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let storage = SqliteProductStore::open(&path).await.unwrap();
+        let harness = |id: &str, adapter_id: &str| RuntimeProductHarness {
+            id: id.into(),
+            configuration_digest: format!("sha256:{id}"),
+            model_compatibility: vec![],
+            configuration_revision: 1,
+            model_rules: Some(HarnessModelRules {
+                allow: vec![HarnessModelRule {
+                    adapter_id: adapter_id.into(),
+                    model_id_exact: None,
+                    model_id_regex: Some(".*".into()),
+                }],
+                deny: vec![],
+            }),
+            execution_access_contracts: vec!["managed-runtime@1".into()],
+            family_policy: None,
+        };
+        storage
+            .initialize_model_catalog(
+                "codex-basic",
+                &[
+                    harness("codex-basic", "codex-subscription"),
+                    harness("claude-basic", "claude-subscription"),
+                ],
+            )
+            .await
+            .unwrap();
+        let service = ProductService::new(storage.clone(), true);
+        let (mut definition, mut snapshot) = staged_codex_catalog();
+        let provider_id = ProviderId::parse("claude-work").unwrap();
+        definition.id = provider_id.clone();
+        definition.adapter_id = "claude-subscription".into();
+        definition.label = "Claude Work".into();
+        snapshot.provider_id = provider_id.clone();
+        snapshot.label = "Claude Work".into();
+        snapshot.system_family = None;
+        service
+            .create_provider_with_catalog(definition, snapshot)
+            .await
+            .unwrap();
+
+        let projection = service
+            .provider_onboarding_projection(provider_id.clone())
+            .await
+            .unwrap();
+        assert_eq!(projection.app_default_harness_id, "codex-basic");
+        assert_eq!(projection.harnesses.len(), 1);
+        assert_eq!(projection.harnesses[0].id, "claude-basic");
+        assert!(!projection.harnesses[0].is_app_default);
+
+        let completed = service
+            .complete_provider_onboarding(CompleteProviderOnboardingCommand {
+                provider_id,
+                harness_id: "claude-basic".into(),
+                family_name: "Claude Work default".into(),
+                model_id: "default".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(completed.defaults.harness_id, "claude-basic");
+        assert_eq!(completed.selection.model_id, "default");
 
         drop(service);
         drop(storage);

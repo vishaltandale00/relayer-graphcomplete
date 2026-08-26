@@ -87,6 +87,43 @@ describe("composer provider lifecycle", () => {
     });
   });
 
+  it("restores model failures after partial effects under the accepted duplicate-risk contract", () => {
+    for (const effectBoundary of ["partial_output", "graph_write", "tool_effect", "unknown"]) {
+      expect(restoredDraftForInteraction({
+        completionStatus: "not_started",
+        text: "Review this repository",
+        modelSelection: { familyId: 12, providerId: "openai-work", modelId: "gpt-5.2" },
+        latestAttempt: {
+          id: 44,
+          outcome: "model_failed",
+          effectBoundary,
+          failureCategory: "provider_timeout",
+        },
+      })).toMatchObject({
+        text: "Review this repository",
+        retryAttemptId: 44,
+        failureCategory: "provider_timeout",
+      });
+    }
+  });
+
+  it("uses the durable model-failed outcome when admission has only a generic execution category", () => {
+    expect(restoredDraftForInteraction({
+      completionStatus: "not_started",
+      text: "Review this repository",
+      latestAttempt: {
+        id: 45,
+        outcome: "model_failed",
+        effectBoundary: "none",
+        failureCategory: "execution",
+      },
+    })).toMatchObject({
+      text: "Review this repository",
+      retryAttemptId: 45,
+      failureCategory: "execution",
+    });
+  });
+
   it("does not restore harness, graph, tool, permission, or app failures", () => {
     for (const failureCategory of ["harness_logic", "graph_validation", "tool_failure", "permission_denied", "application_bug"]) {
       expect(restoredDraftForInteraction({

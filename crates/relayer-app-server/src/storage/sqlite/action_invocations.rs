@@ -58,7 +58,7 @@ impl SqliteProductStore {
 
     pub(crate) async fn interrupted_interactions(&self) -> Result<Vec<Interaction>, StorageError> {
         let rows = sqlx::query(
-            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.completion_status IN ('not_started','running','submitted','waiting_for_approval') ORDER BY i.id",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.completion_status IN ('not_started','running','submitted','waiting_for_approval') OR (i.completion_status='failed' AND i.completion_error LIKE 'Canonical reconciliation pending:%') ORDER BY i.id",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -74,11 +74,25 @@ impl SqliteProductStore {
     ) -> Result<bool, StorageError> {
         let output = serde_json::to_string(output)
             .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let result = sqlx::query("UPDATE interactions SET completion_status='accepted',completion_output_json=?1,completion_error=NULL WHERE id=?2 AND graph_node_id IS NOT NULL AND harness_configuration_name IS NOT NULL AND harness_configuration_digest IS NOT NULL AND effective_execution_digest IS NOT NULL AND effective_permission_receipt_json IS NOT NULL AND (completion_status IN ('not_started','running','submitted','waiting_for_approval') OR (completion_status='failed' AND completion_error LIKE 'Canonical reconciliation pending:%'))")
             .bind(output)
             .bind(interaction_id.value())
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
+        if result.rows_affected() == 1 {
+            let finished_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time is before unix epoch")
+                .as_millis()
+                .to_string();
+            sqlx::query("UPDATE interaction_attempts SET finished_at=?1,outcome='accepted',failure_category=NULL,effect_boundary='graph_write' WHERE interaction_id=?2 AND outcome='running'")
+                .bind(finished_at)
+                .bind(interaction_id.value())
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
         Ok(result.rows_affected() == 1)
     }
 

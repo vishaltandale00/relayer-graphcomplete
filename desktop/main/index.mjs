@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import {
   productionProviderAdapterRegistry,
   productionProviderRuntimeDependencies,
+  resolveLegacyCodexHome,
 } from "./providers/provider-adapter-registry.mjs";
 import { createProviderComposition } from "./providers/provider-composition.mjs";
 import { createProviderDiagnosticsLog } from "./providers/provider-diagnostics-log.mjs";
@@ -46,6 +47,7 @@ app.setName(metadata.relayerProductName || "Relayer Dev");
 
 const userDataPath = app.getPath("userData");
 const providerRuntimeRoot = join(userDataPath, "provider-runtimes");
+const legacyCodexHome = resolveLegacyCodexHome(userDataPath, process.env);
 const updateBaseUrl = packagedRelease?.updateBaseUrl || (
   app.isPackaged ? null : process.env.RELAYER_DESKTOP_UPDATE_BASE_URL || DESKTOP_UPDATE_BASE_URL
 );
@@ -213,6 +215,7 @@ if (primaryInstance) {
       providerStatuses: () => productServer.providerStatuses(),
       runtimeDependencies: (definition) => productionProviderRuntimeDependencies(definition, {
         runtimeRoot: providerRuntimeRoot,
+        legacyCodexHome,
         environment: process.env,
         codexBinary: bundledCodexBinary,
         claudeBinary: process.env.RELAYER_CLAUDE_BINARY,
@@ -234,7 +237,7 @@ if (primaryInstance) {
       nativeTheme,
       modelCatalog,
       providerDefinitions: providerSetup,
-      validateProviderOnboarding: () => productServer.validateProviderOnboarding(defaultHarnessConfiguration),
+      validateProviderOnboarding: () => productServer.validateProviderOnboarding(),
       conversationExporter,
       settings,
       tutorial,

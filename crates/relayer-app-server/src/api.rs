@@ -10,7 +10,10 @@ pub(crate) mod threads;
 mod types;
 
 use crate::{approval::ApprovalDecision, runtime::RuntimeClient};
-use crate::{permissions::PermissionCatalog, product::ProductService};
+use crate::{
+    permissions::PermissionCatalog,
+    product::{InteractionExecutionService, ProductService},
+};
 use auth::DesktopSessionAuthenticator;
 use axum::{Router, routing::get};
 use std::{
@@ -34,6 +37,7 @@ pub(crate) struct ApiState {
     pub(crate) product: ProductService,
     pub(crate) authenticator: DesktopSessionAuthenticator,
     pub(crate) runtime: Option<RuntimeClient>,
+    pub(crate) interaction_execution: Option<InteractionExecutionService>,
     pub(crate) permission_catalog: PermissionCatalog,
     pub(crate) default_harness_configuration: String,
     pub(crate) allow_harness_override: bool,
@@ -64,17 +68,28 @@ pub(crate) fn router(
 ) -> Router {
     let (control_token, read_only_control_token) = control_tokens;
     let annotations_enabled = read_only_control_token.is_some();
+    let approval_decisions = Arc::new(Mutex::new(HashMap::new()));
+    let interaction_execution = runtime.runtime.as_ref().map(|runtime_client| {
+        InteractionExecutionService::new(
+            product.clone(),
+            runtime_client.clone(),
+            runtime.permission_catalog.clone(),
+            runtime.standalone_workspaces_directory.clone(),
+            approval_decisions.clone(),
+        )
+    });
     let state = ApiState {
         product,
         authenticator: DesktopSessionAuthenticator::new(control_token, read_only_control_token),
         runtime: runtime.runtime,
+        interaction_execution,
         permission_catalog: runtime.permission_catalog,
         default_harness_configuration: runtime.default_harness_configuration,
         allow_harness_override: runtime.allow_harness_override,
         allow_conversation_import: runtime.allow_conversation_import,
         standalone_workspaces_directory: runtime.standalone_workspaces_directory,
         export_producer: runtime.export_producer,
-        approval_decisions: Arc::new(Mutex::new(HashMap::new())),
+        approval_decisions,
         annotation_sessions: Arc::new(Mutex::new(HashMap::new())),
         annotations_enabled,
         environment_inspector: crate::environment::EnvironmentInspector::new(),
@@ -90,6 +105,11 @@ pub(crate) fn router(
         .route("/api/capabilities", get(state::capabilities))
         .route("/api/permission-profiles", get(state::permission_profiles))
         .route("/api/model-settings", get(model_settings::get))
+        .route(
+            "/api/provider-onboarding",
+            get(model_settings::onboarding_projection)
+                .post(model_settings::complete_onboarding),
+        )
         .route(
             "/api/model-settings/defaults",
             axum::routing::put(model_settings::update_defaults),

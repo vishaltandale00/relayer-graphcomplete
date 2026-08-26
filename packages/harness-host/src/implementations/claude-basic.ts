@@ -31,6 +31,7 @@ export class ClaudeBasicHarness implements Harness {
   private readonly spawnProcess: typeof spawn;
   private readonly clientModuleUrl: string;
   private sessionId: string | undefined;
+  private sessionProviderDefinitionId: string | undefined;
 
   constructor(
     private readonly context: HarnessFactoryContext,
@@ -38,9 +39,15 @@ export class ClaudeBasicHarness implements Harness {
   ) {
     this.spawnProcess = dependencies.spawnProcess ?? spawn;
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
-    this.sessionId = typeof context.savedState?.claudeSessionId === "string"
-      ? context.savedState.claudeSessionId
-      : undefined;
+    const savedSessionId = context.savedState?.claudeSessionId;
+    const savedProviderDefinitionId = context.savedState?.claudeSessionProviderDefinitionId;
+    // State written before provider-scoped Claude sessions cannot prove which
+    // credentials created the session. Ignore it instead of risking a resume
+    // through a different provider definition.
+    if (typeof savedSessionId === "string" && typeof savedProviderDefinitionId === "string") {
+      this.sessionId = savedSessionId;
+      this.sessionProviderDefinitionId = savedProviderDefinitionId;
+    }
   }
 
   async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
@@ -50,12 +57,23 @@ export class ClaudeBasicHarness implements Harness {
     if (!new Set(["anthropic-api", "claude-subscription"]).has(context.model.adapterId ?? "")) {
       throw new Error(`claude.basic cannot run provider adapter ${context.model.adapterId ?? "unknown"}`);
     }
+    if (context.model.providerId !== context.access.providerId) {
+      throw new Error("claude.basic requires execution access for the selected provider definition");
+    }
+    const providerDefinitionId = context.model.providerId;
+    if (this.sessionProviderDefinitionId !== providerDefinitionId) {
+      this.sessionId = undefined;
+      this.sessionProviderDefinitionId = undefined;
+    }
     const graph = context.graph.acquireCapability();
     const prompt = this.prompt(context.inputGraph);
     await context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
     const result = await this.run(prompt, context.model.modelId, graph, context.access, signal);
     await context.trace.emit({ type: "message", data: { role: "assistant", text: result.text } });
-    if (result.sessionId) this.sessionId = result.sessionId;
+    if (result.sessionId) {
+      this.sessionId = result.sessionId;
+      this.sessionProviderDefinitionId = providerDefinitionId;
+    }
   }
 
   traceSupport(): HarnessTraceSupport {
@@ -66,7 +84,12 @@ export class ClaudeBasicHarness implements Harness {
   }
 
   state(): HarnessSessionState {
-    return this.sessionId === undefined ? {} : { claudeSessionId: this.sessionId };
+    return this.sessionId === undefined || this.sessionProviderDefinitionId === undefined
+      ? {}
+      : {
+          claudeSessionId: this.sessionId,
+          claudeSessionProviderDefinitionId: this.sessionProviderDefinitionId,
+        };
   }
 
   private async run(

@@ -351,10 +351,7 @@ impl RelayerAppServer {
                         .fail_interaction_completion(
                             interaction.id,
                             &harness,
-                            &format!(
-                                "{} {error}",
-                                crate::api::threads::RECONCILIATION_PENDING_PREFIX
-                            ),
+                            &format!("{} {error}", crate::product::RECONCILIATION_PENDING_PREFIX),
                         )
                         .await?;
                 }

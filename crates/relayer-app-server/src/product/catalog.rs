@@ -329,6 +329,46 @@ pub(crate) struct ModelSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderOnboardingModel {
+    pub(crate) id: String,
+    pub(crate) label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderOnboardingHarness {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) is_app_default: bool,
+    pub(crate) models: Vec<ProviderOnboardingModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderOnboardingProjection {
+    pub(crate) provider_id: ProviderId,
+    pub(crate) app_default_harness_id: String,
+    pub(crate) harnesses: Vec<ProviderOnboardingHarness>,
+}
+
+#[derive(Debug)]
+pub(crate) struct CompleteProviderOnboardingCommand {
+    pub(crate) provider_id: ProviderId,
+    pub(crate) harness_id: String,
+    pub(crate) family_name: String,
+    pub(crate) model_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderOnboardingCompletion {
+    pub(crate) defaults: ModelSettingsDefaults,
+    pub(crate) family: ModelFamily,
+    pub(crate) selection: ModelSelection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ModelSelection {
     pub(crate) harness_id: String,
     pub(crate) family_id: ModelFamilyId,

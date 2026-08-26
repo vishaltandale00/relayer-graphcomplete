@@ -40,14 +40,24 @@ export const productionProviderAdapterRegistry = createProviderAdapterRegistry(
   ACTIVE_PROVIDER_ADAPTERS.map(({ descriptor }) => descriptor),
 );
 
+export function resolveLegacyCodexHome(userDataPath, environment = {}) {
+  return environment.RELAYER_CODEX_HOME || join(userDataPath, "codex-home");
+}
+
 const PRODUCTION_RUNTIME_DEPENDENCIES = Object.freeze({
   "codex-subscription": async (definition, context) => {
-    const root = join(context.runtimeRoot, definition.id);
-    await mkdir(root, { recursive: true });
+    // The provider-platform migration preserves the built-in definition's
+    // stable `codex` id. Keep that one definition on the home used by prior
+    // releases so an existing subscription session survives the update. Every
+    // definition created through the provider UI retains its isolated home.
+    const codexHome = definition.id === "codex" && typeof context.legacyCodexHome === "string"
+      ? context.legacyCodexHome
+      : join(context.runtimeRoot, definition.id, "codex-home");
+    await mkdir(codexHome, { recursive: true });
     return {
       environment: {
         ...managedRuntimeEnvironment(context.environment),
-        CODEX_HOME: join(root, "codex-home"),
+        CODEX_HOME: codexHome,
         RELAYER_CODEX_BINARY: context.codexBinary,
       },
     };

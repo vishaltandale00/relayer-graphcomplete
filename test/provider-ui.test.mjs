@@ -28,7 +28,14 @@ describe("provider and harness renderer markup", () => {
     ]);
     expect(html).toContain('id="providerFamilyBack">← Connect another provider</button>');
     expect(auth).toContain('$("#providerFamilyBack").onclick');
-    expect(auth).toContain("cannot use its models. Connect another provider to continue.");
+    expect(auth).toContain("loadProviderOnboardingProjection");
+    expect(auth).toContain('data-onboarding-harness=');
+    expect(auth).toContain("Relayer will not choose a model for you.");
+    expect(auth).toContain("const harnessTabStopId = onboardingHarness ?? onboardingProjection.harnesses[0]?.id");
+    expect(auth).toContain("const modelTabStopId = onboardingModel ?? models[0]?.id");
+    expect(auth).toContain('data-onboarding-model="${CSS.escape(onboardingModel)}"');
+    expect(auth).toContain('$("#finishProviderSetup").disabled = Boolean(busy) || !onboardingModel');
+    expect(auth).not.toContain("onboardingModel = models[0]?.id");
   });
 
   it("renders branded marks for every packaged provider adapter and a generic future fallback", () => {

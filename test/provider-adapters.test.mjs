@@ -9,6 +9,7 @@ import {
   ACTIVE_PROVIDER_ADAPTER_MODULES,
   productionProviderAdapterRegistry,
   productionProviderRuntimeDependencies,
+  resolveLegacyCodexHome,
 } from "../desktop/main/providers/provider-adapter-registry.mjs";
 import {
   createProviderAdapterRegistry,
@@ -117,6 +118,47 @@ describe("authoritative provider adapter registry", () => {
     await expect(productionProviderRuntimeDependencies({
       id: "openai-work", adapterId: "openai-api",
     }, { runtimeRoot: root, environment: {} })).resolves.toEqual({});
+  });
+
+  it("preserves the legacy Codex home only for the migrated default definition across restarts", async () => {
+    const profile = await mkdtemp(join(tmpdir(), "relayer-legacy-codex-home-"));
+    const runtimeRoot = join(profile, "provider-runtimes");
+    const legacyHome = join(profile, "codex-home");
+    const conflictingIsolatedHome = join(runtimeRoot, "codex", "codex-home");
+    await mkdir(legacyHome, { recursive: true });
+    await mkdir(conflictingIsolatedHome, { recursive: true });
+    await writeFile(join(legacyHome, "auth.json"), "legacy-session");
+    await writeFile(join(conflictingIsolatedHome, "auth.json"), "unrelated-isolated-session");
+
+    const context = {
+      runtimeRoot,
+      legacyCodexHome: legacyHome,
+      environment: { PATH: "/safe/bin" },
+      codexBinary: "/bin/codex",
+    };
+    const migrated = { id: "codex", adapterId: "codex-subscription" };
+    const firstStart = await productionProviderRuntimeDependencies(migrated, context);
+    const restarted = await productionProviderRuntimeDependencies(migrated, context);
+
+    expect(firstStart.environment.CODEX_HOME).toBe(legacyHome);
+    expect(restarted.environment.CODEX_HOME).toBe(legacyHome);
+    await expect(readFile(join(legacyHome, "auth.json"), "utf8")).resolves.toBe("legacy-session");
+    await expect(readFile(join(conflictingIsolatedHome, "auth.json"), "utf8"))
+      .resolves.toBe("unrelated-isolated-session");
+
+    const newDefinition = await productionProviderRuntimeDependencies({
+      id: "new-codex-connection", adapterId: "codex-subscription",
+    }, context);
+    expect(newDefinition.environment.CODEX_HOME)
+      .toBe(join(runtimeRoot, "new-codex-connection", "codex-home"));
+  });
+
+  it("resolves both legacy Codex home locations with the prior override precedence", () => {
+    expect(resolveLegacyCodexHome("/profile", {})).toBe(join("/profile", "codex-home"));
+    expect(resolveLegacyCodexHome("/profile", { RELAYER_CODEX_HOME: "/custom/codex" }))
+      .toBe("/custom/codex");
+    expect(resolveLegacyCodexHome("/profile", { RELAYER_CODEX_HOME: "" }))
+      .toBe(join("/profile", "codex-home"));
   });
 
   it("normalizes safe endpoints and rejects embedded authority or query data", () => {

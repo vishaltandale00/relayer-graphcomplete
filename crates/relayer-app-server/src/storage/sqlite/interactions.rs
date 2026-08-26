@@ -36,12 +36,20 @@ impl SqliteProductStore {
             .expect("system time is before unix epoch")
             .as_millis()
             .to_string();
+        // A prior process can have committed graph-backed interaction acceptance before
+        // committing the attempt receipt (including databases written by older versions).
+        // Graph authority wins: normalize those receipts before closing genuinely interrupted
+        // attempts so restart can never turn an accepted result into a failed attempt.
+        sqlx::query("UPDATE interaction_attempts SET finished_at=?1,outcome='accepted',failure_category=NULL,effect_boundary='graph_write' WHERE outcome='running' AND interaction_id IN (SELECT id FROM interactions WHERE completion_status='accepted')")
+            .bind(&finished_at)
+            .execute(&mut *transaction)
+            .await?;
         sqlx::query("UPDATE interaction_attempts SET finished_at=?1,outcome='execution_failed',failure_category='application_restart',effect_boundary='unknown' WHERE outcome='running'")
             .bind(finished_at)
             .execute(&mut *transaction)
             .await?;
         let result = sqlx::query(
-            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('not_started','running','submitted') AND (?2=0 OR input_identity IS NULL) AND NOT (completion_status='not_started' AND EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=interactions.id AND a.outcome='model_failed' AND a.effect_boundary='none')) AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1) AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('not_started','running','submitted') AND (?2=0 OR input_identity IS NULL) AND NOT (completion_status='not_started' AND EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=interactions.id AND a.outcome='model_failed')) AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1) AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
         )
         .bind(error)
         .bind(preserve_identified)
@@ -289,6 +297,7 @@ impl SqliteProductStore {
         interaction_id: InteractionId,
         expected_attempt_id: i64,
         text: &str,
+        input_digest: Option<&str>,
         model_selection: &InteractionModelSelection,
         harness_configuration_name: &str,
     ) -> Result<bool, StorageError> {
@@ -300,12 +309,11 @@ impl SqliteProductStore {
         .bind(interaction_id.value())
         .fetch_optional(&mut *transaction)
         .await?;
-        if !matches!(attempt.as_ref(), Some((outcome, boundary)) if outcome == "model_failed" && boundary == "none")
-        {
+        if !matches!(attempt.as_ref(), Some((outcome, _)) if outcome == "model_failed") {
             return Err(StorageError::Catalog(
                 crate::product::CatalogError::invalid(
                     "interaction_retry_not_recoverable",
-                    "Only a model failure with no durable effect can be retried in place.",
+                    "Only a model failure can be retried in place.",
                 ),
             ));
         }
@@ -340,13 +348,14 @@ impl SqliteProductStore {
         };
         catalog::validate_model_selection_on(&mut transaction, &command).await?;
         let result = sqlx::query(
-            "UPDATE interactions SET text=?1,model_provider_id=?2,provider_model_id=?3,model_family_id=?4,completion_status='submitted',harness_configuration_name=?5,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?6 AND completion_status='not_started' AND NOT EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence)",
+            "UPDATE interactions SET text=?1,model_provider_id=?2,provider_model_id=?3,model_family_id=?4,completion_status='submitted',harness_configuration_name=?5,input_digest=CASE WHEN input_identity IS NULL THEN NULL ELSE ?6 END,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?7 AND completion_status='not_started' AND NOT EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence)",
         )
         .bind(text)
         .bind(model_selection.provider_id.as_str())
         .bind(&model_selection.model_id)
         .bind(model_selection.family_id.value())
         .bind(harness_configuration_name)
+        .bind(input_digest)
         .bind(interaction_id.value())
         .execute(&mut *transaction)
         .await?;
@@ -500,8 +509,13 @@ impl SqliteProductStore {
         interaction_id: InteractionId,
         harness_configuration_name: &str,
     ) -> Result<(), StorageError> {
-        sqlx::query("UPDATE interactions SET completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='running'")
+        let result = sqlx::query("UPDATE interactions SET graph_node_id=NULL,completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='running'")
             .bind(harness_configuration_name).bind(interaction_id.value()).execute(&self.pool).await?;
+        if result.rows_affected() != 1 {
+            return Err(StorageError::IncompatibleSchema(format!(
+                "interaction {interaction_id} was not running while returning it to unsent"
+            )));
+        }
         Ok(())
     }
 }
@@ -739,10 +753,18 @@ mod tests {
             .unwrap()
             .last_insert_rowid();
         let next_model = selection("second-model");
+        sqlx::query("UPDATE interactions SET input_identity='retry-input',input_digest='sha256:old' WHERE id=?1")
+            .bind(thread.root_interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let edited_digest =
+            relayer_graph_core::interaction_input_digest("Edited prompt", &[]).unwrap();
         let first = store.claim_interaction_retry(
             thread.root_interaction_id,
             attempt_id,
             "Edited prompt",
+            Some(&edited_digest),
             &next_model,
             "codex-basic",
         );
@@ -750,6 +772,7 @@ mod tests {
             thread.root_interaction_id,
             attempt_id,
             "Edited prompt",
+            Some(&edited_digest),
             &next_model,
             "codex-basic",
         );
@@ -771,6 +794,13 @@ mod tests {
         assert_eq!(interaction.text, "Edited prompt");
         assert_eq!(interaction.completion_status, "submitted");
         assert_eq!(interaction.model_selection, Some(next_model));
+        let stored_digest: String =
+            sqlx::query_scalar("SELECT input_digest FROM interactions WHERE id=?1")
+                .bind(thread.root_interaction_id.value())
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(stored_digest, edited_digest);
         let receipt = interaction.latest_attempt.unwrap();
         assert_eq!(receipt.id, attempt_id);
         assert_eq!(receipt.model_id, "first-model");

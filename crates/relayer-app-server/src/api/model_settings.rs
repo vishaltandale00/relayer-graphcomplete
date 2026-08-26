@@ -4,9 +4,10 @@ use super::{
     error::ApiError,
 };
 use crate::product::{
-    CreateModelFamilyCommand, HarnessModelRule, HarnessModelRules, ModelFamily, ModelFamilyId,
-    ModelFamilyMember, ModelSelection, ModelSettings, ModelSettingsDefaults,
-    ProviderCatalogSnapshot, ProviderDefinition, ProviderId, ReorderModelFamiliesCommand,
+    CompleteProviderOnboardingCommand, CreateModelFamilyCommand, HarnessModelRule,
+    HarnessModelRules, ModelFamily, ModelFamilyId, ModelFamilyMember, ModelSelection,
+    ModelSettings, ModelSettingsDefaults, ProviderCatalogSnapshot, ProviderDefinition, ProviderId,
+    ProviderOnboardingCompletion, ProviderOnboardingProjection, ReorderModelFamiliesCommand,
     UpdateHarnessModelRulesCommand, UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand,
     ValidateModelSelectionCommand,
 };
@@ -79,6 +80,21 @@ pub(super) struct StagedProviderRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct OnboardingProjectionQuery {
+    provider_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CompleteOnboardingRequest {
+    provider_id: String,
+    harness_id: String,
+    family_name: String,
+    model_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct HarnessRulesRequest {
     expected_revision: u32,
     #[serde(default)]
@@ -93,6 +109,39 @@ pub(super) async fn get(
 ) -> Result<Json<ModelSettings>, ApiError> {
     authorize_read(&state, &headers)?;
     Ok(Json(state.product.model_settings().await?))
+}
+
+pub(super) async fn onboarding_projection(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Query(query): Query<OnboardingProjectionQuery>,
+) -> Result<Json<ProviderOnboardingProjection>, ApiError> {
+    authorize_write(&state, &headers)?;
+    Ok(Json(
+        state
+            .product
+            .provider_onboarding_projection(ProviderId::parse(query.provider_id)?)
+            .await?,
+    ))
+}
+
+pub(super) async fn complete_onboarding(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(request): Json<CompleteOnboardingRequest>,
+) -> Result<Json<ProviderOnboardingCompletion>, ApiError> {
+    authorize_write(&state, &headers)?;
+    Ok(Json(
+        state
+            .product
+            .complete_provider_onboarding(CompleteProviderOnboardingCommand {
+                provider_id: ProviderId::parse(request.provider_id)?,
+                harness_id: request.harness_id,
+                family_name: request.family_name,
+                model_id: request.model_id,
+            })
+            .await?,
+    ))
 }
 
 pub(super) async fn update_defaults(

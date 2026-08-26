@@ -1,23 +1,6 @@
-export const MODEL_RETRYABLE_FAILURES = new Set([
-  "model_unavailable",
-  "model_denied",
-  "provider_disconnected",
-  "provider_authentication",
-  "authentication",
-  "model_not_found",
-  "provider_rate_limit",
-  "rate_limit",
-  "provider_timeout",
-  "provider_transport",
-  "transport",
-  "provider_5xx",
-]);
-
 export function interactionReturnsToUnsent(interaction) {
   return interaction?.completionStatus === "not_started"
-    && interaction?.latestAttempt?.outcome === "model_failed"
-    && interaction?.latestAttempt?.effectBoundary === "none"
-    && MODEL_RETRYABLE_FAILURES.has(interaction?.latestAttempt?.failureCategory);
+    && interaction?.latestAttempt?.outcome === "model_failed";
 }
 
 export function restoredDraftForInteraction(interaction) {

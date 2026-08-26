@@ -23,6 +23,7 @@ const scenes = [
   ["onboarding", "Choose a provider"],
   ["endpoint", "Configure an editable API endpoint"],
   ["family", "Choose the default model family"],
+  ["alternate-harness", "Explicitly choose a compatible alternate harness"],
   ["providers", "Manage independent provider connections"],
   ["families", "Configure harness-agnostic model families"],
   ["harnesses", "Inspect separate harness rules"],
@@ -177,8 +178,12 @@ async function captureBrowserScene(url, frame, profile, width = 1280) {
                 && options.filter((button) => button.tabIndex === 0).length === 1
                 && options.filter((button) => button.getAttribute("aria-checked") === "true").length === 1;
             })(),
-            onboardingUsesOnlyTrustedHarness: !document.querySelector("#onboardingHarnessSelect")
-              && document.querySelector(".onboarding-trusted-harness")?.textContent.includes("Relayer app default"),
+            onboardingUsesOnlyTrustedHarness: (() => {
+              const harnesses = [...document.querySelectorAll("[data-onboarding-harness]")];
+              return harnesses.length === 1
+                && harnesses[0].getAttribute("aria-checked") === "true"
+                && harnesses[0].textContent.includes("Relayer app default");
+            })(),
           };
         })()`,
         returnByValue: true,
@@ -397,6 +402,13 @@ const modelSettings = (scene) => ({
       connected: true,
       models: [{ id: "gpt-5.6-sol", label: "GPT-5.6 Sol", visible: true, available: true, providerDefault: true }],
     },
+    {
+      id: "claude-work",
+      adapterId: "claude-subscription",
+      label: "Claude Work",
+      connected: true,
+      models: [{ id: "claude-sonnet-4", label: "Claude Sonnet", visible: true, available: true, providerDefault: true }],
+    },
   ],
   families: [
     {
@@ -540,6 +552,49 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/api/model-settings") return json(response, modelSettings(scene));
+    if (url.pathname === "/api/provider-onboarding" && request.method === "GET") {
+      const providerId = url.searchParams.get("providerId") ?? "openai-work";
+      const provider = modelSettings(scene).providers.find(({ id }) => id === providerId);
+      const alternate = providerId === "claude-work";
+      return json(response, {
+        providerId,
+        appDefaultHarnessId: "codex-basic",
+        harnesses: [{
+          id: alternate ? "claude-basic" : "codex-basic",
+          label: alternate ? "Claude basic" : "Codex basic",
+          isAppDefault: !alternate,
+          models: (provider?.models ?? []).map(({ id, label }) => ({ id, label })),
+        }],
+      });
+    }
+    if (url.pathname === "/api/provider-onboarding" && request.method === "POST") {
+      const input = await requestJson(request);
+      const family = {
+        id: 21,
+        name: input.familyName,
+        kind: "custom",
+        enabled: true,
+        position: 0,
+        revision: 1,
+        members: [{ providerId: input.providerId, modelId: input.modelId, position: 0 }],
+      };
+      if (scene === "flow") {
+        flowState.defaults = {
+          harnessId: input.harnessId,
+          providerId: input.providerId,
+          familyId: family.id,
+        };
+      }
+      return json(response, {
+        defaults: { ...flowState.defaults },
+        family,
+        selection: {
+          familyId: family.id,
+          providerId: input.providerId,
+          modelId: input.modelId,
+        },
+      });
+    }
     if (url.pathname === "/api/model-settings/defaults") {
       if (scene === "flow" && request.method === "PUT") {
         flowState.defaults = { ...flowState.defaults, ...await requestJson(request) };
@@ -612,6 +667,7 @@ try {
       onboarding: ["Codex subscription", "Claude subscription", "Vercel AI Router"],
       endpoint: ["Endpoint", "gateway.example.com/openai/v1"],
       family: ["Choose your default model family", "GPT-5.2"],
+      "alternate-harness": ["Choose your default model family", "Claude basic", "Claude Sonnet"],
       providers: ["OpenAI Work", "gateway.example.com/openai/v1", "Default provider"],
       families: ["Work coding", "Fast review", "GPT-5.6 Sol"],
       harnesses: ["Harnesses", "Codex basic", "openai-api"],

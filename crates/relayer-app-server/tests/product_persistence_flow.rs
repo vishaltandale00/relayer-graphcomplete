@@ -3428,8 +3428,6 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
     let graph_output = canonical.clone();
     let recovery_output_reads = Arc::new(AtomicUsize::new(0));
     let observed_recovery_output_reads = recovery_output_reads.clone();
-    let concurrent_recovery_barrier = Arc::new(tokio::sync::Barrier::new(2));
-    let observed_recovery_barrier = concurrent_recovery_barrier.clone();
     let approval_metadata_reads = Arc::new(AtomicUsize::new(0));
     let observed_approval_metadata_reads = approval_metadata_reads.clone();
     let invalidations = Arc::new(AtomicUsize::new(0));
@@ -3531,7 +3529,6 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
             axum::routing::get(move || {
                 let graph_output = graph_output.clone();
                 let observed_recovery_output_reads = observed_recovery_output_reads.clone();
-                let observed_recovery_barrier = observed_recovery_barrier.clone();
                 async move {
                     if observed_recovery_output_reads.fetch_add(1, Ordering::SeqCst) == 0 {
                         return (
@@ -3539,7 +3536,6 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
                             axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
                         );
                     }
-                    observed_recovery_barrier.wait().await;
                     (StatusCode::OK, axum::Json(graph_output))
                 }
             }),
@@ -3678,8 +3674,9 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .unwrap();
     assert_eq!(first_strict_resolution["resolution"]["outcome"], "aborted");
     drop(first_reopened);
-    // Live reconciliation can still quarantine an uncertain result. Preserve the concurrent
-    // compare-and-swap promotion regression independently of startup's strict-lease policy.
+    // Simulate a live reconciliation write that became uncertain after graph acceptance. The
+    // next startup must include this quarantined row and promote both interaction and attempt
+    // receipt from canonical graph authority before serving state.
     let pool = sqlite_pool(&database).await;
     sqlx::query("UPDATE interactions SET completion_status='failed',completion_error='Canonical reconciliation pending: simulated live uncertainty' WHERE id=?1")
         .bind(result_id)
@@ -4395,7 +4392,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 14);
+    assert_eq!(applied_migrations, 15);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");

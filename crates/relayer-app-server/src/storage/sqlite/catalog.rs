@@ -689,6 +689,103 @@ impl SqliteProductStore {
         validate_model_selection_on(&mut connection, command).await
     }
 
+    pub(crate) async fn provider_onboarding_model_compatible(
+        &self,
+        harness_id: &str,
+        provider_id: &ProviderId,
+        model_id: &str,
+    ) -> Result<bool, StorageError> {
+        let mut connection = self.pool.acquire().await?;
+        match validate_onboarding_model_on(&mut connection, harness_id, provider_id, model_id).await
+        {
+            Ok(()) => Ok(true),
+            Err(StorageError::Catalog(_)) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub(crate) async fn complete_provider_onboarding(
+        &self,
+        command: &crate::product::CompleteProviderOnboardingCommand,
+    ) -> Result<(ModelSettingsDefaults, ModelFamily), StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        validate_onboarding_model_on(
+            &mut transaction,
+            &command.harness_id,
+            &command.provider_id,
+            &command.model_id,
+        )
+        .await?;
+        let existing: Option<i64> = sqlx::query_scalar(
+            "SELECT f.id FROM product_model_preferences preferences JOIN model_families f ON f.id=preferences.default_family_id WHERE preferences.singleton=1 AND preferences.default_harness_configuration_name=?1 AND preferences.default_provider_id=?2 AND f.kind='custom' AND f.lifecycle_state='active' AND (SELECT COUNT(*) FROM model_family_members member WHERE member.family_id=f.id)=1 AND EXISTS(SELECT 1 FROM model_family_members member WHERE member.family_id=f.id AND member.provider_id=?2 AND member.model_id=?3)",
+        )
+        .bind(&command.harness_id)
+        .bind(command.provider_id.as_str())
+        .bind(&command.model_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if let Some(family_id) = existing {
+            let defaults = load_defaults(&mut transaction).await?;
+            let family = load_family(&mut transaction, ModelFamilyId::from_database(family_id))
+                .await?
+                .ok_or(sqlx::Error::RowNotFound)?;
+            transaction.commit().await?;
+            return Ok((defaults, family));
+        }
+        let family_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM model_families")
+            .fetch_one(&mut *transaction)
+            .await?;
+        let mut family_name = command.family_name.clone();
+        for suffix in 2..=(family_count + 2) {
+            let available = !sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM model_families WHERE lower(name)=lower(?1))",
+            )
+            .bind(&family_name)
+            .fetch_one(&mut *transaction)
+            .await?;
+            if available {
+                break;
+            }
+            family_name = format!("{} ({suffix})", command.family_name);
+        }
+        let position: i64 =
+            sqlx::query_scalar("SELECT COALESCE(MAX(position),-1)+1 FROM model_families")
+                .fetch_one(&mut *transaction)
+                .await?;
+        let result = sqlx::query(
+            "INSERT INTO model_families(name,kind,system_key,enabled,position,revision,lifecycle_state) VALUES (?1,'custom',NULL,1,?2,1,'active')",
+        )
+        .bind(&family_name)
+        .bind(position)
+        .execute(&mut *transaction)
+        .await?;
+        let family_id = ModelFamilyId::from_database(result.last_insert_rowid());
+        replace_family_members(
+            &mut transaction,
+            family_id,
+            &[ModelFamilyMember {
+                provider_id: command.provider_id.clone(),
+                model_id: command.model_id.clone(),
+                position: 0,
+            }],
+        )
+        .await?;
+        sqlx::query(
+            "UPDATE product_model_preferences SET default_harness_configuration_name=?1,default_provider_id=?2,default_family_id=?3,defaults_modified=1 WHERE singleton=1",
+        )
+        .bind(&command.harness_id)
+        .bind(command.provider_id.as_str())
+        .bind(family_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        let defaults = load_defaults(&mut transaction).await?;
+        let family = load_family(&mut transaction, family_id)
+            .await?
+            .ok_or(sqlx::Error::RowNotFound)?;
+        transaction.commit().await?;
+        Ok((defaults, family))
+    }
+
     pub(crate) async fn validate_execution_model_selection(
         &self,
         harness_id: &str,
@@ -697,6 +794,74 @@ impl SqliteProductStore {
         let mut connection = self.pool.acquire().await?;
         validate_execution_model_selection_on(&mut connection, harness_id, selection).await
     }
+}
+
+async fn validate_onboarding_model_on(
+    connection: &mut SqliteConnection,
+    harness_id: &str,
+    provider_id: &ProviderId,
+    model_id: &str,
+) -> Result<(), StorageError> {
+    let command = ValidateModelSelectionCommand {
+        harness_id: harness_id.to_owned(),
+        family_id: ModelFamilyId::from_database(1),
+        provider_id: provider_id.clone(),
+        model_id: model_id.to_owned(),
+    };
+    let row = sqlx::query(
+        "SELECT h.product_visible AS harness_visible,h.available AS harness_available,h.model_rules_present,h.execution_access_contracts_json,p.connected AS provider_connected,p.lifecycle_state='active' AS provider_active,p.adapter_id,p.access_contract,m.visible AS model_visible,m.available AS model_available,EXISTS(SELECT 1 FROM harness_provider_compatibility c WHERE c.harness_configuration_name=h.configuration_name AND c.provider_id=p.id AND (c.all_models=1 OR EXISTS(SELECT 1 FROM harness_model_compatibility cm WHERE cm.harness_configuration_name=c.harness_configuration_name AND cm.provider_id=c.provider_id AND cm.model_id=m.model_id))) AS compatible FROM product_harnesses h JOIN model_providers p ON p.id=?2 JOIN provider_models m ON m.provider_id=p.id AND m.model_id=?3 WHERE h.configuration_name=?1",
+    )
+    .bind(harness_id)
+    .bind(provider_id.as_str())
+    .bind(model_id)
+    .fetch_optional(&mut *connection)
+    .await?;
+    let Some(row) = row else {
+        return Err(StorageError::Catalog(CatalogError::selection(
+            "onboarding_model_unknown",
+            "The selected onboarding harness, provider, or model is unknown.",
+            &command,
+        )));
+    };
+    for (valid, code, message) in [
+        (
+            row.get::<bool, _>("harness_visible"),
+            "harness_not_product_visible",
+            "The selected harness is not product visible.",
+        ),
+        (
+            row.get::<bool, _>("harness_available"),
+            "harness_unavailable",
+            "The selected harness is unavailable.",
+        ),
+        (
+            row.get::<bool, _>("provider_connected"),
+            "provider_disconnected",
+            "The selected provider is disconnected.",
+        ),
+        (
+            row.get::<bool, _>("provider_active"),
+            "provider_removal_pending",
+            "The selected provider is unavailable for new interactions.",
+        ),
+        (
+            row.get::<bool, _>("model_visible"),
+            "model_hidden",
+            "The selected model is hidden.",
+        ),
+        (
+            row.get::<bool, _>("model_available"),
+            "model_unavailable",
+            "The selected model is unavailable.",
+        ),
+    ] {
+        if !valid {
+            return Err(StorageError::Catalog(CatalogError::selection(
+                code, message, &command,
+            )));
+        }
+    }
+    validate_harness_route(connection, harness_id, model_id, &row, &command).await
 }
 
 pub(super) async fn validate_model_selection_on(

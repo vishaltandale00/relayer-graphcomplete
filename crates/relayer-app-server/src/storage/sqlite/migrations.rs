@@ -1,6 +1,8 @@
 use crate::storage::StorageError;
 use sqlx::{SqlitePool, migrate::Migrator};
 
+// Keep this declaration adjacent to the migration directory; adding a migration must rebuild the
+// embedded migrator before schema validation runs.
 static MIGRATOR: Migrator = sqlx::migrate!("./src/storage/sqlite/migrations");
 
 pub(super) async fn run(pool: &SqlitePool) -> Result<(), StorageError> {
@@ -112,6 +114,132 @@ mod tests {
         .await
         .unwrap();
         assert!(!graph_lease_required);
+    }
+
+    #[tokio::test]
+    async fn pre_execution_receipt_migration_preserves_existing_attempt_history() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-attempt-receipt-migration-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        sqlx::query(
+            "INSERT INTO threads(id,title,created_at,updated_at) VALUES (1,'Attempts','1','1')",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status) VALUES (1,1,1,'Accepted','1','accepted'),(2,1,2,'Failed','2','failed'),(3,1,3,'Running','3','running')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO interaction_attempts(id,interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,failure_category,effect_boundary) VALUES (11,1,1,'1','2',7,3,'codex-basic',4,'sha256:one','codex','codex-subscription',5,'gpt','managed-runtime@1','accepted',NULL,'graph_write'),(12,2,1,'3','4',7,3,'codex-basic',4,'sha256:two','codex','codex-subscription',5,'gpt','managed-runtime@1','model_failed','provider_timeout','none'),(13,3,1,'5',NULL,7,3,'codex-basic',4,'sha256:three','codex','codex-subscription',5,'gpt','managed-runtime@1','running',NULL,'unknown')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        store.pool.close().await;
+
+        // Recreate the v14 constraint and ledger exactly enough to prove that migration 0015
+        // upgrades an already-used development profile rather than only fresh databases.
+        let url = format!("sqlite://{}", path.display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        pool.execute("PRAGMA foreign_keys=OFF").await.unwrap();
+        pool.execute("ALTER TABLE interaction_attempts RENAME TO interaction_attempts_current")
+            .await
+            .unwrap();
+        pool.execute(
+            "CREATE TABLE interaction_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                interaction_id INTEGER NOT NULL REFERENCES interactions(id) ON DELETE CASCADE,
+                attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                family_id INTEGER NOT NULL,
+                family_revision INTEGER NOT NULL CHECK (family_revision > 0),
+                harness_configuration_name TEXT NOT NULL,
+                harness_configuration_revision INTEGER NOT NULL CHECK (harness_configuration_revision > 0),
+                harness_configuration_digest TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                adapter_id TEXT NOT NULL,
+                adapter_implementation_version INTEGER NOT NULL CHECK (adapter_implementation_version > 0),
+                model_id TEXT NOT NULL,
+                access_contract TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK (outcome IN ('running','accepted','model_failed','execution_failed','cancelled')),
+                failure_category TEXT,
+                effect_boundary TEXT NOT NULL DEFAULT 'unknown' CHECK (effect_boundary IN ('none','partial_output','graph_write','tool_effect','unknown')),
+                UNIQUE (interaction_id,attempt_number),
+                CHECK ((outcome='running') = (finished_at IS NULL)),
+                CHECK (failure_category IS NULL OR outcome NOT IN ('running','accepted'))
+            )",
+        )
+        .await
+        .unwrap();
+        pool.execute("INSERT INTO interaction_attempts SELECT * FROM interaction_attempts_current")
+            .await
+            .unwrap();
+        pool.execute("DROP TABLE interaction_attempts_current")
+            .await
+            .unwrap();
+        pool.execute("CREATE INDEX interaction_attempts_interaction ON interaction_attempts(interaction_id,attempt_number)")
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version=15")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.execute("PRAGMA foreign_keys=ON").await.unwrap();
+        pool.close().await;
+
+        let reopened = SqliteProductStore::open(&path).await.unwrap();
+        let rows: Vec<(i64, i64, String, Option<String>, String)> = sqlx::query_as(
+            "SELECT id,adapter_implementation_version,outcome,failure_category,effect_boundary FROM interaction_attempts ORDER BY id",
+        )
+        .fetch_all(&reopened.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (11, 5, "accepted".into(), None, "graph_write".into()),
+                (
+                    12,
+                    5,
+                    "model_failed".into(),
+                    Some("provider_timeout".into()),
+                    "none".into()
+                ),
+                (13, 5, "running".into(), None, "unknown".into()),
+            ]
+        );
+        let zero_version = sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,failure_category,effect_boundary) VALUES (2,2,'6','7',7,3,'codex-basic',4,'sha256:four','codex','codex-subscription',0,'gpt','managed-runtime@1','model_failed','provider_authentication','none')")
+            .execute(&reopened.pool)
+            .await
+            .unwrap();
+        assert_eq!(zero_version.rows_affected(), 1);
+        assert!(sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,failure_category,effect_boundary) VALUES (2,2,'8','9',7,3,'codex-basic',4,'sha256:duplicate','codex','codex-subscription',0,'gpt','managed-runtime@1','model_failed','provider_authentication','none')")
+            .execute(&reopened.pool)
+            .await
+            .is_err());
+        sqlx::query("DELETE FROM interactions WHERE id=1")
+            .execute(&reopened.pool)
+            .await
+            .unwrap();
+        let accepted_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM interaction_attempts WHERE interaction_id=1")
+                .fetch_one(&reopened.pool)
+                .await
+                .unwrap();
+        assert_eq!(accepted_count, 0);
+        reopened.pool.close().await;
+        std::fs::remove_file(path).unwrap();
     }
 
     #[tokio::test]

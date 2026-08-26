@@ -75,11 +75,18 @@ describe("provider onboarding IPC hard gate", () => {
       origin: "http://127.0.0.1:43123",
       cookie: { name: "relayer_control", value: "token" },
     });
-    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("null", {
-      status: 200, headers: { "Content-Type": "application/json" },
-    }));
-    await expect(service.validateProviderOnboarding("codex-basic")).resolves.toBe(false);
-    expect(fetch).toHaveBeenCalledWith(new URL("http://127.0.0.1:43123/api/model-selection/default?harnessId=codex-basic"), {
+    const fetch = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        defaults: { harnessId: "saved-alternate" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response("null", {
+        status: 200, headers: { "Content-Type": "application/json" },
+      }));
+    await expect(service.validateProviderOnboarding()).resolves.toBe(false);
+    expect(fetch).toHaveBeenNthCalledWith(1, new URL("http://127.0.0.1:43123/api/model-settings"), {
+      headers: { Cookie: "relayer_control=token" }, signal: undefined,
+    });
+    expect(fetch).toHaveBeenNthCalledWith(2, new URL("http://127.0.0.1:43123/api/model-selection/default?harnessId=saved-alternate"), {
       headers: { Cookie: "relayer_control=token" }, signal: undefined,
     });
     fetch.mockRestore();

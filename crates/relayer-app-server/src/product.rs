@@ -1,5 +1,6 @@
 mod annotations;
 mod catalog;
+mod execution;
 mod ids;
 mod model_policy;
 mod models;
@@ -12,6 +13,7 @@ pub(crate) use annotations::{
 pub(crate) use catalog::CatalogError;
 #[cfg(test)]
 pub(crate) use catalog::CatalogModelSnapshot;
+pub(crate) use catalog::CompleteProviderOnboardingCommand;
 pub(crate) use catalog::CreateModelFamilyCommand;
 pub(crate) use catalog::ExecutionHarnessPolicy;
 pub(crate) use catalog::ExecutionModelSelection;
@@ -34,6 +36,10 @@ pub(crate) use catalog::ProviderCatalogSnapshot;
 pub(crate) use catalog::ProviderDefinition;
 pub(crate) use catalog::ProviderId;
 pub(crate) use catalog::ProviderModel;
+pub(crate) use catalog::ProviderOnboardingCompletion;
+pub(crate) use catalog::ProviderOnboardingHarness;
+pub(crate) use catalog::ProviderOnboardingModel;
+pub(crate) use catalog::ProviderOnboardingProjection;
 pub(crate) use catalog::ReorderModelFamiliesCommand;
 pub(crate) use catalog::RuntimeProductHarness;
 pub(crate) use catalog::SystemFamilySnapshot;
@@ -45,6 +51,12 @@ pub(crate) use catalog::ValidateModelSelectionCommand;
 pub(crate) use catalog::validate_family;
 pub(crate) use catalog::validate_harness_model_rules;
 pub(crate) use catalog::validate_stable_id;
+pub(crate) use execution::{
+    InteractionExecutionService, RECONCILIATION_PENDING_PREFIX, record_background_failure,
+    validate_decision_resolution,
+};
+#[cfg(test)]
+pub(crate) use execution::{final_approval_acknowledgement, validate_approval_correlation};
 pub(crate) use ids::InteractionId;
 pub(crate) use ids::InvalidProductId;
 pub(crate) use ids::ProjectId;
@@ -56,6 +68,7 @@ pub(crate) use models::Interaction;
 pub(crate) use models::InteractionAttempt;
 pub(crate) use models::InteractionContextIntent;
 pub(crate) use models::InteractionContextTarget;
+pub(crate) use models::PreExecutionModelFailure;
 pub(crate) use models::ProductCapabilities;
 pub(crate) use models::ProductState;
 pub(crate) use models::Project;

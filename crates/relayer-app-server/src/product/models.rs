@@ -12,6 +12,16 @@ pub(crate) struct BeginInteractionAttempt<'a> {
     pub(crate) expected_harness_policy: Option<&'a super::ExecutionHarnessPolicy>,
 }
 
+pub(crate) struct PreExecutionModelFailure<'a> {
+    pub(crate) interaction_id: InteractionId,
+    pub(crate) harness_name: &'a str,
+    pub(crate) selection: &'a InteractionModelSelection,
+    pub(crate) route: Option<&'a ExecutionModelSelection>,
+    pub(crate) policy: Option<&'a super::ExecutionHarnessPolicy>,
+    pub(crate) adapter_version: Option<u32>,
+    pub(crate) failure_category: &'a str,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Project {
     pub(crate) id: ProjectId,

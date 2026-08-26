@@ -44,7 +44,7 @@ const connectedDefinitions = [
   },
 ];
 
-const onboardingScenes = new Set(["onboarding", "endpoint", "family", "loading", "error", "authorization", "flow"]);
+const onboardingScenes = new Set(["onboarding", "endpoint", "family", "alternate-harness", "loading", "error", "authorization", "flow"]);
 let definitions = onboardingScenes.has(scene) ? [] : structuredClone(connectedDefinitions);
 let onboardingComplete = !onboardingScenes.has(scene);
 if (scene === "long-label") {
@@ -191,6 +191,13 @@ async function prepareScene() {
         "authentication error",
       );
     }
+  }
+  if (scene === "alternate-harness") {
+    (await waitFor('[data-provider-adapter="claude-subscription"]')).click();
+    document.querySelector("#providerSetupForm").requestSubmit();
+    await waitFor("#providerFamilyStep:not(.hidden)");
+    (await waitFor('[data-onboarding-harness="claude-basic"]')).click();
+    (await waitFor('[data-onboarding-model="claude-sonnet-4"]')).click();
   }
   if (scene === "authorization") {
     (await waitFor('[data-provider-adapter="claude-subscription"]')).click();
