@@ -166,6 +166,10 @@ describe("CodexBasicHarness", () => {
         expect(submittedPrompt).toContain("do not resolve the launcher or Node.js from PATH");
         expect(submittedPrompt).toContain("Request Codex sandbox escalation for this exact launcher command");
         expect(submittedPrompt).toContain("applies its own narrower graph sandbox");
+        expect(submittedPrompt).toContain("the launcher heredoc is the only permitted shell action");
+        expect(submittedPrompt).toContain("Do not run sed, rg, cat, find, or any other inspection command");
+        expect(submittedPrompt).toContain("LayerLayoutObject accepts exactly one argument: the placements array");
+        expect(submittedPrompt).toContain("never assign layout.version");
         expect(submittedEnvironment.RELAYER_GRAPH_AUTHORING_NODE).toBeUndefined();
       }
     } finally {

@@ -221,6 +221,7 @@ Codex native subagents are available when useful. Subagents may directly author,
     const launcher = this.graphAuthoringCommand();
     const launcherClause = this.dependencies.graphAuthoringLauncherPath ? " do not resolve the launcher or Node.js from PATH," : "";
     const launcherArgumentsClause = this.dependencies.graphAuthoringLauncherPath ? " with no arguments" : "";
+    const pinnedExecutionClause = this.pinnedExecutionClause();
     return `You are the basic Relayer graph harness. Answer the current user interaction by authoring and accepting a useful graph layer.
 
 Current interaction node: ${interactionNode.id}
@@ -231,6 +232,7 @@ ${INTERACTION_INPUT_GUIDANCE} In JavaScript, call graph.getInteractionInput() to
 
 Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Run exactly ${launcher}${launcherArgumentsClause}, including the displayed double quotes, and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM;${launcherClause} never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. ${this.dependencies.graphAuthoringLauncherPath ? "Request Codex sandbox escalation for this exact launcher command; Relayer preauthorizes only this pinned internal launcher, which applies its own narrower graph sandbox." : ""} The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:
 ${this.clientModuleUrl}
+${pinnedExecutionClause}
 
 The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Give every persisted node, edge, layer, and action an explicit descriptive clientKey that is unique within this interaction and stable across edits and reruns. For example, use new NodeObject("info", "Summary", "...", "concept", "summary-node"), new EdgeObject([summaryNode, detailNode], "summary-detail-edge"), and new LayerObject(nodes, edges, layout, "response-layer"). Never rely on the constructors' generated client keys in an authored program.
 
@@ -272,6 +274,7 @@ If a graph call rejects an object or graph.submit reports a repairable issue, ed
     const launcher = this.graphAuthoringCommand();
     const launcherClause = this.dependencies.graphAuthoringLauncherPath ? " do not resolve the launcher or Node.js from PATH," : "";
     const launcherArgumentsClause = this.dependencies.graphAuthoringLauncherPath ? " with no arguments" : "";
+    const pinnedExecutionClause = this.pinnedExecutionClause();
     return `You are the Relayer layered-navigation harness. Your task is to answer the current user interaction with a useful graph. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 Current interaction node: ${interactionNode.id}
@@ -282,6 +285,7 @@ ${INTERACTION_INPUT_GUIDANCE} In JavaScript, call graph.getInteractionInput() to
 
 Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Run exactly ${launcher}${launcherArgumentsClause}, including the displayed double quotes, and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM;${launcherClause} never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. ${this.dependencies.graphAuthoringLauncherPath ? "Request Codex sandbox escalation for this exact launcher command; Relayer preauthorizes only this pinned internal launcher, which applies its own narrower graph sandbox." : ""} The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:
 ${this.clientModuleUrl}
+${pinnedExecutionClause}
 
 The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Give every persisted node, edge, layer, and action an explicit descriptive clientKey that is unique within this interaction and stable across edits and reruns. For example, use new NodeObject("info", "Summary", "...", "concept", "summary-node"), new EdgeObject([summaryNode, detailNode], "summary-detail-edge"), and new LayerObject(nodes, edges, layout, "response-layer"). Never rely on the constructors' generated client keys in an authored program. Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.
 
@@ -318,6 +322,11 @@ The graph service enforces exact provenance, target visibility, layer size, expa
       throw new Error("The graph-authoring launcher must be a shell-safe absolute path.");
     }
     return JSON.stringify(launcher);
+  }
+
+  private pinnedExecutionClause(): string {
+    if (this.dependencies.graphAuthoringLauncherPath === undefined) return "";
+    return `In this pinned mode, the launcher heredoc is the only permitted shell action. Do not run sed, rg, cat, find, or any other inspection command. If the authored program fails, repair it only from the returned error and rerun the same launcher heredoc. LayerLayoutObject accepts exactly one argument: the placements array, for example new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)]). Its version is already fixed at 1; never pass a version argument and never assign layout.version.`;
   }
 }
 
