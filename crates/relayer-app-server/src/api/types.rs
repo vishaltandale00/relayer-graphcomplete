@@ -55,6 +55,77 @@ fn project_interaction_contexts(
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct InteractionAttemptResponse {
+    id: i64,
+    attempt_number: i64,
+    started_at: String,
+    finished_at: Option<String>,
+    model_selection: InteractionModelSelection,
+    family_revision: i64,
+    harness_configuration_name: String,
+    harness_configuration_revision: i64,
+    harness_configuration_digest: String,
+    adapter_id: String,
+    adapter_implementation_version: i64,
+    access_contract: String,
+    outcome: String,
+    failure_category: Option<String>,
+    failure_message: Option<String>,
+    effect_boundary: String,
+}
+
+impl From<crate::product::InteractionAttempt> for InteractionAttemptResponse {
+    fn from(attempt: crate::product::InteractionAttempt) -> Self {
+        let failure_message = attempt
+            .failure_category
+            .as_deref()
+            .map(model_failure_message);
+        Self {
+            id: attempt.id,
+            attempt_number: attempt.attempt_number,
+            started_at: attempt.started_at,
+            finished_at: attempt.finished_at,
+            model_selection: InteractionModelSelection {
+                family_id: attempt.family_id,
+                provider_id: attempt.provider_id,
+                model_id: attempt.model_id,
+            },
+            family_revision: attempt.family_revision,
+            harness_configuration_name: attempt.harness_configuration_name,
+            harness_configuration_revision: attempt.harness_configuration_revision,
+            harness_configuration_digest: attempt.harness_configuration_digest,
+            adapter_id: attempt.adapter_id,
+            adapter_implementation_version: attempt.adapter_implementation_version,
+            access_contract: attempt.access_contract,
+            outcome: attempt.outcome,
+            failure_category: attempt.failure_category,
+            failure_message,
+            effect_boundary: attempt.effect_boundary,
+        }
+    }
+}
+
+fn model_failure_message(category: &str) -> String {
+    match category {
+        "model_unavailable" | "model_not_found" | "model_denied" => {
+            "The selected model is no longer available. Choose another model and send again."
+        }
+        "provider_disconnected" | "provider_authentication" | "authentication" => {
+            "The selected provider is not connected. Reconnect it or choose another model."
+        }
+        "provider_rate_limit" | "rate_limit" => {
+            "The selected provider is rate limited. Choose another model or try again later."
+        }
+        "provider_timeout" | "provider_transport" | "transport" | "provider_5xx" => {
+            "The selected provider could not complete this turn. Choose an available model and send again."
+        }
+        _ => "This attempt failed. Review the attempt details before trying again.",
+    }
+    .into()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ProjectResponse {
     id: i64,
     name: String,
@@ -125,6 +196,7 @@ pub(crate) struct InteractionResponse {
     effective_permission_receipt: Option<serde_json::Value>,
     completion_output: Option<serde_json::Value>,
     completion_error: Option<String>,
+    latest_attempt: Option<InteractionAttemptResponse>,
     projection_fresh: bool,
     contexts: Vec<InteractionContextResponse>,
 }
@@ -147,6 +219,7 @@ impl From<Interaction> for InteractionResponse {
             effective_permission_receipt: interaction.effective_permission_receipt,
             completion_output: interaction.completion_output,
             completion_error: interaction.completion_error,
+            latest_attempt: interaction.latest_attempt.map(Into::into),
             projection_fresh: true,
             contexts: Vec::new(),
         }
@@ -190,7 +263,7 @@ impl InteractionResponse {
 }
 
 #[cfg(test)]
-mod tests {
+mod attempt_tests {
     use super::*;
     use crate::product::{InteractionContextIntent, InteractionContextTarget};
     use serde_json::json;
@@ -411,5 +484,76 @@ impl ThreadDetailResponse {
     pub(crate) fn with_interactions(mut self, interactions: Vec<InteractionResponse>) -> Self {
         self.interactions = interactions;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::product::{InteractionAttempt, InteractionId, ModelFamilyId, ProviderId, ThreadId};
+    use serde_json::json;
+
+    #[test]
+    fn recoverable_attempt_serializes_with_the_real_not_started_contract() {
+        let interaction = Interaction {
+            id: InteractionId::from_database(9),
+            thread_id: ThreadId::from_database(4),
+            sequence: 2,
+            text: "Review this repository".into(),
+            graph_node_id: None,
+            completion_status: "not_started".into(),
+            harness_configuration_name: Some("codex-basic".into()),
+            harness_configuration_digest: None,
+            permission_profile_id: "auto".into(),
+            model_selection: Some(InteractionModelSelection {
+                family_id: ModelFamilyId::from_database(12),
+                provider_id: ProviderId::from_database("openai-work".into()),
+                model_id: "gpt-5.2".into(),
+            }),
+            effective_execution_digest: None,
+            effective_permission_receipt: None,
+            completion_output: None,
+            completion_error: None,
+            latest_attempt: Some(InteractionAttempt {
+                id: 44,
+                attempt_number: 1,
+                started_at: "10".into(),
+                finished_at: Some("11".into()),
+                family_id: ModelFamilyId::from_database(12),
+                family_revision: 3,
+                harness_configuration_name: "codex-basic".into(),
+                harness_configuration_revision: 5,
+                harness_configuration_digest: "sha256:harness".into(),
+                provider_id: ProviderId::from_database("openai-work".into()),
+                adapter_id: "openai-api".into(),
+                adapter_implementation_version: 1,
+                model_id: "gpt-5.2".into(),
+                access_contract: "secret@1".into(),
+                outcome: "model_failed".into(),
+                failure_category: Some("provider_rate_limit".into()),
+                effect_boundary: "none".into(),
+            }),
+            created_at: "1".into(),
+        };
+
+        let value = serde_json::to_value(InteractionResponse::from(interaction)).unwrap();
+        assert_eq!(value["completionStatus"], "not_started");
+        assert_eq!(value["latestAttempt"]["id"], 44);
+        assert_eq!(value["latestAttempt"]["outcome"], "model_failed");
+        assert_eq!(value["latestAttempt"]["effectBoundary"], "none");
+        assert_eq!(
+            value["latestAttempt"]["modelSelection"],
+            json!({
+                "familyId": 12,
+                "providerId": "openai-work",
+                "modelId": "gpt-5.2"
+            })
+        );
+        assert!(
+            value["latestAttempt"]["failureMessage"]
+                .as_str()
+                .unwrap()
+                .contains("rate limited")
+        );
     }
 }

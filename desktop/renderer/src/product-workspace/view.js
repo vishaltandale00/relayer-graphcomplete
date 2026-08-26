@@ -96,7 +96,7 @@ export function productWorkspaceMarkup() {
         </section>
         <div class="thread-composer-shell" id="threadComposerShell">
           <section class="composer-context-tray hidden" id="composerContextTray" aria-label="Connected node draft"></section>
-          <div class="thread-composer" id="threadComposer"><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div></div>
+          <div class="thread-composer" id="threadComposer"><p class="composer-retry-message hidden" id="composerRetryMessage" role="alert"></p><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div></div>
         </div>
       </div>
       <aside class="inspector hidden" id="inspector" data-review-capture="node-detail" aria-label="Selected node detail">

@@ -206,7 +206,11 @@ describe("CodexBasicHarness", () => {
 
       await harness.complete(runContext(1, "token"));
 
-      expect(submittedPrompt).toContain("Run exactly node --input-type=module");
+      if (promptProfile === undefined) {
+        expect(submittedPrompt).toContain("Run exactly node --input-type=module");
+      } else {
+        expect(submittedPrompt).toContain("Write a temporary .mjs file outside the project checkout");
+      }
       expect(submittedPrompt).not.toContain("do not resolve Node.js from PATH");
       expect(submittedEnvironment).not.toHaveProperty("RELAYER_GRAPH_AUTHORING_NODE");
     }
@@ -236,9 +240,6 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).toContain('"reference" opens supporting evidence');
     expect(submittedPrompt).toContain("A flat answer is valid");
     expect(submittedPrompt).toContain("Author in whatever order fits the task");
-    expect(submittedPrompt).toContain("pass the program through standard input");
-    expect(submittedPrompt).toContain("never place authored graph code in a --eval argument");
-    expect(submittedPrompt).toContain("do not create a script in either the project checkout or a temporary directory");
     expect(submittedPrompt).toContain("final graph call must be await graph.submit(1)");
     expect(submittedPrompt).toContain("graph.getNode(1)");
     expect(submittedPrompt).toContain("graph.getNeighbors(1)");
@@ -324,7 +325,8 @@ describe("CodexBasicHarness", () => {
 
     await harness.complete({
       ...runContext(1, "token"),
-      model: { providerId: "codex", modelId: "gpt-picker-selected" },
+      model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-picker-selected" },
+      access: codexAccess(),
     });
 
     expect(submitted?.threadParams).toMatchObject({ model: "gpt-picker-selected" });
@@ -363,8 +365,8 @@ describe("CodexBasicHarness", () => {
       return { threadId: options.savedThreadId ?? "codex-thread-1", turnId: `turn-${submissions.length}`, status: "completed" };
     });
 
-    await harness.complete({ ...runContext(1, "first-token"), model: { providerId: "codex", modelId: "gpt-first" } });
-    await harness.complete({ ...runContext(2, "second-token"), model: { providerId: "codex", modelId: "gpt-second" } });
+    await harness.complete({ ...runContext(1, "first-token"), model: { providerId: "codex", modelId: "gpt-first" }, access: codexAccess() });
+    await harness.complete({ ...runContext(2, "second-token"), model: { providerId: "codex", modelId: "gpt-second" }, access: codexAccess() });
 
     expect(submissions.map(({ environment, savedThreadId }) => [environment.RELAYER_GRAPH_TOKEN, environment.RELAYER_NODE_ID, savedThreadId])).toEqual([
       ["first-token", "1", undefined],
@@ -375,6 +377,61 @@ describe("CodexBasicHarness", () => {
       ["gpt-second", "gpt-second"],
     ]);
     expect(harness.state()).toEqual({ codexThreadId: "codex-thread-1" });
+  });
+
+  it("passes only the selected execution-scoped provider secret to Codex", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "ambient-anthropic-secret");
+    vi.stubEnv("CODEX_HOME", "/ambient/codex-home");
+    let submitted: CodexAppServerTurnOptions | undefined;
+    try {
+      const harness = harnessFixture("auto", async (options) => {
+        submitted = options;
+        options.onThreadId("api-thread");
+        return { threadId: "api-thread", turnId: "turn-1", status: "completed" };
+      });
+      await harness.complete({
+        ...runContext(1, "token"),
+        model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+        access: {
+          kind: "secret", contract: "secret@1", providerId: "openai-work", adapterId: "openai-api",
+          adapterImplementationVersion: "1", endpoint: "https://api.openai.test/v1", fields: { "api-key": "selected-secret" },
+        },
+      });
+
+      expect(submitted?.environment.OPENAI_API_KEY).toBe("selected-secret");
+      expect(submitted?.environment.OPENAI_BASE_URL).toBe("https://api.openai.test/v1");
+      expect(submitted?.environment).not.toHaveProperty("ANTHROPIC_API_KEY");
+      expect(submitted?.environment).not.toHaveProperty("CODEX_HOME");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("allows only Codex runtime keys from managed access and preserves graph authority", async () => {
+    let submitted: CodexAppServerTurnOptions | undefined;
+    const harness = harnessFixture("auto", async (options) => {
+      submitted = options;
+      options.onThreadId("managed-thread");
+      return { threadId: "managed-thread", turnId: "turn-1", status: "completed" };
+    });
+    await harness.complete({
+      ...runContext(1, "authoritative-graph-token"),
+      model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-5.2" },
+      access: {
+        ...codexAccess(),
+        environment: {
+          CODEX_HOME: "/isolated/codex-home",
+          OPENAI_API_KEY: "injected-unrelated-secret",
+          RELAYER_GRAPH_TOKEN: "injected-graph-token",
+          RELAYER_GRAPH_URL: "https://attacker.invalid",
+        },
+      },
+    });
+
+    expect(submitted?.environment.CODEX_HOME).toBe("/isolated/codex-home");
+    expect(submitted?.environment).not.toHaveProperty("OPENAI_API_KEY");
+    expect(submitted?.environment.RELAYER_GRAPH_TOKEN).toBe("authoritative-graph-token");
+    expect(submitted?.environment.RELAYER_GRAPH_URL).toBe("http://127.0.0.1:43123");
   });
 
   it("rejects a provider model that codex.basic cannot execute before starting a thread", async () => {
@@ -677,6 +734,17 @@ function runContext(id: number, token: string, trace: HarnessTraceSink = createN
     },
     trace,
     approvals: { request: async () => { throw new Error("unused approval channel"); } },
+  };
+}
+
+function codexAccess() {
+  return {
+    kind: "managed-runtime" as const,
+    contract: "managed-runtime@1" as const,
+    providerId: "codex",
+    adapterId: "codex-subscription",
+    adapterImplementationVersion: "1",
+    environment: {},
   };
 }
 

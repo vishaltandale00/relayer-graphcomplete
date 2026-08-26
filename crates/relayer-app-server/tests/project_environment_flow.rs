@@ -354,8 +354,6 @@ async fn open_app(database: &Path, web_directory: &Path) -> Router {
             .join("../../permissions/desktop.json"),
         control_token: "control".to_owned(),
         read_only_control_token: Some("review".to_owned()),
-        provider_catalog_refresh_url: None,
-        provider_catalog_refresh_token: None,
         runtime: None,
         allow_conversation_import: false,
         export_producer: relayer_app_server::conversation_export::ExportProducer {

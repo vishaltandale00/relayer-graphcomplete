@@ -1,19 +1,22 @@
 import { resolve } from "node:path";
+import { PACKAGED_PROVIDER_MODULES } from "../main/providers/provider-adapter-registry.mjs";
 
 import {
   electronBuilderSigningIdentity,
   loadDesktopReleaseContract,
 } from "../release/contract.mjs";
-import { desktopTargetFromEnvironment } from "../shared/target.mjs";
 
 const desktopRoot = resolve(import.meta.dirname, "..");
 const repositoryRoot = resolve(desktopRoot, "..");
 
-export function createDesktopBuilderConfig(contract) {
+export function createDesktopBuilderConfig(
+  contract,
+  { environment = process.env, argv = process.argv } = {},
+) {
   const release = contract.release;
-  const target = release ? contract : desktopTargetFromEnvironment(process.env);
-  const serverTarget = process.env.RELAYER_DESKTOP_RUST_TARGET || target.rustTarget;
-  if (!release && process.env.CI === "true" && !process.argv.includes("--dir")) {
+  const target = contract;
+  const serverTarget = environment.RELAYER_DESKTOP_RUST_TARGET || target.rustTarget;
+  if (!release && environment.CI === "true" && !argv.includes("--dir")) {
     throw new Error("Distributable desktop builds require the explicit signed release contract.");
   }
 
@@ -48,12 +51,17 @@ export function createDesktopBuilderConfig(contract) {
       "!packaging/**/*",
       "!release/**/*",
       "!renderer/**/*",
+      "!**/{__fixtures__,__tests__,test,tests}/**/*",
+      "!**/*.{fixture,spec,test}.{cjs,js,mjs}",
+      "!main/providers/implementations/*.mjs",
+      ...PACKAGED_PROVIDER_MODULES.map((modulePath) => `main/${modulePath}`),
     ],
     extraResources: [
       { from: resolve(repositoryRoot, `target/${serverTarget}/release/relayer-app-server${target.platform === "win32" ? ".exe" : ""}`), to: `bin/relayer-app-server${target.platform === "win32" ? ".exe" : ""}` },
       { from: resolve(repositoryRoot, `target/${serverTarget}/release/relayer-graph-server${target.platform === "win32" ? ".exe" : ""}`), to: `bin/relayer-graph-server${target.platform === "win32" ? ".exe" : ""}` },
       { from: resolve(repositoryRoot, "harnesses/codex-basic.yaml"), to: "harnesses/codex-basic.yaml" },
       { from: resolve(repositoryRoot, "harnesses/codex-basic-high.yaml"), to: "harnesses/codex-basic-high.yaml" },
+      { from: resolve(repositoryRoot, "harnesses/claude-basic.yaml"), to: "harnesses/claude-basic.yaml" },
       { from: resolve(repositoryRoot, "permissions/desktop.json"), to: "permissions/desktop.json" },
       { from: resolve(repositoryRoot, "packages/graph-client/dist"), to: "graph-client" },
       { from: resolve(desktopRoot, "renderer"), to: "renderer" },

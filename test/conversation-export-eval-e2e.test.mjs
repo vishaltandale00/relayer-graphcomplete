@@ -47,6 +47,7 @@ describe("conversation export to Eval end to end", () => {
       "  full: {}",
       "modelCompatibility:",
       "  - providerId: codex",
+      "executionAccessContracts: [managed-runtime@1]",
       "settings: {}",
       "",
     ].join("\n"));
@@ -56,6 +57,12 @@ describe("conversation export to Eval end to end", () => {
       graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
       configurationPaths: [configurationPath],
       additionalImplementations: { "fixture.task-system": complexConversationFactory(canonicalProjectPath) },
+      acquireProviderExecution: async (providerId) => ({
+        definition: { id: providerId, adapterId: "codex-subscription", accessContract: "managed-runtime@1" },
+        descriptor: { implementationVersion: "1" },
+        runtime: { async executionAccess() { return { kind: "managed-runtime", environment: {} }; } },
+        async release() {},
+      }),
     });
     services.push(runtime);
     const runtimeSession = await runtime.start();
@@ -84,8 +91,16 @@ describe("conversation export to Eval end to end", () => {
       method: "POST",
       body: JSON.stringify({ path: projectDirectory }),
     });
+    const fixtureFamily = await productRequest(productSession, "/api/model-families", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Fixture models",
+        enabled: true,
+        members: [{ providerId: "codex", modelId: "fixture-model" }],
+      }),
+    });
     const selection = {
-      familyId: (await productRequest(productSession, "/api/model-settings")).families[0].id,
+      familyId: fixtureFamily.id,
       providerId: "codex",
       modelId: "fixture-model",
     };

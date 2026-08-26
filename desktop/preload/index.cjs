@@ -24,6 +24,18 @@ contextBridge.exposeInMainWorld("relayerDesktop", {
     settingsOpened: () => ipcRenderer.invoke("relayer:model-catalog-settings-open"),
     refresh: (providerId) => ipcRenderer.invoke("relayer:model-catalog-refresh", providerId),
   },
+  providers: {
+    status: () => ipcRenderer.invoke("relayer:provider-status"),
+    connect: (input) => ipcRenderer.invoke("relayer:provider-connect", input),
+    completeConnection: (connectionId) => ipcRenderer.invoke("relayer:provider-connect-complete", { connectionId }),
+    cancelConnection: (connectionId) => ipcRenderer.invoke("relayer:provider-connect-cancel", { connectionId }),
+    rename: (id, label) => ipcRenderer.invoke("relayer:provider-rename", { id, label }),
+    logout: (id) => ipcRenderer.invoke("relayer:provider-logout", { id }),
+    reconnect: (id) => ipcRenderer.invoke("relayer:provider-reconnect", { id }),
+    remove: (id) => ipcRenderer.invoke("relayer:provider-remove", { id }),
+    completeOnboarding: () => ipcRenderer.invoke("relayer:provider-onboarding-complete"),
+    onChanged: (callback) => subscribe("relayer:providers-changed", callback),
+  },
   appearance: {
     read: () => ipcRenderer.invoke("relayer:appearance-read"),
     set: (appearance) => ipcRenderer.invoke("relayer:appearance-set", appearance),

@@ -30,6 +30,16 @@ function registerTestIpc() {
     account: { email: "zero-inference@relayer.test", planType: "Fixture" },
   }));
   ipcMain.handle("relayer:appearance-read", () => ({ appearance: "dark" }));
+  ipcMain.handle("relayer:provider-status", () => ({
+    adapters: [],
+    definitions: [],
+    hasCompletedOnboarding: true,
+  }));
+  ipcMain.handle("relayer:tutorial-read", () => ({ status: "never-shown", automaticEligible: false }));
+  ipcMain.handle("relayer:tutorial-begin-automatic", () => ({ started: false }));
+  ipcMain.handle("relayer:tutorial-begin-manual", () => ({ started: false }));
+  ipcMain.handle("relayer:tutorial-dismiss", () => ({ status: "dismissed" }));
+  ipcMain.handle("relayer:tutorial-complete", () => ({ status: "completed" }));
   ipcMain.handle("relayer:update-status", () => ({
     phase: "development",
     channel: "stable",
@@ -41,7 +51,17 @@ function registerTestIpc() {
 }
 
 function unregisterTestIpc() {
-  for (const channel of ["relayer:account-read", "relayer:appearance-read", "relayer:update-status"]) {
+  for (const channel of [
+    "relayer:account-read",
+    "relayer:appearance-read",
+    "relayer:provider-status",
+    "relayer:tutorial-read",
+    "relayer:tutorial-begin-automatic",
+    "relayer:tutorial-begin-manual",
+    "relayer:tutorial-dismiss",
+    "relayer:tutorial-complete",
+    "relayer:update-status",
+  ]) {
     ipcMain.removeHandler(channel);
   }
 }
@@ -84,11 +104,22 @@ async function waitForThread(session, threadId, check, label) {
 
 async function openThread(productSession, threadId) {
   await window.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(threadId)}`);
-  await waitFor("the ordinary product workspace", () => window.webContents.executeJavaScript(`(() => (
-    !document.querySelector("#threadView")?.classList.contains("hidden")
-    && Boolean(document.querySelector("#threadComposer"))
-    && Boolean(document.querySelector("#turnPickerButton"))
-  ))()`));
+  try {
+    await waitFor("the ordinary product workspace", () => window.webContents.executeJavaScript(`(() => (
+      !document.querySelector("#threadView")?.classList.contains("hidden")
+      && Boolean(document.querySelector("#threadComposer"))
+      && Boolean(document.querySelector("#turnPickerButton"))
+    ))()`));
+  } catch (error) {
+    const state = await window.webContents.executeJavaScript(`(() => ({
+      appHidden: document.querySelector("#appShell")?.classList.contains("hidden"),
+      authHidden: document.querySelector("#authScreen")?.classList.contains("hidden"),
+      threadHidden: document.querySelector("#threadView")?.classList.contains("hidden"),
+      threadHtml: document.querySelector("#threadView")?.innerHTML,
+      toast: document.querySelector("#toast")?.textContent,
+    }))()`);
+    throw new Error(`${error.message} state=${JSON.stringify(state)}`);
+  }
 }
 
 async function approvalDockState() {
@@ -187,6 +218,9 @@ async function run() {
     updater: { status: () => ({ phase: "development" }) },
   });
   window = await createWindow(productSession);
+  window.webContents.on("console-message", (_event, level, message) => {
+    if (level >= 2) console.error(`Renderer console: ${message}`);
+  });
   window.show();
 
   const created = await productRequest(productSession, "/api/threads", {
@@ -394,6 +428,7 @@ async function shutdown() {
     }
   }
   await rm(dataDirectory, { recursive: true, force: true });
+  process.exitCode = exitCode;
   app.exit(exitCode);
 }
 

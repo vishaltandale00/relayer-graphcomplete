@@ -580,7 +580,6 @@ mod tests {
                 default_harness_configuration: "codex-basic".into(),
                 allow_harness_override: true,
                 allow_conversation_import,
-                provider_catalog_refresh: None,
                 standalone_workspaces_directory: directory.path().join("workspaces"),
                 export_producer: ExportProducer {
                     desktop_version: "0.2.12".into(),
@@ -818,7 +817,16 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(destination.status(), StatusCode::OK);
+        if destination.status() != StatusCode::OK {
+            panic!(
+                "destination response: {}",
+                String::from_utf8_lossy(
+                    &axum::body::to_bytes(destination.into_body(), usize::MAX)
+                        .await
+                        .unwrap()
+                )
+            );
+        }
         let destination = response_json(destination).await;
         assert_eq!(destination["interactionId"], destination_interaction_id);
         assert_eq!(destination["rootLayerId"], destination_root_layer_id);

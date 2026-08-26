@@ -2,7 +2,6 @@ use crate::{
     api,
     permissions::PermissionCatalog,
     product::{Interaction, PreparedInteractionBinding, ProductService, ProjectId},
-    provider_catalog_refresh::ProviderCatalogRefreshClient,
     runtime::RuntimeClient,
     storage::SqliteProductStore,
 };
@@ -89,6 +88,28 @@ async fn reconcile_interrupted_interaction(
         let permission = permission_catalog
             .profile(&thread.permission_profile_id)
             .map_err(StartupReconciliationError::deterministic)?;
+        let execution_model_selection = match interaction.model_selection.as_ref() {
+            Some(selection) => Some(
+                storage
+                    .validate_execution_model_selection(
+                        &thread.harness_configuration_name,
+                        selection,
+                    )
+                    .await
+                    .map_err(StartupReconciliationError::deterministic)?,
+            ),
+            None => None,
+        };
+        let harness_policy = if execution_model_selection.is_some() {
+            Some(
+                storage
+                    .load_execution_harness_policy(&thread.harness_configuration_name)
+                    .await
+                    .map_err(StartupReconciliationError::deterministic)?,
+            )
+        } else {
+            None
+        };
         let prepared_invocation =
             invocation.map(|(source_interaction_node_id, source_action_id)| {
                 crate::runtime::PreparedInvocation {
@@ -106,7 +127,9 @@ async fn reconcile_interrupted_interaction(
                 working_directory: "",
                 harness_configuration_name: &thread.harness_configuration_name,
                 permission_profile: permission,
-                model_selection: interaction.model_selection.as_ref(),
+                model_selection: execution_model_selection.as_ref(),
+                execution_lease_id: None,
+                harness_policy: harness_policy.as_ref(),
                 invocation: prepared_invocation,
                 input_identity: durable_input
                     .as_ref()
@@ -232,8 +255,6 @@ pub struct RelayerAppServerConfig {
     pub permission_catalog: PathBuf,
     pub control_token: String,
     pub read_only_control_token: Option<String>,
-    pub provider_catalog_refresh_url: Option<String>,
-    pub provider_catalog_refresh_token: Option<String>,
     pub runtime: Option<RelayerRuntimeConfig>,
     pub allow_conversation_import: bool,
     pub export_producer: crate::conversation_export::ExportProducer,
@@ -244,7 +265,6 @@ pub struct RelayerAppServer {
     web_directory: PathBuf,
     control_token: String,
     read_only_control_token: Option<String>,
-    provider_catalog_refresh: Option<ProviderCatalogRefreshClient>,
     runtime: Option<RuntimeClient>,
     permission_catalog: PermissionCatalog,
     default_harness_configuration: String,
@@ -258,18 +278,6 @@ impl RelayerAppServer {
     pub async fn open(config: RelayerAppServerConfig) -> anyhow::Result<Self> {
         if config.read_only_control_token.as_deref() == Some(config.control_token.as_str()) {
             anyhow::bail!("read-only control token must be distinct from write authority");
-        }
-        if config
-            .provider_catalog_refresh_token
-            .as_deref()
-            .is_some_and(|token| {
-                token == config.control_token
-                    || config.read_only_control_token.as_deref() == Some(token)
-            })
-        {
-            anyhow::bail!(
-                "provider catalog refresh token must be distinct from desktop session tokens"
-            );
         }
         let permission_catalog = PermissionCatalog::load(&config.permission_catalog).await?;
         let storage = SqliteProductStore::open(&config.database_path).await?;
@@ -343,10 +351,7 @@ impl RelayerAppServer {
                         .fail_interaction_completion(
                             interaction.id,
                             &harness,
-                            &format!(
-                                "{} {error}",
-                                crate::api::threads::RECONCILIATION_PENDING_PREFIX
-                            ),
+                            &format!("{} {error}", crate::product::RECONCILIATION_PENDING_PREFIX),
                         )
                         .await?;
                 }
@@ -396,19 +401,6 @@ impl RelayerAppServer {
             .runtime
             .as_ref()
             .is_some_and(|runtime| runtime.allow_harness_override);
-        let provider_catalog_refresh = match (
-            config.provider_catalog_refresh_url.as_deref(),
-            config.provider_catalog_refresh_token,
-        ) {
-            (Some(origin), Some(token)) => Some(ProviderCatalogRefreshClient::new(origin, token)?),
-            (None, None) if runtime.is_some() && !allow_harness_override => {
-                anyhow::bail!(
-                    "ordinary product runtime requires a trusted provider catalog refresh service"
-                )
-            }
-            (None, None) => None,
-            _ => anyhow::bail!("provider catalog refresh URL and token must be supplied together"),
-        };
         let standalone_workspaces_directory = config
             .runtime
             .as_ref()
@@ -445,7 +437,6 @@ impl RelayerAppServer {
             web_directory: config.web_directory,
             control_token: config.control_token,
             read_only_control_token: config.read_only_control_token,
-            provider_catalog_refresh,
             runtime,
             permission_catalog,
             default_harness_configuration,
@@ -470,7 +461,6 @@ impl RelayerAppServer {
                 default_harness_configuration: self.default_harness_configuration.clone(),
                 allow_harness_override: self.allow_harness_override,
                 allow_conversation_import: self.allow_conversation_import,
-                provider_catalog_refresh: self.provider_catalog_refresh.clone(),
                 standalone_workspaces_directory: self.standalone_workspaces_directory.clone(),
                 export_producer: self.export_producer.clone(),
             },

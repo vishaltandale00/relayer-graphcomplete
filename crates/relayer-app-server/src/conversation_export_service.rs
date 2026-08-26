@@ -937,6 +937,7 @@ mod tests {
             effective_permission_receipt: None,
             completion_output: None,
             completion_error: Some("failed".into()),
+            latest_attempt: None,
         };
         let target = InteractionInputNode::from(GraphNode {
             id: NodeId::new(20).unwrap(),
@@ -1014,6 +1015,7 @@ mod tests {
             effective_permission_receipt: None,
             completion_output: None,
             completion_error: None,
+            latest_attempt: None,
         };
         // Unbound durable intent has not passed graph core's accepted-reachability and scope
         // checks. Reject all such targets, including cross-project, unreachable, or nonaccepted
@@ -1103,6 +1105,7 @@ mod tests {
             effective_permission_receipt: None,
             completion_output: None,
             completion_error: Some("superseded".into()),
+            latest_attempt: None,
         };
         let invocation = ActionInvocation {
             source_interaction_id: source_id,

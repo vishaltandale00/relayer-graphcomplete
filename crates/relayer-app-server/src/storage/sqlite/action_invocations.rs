@@ -58,7 +58,7 @@ impl SqliteProductStore {
 
     pub(crate) async fn interrupted_interactions(&self) -> Result<Vec<Interaction>, StorageError> {
         let rows = sqlx::query(
-            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id FROM interactions i WHERE i.completion_status IN ('not_started','running','submitted','waiting_for_approval') ORDER BY i.id",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.completion_status IN ('not_started','running','submitted','waiting_for_approval') OR (i.completion_status='failed' AND i.completion_error LIKE 'Canonical reconciliation pending:%') ORDER BY i.id",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -74,11 +74,25 @@ impl SqliteProductStore {
     ) -> Result<bool, StorageError> {
         let output = serde_json::to_string(output)
             .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let result = sqlx::query("UPDATE interactions SET completion_status='accepted',completion_output_json=?1,completion_error=NULL WHERE id=?2 AND graph_node_id IS NOT NULL AND harness_configuration_name IS NOT NULL AND harness_configuration_digest IS NOT NULL AND effective_execution_digest IS NOT NULL AND effective_permission_receipt_json IS NOT NULL AND (completion_status IN ('not_started','running','submitted','waiting_for_approval') OR (completion_status='failed' AND completion_error LIKE 'Canonical reconciliation pending:%'))")
             .bind(output)
             .bind(interaction_id.value())
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
+        if result.rows_affected() == 1 {
+            let finished_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time is before unix epoch")
+                .as_millis()
+                .to_string();
+            sqlx::query("UPDATE interaction_attempts SET finished_at=?1,outcome='accepted',failure_category=NULL,effect_boundary='graph_write' WHERE interaction_id=?2 AND outcome='running'")
+                .bind(finished_at)
+                .bind(interaction_id.value())
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
         Ok(result.rows_affected() == 1)
     }
 
@@ -240,6 +254,7 @@ impl SqliteProductStore {
             effective_permission_receipt: None,
             completion_output: None,
             completion_error: None,
+            latest_attempt: None,
             created_at: timestamp.clone(),
         };
         sqlx::query(
@@ -352,7 +367,7 @@ async fn invocation_with_result(
 ) -> Result<Option<(ActionInvocation, Interaction)>, StorageError> {
     let invocation = invocation_from_row(&row)?;
     let interaction = sqlx::query(
-        "SELECT id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,completion_output_json,completion_error,permission_profile_id,effective_execution_digest,effective_permission_receipt_json,model_provider_id,provider_model_id,model_family_id FROM interactions WHERE id=?1",
+        "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.id=?1",
     )
     .bind(invocation.result_interaction_id.value())
     .fetch_one(&mut *connection)
@@ -848,7 +863,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn historical_action_survives_family_deletion() {
+    async fn historical_action_requires_a_current_family() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -892,22 +907,22 @@ mod tests {
                 .unwrap()
         );
 
-        let outcome = store
+        let error = store
             .insert_action_invocation(thread.root_interaction_id, 41, "Historical follow-up")
             .await
+            .err()
             .unwrap();
-        let interaction = match outcome {
-            ActionInvocationInsertOutcome::Created { interaction, .. } => interaction,
-            ActionInvocationInsertOutcome::Existing { .. } => panic!("first invocation existed"),
-        };
-        assert_eq!(interaction.model_selection, Some(model_selection));
+        match error {
+            StorageError::Catalog(error) => assert_eq!(error.code(), "model_family_removed"),
+            other => panic!("unexpected error: {other}"),
+        }
 
         store.pool.close().await;
         std::fs::remove_file(path).unwrap();
     }
 
     #[tokio::test]
-    async fn historical_action_can_reuse_a_hidden_available_model() {
+    async fn historical_action_cannot_reuse_a_hidden_model() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -958,22 +973,22 @@ mod tests {
             other => panic!("unexpected error: {other}"),
         }
 
-        let outcome = store
+        let error = store
             .insert_action_invocation(thread.root_interaction_id, 41, "Historical follow-up")
             .await
+            .err()
             .unwrap();
-        let interaction = match outcome {
-            ActionInvocationInsertOutcome::Created { interaction, .. } => interaction,
-            ActionInvocationInsertOutcome::Existing { .. } => panic!("first invocation existed"),
-        };
-        assert_eq!(interaction.model_selection, Some(model_selection));
+        match error {
+            StorageError::Catalog(error) => assert_eq!(error.code(), "model_hidden"),
+            other => panic!("unexpected error: {other}"),
+        }
 
         store.pool.close().await;
         std::fs::remove_file(path).unwrap();
     }
 
     #[tokio::test]
-    async fn stale_provider_catalog_blocks_action_before_insertion() {
+    async fn action_uses_the_last_successful_catalog_snapshot() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1007,16 +1022,11 @@ mod tests {
             .await
             .unwrap();
 
-        let error = store
-            .insert_action_invocation(thread.root_interaction_id, 41, "Must not persist")
+        store
+            .insert_action_invocation(thread.root_interaction_id, 41, "Use last-known catalog")
             .await
-            .err()
             .unwrap();
-        match error {
-            StorageError::Catalog(error) => assert_eq!(error.code(), "provider_catalog_stale"),
-            other => panic!("unexpected error: {other}"),
-        }
-        assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 1);
+        assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 2);
 
         store.pool.close().await;
         std::fs::remove_file(path).unwrap();
@@ -1074,7 +1084,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hidden_available_model_remains_runnable_for_historical_actions() {
+    async fn hidden_available_model_is_blocked_for_new_historical_actions() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1108,15 +1118,15 @@ mod tests {
             .await
             .unwrap();
 
-        let outcome = store
+        let error = store
             .insert_action_invocation(thread.root_interaction_id, 41, "Historical follow-up")
             .await
+            .err()
             .unwrap();
-        let interaction = match outcome {
-            ActionInvocationInsertOutcome::Created { interaction, .. } => interaction,
-            ActionInvocationInsertOutcome::Existing { .. } => panic!("first invocation existed"),
-        };
-        assert_eq!(interaction.model_selection, Some(model_selection));
+        match error {
+            StorageError::Catalog(error) => assert_eq!(error.code(), "model_hidden"),
+            other => panic!("unexpected error: {other}"),
+        }
 
         store.pool.close().await;
         std::fs::remove_file(path).unwrap();

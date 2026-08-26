@@ -12,15 +12,26 @@
 </head>
 <body>
   <section class="auth-screen hidden" id="authScreen" aria-labelledby="authTitle">
-    <div class="auth-card">
+    <div class="auth-card provider-setup-card" aria-busy="false">
       <div class="logo large" role="img" aria-label="Relayer"></div>
-      <h1 id="authTitle">Connect a provider</h1>
-      <div class="provider-option">
-        <div class="provider-icon">›_</div>
-        <div class="provider-copy"><strong>Codex</strong><small>OpenAI</small></div>
-        <button class="primary" id="connectCodex">Connect</button>
-      </div>
-      <div class="auth-status" id="authStatus">Checking Codex…</div>
+      <div class="provider-setup-heading"><small>Welcome to Relayer</small><h1 id="authTitle">Connect a provider</h1><p id="authDescription">Choose how Relayer can access models. You can add more providers later.</p></div>
+      <div class="provider-setup-options" id="providerSetupOptions" aria-label="Provider options"></div>
+      <form class="provider-setup-form hidden" id="providerSetupForm" novalidate>
+        <button type="button" class="provider-setup-back" id="providerSetupBack">← All providers</button>
+        <div id="providerSetupFields"></div>
+        <div class="provider-setup-actions">
+          <button type="button" class="secondary" id="cancelProviderConnection">Cancel</button>
+          <button type="submit" class="primary" id="connectProvider">Connect and discover models</button>
+        </div>
+      </form>
+      <section class="provider-family-step hidden" id="providerFamilyStep" aria-labelledby="providerFamilyTitle">
+        <button type="button" class="provider-setup-back" id="providerFamilyBack">← Connect another provider</button>
+        <h2 id="providerFamilyTitle">Choose your default model family</h2>
+        <p>The default harness needs at least one available model before you can continue.</p>
+        <div id="onboardingFamilyOptions"></div>
+        <button type="button" class="primary wide" id="finishProviderSetup">Continue to Relayer</button>
+      </section>
+      <div class="auth-status" id="authStatus" role="status" aria-live="polite">Checking providers…</div>
     </div>
   </section>
 
@@ -40,9 +51,10 @@
         <div class="side-section settings-navigation">
           <div class="section-label">Settings</div>
           <div class="entry-list" id="settingsTabs" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
-            <button class="entry settings-tab" type="button" role="tab" data-settings-tab="models" aria-controls="modelSettingsPanel"><span class="entry-icon" aria-hidden="true">✦</span><span>Models and harnesses</span></button>
+            <button class="entry settings-tab" type="button" role="tab" data-settings-tab="providers" aria-controls="providerSettingsPanel"><span class="entry-icon" aria-hidden="true">◉</span><span>Providers</span></button>
+            <button class="entry settings-tab" type="button" role="tab" data-settings-tab="models" aria-controls="modelSettingsPanel"><span class="entry-icon" aria-hidden="true">✦</span><span>Model families</span></button>
+            <button class="entry settings-tab" type="button" role="tab" data-settings-tab="harnesses" aria-controls="harnessSettingsPanel"><span class="entry-icon" aria-hidden="true">⌘</span><span>Harnesses</span></button>
             <button class="entry settings-tab" type="button" role="tab" data-settings-tab="appearance" aria-controls="appearanceSettingsPanel"><span class="entry-icon" aria-hidden="true">◐</span><span>Appearance</span></button>
-            <button class="entry settings-tab" type="button" role="tab" data-settings-tab="codex" aria-controls="codexSettingsPanel"><span class="entry-icon" aria-hidden="true">›_</span><span>Codex</span></button>
             <button class="entry settings-tab" type="button" role="tab" data-settings-tab="updates" aria-controls="updatesSettingsPanel"><span class="entry-icon" aria-hidden="true">↓</span><span>Application updates</span></button>
             <button class="entry settings-tab" type="button" role="tab" data-settings-tab="advanced" aria-controls="advancedSettingsPanel"><span class="entry-icon" aria-hidden="true">⋯</span><span>Advanced</span></button>
           </div>
@@ -98,14 +110,31 @@
 
       <section class="settings-view hidden" id="settingsView" aria-labelledby="settingsTitle">
         <header class="settings-header">
+          <div class="settings-compact-navigation">
+            <button class="settings-compact-back" id="settingsCompactBackButton" type="button" aria-label="Back to Relayer"><span aria-hidden="true">←</span><span>Relayer</span></button>
+            <label for="settingsCompactSelect">Settings section</label>
+            <select id="settingsCompactSelect">
+              <option value="providers">Providers</option>
+              <option value="models">Model families</option>
+              <option value="harnesses">Harnesses</option>
+              <option value="appearance">Appearance</option>
+              <option value="updates">Application updates</option>
+              <option value="advanced">Advanced</option>
+            </select>
+          </div>
           <div><small>Settings</small><h1 id="settingsTitle">Appearance</h1></div>
         </header>
         <div class="settings-content">
+          <section class="settings-section provider-settings-section hidden" id="providerSettingsPanel" role="tabpanel" data-settings-panel="providers" aria-labelledby="providerSettingsHeading">
+            <div class="settings-section-heading"><div><h2 id="providerSettingsHeading">Providers</h2><p>Each provider is an independent access path with its own credentials.</p></div><div class="provider-definition-actions"><button type="button" class="secondary" id="refreshProviderCatalogs">Refresh models</button><button type="button" class="primary" id="newProviderDefinition">＋ Add provider</button></div></div>
+            <div class="provider-definition-list" id="providerDefinitionList"><div class="family-empty">Loading providers…</div></div>
+            <div class="model-settings-status" id="providerSettingsStatus" role="status" aria-live="polite"></div>
+          </section>
           <section class="settings-section model-settings-section hidden" id="modelSettingsPanel" role="tabpanel" data-settings-panel="models" aria-labelledby="modelSettingsHeading">
-            <h2 id="modelSettingsHeading">Models and harnesses</h2>
+            <h2 id="modelSettingsHeading">Model families</h2>
             <div class="model-defaults">
               <h3>Defaults</h3>
-              <label class="setting-row"><b>Harness</b><select id="defaultHarnessSelect" aria-describedby="defaultHarnessError"></select></label>
+              <label class="setting-row"><b>Harness</b><select id="defaultHarnessSelect" aria-describedby="defaultHarnessError"></select><small>Harness configuration is managed separately.</small></label>
               <div class="setting-error hidden" id="defaultHarnessError" role="alert"></div>
               <label class="setting-row"><b>Provider</b><select id="defaultProviderSelect"></select></label>
             </div>
@@ -131,13 +160,14 @@
             </div>
             <div class="model-settings-status" id="modelSettingsStatus" role="status"></div>
           </section>
+          <section class="settings-section harness-settings-section hidden" id="harnessSettingsPanel" role="tabpanel" data-settings-panel="harnesses" aria-labelledby="harnessSettingsHeading">
+            <div class="settings-section-heading"><div><h2 id="harnessSettingsHeading">Harnesses</h2><p>Harness configurations control execution behavior and model eligibility. They do not configure providers or families.</p></div></div>
+            <div id="harnessConfigurationList" class="harness-configuration-list"><div class="family-empty">Loading harnesses…</div></div>
+            <div class="model-settings-status" id="harnessSettingsStatus" role="status" aria-live="polite"></div>
+          </section>
           <section class="settings-section" id="appearanceSettingsPanel" role="tabpanel" data-settings-panel="appearance">
             <h2>Appearance</h2>
             <label class="setting-row"><div><b>Theme</b><small id="appearanceDescription">Choose how Relayer looks on this computer.</small></div><select id="appearanceSelect"><option value="dark">Dark</option><option value="light">Light</option></select></label>
-          </section>
-          <section class="settings-section hidden" id="codexSettingsPanel" role="tabpanel" data-settings-panel="codex">
-            <h2>Codex</h2>
-            <div class="setting-row"><div><b id="settingsAccount">Connected</b><small>Managed by Codex</small></div><button type="button" class="secondary" id="disconnectCodex">Disconnect</button></div>
           </section>
           <section class="settings-section hidden" id="updatesSettingsPanel" role="tabpanel" data-settings-panel="updates">
             <h2>Application updates</h2>
@@ -153,6 +183,13 @@
     </main>
   </div>
 
+  <dialog class="provider-dialog" id="providerDialog" aria-labelledby="providerDialogTitle">
+    <form method="dialog" class="provider-dialog-shell">
+      <header><div><small>Provider settings</small><h2 id="providerDialogTitle">Add provider</h2></div><button type="submit" class="icon-button" aria-label="Close provider dialog">×</button></header>
+      <div id="providerDialogContent"></div>
+      <div class="auth-status" id="providerDialogStatus" role="status" aria-live="polite"></div>
+    </form>
+  </dialog>
   <div class="update-popover hidden" id="updatePopover"><button class="icon-button close-popover" id="closeUpdate">×</button><small>Relayer update</small><h3 id="updateTitle">Update available</h3><p id="updateDetail"></p><button class="primary wide" id="updateAction">Download update</button></div>
   <div class="toast hidden" id="toast"></div>
   <script src="./vendor/lucide.min.js"></script>

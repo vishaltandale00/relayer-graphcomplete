@@ -3,7 +3,6 @@ use crate::conversation_export_service::ConversationExportBuildError;
 use crate::conversation_import_service::ConversationImportError;
 use crate::permissions::PermissionError;
 use crate::product::{CatalogError, InvalidProductId, ProductError};
-use crate::provider_catalog_refresh::ProviderCatalogRefreshError;
 use crate::runtime::RuntimeError;
 use crate::storage::StorageError;
 use axum::{
@@ -140,18 +139,6 @@ impl From<ConversationImportError> for ApiError {
                 "conversation import failed: {operation}; cleanup failed: {cleanup}"
             )),
         }
-    }
-}
-
-impl From<ProviderCatalogRefreshError> for ApiError {
-    fn from(error: ProviderCatalogRefreshError) -> Self {
-        Self(
-            StatusCode::SERVICE_UNAVAILABLE,
-            json!({
-                "code": "provider_catalog_refresh_failed",
-                "error": error.to_string(),
-            }),
-        )
     }
 }
 

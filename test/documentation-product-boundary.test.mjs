@@ -19,6 +19,8 @@ describe("product documentation boundary", () => {
     expect(readme).not.toContain("system built on [Prime Agent]");
     expect(JSON.parse(packageManifest).description).toContain("harness- and provider-agnostic product contract");
     expect(architecture).toContain("A thread-selected harness owns model execution behind a provider-agnostic product contract.");
+    expect(architecture).toContain("every model-related failure returns the same interaction to an editable unsent state");
+    expect(architecture).toContain("durable graph writes remain authoritative");
     expect(architecture).not.toContain("Prime Agent is the execution runtime.");
     expect(prd).toContain("Relayer has a harness- and provider-agnostic product contract.");
     expect(prd).toContain("Application-state baseline:</strong> Commit <code>38286cb</code>");

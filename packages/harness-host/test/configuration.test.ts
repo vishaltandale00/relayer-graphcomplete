@@ -1,31 +1,78 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { digestHarnessConfiguration, loadHarnessConfiguration, loadHarnessConfigurations, parseHarnessConfiguration } from "../src/configuration.js";
+import {
+  digestHarnessConfiguration,
+  harnessAllowsModel,
+  loadHarnessConfiguration,
+  loadHarnessConfigurations,
+  parseHarnessConfiguration,
+  sameHarnessExecutionConfiguration,
+} from "../src/configuration.js";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 const permissionBindings = { ask: {}, auto: {}, full: {} };
 
 describe("harness configuration", () => {
+  it("validates every checked-in harness configuration", async () => {
+    const harnessDirectory = join(repositoryRoot, "harnesses");
+    const paths = (await readdir(harnessDirectory))
+      .filter((name) => name.endsWith(".yaml"))
+      .sort()
+      .map((name) => join(harnessDirectory, name));
+
+    await expect(Promise.all(paths.map(loadHarnessConfiguration))).resolves.toHaveLength(paths.length);
+  });
+
   it("loads the production codex.basic configuration", async () => {
     await expect(loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-basic.yaml"))).resolves.toEqual({
       schemaVersion: 1,
       name: "codex-basic",
       implementation: "codex.basic",
       implementationVersion: 1,
+      revision: 1,
       permissionBindings: {
         ask: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user", networkAccessEnabled: true },
         auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
         full: { sandboxMode: "danger-full-access", approvalPolicy: "never" },
       },
       modelCompatibility: [{ providerId: "codex" }],
+      modelRules: {
+        allow: [
+          { adapterId: "codex-subscription", modelIdRegex: ".*" },
+          { adapterId: "openai-api", modelIdRegex: ".*" },
+          { adapterId: "openrouter", modelIdRegex: ".*" },
+          { adapterId: "vercel-ai-router", modelIdRegex: ".*" },
+        ],
+        deny: [],
+      },
+      executionAccessContracts: ["managed-runtime@1", "secret@1"],
+      modelDefaults: { familyPolicy: { id: "codex-default-family", version: 1 } },
       settings: {
         modelReasoningEffort: "medium",
         skipGitRepoCheck: true,
       },
     });
+  });
+
+  it("admits every production Claude subscription alias through the checked-in harness", async () => {
+    const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/claude-basic.yaml"));
+    for (const modelId of ["sonnet", "opus", "fable"]) {
+      expect(harnessAllowsModel(configuration.modelRules, {
+        adapterId: "claude-subscription",
+        modelId,
+      })).toBe(true);
+    }
+    expect(harnessAllowsModel(configuration.modelRules, {
+      adapterId: "claude-subscription",
+      modelId: "claude-sonnet-4",
+    })).toBe(false);
+    expect(harnessAllowsModel(configuration.modelRules, {
+      adapterId: "anthropic-api",
+      modelId: "claude-sonnet-4",
+    })).toBe(true);
   });
 
   it("validates provider-neutral all-model and subset compatibility", () => {
@@ -35,6 +82,7 @@ describe("harness configuration", () => {
       implementation: "codex.basic",
       implementationVersion: 1,
       permissionBindings,
+      executionAccessContracts: ["managed-runtime@1"],
       modelCompatibility: [{
         providerId: "codex",
         modelIds: ["model-a", "model-b"],
@@ -85,6 +133,100 @@ describe("harness configuration", () => {
       ...parsed,
       modelCompatibility: [{ providerId: "codex", modelIds: ["🧠".repeat(201)] }],
     })).toThrow("modelIds must be a non-empty model ID array");
+  });
+
+  it("validates adapter model rules and applies deny-wins semantics", () => {
+    const parsed = parseHarnessConfiguration({
+      schemaVersion: 1,
+      name: "coding",
+      implementation: "codex.basic",
+      implementationVersion: 1,
+      permissionBindings,
+      executionAccessContracts: ["secret@1"],
+      modelRules: {
+        allow: [
+          { adapterId: "anthropic-api", modelIdRegex: "^claude-sonnet-" },
+          { adapterId: "openai-api", modelIdExact: "gpt-5.2" },
+        ],
+        deny: [{ adapterId: "openai-api", modelIdRegex: "-preview$" }],
+      },
+      settings: {},
+    });
+
+    expect(harnessAllowsModel(parsed.modelRules, { adapterId: "anthropic-api", modelId: "claude-sonnet-4" })).toBe(true);
+    expect(harnessAllowsModel(parsed.modelRules, { adapterId: "anthropic-api", modelId: "claude-haiku-4" })).toBe(false);
+    expect(harnessAllowsModel(parsed.modelRules, { adapterId: "openai-api", modelId: "gpt-5.2" })).toBe(true);
+    expect(harnessAllowsModel({
+      allow: [{ adapterId: "openai-api", modelIdRegex: "^gpt-" }],
+      deny: [{ adapterId: "openai-api", modelIdExact: "gpt-preview" }],
+    }, { adapterId: "openai-api", modelId: "gpt-preview" })).toBe(false);
+    expect(harnessAllowsModel({ allow: [], deny: [] }, { adapterId: "future", modelId: "model" })).toBe(true);
+    expect(harnessAllowsModel(parsed.modelRules, { modelId: "gpt-5.2" })).toBe(false);
+  });
+
+  it("fails closed on invalid model rules and access contracts", () => {
+    const base = {
+      schemaVersion: 1,
+      name: "invalid",
+      implementation: "test",
+      implementationVersion: 1,
+      permissionBindings,
+      settings: {},
+    };
+    expect(() => parseHarnessConfiguration({
+      ...base,
+      modelRules: { allow: [{ adapterId: "openai-api", modelIdRegex: "[" }] },
+    })).toThrow("modelIdRegex is invalid");
+    expect(() => parseHarnessConfiguration({
+      ...base,
+      modelRules: { allow: [{ adapterId: "openai-api", modelIdExact: "gpt", modelIdRegex: "gpt" }] },
+    })).toThrow("exactly one");
+    expect(() => parseHarnessConfiguration({ ...base, executionAccessContracts: ["secret"] }))
+      .toThrow("versioned identifier");
+    expect(() => parseHarnessConfiguration({
+      ...base,
+      modelRules: { allow: [{ adapterId: "openai-api", modelIdExact: "gpt" }] },
+    })).toThrow("require executionAccessContracts");
+    expect(() => parseHarnessConfiguration({
+      ...base,
+      executionAccessContracts: ["secret@1"],
+      modelRules: { allow: [{ adapterId: "openai-api", modelIdRegex: "(?=gpt)" }] },
+    })).toThrow("cross-runtime subset");
+  });
+
+  it("parses a managed family policy and adopts catalog-rule changes lazily", () => {
+    const base = parseHarnessConfiguration({
+      schemaVersion: 1,
+      name: "managed",
+      implementation: "test",
+      implementationVersion: 1,
+      permissionBindings,
+      executionAccessContracts: ["managed-runtime@1"],
+      modelDefaults: { familyPolicy: { id: "codex-default-family", version: 1 } },
+      modelRules: { allow: [], deny: [] },
+      settings: {},
+    });
+    expect(base.modelDefaults).toEqual({ familyPolicy: { id: "codex-default-family", version: 1 } });
+    const changedRules = parseHarnessConfiguration({
+      ...base,
+      revision: 2,
+      modelRules: { allow: [], deny: [{ adapterId: "codex-subscription", modelIdExact: "retired" }] },
+      modelDefaults: { familyPolicy: { id: "codex-default-family", version: 2 } },
+    });
+    expect(sameHarnessExecutionConfiguration(base, changedRules)).toBe(true);
+    expect(digestHarnessConfiguration(base)).not.toBe(digestHarnessConfiguration(changedRules));
+  });
+
+  it("rejects legacy model compatibility without explicit execution access", () => {
+    expect(() => parseHarnessConfiguration({
+      schemaVersion: 1,
+      name: "ambient-legacy",
+      implementation: "test",
+      implementationVersion: 1,
+      permissionBindings,
+      modelCompatibility: [{ providerId: "codex" }],
+      settings: {},
+    })).toThrow("require executionAccessContracts");
   });
 
   it("keeps implementation-specific configuration opaque to the host", () => {
@@ -188,6 +330,7 @@ describe("harness configuration", () => {
         full: { sandboxMode: "danger-full-access", approvalPolicy: "never" },
       },
       modelCompatibility: [{ providerId: "codex" }],
+      executionAccessContracts: ["managed-runtime@1"],
       settings: {
         modelReasoningEffort: "medium",
         promptProfile: "layered-navigation-multi-agent-v1",

@@ -4,9 +4,11 @@ use super::{
     error::ApiError,
 };
 use crate::product::{
-    CreateModelFamilyCommand, ModelFamily, ModelFamilyId, ModelFamilyMember, ModelSelection,
-    ModelSettings, ModelSettingsDefaults, ProviderCatalogSnapshot, ProviderId,
-    ReorderModelFamiliesCommand, UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand,
+    CompleteProviderOnboardingCommand, CreateModelFamilyCommand, HarnessModelRule,
+    HarnessModelRules, ModelFamily, ModelFamilyId, ModelFamilyMember, ModelSelection,
+    ModelSettings, ModelSettingsDefaults, ProviderCatalogSnapshot, ProviderDefinition, ProviderId,
+    ProviderOnboardingCompletion, ProviderOnboardingProjection, ReorderModelFamiliesCommand,
+    UpdateHarnessModelRulesCommand, UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand,
     ValidateModelSelectionCommand,
 };
 use axum::{
@@ -21,6 +23,7 @@ use serde::Deserialize;
 pub(super) struct DefaultsRequest {
     harness_id: Option<String>,
     provider_id: Option<String>,
+    family_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +71,38 @@ pub(super) struct DefaultSelectionQuery {
     harness_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct StagedProviderRequest {
+    definition: ProviderDefinition,
+    catalog: ProviderCatalogSnapshot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct OnboardingProjectionQuery {
+    provider_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CompleteOnboardingRequest {
+    provider_id: String,
+    harness_id: String,
+    family_name: String,
+    model_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct HarnessRulesRequest {
+    expected_revision: u32,
+    #[serde(default)]
+    allow: Vec<HarnessModelRule>,
+    #[serde(default)]
+    deny: Vec<HarnessModelRule>,
+}
+
 pub(super) async fn get(
     State(state): State<ApiState>,
     headers: HeaderMap,
@@ -76,15 +111,49 @@ pub(super) async fn get(
     Ok(Json(state.product.model_settings().await?))
 }
 
+pub(super) async fn onboarding_projection(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Query(query): Query<OnboardingProjectionQuery>,
+) -> Result<Json<ProviderOnboardingProjection>, ApiError> {
+    authorize_write(&state, &headers)?;
+    Ok(Json(
+        state
+            .product
+            .provider_onboarding_projection(ProviderId::parse(query.provider_id)?)
+            .await?,
+    ))
+}
+
+pub(super) async fn complete_onboarding(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(request): Json<CompleteOnboardingRequest>,
+) -> Result<Json<ProviderOnboardingCompletion>, ApiError> {
+    authorize_write(&state, &headers)?;
+    Ok(Json(
+        state
+            .product
+            .complete_provider_onboarding(CompleteProviderOnboardingCommand {
+                provider_id: ProviderId::parse(request.provider_id)?,
+                harness_id: request.harness_id,
+                family_name: request.family_name,
+                model_id: request.model_id,
+            })
+            .await?,
+    ))
+}
+
 pub(super) async fn update_defaults(
     State(state): State<ApiState>,
     headers: HeaderMap,
     Json(request): Json<DefaultsRequest>,
 ) -> Result<Json<ModelSettingsDefaults>, ApiError> {
     authorize_write(&state, &headers)?;
-    if request.harness_id.is_none() && request.provider_id.is_none() {
+    if request.harness_id.is_none() && request.provider_id.is_none() && request.family_id.is_none()
+    {
         return Err(ApiError::invalid(
-            "At least one of harnessId or providerId is required.",
+            "At least one of harnessId, providerId, or familyId is required.",
         ));
     }
     Ok(Json(
@@ -93,6 +162,10 @@ pub(super) async fn update_defaults(
             .update_model_settings_defaults(UpdateModelSettingsDefaultsCommand {
                 harness_id: request.harness_id,
                 provider_id: request.provider_id.map(ProviderId::parse).transpose()?,
+                family_id: request
+                    .family_id
+                    .map(ModelFamilyId::try_from_value)
+                    .transpose()?,
             })
             .await?,
     ))
@@ -206,6 +279,58 @@ pub(super) async fn publish_provider_catalog(
 ) -> Result<StatusCode, ApiError> {
     authorize_provider_publish(&state, &headers)?;
     state.product.publish_provider_catalog(snapshot).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub(super) async fn provider_definitions(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<ProviderDefinition>>, ApiError> {
+    authorize_provider_publish(&state, &headers)?;
+    Ok(Json(state.product.provider_definitions().await?))
+}
+
+pub(super) async fn sync_provider_definitions(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(definitions): Json<Vec<ProviderDefinition>>,
+) -> Result<StatusCode, ApiError> {
+    authorize_provider_publish(&state, &headers)?;
+    state.product.sync_provider_definitions(definitions).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub(super) async fn create_provider_with_catalog(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(request): Json<StagedProviderRequest>,
+) -> Result<StatusCode, ApiError> {
+    authorize_provider_publish(&state, &headers)?;
+    state
+        .product
+        .create_provider_with_catalog(request.definition, request.catalog)
+        .await?;
+    Ok(StatusCode::CREATED)
+}
+
+pub(super) async fn update_harness_model_rules(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<HarnessRulesRequest>,
+) -> Result<StatusCode, ApiError> {
+    authorize_write(&state, &headers)?;
+    state
+        .product
+        .update_harness_model_rules(UpdateHarnessModelRulesCommand {
+            harness_id: id,
+            expected_revision: request.expected_revision,
+            rules: HarnessModelRules {
+                allow: request.allow,
+                deny: request.deny,
+            },
+        })
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

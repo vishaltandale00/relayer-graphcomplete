@@ -4,6 +4,7 @@ export * from "./configuration.js";
 export * from "./implementations/codex-app-server.js";
 export * from "./implementations/codex-approvals.js";
 export * from "./implementations/codex-basic.js";
+export * from "./implementations/claude-basic.js";
 export * from "./implementations/prime-agent.js";
 export * from "./host.js";
 export * from "./interaction-input.js";
