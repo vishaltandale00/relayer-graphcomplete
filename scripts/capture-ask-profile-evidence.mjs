@@ -459,7 +459,7 @@ function sealedSystemHardlinkPolicy(path) {
     .some((root) => resolvedPath === root || resolvedPath.startsWith(`${root}${sep}`));
 }
 
-function configureFreshRuntimeArtifactSpecs(freshRoot, freshTarget, freshJavaScriptOutput) {
+function configureFreshRuntimeArtifactSpecs(freshRoot, freshTarget, freshJavaScriptOutput, freshDesktopOutput) {
   const freshAppServer = join(freshTarget, "debug", "relayer-app-server");
   const freshGraphServer = join(freshTarget, "debug", "relayer-graph-server");
   const nativeRoots = [
@@ -486,7 +486,7 @@ function configureFreshRuntimeArtifactSpecs(freshRoot, freshTarget, freshJavaScr
     })),
     { key: "app-server", source: freshAppServer, label: "target/debug/relayer-app-server", copy: true, provenance: "fresh-build", discoveredSha256: discoveredMachOSha256(freshAppServer) },
     { key: "graph-server", source: freshGraphServer, label: "target/debug/relayer-graph-server", copy: true, provenance: "fresh-build", discoveredSha256: discoveredMachOSha256(freshGraphServer) },
-    { key: "desktop", source: join(freshRoot, "desktop"), label: "desktop", copy: true, provenance: "commit", revisionPath: "desktop" },
+    { key: "desktop", source: freshDesktopOutput, label: "desktop", copy: true, provenance: "fresh-build" },
     { key: "permissions", source: join(freshRoot, "permissions"), label: "permissions", copy: true, provenance: "commit", revisionPath: "permissions" },
     { key: "harnesses", source: join(freshRoot, "harnesses"), label: "harnesses", copy: true, provenance: "commit", revisionPath: "harnesses" },
     { key: "graph-client-dist", source: join(freshJavaScriptOutput, "graph-client"), label: "packages/graph-client/dist", copy: true, target: "node_modules/@relayer/graph-client/dist", provenance: "fresh-build" },
@@ -1447,6 +1447,7 @@ async function prepareFreshBuiltRuntime() {
   const freshRoot = join(freshWorkspace, "source");
   const freshOutput = join(freshWorkspace, "output");
   const freshJavaScriptOutput = join(freshOutput, "javascript");
+  const freshDesktopOutput = join(freshOutput, "desktop");
   const freshRustOutput = join(freshWorkspace, "rust-output");
   const freshTarget = join(freshRustOutput, "target");
   const freshCargoHome = join(freshWorkspace, "cargo-home");
@@ -1502,6 +1503,32 @@ async function prepareFreshBuiltRuntime() {
   const materializedSource = await inventoryRegularArtifactTree({ root: freshRoot, label: "<fresh-build-source>" });
   if (JSON.stringify(materializedSource) !== JSON.stringify(committedSource)) {
     throw new Error("Fresh build source tree does not exactly match authenticated commit-object bytes.");
+  }
+  await cp(join(freshRoot, "desktop"), freshDesktopOutput, { recursive: true, preserveTimestamps: true });
+  const [committedDesktop, copiedDesktop] = await Promise.all([
+    inventoryRegularArtifactTree({ root: join(freshRoot, "desktop"), label: "<fresh-built-desktop>" }),
+    inventoryRegularArtifactTree({ root: freshDesktopOutput, label: "<fresh-built-desktop>" }),
+  ]);
+  if (JSON.stringify(committedDesktop) !== JSON.stringify(copiedDesktop)) {
+    throw new Error("Fresh desktop assembly does not match authenticated commit bytes before vendoring.");
+  }
+  const sourceRendererVendorSpecs = [
+    { source: join(repositoryRoot, "node_modules", "lucide", "dist", "umd", "lucide.min.js"), label: "<renderer-vendor>/lucide.min.js" },
+    { source: join(repositoryRoot, "node_modules", "marked", "lib", "marked.umd.js"), label: "<renderer-vendor>/marked.umd.js" },
+  ];
+  const sourceRendererVendorInputs = await inventoryBuildArtifacts(sourceRendererVendorSpecs);
+  const rendererVendorDirectory = join(freshDesktopOutput, "renderer", "vendor");
+  await mkdir(rendererVendorDirectory, { recursive: true, mode: 0o700 });
+  for (const spec of sourceRendererVendorSpecs) {
+    await copyFile(spec.source, join(rendererVendorDirectory, basename(spec.source)));
+  }
+  const copiedRendererVendorSpecs = sourceRendererVendorSpecs.map((spec) => ({
+    source: join(rendererVendorDirectory, basename(spec.source)),
+    label: spec.label,
+  }));
+  const copiedRendererVendorInputs = await inventoryBuildArtifacts(copiedRendererVendorSpecs);
+  if (JSON.stringify(copiedRendererVendorInputs) !== JSON.stringify(sourceRendererVendorInputs)) {
+    throw new Error("Fresh desktop renderer vendors do not match their authenticated sources.");
   }
   freshBuildSourceSpec = { source: freshRoot, label: "<fresh-build-source>" };
   freshBuildExpectedSource = materializedSource;
@@ -1697,15 +1724,17 @@ async function prepareFreshBuiltRuntime() {
   freshBuildInputSpecs = [
     ...buildToolSpecs,
     ...copiedJavaScriptDependencySpecs,
+    ...sourceRendererVendorSpecs,
     ...generatedGraphClientInputSpecs,
     ...generatedCargoInputSpecs,
   ];
-  freshBuildExpectedInputs = [...buildToolInputs, ...copiedJavaScriptInputs, ...generatedGraphClientInputs, ...generatedCargoInputs]
+  freshBuildExpectedInputs = [...buildToolInputs, ...copiedJavaScriptInputs, ...sourceRendererVendorInputs, ...generatedGraphClientInputs, ...generatedCargoInputs]
     .sort((left, right) => left.file.localeCompare(right.file));
   if (existsSync(freshTarget)) throw new Error("Fresh Rust target directory existed before the authenticated build.");
   const completedJavaScriptOutputSpecs = [
     { source: join(freshJavaScriptOutput, "graph-client"), label: "<build-phase-output>/graph-client-dist" },
     { source: join(freshJavaScriptOutput, "harness-host"), label: "<build-phase-output>/harness-host-dist" },
+    { source: freshDesktopOutput, label: "<build-phase-output>/desktop" },
   ];
   const completedJavaScriptOutputs = await inventoryBuildArtifacts(completedJavaScriptOutputSpecs);
   await verifyFreshBuildSource();
@@ -1732,6 +1761,7 @@ async function prepareFreshBuiltRuntime() {
   const outputSpecs = [
     { source: join(freshJavaScriptOutput, "graph-client"), label: "packages/graph-client/dist" },
     { source: join(freshJavaScriptOutput, "harness-host"), label: "packages/harness-host/dist" },
+    { source: freshDesktopOutput, label: "desktop" },
     { source: join(freshTarget, "debug", "relayer-app-server"), label: "target/debug/relayer-app-server" },
     { source: join(freshTarget, "debug", "relayer-graph-server"), label: "target/debug/relayer-graph-server" },
   ];
@@ -1745,7 +1775,7 @@ async function prepareFreshBuiltRuntime() {
     externalInputs: freshBuildExpectedInputs,
     outputs,
   };
-  configureFreshRuntimeArtifactSpecs(freshRoot, freshTarget, freshJavaScriptOutput);
+  configureFreshRuntimeArtifactSpecs(freshRoot, freshTarget, freshJavaScriptOutput, freshDesktopOutput);
   return { freshRoot, freshTarget };
 }
 

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let requestImplementation;
 let rendered;
+let renderFailure;
 
 function approvalReceipt({ requestId = "request-1", threadId = 10, interactionId = 20, resolution } = {}) {
   return {
@@ -44,6 +45,7 @@ function deferred() {
 async function loadModules() {
   vi.resetModules();
   rendered = 0;
+  renderFailure = null;
   Object.assign(globalThis, {
     document: { querySelector: () => null },
     location: new URL("http://127.0.0.1:43123/?threadId=10"),
@@ -54,7 +56,10 @@ async function loadModules() {
     request: (...args) => requestImplementation(...args),
   }));
   vi.doMock("../desktop/renderer/src/graph.js", () => ({
-    renderThread: () => { rendered += 1; },
+    renderThread: () => {
+      rendered += 1;
+      if (renderFailure) throw renderFailure;
+    },
   }));
   vi.doMock("../desktop/renderer/src/navigation.js", () => ({
     renderScopeMenu: vi.fn(),
@@ -121,6 +126,29 @@ describe("desktop approval state integration", () => {
     expect(requestImplementation.mock.calls.filter(([path]) => path.endsWith("/decision"))).toHaveLength(1);
     post.resolve({ approval: pending });
     await first;
+  });
+
+  it("posts one approval decision even when its presentation cannot redraw", async () => {
+    const pending = approvalReceipt();
+    const resolved = productState({
+      approval: approvalReceipt({ resolution: { outcome: "approved", decision: "approve_once", resolvedAt: "2026-08-20T12:01:00Z" } }),
+      completionStatus: "running",
+    });
+    requestImplementation = vi.fn(async (path) => {
+      if (path.endsWith("/decision")) return { approval: resolved.approvals[0] };
+      if (path === "/api/state?threadId=10") return resolved;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    Object.assign(controller.appState, productState({ approval: pending }));
+    controller.viewState.currentThreadId = 10;
+    renderFailure = new Error("The vendored Lucide renderer must load before Relayer icons are created.");
+
+    await expect(controller.decideApproval("request-1", "approve_once")).resolves.toBeUndefined();
+
+    expect(requestImplementation.mock.calls.filter(([path]) => path.endsWith("/decision"))).toHaveLength(1);
+    expect(controller.appState.approvals[0].resolution?.outcome).toBe("approved");
+    expect(controller.appState.pendingApprovalDecisions).toEqual([]);
   });
 
   it("does not refresh or mutate a newly selected thread after a stale decision resolves", async () => {

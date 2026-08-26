@@ -38,6 +38,7 @@ import {
 } from "./onboarding-tutorial.js";
 import { $, applyAppearance, toast } from "./ui.js";
 import { renderUpdate, updateAction } from "./updates.js";
+import { assertRelayerIconRendererReady } from "./product-workspace/icons.js";
 
 function applyPlatformCopy() {
   const isMac = desktop?.platform === "darwin";
@@ -252,6 +253,7 @@ function bindEvents() {
 }
 
 async function boot() {
+  assertRelayerIconRendererReady();
   if (evalReview) viewState.evalContext = await evalReview.context();
   applyPlatformCopy();
   bindEvents();

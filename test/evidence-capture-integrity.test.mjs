@@ -1543,6 +1543,11 @@ describe("evidence capture integrity", () => {
       expect(capture).toContain('source: join(freshTarget, "debug", "relayer-app-server")');
       expect(capture).not.toContain('source: join(repositoryRoot, "target", "debug", "relayer-app-server")');
       expect(capture).toContain("Copied JavaScript build dependencies do not match their inventoried source bytes.");
+      expect(capture).toContain('const freshDesktopOutput = join(freshOutput, "desktop");');
+      expect(capture).toContain('"lucide", "dist", "umd", "lucide.min.js"');
+      expect(capture).toContain('"marked", "lib", "marked.umd.js"');
+      expect(capture).toContain("Fresh desktop renderer vendors do not match their authenticated sources.");
+      expect(capture).toContain('{ source: freshDesktopOutput, label: "desktop" }');
       expect(capture).toContain('label: "<build-dependency>/cargo-config.toml"');
       expect(capture).toContain("<build-tool-dynamic-library>");
       expect(capture).toContain("copiedExternalInputsMatchInventoriedSources: true");

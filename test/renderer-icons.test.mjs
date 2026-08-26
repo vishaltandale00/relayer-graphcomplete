@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as lucideExports from "lucide";
 import {
   RELAYER_ICON_NAMES,
+  assertRelayerIconRendererReady,
   createRelayerIcon,
   relayerIconDescriptor,
   resolveRelayerIconName,
@@ -59,5 +60,12 @@ describe("workspace Relayer icons", () => {
       }),
     });
     expect(createRelayerIcon("alarm-clock")).toMatchObject({ icon: Circle });
+  });
+
+  it("fails startup clearly when the vendored renderer is unavailable", () => {
+    vi.stubGlobal("lucide", undefined);
+    expect(() => assertRelayerIconRendererReady()).toThrow(
+      "The vendored Lucide renderer must load before Relayer icons are created.",
+    );
   });
 });

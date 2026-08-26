@@ -162,10 +162,7 @@ export function relayerIconDescriptor(name) {
 
 export function createRelayerIcon(name, attributes = {}) {
   const descriptor = relayerIconDescriptor(name);
-  const lucide = globalThis.lucide;
-  if (typeof lucide?.createElement !== "function" || !lucide.Circle) {
-    throw new Error("The vendored Lucide renderer must load before Relayer icons are created.");
-  }
+  const lucide = assertRelayerIconRendererReady();
   const iconNode = lucide[descriptor.lucideExportName] ?? lucide.Circle;
   return lucide.createElement(iconNode, {
     "aria-hidden": "true",
@@ -173,6 +170,14 @@ export function createRelayerIcon(name, attributes = {}) {
     ...attributes,
     "data-relayer-icon": descriptor.renderedName,
   });
+}
+
+export function assertRelayerIconRendererReady() {
+  const lucide = globalThis.lucide;
+  if (typeof lucide?.createElement !== "function" || !lucide.Circle) {
+    throw new Error("The vendored Lucide renderer must load before Relayer icons are created.");
+  }
+  return lucide;
 }
 
 function toPascalCase(name) {
