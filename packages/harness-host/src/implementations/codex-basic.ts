@@ -137,7 +137,7 @@ export class CodexBasicHarness implements Harness {
     return this.codexThreadId === undefined ? {} : { codexThreadId: this.codexThreadId };
   }
 
-  forceDispose(): void {
+  forceShutdown(): void {
     for (const shutdown of this.activeForceShutdowns) shutdown.abort(new Error("Codex harness force-disposed"));
   }
 

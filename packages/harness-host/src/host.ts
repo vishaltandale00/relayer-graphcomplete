@@ -41,6 +41,7 @@ import type {
 interface LiveSession {
   descriptor: HarnessSessionDescriptor;
   harness: Harness;
+  lifecycle: HarnessLifecycle;
   approvals: HarnessApprovalCoordinator;
   tail: Promise<void>;
   activeCompletion?: {
@@ -48,6 +49,26 @@ interface LiveSession {
     readonly interactionId: number;
     readonly controller: AbortController;
   };
+}
+
+class HarnessLifecycle {
+  private disposePromise: Promise<void> | undefined;
+  private forceRequested = false;
+
+  constructor(readonly harness: Harness) {}
+
+  dispose(): Promise<void> {
+    if (this.disposePromise === undefined) {
+      this.disposePromise = Promise.resolve().then(() => this.harness.dispose?.());
+    }
+    return this.disposePromise;
+  }
+
+  forceShutdown(): void {
+    if (this.forceRequested) return;
+    this.forceRequested = true;
+    this.harness.forceShutdown?.();
+  }
 }
 
 interface PersistedHarnessSessionDescriptor {
@@ -83,7 +104,7 @@ export interface RunningHarnessHost {
 
 export class HarnessHost {
   private readonly sessions = new Map<number, LiveSession>();
-  private readonly lateClosingHarnesses = new Set<Harness>();
+  private readonly lateClosingHarnesses = new Set<HarnessLifecycle>();
   private readonly registrationTails = new Map<number, Promise<void>>();
   private saved = new Map<number, PersistedHarnessSessionDescriptor>();
   private legacySaved = new Map<number, LegacyPersistedHarnessSessionDescriptor>();
@@ -198,33 +219,23 @@ export class HarnessHost {
       permissionBinding: permissionBinding(descriptor.configuration, descriptor.permissionProfileId),
       ...(savedState === undefined ? {} : { savedState }),
     });
+    const lifecycle = new HarnessLifecycle(harness);
     if (this.closed) {
       if (this.forceClosePromise !== undefined) {
-        let forceDisposed = false;
-        if (harness.forceDispose !== undefined) {
-          try {
-            harness.forceDispose();
-            forceDisposed = true;
-          } catch {
-            // The canonical force close has already completed. A late provider
-            // cleanup failure cannot replace its stable registration outcome.
-          }
+        try {
+          lifecycle.forceShutdown();
+        } catch {
+          // The canonical force close has already completed. A late provider
+          // interruption failure cannot replace its stable registration outcome.
         }
-        if (!forceDisposed) {
-          try {
-            void Promise.resolve(harness.dispose?.()).catch(() => undefined);
-          } catch {
-            // A late registration cannot delay or overturn the already-completed
-            // force close. Best-effort fallback disposal is deliberately contained.
-          }
-        }
+        void lifecycle.dispose().catch(() => undefined);
         throw new Error("Harness host force-closed while the session was starting");
       }
-      this.lateClosingHarnesses.add(harness);
+      this.lateClosingHarnesses.add(lifecycle);
       try {
-        await harness.dispose?.();
+        await lifecycle.dispose();
       } finally {
-        this.lateClosingHarnesses.delete(harness);
+        this.lateClosingHarnesses.delete(lifecycle);
       }
       throw new Error("Harness host closed while the session was starting");
     }
@@ -233,7 +244,7 @@ export class HarnessHost {
       state = captureHarnessState(harness);
     } catch (error) {
       try {
-        await harness.dispose?.();
+        await lifecycle.dispose();
       } catch (disposeError) {
         throw new AggregateError([error, disposeError], "Harness session initialization and cleanup failed");
       }
@@ -243,6 +254,7 @@ export class HarnessHost {
     this.sessions.set(descriptor.threadId, {
       descriptor: persisted,
       harness,
+      lifecycle,
       approvals: new HarnessApprovalCoordinator({ threadId: descriptor.threadId }),
       tail: Promise.resolve(),
     });
@@ -437,6 +449,10 @@ export class HarnessHost {
 
   close(): Promise<void> {
     if (this.forceClosePromise !== undefined) return this.forceClosePromise;
+    return this.beginClose();
+  }
+
+  private beginClose(): Promise<void> {
     if (this.closePromise !== undefined) return this.closePromise;
     this.closed = true;
     let resolve!: () => void;
@@ -469,7 +485,7 @@ export class HarnessHost {
         errors.push(error);
       }
       try {
-        await session.harness.dispose?.();
+        await session.lifecycle.dispose();
       } catch (error) {
         errors.push(error);
       }
@@ -508,11 +524,15 @@ export class HarnessHost {
     for (const session of this.sessions.values()) {
       session.approvals.close("Harness host force-closed before the approval was resolved.");
       session.activeCompletion?.controller.abort(new Error("Harness host force-closed"));
-      try { session.harness.forceDispose?.(); } catch (error) { errors.push(error); }
+      try { session.lifecycle.forceShutdown(); } catch (error) { errors.push(error); }
     }
-    for (const harness of this.lateClosingHarnesses) {
-      try { harness.forceDispose?.(); } catch (error) { errors.push(error); }
+    for (const lifecycle of this.lateClosingHarnesses) {
+      try { lifecycle.forceShutdown(); } catch (error) { errors.push(error); }
     }
+    // Force close is intentionally bounded, but every harness still has one
+    // host-owned disposal path. The interrupt hooks above unblock that path;
+    // do not await it here because a broken provider must not prevent exit.
+    void this.beginClose().catch(() => undefined);
     void (async () => {
       try {
         await this.initializePromise;

@@ -1704,6 +1704,20 @@ describe("evidence capture integrity", () => {
     expect(capture).toContain("Snapshotted Mach-O dependency closure differs from authenticated discovery");
   });
 
+  it("records authenticated component versions and proves exact grants do not cross live sessions", () => {
+    const capture = readFileSync(join(import.meta.dirname, "..", "scripts", "capture-ask-profile-evidence.mjs"), "utf8");
+    expect(capture).toContain('desktop: committedJsonVersion("desktop/package.json", "desktop")');
+    expect(capture).toContain("appServer: rustWorkspaceVersion");
+    expect(capture).toContain("graphServer: rustWorkspaceVersion");
+    expect(capture).toContain("versions: {");
+    expect(capture).toContain("desktopVersion: sourceVersions.desktop");
+    expect(capture).not.toContain('version: "issue-85-evidence"');
+    expect(capture).toContain('title: "Live Ask-profile cross-session isolation"');
+    expect(capture).toContain("isolatedHarnessSessionId === sourceHarnessSessionId");
+    expect(capture).toContain('capture("cross-session-exact-waiting"');
+    expect(capture).toContain("crossSessionProof: sanitizeEvidence(crossSessionProof)");
+  });
+
   it("rejects at the deadline while a check remains pending", async () => {
     vi.useFakeTimers();
     try {

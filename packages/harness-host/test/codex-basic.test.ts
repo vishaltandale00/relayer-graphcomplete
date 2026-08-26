@@ -42,8 +42,8 @@ describe("CodexBasicHarness", () => {
 
     const completing = harness.complete(runContext(1, "token"));
     await vi.waitFor(() => expect(submitted).toBeDefined());
-    harness.forceDispose();
-    harness.forceDispose();
+    harness.forceShutdown();
+    harness.forceShutdown();
 
     await expect(completing).rejects.toThrow("force-disposed");
     expect(submitted?.forceSignal?.aborted).toBe(true);

@@ -183,7 +183,8 @@ export interface Harness {
   complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void>;
   state(): HarnessSessionState;
   dispose?(): void | Promise<void>;
-  forceDispose?(): void;
+  /** Immediately interrupt provider work so the host-owned dispose operation can finish. */
+  forceShutdown?(): void;
 }
 
 export interface HarnessFactoryContext {

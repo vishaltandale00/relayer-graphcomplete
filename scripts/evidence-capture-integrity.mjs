@@ -7,7 +7,7 @@ import { isAbsolute, relative, sep } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
-function fixedGitEnvironment(environment = process.env) {
+export function fixedGitEnvironment(environment = process.env) {
   const safe = Object.fromEntries(Object.entries(environment).filter(([key, value]) => {
     const normalizedKey = key.toUpperCase();
     return value !== undefined
@@ -37,7 +37,7 @@ export function sanitizeElectronBootstrapEnvironment(environment) {
   }));
 }
 
-function fixedGitArguments(repositoryRoot, args) {
+export function fixedGitArguments(repositoryRoot, args) {
   return [
     "--no-optional-locks",
     "-c", "core.attributesFile=/dev/null",

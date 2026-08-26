@@ -7,7 +7,7 @@ import {
 function evidenceFixture() {
   const screenshots = {};
   const holds = [];
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < 7; index += 1) {
     const label = `prompt-${index}-waiting`;
     const requestId = `request-${index}`;
     screenshots[label] = { file: `${label}.png`, approvalRequestId: requestId };
@@ -47,7 +47,7 @@ describe("Ask-profile video evidence model", () => {
     }, 1_000)).toBe(false);
   });
 
-  it("accepts six unique screenshot-correlated stable prompt intervals", () => {
+  it("accepts seven unique screenshot-correlated stable prompt intervals", () => {
     expect(validateApprovalPromptHoldEvidence(evidenceFixture())).toBe(true);
   });
 

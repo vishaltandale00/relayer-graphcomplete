@@ -1206,6 +1206,9 @@ describe("HarnessHost", () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-force-reentry-"));
     let host!: HarnessHost;
     let reentered: Promise<void> | undefined;
+    let markDisposed!: () => void;
+    const disposed = new Promise<void>((resolve) => { markDisposed = resolve; });
+    const dispose = vi.fn(() => { markDisposed(); });
     try {
       host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
@@ -1213,7 +1216,8 @@ describe("HarnessHost", () => {
         implementations: { test: () => ({
           async complete() {},
           state: emptyState,
-          forceDispose() { reentered = host.forceClose(); },
+          forceShutdown() { reentered = host.forceClose(); },
+          dispose,
         }) },
       });
       await host.initialize();
@@ -1223,6 +1227,8 @@ describe("HarnessHost", () => {
       expect(reentered).toBe(forcing);
       expect(host.forceClose()).toBe(forcing);
       await forcing;
+      await disposed;
+      expect(dispose).toHaveBeenCalledOnce();
       await expect(host.createSession({
         threadId: 2,
         permissionProfileId: "auto",
@@ -1240,7 +1246,7 @@ describe("HarnessHost", () => {
     let resolveHarness!: (harness: Harness) => void;
     let markFactoryStarted!: () => void;
     const factoryStarted = new Promise<void>((resolve) => { markFactoryStarted = resolve; });
-    const forceDispose = vi.fn();
+    const forceShutdown = vi.fn();
     const pendingHarness = new Promise<Harness>((resolve) => { resolveHarness = resolve; });
     const host = new HarnessHost({
       stateFile: join(directory, "sessions.json"),
@@ -1258,12 +1264,12 @@ describe("HarnessHost", () => {
 
       await factoryStarted;
       await host.forceClose();
-      resolveHarness({ async complete() {}, state: emptyState, forceDispose });
+      resolveHarness({ async complete() {}, state: emptyState, forceShutdown });
 
       await expect(registering).rejects.toThrow("force-closed while the session was starting");
-      expect(forceDispose).toHaveBeenCalledOnce();
+      expect(forceShutdown).toHaveBeenCalledOnce();
     } finally {
-      resolveHarness?.({ async complete() {}, state: emptyState, forceDispose });
+      resolveHarness?.({ async complete() {}, state: emptyState, forceShutdown });
       await host.forceClose().catch(() => {});
       await rm(directory, { recursive: true, force: true });
     }
@@ -1275,7 +1281,7 @@ describe("HarnessHost", () => {
     let markFactoryStarted!: () => void;
     const factoryStarted = new Promise<void>((resolve) => { markFactoryStarted = resolve; });
     const pendingHarness = new Promise<Harness>((resolve) => { resolveHarness = resolve; });
-    const forceDispose = vi.fn(() => { throw new Error("late force cleanup failed"); });
+    const forceShutdown = vi.fn(() => { throw new Error("late force cleanup failed"); });
     const dispose = vi.fn(() => new Promise<void>(() => {}));
     const host = new HarnessHost({
       stateFile: join(directory, "sessions.json"),
@@ -1293,14 +1299,14 @@ describe("HarnessHost", () => {
       await factoryStarted;
       await host.forceClose();
 
-      resolveHarness({ async complete() {}, state: emptyState, forceDispose, dispose });
+      resolveHarness({ async complete() {}, state: emptyState, forceShutdown, dispose });
 
       await expect(registering).rejects.toThrow("Harness host force-closed while the session was starting");
-      expect(forceDispose).toHaveBeenCalledOnce();
+      expect(forceShutdown).toHaveBeenCalledOnce();
       expect(dispose).toHaveBeenCalledOnce();
       await expect(host.forceClose()).resolves.toBeUndefined();
     } finally {
-      resolveHarness?.({ async complete() {}, state: emptyState, forceDispose, dispose });
+      resolveHarness?.({ async complete() {}, state: emptyState, forceShutdown, dispose });
       await host.forceClose().catch(() => {});
       await rm(directory, { recursive: true, force: true });
     }
@@ -1421,7 +1427,7 @@ describe("HarnessHost", () => {
     const disposeStarted = new Promise<void>((resolve) => { markDisposeStarted = resolve; });
     const disposeGate = new Promise<void>((resolve) => { releaseDispose = resolve; });
     const pendingHarness = new Promise<Harness>((resolve) => { resolveHarness = resolve; });
-    const forceDispose = vi.fn(() => releaseDispose());
+    const forceShutdown = vi.fn(() => releaseDispose());
     const dispose = vi.fn(async () => { markDisposeStarted(); await disposeGate; });
     const host = new HarnessHost({
       stateFile: join(directory, "sessions.json"),
@@ -1438,17 +1444,17 @@ describe("HarnessHost", () => {
       });
       await factoryStarted;
       await host.close();
-      resolveHarness({ async complete() {}, state: emptyState, dispose, forceDispose });
+      resolveHarness({ async complete() {}, state: emptyState, dispose, forceShutdown });
       await disposeStarted;
 
       await host.forceClose();
       await expect(registering).rejects.toThrow("closed while the session was starting");
 
       expect(dispose).toHaveBeenCalledOnce();
-      expect(forceDispose).toHaveBeenCalledOnce();
+      expect(forceShutdown).toHaveBeenCalledOnce();
     } finally {
       releaseDispose?.();
-      resolveHarness?.({ async complete() {}, state: emptyState, dispose, forceDispose });
+      resolveHarness?.({ async complete() {}, state: emptyState, dispose, forceShutdown });
       await host.forceClose().catch(() => {});
       await rm(directory, { recursive: true, force: true });
     }
@@ -1461,7 +1467,11 @@ describe("HarnessHost", () => {
     let markDisposeStarted!: () => void;
     const disposeStarted = new Promise<void>((resolveStarted) => { markDisposeStarted = resolveStarted; });
     const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
-    const forceDispose = vi.fn();
+    const forceShutdown = vi.fn();
+    const dispose = vi.fn(async () => {
+      markDisposeStarted();
+      await disposeGate;
+    });
     try {
       running = await startHarnessHost({
         stateFile: join(directory, "sessions.json"),
@@ -1469,11 +1479,8 @@ describe("HarnessHost", () => {
         implementations: { test: () => ({
           async complete() {},
           state: emptyState,
-          async dispose() {
-            markDisposeStarted();
-            await disposeGate;
-          },
-          forceDispose,
+          dispose,
+          forceShutdown,
         }) },
       });
       await running.host.createSession({
@@ -1495,12 +1502,14 @@ describe("HarnessHost", () => {
       await disposeStarted;
       const forced = running.forceClose();
       const forcedAgain = running.forceClose();
-      expect(forceDispose).toHaveBeenCalledOnce();
+      expect(forceShutdown).toHaveBeenCalledOnce();
       await socketClosed;
       await expect(fetch(`${running.url}/sessions`, { method: "POST" })).rejects.toThrow();
       releaseDispose();
       await Promise.all([forced, forcedAgain]);
       await closing;
+      expect(dispose).toHaveBeenCalledOnce();
+      expect(forceShutdown).toHaveBeenCalledOnce();
     } finally {
       releaseDispose?.();
       await running?.forceClose();

@@ -20,8 +20,8 @@ export function validateApprovalPromptHoldEvidence({
 }) {
   const waitingScreenshots = Object.entries(screenshots)
     .filter(([, screenshot]) => screenshot.approvalRequestId != null);
-  if (waitingScreenshots.length !== 6 || holds.length !== waitingScreenshots.length) {
-    throw new Error(`Approval prompt evidence must contain exactly six waiting captures and holds: ${JSON.stringify({
+  if (waitingScreenshots.length !== 7 || holds.length !== waitingScreenshots.length) {
+    throw new Error(`Approval prompt evidence must contain exactly seven waiting captures and holds: ${JSON.stringify({
       waitingCaptures: waitingScreenshots.length,
       holds: holds.length,
     })}`);

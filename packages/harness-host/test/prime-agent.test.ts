@@ -24,8 +24,8 @@ describe("PrimeAgentHarness", () => {
     };
     const harness = await createHarness(session);
 
-    harness.forceDispose();
-    harness.forceDispose();
+    harness.forceShutdown();
+    harness.forceShutdown();
 
     expect(session.abort).toHaveBeenCalledOnce();
     expect(nativeSyncDispose).toHaveBeenCalledOnce();
@@ -49,7 +49,7 @@ describe("PrimeAgentHarness", () => {
     };
     const harness = await createHarness(session);
 
-    harness.forceDispose();
+    harness.forceShutdown();
     releaseAbort();
     await abortFinished;
 
@@ -66,7 +66,7 @@ describe("PrimeAgentHarness", () => {
     };
     const harness = await createHarness(session);
 
-    expect(() => harness.forceDispose()).not.toThrow();
+    expect(() => harness.forceShutdown()).not.toThrow();
     await Promise.resolve();
 
     expect(session.abort).toHaveBeenCalledOnce();
@@ -82,7 +82,7 @@ describe("PrimeAgentHarness", () => {
     };
     const harness = await createHarness(session);
 
-    expect(() => harness.forceDispose()).not.toThrow();
+    expect(() => harness.forceShutdown()).not.toThrow();
 
     expect(session.abort).toHaveBeenCalledOnce();
     expect(nativeSyncDispose).toHaveBeenCalledOnce();
@@ -102,9 +102,9 @@ describe("PrimeAgentHarness", () => {
     };
     const harness = await createHarness(session);
 
-    expect(() => harness.forceDispose()).toThrow("forced native disposal failed");
+    expect(() => harness.forceShutdown()).toThrow("forced native disposal failed");
     await expect(harness.dispose()).resolves.toBeUndefined();
-    harness.forceDispose();
+    harness.forceShutdown();
     await harness.dispose();
 
     expect(session.abort).toHaveBeenCalledOnce();
@@ -123,7 +123,7 @@ describe("PrimeAgentHarness", () => {
     const harness = await createHarness(session);
 
     await harness.dispose();
-    harness.forceDispose();
+    harness.forceShutdown();
 
     expect(session.disposeAsync).toHaveBeenCalledOnce();
     expect(nativeSyncDispose).toHaveBeenCalledOnce();
@@ -140,7 +140,7 @@ describe("PrimeAgentHarness", () => {
     const harness = await createHarness(session);
 
     await harness.dispose();
-    harness.forceDispose();
+    harness.forceShutdown();
 
     expect(nativeSyncDispose).toHaveBeenCalledOnce();
     expect(session.abort).not.toHaveBeenCalled();
@@ -175,7 +175,7 @@ describe("PrimeAgentHarness", () => {
 
     const graceful = harness.dispose();
     expect(harness.dispose()).toBe(graceful);
-    harness.forceDispose();
+    harness.forceShutdown();
     await graceful;
     await harness.dispose();
 
@@ -204,7 +204,7 @@ describe("PrimeAgentHarness", () => {
 
     const graceful = harness.dispose();
     await gracefulStarted;
-    harness.forceDispose();
+    harness.forceShutdown();
     releaseGraceful();
     await expect(graceful).resolves.toBeUndefined();
     await expect(harness.dispose()).resolves.toBeUndefined();
@@ -234,7 +234,7 @@ describe("PrimeAgentHarness", () => {
 
     const graceful = harness.dispose();
     await gracefulStarted;
-    harness.forceDispose();
+    harness.forceShutdown();
     releaseGraceful();
     await expect(graceful).resolves.toBeUndefined();
 

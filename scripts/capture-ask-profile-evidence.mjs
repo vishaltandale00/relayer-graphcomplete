@@ -19,6 +19,8 @@ import {
   createPinnedFreshBuildSandboxProfile,
   captureExactRegularFileIdentity,
   discoverNonSystemMachODependencies,
+  fixedGitArguments,
+  fixedGitEnvironment,
   inventoryRegularArtifactTree,
   pipeByteChunks,
   pinUniqueBytes,
@@ -91,35 +93,8 @@ function fixedSystemSandboxExec() {
   return SYSTEM_SANDBOX_EXEC_PATH;
 }
 
-function fixedGitEnvironment() {
-  const safe = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => {
-    const normalizedKey = key.toUpperCase();
-    return value !== undefined
-      && !normalizedKey.startsWith("GIT_")
-      && !normalizedKey.startsWith("DYLD_")
-      && normalizedKey !== "LD_PRELOAD";
-  }));
-  return {
-    ...safe,
-    PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_NO_REPLACE_OBJECTS: "1",
-  };
-}
-
 function bootstrapEnvironment() {
   return sanitizeElectronBootstrapEnvironment(process.env);
-}
-
-function fixedGitArguments(root, args) {
-  return [
-    "--no-optional-locks",
-    "-c", "core.attributesFile=/dev/null",
-    "-c", "core.fsmonitor=false",
-    "-c", `core.worktree=${root}`,
-    ...args,
-  ];
 }
 
 function rejectMutableRepositoryAuthority(gitPath, root) {
@@ -416,6 +391,29 @@ verifyExecutedBootstrapControls();
 const publishedDirectory = join(repositoryRoot, "docs", "prd", "assets", "evidence", "ask-profile-approval");
 const publishedReadmePath = "docs/prd/assets/evidence/ask-profile-approval/README.md";
 const publishedReadme = gitObjectBytes(SOURCE_GIT_PATH, repositoryRoot, sourceCommit, publishedReadmePath).toString("utf8");
+function committedJsonVersion(path, label) {
+  const value = JSON.parse(gitObjectBytes(SOURCE_GIT_PATH, repositoryRoot, sourceCommit, path).toString("utf8"))?.version;
+  if (typeof value !== "string" || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value)) {
+    throw new Error(`Authenticated ${label} metadata does not contain a semantic version.`);
+  }
+  return value;
+}
+function committedRustWorkspaceVersion() {
+  const cargo = gitObjectBytes(SOURCE_GIT_PATH, repositoryRoot, sourceCommit, "Cargo.toml").toString("utf8");
+  const section = /\[workspace\.package\]([\s\S]*?)(?=\n\[|$)/.exec(cargo)?.[1];
+  const value = /^version\s*=\s*"([^"]+)"\s*$/m.exec(section ?? "")?.[1];
+  if (typeof value !== "string" || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value)) {
+    throw new Error("Authenticated Rust workspace metadata does not contain a semantic version.");
+  }
+  return value;
+}
+const rustWorkspaceVersion = committedRustWorkspaceVersion();
+const sourceVersions = Object.freeze({
+  desktop: committedJsonVersion("desktop/package.json", "desktop"),
+  appServer: rustWorkspaceVersion,
+  graphServer: rustWorkspaceVersion,
+  harnessHost: committedJsonVersion("packages/harness-host/package.json", "harness host"),
+});
 const electronContentsDirectory = resolve(dirname(process.execPath), "..");
 const originalElectronContentsDirectory = authenticatedBootstrap?.originalElectronContents;
 if (typeof originalElectronContentsDirectory !== "string"
@@ -874,7 +872,7 @@ function registerEvidenceIpc() {
   registerIpc("relayer:update-status", () => ({
     phase: "development",
     channel: "stable",
-    version: "issue-85-evidence",
+    version: sourceVersions.desktop,
     availableVersion: null,
     percent: null,
     error: null,
@@ -2413,6 +2411,12 @@ async function run() {
     runtimeSession,
     providerCatalogRefreshSession: refreshServer.session,
     defaultHarnessConfiguration: "codex-basic",
+    exportProducer: {
+      desktopVersion: sourceVersions.desktop,
+      buildCommit: sourceCommit,
+      platform: process.platform,
+      architecture: process.arch,
+    },
   });
   services.push(product);
   const productSession = await abortableEvidenceOperation(
@@ -2572,6 +2576,7 @@ async function run() {
     throw new Error(`Future exact request did not consume the session grant: ${JSON.stringify(exactReceipt)}`);
   }
   if (await markerText(alwaysPath) !== "exact-live-session\n") throw new Error("Exact live-session match did not execute.");
+  const approveAlwaysExactContent = await markerText(alwaysPath);
   observations.push({ label: "exact-auto-resolved", interactionId: exact.id, receipt: exactReceipt });
   observations.at(-1).providerItemCorrelation = await exportTrace(exact, threadId, "exact-auto-resolved", alwaysPath, "complete", "completed", "exact-live-session\n", exactReceipt);
 
@@ -2654,6 +2659,86 @@ async function run() {
   }
   observations.push({ label: "provider-loss-fail-closed", interactionId: providerLoss.id, dock: lossWaiting.dock, receipt: lossReceipt });
   observations.at(-1).providerItemCorrelation = await exportTrace(providerLoss, threadId, "provider-loss-fail-closed", lossPath, "failed", undefined, "must-not-appear\n", lossReceipt);
+
+  await rm(alwaysPath, { force: true });
+  const crossSessionThread = await productRequest(productSession, "/api/threads", {
+    method: "POST",
+    body: JSON.stringify({
+      title: "Live Ask-profile cross-session isolation",
+      projectId: project.id,
+      initialMessage: "Author and submit a small baseline graph before the cross-session approval check.",
+      permissionProfileId: "ask",
+      modelSelection: { familyId: family.id, providerId: "codex", modelId: MODEL_ID },
+    }),
+  });
+  const crossSessionBaseline = await waitForThread(
+    productSession,
+    crossSessionThread.id,
+    (detail) => detail.interactions[0]?.completionStatus === "accepted",
+    "cross-session baseline accepted graph",
+  );
+  await exportTrace(crossSessionBaseline.interactions[0], crossSessionThread.id, "cross-session-baseline");
+  const crossSessionExact = await createInteraction(productSession, crossSessionThread.id, alwaysPrompt);
+  const crossSessionWaiting = await waitForOpenApproval(
+    productSession,
+    crossSessionThread.id,
+    crossSessionExact.id,
+    "cross-session exact scope",
+  );
+  const sourceHarnessSessionId = alwaysResult.resolved.request.correlation.harnessSessionId;
+  const isolatedHarnessSessionId = crossSessionWaiting.receipt.request.correlation.harnessSessionId;
+  if (isolatedHarnessSessionId === sourceHarnessSessionId
+    || JSON.stringify(crossSessionWaiting.receipt.request.scopeKeys) !== JSON.stringify(alwaysResult.resolved.request.scopeKeys)
+    || JSON.stringify(crossSessionWaiting.receipt.request.action) !== JSON.stringify(alwaysResult.resolved.request.action)
+    || existsSync(alwaysPath)) {
+    throw new Error(`A new live harness session did not ask again for the exact prior grant scope: ${JSON.stringify({
+      sourceHarnessSessionId,
+      isolatedHarnessSessionId,
+      source: alwaysResult.resolved.request,
+      isolated: crossSessionWaiting.receipt.request,
+    })}`);
+  }
+  await capture("cross-session-exact-waiting", [
+    "new live harness session",
+    "prior exact grant is not reused",
+    "identical protected action waits for a new decision",
+  ], crossSessionWaiting.receipt);
+  await click("#denyApproval");
+  const crossSessionDenied = await waitForThread(
+    productSession,
+    crossSessionThread.id,
+    (detail) => detail.interactions.find((item) => String(item.id) === String(crossSessionExact.id))?.completionStatus === "accepted",
+    "cross-session exact denial adaptation",
+  );
+  const crossSessionReceipt = crossSessionDenied.approvals.find((receipt) => (
+    receipt.request.requestId === crossSessionWaiting.receipt.request.requestId
+  ));
+  if (crossSessionReceipt?.resolution?.actor !== "user"
+    || crossSessionReceipt.resolution.decision !== "deny"
+    || crossSessionReceipt.resolution.outcome !== "denied"
+    || existsSync(alwaysPath)) {
+    throw new Error(`Cross-session exact-scope denial failed closed: ${JSON.stringify(crossSessionReceipt)}`);
+  }
+  const crossSessionProviderItemCorrelation = await exportTrace(
+    crossSessionExact,
+    crossSessionThread.id,
+    "cross-session-exact-denied",
+    alwaysPath,
+    "complete",
+    "declined",
+    "exact-live-session\n",
+    crossSessionReceipt,
+  );
+  const crossSessionProof = {
+    threadId: crossSessionThread.id,
+    interactionId: crossSessionExact.id,
+    sourceHarnessSessionId,
+    isolatedHarnessSessionId,
+    requestId: crossSessionReceipt.request.requestId,
+    scopeKeys: crossSessionReceipt.request.scopeKeys,
+    resolution: crossSessionReceipt.resolution,
+    providerItemCorrelation: crossSessionProviderItemCorrelation,
+  };
 
   await openThread(productSession, threadId);
   const finalDetail = await threadDetail(productSession, threadId);
@@ -2753,8 +2838,9 @@ async function run() {
   }
   const protectedActionChecks = {
     approveOnceContent,
-    approveAlwaysExactContent: await markerText(alwaysPath),
+    approveAlwaysExactContent,
     exactReplaySetupRemovedOnlyOwnedMarker: true,
+    crossSessionExactAbsent: !existsSync(alwaysPath),
     approveOnceRepeatAbsent: !existsSync(oncePath),
     nearMatchAbsent: !existsSync(nearPath),
     cancelledAbsent: !existsSync(cancelPath),
@@ -2780,6 +2866,11 @@ async function run() {
       commit: sourceCommit,
       worktree: "clean",
       runtimeArtifactInventorySha256: createHash("sha256").update(JSON.stringify(sourceRuntimeArtifacts)).digest("hex"),
+    },
+    versions: {
+      ...sourceVersions,
+      electron: process.versions.electron,
+      node: process.versions.node,
     },
     productClaim: "local development checkout only; no packaged or release claim",
     inference: { provider: "codex", model: MODEL_ID, paid: true, fixture: false },
@@ -2816,6 +2907,7 @@ async function run() {
       approvalPromptHolds,
     },
     observations: sanitizeEvidence(observations),
+    crossSessionProof: sanitizeEvidence(crossSessionProof),
     protectedActionChecks,
     artifacts,
   };

@@ -47,7 +47,7 @@ interface PrimeAgentConfiguration {
 }
 
 export class PrimeAgentHarness implements Harness {
-  private forceDisposeStarted = false;
+  private forceShutdownStarted = false;
   private gracefullyDisposed = false;
   private gracefulDisposePromise: Promise<void> | undefined;
   private nativeDisposeInProgress = false;
@@ -162,9 +162,9 @@ export class PrimeAgentHarness implements Harness {
     return this.gracefulDisposePromise;
   }
 
-  forceDispose(): void {
-    if (this.forceDisposeStarted || this.gracefullyDisposed) return;
-    this.forceDisposeStarted = true;
+  forceShutdown(): void {
+    if (this.forceShutdownStarted || this.gracefullyDisposed) return;
+    this.forceShutdownStarted = true;
     this.installNativeDisposeGuard();
     try {
       void this.session.abort().catch(() => undefined);
