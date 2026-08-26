@@ -85,7 +85,7 @@ export function productWorkspaceMarkup() {
               <div id="approvalAffectedFilesRow"><dt>Affected files</dt><dd id="approvalAffectedFiles"></dd></div>
               <div><dt>Approval scope</dt><dd id="approvalScopeDescription"></dd></div>
             </dl>
-            <details class="approval-history hidden" id="approvalHistory"><summary id="approvalHistorySummary">Approval history</summary><ol id="approvalHistoryList"></ol></details>
+            <details class="approval-history hidden" id="approvalHistory"><summary id="approvalHistorySummary">Approval history</summary><ol id="approvalHistoryList" tabindex="0" aria-label="Resolved approval requests"></ol></details>
             <p class="approval-error hidden" id="approvalError" role="alert"></p>
             <div class="approval-actions" role="group" aria-label="Resolve approval request">
               <button class="approval-deny" id="denyApproval" type="button">Deny</button>

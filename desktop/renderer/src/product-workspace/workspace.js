@@ -32,6 +32,7 @@ import {
   approvalQueueKeyIntent,
   approvalQueueTarget,
   approvalResolutionLabel,
+  shouldRevealApprovalHistory,
   pendingApprovalsForThread,
   resolvedApprovalHistoryForThread,
   selectedPendingApproval,
@@ -2239,8 +2240,15 @@ export function createProductWorkspace({
     const activeWasInside = approvalDock.contains(graphDocument.activeElement);
     const wasHidden = approvalDock.classList.contains("hidden");
     const wasHistoryOnly = approvalDock.classList.contains("history-only");
+    const threadChanged = approvalDock.dataset.threadId !== threadKey;
     const history = resolvedApprovalHistoryForThread(state, thread);
     const dockMode = approvalDockMode(pending, history);
+    const revealHistory = shouldRevealApprovalHistory({
+      dockMode,
+      wasHidden,
+      wasHistoryOnly,
+      threadChanged,
+    });
     const renderHistory = () => {
       $("#approvalHistory").classList.toggle("hidden", history.length === 0);
       $("#approvalHistorySummary").textContent = `Approval history (${history.length})`;
@@ -2277,6 +2285,7 @@ export function createProductWorkspace({
         $("#approvalError").classList.add("hidden");
         $(".approval-actions").classList.add("hidden");
         renderHistory();
+        if (revealHistory) $("#approvalHistory").open = true;
       }
       if (focus.shouldFocus) {
         prompt.focus({ preventScroll: true });

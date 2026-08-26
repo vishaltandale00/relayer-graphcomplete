@@ -8,6 +8,7 @@ import {
   pendingApprovalsForThread,
   resolvedApprovalHistoryForThread,
   selectedPendingApproval,
+  shouldRevealApprovalHistory,
   validApprovalDecision,
   validApprovalRequest,
 } from "../desktop/renderer/src/approval-model.js";
@@ -116,5 +117,23 @@ describe("desktop approval model", () => {
     expect(validApprovalDecision("approve_always")).toBe(true);
     expect(validApprovalDecision("deny")).toBe(true);
     expect(validApprovalDecision("allow")).toBe(false);
+  });
+
+  it("reveals approval history on entry and thread changes without overriding a same-thread collapse", () => {
+    expect(shouldRevealApprovalHistory({
+      dockMode: "history", wasHidden: true, wasHistoryOnly: false, threadChanged: false,
+    })).toBe(true);
+    expect(shouldRevealApprovalHistory({
+      dockMode: "history", wasHidden: false, wasHistoryOnly: false, threadChanged: false,
+    })).toBe(true);
+    expect(shouldRevealApprovalHistory({
+      dockMode: "history", wasHidden: false, wasHistoryOnly: true, threadChanged: true,
+    })).toBe(true);
+    expect(shouldRevealApprovalHistory({
+      dockMode: "history", wasHidden: false, wasHistoryOnly: true, threadChanged: false,
+    })).toBe(false);
+    expect(shouldRevealApprovalHistory({
+      dockMode: "pending", wasHidden: true, wasHistoryOnly: false, threadChanged: true,
+    })).toBe(false);
   });
 });

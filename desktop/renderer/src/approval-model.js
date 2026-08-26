@@ -108,6 +108,10 @@ export function approvalDockMode(pending, history) {
   return "hidden";
 }
 
+export function shouldRevealApprovalHistory({ dockMode, wasHidden, wasHistoryOnly, threadChanged }) {
+  return dockMode === "history" && (wasHidden || !wasHistoryOnly || threadChanged);
+}
+
 export function approvalQueueTarget(pending, requestId, intent) {
   if (!pending.length) return null;
   const current = Math.max(0, pending.findIndex((receipt) => (
