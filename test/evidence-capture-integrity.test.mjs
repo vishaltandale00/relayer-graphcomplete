@@ -1706,6 +1706,7 @@ describe("evidence capture integrity", () => {
 
   it("records authenticated component versions and proves exact grants do not cross live sessions", () => {
     const capture = readFileSync(join(import.meta.dirname, "..", "scripts", "capture-ask-profile-evidence.mjs"), "utf8");
+    expect(capture).toContain('dirname, isAbsolute, join');
     expect(capture).toContain('desktop: committedJsonVersion("desktop/package.json", "desktop")');
     expect(capture).toContain("appServer: rustWorkspaceVersion");
     expect(capture).toContain("graphServer: rustWorkspaceVersion");
