@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "passed": true,
-  "capturedAt": "2026-08-25T19:46:28.235Z",
-  "sourceCommit": "4aac482f83ca40c2ac408b5da735b901e493c5a6",
+  "capturedAt": "2026-08-26T04:31:04.605Z",
+  "sourceCommit": "dfac401712eccbb1a9ac953b83a6df40babc2342",
   "workingTreeDirty": false,
   "command": "npm run build && RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE=1 electron scripts/capture-interaction-context-evidence.mjs",
   "paidInferenceCalls": 0,
@@ -28,7 +28,11 @@
   "assertions": {
     "nodeDetailsOpened": true,
     "multipleAnnotationsAddedEditedAndOrdered": true,
-    "groupedComposerVisible": true,
+    "compactComposerPopoverVisible": true,
+    "compactComposerPopoverAvoidsNodeDetails": true,
+    "multipleNodePillStripScrolls": true,
+    "editPreservesPopoverDimensions": true,
+    "longAnnotationEditorScrolls": true,
     "messageAndContextSent": true,
     "historyPillAndPopoverVisible": true,
     "historicalTargetNodeReopened": true,
@@ -40,16 +44,16 @@
   "screenshots": [
     {
       "file": "grouped-composer.png",
-      "sha256": "b35b8a8015e2783a54f52b2a39148d48e85377439280a906e0acbd0b65d82b46"
+      "sha256": "841996cefbfe3d1ad8c795428733f3a73e5138a5217980c8dafe389b02df7502"
     },
     {
       "file": "restarted-context.png",
-      "sha256": "0d5dc84627f4b6be0a621dd93b8515ddf0e26c379a263f73907b34428aa7e80d"
+      "sha256": "29c40ede1cd040fa89fdf2457a7dcac75e24f8b2494543260cc8aebf9b5e0d42"
     }
   ],
   "video": {
     "file": "interaction-context.mp4",
-    "sha256": "9687c6f7deba4319cc14a22029740d59ac4748fd89481868e9595ab9df37d8ab",
+    "sha256": "783387e6594d9101eec4f70dca78228289d75acff008ee29d1b799ee126dc447",
     "durationSeconds": 26.367,
     "stream": {
       "codec_name": "h264",
@@ -63,7 +67,7 @@
     "playbackDecoded": true,
     "steps": [
       "1. Open Node Details for any visible node; the + control connects it to the next interaction",
-      "2. Multiple ordered annotations stay grouped under their connected node above the composer",
+      "2. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
       "3. The turn banner shows one connected-node pill; its popover restores both annotations in order",
       "4. Clicking the connected node reopens its full Node Details from history",
       "5. A connected node with a non-empty annotation enables send even when message text is empty",
