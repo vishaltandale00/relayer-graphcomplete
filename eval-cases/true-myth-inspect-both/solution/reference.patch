@@ -1,0 +1,71 @@
+diff --git a/src/result.ts b/src/result.ts
+index 0c49722..b8a4540 100644
+--- a/src/result.ts
++++ b/src/result.ts
+@@ -309,6 +309,16 @@ class ResultImpl<T, E> {
+     return this as Result<T, E>;
+   }
+ 
++  /** Run the callback for the active variant and return this Result unchanged. */
++  inspectBoth(matcher: Matcher<T, E, void>): Result<T, E> {
++    if (this.repr[0] === Variant.Ok) {
++      matcher.Ok(this.repr[1]);
++    } else {
++      matcher.Err(this.repr[1]);
++    }
++    return this as Result<T, E>;
++  }
++
+   /** Method variant for {@linkcode toString} */
+   toString(): string {
+     return `${this.repr[0]}(${safeToString(this.repr[1])})`;
+@@ -1268,6 +1278,22 @@ export function inspectErr<T, E>(
+   return curry1(op, result);
+ }
+ 
++/** Inspect exactly the active Result branch without changing the Result. */
++export function inspectBoth<T, E>(
++  matcher: Matcher<T, E, void>,
++  result: Result<T, E>
++): Result<T, E>;
++export function inspectBoth<T, E>(
++  matcher: Matcher<T, E, void>
++): (result: Result<T, E>) => Result<T, E>;
++export function inspectBoth<T, E>(
++  matcher: Matcher<T, E, void>,
++  result?: Result<T, E>
++): Result<T, E> | ((result: Result<T, E>) => Result<T, E>) {
++  const op = (r: Result<T, E>) => r.inspectBoth(matcher);
++  return curry1(op, result);
++}
++
+ /**
+   Create a `String` representation of a {@linkcode Result} instance.
+ 
+diff --git a/test/result.test.ts b/test/result.test.ts
+index f8f3927..eb98ae0 100644
+--- a/test/result.test.ts
++++ b/test/result.test.ts
+@@ -9,6 +9,22 @@ const length = (x: { length: number }) => x.length;
+ const double = (x: number) => x * 2;
+ 
+ describe('`Result` pure functions', () => {
++  test('`inspectBoth` calls exactly one branch and preserves identity', () => {
++    const seen: string[] = [];
++    const ok = result.ok<number, string>(42);
++    expect(
++      result.inspectBoth({ Ok: value => seen.push(`ok:${value}`), Err: error => seen.push(`err:${error}`) }, ok)
++    ).toBe(ok);
++    expect(seen).toEqual(['ok:42']);
++
++    seen.length = 0;
++    const err = result.err<number, string>('bad');
++    expect(
++      result.inspectBoth({ Ok: value => seen.push(`ok:${value}`), Err: error => seen.push(`err:${error}`) })(err)
++    ).toBe(err);
++    expect(seen).toEqual(['err:bad']);
++  });
++
+   test('`ok`', () => {
+     const theOk = result.ok(42);
+     expect(theOk).toBeInstanceOf(Result);

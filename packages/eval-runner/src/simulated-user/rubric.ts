@@ -126,7 +126,10 @@ export interface RubricSubjectDefinition<CriterionKey extends string> {
 
 export interface SimulatedUserRubricManifest {
   readonly schemaVersion: 1;
-  readonly rubricVersion: "simulated-user-rubric-v1";
+  readonly rubricVersion:
+    | "simulated-user-rubric-v1"
+    | "graph-presentation-rubric-v2"
+    | "graph-presentation-rubric-v3";
   readonly ratingScale: Readonly<Record<1 | 2 | 3 | 4, string>>;
   readonly nullRating: {
     readonly meaning: string;
@@ -193,6 +196,89 @@ export const SIMULATED_USER_RUBRIC_V1 = {
 } as const satisfies SimulatedUserRubricManifest;
 
 export const DEFAULT_SIMULATED_USER_RUBRIC: SimulatedUserRubricManifest = SIMULATED_USER_RUBRIC_V1;
+
+/** Presentation-only rubric for the graph grade; correctness belongs to the separate outcome grade. */
+export const GRAPH_PRESENTATION_RUBRIC_V2 = {
+  ...SIMULATED_USER_RUBRIC_V1,
+  rubricVersion: "graph-presentation-rubric-v2",
+  subjects: {
+    ...SIMULATED_USER_RUBRIC_V1.subjects,
+    node: {
+      ...SIMULATED_USER_RUBRIC_V1.subjects.node,
+      criteria: {
+        ...SIMULATED_USER_RUBRIC_V1.subjects.node.criteria,
+        substance: {
+          label: "Visible information density",
+          description: "The node presents an appropriate amount of information for its visual role without looking empty, cramped, or needlessly repetitive. Do not judge factual correctness here.",
+        },
+      },
+    },
+    turn: {
+      ...SIMULATED_USER_RUBRIC_V1.subjects.turn,
+      criteria: {
+        ...SIMULATED_USER_RUBRIC_V1.subjects.turn.criteria,
+        answer_quality: {
+          label: "Response usability",
+          description: "The completed graph is visually usable and appropriately organized for the request. Do not judge factual or task-outcome correctness here.",
+        },
+      },
+    },
+  },
+} as const satisfies SimulatedUserRubricManifest;
+
+/**
+ * Artifact-grounded presentation rubric. The judge independently inspects the
+ * candidate artifact, then uses screenshots as the authority for what the
+ * graph actually communicates. Task outcome correctness remains a separate
+ * grade.
+ */
+export const GRAPH_PRESENTATION_RUBRIC_V3 = {
+  ...SIMULATED_USER_RUBRIC_V1,
+  rubricVersion: "graph-presentation-rubric-v3",
+  ratingScale: {
+    1: "The user cannot reconstruct a meaningful handoff, or the presentation materially contradicts the artifact.",
+    2: "The result is partly understandable, but a material part of the problem, work, evidence, or limits is missing.",
+    3: "The user can understand the core problem, work, result, and evidence with only minor weaknesses.",
+    4: "The graph is a strong, concise, artifact-grounded handoff with no material comprehension gaps.",
+  },
+  subjects: {
+    ...SIMULATED_USER_RUBRIC_V1.subjects,
+    layer: {
+      ...SIMULATED_USER_RUBRIC_V1.subjects.layer,
+      criteria: {
+        ...SIMULATED_USER_RUBRIC_V1.subjects.layer.criteria,
+        coverage: {
+          label: "Contribution to the handoff",
+          description: "The layer covers the task-relevant information it should contribute, based on artifact evidence, including detail that should have been disclosed from its parent.",
+        },
+      },
+    },
+    node: {
+      ...SIMULATED_USER_RUBRIC_V1.subjects.node,
+      criteria: {
+        ...SIMULATED_USER_RUBRIC_V1.subjects.node.criteria,
+        substance: {
+          label: "Explanatory value",
+          description: "The node helps the user understand the problem, material work, result, evidence, or limitations. A status card is not substantive merely because it is dense or polished.",
+        },
+      },
+    },
+    turn: {
+      ...SIMULATED_USER_RUBRIC_V1.subjects.turn,
+      criteria: {
+        ...SIMULATED_USER_RUBRIC_V1.subjects.turn.criteria,
+        answer_quality: {
+          label: "Task-grounded handoff comprehension",
+          description: "Judge whether the graph lets the user understand the task or problem, the material work and reasoning, the result, and its evidence or limitations. Give material work the greatest importance. Inspect the artifact to learn what matters, but credit communication only when it is visible in the graph.",
+        },
+        recursive_coherence: {
+          label: "Recursive progressive disclosure",
+          description: "At every node, decide whether more detail or an action is none, helpful, or required. Penalize missing needed disclosure at its parent; recursively grade every expansion that exists.",
+        },
+      },
+    },
+  },
+} as const satisfies SimulatedUserRubricManifest;
 
 export interface RubricRatingValidationIssue {
   readonly code: "missing_rubric_key" | "unknown_rubric_key" | "invalid_rating";

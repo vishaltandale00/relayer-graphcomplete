@@ -145,9 +145,11 @@ export async function buildAcceptedReviewTopology({ turnId, rootLayerId, loadLay
       if (action.kind !== "invoke") throw new Error(`Unknown accepted action kind: ${action.kind}`);
       return base;
     });
+    const nodes = resolved.nodes.map((node) => ({ id: String(node.id), title: node.title, detail: node.detail }));
     layers.push({
       id: layerId,
       nodeIds: resolvedNodeIds,
+      ...(nodes.some((node) => typeof node.title === "string" || typeof node.detail === "string") ? { nodes } : {}),
       edgeIds: resolvedEdgeIds,
       actions,
     });
@@ -286,16 +288,20 @@ export function createLocalSimulatedUserJudgeRunner({
         record = await runJudge({
           executionId: String(context.execution.id),
           originalRequest: context.request.text,
-          configuration: selectedConfiguration,
+          configuration: { ...selectedConfiguration, rubric: context.rubric },
           controller,
           reviewStore: store,
-          workingDirectory: context.artifactDirectory,
+          workingDirectory: context.artifact?.workingDirectory ?? context.artifactDirectory,
+          artifact: context.artifact,
+          additionalDirectories: context.artifact?.workingDirectory === context.artifactDirectory
+            ? []
+            : [context.artifactDirectory],
         });
       } catch (error) {
         return persistJudgeArtifacts({
           context,
           configuration: selectedConfiguration,
-          rubric: DEFAULT_SIMULATED_USER_RUBRIC,
+          rubric: context.rubric ?? DEFAULT_SIMULATED_USER_RUBRIC,
           screenshots,
           sessionTrace: opened.session.trace(),
           toolTrace: [],
@@ -387,7 +393,6 @@ async function persistJudgeArtifacts({
   );
   return {
     status,
-    passed: status === "completed",
     rubricRef: artifacts.rubric,
     configurationRef: artifacts.configuration,
     interactionTraceRef: artifacts.interactionTrace,

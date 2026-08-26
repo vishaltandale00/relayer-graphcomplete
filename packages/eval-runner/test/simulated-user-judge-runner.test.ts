@@ -55,6 +55,11 @@ describe("simulated-user Codex judge runner", () => {
         RANDOM_SECRET: "must-not-leak",
       },
       workingDirectory: process.cwd(),
+      artifact: {
+        kind: "git_workspace",
+        workingDirectory: process.cwd(),
+        baseRevision: "base-commit",
+      },
       threadFactory: factory,
       mcpServer: { bearerToken: "test-token-with-at-least-24-characters" },
     });
@@ -88,7 +93,7 @@ describe("simulated-user Codex judge runner", () => {
       schemaVersion: 1,
       executionId: "execution-1",
       judge: { model: "gpt-test", modelReasoningEffort: "high" },
-      prompt: { version: "simulated-user-judge-prompt-v1" },
+      prompt: { version: "simulated-user-judge-prompt-v2" },
       rubric: { rubricVersion: "simulated-user-rubric-v1" },
       codexThreadId: "codex-thread-1",
       finalResponse: "Review submitted.",
@@ -105,6 +110,9 @@ describe("simulated-user Codex judge runner", () => {
     expect(result.prompt.text).toContain("root and expansion layers have no different rules");
     expect(result.prompt.text).toContain("Do not regrade the reference destination node by node");
     expect(result.prompt.text).toContain("Need is independent of execution");
+    expect(result.prompt.text).toContain("read-only shell and filesystem commands");
+    expect(result.prompt.text).toContain('"baseRevision": "base-commit"');
+    expect(result.prompt.text).toContain("The rubric is the contract");
     expect(result.codexTrace).toEqual([{ id: "message-1", type: "agent_message", text: "Review submitted." }]);
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.codexTrace)).toBe(true);
@@ -112,14 +120,22 @@ describe("simulated-user Codex judge runner", () => {
     expect(Object.isFrozen(result.review)).toBe(true);
   });
 
-  it("rejects shell, file, web, and non-review MCP activity in returned Codex traces", () => {
+  it("allows read-only shell evidence but rejects file, web, and non-review MCP activity", () => {
     const forbidden: ThreadItem[] = [
-      { id: "shell", type: "command_execution", command: "pwd", aggregated_output: "", exit_code: 0, status: "completed" },
       { id: "file", type: "file_change", changes: [{ path: "x", kind: "add" }], status: "completed" },
       { id: "web", type: "web_search", query: "anything" },
       { id: "mcp", type: "mcp_tool_call", server: "other", tool: "read", arguments: {}, status: "completed" },
     ];
     for (const item of forbidden) expect(() => assertReviewOnlyCodexTrace([item])).toThrow(/forbidden/i);
+
+    expect(() => assertReviewOnlyCodexTrace([{
+      id: "shell",
+      type: "command_execution",
+      command: "git diff --stat HEAD^",
+      aggregated_output: "src/file.ts | 2 ++",
+      exit_code: 0,
+      status: "completed",
+    }])).not.toThrow();
 
     expect(() => assertReviewOnlyCodexTrace([{
       id: "allowed",
@@ -170,6 +186,14 @@ function finalizedStore(): IncrementalReviewStore<LayerReview, NodeReview, TurnR
     evidence: { context: ["shot-layer"], detail: ["shot-node"] },
     ratings: { layer_fit: 4, title_detail_alignment: 4, substance: 4, detail_presentation: 4 },
     actions: [],
+    structure: {
+      rating: 4,
+      expansion: { need: "none", result: "absent" },
+      references: { need: "none", result: "absent" },
+      invoke: { need: "none", result: "absent" },
+      reason: "A flat node is sufficient.",
+      evidence: ["shot-node"],
+    },
     summary: "Useful.",
     findings: [],
   });
@@ -191,6 +215,11 @@ function finalizedStore(): IncrementalReviewStore<LayerReview, NodeReview, TurnR
       expansion: { need: "none", result: "absent" },
       references: { need: "none", result: "absent" },
       reason: "A flat response is sufficient.",
+      evidence: ["shot-layer"],
+    },
+    scoreCeiling: {
+      maximum: 4,
+      reason: "No critical comprehension gap exists.",
       evidence: ["shot-layer"],
     },
   });

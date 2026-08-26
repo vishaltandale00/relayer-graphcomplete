@@ -7,6 +7,7 @@ import {
 } from "../src/simulated-user/contracts.js";
 import {
   DEFAULT_SIMULATED_USER_RUBRIC,
+  GRAPH_PRESENTATION_RUBRIC_V3,
   SIMULATED_USER_RUBRIC_V1,
   getRubricCriterionKeys,
   validateRubricRatings,
@@ -85,6 +86,14 @@ describe("simulated-user judge contracts", () => {
         summary: "The destination is valuable, though the label is vague.",
         findings: [],
       }],
+      structure: {
+        rating: 4,
+        expansion: { need: "helpful", result: "works" },
+        references: { need: "none", result: "absent" },
+        invoke: { need: "none", result: "absent" },
+        reason: "The child action supplies useful depth.",
+        evidence: ["shot-17"],
+      },
       summary: "Useful content with a dense detail layout.",
       findings: [{
         type: "issue",
@@ -142,6 +151,15 @@ describe("recursive simulated-user rubric", () => {
       "presentation_quality",
       "follow_up_progress",
     ]);
+  });
+
+  it("defines artifact-grounded recursive presentation guidance in v3", () => {
+    expect(GRAPH_PRESENTATION_RUBRIC_V3.rubricVersion).toBe("graph-presentation-rubric-v3");
+    expect(GRAPH_PRESENTATION_RUBRIC_V3.subjects.node.criteria.substance.label).toBe("Explanatory value");
+    expect(GRAPH_PRESENTATION_RUBRIC_V3.subjects.turn.criteria.answer_quality.description)
+      .toContain("Inspect the artifact");
+    expect(GRAPH_PRESENTATION_RUBRIC_V3.subjects.turn.criteria.recursive_coherence.description)
+      .toContain("At every node");
   });
 
   it("reports missing, unknown, and invalid rating keys without inference", () => {

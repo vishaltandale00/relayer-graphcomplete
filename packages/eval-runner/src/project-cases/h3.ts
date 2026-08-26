@@ -6,6 +6,8 @@ import { spawn } from "node:child_process";
 import type { EvalCheck } from "../runtime-basic.js";
 
 export const H3_PROJECT_CASE_ID = "project.h3.sanitize-status-code";
+export const H3_AUTONOMOUS_FIX_CASE_ID = "autonomous.h3.sanitize-status-code";
+export const H3_AUTONOMOUS_INVESTIGATION_CASE_ID = "autonomous.h3.investigate-status-code";
 export const H3_REPOSITORY_URL = "https://github.com/h3js/h3.git";
 export const H3_UPSTREAM_COMMIT = "abd4d7725b70790481d7fb816eda9650472ca725";
 export const H3_UPSTREAM_TREE = "71fe6d55f98415d1eb0e3ca0cbc6e6ea071c9d97";
@@ -31,12 +33,12 @@ export interface ProjectEvalThreadDefinition {
   readonly permissionProfileId: "ask" | "auto" | "full";
   readonly mutationPolicy: "read-only" | "writable";
   readonly prompts: readonly string[];
-  readonly workspaceGrade: "question" | "diagnosis" | "implementation";
+  readonly workspaceGrade: "question" | "diagnosis" | "implementation" | "autonomous-implementation";
 }
 
 export interface ProjectEvalCaseDefinition {
   readonly schemaVersion: 1;
-  readonly id: typeof H3_PROJECT_CASE_ID;
+  readonly id: string;
   readonly name: string;
   readonly description: string;
   readonly localOnly: true;
@@ -52,6 +54,9 @@ export interface ProjectEvalCaseDefinition {
     readonly license: "MIT";
   };
   readonly threads: readonly ProjectEvalThreadDefinition[];
+  readonly autonomous?: true;
+  readonly category?: "coding" | "work";
+  readonly taskType?: "feature-change" | "debugging" | "investigation";
 }
 
 export const h3ProjectEvalCase: ProjectEvalCaseDefinition = Object.freeze({
@@ -103,6 +108,58 @@ export const h3ProjectEvalCase: ProjectEvalCaseDefinition = Object.freeze({
       prompts: Object.freeze([
         "Fix the diagnosed status-code validation bug in the smallest appropriate source boundary. Add focused regression coverage for decimal numbers and decimal numeric strings. Run relevant checks and create one meaningful local commit. Do not change dependencies, generated files, or unrelated code.",
         "Now strengthen the tests around the accepted 100–599 boundaries and numeric-string behavior. Confirm integer numeric strings remain accepted while decimal numeric strings fall back. Make any remaining substantive correction, run the relevant checks, and produce a second meaningful local commit. Keep changes limited to the sanitizer and its focused unit test, leave the tree clean, and do not deploy, publish, or push.",
+      ]),
+    }),
+  ]),
+});
+
+const H3_FIXTURE = h3ProjectEvalCase.fixture;
+
+export const h3AutonomousFixEvalCase: ProjectEvalCaseDefinition = Object.freeze({
+  schemaVersion: 1,
+  id: H3_AUTONOMOUS_FIX_CASE_ID,
+  name: "h3 · autonomous status-code repair",
+  description: "Repairs a seeded decimal status-code validation bug from a concise user request.",
+  localOnly: true,
+  supportedPlatform: "darwin",
+  autonomous: true,
+  category: "coding",
+  taskType: "debugging",
+  fixture: H3_FIXTURE,
+  threads: Object.freeze([
+    Object.freeze({
+      id: "implementation",
+      name: "Repair decimal status validation",
+      permissionProfileId: "full",
+      mutationPolicy: "writable",
+      workspaceGrade: "autonomous-implementation",
+      prompts: Object.freeze([
+        "Fix the decimal HTTP status validation bug in this checkout. Add focused regression coverage, run the relevant checks, and commit the repair. Keep the change scoped and do not push or publish anything.",
+      ]),
+    }),
+  ]),
+});
+
+export const h3AutonomousInvestigationEvalCase: ProjectEvalCaseDefinition = Object.freeze({
+  schemaVersion: 1,
+  id: H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
+  name: "h3 · autonomous status-code investigation",
+  description: "Investigates a production-shaped status-code failure without a curated diagnostic recipe.",
+  localOnly: true,
+  supportedPlatform: "darwin",
+  autonomous: true,
+  category: "work",
+  taskType: "investigation",
+  fixture: H3_FIXTURE,
+  threads: Object.freeze([
+    Object.freeze({
+      id: "investigation",
+      name: "Investigate invalid Response status",
+      permissionProfileId: "auto",
+      mutationPolicy: "read-only",
+      workspaceGrade: "diagnosis",
+      prompts: Object.freeze([
+        "A decimal HTTP status can make it through this checkout and later fail when a platform Response is constructed. Investigate the cause, identify the smallest responsible path and relevant tests, and explain how you verified the diagnosis. Do not modify the checkout.",
       ]),
     }),
   ]),
@@ -178,7 +235,9 @@ export async function gradeH3Workspace(options: {
   readonly runCommand?: CommandRunner;
 }): Promise<readonly EvalCheck[]> {
   const runCommand = options.runCommand ?? run;
-  if (options.grade === "implementation") return gradeImplementation(options.workspaceDirectory, runCommand);
+  if (options.grade === "implementation" || options.grade === "autonomous-implementation") {
+    return gradeImplementation(options.workspaceDirectory, runCommand, options.grade === "implementation" ? 2 : 1);
+  }
   const checks = await gradeReadOnly(options.workspaceDirectory, runCommand, options.grade);
   if (options.grade === "question") return checks;
   const hidden = await runHiddenStatusCheck(options.workspaceDirectory, runCommand);
@@ -284,7 +343,7 @@ async function gradeReadOnly(directory: string, runCommand: CommandRunner, grade
   ];
 }
 
-async function gradeImplementation(directory: string, runCommand: CommandRunner): Promise<readonly EvalCheck[]> {
+async function gradeImplementation(directory: string, runCommand: CommandRunner, minimumCommits: 1 | 2): Promise<readonly EvalCheck[]> {
   const hidden = await runHiddenStatusCheck(directory, runCommand);
   const build = await runCommand("corepack", [H3_PACKAGE_MANAGER, "run", "build"], { cwd: directory });
   const typecheck = await runCommand("corepack", [H3_PACKAGE_MANAGER, "run", "typecheck"], { cwd: directory });
@@ -319,8 +378,8 @@ async function gradeImplementation(directory: string, runCommand: CommandRunner)
       detail: "The sanitizer uses integer validation and focused tests cover number and numeric-string boundaries.",
     },
     {
-      name: "workspace:implementation-two-meaningful-commits",
-      passed: commits.length >= 2
+      name: `workspace:implementation-${minimumCommits === 1 ? "meaningful-commit" : "two-meaningful-commits"}`,
+      passed: commits.length >= minimumCommits
         && commitFiles.every((files) => files.length > 0 && files.every((file) => allowedFiles.has(file)))
         && commitFiles.some((files) => files.includes(H3_SEED_PATH))
         && commitFiles.some((files) => files.includes(H3_TEST_PATH)),

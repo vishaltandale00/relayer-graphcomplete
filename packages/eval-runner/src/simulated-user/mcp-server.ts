@@ -96,6 +96,10 @@ const findingSchema = z.discriminatedUnion("type", [
     evidence: z.array(screenshotReferenceSchema).min(1),
   }).strict(),
 ]);
+const structureDimensionSchema = z.object({
+  need: z.enum(["none", "helpful", "required"]),
+  result: z.enum(["absent", "works", "mixed", "fails"]),
+}).strict();
 
 const layerRatingsSchema = z.object({
   purpose_clarity: ratingSchema,
@@ -178,6 +182,14 @@ const nodeReviewSchema = z.object({
   ratings: nodeRatingsSchema,
   nullRatingJustifications: optionalJustifications(nodeRatingsSchema.shape),
   actions: z.array(z.discriminatedUnion("kind", [navigateActionReviewSchema, invokeActionReviewSchema])),
+  structure: z.object({
+    rating: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+    expansion: structureDimensionSchema,
+    references: structureDimensionSchema,
+    invoke: structureDimensionSchema,
+    reason: z.string().min(1),
+    evidence: z.array(screenshotReferenceSchema).min(1),
+  }).strict(),
   summary: z.string().min(1),
   findings: z.array(findingSchema),
 }).strict();
@@ -191,14 +203,13 @@ const turnReviewSchema = z.object({
   findings: z.array(findingSchema),
   structure: z.object({
     overall: z.enum(["helps", "neutral", "mixed", "hurts"]),
-    expansion: z.object({
-      need: z.enum(["none", "helpful", "required"]),
-      result: z.enum(["absent", "works", "mixed", "fails"]),
-    }).strict(),
-    references: z.object({
-      need: z.enum(["none", "helpful", "required"]),
-      result: z.enum(["absent", "works", "mixed", "fails"]),
-    }).strict(),
+    expansion: structureDimensionSchema,
+    references: structureDimensionSchema,
+    reason: z.string().min(1),
+    evidence: z.array(screenshotReferenceSchema).min(1),
+  }).strict(),
+  scoreCeiling: z.object({
+    maximum: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     reason: z.string().min(1),
     evidence: z.array(screenshotReferenceSchema).min(1),
   }).strict(),
@@ -349,7 +360,7 @@ function createMcpServer(
   }));
 
   server.registerTool("reviewNode", {
-    description: "Create or revise one node assessment, including every visible action on that node.",
+    description: "Create or revise one node assessment, including every visible action and whether expansion, reference, or invoke affordances are needed even when absent.",
     inputSchema: z.object({ review: nodeReviewSchema }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ review }) => traced(trace, now, "reviewNode", { review }, async () => {

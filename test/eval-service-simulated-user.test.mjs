@@ -3,8 +3,20 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  H3_AUTONOMOUS_FIX_CASE_ID,
+  H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
+  HTTPX_PROXY_AUTH_REPORT_CASE_ID,
+  OFETCH_RETRY_METHODS_CASE_ID,
+  SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
+  TRUE_MYTH_INSPECT_BOTH_CASE_ID,
+} from "@relayer/eval-runner";
 
-import { EvalService, resolveH3PermissionProfile } from "../desktop/eval-main/eval-service.mjs";
+import {
+  EvalService,
+  judgeArtifactForExecution,
+  resolveH3PermissionProfile,
+} from "../desktop/eval-main/eval-service.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const directories = [];
@@ -17,6 +29,19 @@ afterEach(async () => {
 });
 
 describe("EvalService simulated-user result persistence", () => {
+  it("grounds a project judge in the candidate workspace and seeded task base", () => {
+    expect(judgeArtifactForExecution({ fixture: {
+      workspaceDirectory: "/immutable/execution/workspace",
+      upstreamCommit: "upstream",
+      seededCommit: "seeded-task-base",
+    } })).toEqual({
+      kind: "git_workspace",
+      workingDirectory: "/immutable/execution/workspace",
+      baseRevision: "seeded-task-base",
+    });
+    expect(judgeArtifactForExecution({})).toBeUndefined();
+  });
+
   it("runs after deterministic checks and reloads the immutable completed artifact", async () => {
     const { stateFile, configurationPath } = await testPaths();
     globalThis.fetch = fakeAcceptedProduct();
@@ -49,6 +74,14 @@ describe("EvalService simulated-user result persistence", () => {
       "simulated-user",
       "simulated-user-sol-high",
     ]);
+    expect(service.catalog().cases.filter(({ caseSnapshot }) => caseSnapshot).map(({ id }) => id)).toEqual([
+      H3_AUTONOMOUS_FIX_CASE_ID,
+      H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
+      OFETCH_RETRY_METHODS_CASE_ID,
+      TRUE_MYTH_INSPECT_BOTH_CASE_ID,
+      SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
+      HTTPX_PROXY_AUTH_REPORT_CASE_ID,
+    ]);
     const created = await service.createRun(simulatedUserSelection());
     const completed = await waitForCompletedRun(service, created.id);
 
@@ -70,7 +103,7 @@ describe("EvalService simulated-user result persistence", () => {
         status: "accepted",
       },
       request: { followUp: false },
-      rubric: { rubricVersion: "simulated-user-rubric-v1" },
+      rubric: { rubricVersion: "graph-presentation-rubric-v3" },
       judgeConfiguration: { name: "simulated-user" },
     });
     expect(calls[0].request.text).toContain("incoming queue");
@@ -83,8 +116,8 @@ describe("EvalService simulated-user result persistence", () => {
         schemaVersion: 1,
         judge: "simulated-user",
         status: "completed",
-        passed: true,
-        rubricVersion: "simulated-user-rubric-v1",
+        passed: null,
+        rubricVersion: "graph-presentation-rubric-v3",
         judgeConfiguration: { name: "simulated-user" },
         artifactAuthority: "references",
         references: {
@@ -157,12 +190,13 @@ describe("EvalService simulated-user result persistence", () => {
     expect(partial.status).toBe("failed");
     expect(partial.executions[0]).toMatchObject({
       passed: false,
+      presentationGrade: { status: "partial", score: null },
       checks: expect.arrayContaining([expect.objectContaining({ passed: true })]),
       turns: [expect.objectContaining({
         deterministicPassed: true,
         judgeResults: [expect.objectContaining({
           status: "partial",
-          passed: false,
+          passed: null,
           error: "Node-detail capture failed.",
           references: {
             rubric: "rubric.json",
@@ -190,9 +224,46 @@ describe("EvalService simulated-user result persistence", () => {
     );
     expect(failed.executions[0].turns[0].judgeResults[0]).toMatchObject({
       status: "failed",
-      passed: false,
+      passed: null,
       error: "Judge process exited.",
     });
+  });
+
+  it("keeps presentation judging independent when an outcome gate fails", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    globalThis.fetch = fakeAcceptedProduct();
+    const runner = vi.fn(async () => ({
+      status: "completed",
+      passed: true,
+      rubricRef: "rubric.json",
+      configurationRef: "judge.json",
+      interactionTraceRef: "trace.json",
+      screenshotRefs: ["screenshots/root.json"],
+      reviewRef: "review.json",
+      coverageRef: "coverage.json",
+      review: { layers: [], inventory: { layers: [] } },
+      coverage: { complete: true, missingSubjects: [] },
+    }));
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      simulatedUserJudgeRunner: runner,
+    }).open();
+
+    const created = await service.createRun({
+      testCaseIds: ["empty-project.hierarchical-overview.single-turn"],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "simulated-user",
+    });
+    const completed = await waitForCompletedRun(service, created.id);
+    const execution = completed.executions[0];
+
+    expect(execution.outcomeGrade).toMatchObject({ status: "completed", qualified: false });
+    expect(execution.presentationGrade).toMatchObject({ status: "completed" });
+    expect(runner).toHaveBeenCalledOnce();
+    expect(execution.turns[0].deterministicPassed).toBe(false);
+    expect(execution.turns[0].judgeResults[0].status).toBe("completed");
   });
 
   it("converts a persisted in-flight judge artifact to an explicit partial result on restart", async () => {

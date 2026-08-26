@@ -74,6 +74,35 @@ function nodeReview(
 }
 
 describe("recursive simulated-user review state", () => {
+  it("forces required missing disclosure to lower both its parent and whole-turn ceiling", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-required",
+      rootLayerId: "layer-required",
+      layers: [{ id: "layer-required", nodeIds: ["node-required"], actions: [] }],
+    });
+    const store = new IncrementalReviewStore<TestLayerReview, TestNodeReview, TestTurnReview>({ inventory });
+    store.reviewLayer(layerReview("layer-required"));
+    const missingExpansion = {
+      expansion: { need: "required", result: "absent" },
+      references: { need: "none", result: "absent" },
+      invoke: { need: "none", result: "absent" },
+    } as const;
+    expect(() => store.reviewNode({
+      ...nodeReview("layer-required", "node-required"),
+      structure: { rating: 4, ...missingExpansion },
+    })).toThrow("cannot receive a recursive-disclosure rating above 2");
+    store.reviewNode({
+      ...nodeReview("layer-required", "node-required"),
+      structure: { rating: 2, ...missingExpansion },
+    });
+    expect(() => store.submitReview({
+      turnId: "turn-required",
+      evidence: ["shot-root"],
+      summary: "Missing required detail.",
+      scoreCeiling: { maximum: 4 },
+    })).toThrow("requires a whole-turn presentation ceiling of 2 or lower");
+  });
+
   it("recursively inventories expansion subjects but grades reference inclusion from its source action", () => {
     const inventory = inventoryReviewSubjects(topology);
 

@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 
 import {
   H3_PACKAGE_MANAGER,
+  H3_AUTONOMOUS_FIX_CASE_ID,
+  H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
   H3_PROJECT_CASE_ID,
   H3_REPOSITORY_URL,
   H3_SEEDED_COMMIT,
@@ -88,6 +90,21 @@ describe("Relayer Eval application service", () => {
       },
       workspaceGrader: async ({ grade }) => {
         workspaceGrades.push(grade);
+        if (grade === "autonomous-implementation") {
+          return [
+            "implementation-build",
+            "implementation-typecheck",
+            "implementation-hidden-decimal-check",
+            "implementation-focused-files",
+            "implementation-validation-boundary",
+            "implementation-meaningful-commit",
+            "implementation-clean",
+          ].map((name) => ({ name: `workspace:${name}`, passed: true, detail: `${name} passed.` }));
+        }
+        if (grade === "diagnosis") {
+          return ["diagnosis-baseline-head", "diagnosis-zero-diff", "diagnosis-reproduces-seeded-failure"]
+            .map((name) => ({ name: `workspace:${name}`, passed: true, detail: `${name} passed.` }));
+        }
         return [{ name: `workspace:${grade}`, passed: true, detail: `${grade} policy passed.` }];
       },
       acceptedTopologyGrader: (topology, { requireGrandchild = false } = {}) => {
@@ -245,6 +262,26 @@ describe("Relayer Eval application service", () => {
     expect(new Set(h3Threads.map((threadDetail) => threadDetail.thread.projectId)).size).toBe(1);
     expect(h3Threads.every((threadDetail) => threadDetail.interactions.length === 2)).toBe(true);
     expect(h3Threads.map((threadDetail) => threadDetail.thread.permissionProfileId)).toEqual(["ask", "auto", "full"]);
+
+    const autonomousCreated = await evalService.createRun({
+      testCaseIds: [H3_AUTONOMOUS_FIX_CASE_ID, H3_AUTONOMOUS_INVESTIGATION_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const autonomousCompleted = await waitForCompletedRun(evalService, autonomousCreated.id);
+    expect(autonomousCompleted.executions).toHaveLength(2);
+    expect(autonomousCompleted.executions.every((execution) => execution.lifecycle.status === "complete")).toBe(true);
+    expect(autonomousCompleted.executions.every((execution) => execution.turns.length === 1)).toBe(true);
+    expect(autonomousCompleted.executions.every((execution) => execution.caseSnapshotDigest.startsWith("sha256:"))).toBe(true);
+    expect(autonomousCompleted.executions.every((execution) => execution.caseSnapshot.artifacts.reference.sealedPath === undefined)).toBe(true);
+    expect(autonomousCompleted.executions.every((execution) => execution.outcomeGrade.status === "partial")).toBe(true);
+    expect(autonomousCompleted.executions.map((execution) => execution.outcomeGrade.qualified)).toEqual([true, true]);
+    expect(autonomousCompleted.executions.every((execution) => execution.outcomeGrade.score === null)).toBe(true);
+    expect(autonomousCompleted.executions.map((execution) => execution.outcomeGrade.mandatoryGates.map((gate) => gate.gateId))).toEqual([
+      ["hidden-decimal-behavior", "focused-regression-suite", "scoped-clean-commit"],
+      ["read-only-workspace", "independent-reproduction"],
+    ]);
+    expect(autonomousCompleted.executions.every((execution) => execution.presentationGrade.status === "unjudged")).toBe(true);
   }, 20_000);
 });
 

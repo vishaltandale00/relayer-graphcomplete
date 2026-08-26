@@ -180,5 +180,25 @@ describe("h3 deterministic workspace grading", () => {
       "workspace:implementation-clean",
     ]);
     expect(checks.every((check) => check.passed)).toBe(true);
+
+    const autonomousRunCommand: CommandRunner = async (command, args) => {
+      if (command === "node" || command === "corepack") return { exitCode: 0, stdout: "ok", stderr: "" };
+      if (command === "git" && args[0] === "status") return { exitCode: 0, stdout: "", stderr: "" };
+      if (command === "git" && args[0] === "rev-list") return { exitCode: 0, stdout: "one-autonomous-commit\n", stderr: "" };
+      if (command === "git" && args[0] === "diff" && args[1] === "--name-only") {
+        return { exitCode: 0, stdout: `${H3_SEED_PATH}\n${H3_TEST_PATH}\n`, stderr: "" };
+      }
+      if (command === "git" && args[0] === "diff-tree") {
+        return { exitCode: 0, stdout: `${H3_SEED_PATH}\n${H3_TEST_PATH}\n`, stderr: "" };
+      }
+      throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+    };
+    const autonomousChecks = await gradeH3Workspace({
+      workspaceDirectory: root,
+      grade: "autonomous-implementation",
+      runCommand: autonomousRunCommand,
+    });
+    expect(autonomousChecks.find((check) => check.name === "workspace:implementation-meaningful-commit")?.passed).toBe(true);
+    expect(autonomousChecks.every((check) => check.passed)).toBe(true);
   });
 });

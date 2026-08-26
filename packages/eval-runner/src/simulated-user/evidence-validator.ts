@@ -101,6 +101,13 @@ export function validateScreenshotEvidence(
         (shot) => lowerReviewEvidence.has(shot.screenshotId),
         "Structure evidence must cite completed current-turn lower-subject reviews",
       );
+      collector.requireNonEmpty(request.review.scoreCeiling.evidence, ["scoreCeiling", "evidence"]);
+      collector.references(
+        request.review.scoreCeiling.evidence,
+        ["scoreCeiling", "evidence"],
+        (shot) => lowerReviewEvidence.has(shot.screenshotId),
+        "Score-ceiling evidence must cite completed current-turn lower-subject reviews",
+      );
       collector.findings(
         request.review.findings,
         ["findings"],
@@ -142,6 +149,14 @@ function validateNodeEvidence(
     (shot) => shot.layerId === subject.layerId
       && (shot.selectedNodeId === null || shot.selectedNodeId === subject.nodeId),
     `Node findings must cite node ${subject.nodeId} or its layer context`,
+  );
+  collector.requireNonEmpty(review.structure.evidence, ["structure", "evidence"]);
+  collector.references(
+    review.structure.evidence,
+    ["structure", "evidence"],
+    (shot) => shot.layerId === subject.layerId
+      && (shot.selectedNodeId === null || shot.selectedNodeId === subject.nodeId),
+    `Node structure evidence must cite node ${subject.nodeId} or its layer context`,
   );
 
   review.actions.forEach((action, index) => {
@@ -226,6 +241,7 @@ function collectLowerReviewEvidence(
   for (const review of nodeReviews) {
     add(review.evidence.context);
     add(review.evidence.detail);
+    add(review.structure.evidence);
     for (const finding of review.findings) add(finding.evidence);
     for (const action of review.actions) {
       add(action.evidence.source);

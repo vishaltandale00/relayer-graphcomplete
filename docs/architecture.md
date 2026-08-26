@@ -144,6 +144,20 @@ The default and opt-in live evals start from an empty temporary folder and run t
 1. deterministic graph-contract checks; and
 2. a fresh structured Codex judge that scores six declared task-system facts plus graph and detail usefulness.
 
+Project-case presentation judging runs in the candidate workspace under a read-only,
+network-disabled sandbox. The judge receives the original request and immutable
+artifact coordinates, including the task's base Git revision, and may inspect the
+workspace with ordinary read-only shell and Git commands. Its rubric remains the
+investigation contract: artifact evidence establishes what work matters, while
+captured production-workspace screenshots are the sole evidence for what the graph
+communicates. Every reachable expansion layer is reviewed recursively. Each parent
+node records whether expansion, reference, or invoke affordances were absent,
+helpful, or required so missing disclosure is penalized at the parent rather than
+escaping review because no child exists. Presentation scoring combines whole-turn
+handoff comprehension with depth-decayed layer and node experience; explicit
+critical-omission ceilings are applied afterward. Judge lifecycle completion is
+recorded independently from both task-outcome qualification and presentation score.
+
 The Eval application's deterministic graph-contract judge scores only durable graph structure; it does not use phrase matching as a semantic proxy. A separate hierarchical-overview case checks for a useful node-level navigate action so navigation capability is measured without requiring artificial child layers in every answer.
 
 The runner input is a test-run ID, selected test-case IDs, selected harness-configuration names, and one judge configuration. At the CLI boundary, configuration names resolve to validated snapshots. The runner expands their Cartesian product into executions identified by `(testRunId, testCaseId, harnessConfigurationName)` and passes each resolved `HarnessConfiguration` into case execution. Every execution artifact stores that exact snapshot and its canonical SHA-256 digest. Two configurations may select the same implementation; that is ordinary run selection, not a harness-specific case or matrix.

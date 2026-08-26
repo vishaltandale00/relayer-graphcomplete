@@ -30,10 +30,17 @@ export interface NodeReviewRecord {
   readonly layerId: ReviewSubjectId;
   readonly nodeId: ReviewSubjectId;
   readonly actions: readonly NodeActionReviewRecord[];
+  readonly structure?: {
+    readonly rating: 1 | 2 | 3 | 4;
+    readonly expansion: { readonly need: string; readonly result: string };
+    readonly references: { readonly need: string; readonly result: string };
+    readonly invoke: { readonly need: string; readonly result: string };
+  };
 }
 
 export interface TurnReviewRecord {
   readonly turnId: ReviewSubjectId;
+  readonly scoreCeiling?: { readonly maximum: 1 | 2 | 3 | 4 };
 }
 
 export interface ReviewRevision<Review> {
@@ -182,6 +189,7 @@ export class IncrementalReviewStore<
     }
     const actionSubjects = this.#actionSubjects.get(key)!;
     validateNestedActionReviews(review.actions, actionSubjects);
+    validateRecursiveDisclosure(review);
     const savedReview = immutableClone(review);
     this.#validateEvidence?.({ kind: "node", subject, actionSubjects, review: savedReview });
     const revision = appendRevision(this.#nodes, key, savedReview);
@@ -225,6 +233,7 @@ export class IncrementalReviewStore<
 
     const missing = computeReviewCoverage(this.inventory, this.#coverageState(true)).missingSubjects;
     if (missing.length > 0) throw new MissingReviewSubjectsError(missing);
+    validateRequiredDisclosureCeiling(review, [...this.#nodes.values()].map((history) => history.current));
 
     const savedReview = immutableClone(review);
     this.#validateEvidence?.({
@@ -278,6 +287,42 @@ function validateNestedActionReviews(
         `Action review ${formatId(review.actionId)} has kind ${review.kind}; expected ${subject.actionKind}`,
       );
     }
+  }
+}
+
+function validateRecursiveDisclosure(review: NodeReviewRecord): void {
+  if (review.structure === undefined) return;
+  const dimensions = [review.structure.expansion, review.structure.references, review.structure.invoke];
+  if (dimensions.some((dimension) => dimension.need === "required" && ["absent", "fails"].includes(dimension.result))) {
+    if (review.structure.rating > 2) {
+      throw new Error("A node with required missing disclosure cannot receive a recursive-disclosure rating above 2");
+    }
+  } else if (dimensions.some((dimension) => dimension.need === "required" && dimension.result === "mixed")) {
+    if (review.structure.rating > 3) {
+      throw new Error("A node with mixed required disclosure cannot receive a recursive-disclosure rating above 3");
+    }
+  }
+}
+
+function validateRequiredDisclosureCeiling<TurnReview extends TurnReviewRecord, NodeReview extends NodeReviewRecord>(
+  review: TurnReview,
+  nodes: readonly NodeReview[],
+): void {
+  if (review.scoreCeiling === undefined) return;
+  const dimensions = nodes.flatMap((node) => node.structure === undefined
+    ? []
+    : [node.structure.expansion, node.structure.references, node.structure.invoke]);
+  if (
+    dimensions.some((dimension) => dimension.need === "required" && ["absent", "fails"].includes(dimension.result))
+    && review.scoreCeiling.maximum > 2
+  ) {
+    throw new Error("Required missing node disclosure requires a whole-turn presentation ceiling of 2 or lower");
+  }
+  if (
+    dimensions.some((dimension) => dimension.need === "required" && dimension.result === "mixed")
+    && review.scoreCeiling.maximum > 3
+  ) {
+    throw new Error("Mixed required node disclosure requires a whole-turn presentation ceiling of 3 or lower");
   }
 }
 

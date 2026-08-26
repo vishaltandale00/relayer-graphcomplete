@@ -285,6 +285,14 @@ function validNodeReview(): NodeReview {
     evidence: { context: ["shot-layer"], detail: ["shot-node"] },
     ratings: { layer_fit: 4, title_detail_alignment: 4, substance: 4, detail_presentation: 4 },
     actions: [],
+    structure: {
+      rating: 4,
+      expansion: { need: "none", result: "absent" },
+      references: { need: "none", result: "absent" },
+      invoke: { need: "none", result: "absent" },
+      reason: "A flat node is sufficient.",
+      evidence: ["shot-node"],
+    },
     summary: "Useful and clear.",
     findings: [],
   };
@@ -309,6 +317,11 @@ function validTurnReview(): TurnReview {
       expansion: { need: "none", result: "absent" },
       references: { need: "none", result: "absent" },
       reason: "A flat response is sufficient.",
+      evidence: ["shot-layer"],
+    },
+    scoreCeiling: {
+      maximum: 4,
+      reason: "No critical comprehension gap exists.",
       evidence: ["shot-layer"],
     },
   };

@@ -250,6 +250,11 @@ describe("local Electron simulated-user judge adapter", () => {
           reason: "The child layer adds useful detail.",
           evidence: ["shot-root-context", "shot-child-context"],
         },
+        scoreCeiling: {
+          maximum: 4,
+          reason: "No critical comprehension gap exists.",
+          evidence: ["shot-root-context", "shot-child-context"],
+        },
       });
       return {
         rubric: DEFAULT_SIMULATED_USER_RUBRIC,
@@ -263,6 +268,11 @@ describe("local Electron simulated-user judge adapter", () => {
     const result = await runner({
       artifactDirectory,
       execution: { id: "execution-1" },
+      artifact: {
+        kind: "git_workspace",
+        workingDirectory: artifactDirectory,
+        baseRevision: "base-commit",
+      },
       thread: { id: "7" },
       turn: { id: "41", rootLayerId: "10" },
       request: {
@@ -282,13 +292,16 @@ describe("local Electron simulated-user judge adapter", () => {
       artifactDirectory: screenshotDirectory,
     }));
     expect(runJudge).toHaveBeenCalledTimes(1);
+    expect(runJudge).toHaveBeenCalledWith(expect.objectContaining({
+      workingDirectory: artifactDirectory,
+      artifact: expect.objectContaining({ kind: "git_workspace", baseRevision: "base-commit" }),
+    }));
     expect(session.screenshot).toHaveBeenCalledTimes(5);
     expect(session.interact).toHaveBeenCalledTimes(1);
     expect(session.history).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledWith({ close: true });
     expect(result).toMatchObject({
       status: "completed",
-      passed: true,
       rubricRef: "rubric.json",
       configurationRef: "judge-configuration.json",
       interactionTraceRef: "interaction-trace.json",
@@ -476,6 +489,14 @@ function nodeReview({ layerId, nodeId, context, detail, actions }) {
       detail_presentation: 4,
     },
     actions,
+    structure: {
+      rating: 4,
+      expansion: { need: actions.some((action) => action.kind === "navigate") ? "helpful" : "none", result: actions.some((action) => action.kind === "navigate") ? "works" : "absent" },
+      references: { need: "none", result: "absent" },
+      invoke: { need: actions.some((action) => action.kind === "invoke") ? "helpful" : "none", result: actions.some((action) => action.kind === "invoke") ? "works" : "absent" },
+      reason: "The node's recursive affordances were assessed.",
+      evidence: [detail],
+    },
     summary: "Useful node.",
     findings: [],
   };
