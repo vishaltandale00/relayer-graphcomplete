@@ -1706,6 +1706,7 @@ function isReadOnlyInspectionCommand(action, authority) {
       "--hidden", "--no-ignore",
     ]);
     const safeValueFlags = new Set(["-g", "--glob"]);
+    const safeNumericValueFlags = new Set(["-C", "--context"]);
     let optionsEnded = false;
     const operands = [];
     for (let index = 0; index < args.length; index += 1) {
@@ -1720,7 +1721,14 @@ function isReadOnlyInspectionCommand(action, authority) {
           index += 1;
           continue;
         }
+        if (safeNumericValueFlags.has(argument)) {
+          const value = args[index + 1];
+          if (value === undefined || !/^\d+$/.test(value)) return false;
+          index += 1;
+          continue;
+        }
         if (argument.startsWith("--glob=") && argument.length > "--glob=".length) continue;
+        if (/^--context=\d+$/.test(argument)) continue;
         return false;
       } else {
         if (argument === "") return false;

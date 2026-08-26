@@ -2383,6 +2383,25 @@ describe("evidence capture integrity", () => {
     ], inspectionAuthority)).toBe(0);
   });
 
+  it("accepts numeric context output for authenticated pinned ripgrep inspection", () => {
+    const actions = [authenticatedInspectionAction(`${PINNED_RG} -n -C 3 needle ${INSPECTION_ROOT}/dist/index.js`)];
+    const event = {
+      type: "provider.event",
+      data: { method: "item/started", params: { item: { id: "context-read", type: "commandExecution", command: actions[0].command, commandActions: actions } } },
+    };
+    expect(validatePinnedGraphAuthoringCommands([event], inspectionAuthority)).toBe(0);
+  });
+
+  it.each(["-C", "-C nope", "--context=all"])("rejects invalid pinned ripgrep context option %s", (contextOption) => {
+    const command = `${PINNED_RG} -n ${contextOption} needle ${INSPECTION_ROOT}/dist/index.js`;
+    const action = authenticatedInspectionAction(command);
+    const event = {
+      type: "provider.event",
+      data: { method: "item/started", params: { item: { id: "invalid-context", type: "commandExecution", command, commandActions: [action] } } },
+    };
+    expect(() => validatePinnedGraphAuthoringCommands([event], inspectionAuthority)).toThrow("inspect source read-only");
+  });
+
   it("rejects inspection operands from a raw temp root that collides after redaction", () => {
     const command = `${PINNED_RG} -n needle ${INSPECTION_ROOT}/dist/index.js`;
     const collidingRaw = command
