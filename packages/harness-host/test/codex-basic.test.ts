@@ -555,10 +555,10 @@ describe("CodexBasicHarness", () => {
     }
   });
 
-  it("binds the graph-authoring launcher before trace redaction", async () => {
+  it.each(["quoted", "unquoted"])("binds the %s graph-authoring launcher before trace redaction", async (form) => {
     const trace = recordingTrace();
     const launcher = "/private/var/folders/xy/private-token/T/runtime-snapshot/graph-authoring-launcher";
-    const command = `${JSON.stringify(launcher)} <<'EOF'\nawait graph.submit(1);\nEOF`;
+    const command = `${form === "quoted" ? JSON.stringify(launcher) : launcher} <<'EOF'\nawait graph.submit(1);\nEOF`;
     const harness = harnessFixture("auto", async (options) => {
       options.onThreadId("streamed-thread");
       options.onNotification?.("item/started", { item: {

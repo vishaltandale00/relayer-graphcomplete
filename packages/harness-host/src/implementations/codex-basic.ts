@@ -397,10 +397,11 @@ function attachCommandExecutableAuthority(redactedParams: JsonValue, rawParams: 
 
 function pinnedGraphAuthoringLauncher(command: unknown): string | undefined {
   if (typeof command !== "string") return undefined;
-  const match = /^("[^"\r\n]+") <<'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\r?\n/.exec(command.trim());
+  const match = /^("[^"\r\n]+"|\/[A-Za-z0-9._/@+-]+) <<'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\r?\n/.exec(command.trim());
   if (!match) return undefined;
   try {
-    const launcher = JSON.parse(match[1] ?? "null");
+    const encodedLauncher = match[1] ?? "";
+    const launcher = encodedLauncher.startsWith('"') ? JSON.parse(encodedLauncher) : encodedLauncher;
     return typeof launcher === "string" && /^\/[A-Za-z0-9._/@+-]+$/.test(launcher) ? launcher : undefined;
   } catch {
     return undefined;
