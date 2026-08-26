@@ -167,14 +167,14 @@ describe("Codex approval bridge", () => {
     }), context)).resolves.toEqual({ decision: "decline" });
   });
 
-  it("recognizes the exact pinned launcher from Codex's sole zsh display wrapper before command actions arrive", async () => {
+  it.each(["-c", "-lc"])("recognizes the exact pinned launcher from Codex's sole zsh %s display wrapper before command actions arrive", async (flag) => {
     const fixture = bridgeFixture("deny");
     const launcher = "/immutable/runtime/graph-authoring-launcher";
     const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
     const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
     fixture.items.set("item-1", {
       ...commandItem(),
-      command: `/bin/zsh -lc ${JSON.stringify(command)}`,
+      command: `/bin/zsh ${flag} ${JSON.stringify(command)}`,
     });
 
     await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
@@ -184,7 +184,7 @@ describe("Codex approval bridge", () => {
 
     fixture.items.set("item-1", {
       ...commandItem(),
-      command: `/bin/zsh -lc ${JSON.stringify(command)}; echo escaped`,
+      command: `/bin/zsh ${flag} ${JSON.stringify(command)}; echo escaped`,
     });
     await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
       threadId: "thread-1", turnId: "turn-1", itemId: "item-1", cwd: "/workspace/project",
