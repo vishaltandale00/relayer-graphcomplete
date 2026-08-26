@@ -334,6 +334,7 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
   const trustedCommand = trustedGraphAuthoringCommand(
     item,
     optionalString(params.command),
+    params.commandActions,
     context.trustedGraphAuthoringLauncher,
   );
   const trustedCwd = optionalString(params.cwd) ?? string(item.cwd);
@@ -454,6 +455,7 @@ export function isExactGraphAuthoringLauncherCommand(command: string, launcherPa
 function trustedGraphAuthoringCommand(
   item: JsonObject,
   requestCommand: string | undefined,
+  requestActionsValue: unknown,
   launcherPath: string | undefined,
 ): string | undefined {
   if (launcherPath === undefined) return undefined;
@@ -461,9 +463,15 @@ function trustedGraphAuthoringCommand(
   const wrappedCommand = itemCommand === undefined ? undefined : exactZshLoginCommand(itemCommand);
   const actions = Array.isArray(item.commandActions) ? item.commandActions : undefined;
   if (actions !== undefined && actions.length !== 1) return undefined;
+  const requestActions = requestActionsValue === null || requestActionsValue === undefined
+    ? undefined
+    : Array.isArray(requestActionsValue) ? requestActionsValue : null;
+  if (requestActions === null || (requestActions !== undefined && requestActions.length !== 1)) return undefined;
   const action = actions?.length === 1 ? record(actions[0]) : undefined;
   const actionCommand = action === undefined ? undefined : string(action.command);
-  return [requestCommand, actionCommand, wrappedCommand, itemCommand].find((command) => (
+  const requestAction = requestActions?.length === 1 ? record(requestActions[0]) : undefined;
+  const requestActionCommand = requestAction === undefined ? undefined : string(requestAction.command);
+  return [requestActionCommand, requestCommand, actionCommand, wrappedCommand, itemCommand].find((command) => (
     command !== undefined && isExactGraphAuthoringLauncherCommand(command, launcherPath)
   ));
 }

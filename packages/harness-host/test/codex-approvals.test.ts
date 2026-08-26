@@ -191,6 +191,25 @@ describe("Codex approval bridge", () => {
     }), context)).resolves.toEqual({ decision: "decline" });
   });
 
+  it("recognizes the exact pinned launcher from the approval request's sole command action", async () => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", { ...commandItem(), command: "/bin/zsh -c <redacted>" });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", cwd: "/workspace/project",
+      commandActions: [{ type: "unknown", command }],
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", cwd: "/workspace/project",
+      commandActions: [{ type: "unknown", command }, { type: "unknown", command: "echo escaped" }],
+    }), context)).resolves.toEqual({ decision: "decline" });
+  });
+
   it("derives one exact key per proposed file path and change kind", async () => {
     const fixture = bridgeFixture("approve_always");
     fixture.items.set("file-1", {
