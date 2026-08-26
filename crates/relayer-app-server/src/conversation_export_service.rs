@@ -17,8 +17,8 @@ use crate::{
         MAX_JSONL_LINE_BYTES, validate_export_records,
     },
     product::{
-        ActionInvocation, DurableInteractionInput, Interaction, InteractionContextIntent,
-        InteractionId, ProductError, ProductService, ThreadId,
+        ActionInvocation, DurableInteractionInput, Interaction, InteractionId, ProductError,
+        ProductService, ThreadId,
     },
     runtime::{RuntimeClient, RuntimeError},
 };
@@ -133,12 +133,9 @@ pub(crate) async fn build_conversation_export(
                 input: runtime.interaction_input(node_id).await?,
                 actions: runtime.interaction_context_actions(node_id).await?,
             })),
-            None => match durable_input.filter(|input| !input.contexts.is_empty()) {
-                Some(input) => Some(ContextInput::Durable(
-                    materialize_durable_contexts(runtime, input).await?,
-                )),
-                None => None,
-            },
+            None => durable_input
+                .filter(|input| !input.contexts.is_empty())
+                .map(ContextInput::Durable),
         };
         context_inputs.push(context_input);
     }
@@ -269,61 +266,7 @@ struct RuntimeContextInput {
 
 enum ContextInput {
     Runtime(RuntimeContextInput),
-    Durable(DurableContextInput),
-}
-
-struct DurableContextInput {
-    contexts: Vec<DurableContext>,
-}
-
-struct DurableContext {
-    intent: InteractionContextIntent,
-    target_node: GraphNode,
-}
-
-async fn materialize_durable_contexts(
-    runtime: &RuntimeClient,
-    input: DurableInteractionInput,
-) -> Result<DurableContextInput, ConversationExportBuildError> {
-    let mut contexts = Vec::with_capacity(input.contexts.len());
-    for intent in input.contexts {
-        let layer: ResolvedLayer = serde_json::from_value(
-            runtime
-                .get_layer(
-                    intent.target.source_interaction_node_id,
-                    intent.target.source_layer_id,
-                )
-                .await?,
-        )?;
-        if layer.layer.id.value() != intent.target.source_layer_id
-            || !layer
-                .layer
-                .nodes
-                .iter()
-                .any(|node_id| node_id.value() == intent.target.node_id)
-        {
-            return Err(ConversationExportBuildError::Invalid(format!(
-                "durable context target {} is outside source layer {}",
-                intent.target.node_id, intent.target.source_layer_id
-            )));
-        }
-        let target_node = layer
-            .nodes
-            .into_iter()
-            .find(|node| node.id.value() == intent.target.node_id)
-            .ok_or_else(|| {
-                ConversationExportBuildError::Invalid(format!(
-                    "durable context target {} is missing from source layer {}",
-                    intent.target.node_id, intent.target.source_layer_id
-                ))
-            })?;
-        ensure_accepted(target_node.state, "context target", target_node.id.value())?;
-        contexts.push(DurableContext {
-            intent,
-            target_node,
-        });
-    }
-    Ok(DurableContextInput { contexts })
+    Durable(DurableInteractionInput),
 }
 
 struct TurnExportContext<'a> {
@@ -377,11 +320,7 @@ fn export_turn(
         ids,
         redactor,
     )?;
-    let interaction_node_id = match interaction.graph_node_id {
-        Some(node_id) => Some(ids.node(node_id)),
-        None if !contexts.is_empty() => Some(ids.fresh_node()),
-        None => None,
-    };
+    let interaction_node_id = interaction.graph_node_id.map(|node_id| ids.node(node_id));
     let origin = match invocation {
         Some(invocation) => {
             let source_action_id = ids.action.get(&invocation.action_id).cloned().ok_or_else(|| {
@@ -493,34 +432,11 @@ fn export_contexts(
                 interaction.id
             )));
         }
-        return durable
-            .contexts
-            .iter()
-            .map(|context| {
-                Ok(ExportInteractionContext {
-                    id: ids.fresh_action(),
-                    target: ExportContextTargetSnapshot {
-                        id: ids.node(context.target_node.id.value()),
-                        kind: redactor.text(&context.target_node.kind),
-                        icon: redactor.text(&context.target_node.icon),
-                        title: redactor.text(&context.target_node.title),
-                        detail: redactor.text(&context.target_node.detail),
-                        state: ExportRecordState::Accepted,
-                    },
-                    source: ExportContextSource {
-                        interaction_node_id: ids
-                            .node(context.intent.target.source_interaction_node_id),
-                        layer_id: ids.layer(context.intent.target.source_layer_id),
-                    },
-                    annotations: context
-                        .intent
-                        .annotations
-                        .iter()
-                        .map(|annotation| redactor.text(annotation))
-                        .collect(),
-                })
-            })
-            .collect();
+        return Err(ConversationExportBuildError::Invalid(format!(
+            "interaction {} has {} durable context attachment(s) whose graph authority is not yet bound; retry export after interaction recovery",
+            interaction.id,
+            durable.contexts.len()
+        )));
     };
     if runtime.input.interaction.id.value() != interaction.graph_node_id.unwrap_or_default()
         || runtime.input.contexts.len() != runtime.actions.len()
@@ -915,20 +831,6 @@ impl PortableIds {
     fn action(&mut self, raw: i64) -> String {
         next_id(&mut self.action, raw, "action")
     }
-    fn fresh_node(&mut self) -> String {
-        let mut raw = -1;
-        while self.node.contains_key(&raw) {
-            raw -= 1;
-        }
-        next_id(&mut self.node, raw, "node")
-    }
-    fn fresh_action(&mut self) -> String {
-        let mut raw = -1;
-        while self.action.contains_key(&raw) {
-            raw -= 1;
-        }
-        next_id(&mut self.action, raw, "action")
-    }
 
     fn bind_node(
         &mut self,
@@ -989,14 +891,13 @@ fn next_id(ids: &mut HashMap<i64, String>, raw: i64, kind: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ContextInput, DurableContext, DurableContextInput, ImportedExportContext, PortableIds,
-        ProjectPathRedactor, RuntimeContextInput, TurnExportContext, completion_status,
-        export_action, export_contexts, export_turn,
+        ContextInput, ImportedExportContext, PortableIds, ProjectPathRedactor, RuntimeContextInput,
+        TurnExportContext, completion_status, export_action, export_contexts, export_turn,
     };
     use crate::{
         conversation_export::{ExportCompletionStatus, ExportTurnOrigin},
         product::{
-            ActionInvocation, Interaction, InteractionContextIntent,
+            ActionInvocation, DurableInteractionInput, Interaction, InteractionContextIntent,
             InteractionContextTarget as ProductInteractionContextTarget, InteractionId, ThreadId,
         },
     };
@@ -1096,7 +997,7 @@ mod tests {
     }
 
     #[test]
-    fn exports_unbound_durable_contexts_with_materialized_target_snapshots() {
+    fn rejects_unbound_durable_contexts_until_graph_authority_is_bound() {
         let interaction = Interaction {
             id: InteractionId::from_database(8),
             thread_id: ThreadId::from_database(1),
@@ -1114,61 +1015,41 @@ mod tests {
             completion_output: None,
             completion_error: None,
         };
-        let durable = ContextInput::Durable(DurableContextInput {
-            contexts: vec![DurableContext {
-                intent: InteractionContextIntent {
-                    target: ProductInteractionContextTarget {
-                        node_id: 20,
-                        source_interaction_node_id: 40,
-                        source_layer_id: 50,
-                    },
-                    annotations: vec!["Compare /workspace/project/private.txt".into()],
+        // Unbound durable intent has not passed graph core's accepted-reachability and scope
+        // checks. Reject all such targets, including cross-project, unreachable, or nonaccepted
+        // occurrences, rather than trying to infer authority from caller-supplied IDs.
+        let durable = ContextInput::Durable(DurableInteractionInput {
+            input_identity: "send-unbound".into(),
+            input_digest: "sha256:unbound".into(),
+            contexts: vec![InteractionContextIntent {
+                target: ProductInteractionContextTarget {
+                    node_id: 20,
+                    source_interaction_node_id: 40,
+                    source_layer_id: 50,
                 },
-                target_node: GraphNode {
-                    id: NodeId::new(20).unwrap(),
-                    kind: "concept".into(),
-                    icon: "file".into(),
-                    title: "Target".into(),
-                    detail: "Stored at /workspace/project/private.txt".into(),
-                    state: RecordState::Accepted,
-                    leased_action_id: None,
-                },
+                annotations: vec!["Compare /workspace/project/private.txt".into()],
             }],
         });
 
-        let exported = export_turn(
+        let error = export_contexts(
             &interaction,
-            TurnExportContext {
-                closure: None,
-                context_input: Some(&durable),
-                invocation: None,
-                imported: ImportedExportContext {
-                    turn: None,
-                    turn_sequences: &Default::default(),
-                },
-                turn_sequences: &[(interaction.id, interaction.sequence)]
-                    .into_iter()
-                    .collect(),
-                redactor: &ProjectPathRedactor::new(Some("/workspace/project")),
-            },
+            Some(&durable),
+            None,
             &mut PortableIds::default(),
+            &ProjectPathRedactor::new(Some("/workspace/project")),
         )
-        .unwrap();
+        .unwrap_err();
 
-        assert_eq!(exported.interaction_node_id.as_deref(), Some("node:3"));
-        assert_eq!(exported.contexts.len(), 1);
-        assert_eq!(exported.contexts[0].id, "action:1");
-        assert_eq!(exported.contexts[0].target.id, "node:1");
-        assert_eq!(
-            exported.contexts[0].target.detail,
-            "Stored at [project-path]/private.txt"
+        assert!(
+            error
+                .to_string()
+                .contains("graph authority is not yet bound")
         );
-        assert_eq!(
-            exported.contexts[0].annotations,
-            ["Compare [project-path]/private.txt"]
+        assert!(
+            error
+                .to_string()
+                .contains("retry export after interaction recovery")
         );
-        assert_eq!(exported.contexts[0].source.interaction_node_id, "node:2");
-        assert_eq!(exported.contexts[0].source.layer_id, "layer:1");
     }
 
     #[test]

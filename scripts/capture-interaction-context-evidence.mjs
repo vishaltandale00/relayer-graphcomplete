@@ -413,15 +413,19 @@ async function run() {
     const preview = document.querySelector('.composer-context-preview')?.getBoundingClientRect();
     const editor = document.querySelector('#contextAnnotationEditor');
     if (!preview || !editor || editor.scrollHeight <= editor.clientHeight) return null;
+    const initialScrollTop = editor.scrollTop;
+    editor.scrollTop = editor.scrollHeight;
     return {
       width: preview.width,
       height: preview.height,
       editorOverflow: getComputedStyle(editor).overflowY,
+      editorScrolled: editor.scrollTop > initialScrollTop,
     };
   })()`));
   if (Math.abs(previewDuringEdit.width - previewBeforeEdit.width) >= 1
     || Math.abs(previewDuringEdit.height - previewBeforeEdit.height) >= 1
-    || previewDuringEdit.editorOverflow !== "auto") {
+    || previewDuringEdit.editorOverflow !== "auto"
+    || !previewDuringEdit.editorScrolled) {
     throw new Error(`Long annotation edit changed preview geometry: ${JSON.stringify({ previewBeforeEdit, previewDuringEdit })}`);
   }
   await click("[aria-label='Confirm annotation']");
@@ -433,6 +437,20 @@ async function run() {
       'Prioritize worker availability when reasoning.',
     ]);
   })()`));
+  await click("[aria-label='Edit annotation 2 for Incoming queue']");
+  await captureStep(
+    "2. Editing stays inside the fixed popover and keeps an explicit trash control available",
+    ".composer-context-preview",
+  );
+  await click("[aria-label='Delete annotation being edited for Incoming queue']");
+  await waitFor("annotation deleted while editing", () => evaluate(`(() => {
+    const values = [...document.querySelectorAll('.composer-context-annotations li > span')]
+      .map((element) => element.textContent);
+    return JSON.stringify(values) === JSON.stringify([${JSON.stringify(longAnnotation)}]);
+  })()`));
+  await click("[aria-label='Add annotation to Incoming queue']");
+  await setValue("#contextAnnotationEditor", "Prioritize worker availability when reasoning.");
+  await click("[aria-label='Confirm annotation']");
   await click("[aria-label='Close Incoming queue annotations']");
   await clickNode("Two-worker pool");
   await click("#attachNodeContext");
@@ -440,20 +458,26 @@ async function run() {
   await clickNode("Results store");
   await click("#attachNodeContext");
   await click("[aria-label='Confirm annotation']");
+  mainWindow.setSize(1104, 920);
+  await waitForPaint();
   const pillOverflow = await waitFor("multiple node pills scroll horizontally", () => evaluate(`(() => {
     const strip = document.querySelector('.composer-context-pills');
     if (!strip || strip.children.length !== 3) return null;
-    strip.style.maxWidth = '280px';
     const overflow = getComputedStyle(strip).overflowX;
     const scrollable = strip.scrollWidth > strip.clientWidth;
     strip.scrollLeft = strip.scrollWidth;
     const scrolled = strip.scrollLeft > 0;
-    strip.style.removeProperty('max-width');
     return { overflow, scrollable, scrolled };
   })()`));
   if (pillOverflow.overflow !== "auto" || !pillOverflow.scrollable || !pillOverflow.scrolled) {
     throw new Error(`Multiple node pills did not scroll horizontally: ${JSON.stringify(pillOverflow)}`);
   }
+  await captureStep(
+    "3. Multiple attached-node pills scroll horizontally within the available composer width",
+    ".composer-context-pills",
+  );
+  mainWindow.setSize(1480, 920);
+  await waitForPaint();
   await click("[aria-label='Detach Two-worker pool']");
   await click("[aria-label='Detach Results store']");
   await click("[aria-label='Show Incoming queue annotations']");
@@ -465,7 +489,7 @@ async function run() {
   await refreshCaptureSurface();
   await writeFile(composerScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
   await captureStep(
-    "2. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
+    "4. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
     "#composerContextTray",
     3,
   );
@@ -488,7 +512,7 @@ async function run() {
       && document.querySelectorAll('#interactionContextPopover li').length === 2
   `));
   await captureStep(
-    "3. The turn banner shows one connected-node pill; its popover restores both annotations in order",
+    "5. The turn banner shows one connected-node pill; its popover restores both annotations in order",
     "#interactionContextPopover",
     3,
   );
@@ -501,7 +525,7 @@ async function run() {
       && document.querySelector('#attachNodeContext')?.disabled === false
   `));
   await captureStep(
-    "4. Clicking the connected node reopens its full Node Details from history",
+    "6. Clicking the connected node reopens its full Node Details from history",
     "#inspector",
   );
 
@@ -516,7 +540,7 @@ async function run() {
       && document.querySelector('#sendInteraction')?.disabled === false
   `));
   await captureStep(
-    "5. A connected node with a non-empty annotation enables send even when message text is empty",
+    "7. A connected node with a non-empty annotation enables send even when message text is empty",
     "#threadComposerShell",
   );
   await click("#sendInteraction");
@@ -536,7 +560,7 @@ async function run() {
       === 'This annotation alone is a valid interaction input.'
   `));
   await captureStep(
-    "6. Annotation-only history has no derived message label; the context pill preserves the actual input",
+    "8. Annotation-only history has no derived message label; the context pill preserves the actual input",
     "#interactionBanner",
     3,
   );
@@ -556,7 +580,7 @@ async function run() {
   await refreshCaptureSurface();
   await writeFile(restartedScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
   await captureStep(
-    "7. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
+    "9. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
     "#interactionContextPopover",
     3.4,
   );
@@ -566,7 +590,7 @@ async function run() {
       && !document.querySelector('#inspector')?.classList.contains('hidden')
   `));
   await captureStep(
-    "8. The persisted context still reopens the exact target node after restart",
+    "10. The persisted context still reopens the exact target node after restart",
     "#inspector",
     3.4,
   );
@@ -601,6 +625,7 @@ async function run() {
       multipleNodePillStripScrolls: true,
       editPreservesPopoverDimensions: true,
       longAnnotationEditorScrolls: true,
+      annotationDeletedWhileEditing: true,
       messageAndContextSent: true,
       historyPillAndPopoverVisible: true,
       historicalTargetNodeReopened: true,
