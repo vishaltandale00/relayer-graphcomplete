@@ -4,6 +4,35 @@ import { createProviderAdapterRegistry } from "../desktop/main/providers/provide
 import { createProviderComposition } from "../desktop/main/providers/provider-composition.mjs";
 
 describe("injectable production provider composition", () => {
+  it("publishes missing persisted credentials as unavailable and keeps explicit refresh deterministic", async () => {
+    const published = [];
+    const composition = createProviderComposition({
+      registry: createProviderAdapterRegistry([{
+        adapterId: "fake-api", implementationVersion: "1", label: "Fake API",
+        accessContract: "secret@1", defaultEndpoint: "https://fake.example/v1",
+        connection: { mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }] },
+        create: vi.fn(),
+      }]),
+      definitionStore: { async load() { return [{
+        id: "missing", adapterId: "fake-api", label: "Missing API", endpoint: "https://fake.example/v1",
+        accessContract: "secret@1", credentialReference: "provider:missing", lifecycleState: "active",
+      }]; } },
+      credentialStore: { async get() { return null; }, async listReferences() { return ["provider:missing"]; } },
+      publishCatalog: async (snapshot) => { published.push(snapshot); },
+      modelCatalogOptions: { backgroundIntervalMs: 60_000 },
+    });
+
+    await composition.start();
+    expect(published).toEqual([expect.objectContaining({
+      providerId: "missing", connected: false, models: [],
+      unavailableReason: expect.objectContaining({ code: "provider_unavailable" }),
+    })]);
+    await composition.modelCatalog.explicitRefresh("missing");
+    expect(published).toHaveLength(2);
+    expect(published[1]).toEqual(published[0]);
+    await composition.close();
+  });
+
   it("does not instantiate or refresh a tombstoned legacy provider", async () => {
     const create = vi.fn(() => { throw new Error("tombstoned provider must not be instantiated"); });
     const composition = createProviderComposition({

@@ -83,6 +83,16 @@ export function registerDesktopIpc({
     getWindow()?.webContents.send("relayer:providers-changed", { kind: "logged_out", providerId: id });
     return account;
   });
+  ipcMain.handle("relayer:provider-reconnect", async (_event, { id }) => {
+    if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
+    const result = await providerDefinitions.reconnect(id);
+    if (result.login?.authUrl) await shell.openExternal(result.login.authUrl);
+    getWindow()?.webContents.send("relayer:providers-changed", {
+      kind: "reconnect_pending",
+      providerId: result.providerDefinition.id,
+    });
+    return result;
+  });
   ipcMain.handle("relayer:provider-remove", async (_event, { id }) => {
     if (!providerDefinitions) throw new Error("Provider setup is unavailable.");
     const definition = await providerDefinitions.remove(id);

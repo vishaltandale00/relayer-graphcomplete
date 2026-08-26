@@ -34,6 +34,7 @@ export class ProviderDefinitionService {
     onRuntimeReady = () => {},
     onRuntimeRemoved = () => {},
     onRuntimeChanged = () => {},
+    onRuntimeUnavailable = () => {},
     removeRuntimeState = async () => false,
     providerStatuses = null,
   }) {
@@ -50,6 +51,7 @@ export class ProviderDefinitionService {
     this.onRuntimeReady = onRuntimeReady;
     this.onRuntimeRemoved = onRuntimeRemoved;
     this.onRuntimeChanged = onRuntimeChanged;
+    this.onRuntimeUnavailable = onRuntimeUnavailable;
     this.removeRuntimeState = removeRuntimeState;
     this.providerStatuses = providerStatuses;
     this.definitions = null;
@@ -73,9 +75,9 @@ export class ProviderDefinitionService {
     return definitions
       .filter(({ lifecycleState }) => includeTombstones || lifecycleState !== "tombstoned")
       .map((definition) => {
-        if (statuses === null) return publicDefinition(definition);
-        const status = statuses instanceof Map ? statuses.get(definition.id) : statuses?.[definition.id];
         const override = this.statusOverrides.get(definition.id);
+        if (statuses === null && !override) return publicDefinition(definition);
+        const status = statuses instanceof Map ? statuses.get(definition.id) : statuses?.[definition.id];
         return publicDefinition({
           ...definition,
           connected: override?.connected ?? (status?.connected === true),
@@ -194,9 +196,27 @@ export class ProviderDefinitionService {
       const pending = this.pendingConnections.get(connectionId);
       if (!pending) throw new Error("Unknown pending provider connection.");
       signal?.throwIfAborted();
-      const account = await pending.runtime.credentials.account({ signal });
+      let account;
+      try {
+        account = await pending.runtime.credentials.account({ signal });
+      } catch (error) {
+        if (pending.reconnect === true) {
+          await this.diagnostics?.write({
+            category: "managed_provider_reconnect_failed",
+            adapterId: pending.candidate.adapterId,
+            providerId: pending.candidate.id,
+            ...providerDiagnosticDetails(error),
+          }).catch(() => undefined);
+          await this.#cancelPendingConnection(connectionId);
+        }
+        throw error;
+      }
       if (account?.status !== "connected") {
-        if (account?.status === "unavailable") throw new Error("Provider login is unavailable.");
+        if (account?.status === "unavailable") {
+          const error = new Error("Provider login is unavailable.");
+          if (pending.reconnect === true) await this.#cancelPendingConnection(connectionId);
+          throw error;
+        }
         return Object.freeze({
           status: "pending",
           connectionId,
@@ -210,6 +230,13 @@ export class ProviderDefinitionService {
         if (!catalog.models.some(({ visible }) => visible)) throw new Error("Provider did not report any visible models.");
         runtimeRegistrationAttempted = true;
         await this.onRuntimeReady(pending.candidate, pending.runtime);
+        if (pending.reconnect === true) {
+          await this.publishCatalog(catalog, { signal });
+          this.runtimes.set(connectionId, pending.runtime);
+          this.statusOverrides.delete(connectionId);
+          this.pendingConnections.delete(connectionId);
+          return Object.freeze({ status: "connected", providerDefinition: publicDefinition(pending.candidate) });
+        }
         if (typeof this.definitionStore.createWithCatalog === "function") {
           await this.definitionStore.createWithCatalog(pending.candidate, catalog, { signal });
           this.definitions.push(pending.candidate);
@@ -228,7 +255,7 @@ export class ProviderDefinitionService {
           providerId: pending.candidate.id,
           ...providerDiagnosticDetails(error),
         }).catch(() => undefined);
-        if (runtimeRegistrationAttempted) {
+        if (runtimeRegistrationAttempted && pending.reconnect !== true) {
           try { await this.onRuntimeRemoved(pending.candidate); } catch { /* preserve the connection failure */ }
         }
         await this.#cancelPendingConnection(connectionId);
@@ -245,7 +272,24 @@ export class ProviderDefinitionService {
     const pending = this.pendingConnections.get(connectionId);
     if (!pending) return false;
     this.pendingConnections.delete(connectionId);
+    if (pending.reconnect === true) {
+      this.runtimes.delete(connectionId);
+      this.statusOverrides.set(connectionId, {
+        connected: false,
+        unavailableReason: {
+          code: "provider_logged_out",
+          message: "The provider is signed out.",
+        },
+      });
+      await Promise.allSettled([
+        pending.runtime.close?.(),
+        this.onRuntimeRemoved(pending.candidate),
+        this.removeRuntimeState(pending.candidate),
+      ]);
+      return true;
+    }
     await pending.runtime.close?.();
+    this.runtimes.delete(connectionId);
     await this.removeRuntimeState(pending.candidate);
     if (pending.candidate.credentialReference) await this.credentialStore.delete(pending.candidate.credentialReference);
     return true;
@@ -273,6 +317,9 @@ export class ProviderDefinitionService {
       if (!definition || definition.lifecycleState !== "active") throw new Error("Unknown active provider definition.");
       const descriptor = this.registry.get(definition.adapterId);
       if (descriptor.connection.mode === "secret-fields") throw new Error("API provider definitions do not support logout.");
+      if (this.activeExecutions.has(id)) {
+        throw new Error("Provider cannot be signed out while interactions are running.");
+      }
       const runtime = await this.#runtimeFor(definition);
       if (typeof runtime.credentials?.logout !== "function") throw new Error("Provider logout is unavailable.");
       const account = await runtime.credentials.logout({ signal });
@@ -294,6 +341,55 @@ export class ProviderDefinitionService {
         }).catch(() => undefined);
       }
       return Object.freeze({ ...(account ?? { status: "disconnected" }) });
+    });
+  }
+
+  async reconnect(id, { signal } = {}) {
+    return this.#serialized(async () => {
+      await this.#initialize();
+      signal?.throwIfAborted();
+      const definition = this.definitions.find((item) => item.id === id);
+      if (!definition || definition.lifecycleState !== "active") throw new Error("Unknown active provider definition.");
+      const descriptor = this.registry.get(definition.adapterId);
+      if (descriptor.connection.mode === "secret-fields") throw new Error("API provider definitions do not support reconnect.");
+      if (this.activeExecutions.has(id)) {
+        throw new Error("Provider cannot reconnect while interactions are running.");
+      }
+      if (this.pendingConnections.has(id)) throw new Error("Provider reconnect is already pending.");
+
+      let runtime = this.runtimes.get(id);
+      const createdRuntime = !runtime;
+      if (!runtime) {
+        runtime = this.registry.create(definition, {
+          ...await this.runtimeDependencies(definition),
+          secrets: {},
+        });
+      }
+      if (typeof runtime.credentials?.login !== "function") throw new Error("Provider reconnect is unavailable.");
+      let login;
+      try {
+        login = await runtime.credentials.login({ signal });
+      } catch (error) {
+        if (createdRuntime) {
+          try { await runtime.close?.(); } catch { /* preserve the login failure */ }
+        }
+        throw error;
+      }
+      this.runtimes.set(id, runtime);
+      this.pendingConnections.set(id, { candidate: definition, runtime, login, reconnect: true });
+      this.statusOverrides.set(id, {
+        connected: false,
+        unavailableReason: {
+          code: "provider_login_pending",
+          message: "Provider sign-in is pending.",
+        },
+      });
+      return Object.freeze({
+        status: "pending",
+        connectionId: id,
+        providerDefinition: publicDefinition(definition),
+        login: Object.freeze({ ...(login ?? {}) }),
+      });
     });
   }
 
@@ -344,6 +440,7 @@ export class ProviderDefinitionService {
       throw error;
     }
     this.runtimes.set(definition.id, runtime);
+    this.statusOverrides.delete(definition.id);
     return runtime;
   }
 
@@ -354,6 +451,21 @@ export class ProviderDefinitionService {
         try {
           await this.#runtimeFor(definition);
         } catch (error) {
+          this.statusOverrides.set(definition.id, {
+            connected: false,
+            unavailableReason: {
+              code: "provider_activation_failed",
+              message: "The provider could not be activated.",
+            },
+          });
+          try { await this.onRuntimeUnavailable(definition, error); } catch (publicationError) {
+            await this.diagnostics?.write({
+              category: "provider_activation_status_publish_failed",
+              adapterId: definition.adapterId,
+              providerId: definition.id,
+              ...providerDiagnosticDetails(publicationError),
+            }).catch(() => undefined);
+          }
           await this.diagnostics?.write({
             category: "provider_activation_failed",
             adapterId: definition.adapterId,

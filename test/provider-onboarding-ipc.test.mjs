@@ -13,7 +13,14 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     nativeTheme: {},
     credentials: { account: vi.fn(), login: vi.fn(), logout: vi.fn() },
     modelCatalog: { settingsOpened: vi.fn(), explicitRefresh: vi.fn() },
-    providerDefinitions: { adapters: () => [], list: async () => [], logout: vi.fn(async () => ({ status: "disconnected" })) },
+    providerDefinitions: {
+      adapters: () => [], list: async () => [],
+      logout: vi.fn(async () => ({ status: "disconnected" })),
+      reconnect: vi.fn(async (id) => ({
+        status: "pending", connectionId: id, providerDefinition: { id },
+        login: { authUrl: "https://login.example.test" },
+      })),
+    },
     validateProviderOnboarding,
     settings: {
       read: async () => savedSettings,
@@ -28,6 +35,7 @@ function fixture(validateProviderOnboarding, savedSettings = { appearance: "dark
     complete: handlers.get("relayer:provider-onboarding-complete"),
     status: handlers.get("relayer:provider-status"),
     logout: handlers.get("relayer:provider-logout"),
+    reconnect: handlers.get("relayer:provider-reconnect"),
     writes,
   };
 }
@@ -50,6 +58,13 @@ describe("provider onboarding IPC hard gate", () => {
   it("routes logout by exact provider definition through the generic IPC", async () => {
     const { logout } = fixture(async () => false);
     await expect(logout(null, { id: "claude-work" })).resolves.toEqual({ status: "disconnected" });
+  });
+
+  it("routes reconnect through the same definition identity and opens its managed login", async () => {
+    const { reconnect } = fixture(async () => false);
+    await expect(reconnect(null, { id: "claude-work" })).resolves.toMatchObject({
+      status: "pending", connectionId: "claude-work", providerDefinition: { id: "claude-work" },
+    });
   });
 
   it("migrates an existing already-valid Codex user without showing first-run setup", async () => {

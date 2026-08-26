@@ -10,6 +10,7 @@ import {
   bindComposerKeydown,
   composerDisabledForState,
   composerDraftMatchesSubmission,
+  composerDraftScopeKey,
   composerFocusRestoration,
   composerKeydownIntent,
   composerSubmissionReady,
@@ -20,6 +21,7 @@ import {
   contextEditorCanConfirm,
   contextEditorPresentation,
   contextStagingDisabledFor,
+  createComposerDraftScopeState,
   graphTurnNavigationDelta,
   graphRenderClearsSelection,
   hasHistoricalContextSelection,
@@ -31,6 +33,7 @@ import {
   interactionContextDraftTransition,
   removeContextAnnotation,
   resolveInteractionContextNode,
+  transitionComposerDraftScope,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace keyboard behavior", () => {
@@ -260,9 +263,12 @@ describe("product workspace keyboard behavior", () => {
 
   it("only clears the exact composer draft whose send completed", () => {
     const submittedContexts = [{ target: { nodeId: 3 }, annotations: ["note"] }];
+    const submittedDraftScopeKey = composerDraftScopeKey(10, 100);
     expect(composerDraftMatchesSubmission({
       currentThreadId: 10,
       submittedThreadId: 10,
+      currentDraftScopeKey: submittedDraftScopeKey,
+      submittedDraftScopeKey,
       currentPromptValue: "send A",
       submittedPromptValue: "send A",
       currentContexts: submittedContexts,
@@ -271,6 +277,8 @@ describe("product workspace keyboard behavior", () => {
     expect(composerDraftMatchesSubmission({
       currentThreadId: 11,
       submittedThreadId: 10,
+      currentDraftScopeKey: composerDraftScopeKey(11, 200),
+      submittedDraftScopeKey,
       currentPromptValue: "send B",
       submittedPromptValue: "send A",
       currentContexts: [],
@@ -279,6 +287,8 @@ describe("product workspace keyboard behavior", () => {
     expect(composerDraftMatchesSubmission({
       currentThreadId: 10,
       submittedThreadId: 10,
+      currentDraftScopeKey: submittedDraftScopeKey,
+      submittedDraftScopeKey,
       currentPromptValue: "send B",
       submittedPromptValue: "send A",
       currentContexts: submittedContexts,
@@ -287,11 +297,138 @@ describe("product workspace keyboard behavior", () => {
     expect(composerDraftMatchesSubmission({
       currentThreadId: 10,
       submittedThreadId: 10,
+      currentDraftScopeKey: submittedDraftScopeKey,
+      submittedDraftScopeKey,
       currentPromptValue: "send A",
       submittedPromptValue: "send A",
       currentContexts: [...submittedContexts],
       submittedContexts,
     })).toBe(false);
+    expect(composerDraftMatchesSubmission({
+      currentThreadId: 10,
+      submittedThreadId: 10,
+      currentDraftScopeKey: composerDraftScopeKey(10, 101),
+      submittedDraftScopeKey,
+      currentPromptValue: "send A",
+      submittedPromptValue: "send A",
+      currentContexts: submittedContexts,
+      submittedContexts,
+    })).toBe(false);
+  });
+
+  it("scopes restored and user-authored drafts across A to B to A switches", () => {
+    let state = createComposerDraftScopeState();
+    let transition = transitionComposerDraftScope(state, {
+      threadId: "thread-a",
+      interactionId: "interaction-a",
+      currentPromptValue: "",
+      restoredDraft: { text: "retry A" },
+    });
+    state = transition.state;
+    expect(transition.promptValue).toBe("retry A");
+    expect(state.drafts.get(composerDraftScopeKey("thread-a", "interaction-a")))
+      .toMatchObject({ restoredDraftInteractionId: "interaction-a" });
+
+    transition = transitionComposerDraftScope(state, {
+      threadId: "thread-b",
+      interactionId: "interaction-b",
+      currentPromptValue: "edited retry A",
+    });
+    state = transition.state;
+    expect(transition.promptValue).toBe("");
+    expect(state.drafts.get(composerDraftScopeKey("thread-b", "interaction-b")))
+      .toEqual({ promptValue: "", restoredDraftInteractionId: null });
+
+    transition = transitionComposerDraftScope(state, {
+      threadId: "thread-a",
+      interactionId: "interaction-a",
+      currentPromptValue: "draft B",
+      restoredDraft: { text: "retry A" },
+    });
+    state = transition.state;
+    expect(transition.promptValue).toBe("edited retry A");
+    expect(state.drafts.get(composerDraftScopeKey("thread-b", "interaction-b")))
+      .toEqual({ promptValue: "draft B", restoredDraftInteractionId: null });
+  });
+
+  it("never exposes another interaction's restored prompt as the active send value", () => {
+    let state = createComposerDraftScopeState();
+    let transition = transitionComposerDraftScope(state, {
+      threadId: 10,
+      interactionId: 100,
+      currentPromptValue: "",
+      restoredDraft: { text: "stale A" },
+    });
+    state = transition.state;
+    expect(transition.promptValue).toBe("stale A");
+
+    transition = transitionComposerDraftScope(state, {
+      threadId: 11,
+      interactionId: 200,
+      currentPromptValue: transition.promptValue,
+    });
+    expect(transition.promptValue).toBe("");
+    expect(composerSubmissionReady(transition.promptValue, false, true)).toBe(false);
+
+    transition = transitionComposerDraftScope(transition.state, {
+      threadId: 11,
+      interactionId: 200,
+      currentPromptValue: "send B",
+    });
+    expect(transition.promptValue).toBe("send B");
+    expect(composerSubmissionReady(transition.promptValue, false, true)).toBe(true);
+  });
+
+  it("clears a restored draft when the latest interaction changes in the same thread", () => {
+    let transition = transitionComposerDraftScope(createComposerDraftScopeState(), {
+      threadId: 10,
+      interactionId: 100,
+      currentPromptValue: "",
+      restoredDraft: { text: "retry interaction 100" },
+    });
+    transition = transitionComposerDraftScope(transition.state, {
+      threadId: 10,
+      interactionId: 101,
+      currentPromptValue: transition.promptValue,
+    });
+    expect(transition.promptValue).toBe("");
+    expect(transition.state.drafts.get(composerDraftScopeKey(10, 101)))
+      .toEqual({ promptValue: "", restoredDraftInteractionId: null });
+  });
+
+  it("applies a model-failed restoration that arrives after the running interaction rendered", () => {
+    let transition = transitionComposerDraftScope(createComposerDraftScopeState(), {
+      threadId: 10,
+      interactionId: 100,
+      currentPromptValue: "",
+    });
+    expect(transition.promptValue).toBe("");
+
+    transition = transitionComposerDraftScope(transition.state, {
+      threadId: 10,
+      interactionId: 100,
+      currentPromptValue: "",
+      restoredDraft: { text: "retry after model failure" },
+    });
+    expect(transition.promptValue).toBe("retry after model failure");
+    expect(transition.state.drafts.get(composerDraftScopeKey(10, 100)))
+      .toEqual({
+        promptValue: "retry after model failure",
+        restoredDraftInteractionId: 100,
+      });
+
+    transition = transitionComposerDraftScope(transition.state, {
+      threadId: 10,
+      interactionId: 100,
+      currentPromptValue: "user edited the restored prompt",
+      restoredDraft: { text: "stale server retry text" },
+    });
+    expect(transition.promptValue).toBe("user edited the restored prompt");
+    expect(transition.state.drafts.get(composerDraftScopeKey(10, 100)))
+      .toEqual({
+        promptValue: "user edited the restored prompt",
+        restoredDraftInteractionId: 100,
+      });
   });
 
   it("starts at one line, grows to its cap, and then enables vertical scrolling", async () => {

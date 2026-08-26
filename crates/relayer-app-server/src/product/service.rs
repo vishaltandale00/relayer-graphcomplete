@@ -501,6 +501,7 @@ impl ProductService {
         Ok(settings.harnesses.iter().any(|harness| {
             harness.id == harness_id
                 && harness.available
+                && harness.model_rules.is_none()
                 && harness.model_compatibility.is_empty()
                 && harness.compatible_provider_ids.is_empty()
         }))
@@ -675,6 +676,14 @@ impl ProductService {
             .ok_or_else(|| {
                 ProductError::NotFound(format!("model family {}", command.id.value()))
             })?;
+        let defaults = self.storage.load_model_settings().await?.defaults;
+        if defaults.family_id == Some(command.id) && !command.enabled {
+            return Err(CatalogError::invalid(
+                "default_family_disable_blocked",
+                "Change the default model family before disabling it.",
+            )
+            .into());
+        }
         match current.kind {
             ModelFamilyKind::System => {
                 if command.name.is_some() || command.members.is_some() {
@@ -719,6 +728,13 @@ impl ProductService {
             return Err(CatalogError::invalid(
                 "system_family_read_only",
                 "System model families cannot be deleted.",
+            )
+            .into());
+        }
+        if self.storage.load_model_settings().await?.defaults.family_id == Some(id) {
+            return Err(CatalogError::invalid(
+                "default_family_removal_blocked",
+                "Change the default model family before removing it.",
             )
             .into());
         }
@@ -1841,8 +1857,18 @@ mod tests {
             std::process::id()
         ));
         let storage = SqliteProductStore::open(&path).await.unwrap();
+        let mut harnesses = runtime_harnesses();
+        harnesses.push(RuntimeProductHarness {
+            id: "rule-owned".into(),
+            configuration_digest: "sha256:rule-owned".into(),
+            model_compatibility: Vec::new(),
+            configuration_revision: 1,
+            model_rules: Some(HarnessModelRules::default()),
+            execution_access_contracts: vec!["managed-runtime@1".into()],
+            family_policy: None,
+        });
         storage
-            .initialize_model_catalog("prime-agent-basic", &runtime_harnesses())
+            .initialize_model_catalog("prime-agent-basic", &harnesses)
             .await
             .unwrap();
         let service = ProductService::new(storage.clone(), true);
@@ -1856,6 +1882,12 @@ mod tests {
         assert!(
             !service
                 .harness_uses_configuration_model("codex-basic")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !service
+                .harness_uses_configuration_model("rule-owned")
                 .await
                 .unwrap()
         );
@@ -2010,7 +2042,7 @@ mod tests {
 
         let completed = service
             .complete_provider_onboarding(CompleteProviderOnboardingCommand {
-                provider_id,
+                provider_id: provider_id.clone(),
                 harness_id: "claude-basic".into(),
                 family_name: "Claude Work default".into(),
                 model_id: "default".into(),
@@ -2019,6 +2051,30 @@ mod tests {
             .unwrap();
         assert_eq!(completed.defaults.harness_id, "claude-basic");
         assert_eq!(completed.selection.model_id, "default");
+        let harness_error = service
+            .update_model_settings_defaults(UpdateModelSettingsDefaultsCommand {
+                harness_id: Some("codex-basic".into()),
+                provider_id: None,
+                family_id: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(harness_error.to_string().contains("default family"));
+        let disable_error = service
+            .update_model_family(UpdateModelFamilyCommand {
+                id: completed.family.id,
+                name: None,
+                enabled: false,
+                members: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(disable_error.to_string().contains("before disabling"));
+        let delete_error = service
+            .delete_model_family(completed.family.id)
+            .await
+            .unwrap_err();
+        assert!(delete_error.to_string().contains("before removing"));
 
         drop(service);
         drop(storage);

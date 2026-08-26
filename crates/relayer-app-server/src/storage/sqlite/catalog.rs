@@ -131,6 +131,8 @@ impl SqliteProductStore {
                 }
                 if old_state == "active" && definition.lifecycle_state == "removal_pending" {
                     guard_provider_removal(&mut transaction, definition.id.as_str()).await?;
+                    tombstone_managed_provider_families(&mut transaction, definition.id.as_str())
+                        .await?;
                 }
                 if old_state == "removal_pending" && definition.lifecycle_state == "tombstoned" {
                     let running: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM interaction_attempts WHERE provider_id=?1 AND outcome='running')")
@@ -216,6 +218,12 @@ impl SqliteProductStore {
         default_harness: &str,
         runtime_harnesses: &[RuntimeProductHarness],
     ) -> Result<(), StorageError> {
+        for harness in runtime_harnesses {
+            if let Some(rules) = &harness.model_rules {
+                crate::product::validate_harness_model_rules(rules)
+                    .map_err(StorageError::Catalog)?;
+            }
+        }
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         sqlx::query(
             "UPDATE product_harnesses SET available=0,unavailable_reason_code='harness_unavailable',unavailable_reason_message='The harness runtime is unavailable.'",
@@ -245,20 +253,53 @@ impl SqliteProductStore {
                 harness.model_rules.is_some() || !harness.model_compatibility.is_empty();
             let available = runtime_present
                 && (!model_selecting || !harness.execution_access_contracts.is_empty());
+            let existing_overlay: Option<(bool, String, i64)> = sqlx::query_as(
+                "SELECT model_rules_modified,runtime_configuration_digest,configuration_revision FROM product_harnesses WHERE configuration_name=?1",
+            )
+            .bind(&harness.id)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            let (effective_revision, effective_digest) = match existing_overlay {
+                Some((true, base_digest, current_revision))
+                    if base_digest != harness.configuration_digest =>
+                {
+                    let rules = load_harness_rules(&mut transaction, &harness.id).await?;
+                    let next_revision = current_revision + 1;
+                    (
+                        next_revision as u32,
+                        overlay_digest(&harness.configuration_digest, &rules, next_revision)?,
+                    )
+                }
+                Some((true, _, current_revision)) => {
+                    let digest: String = sqlx::query_scalar(
+                        "SELECT configuration_digest FROM product_harnesses WHERE configuration_name=?1",
+                    )
+                    .bind(&harness.id)
+                    .fetch_one(&mut *transaction)
+                    .await?;
+                    (current_revision as u32, digest)
+                }
+                _ => (
+                    harness.configuration_revision,
+                    harness.configuration_digest.clone(),
+                ),
+            };
             sqlx::query(
-                "INSERT INTO product_harnesses(configuration_name,label,product_visible,available,unavailable_reason_code,unavailable_reason_message,configuration_revision,configuration_digest,model_rules_present,execution_access_contracts_json,family_policy_id,family_policy_version) VALUES (?1,?2,1,?3,?4,?5,?6,?7,?8,?9,?10,?11) ON CONFLICT(configuration_name) DO UPDATE SET label=excluded.label,product_visible=1,available=excluded.available,unavailable_reason_code=excluded.unavailable_reason_code,unavailable_reason_message=excluded.unavailable_reason_message,configuration_revision=CASE WHEN product_harnesses.model_rules_modified=1 THEN product_harnesses.configuration_revision ELSE excluded.configuration_revision END,configuration_digest=CASE WHEN product_harnesses.model_rules_modified=1 THEN product_harnesses.configuration_digest ELSE excluded.configuration_digest END,model_rules_present=CASE WHEN product_harnesses.model_rules_modified=1 THEN product_harnesses.model_rules_present ELSE excluded.model_rules_present END,execution_access_contracts_json=excluded.execution_access_contracts_json,family_policy_id=excluded.family_policy_id,family_policy_version=excluded.family_policy_version",
+                "INSERT INTO product_harnesses(configuration_name,label,product_visible,available,unavailable_reason_code,unavailable_reason_message,configuration_revision,configuration_digest,model_rules_present,execution_access_contracts_json,family_policy_id,family_policy_version,runtime_configuration_revision,runtime_configuration_digest) VALUES (?1,?2,1,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13) ON CONFLICT(configuration_name) DO UPDATE SET label=excluded.label,product_visible=1,available=excluded.available,unavailable_reason_code=excluded.unavailable_reason_code,unavailable_reason_message=excluded.unavailable_reason_message,configuration_revision=excluded.configuration_revision,configuration_digest=excluded.configuration_digest,model_rules_present=CASE WHEN product_harnesses.model_rules_modified=1 THEN product_harnesses.model_rules_present ELSE excluded.model_rules_present END,execution_access_contracts_json=excluded.execution_access_contracts_json,family_policy_id=excluded.family_policy_id,family_policy_version=excluded.family_policy_version,runtime_configuration_revision=excluded.runtime_configuration_revision,runtime_configuration_digest=excluded.runtime_configuration_digest",
             )
             .bind(&harness.id)
             .bind(harness_label(&harness.id))
             .bind(available)
             .bind((!available).then_some(if runtime_present { "harness_access_contract_missing" } else { "harness_unavailable" }))
             .bind((!available).then_some(if runtime_present { "The model-selecting harness has no execution access contract." } else { "The harness runtime is unavailable." }))
-            .bind(harness.configuration_revision)
-            .bind(&harness.configuration_digest)
+            .bind(effective_revision)
+            .bind(&effective_digest)
             .bind(harness.model_rules.is_some())
             .bind(serde_json::to_string(&harness.execution_access_contracts).map_err(|error| StorageError::Serialization(error.to_string()))?)
             .bind(harness.family_policy.as_ref().map(|policy| policy.id.as_str()))
             .bind(harness.family_policy.as_ref().map(|policy| policy.version))
+            .bind(harness.configuration_revision)
+            .bind(&harness.configuration_digest)
             .execute(&mut *transaction)
             .await?;
             let model_rules_modified: bool = sqlx::query_scalar(
@@ -442,39 +483,42 @@ impl SqliteProductStore {
                 )));
             }
         }
-        if let Some(family_id) = command.family_id {
-            let harness_id = command.harness_id.clone().unwrap_or(
-                sqlx::query_scalar("SELECT default_harness_configuration_name FROM product_model_preferences WHERE singleton=1")
-                    .fetch_one(&mut *transaction)
-                    .await?,
-            );
-            let candidates = sqlx::query_as::<_, (String, String)>(
+        let stored_defaults = load_defaults(&mut transaction).await?;
+        if command.harness_id.is_some() || command.family_id.is_some() {
+            let family_id = command.family_id.or(stored_defaults.family_id);
+            let harness_id = command
+                .harness_id
+                .clone()
+                .unwrap_or(stored_defaults.harness_id);
+            if let Some(family_id) = family_id {
+                let candidates = sqlx::query_as::<_, (String, String)>(
                 "SELECT provider_id,model_id FROM model_family_members WHERE family_id=?1 ORDER BY position",
             )
             .bind(family_id.value())
             .fetch_all(&mut *transaction)
             .await?;
-            let mut resolvable = false;
-            for (provider_id, model_id) in candidates {
-                let validation = ValidateModelSelectionCommand {
-                    harness_id: harness_id.clone(),
-                    family_id,
-                    provider_id: ProviderId::from_database(provider_id),
-                    model_id,
-                };
-                if validate_model_selection_on(&mut transaction, &validation)
-                    .await
-                    .is_ok()
-                {
-                    resolvable = true;
-                    break;
+                let mut resolvable = false;
+                for (provider_id, model_id) in candidates {
+                    let validation = ValidateModelSelectionCommand {
+                        harness_id: harness_id.clone(),
+                        family_id,
+                        provider_id: ProviderId::from_database(provider_id),
+                        model_id,
+                    };
+                    if validate_model_selection_on(&mut transaction, &validation)
+                        .await
+                        .is_ok()
+                    {
+                        resolvable = true;
+                        break;
+                    }
                 }
-            }
-            if !resolvable {
-                return Err(StorageError::Catalog(CatalogError::invalid(
-                    "default_family_unresolvable",
-                    "The default family must contain a model resolvable by the default harness.",
-                )));
+                if !resolvable {
+                    return Err(StorageError::Catalog(CatalogError::invalid(
+                        "default_family_unresolvable",
+                        "The default family must contain a model resolvable by the default harness.",
+                    )));
+                }
             }
         }
         sqlx::query(
@@ -581,6 +625,7 @@ impl SqliteProductStore {
         .await?;
         let id = ModelFamilyId::from_database(result.last_insert_rowid());
         replace_family_members(&mut transaction, id, &command.members).await?;
+        compact_family_positions(&mut transaction).await?;
         transaction.commit().await?;
         self.get_model_family(id)
             .await?
@@ -600,6 +645,20 @@ impl SqliteProductStore {
         command: &UpdateModelFamilyCommand,
     ) -> Result<ModelFamily, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if !command.enabled {
+            let is_default: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM product_model_preferences WHERE singleton=1 AND default_family_id=?1)",
+            )
+            .bind(command.id.value())
+            .fetch_one(&mut *transaction)
+            .await?;
+            if is_default {
+                return Err(StorageError::Catalog(CatalogError::invalid(
+                    "default_family_disable_blocked",
+                    "Change the default model family before disabling it.",
+                )));
+            }
+        }
         if let Some(name) = &command.name {
             sqlx::query("UPDATE model_families SET name=?1,revision=revision+CASE WHEN enabled<>?2 OR ?4 THEN 1 ELSE 0 END,enabled=?2 WHERE id=?3 AND lifecycle_state='active'")
                 .bind(name)
@@ -664,19 +723,7 @@ impl SqliteProductStore {
                 "familyIds must contain every model family exactly once.",
             )));
         }
-        // Offset first so the UNIQUE(position) constraint cannot observe transient collisions.
-        sqlx::query(
-            "UPDATE model_families SET position=position+1000000 WHERE lifecycle_state='active'",
-        )
-        .execute(&mut *transaction)
-        .await?;
-        for (position, id) in command.family_ids.iter().enumerate() {
-            sqlx::query("UPDATE model_families SET position=?1 WHERE id=?2")
-                .bind(position as i64)
-                .bind(id.value())
-                .execute(&mut *transaction)
-                .await?;
-        }
+        rewrite_family_positions(&mut transaction, &command.family_ids).await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -1114,6 +1161,56 @@ async fn validate_harness_route(
     }
 }
 
+async fn load_harness_rules(
+    connection: &mut SqliteConnection,
+    harness_id: &str,
+) -> Result<HarnessModelRules, StorageError> {
+    let rows = sqlx::query(
+        "SELECT effect,adapter_id,match_kind,model_pattern FROM harness_model_rules WHERE harness_configuration_name=?1 ORDER BY effect,position",
+    )
+    .bind(harness_id)
+    .fetch_all(&mut *connection)
+    .await?;
+    let mut rules = HarnessModelRules::default();
+    for row in rows {
+        let effect: String = row.try_get(0)?;
+        let match_kind: String = row.try_get(2)?;
+        let pattern: String = row.try_get(3)?;
+        let rule = HarnessModelRule {
+            adapter_id: row.try_get(1)?,
+            model_id_exact: (match_kind == "exact").then_some(pattern.clone()),
+            model_id_regex: (match_kind == "regex").then_some(pattern),
+        };
+        match effect.as_str() {
+            "allow" => rules.allow.push(rule),
+            "deny" => rules.deny.push(rule),
+            _ => {
+                return Err(StorageError::IncompatibleSchema(
+                    "unknown harness model rule effect".into(),
+                ));
+            }
+        }
+    }
+    Ok(rules)
+}
+
+fn overlay_digest(
+    base_digest: &str,
+    rules: &HarnessModelRules,
+    revision: i64,
+) -> Result<String, StorageError> {
+    let mut digest = Sha256::new();
+    digest.update(base_digest.as_bytes());
+    digest.update([0]);
+    digest.update(
+        serde_json::to_vec(rules)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?,
+    );
+    digest.update([0]);
+    digest.update(revision.to_le_bytes());
+    Ok(format!("sha256:{:x}", digest.finalize()))
+}
+
 async fn load_defaults(
     connection: &mut SqliteConnection,
 ) -> Result<ModelSettingsDefaults, StorageError> {
@@ -1243,7 +1340,7 @@ async fn load_harnesses(
 
 async fn load_providers(connection: &mut SqliteConnection) -> Result<Vec<Provider>, StorageError> {
     let rows = sqlx::query(
-        "SELECT id,label,connected,unavailable_reason_code,unavailable_reason_message FROM model_providers WHERE lifecycle_state='active' ORDER BY label,id",
+            "SELECT id,adapter_id,label,connected,unavailable_reason_code,unavailable_reason_message FROM model_providers WHERE lifecycle_state='active' ORDER BY label,id",
     )
     .fetch_all(&mut *connection)
     .await?;
@@ -1273,9 +1370,10 @@ async fn load_providers(connection: &mut SqliteConnection) -> Result<Vec<Provide
             Ok(Provider {
                 models: models.remove(&id).unwrap_or_default(),
                 id: ProviderId::from_database(id),
-                label: row.try_get(1)?,
-                connected: row.try_get(2)?,
-                unavailable_reason: reason_from_row(row, 3, 4)?,
+                adapter_id: row.try_get(1)?,
+                label: row.try_get(2)?,
+                connected: row.try_get(3)?,
+                unavailable_reason: reason_from_row(row, 4, 5)?,
             })
         })
         .collect()
@@ -1389,14 +1487,14 @@ async fn replace_system_family(
     .await?;
     // Legacy system families predate the declarative policy identity. Retire any family owned
     // solely by this provider in the same transaction that creates the policy-owned successor.
-    sqlx::query("UPDATE model_families SET name=name || ' (retired ' || id || ')',lifecycle_state='tombstoned',enabled=0,removed_at=CAST(strftime('%s','now') AS TEXT) WHERE kind='system' AND managed_provider_id IS NULL AND lifecycle_state='active' AND EXISTS(SELECT 1 FROM model_family_members member WHERE member.family_id=model_families.id AND member.provider_id=?1) AND NOT EXISTS(SELECT 1 FROM model_family_members member WHERE member.family_id=model_families.id AND member.provider_id!=?1)")
+    sqlx::query("UPDATE model_families SET lifecycle_state='tombstoned',enabled=0,removed_at=CAST(strftime('%s','now') AS TEXT) WHERE kind='system' AND managed_provider_id IS NULL AND lifecycle_state='active' AND EXISTS(SELECT 1 FROM model_family_members member WHERE member.family_id=model_families.id AND member.provider_id=?1) AND NOT EXISTS(SELECT 1 FROM model_family_members member WHERE member.family_id=model_families.id AND member.provider_id!=?1)")
         .bind(snapshot.provider_id.as_str())
         .execute(&mut *connection)
         .await?;
     // Retire obsolete policy identities before inserting the replacement so the user-facing
     // name remains stable. This is inside the catalog transaction, so any later failure restores
     // the prior family and default unchanged.
-    sqlx::query("UPDATE model_families SET name=name || ' (retired ' || id || ')',lifecycle_state='tombstoned',enabled=0,removed_at=CAST(strftime('%s','now') AS TEXT) WHERE managed_provider_id=?1 AND (policy_id!=?2 OR policy_version!=?3) AND lifecycle_state='active'")
+    sqlx::query("UPDATE model_families SET lifecycle_state='tombstoned',enabled=0,removed_at=CAST(strftime('%s','now') AS TEXT) WHERE managed_provider_id=?1 AND (policy_id!=?2 OR policy_version!=?3) AND lifecycle_state='active'")
         .bind(snapshot.provider_id.as_str())
         .bind(&policy.id)
         .bind(policy.version)
@@ -1428,7 +1526,7 @@ async fn replace_system_family(
                         )
                     })
                     .collect::<Vec<_>>();
-            sqlx::query("UPDATE model_families SET name=?1,revision=revision+?2,system_key=?3,lifecycle_state='active',enabled=1,removed_at=NULL WHERE id=?4")
+            sqlx::query("UPDATE model_families SET name=?1,revision=revision+?2,system_key=?3,lifecycle_state='active',removed_at=NULL WHERE id=?4")
                 .bind(&system_family.name)
                 .bind(i64::from(changed))
                 .bind(&key)
@@ -1457,9 +1555,10 @@ async fn replace_system_family(
         }
     };
     replace_family_members(connection, id, &members).await?;
+    compact_family_positions(connection).await?;
     // Move only an unset or managed default. A user-owned custom family is never replaced by
     // reconciliation. The entire catalog/family/default transition commits atomically.
-    sqlx::query("UPDATE product_model_preferences SET default_family_id=CASE WHEN ?3 OR EXISTS(SELECT 1 FROM model_families current WHERE current.id=default_family_id AND current.kind='system' AND current.managed_provider_id IS NOT NULL) OR (default_family_id IS NULL AND (default_provider_id IS NULL OR default_provider_id=?2 OR NOT EXISTS(SELECT 1 FROM model_providers chosen WHERE chosen.id=default_provider_id AND chosen.lifecycle_state='active' AND chosen.connected=1))) THEN ?1 ELSE default_family_id END,default_provider_id=CASE WHEN ?3 OR EXISTS(SELECT 1 FROM model_families current WHERE current.id=default_family_id AND current.kind='system' AND current.managed_provider_id IS NOT NULL) OR (default_family_id IS NULL AND (default_provider_id IS NULL OR default_provider_id=?2 OR NOT EXISTS(SELECT 1 FROM model_providers chosen WHERE chosen.id=default_provider_id AND chosen.lifecycle_state='active' AND chosen.connected=1))) THEN ?2 ELSE default_provider_id END WHERE singleton=1")
+    sqlx::query("UPDATE product_model_preferences SET default_family_id=CASE WHEN ?3 OR EXISTS(SELECT 1 FROM model_families current WHERE current.id=default_family_id AND current.kind='system' AND current.managed_provider_id=?2) OR (default_family_id IS NULL AND (default_provider_id IS NULL OR default_provider_id=?2 OR NOT EXISTS(SELECT 1 FROM model_providers chosen WHERE chosen.id=default_provider_id AND chosen.lifecycle_state='active' AND chosen.connected=1))) THEN ?1 ELSE default_family_id END,default_provider_id=CASE WHEN ?3 OR EXISTS(SELECT 1 FROM model_families current WHERE current.id=default_family_id AND current.kind='system' AND current.managed_provider_id=?2) OR (default_family_id IS NULL AND (default_provider_id IS NULL OR default_provider_id=?2 OR NOT EXISTS(SELECT 1 FROM model_providers chosen WHERE chosen.id=default_provider_id AND chosen.lifecycle_state='active' AND chosen.connected=1))) THEN ?2 ELSE default_provider_id END WHERE singleton=1")
         .bind(id.value())
         .bind(snapshot.provider_id.as_str())
         .bind(legacy_default)
@@ -1492,20 +1591,61 @@ async fn replace_family_members(
 }
 
 async fn compact_family_positions(connection: &mut SqliteConnection) -> Result<(), StorageError> {
-    let ids = sqlx::query_scalar::<_, i64>("SELECT id FROM model_families ORDER BY position,id")
-        .fetch_all(&mut *connection)
-        .await?;
-    sqlx::query("UPDATE model_families SET position=position+1000000")
+    let ids = sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM model_families WHERE lifecycle_state='active' ORDER BY position,id",
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+    let ids = ids
+        .into_iter()
+        .map(ModelFamilyId::from_database)
+        .collect::<Vec<_>>();
+    rewrite_family_positions(connection, &ids).await
+}
+
+async fn rewrite_family_positions(
+    connection: &mut SqliteConnection,
+    active_ids: &[ModelFamilyId],
+) -> Result<(), StorageError> {
+    let tombstone_ids = sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM model_families WHERE lifecycle_state='tombstoned' ORDER BY position,id",
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+    let offset: i64 =
+        sqlx::query_scalar("SELECT COALESCE(MAX(position),-1)+COUNT(*)+1 FROM model_families")
+            .fetch_one(&mut *connection)
+            .await?;
+    sqlx::query("UPDATE model_families SET position=position+?1")
+        .bind(offset)
         .execute(&mut *connection)
         .await?;
-    for (position, id) in ids.into_iter().enumerate() {
+    for (position, id) in active_ids.iter().enumerate() {
         sqlx::query("UPDATE model_families SET position=?1 WHERE id=?2")
             .bind(position as i64)
+            .bind(id.value())
+            .execute(&mut *connection)
+            .await?;
+    }
+    for (index, id) in tombstone_ids.into_iter().enumerate() {
+        sqlx::query("UPDATE model_families SET position=?1 WHERE id=?2")
+            .bind((active_ids.len() + index) as i64)
             .bind(id)
             .execute(&mut *connection)
             .await?;
     }
     Ok(())
+}
+
+async fn tombstone_managed_provider_families(
+    connection: &mut SqliteConnection,
+    provider_id: &str,
+) -> Result<(), StorageError> {
+    sqlx::query("UPDATE model_families SET lifecycle_state='tombstoned',enabled=0,removed_at=CAST(strftime('%s','now') AS TEXT) WHERE managed_provider_id=?1 AND lifecycle_state='active'")
+        .bind(provider_id)
+        .execute(&mut *connection)
+        .await?;
+    compact_family_positions(connection).await
 }
 
 async fn guard_provider_removal(
@@ -1675,6 +1815,31 @@ mod provider_definition_tests {
             credential_reference: Some(format!("provider:{id}")),
             lifecycle_state: "active".into(),
             removed_at: None,
+        }
+    }
+
+    fn catalog_snapshot(id: &str, label: &str) -> ProviderCatalogSnapshot {
+        ProviderCatalogSnapshot {
+            provider_id: ProviderId::parse(id).unwrap(),
+            label: label.into(),
+            connected: true,
+            unavailable_reason: None,
+            models: vec![crate::product::CatalogModelSnapshot {
+                id: "model-one".into(),
+                label: "Model One".into(),
+                order: 0,
+                visible: true,
+                available: true,
+                unavailable_reason: None,
+                provider_default: true,
+                replacement_model_id: None,
+                metadata: serde_json::json!({}),
+            }],
+            system_family: Some(SystemFamilySnapshot {
+                key: "ignored".into(),
+                name: format!("{label} defaults"),
+                model_ids: vec!["model-one".into()],
+            }),
         }
     }
 
@@ -2014,7 +2179,252 @@ mod provider_definition_tests {
             .into_iter()
             .find(|harness| harness.id == "codex-basic")
             .unwrap();
-        assert_eq!(harness.configuration_revision, 2);
+        assert_eq!(harness.configuration_revision, 3);
         assert_eq!(harness.model_rules, Some(edited));
+        let rebased_digest: String = sqlx::query_scalar(
+            "SELECT configuration_digest FROM product_harnesses WHERE configuration_name='codex-basic'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        store
+            .initialize_model_catalog(
+                "codex-basic",
+                &[RuntimeProductHarness {
+                    id: "codex-basic".into(),
+                    configuration_revision: 3,
+                    configuration_digest: "sha256:shipped-v3".into(),
+                    model_compatibility: Vec::new(),
+                    model_rules: Some(HarnessModelRules::default()),
+                    execution_access_contracts: vec!["managed-runtime@1".into()],
+                    family_policy: None,
+                }],
+            )
+            .await
+            .unwrap();
+        let unchanged: (i64, String) = sqlx::query_as(
+            "SELECT configuration_revision,configuration_digest FROM product_harnesses WHERE configuration_name='codex-basic'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(unchanged, (3, rebased_digest));
+    }
+
+    #[tokio::test]
+    async fn managed_families_preserve_visibility_do_not_steal_defaults_and_retire_with_provider() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-managed-family-lifecycle-{}-{}.sqlite3",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        store
+            .initialize_model_catalog(
+                "codex-basic",
+                &[RuntimeProductHarness {
+                    id: "codex-basic".into(),
+                    configuration_digest: "sha256:test".into(),
+                    model_compatibility: Vec::new(),
+                    configuration_revision: 1,
+                    model_rules: Some(HarnessModelRules {
+                        allow: vec![HarnessModelRule {
+                            adapter_id: "openai-api".into(),
+                            model_id_exact: Some("model-one".into()),
+                            model_id_regex: None,
+                        }],
+                        deny: Vec::new(),
+                    }),
+                    execution_access_contracts: vec!["secret@1".into()],
+                    family_policy: None,
+                }],
+            )
+            .await
+            .unwrap();
+        let policy = FamilyPolicyReference {
+            id: "codex-default-family".into(),
+            version: 1,
+        };
+        let mut first = definition("first-openai");
+        first.label = "First".into();
+        let mut second = definition("second-openai");
+        second.label = "Second".into();
+        for (definition, label) in [(&first, "First"), (&second, "Second")] {
+            store
+                .create_provider_with_catalog(
+                    definition,
+                    &catalog_snapshot(definition.id.as_str(), label),
+                    Some(&policy),
+                    "1",
+                )
+                .await
+                .unwrap();
+        }
+        let defaults = store.load_model_settings().await.unwrap().defaults;
+        assert_eq!(defaults.provider_id, first.id);
+        assert_eq!(
+            store
+                .load_model_settings()
+                .await
+                .unwrap()
+                .providers
+                .into_iter()
+                .find(|provider| provider.id == first.id)
+                .unwrap()
+                .adapter_id,
+            "openai-api"
+        );
+        let first_family: i64 = sqlx::query_scalar(
+            "SELECT id FROM model_families WHERE managed_provider_id='first-openai' AND lifecycle_state='active'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        let second_family: i64 = sqlx::query_scalar(
+            "SELECT id FROM model_families WHERE managed_provider_id='second-openai' AND lifecycle_state='active'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        let disable_store = store.clone();
+        let default_store = store.clone();
+        let disable_command = UpdateModelFamilyCommand {
+            id: ModelFamilyId::from_database(first_family),
+            name: None,
+            enabled: false,
+            members: None,
+        };
+        let default_command = UpdateModelSettingsDefaultsCommand {
+            harness_id: None,
+            provider_id: Some(second.id.clone()),
+            family_id: Some(ModelFamilyId::from_database(second_family)),
+        };
+        let (disable_result, default_result) = tokio::join!(
+            disable_store.update_model_family(&disable_command),
+            default_store.update_model_settings_defaults(&default_command)
+        );
+        assert!(default_result.is_ok());
+        assert!(
+            disable_result.is_ok()
+                || disable_result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("before disabling")
+        );
+        let default_enabled: bool = sqlx::query_scalar(
+            "SELECT family.enabled FROM product_model_preferences preferences JOIN model_families family ON family.id=preferences.default_family_id WHERE preferences.singleton=1",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert!(default_enabled);
+        store
+            .update_model_family(&UpdateModelFamilyCommand {
+                id: ModelFamilyId::from_database(first_family),
+                name: None,
+                enabled: false,
+                members: None,
+            })
+            .await
+            .unwrap();
+        store
+            .publish_provider_catalog(
+                &catalog_snapshot("first-openai", "First"),
+                Some(&policy),
+                "2",
+            )
+            .await
+            .unwrap();
+        assert!(
+            !sqlx::query_scalar::<_, bool>("SELECT enabled FROM model_families WHERE id=?1")
+                .bind(first_family)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap()
+        );
+
+        store
+            .create_model_family(&CreateModelFamilyCommand {
+                name: format!("First defaults (removed {first_family})"),
+                enabled: true,
+                members: vec![ModelFamilyMember {
+                    provider_id: first.id.clone(),
+                    model_id: "model-one".into(),
+                    position: 0,
+                }],
+            })
+            .await
+            .unwrap();
+        let mut removing = first.clone();
+        removing.lifecycle_state = "removal_pending".into();
+        store.sync_provider_definitions(&[removing]).await.unwrap();
+        let retired: (String, bool) =
+            sqlx::query_as("SELECT lifecycle_state,enabled FROM model_families WHERE id=?1")
+                .bind(first_family)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(retired, ("tombstoned".into(), false));
+        let positions: Vec<i64> = sqlx::query_scalar(
+            "SELECT position FROM model_families ORDER BY CASE lifecycle_state WHEN 'active' THEN 0 ELSE 1 END,position",
+        )
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(positions, vec![0, 1, 2]);
+    }
+
+    #[tokio::test]
+    async fn deleted_custom_family_releases_its_name_without_reusing_its_tombstone_position() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-custom-family-reuse-{}-{}.sqlite3",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        sqlx::query("UPDATE model_providers SET connected=1 WHERE id='codex'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('codex','model-one','Model One',0,1,1,0,'{}')")
+            .execute(&store.pool).await.unwrap();
+        let command = CreateModelFamilyCommand {
+            name: "Reusable".into(),
+            enabled: true,
+            members: vec![ModelFamilyMember {
+                provider_id: ProviderId::parse("codex").unwrap(),
+                model_id: "model-one".into(),
+                position: 0,
+            }],
+        };
+        let removed = store.create_model_family(&command).await.unwrap();
+        let collision = CreateModelFamilyCommand {
+            name: format!("Reusable (removed {})", removed.id.value()),
+            enabled: true,
+            members: command.members.clone(),
+        };
+        store.create_model_family(&collision).await.unwrap();
+        assert!(store.delete_model_family(removed.id).await.unwrap());
+        let replacement = store.create_model_family(&command).await.unwrap();
+        assert_ne!(removed.id, replacement.id);
+        let rows: Vec<(String, i64)> =
+            sqlx::query_as("SELECT lifecycle_state,position FROM model_families ORDER BY position")
+                .fetch_all(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("active".into(), 0),
+                ("active".into(), 1),
+                ("tombstoned".into(), 2)
+            ]
+        );
     }
 }

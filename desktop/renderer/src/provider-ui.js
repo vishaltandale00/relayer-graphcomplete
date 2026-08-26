@@ -108,13 +108,15 @@ export function providerDefinitionsMarkup(definitions, defaults = {}, descriptor
     const isDefault = String(defaults.providerId) === String(definition.id);
     const descriptor = descriptors.find((candidate) => candidate.adapterId === definition.adapterId);
     const canLogout = descriptor?.connection?.mode && descriptor.connection.mode !== "secret-fields";
+    const canReconnect = canLogout && status.lifecycle === "unavailable";
     return `<article class="provider-definition-card ${escapeHtmlAttribute(status.lifecycle)}" data-provider-definition="${escapeHtmlAttribute(definition.id)}">
       <div class="provider-definition-heading"><div class="provider-definition-identity">${providerLogoMarkup(definition.adapterId)}<div class="provider-definition-copy"><h3>${escapeHtml(definition.label)}</h3><span>${escapeHtml(definition.adapterLabel ?? definition.adapterId)}</span></div></div><span class="provider-status ${status.usable ? "connected" : "unavailable"}">${escapeHtml(status.label)}</span></div>
       <dl><div><dt>Endpoint</dt><dd>${escapeHtml(definition.endpoint ?? "Managed by subscription")}</dd></div><div><dt>Access</dt><dd>${escapeHtml(definition.accessContract ?? "Managed")}</dd></div></dl>
       <div class="provider-definition-actions">
         ${isDefault ? `<span class="default-badge">Default provider</span>` : ""}
         <span class="push"></span>
-        ${canLogout ? `<button type="button" class="secondary" data-provider-logout="${escapeHtmlAttribute(definition.id)}" ${status.lifecycle !== "active" ? "disabled" : ""}>Sign out</button>` : ""}
+        ${canReconnect ? `<button type="button" class="secondary" data-provider-reconnect="${escapeHtmlAttribute(definition.id)}">Reconnect</button>` : ""}
+        ${canLogout && !canReconnect ? `<button type="button" class="secondary" data-provider-logout="${escapeHtmlAttribute(definition.id)}" ${status.lifecycle !== "active" ? "disabled" : ""}>Sign out</button>` : ""}
         <button type="button" class="secondary" data-provider-rename="${escapeHtmlAttribute(definition.id)}" ${status.lifecycle === "removal_pending" ? "disabled" : ""}>Rename</button>
         <button type="button" class="secondary danger-action" data-provider-remove="${escapeHtmlAttribute(definition.id)}" ${isDefault || status.lifecycle === "removal_pending" ? "disabled" : ""}>${status.lifecycle === "removal_pending" ? "Removing…" : "Remove"}</button>
       </div>

@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld("relayerDesktop", {
     cancelConnection: (connectionId) => ipcRenderer.invoke("relayer:provider-connect-cancel", { connectionId }),
     rename: (id, label) => ipcRenderer.invoke("relayer:provider-rename", { id, label }),
     logout: (id) => ipcRenderer.invoke("relayer:provider-logout", { id }),
+    reconnect: (id) => ipcRenderer.invoke("relayer:provider-reconnect", { id }),
     remove: (id) => ipcRenderer.invoke("relayer:provider-remove", { id }),
     completeOnboarding: () => ipcRenderer.invoke("relayer:provider-onboarding-complete"),
     onChanged: (callback) => subscribe("relayer:providers-changed", callback),

@@ -50,6 +50,27 @@ function renderDefinitions() {
       }
     };
   });
+  $$('[data-provider-reconnect]', $("#providerDefinitionList")).forEach((button) => {
+    button.onclick = async () => {
+      try {
+        let result = await desktop.providers.reconnect(button.dataset.providerReconnect);
+        pendingConnectionId = result.status === "pending" ? result.connectionId : null;
+        while (result.status === "pending" && result.connectionId === pendingConnectionId) {
+          setStatus("Complete sign-in in your browser. Relayer will continue automatically.");
+          await new Promise((resolve) => setTimeout(resolve, 750));
+          if (pendingConnectionId !== result.connectionId) return;
+          result = await desktop.providers.completeConnection(result.connectionId);
+        }
+        pendingConnectionId = null;
+        await refreshProviderSettings();
+        await refreshModelFamilySettings();
+        refreshNewThreadModelPicker();
+        setStatus("Provider reconnected.", "success");
+      } catch (error) {
+        setStatus(error.message, "error");
+      }
+    };
+  });
   $$("[data-provider-remove]", $("#providerDefinitionList")).forEach((button) => {
     button.onclick = async () => {
       const definition = status.definitions.find((item) => item.id === button.dataset.providerRemove);

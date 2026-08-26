@@ -144,6 +144,16 @@ describe("provider and harness renderer markup", () => {
     expect(markup).not.toContain('data-provider-logout="openai-work"');
   });
 
+  it("offers reconnect instead of sign out for an unavailable managed definition", () => {
+    const markup = providerDefinitionsMarkup([{
+      id: "claude-work", adapterId: "claude-subscription", label: "Claude Work",
+      lifecycleState: "active", connected: false,
+      unavailableReason: { code: "provider_logged_out", message: "The provider is signed out." },
+    }], {}, [{ adapterId: "claude-subscription", connection: { mode: "managed-login" } }]);
+    expect(markup).toContain('data-provider-reconnect="claude-work"');
+    expect(markup).not.toContain('data-provider-logout="claude-work"');
+  });
+
   it("presents harness rules separately with exact and regex matchers", () => {
     const markup = harnessConfigurationsMarkup([{
       id: "coding-default",

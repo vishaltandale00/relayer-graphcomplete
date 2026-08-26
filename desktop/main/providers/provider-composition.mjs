@@ -1,5 +1,8 @@
 import { ModelCatalogService } from "../models/model-catalog-service.mjs";
-import { toProductCatalogSnapshot } from "../models/model-catalog-adapter.mjs";
+import {
+  toProductCatalogSnapshot,
+  unavailableModelCatalogSnapshot,
+} from "../models/model-catalog-adapter.mjs";
 import { ProviderDefinitionService } from "./provider-definition-service.mjs";
 
 export function createProviderComposition({
@@ -28,9 +31,22 @@ export function createProviderComposition({
     runtimeDependencies,
     removeRuntimeState,
     publishCatalog: (snapshot, options) => publishCatalog(toProductCatalogSnapshot(snapshot), options),
-    onRuntimeReady: (_definition, runtime) => modelCatalog.register(runtime.catalog ?? runtime),
+    onRuntimeReady: (definition, runtime) => {
+      modelCatalog.unregister(definition.id);
+      modelCatalog.register(runtime.catalog ?? runtime);
+    },
     onRuntimeRemoved: (definition) => modelCatalog.unregister(definition.id),
     onRuntimeChanged: (definition) => modelCatalog.providerChanged(definition.id),
+    onRuntimeUnavailable: (definition) => {
+      modelCatalog.unregister(definition.id);
+      modelCatalog.register({
+        providerId: definition.id,
+        discover: async () => unavailableModelCatalogSnapshot({
+          providerId: definition.id,
+          providerLabel: definition.label,
+        }, "The provider could not be activated."),
+      });
+    },
   });
   return Object.freeze({
     modelCatalog,

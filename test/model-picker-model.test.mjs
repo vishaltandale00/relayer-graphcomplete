@@ -59,6 +59,16 @@ function settings() {
 }
 
 describe("composer model picker selection", () => {
+  it("requires an explicit model whenever a harness declares model rules", () => {
+    const catalog = settings();
+    const harness = catalog.harnesses.find((item) => item.id === "codex-basic");
+    harness.modelRules = { allow: [], deny: [] };
+    harness.modelCompatibility = [];
+    harness.compatibleProviderIds = [];
+
+    expect(harnessUsesConfigurationModel(catalog, "codex-basic")).toBe(false);
+  });
+
   it("recognizes typed catalog rejections that require picker reconciliation", () => {
     expect(isModelSelectionCatalogError({ code: "model_unavailable" })).toBe(true);
     expect(isModelSelectionCatalogError({ code: "harness_model_incompatible" })).toBe(true);

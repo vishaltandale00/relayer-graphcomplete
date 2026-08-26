@@ -13,6 +13,10 @@ pub(super) async fn run(pool: &SqlitePool) -> Result<(), StorageError> {
 #[cfg(test)]
 mod tests {
     use super::super::SqliteProductStore;
+    use crate::product::{
+        HarnessModelRule, HarnessModelRules, RuntimeProductHarness, UpdateHarnessModelRulesCommand,
+        UpdateModelSettingsDefaultsCommand,
+    };
     use sqlx::{Executor, Row, sqlite::SqlitePoolOptions};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -238,6 +242,164 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(accepted_count, 0);
+        reopened.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn harness_overlay_base_migration_preserves_edits_and_rebases_once() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-overlay-base-migration-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let harness = |id: &str, revision: u32, digest: &str| RuntimeProductHarness {
+            id: id.into(),
+            configuration_digest: digest.into(),
+            model_compatibility: Vec::new(),
+            configuration_revision: revision,
+            model_rules: Some(HarnessModelRules::default()),
+            execution_access_contracts: vec!["managed-runtime@1".into()],
+            family_policy: None,
+        };
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        store
+            .initialize_model_catalog(
+                "codex-basic",
+                &[
+                    harness("codex-basic", 1, "sha256:codex-v1"),
+                    harness("alternate", 1, "sha256:alternate-v1"),
+                ],
+            )
+            .await
+            .unwrap();
+        let edited = HarnessModelRules {
+            allow: vec![HarnessModelRule {
+                adapter_id: "openai-api".into(),
+                model_id_exact: Some("gpt-test".into()),
+                model_id_regex: None,
+            }],
+            deny: Vec::new(),
+        };
+        store
+            .update_harness_model_rules(&UpdateHarnessModelRulesCommand {
+                harness_id: "codex-basic".into(),
+                expected_revision: 1,
+                rules: edited.clone(),
+            })
+            .await
+            .unwrap();
+        store
+            .update_model_settings_defaults(&UpdateModelSettingsDefaultsCommand {
+                harness_id: Some("alternate".into()),
+                provider_id: None,
+                family_id: None,
+            })
+            .await
+            .unwrap();
+        store.pool.close().await;
+
+        // Recreate the exact v15 shape and ledger. Migration 0016 must add only the runtime-base
+        // metadata; the user overlay and saved defaults remain authoritative.
+        let url = format!("sqlite://{}", path.display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        pool.execute("ALTER TABLE product_harnesses DROP COLUMN runtime_configuration_digest")
+            .await
+            .unwrap();
+        pool.execute("ALTER TABLE product_harnesses DROP COLUMN runtime_configuration_revision")
+            .await
+            .unwrap();
+        pool.execute("DROP INDEX model_families_name_nocase")
+            .await
+            .unwrap();
+        pool.execute(
+            "CREATE UNIQUE INDEX model_families_name_nocase ON model_families(name COLLATE NOCASE)",
+        )
+        .await
+        .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (16,17)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        let reopened = SqliteProductStore::open(&path).await.unwrap();
+        let before = reopened.load_model_settings().await.unwrap();
+        assert_eq!(before.defaults.harness_id, "alternate");
+        assert_eq!(
+            before
+                .harnesses
+                .iter()
+                .find(|item| item.id == "codex-basic")
+                .unwrap()
+                .model_rules,
+            Some(edited.clone())
+        );
+        let migrated_base: (i64, String) = sqlx::query_as(
+            "SELECT runtime_configuration_revision,runtime_configuration_digest FROM product_harnesses WHERE configuration_name='codex-basic'",
+        )
+        .fetch_one(&reopened.pool)
+        .await
+        .unwrap();
+        assert_eq!(migrated_base, (1, String::new()));
+
+        let upgraded = [
+            harness("codex-basic", 2, "sha256:codex-v2"),
+            harness("alternate", 1, "sha256:alternate-v1"),
+        ];
+        reopened
+            .initialize_model_catalog("codex-basic", &upgraded)
+            .await
+            .unwrap();
+        let rebased: (i64, String, i64, String) = sqlx::query_as(
+            "SELECT configuration_revision,configuration_digest,runtime_configuration_revision,runtime_configuration_digest FROM product_harnesses WHERE configuration_name='codex-basic'",
+        )
+        .fetch_one(&reopened.pool)
+        .await
+        .unwrap();
+        assert_eq!(rebased.0, 3);
+        assert_ne!(rebased.1, "sha256:codex-v1");
+        assert_ne!(rebased.1, "sha256:codex-v2");
+        assert_eq!(rebased.2, 2);
+        assert_eq!(rebased.3, "sha256:codex-v2");
+        assert_eq!(
+            reopened
+                .load_model_settings()
+                .await
+                .unwrap()
+                .defaults
+                .harness_id,
+            "alternate"
+        );
+        reopened
+            .initialize_model_catalog("codex-basic", &upgraded)
+            .await
+            .unwrap();
+        let idempotent: (i64, String, i64, String) = sqlx::query_as(
+            "SELECT configuration_revision,configuration_digest,runtime_configuration_revision,runtime_configuration_digest FROM product_harnesses WHERE configuration_name='codex-basic'",
+        )
+        .fetch_one(&reopened.pool)
+        .await
+        .unwrap();
+        assert_eq!(idempotent, rebased);
+        let after = reopened.load_model_settings().await.unwrap();
+        assert_eq!(after.defaults.harness_id, "alternate");
+        assert_eq!(
+            after
+                .harnesses
+                .into_iter()
+                .find(|item| item.id == "codex-basic")
+                .unwrap()
+                .model_rules,
+            Some(edited)
+        );
         reopened.pool.close().await;
         std::fs::remove_file(path).unwrap();
     }

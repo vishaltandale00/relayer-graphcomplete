@@ -146,6 +146,8 @@ const PRODUCT_HARNESS_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("family_policy_id", "TEXT", false, 0),
     ("family_policy_version", "INTEGER", false, 0),
     ("model_rules_modified", "INTEGER", true, 0),
+    ("runtime_configuration_revision", "INTEGER", true, 0),
+    ("runtime_configuration_digest", "TEXT", true, 0),
 ];
 const HARNESS_MODEL_RULE_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("harness_configuration_name", "TEXT", true, 1),
@@ -342,7 +344,7 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     .await?;
     validate_index(pool, "model_families", &["system_key"], true).await?;
     validate_index(pool, "model_families", &["position"], true).await?;
-    validate_index(pool, "model_families", &["name"], true).await?;
+    validate_active_family_name_index(pool).await?;
     validate_index(
         pool,
         "model_families",
@@ -698,6 +700,56 @@ fn column_from_row(row: &SqliteRow) -> Result<Column, StorageError> {
     })
 }
 
+async fn validate_active_family_name_index(pool: &SqlitePool) -> Result<(), StorageError> {
+    let indexes = sqlx::query("PRAGMA index_list(model_families)")
+        .fetch_all(pool)
+        .await?;
+    for index in indexes {
+        if index.try_get::<i64, _>("unique")? != 1 || index.try_get::<i64, _>("partial")? != 1 {
+            continue;
+        }
+        let name: String = index.try_get("name")?;
+        let escaped = name.replace('"', "\"\"");
+        let columns = sqlx::query(&format!("PRAGMA index_xinfo(\"{escaped}\")"))
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .filter_map(|row| match row.try_get::<i64, _>("key") {
+                Ok(1) => Some(Ok((
+                    row.try_get::<String, _>("name"),
+                    row.try_get::<String, _>("coll"),
+                ))),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .map(|entry| {
+                let (name, collation) = entry?;
+                Ok((name?, collation?))
+            })
+            .collect::<Result<Vec<_>, sqlx::Error>>()?;
+        if columns != [("name".to_owned(), "NOCASE".to_owned())] {
+            continue;
+        }
+        let sql: String =
+            sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type='index' AND name=?1")
+                .bind(&name)
+                .fetch_one(pool)
+                .await?;
+        let normalized = sql
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>()
+            .to_ascii_lowercase();
+        let predicates = normalized.split("where").collect::<Vec<_>>();
+        if predicates.len() == 2 && predicates[1] == "lifecycle_state='active'" {
+            return Ok(());
+        }
+    }
+    Err(incompatible(
+        "table model_families is missing its active-only unique name index",
+    ))
+}
+
 async fn validate_index(
     pool: &SqlitePool,
     table: &str,
@@ -782,6 +834,44 @@ fn incompatible(message: &str) -> StorageError {
 #[cfg(test)]
 mod tests {
     use super::super::SqliteProductStore;
+
+    #[tokio::test]
+    async fn malformed_active_family_name_index_fails_current_schema_open() {
+        for (label, index_sql) in [
+            (
+                "false-predicate",
+                "CREATE UNIQUE INDEX model_families_name_nocase ON model_families(name COLLATE NOCASE) WHERE 1=0 AND lifecycle_state='active'",
+            ),
+            (
+                "binary-collation",
+                "CREATE UNIQUE INDEX model_families_name_nocase ON model_families(name) WHERE lifecycle_state='active'",
+            ),
+        ] {
+            let path = std::env::temp_dir().join(format!(
+                "relayer-malformed-family-name-index-{label}-{}-{}.sqlite3",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+            ));
+            let store = SqliteProductStore::open(&path).await.unwrap();
+            let mut connection = store.pool.acquire().await.unwrap();
+            sqlx::query("DROP INDEX model_families_name_nocase")
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+            sqlx::query(index_sql)
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+            drop(connection);
+            store.pool.close().await;
+            let error = SqliteProductStore::open(&path).await.err().unwrap();
+            assert!(error.to_string().contains("active-only unique name index"));
+            std::fs::remove_file(path).unwrap();
+        }
+    }
 
     #[tokio::test]
     async fn malformed_interaction_context_table_fails_current_schema_open() {

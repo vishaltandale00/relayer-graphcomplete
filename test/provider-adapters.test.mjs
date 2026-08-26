@@ -252,6 +252,130 @@ describe("secret-backed API adapters", () => {
 });
 
 describe("managed subscription isolation", () => {
+  it("rejects logout while the exact provider has an active execution lease", async () => {
+    const logout = vi.fn(async () => ({ status: "disconnected" }));
+    const descriptor = {
+      adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
+      defaultEndpoint: null, connection: { mode: "managed-login", fields: [] },
+      create: () => { throw new Error("initial runtime should be reused"); },
+    };
+    const service = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([descriptor]),
+      definitionStore: { async load() { return [{
+        id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,
+        accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
+      }]; } },
+      credentialStore: {},
+      initialRuntimes: new Map([["managed-work", { credentials: { logout } }]]),
+    });
+
+    const lease = await service.acquireExecution("managed-work");
+    await expect(service.logout("managed-work")).rejects.toThrow("interactions are running");
+    expect(logout).not.toHaveBeenCalled();
+    await lease.release();
+    await expect(service.logout("managed-work")).resolves.toEqual({ status: "disconnected" });
+  });
+
+  it("reconnects a signed-out managed provider without creating a new definition identity", async () => {
+    let accountStatus = "disconnected";
+    const published = [];
+    const definition = {
+      id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,
+      accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
+    };
+    const runtime = {
+      providerId: definition.id,
+      credentials: {
+        login: vi.fn(async () => ({ authUrl: "https://login.example.test/work" })),
+        account: vi.fn(async () => ({ status: accountStatus })),
+      },
+      discover: vi.fn(async () => ({
+        provider: { id: definition.id, label: definition.label, status: "available" },
+        models: [{ visible: true }],
+        systemFamily: { id: definition.id, label: definition.label, modelIds: [] },
+      })),
+    };
+    const service = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([{
+        adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
+        defaultEndpoint: null, connection: { mode: "managed-login", fields: [] }, create: () => runtime,
+      }]),
+      definitionStore: {
+        async load() { return [definition]; },
+        createWithCatalog: vi.fn(async () => { throw new Error("reconnect must not create a definition"); }),
+      },
+      credentialStore: {},
+      initialRuntimes: new Map([[definition.id, runtime]]),
+      publishCatalog: async (snapshot) => { published.push(snapshot); },
+    });
+
+    const pending = await service.reconnect(definition.id);
+    expect(pending).toMatchObject({
+      status: "pending", connectionId: definition.id,
+      providerDefinition: { id: definition.id },
+    });
+    expect(pending.login.authUrl).toBe("https://login.example.test/work");
+    await expect(service.completeConnection(definition.id)).resolves.toMatchObject({ status: "pending" });
+    accountStatus = "connected";
+    await expect(service.completeConnection(definition.id)).resolves.toMatchObject({
+      status: "connected", providerDefinition: { id: definition.id },
+    });
+    expect(published).toHaveLength(1);
+    await expect(service.list()).resolves.toEqual([expect.objectContaining({ id: definition.id })]);
+  });
+
+  it("cleans a terminal reconnect account failure so the same definition can reconnect again", async () => {
+    const definition = {
+      id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,
+      accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
+    };
+    const failedRuntime = {
+      credentials: {
+        login: vi.fn(async () => ({ authUrl: "https://login.example.test/work" })),
+        account: vi.fn(async () => { throw new Error("managed account check failed"); }),
+      },
+      close: vi.fn(async () => {}),
+    };
+    const replacementRuntime = {
+      providerId: definition.id,
+      credentials: {
+        login: vi.fn(async () => ({ authUrl: "https://login.example.test/work" })),
+        account: vi.fn(async () => ({ status: "connected" })),
+      },
+      discover: vi.fn(async () => ({
+        provider: { id: definition.id, label: definition.label, status: "available" },
+        models: [{ visible: true }],
+        systemFamily: { id: definition.id, label: definition.label, modelIds: [] },
+      })),
+    };
+    const create = vi.fn(() => replacementRuntime);
+    const removed = vi.fn(async () => {});
+    const service = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([{
+        adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
+        defaultEndpoint: null, connection: { mode: "managed-login", fields: [] }, create,
+      }]),
+      definitionStore: { async load() { return [definition]; } },
+      credentialStore: {},
+      initialRuntimes: new Map([[definition.id, failedRuntime]]),
+      onRuntimeRemoved: removed,
+      publishCatalog: vi.fn(async () => {}),
+    });
+
+    await expect(service.reconnect(definition.id)).resolves.toMatchObject({ status: "pending" });
+    await expect(service.completeConnection(definition.id)).rejects.toThrow("managed account check failed");
+    expect(failedRuntime.close).toHaveBeenCalledOnce();
+    expect(removed).toHaveBeenCalledWith(expect.objectContaining({ id: definition.id }));
+
+    await expect(service.reconnect(definition.id)).resolves.toMatchObject({
+      status: "pending", connectionId: definition.id,
+    });
+    expect(create).toHaveBeenCalledOnce();
+    await expect(service.completeConnection(definition.id)).resolves.toMatchObject({
+      status: "connected", providerDefinition: { id: definition.id },
+    });
+  });
+
   it("logs out only the exact managed provider definition through the generic service", async () => {
     const accounts = new Map([["managed-work", "connected"], ["managed-personal", "connected"]]);
     const descriptor = {
@@ -966,6 +1090,38 @@ describe("provider definition lifecycle", () => {
       category: "provider_activation_failed", providerId: "revoked", code: "unknown",
     })]);
     await expect(service.acquireExecution("revoked")).rejects.toThrow("credentials are unavailable");
+  });
+
+  it("marks a persisted provider unavailable when startup activation cannot load its credential", async () => {
+    const unavailable = [];
+    const descriptor = {
+      adapterId: "fake-api", implementationVersion: "1", label: "Fake", accessContract: "secret@1",
+      defaultEndpoint: "https://example.test/v1", connection: {
+        mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }],
+      },
+      create: vi.fn(),
+    };
+    const service = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([descriptor]),
+      definitionStore: { async load() { return [{
+        id: "missing", adapterId: "fake-api", label: "Missing", endpoint: "https://example.test/v1",
+        accessContract: "secret@1", credentialReference: "provider:missing", lifecycleState: "active",
+      }]; } },
+      credentialStore: { async get() { return null; } },
+      providerStatuses: async () => new Map([["missing", { connected: true, unavailableReason: null }]]),
+      onRuntimeUnavailable: async (definition, error) => { unavailable.push({ definition, error }); },
+    });
+
+    await service.activate();
+    expect(descriptor.create).not.toHaveBeenCalled();
+    expect(unavailable).toHaveLength(1);
+    expect(unavailable[0].definition.id).toBe("missing");
+    expect(unavailable[0].error.message).toContain("credentials are unavailable");
+    await expect(service.list()).resolves.toEqual([expect.objectContaining({
+      id: "missing",
+      connected: false,
+      unavailableReason: expect.objectContaining({ code: "provider_activation_failed" }),
+    })]);
   });
 
   it("does not cache a lazy runtime whose catalog registration failed", async () => {

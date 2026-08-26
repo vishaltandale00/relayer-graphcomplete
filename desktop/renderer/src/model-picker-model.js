@@ -27,6 +27,7 @@ export function harnessUsesConfigurationModel(settings, harnessId) {
   return Boolean(
     harness
     && harness.available !== false
+    && harness.modelRules == null
     && (harness.modelCompatibility?.length ?? 0) === 0
     && (harness.compatibleProviderIds?.length ?? 0) === 0
   );

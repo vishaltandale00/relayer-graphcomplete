@@ -535,14 +535,73 @@ export function interactionContextDraftTransition(draft, event) {
 export function composerDraftMatchesSubmission({
   currentThreadId,
   submittedThreadId,
+  currentDraftScopeKey,
+  submittedDraftScopeKey,
   currentPromptValue,
   submittedPromptValue,
   currentContexts,
   submittedContexts,
 }) {
   return String(currentThreadId) === String(submittedThreadId)
+    && currentDraftScopeKey === submittedDraftScopeKey
     && currentPromptValue === submittedPromptValue
     && currentContexts === submittedContexts;
+}
+
+export function composerDraftScopeKey(threadId, interactionId) {
+  return `${String(threadId)}:${interactionId == null ? "none" : String(interactionId)}`;
+}
+
+export function createComposerDraftScopeState() {
+  return { activeScopeKey: null, drafts: new Map() };
+}
+
+export function transitionComposerDraftScope(state, {
+  threadId,
+  interactionId,
+  currentPromptValue,
+  restoredDraft = null,
+}) {
+  const nextScopeKey = composerDraftScopeKey(threadId, interactionId);
+  if (state.activeScopeKey === nextScopeKey) {
+    const currentDraft = state.drafts.get(nextScopeKey) ?? {
+      promptValue: currentPromptValue,
+      restoredDraftInteractionId: null,
+    };
+    const restorationArrived = restoredDraft
+      && String(currentDraft.restoredDraftInteractionId) !== String(interactionId);
+    const promptValue = restorationArrived ? restoredDraft.text : currentPromptValue;
+    const drafts = new Map(state.drafts);
+    drafts.set(nextScopeKey, {
+      promptValue,
+      restoredDraftInteractionId: restorationArrived
+        ? interactionId
+        : currentDraft.restoredDraftInteractionId,
+    });
+    return {
+      state: { activeScopeKey: nextScopeKey, drafts },
+      promptValue,
+    };
+  }
+
+  const drafts = new Map(state.drafts);
+  if (state.activeScopeKey !== null) {
+    drafts.set(state.activeScopeKey, {
+      promptValue: currentPromptValue,
+      restoredDraftInteractionId: state.drafts.get(state.activeScopeKey)
+        ?.restoredDraftInteractionId ?? null,
+    });
+  }
+  if (!drafts.has(nextScopeKey)) {
+    drafts.set(nextScopeKey, {
+      promptValue: restoredDraft?.text ?? "",
+      restoredDraftInteractionId: restoredDraft ? interactionId : null,
+    });
+  }
+  return {
+    state: { activeScopeKey: nextScopeKey, drafts },
+    promptValue: drafts.get(nextScopeKey).promptValue,
+  };
 }
 
 export function contextStagingDisabledFor(status, canCompose = true, requestDisabled = false) {
@@ -1404,7 +1463,7 @@ export function createProductWorkspace({
   const prompt = $("#threadPrompt");
   const send = $("#sendInteraction");
   let pickerInheritanceKey = null;
-  let restoredDraftInteractionId = null;
+  let composerDraftScopeState = createComposerDraftScopeState();
   let restoredDraftActive = false;
   let modelPicker;
   const contextForNode = (nodeId) => composerContexts.find((context) => (
@@ -1749,6 +1808,7 @@ export function createProductWorkspace({
     const text = prompt.value.trim();
     if (send.disabled) return;
     const submittedThreadId = getThread()?.id;
+    const submittedDraftScopeKey = composerDraftScopeState.activeScopeKey;
     const submittedPromptValue = prompt.value;
     const submittedContexts = composerContexts;
     prompt.disabled = true;
@@ -1761,6 +1821,8 @@ export function createProductWorkspace({
       if (composerDraftMatchesSubmission({
         currentThreadId: getThread()?.id,
         submittedThreadId,
+        currentDraftScopeKey: composerDraftScopeState.activeScopeKey,
+        submittedDraftScopeKey,
         currentPromptValue: prompt.value,
         submittedPromptValue,
         currentContexts: composerContexts,
@@ -2071,10 +2133,14 @@ export function createProductWorkspace({
     const retryMessage = $("#composerRetryMessage");
     retryMessage.classList.toggle("hidden", !restoredDraft);
     retryMessage.textContent = restoredDraft?.message ?? "";
-    if (restoredDraft && String(restoredDraftInteractionId) !== String(latestInteraction.id)) {
-      prompt.value = restoredDraft.text;
-      restoredDraftInteractionId = latestInteraction.id;
-    }
+    const draftTransition = transitionComposerDraftScope(composerDraftScopeState, {
+      threadId,
+      interactionId: latestInteraction?.id,
+      currentPromptValue: prompt.value,
+      restoredDraft,
+    });
+    composerDraftScopeState = draftTransition.state;
+    prompt.value = draftTransition.promptValue;
     const inheritanceKey = `${thread.id}:${latestInteraction?.id ?? "none"}`;
     if (modelPicker) {
       const replaceSelection = inheritanceKey !== pickerInheritanceKey;

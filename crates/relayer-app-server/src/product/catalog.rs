@@ -145,6 +145,26 @@ pub(crate) fn validate_harness_model_rules(rules: &HarnessModelRules) -> Result<
                     ("exact", exact.as_str())
                 }
                 (None, Some(pattern)) if !pattern.is_empty() && pattern.len() <= 500 => {
+                    // Rust regex character classes such as `\w` are Unicode-aware while
+                    // JavaScript's corresponding classes remain ASCII-only even with /u.
+                    // Reject escaped alphabetic shorthands so persisted rules have identical
+                    // meaning in product validation and the renderer's local projection.
+                    if pattern
+                        .as_bytes()
+                        .windows(2)
+                        .any(|pair| pair[0] == b'\\' && pair[1].is_ascii_alphabetic())
+                    {
+                        return Err(CatalogError::invalid(
+                            "harness_model_regex_invalid",
+                            "A model regex uses an escaped character class outside the supported cross-runtime subset.",
+                        ));
+                    }
+                    if regex_uses_unsupported_class_syntax(pattern) {
+                        return Err(CatalogError::invalid(
+                            "harness_model_regex_invalid",
+                            "A model regex uses character-class set syntax outside the supported cross-runtime subset.",
+                        ));
+                    }
                     if pattern.contains("(?")
                         || [
                             "\\1", "\\2", "\\3", "\\4", "\\5", "\\6", "\\7", "\\8", "\\9", "\\k",
@@ -182,6 +202,33 @@ pub(crate) fn validate_harness_model_rules(rules: &HarnessModelRules) -> Result<
         }
     }
     Ok(())
+}
+
+fn regex_uses_unsupported_class_syntax(pattern: &str) -> bool {
+    // ECMAScript /u and Rust regex disagree on class set algebra. Until the renderer can consume
+    // the Rust matcher directly, accept only ordinary, non-nested character classes.
+    if pattern.contains("&&") || pattern.contains("--") || pattern.contains("~~") {
+        return true;
+    }
+    let mut escaped = false;
+    let mut in_class = false;
+    for character in pattern.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        match character {
+            '[' if in_class => return true,
+            '[' => in_class = true,
+            ']' => in_class = false,
+            _ => {}
+        }
+    }
+    false
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -255,6 +302,7 @@ pub(crate) struct ProviderDefinition {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Provider {
     pub(crate) id: ProviderId,
+    pub(crate) adapter_id: String,
     pub(crate) label: String,
     pub(crate) connected: bool,
     pub(crate) unavailable_reason: Option<UnavailableReason>,
@@ -556,7 +604,13 @@ pub(crate) fn validate_stable_id(value: &str, label: &str) -> Result<(), Catalog
             format!("{label} must be a non-empty string without surrounding whitespace"),
         ));
     }
-    if value.chars().count() > 200 || value.chars().any(char::is_control) {
+    // U+2028/U+2029 are ECMAScript line terminators but Rust regex dot matches them. Excluding
+    // them from stable catalog IDs makes dot matching identical over the valid model-ID domain.
+    if value.chars().count() > 200
+        || value
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}'))
+    {
         return Err(CatalogError::invalid(
             "stable_id_invalid",
             format!("{label} is not a valid stable identifier"),
@@ -627,6 +681,34 @@ mod tests {
             validate_harness_model_rules(&HarnessModelRules {
                 allow: vec![HarnessModelRule {
                     model_id_regex: Some("(".into()),
+                    ..valid.clone()
+                }],
+                deny: Vec::new(),
+            })
+            .unwrap_err()
+            .code(),
+            "harness_model_regex_invalid"
+        );
+        for pattern in ["^[a-z&&[^q]]+$", "^[a-z--q]+$", "^[a-z~~q]+$"] {
+            assert_eq!(
+                validate_harness_model_rules(&HarnessModelRules {
+                    allow: vec![HarnessModelRule {
+                        model_id_regex: Some(pattern.into()),
+                        ..valid.clone()
+                    }],
+                    deny: Vec::new(),
+                })
+                .unwrap_err()
+                .code(),
+                "harness_model_regex_invalid"
+            );
+        }
+        assert!(validate_stable_id("model\u{2028}id", "modelId").is_err());
+        assert!(validate_stable_id("model\u{2029}id", "modelId").is_err());
+        assert_eq!(
+            validate_harness_model_rules(&HarnessModelRules {
+                allow: vec![HarnessModelRule {
+                    model_id_regex: Some("^\\w+$".into()),
                     ..valid.clone()
                 }],
                 deny: Vec::new(),
