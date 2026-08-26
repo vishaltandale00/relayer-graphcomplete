@@ -17,7 +17,8 @@ use crate::{
         MAX_JSONL_LINE_BYTES, validate_export_records,
     },
     product::{
-        ActionInvocation, Interaction, InteractionId, ProductError, ProductService, ThreadId,
+        ActionInvocation, DurableInteractionInput, Interaction, InteractionContextIntent,
+        InteractionId, ProductError, ProductService, ThreadId,
     },
     runtime::{RuntimeClient, RuntimeError},
 };
@@ -126,12 +127,18 @@ pub(crate) async fn build_conversation_export(
             None
         };
         closures.push(closure);
+        let durable_input = product.interaction_input(interaction.id).await?;
         let context_input = match interaction.graph_node_id {
-            Some(node_id) => Some(RuntimeContextInput {
+            Some(node_id) => Some(ContextInput::Runtime(RuntimeContextInput {
                 input: runtime.interaction_input(node_id).await?,
                 actions: runtime.interaction_context_actions(node_id).await?,
-            }),
-            None => None,
+            })),
+            None => match durable_input.filter(|input| !input.contexts.is_empty()) {
+                Some(input) => Some(ContextInput::Durable(
+                    materialize_durable_contexts(runtime, input).await?,
+                )),
+                None => None,
+            },
         };
         context_inputs.push(context_input);
     }
@@ -260,9 +267,68 @@ struct RuntimeContextInput {
     actions: Vec<InteractionContextAction>,
 }
 
+enum ContextInput {
+    Runtime(RuntimeContextInput),
+    Durable(DurableContextInput),
+}
+
+struct DurableContextInput {
+    contexts: Vec<DurableContext>,
+}
+
+struct DurableContext {
+    intent: InteractionContextIntent,
+    target_node: GraphNode,
+}
+
+async fn materialize_durable_contexts(
+    runtime: &RuntimeClient,
+    input: DurableInteractionInput,
+) -> Result<DurableContextInput, ConversationExportBuildError> {
+    let mut contexts = Vec::with_capacity(input.contexts.len());
+    for intent in input.contexts {
+        let layer: ResolvedLayer = serde_json::from_value(
+            runtime
+                .get_layer(
+                    intent.target.source_interaction_node_id,
+                    intent.target.source_layer_id,
+                )
+                .await?,
+        )?;
+        if layer.layer.id.value() != intent.target.source_layer_id
+            || !layer
+                .layer
+                .nodes
+                .iter()
+                .any(|node_id| node_id.value() == intent.target.node_id)
+        {
+            return Err(ConversationExportBuildError::Invalid(format!(
+                "durable context target {} is outside source layer {}",
+                intent.target.node_id, intent.target.source_layer_id
+            )));
+        }
+        let target_node = layer
+            .nodes
+            .into_iter()
+            .find(|node| node.id.value() == intent.target.node_id)
+            .ok_or_else(|| {
+                ConversationExportBuildError::Invalid(format!(
+                    "durable context target {} is missing from source layer {}",
+                    intent.target.node_id, intent.target.source_layer_id
+                ))
+            })?;
+        ensure_accepted(target_node.state, "context target", target_node.id.value())?;
+        contexts.push(DurableContext {
+            intent,
+            target_node,
+        });
+    }
+    Ok(DurableContextInput { contexts })
+}
+
 struct TurnExportContext<'a> {
     closure: Option<&'a AcceptedGraphClosure>,
-    context_input: Option<&'a RuntimeContextInput>,
+    context_input: Option<&'a ContextInput>,
     invocation: Option<&'a ActionInvocation>,
     imported: ImportedExportContext<'a>,
     turn_sequences: &'a HashMap<InteractionId, i64>,
@@ -311,6 +377,11 @@ fn export_turn(
         ids,
         redactor,
     )?;
+    let interaction_node_id = match interaction.graph_node_id {
+        Some(node_id) => Some(ids.node(node_id)),
+        None if !contexts.is_empty() => Some(ids.fresh_node()),
+        None => None,
+    };
     let origin = match invocation {
         Some(invocation) => {
             let source_action_id = ids.action.get(&invocation.action_id).cloned().ok_or_else(|| {
@@ -370,7 +441,7 @@ fn export_turn(
         sequence: sequence(interaction.sequence)?,
         created_at: interaction.created_at.clone(),
         text: redactor.text(&interaction.text),
-        interaction_node_id: interaction.graph_node_id.map(|id| ids.node(id)),
+        interaction_node_id,
         origin,
         completion: ExportCompletionReceipt {
             status,
@@ -398,12 +469,12 @@ fn export_turn(
 
 fn export_contexts(
     interaction: &Interaction,
-    runtime: Option<&RuntimeContextInput>,
+    input: Option<&ContextInput>,
     imported: Option<&Vec<ExportInteractionContext>>,
     ids: &mut PortableIds,
     redactor: &ProjectPathRedactor,
 ) -> Result<Vec<ExportInteractionContext>, ConversationExportBuildError> {
-    let Some(runtime) = runtime else {
+    let Some(input) = input else {
         if imported.is_some_and(|contexts| !contexts.is_empty()) {
             return Err(ConversationExportBuildError::Invalid(format!(
                 "imported interaction {} lost its graph context materialization",
@@ -411,6 +482,45 @@ fn export_contexts(
             )));
         }
         return Ok(Vec::new());
+    };
+    let ContextInput::Runtime(runtime) = input else {
+        let ContextInput::Durable(durable) = input else {
+            unreachable!()
+        };
+        if imported.is_some_and(|contexts| !contexts.is_empty()) {
+            return Err(ConversationExportBuildError::Invalid(format!(
+                "imported interaction {} lost its graph context materialization",
+                interaction.id
+            )));
+        }
+        return durable
+            .contexts
+            .iter()
+            .map(|context| {
+                Ok(ExportInteractionContext {
+                    id: ids.fresh_action(),
+                    target: ExportContextTargetSnapshot {
+                        id: ids.node(context.target_node.id.value()),
+                        kind: redactor.text(&context.target_node.kind),
+                        icon: redactor.text(&context.target_node.icon),
+                        title: redactor.text(&context.target_node.title),
+                        detail: redactor.text(&context.target_node.detail),
+                        state: ExportRecordState::Accepted,
+                    },
+                    source: ExportContextSource {
+                        interaction_node_id: ids
+                            .node(context.intent.target.source_interaction_node_id),
+                        layer_id: ids.layer(context.intent.target.source_layer_id),
+                    },
+                    annotations: context
+                        .intent
+                        .annotations
+                        .iter()
+                        .map(|annotation| redactor.text(annotation))
+                        .collect(),
+                })
+            })
+            .collect();
     };
     if runtime.input.interaction.id.value() != interaction.graph_node_id.unwrap_or_default()
         || runtime.input.contexts.len() != runtime.actions.len()
@@ -446,7 +556,18 @@ fn export_contexts(
                 )));
             }
         }
-        return Ok(imported.clone());
+        return Ok(imported
+            .iter()
+            .cloned()
+            .map(|mut context| {
+                context.annotations = context
+                    .annotations
+                    .iter()
+                    .map(|annotation| redactor.text(annotation))
+                    .collect();
+                context
+            })
+            .collect());
     }
 
     runtime
@@ -483,7 +604,11 @@ fn export_contexts(
                     interaction_node_id: ids.node(action.target.source_interaction_node_id.value()),
                     layer_id: ids.layer(action.target.source_layer_id.value()),
                 },
-                annotations: normalized.annotations.clone(),
+                annotations: normalized
+                    .annotations
+                    .iter()
+                    .map(|annotation| redactor.text(annotation))
+                    .collect(),
             })
         })
         .collect()
@@ -790,6 +915,20 @@ impl PortableIds {
     fn action(&mut self, raw: i64) -> String {
         next_id(&mut self.action, raw, "action")
     }
+    fn fresh_node(&mut self) -> String {
+        let mut raw = -1;
+        while self.node.contains_key(&raw) {
+            raw -= 1;
+        }
+        next_id(&mut self.node, raw, "node")
+    }
+    fn fresh_action(&mut self) -> String {
+        let mut raw = -1;
+        while self.action.contains_key(&raw) {
+            raw -= 1;
+        }
+        next_id(&mut self.action, raw, "action")
+    }
 
     fn bind_node(
         &mut self,
@@ -850,12 +989,16 @@ fn next_id(ids: &mut HashMap<i64, String>, raw: i64, kind: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ImportedExportContext, PortableIds, ProjectPathRedactor, RuntimeContextInput,
-        TurnExportContext, completion_status, export_action, export_contexts, export_turn,
+        ContextInput, DurableContext, DurableContextInput, ImportedExportContext, PortableIds,
+        ProjectPathRedactor, RuntimeContextInput, TurnExportContext, completion_status,
+        export_action, export_contexts, export_turn,
     };
     use crate::{
         conversation_export::{ExportCompletionStatus, ExportTurnOrigin},
-        product::{ActionInvocation, Interaction, InteractionId, ThreadId},
+        product::{
+            ActionInvocation, Interaction, InteractionContextIntent,
+            InteractionContextTarget as ProductInteractionContextTarget, InteractionId, ThreadId,
+        },
     };
     use relayer_graph_core::{
         ActionId, ActionKind, ActionVariant, GraphAction, GraphNode, InteractionContext,
@@ -917,7 +1060,7 @@ mod tests {
                 contexts: vec![InteractionContext {
                     type_id: "interaction.context".into(),
                     target_node: target.clone(),
-                    annotations: vec!["First".into(), "Second".into()],
+                    annotations: vec!["Inspect /workspace/project/src".into(), "Second".into()],
                 }],
             },
             actions: vec![InteractionContextAction {
@@ -929,24 +1072,103 @@ mod tests {
                     source_interaction_node_id: NodeId::new(40).unwrap(),
                     source_layer_id: LayerId::new(50).unwrap(),
                 },
-                annotations: vec!["First".into(), "Second".into()],
+                annotations: vec!["Inspect /workspace/project/src".into(), "Second".into()],
                 state: RecordState::Accepted,
             }],
         };
 
         let exported = export_contexts(
             &interaction,
-            Some(&runtime),
+            Some(&ContextInput::Runtime(runtime)),
             None,
             &mut PortableIds::default(),
-            &ProjectPathRedactor::new(None),
+            &ProjectPathRedactor::new(Some("/workspace/project")),
         )
         .unwrap();
         assert_eq!(exported[0].id, "action:1");
         assert_eq!(exported[0].target.id, "node:1");
         assert_eq!(exported[0].source.interaction_node_id, "node:2");
         assert_eq!(exported[0].source.layer_id, "layer:1");
-        assert_eq!(exported[0].annotations, ["First", "Second"]);
+        assert_eq!(
+            exported[0].annotations,
+            ["Inspect [project-path]/src", "Second"]
+        );
+    }
+
+    #[test]
+    fn exports_unbound_durable_contexts_with_materialized_target_snapshots() {
+        let interaction = Interaction {
+            id: InteractionId::from_database(8),
+            thread_id: ThreadId::from_database(1),
+            sequence: 2,
+            text: "Preserved draft".into(),
+            created_at: "2".into(),
+            graph_node_id: None,
+            completion_status: "submitted".into(),
+            harness_configuration_name: None,
+            harness_configuration_digest: None,
+            permission_profile_id: "auto".into(),
+            model_selection: None,
+            effective_execution_digest: None,
+            effective_permission_receipt: None,
+            completion_output: None,
+            completion_error: None,
+        };
+        let durable = ContextInput::Durable(DurableContextInput {
+            contexts: vec![DurableContext {
+                intent: InteractionContextIntent {
+                    target: ProductInteractionContextTarget {
+                        node_id: 20,
+                        source_interaction_node_id: 40,
+                        source_layer_id: 50,
+                    },
+                    annotations: vec!["Compare /workspace/project/private.txt".into()],
+                },
+                target_node: GraphNode {
+                    id: NodeId::new(20).unwrap(),
+                    kind: "concept".into(),
+                    icon: "file".into(),
+                    title: "Target".into(),
+                    detail: "Stored at /workspace/project/private.txt".into(),
+                    state: RecordState::Accepted,
+                    leased_action_id: None,
+                },
+            }],
+        });
+
+        let exported = export_turn(
+            &interaction,
+            TurnExportContext {
+                closure: None,
+                context_input: Some(&durable),
+                invocation: None,
+                imported: ImportedExportContext {
+                    turn: None,
+                    turn_sequences: &Default::default(),
+                },
+                turn_sequences: &[(interaction.id, interaction.sequence)]
+                    .into_iter()
+                    .collect(),
+                redactor: &ProjectPathRedactor::new(Some("/workspace/project")),
+            },
+            &mut PortableIds::default(),
+        )
+        .unwrap();
+
+        assert_eq!(exported.interaction_node_id.as_deref(), Some("node:3"));
+        assert_eq!(exported.contexts.len(), 1);
+        assert_eq!(exported.contexts[0].id, "action:1");
+        assert_eq!(exported.contexts[0].target.id, "node:1");
+        assert_eq!(
+            exported.contexts[0].target.detail,
+            "Stored at [project-path]/private.txt"
+        );
+        assert_eq!(
+            exported.contexts[0].annotations,
+            ["Compare [project-path]/private.txt"]
+        );
+        assert_eq!(exported.contexts[0].source.interaction_node_id, "node:2");
+        assert_eq!(exported.contexts[0].source.layer_id, "layer:1");
     }
 
     #[test]

@@ -150,8 +150,13 @@ describe("composer model picker UI contract", () => {
     expect(stableFollowupInputId(3, "Next", selection, [])).toBe(first);
     const changed = stableFollowupInputId(3, "Changed", selection, []);
     expect(changed).not.toBe(first);
+    const otherThread = stableFollowupInputId(4, "Next", selection, []);
+    expect(otherThread).not.toBe(first);
+    expect(stableFollowupInputId(3, "Next", selection, [])).toBe(first);
     markFollowupSendSucceeded(changed);
     expect(stableFollowupInputId(3, "Changed", selection, [])).not.toBe(changed);
+    expect(stableFollowupInputId(3, "Next", selection, [])).toBe(first);
+    expect(stableFollowupInputId(4, "Next", selection, [])).toBe(otherThread);
   });
 
   it("delegates the one trusted pre-inference refresh to the product backend", async () => {

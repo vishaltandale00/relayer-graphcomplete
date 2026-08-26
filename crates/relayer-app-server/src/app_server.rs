@@ -305,19 +305,26 @@ impl RelayerAppServer {
                 )
                 .await
                 {
-                    if error.is_retryable()
-                        && (storage
-                            .invocation_requires_graph_lease(interaction.id)
-                            .await?
-                            || storage.interaction_input(interaction.id).await?.is_some())
-                    {
-                        // A strict invoke is recoverable by its immutable source pair. Leave its
-                        // nonterminal state intact here: the restart recovery passes below will
-                        // abort any stale approval receipt and normalize it to `submitted`, so a
-                        // later restart or re-invocation can resume the same result. Quarantining
-                        // would make the only interaction allowed to consume the lease terminal.
+                    let graph_lease_recoverable = storage
+                        .invocation_requires_graph_lease(interaction.id)
+                        .await?;
+                    let identified = storage.interaction_input(interaction.id).await?.is_some();
+                    if error.is_retryable() && (graph_lease_recoverable || identified) {
+                        if identified {
+                            storage
+                                .recover_identified_interaction_submitted(
+                                    interaction.id,
+                                    "Identified interaction startup reconciliation was interrupted transiently and is ready to resume.",
+                                )
+                                .await?;
+                        }
+                        // Strict invokes and identified inputs have durable replay identities.
+                        // Preserve that recovery path here: the restart recovery passes below will
+                        // abort any stale approval receipt, and identified interactions are
+                        // normalized to `submitted` before the post-open resume pass. Quarantining
+                        // would make the only interaction allowed to consume its identity terminal.
                         eprintln!(
-                            "preserving interrupted leased action invocation {} after transient startup reconciliation failure: {error}",
+                            "preserving interrupted recoverable interaction {} after transient startup reconciliation failure: {error}",
                             interaction.id
                         );
                         continue;

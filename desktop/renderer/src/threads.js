@@ -395,12 +395,14 @@ function schedulePendingRefresh(threadId, { force = false } = {}) {
   clearTimeout(pendingRefreshTimer);
   pendingRefreshTimer = undefined;
   const thread = appState.threads.find((candidate) => String(candidate.id) === String(threadId));
-  if (!threadId || !thread || thread.imported === true) return;
-  const hasPendingInteraction = shouldPollThreadInteractions(thread, appState.interactions)
-    || appState.interactions.some((interaction) => (
+  if (!threadId || !thread) return;
+  const hasStaleProjection = appState.interactions.some((interaction) => (
     String(interaction.threadId) === String(threadId)
     && interaction.projectionFresh === false
-  ))
+  ));
+  if (thread.imported === true && !hasStaleProjection) return;
+  const hasPendingInteraction = shouldPollThreadInteractions(thread, appState.interactions)
+    || hasStaleProjection
     || layerContainsPendingInvokedAction(
       appState.visibleLayer,
       appState.actionInvocations,

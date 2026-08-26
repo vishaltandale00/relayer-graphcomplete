@@ -384,33 +384,88 @@ async function run() {
   await waitFor("new context annotation editor", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
   await setValue("#contextAnnotationEditor", "Queue order controls which task is claimed next.");
   await click("[aria-label='Confirm annotation']");
-  await waitFor("first grouped annotation", () => evaluate(`
-    document.querySelectorAll('.composer-context-group').length === 1
+  await waitFor("first compact annotation", () => evaluate(`
+    document.querySelectorAll('.composer-context-pill-wrap').length === 1
       && document.querySelectorAll('.composer-context-annotations li').length === 1
   `));
   await click("[aria-label='Add annotation to Incoming queue']");
   await setValue("#contextAnnotationEditor", "Prioritize worker availability when reasoning.");
   await click("[aria-label='Confirm annotation']");
-  await waitFor("second grouped annotation", () => evaluate(`
+  await waitFor("second ordered annotation", () => evaluate(`
     document.querySelectorAll('.composer-context-annotations li').length === 2
   `));
+  const previewBeforeEdit = await evaluate(`(() => {
+    const preview = document.querySelector('.composer-context-preview')?.getBoundingClientRect();
+    const inspector = document.querySelector('#inspector')?.getBoundingClientRect();
+    return preview && inspector ? {
+      width: preview.width,
+      height: preview.height,
+      avoidsInspector: preview.right < inspector.left,
+    } : null;
+  })()`);
+  if (!previewBeforeEdit?.avoidsInspector) {
+    throw new Error(`Composer context preview overlaps Node Details: ${JSON.stringify(previewBeforeEdit)}`);
+  }
+  const longAnnotation = "Queue ordering is the key bottleneck. Compare the oldest pending items with current worker capacity, preserve their original priority, and call out any work that has remained stalled across multiple interactions.";
   await click("[aria-label='Edit annotation 1 for Incoming queue']");
-  await setValue("#contextAnnotationEditor", "Queue ordering is the key bottleneck.");
+  await setValue("#contextAnnotationEditor", longAnnotation);
+  const previewDuringEdit = await waitFor("fixed long annotation editor", () => evaluate(`(() => {
+    const preview = document.querySelector('.composer-context-preview')?.getBoundingClientRect();
+    const editor = document.querySelector('#contextAnnotationEditor');
+    if (!preview || !editor || editor.scrollHeight <= editor.clientHeight) return null;
+    return {
+      width: preview.width,
+      height: preview.height,
+      editorOverflow: getComputedStyle(editor).overflowY,
+    };
+  })()`));
+  if (Math.abs(previewDuringEdit.width - previewBeforeEdit.width) >= 1
+    || Math.abs(previewDuringEdit.height - previewBeforeEdit.height) >= 1
+    || previewDuringEdit.editorOverflow !== "auto") {
+    throw new Error(`Long annotation edit changed preview geometry: ${JSON.stringify({ previewBeforeEdit, previewDuringEdit })}`);
+  }
   await click("[aria-label='Confirm annotation']");
   await waitFor("edited ordered annotations", () => evaluate(`(() => {
     const values = [...document.querySelectorAll('.composer-context-annotations li > span')]
       .map((element) => element.textContent);
     return JSON.stringify(values) === JSON.stringify([
-      'Queue ordering is the key bottleneck.',
+      ${JSON.stringify("Queue ordering is the key bottleneck. Compare the oldest pending items with current worker capacity, preserve their original priority, and call out any work that has remained stalled across multiple interactions.")},
       'Prioritize worker availability when reasoning.',
     ]);
   })()`));
+  await click("[aria-label='Close Incoming queue annotations']");
+  await clickNode("Two-worker pool");
+  await click("#attachNodeContext");
+  await click("[aria-label='Confirm annotation']");
+  await clickNode("Results store");
+  await click("#attachNodeContext");
+  await click("[aria-label='Confirm annotation']");
+  const pillOverflow = await waitFor("multiple node pills scroll horizontally", () => evaluate(`(() => {
+    const strip = document.querySelector('.composer-context-pills');
+    if (!strip || strip.children.length !== 3) return null;
+    strip.style.maxWidth = '280px';
+    const overflow = getComputedStyle(strip).overflowX;
+    const scrollable = strip.scrollWidth > strip.clientWidth;
+    strip.scrollLeft = strip.scrollWidth;
+    const scrolled = strip.scrollLeft > 0;
+    strip.style.removeProperty('max-width');
+    return { overflow, scrollable, scrolled };
+  })()`));
+  if (pillOverflow.overflow !== "auto" || !pillOverflow.scrollable || !pillOverflow.scrolled) {
+    throw new Error(`Multiple node pills did not scroll horizontally: ${JSON.stringify(pillOverflow)}`);
+  }
+  await click("[aria-label='Detach Two-worker pool']");
+  await click("[aria-label='Detach Results store']");
+  await click("[aria-label='Show Incoming queue annotations']");
+  await waitFor("incoming queue annotations reopened", () => evaluate(`
+    document.querySelectorAll('.composer-context-annotations li').length === 2
+  `));
   await setValue("#threadPrompt", "Use this connected queue context in the follow-up.");
   await waitFor("message and context send enabled", () => evaluate(`document.querySelector('#sendInteraction')?.disabled === false`));
   await refreshCaptureSurface();
   await writeFile(composerScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
   await captureStep(
-    "2. Multiple ordered annotations stay grouped under their connected node above the composer",
+    "2. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
     "#composerContextTray",
     3,
   );
@@ -424,7 +479,7 @@ async function run() {
   `));
   const secondContext = secondDetail.interactions[1].contexts?.[0];
   if (JSON.stringify(secondContext?.annotations) !== JSON.stringify([
-    "Queue ordering is the key bottleneck.",
+    longAnnotation,
     "Prioritize worker availability when reasoning.",
   ])) throw new Error(`Message+context annotations were not durably ordered: ${JSON.stringify(secondContext)}`);
   await click("#interactionContextPill");
@@ -541,7 +596,11 @@ async function run() {
     assertions: {
       nodeDetailsOpened: true,
       multipleAnnotationsAddedEditedAndOrdered: true,
-      groupedComposerVisible: true,
+      compactComposerPopoverVisible: true,
+      compactComposerPopoverAvoidsNodeDetails: true,
+      multipleNodePillStripScrolls: true,
+      editPreservesPopoverDimensions: true,
+      longAnnotationEditorScrolls: true,
       messageAndContextSent: true,
       historyPillAndPopoverVisible: true,
       historicalTargetNodeReopened: true,

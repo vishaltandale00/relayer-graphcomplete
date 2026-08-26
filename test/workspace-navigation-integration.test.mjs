@@ -613,6 +613,39 @@ describe("workspace navigation integration", () => {
     }
   });
 
+  it("retries an imported thread until its server projection is fresh", async () => {
+    vi.useFakeTimers();
+    try {
+      const turn = interaction(1, 10, rootLayer(101, 11));
+      const staleTurn = { ...turn, projectionFresh: false };
+      const freshTurn = { ...turn, projectionFresh: true };
+      const threads = [{ id: 10, title: "Imported review", imported: true }];
+      const stale = productState(threads, [staleTurn]);
+      const fresh = productState(threads, [freshTurn]);
+      let stateReads = 0;
+      requestImplementation = vi.fn(async (path) => {
+        if (path.startsWith("/api/state?threadId=10")) {
+          stateReads += 1;
+          return stateReads === 1 ? stale : fresh;
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const controller = await loadModules();
+
+      await controller.loadThread(10);
+      expect(stateReads).toBe(1);
+      expect(controller.appState.interactions[0].projectionFresh).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(stateReads).toBe(2);
+      expect(controller.appState.interactions[0].projectionFresh).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries a project-visible submitted invocation through the same source action", async () => {
     vi.useFakeTimers();
     try {

@@ -20,16 +20,22 @@ export function followupRequestBody(text, modelSelection, inputId, contexts = []
   return { text, inputId, contexts, modelSelection };
 }
 
-let pendingFollowupSend = null;
+const pendingFollowupSends = new Map();
 
 export function stableFollowupInputId(threadId, text, modelSelection, contexts = []) {
   const content = JSON.stringify({ threadId: String(threadId), text, modelSelection, contexts });
-  if (pendingFollowupSend?.content !== content) {
-    pendingFollowupSend = { content, inputId: crypto.randomUUID() };
-  }
-  return pendingFollowupSend.inputId;
+  const pending = pendingFollowupSends.get(content);
+  if (pending) return pending;
+  const inputId = crypto.randomUUID();
+  pendingFollowupSends.set(content, inputId);
+  return inputId;
 }
 
 export function markFollowupSendSucceeded(inputId) {
-  if (pendingFollowupSend?.inputId === inputId) pendingFollowupSend = null;
+  for (const [content, pendingInputId] of pendingFollowupSends) {
+    if (pendingInputId === inputId) {
+      pendingFollowupSends.delete(content);
+      return;
+    }
+  }
 }

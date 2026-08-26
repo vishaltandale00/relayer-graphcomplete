@@ -42,6 +42,8 @@ export const GRAPH_MIN_ZOOM = 0.4;
 export const GRAPH_MAX_ZOOM = 2;
 export const COMPOSER_MIN_HEIGHT = 42;
 export const COMPOSER_MAX_HEIGHT = 126;
+export const CONTEXT_EDITOR_MIN_HEIGHT = 52;
+export const CONTEXT_EDITOR_MAX_HEIGHT = 88;
 
 const GRAPH_NODE_HALF_WIDTH = 82;
 const GRAPH_NODE_TOP = 28;
@@ -529,6 +531,19 @@ export function interactionContextDraftTransition(draft, event) {
   throw new Error(`Unknown interaction context draft event: ${event}`);
 }
 
+export function composerDraftMatchesSubmission({
+  currentThreadId,
+  submittedThreadId,
+  currentPromptValue,
+  submittedPromptValue,
+  currentContexts,
+  submittedContexts,
+}) {
+  return String(currentThreadId) === String(submittedThreadId)
+    && currentPromptValue === submittedPromptValue
+    && currentContexts === submittedContexts;
+}
+
 export function contextStagingDisabledFor(status, canCompose = true, requestDisabled = false) {
   return requestDisabled || composerDisabledForState(status, canCompose);
 }
@@ -627,6 +642,17 @@ export function resizeComposerTextarea(textarea) {
   textarea.style.overflowY = contentHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
 }
 
+export function resizeContextEditorTextarea(textarea) {
+  textarea.style.height = "auto";
+  const contentHeight = Math.max(CONTEXT_EDITOR_MIN_HEIGHT, textarea.scrollHeight);
+  textarea.style.height = `${Math.min(contentHeight, CONTEXT_EDITOR_MAX_HEIGHT)}px`;
+  textarea.style.overflowY = contentHeight > CONTEXT_EDITOR_MAX_HEIGHT ? "auto" : "hidden";
+}
+
+export function contextAnnotationCountLabel(count) {
+  return `${count} annotation${count === 1 ? "" : "s"}`;
+}
+
 // History state is supplied by the renderer integration so Product and Eval use the same
 // controls. `onSelectTurn(delta)` remains the keyboard/stepper contract; callers can add
 // `onSelectTurnById(id)` for direct popover jumps without changing existing integrations.
@@ -685,6 +711,7 @@ export function createProductWorkspace({
   let inspectorFocusOrigin = null;
   let composerContexts = [];
   let contextEditor = null;
+  let openComposerContextNodeId = null;
   let contextPopoverOpen = false;
   const contextNodeOverrides = new Map();
   let selectedContextTarget = null;
@@ -1407,6 +1434,7 @@ export function createProductWorkspace({
   const openContextEditor = (node, annotationIndex = null) => {
     if (!node || contextStagingDisabled() || contextEditor) return;
     const context = contextForNode(node.id);
+    openComposerContextNodeId = context ? node.id : null;
     contextEditor = {
       nodeId: node.id,
       annotationIndex,
@@ -1418,50 +1446,142 @@ export function createProductWorkspace({
   };
   function renderComposerContexts() {
     const tray = $("#composerContextTray");
-    const groups = composerContexts.map((context) => {
-      const group = graphDocument.createElement("section");
-      group.className = "composer-context-group";
+    const parts = [];
+    const openContext = composerContexts.find((context) => (
+      String(context.node.id) === String(openComposerContextNodeId)
+    ));
+    if (!openContext) openComposerContextNodeId = null;
+
+    const createEditorBody = (node) => {
+      const editorPresentation = contextEditorPresentation(
+        contextEditor,
+        contextStagingDisabled(),
+      );
+      const body = graphDocument.createElement("div");
+      body.className = "composer-context-inline-editor";
+      const textarea = graphDocument.createElement("textarea");
+      textarea.id = "contextAnnotationEditor";
+      textarea.rows = 2;
+      textarea.placeholder = contextEditor.attaching
+        ? "Add a note (optional for a new node)…"
+        : "Add an annotation…";
+      textarea.setAttribute("aria-label", `Annotation for ${node.title}`);
+      textarea.value = contextEditor.value;
+      textarea.disabled = editorPresentation.textareaDisabled;
+      const controls = graphDocument.createElement("div");
+      controls.className = "composer-context-editor-actions";
+      const cancel = graphDocument.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "×";
+      cancel.title = "Cancel";
+      cancel.setAttribute("aria-label", "Cancel annotation edit");
+      cancel.onclick = closeContextEditor;
+      const remove = graphDocument.createElement("button");
+      remove.type = "button";
+      remove.textContent = "🗑";
+      remove.title = "Delete annotation";
+      remove.setAttribute("aria-label", `Delete annotation being edited for ${node.title}`);
+      remove.onclick = () => {
+        if (contextStagingDisabled() || contextEditor?.annotationIndex == null) return;
+        composerContexts = removeContextAnnotation(
+          composerContexts,
+          node.id,
+          contextEditor.annotationIndex,
+        );
+        contextEditor = null;
+        renderComposerContexts();
+      };
+      remove.disabled = contextStagingDisabled() || contextEditor?.annotationIndex == null;
+      const confirm = graphDocument.createElement("button");
+      confirm.type = "button";
+      confirm.textContent = "✓";
+      confirm.title = "Confirm";
+      confirm.setAttribute("aria-label", "Confirm annotation");
+      confirm.disabled = editorPresentation.confirmDisabled;
+      confirm.onclick = () => {
+        if (contextStagingDisabled()) return;
+        const interaction = currentInteraction();
+        const sourceTarget = String(selectedContextTarget?.nodeId) === String(node.id)
+          ? selectedContextTarget
+          : null;
+        composerContexts = applyContextEditor(
+          composerContexts,
+          contextEditor,
+          node,
+          sourceTarget || {
+            nodeId: node.id,
+            sourceInteractionNodeId: interaction?.graphNodeId,
+            sourceLayerId: currentLayerId(),
+          },
+        );
+        openComposerContextNodeId = node.id;
+        contextEditor = null;
+        renderComposerContexts();
+      };
+      textarea.oninput = () => {
+        contextEditor.value = textarea.value;
+        resizeContextEditorTextarea(textarea);
+        confirm.disabled = contextEditorPresentation(
+          contextEditor,
+          contextStagingDisabled(),
+        ).confirmDisabled;
+      };
+      if (contextEditor.annotationIndex != null) controls.append(remove);
+      controls.append(cancel, confirm);
+      body.append(textarea, controls);
+      return body;
+    };
+
+    if (openContext) {
+      const preview = graphDocument.createElement("section");
+      preview.className = "composer-context-preview";
+      preview.setAttribute("aria-live", "polite");
+      preview.setAttribute("aria-label", `${openContext.node.title} annotations`);
       const heading = graphDocument.createElement("div");
-      heading.className = "composer-context-heading";
+      heading.className = "composer-context-preview-heading";
       const nodeButton = graphDocument.createElement("button");
       nodeButton.type = "button";
       nodeButton.className = "composer-context-node";
-      nodeButton.append(createRelayerIcon(context.node.icon || context.node.metadata?.relayer?.icon));
-      const title = graphDocument.createElement("span");
-      title.textContent = context.node.title;
+      nodeButton.append(createRelayerIcon(
+        openContext.node.icon || openContext.node.metadata?.relayer?.icon,
+      ));
+      const title = graphDocument.createElement("strong");
+      title.textContent = openContext.node.title;
       nodeButton.append(title);
-      nodeButton.setAttribute("aria-label", `Open ${context.node.title} details`);
-      nodeButton.onclick = () => selectNode(getState(), context.node.id);
+      nodeButton.setAttribute("aria-label", `Open ${openContext.node.title} details`);
+      nodeButton.onclick = () => selectNode(getState(), openContext.node.id);
       const add = graphDocument.createElement("button");
       add.type = "button";
       add.className = "context-symbol-button";
       add.textContent = "+";
       add.title = "Add annotation";
-      add.setAttribute("aria-label", `Add annotation to ${context.node.title}`);
-      add.onclick = () => openContextEditor(context.node);
+      add.setAttribute("aria-label", `Add annotation to ${openContext.node.title}`);
+      add.onclick = () => openContextEditor(openContext.node);
       add.disabled = contextStagingDisabled() || Boolean(contextEditor);
-      const detach = graphDocument.createElement("button");
-      detach.type = "button";
-      detach.className = "context-symbol-button";
-      detach.textContent = "×";
-      detach.title = "Detach node";
-      detach.setAttribute("aria-label", `Detach ${context.node.title}`);
-      detach.onclick = () => {
-        if (contextStagingDisabled() || contextEditor) return;
-        if (contextDetachNeedsConfirmation(context)
-          && !graphWindow.confirm(`Detach ${context.node.title} and its annotations?`)) return;
-        composerContexts = composerContexts.filter((candidate) => candidate !== context);
-        if (String(contextEditor?.nodeId) === String(context.node.id)) contextEditor = null;
+      const close = graphDocument.createElement("button");
+      close.type = "button";
+      close.className = "context-symbol-button";
+      close.textContent = "×";
+      close.title = "Close annotations";
+      close.setAttribute("aria-label", `Close ${openContext.node.title} annotations`);
+      close.onclick = () => {
+        if (contextEditor) return;
+        openComposerContextNodeId = null;
         renderComposerContexts();
       };
-      detach.disabled = contextStagingDisabled() || Boolean(contextEditor);
-      heading.append(nodeButton, add, detach);
-      group.append(heading);
-      if (context.annotations.length) {
-        const list = graphDocument.createElement("ol");
-        list.className = "composer-context-annotations";
-        context.annotations.forEach((annotation, index) => {
-          const item = graphDocument.createElement("li");
+      close.disabled = Boolean(contextEditor);
+      heading.append(nodeButton, add, close);
+
+      const list = graphDocument.createElement("ol");
+      list.className = "composer-context-annotations";
+      openContext.annotations.forEach((annotation, index) => {
+        const item = graphDocument.createElement("li");
+        const editing = String(contextEditor?.nodeId) === String(openContext.node.id)
+          && contextEditor.annotationIndex === index;
+        if (editing) {
+          item.className = "editing";
+          item.append(createEditorBody(openContext.node));
+        } else {
           const text = graphDocument.createElement("span");
           text.textContent = annotation;
           const edit = graphDocument.createElement("button");
@@ -1469,103 +1589,130 @@ export function createProductWorkspace({
           edit.className = "context-symbol-button";
           edit.textContent = "✎";
           edit.title = "Edit annotation";
-          edit.setAttribute("aria-label", `Edit annotation ${index + 1} for ${context.node.title}`);
-          edit.onclick = () => openContextEditor(context.node, index);
+          edit.setAttribute(
+            "aria-label",
+            `Edit annotation ${index + 1} for ${openContext.node.title}`,
+          );
+          edit.onclick = () => openContextEditor(openContext.node, index);
           edit.disabled = contextStagingDisabled() || Boolean(contextEditor);
           const remove = graphDocument.createElement("button");
           remove.type = "button";
           remove.className = "context-symbol-button";
           remove.textContent = "🗑";
           remove.title = "Delete annotation";
-          remove.setAttribute("aria-label", `Delete annotation ${index + 1} for ${context.node.title}`);
+          remove.setAttribute(
+            "aria-label",
+            `Delete annotation ${index + 1} for ${openContext.node.title}`,
+          );
           remove.onclick = () => {
             if (contextStagingDisabled() || contextEditor) return;
-            composerContexts = removeContextAnnotation(composerContexts, context.node.id, index);
-            if (String(contextEditor?.nodeId) === String(context.node.id)
-              && contextEditor.annotationIndex === index) contextEditor = null;
+            composerContexts = removeContextAnnotation(
+              composerContexts,
+              openContext.node.id,
+              index,
+            );
             renderComposerContexts();
           };
           remove.disabled = contextStagingDisabled() || Boolean(contextEditor);
           item.append(text, edit, remove);
-          list.append(item);
-        });
-        group.append(list);
+        }
+        list.append(item);
+      });
+      const adding = String(contextEditor?.nodeId) === String(openContext.node.id)
+        && contextEditor.annotationIndex == null
+        && !contextEditor.attaching;
+      if (adding) {
+        const item = graphDocument.createElement("li");
+        item.className = "editing";
+        item.append(createEditorBody(openContext.node));
+        list.append(item);
       }
-      return group;
-    });
-    if (contextEditor) {
-      const node = resolveInteractionContextNode(
+      preview.append(heading, list);
+      parts.push(preview);
+    }
+
+    const attachingNode = contextEditor?.attaching
+      ? resolveInteractionContextNode(
         contextEditor.nodeId,
         getState().nodes,
         composerContexts,
         contextNodeOverrides,
-      );
-      if (node) {
-        const editorPresentation = contextEditorPresentation(
-          contextEditor,
-          contextStagingDisabled(),
-        );
-        const editor = graphDocument.createElement("section");
-        editor.className = "composer-context-editor";
-        const heading = graphDocument.createElement("div");
-        heading.className = "composer-context-heading";
-        heading.append(createRelayerIcon(node.icon || node.metadata?.relayer?.icon));
-        const title = graphDocument.createElement("strong");
-        title.textContent = node.title;
-        heading.append(title);
-        const textarea = graphDocument.createElement("textarea");
-        textarea.id = "contextAnnotationEditor";
-        textarea.rows = 2;
-        textarea.placeholder = "Add a note (optional for a new node)…";
-        textarea.setAttribute("aria-label", `Annotation for ${node.title}`);
-        textarea.value = contextEditor.value;
-        textarea.disabled = editorPresentation.textareaDisabled;
-        textarea.oninput = () => {
-          contextEditor.value = textarea.value;
-          confirm.disabled = contextEditorPresentation(
-            contextEditor,
-            contextStagingDisabled(),
-          ).confirmDisabled;
-        };
-        const controls = graphDocument.createElement("div");
-        controls.className = "composer-context-editor-actions";
-        const cancel = graphDocument.createElement("button");
-        cancel.type = "button";
-        cancel.textContent = "×";
-        cancel.title = "Cancel";
-        cancel.setAttribute("aria-label", "Cancel annotation edit");
-        cancel.onclick = closeContextEditor;
-        const confirm = graphDocument.createElement("button");
-        confirm.type = "button";
-        confirm.textContent = "✓";
-        confirm.title = "Confirm";
-        confirm.setAttribute("aria-label", "Confirm annotation");
-        confirm.disabled = editorPresentation.confirmDisabled;
-        confirm.onclick = () => {
-          if (contextStagingDisabled()) return;
-          const interaction = currentInteraction();
-          const sourceTarget = String(selectedContextTarget?.nodeId) === String(node.id)
-            ? selectedContextTarget
-            : null;
-          composerContexts = applyContextEditor(
-            composerContexts,
-            contextEditor,
-            node,
-            sourceTarget || {
-              nodeId: node.id,
-              sourceInteractionNodeId: interaction?.graphNodeId,
-              sourceLayerId: currentLayerId(),
-            },
-          );
-          closeContextEditor();
-        };
-        controls.append(cancel, confirm);
-        editor.append(heading, textarea, controls);
-        groups.push(editor);
-      }
+      )
+      : null;
+    if (attachingNode) {
+      const editor = graphDocument.createElement("section");
+      editor.className = "composer-context-editor";
+      const heading = graphDocument.createElement("div");
+      heading.className = "composer-context-heading";
+      heading.append(createRelayerIcon(
+        attachingNode.icon || attachingNode.metadata?.relayer?.icon,
+      ));
+      const title = graphDocument.createElement("strong");
+      title.textContent = attachingNode.title;
+      heading.append(title);
+      editor.append(heading, createEditorBody(attachingNode));
+      parts.push(editor);
     }
-    tray.replaceChildren(...groups);
-    tray.classList.toggle("hidden", groups.length === 0);
+
+    if (composerContexts.length) {
+      const pills = graphDocument.createElement("div");
+      pills.className = "composer-context-pills";
+      pills.setAttribute("aria-label", "Attached node context");
+      composerContexts.forEach((context) => {
+        const wrap = graphDocument.createElement("div");
+        wrap.className = "composer-context-pill-wrap";
+        const pill = graphDocument.createElement("button");
+        pill.type = "button";
+        pill.className = "composer-context-pill";
+        pill.setAttribute(
+          "aria-expanded",
+          String(String(openComposerContextNodeId) === String(context.node.id)),
+        );
+        pill.setAttribute("aria-label", `Show ${context.node.title} annotations`);
+        pill.append(createRelayerIcon(context.node.icon || context.node.metadata?.relayer?.icon));
+        const title = graphDocument.createElement("strong");
+        title.textContent = context.node.title;
+        const count = graphDocument.createElement("span");
+        count.textContent = contextAnnotationCountLabel(context.annotations.length);
+        const chevron = graphDocument.createElement("span");
+        chevron.textContent = "⌄";
+        chevron.setAttribute("aria-hidden", "true");
+        pill.append(title, count, chevron);
+        pill.onclick = () => {
+          if (contextEditor) return;
+          openComposerContextNodeId = String(openComposerContextNodeId) === String(context.node.id)
+            ? null
+            : context.node.id;
+          renderComposerContexts();
+        };
+        pill.disabled = Boolean(contextEditor);
+        const detach = graphDocument.createElement("button");
+        detach.type = "button";
+        detach.className = "composer-context-pill-remove";
+        detach.textContent = "×";
+        detach.title = "Detach node";
+        detach.setAttribute("aria-label", `Detach ${context.node.title}`);
+        detach.onclick = () => {
+          if (contextStagingDisabled() || contextEditor) return;
+          if (contextDetachNeedsConfirmation(context)
+            && !graphWindow.confirm(`Detach ${context.node.title} and its annotations?`)) return;
+          composerContexts = composerContexts.filter((candidate) => candidate !== context);
+          if (String(openComposerContextNodeId) === String(context.node.id)) {
+            openComposerContextNodeId = null;
+          }
+          renderComposerContexts();
+        };
+        detach.disabled = contextStagingDisabled() || Boolean(contextEditor);
+        wrap.append(pill, detach);
+        pills.append(wrap);
+      });
+      parts.push(pills);
+    }
+
+    tray.replaceChildren(...parts);
+    tray.classList.toggle("hidden", parts.length === 0);
+    const renderedEditor = $("#contextAnnotationEditor");
+    if (renderedEditor) resizeContextEditorTextarea(renderedEditor);
     syncComposer();
   }
   const syncComposer = () => {
@@ -1598,19 +1745,31 @@ export function createProductWorkspace({
   send.onclick = async () => {
     const text = prompt.value.trim();
     if (send.disabled) return;
+    const submittedThreadId = getThread()?.id;
+    const submittedPromptValue = prompt.value;
+    const submittedContexts = composerContexts;
     prompt.disabled = true;
     send.disabled = true;
     renderComposerContexts();
     updateAttachContextControl();
     try {
       const modelSelection = pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection;
-      await onSubmitInteraction(text, modelSelection, interactionContextPayload(composerContexts));
-      prompt.value = "";
-      ({ contexts: composerContexts, editor: contextEditor } = interactionContextDraftTransition(
-        { contexts: composerContexts, editor: contextEditor },
-        "durable_send",
-      ));
-      renderComposerContexts();
+      await onSubmitInteraction(text, modelSelection, interactionContextPayload(submittedContexts));
+      if (composerDraftMatchesSubmission({
+        currentThreadId: getThread()?.id,
+        submittedThreadId,
+        currentPromptValue: prompt.value,
+        submittedPromptValue,
+        currentContexts: composerContexts,
+        submittedContexts,
+      })) {
+        prompt.value = "";
+        ({ contexts: composerContexts, editor: contextEditor } = interactionContextDraftTransition(
+          { contexts: composerContexts, editor: contextEditor },
+          "durable_send",
+        ));
+        renderComposerContexts();
+      }
     } catch (error) {
       toast(error.message);
     } finally {
@@ -1860,6 +2019,7 @@ export function createProductWorkspace({
         { contexts: composerContexts, editor: contextEditor },
         "thread_change",
       ));
+      openComposerContextNodeId = null;
     }
     renderedThreadId = threadId;
     if (annotationSubject?.anchor.kind !== "thread") {

@@ -4,14 +4,18 @@ import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspac
 import {
   COMPOSER_MAX_HEIGHT,
   COMPOSER_MIN_HEIGHT,
+  CONTEXT_EDITOR_MAX_HEIGHT,
+  CONTEXT_EDITOR_MIN_HEIGHT,
   applyContextEditor,
   bindComposerKeydown,
   composerDisabledForState,
+  composerDraftMatchesSubmission,
   composerFocusRestoration,
   composerKeydownIntent,
   composerSubmissionReady,
   composerStatusForThread,
   contextDraftHasAnnotation,
+  contextAnnotationCountLabel,
   contextDetachNeedsConfirmation,
   contextEditorCanConfirm,
   contextEditorPresentation,
@@ -22,6 +26,7 @@ import {
   historicalContextSelectionOptions,
   handleComposerKeydown,
   resizeComposerTextarea,
+  resizeContextEditorTextarea,
   interactionContextPayload,
   interactionContextDraftTransition,
   removeContextAnnotation,
@@ -145,6 +150,37 @@ describe("product workspace keyboard behavior", () => {
     expect(contextDetachNeedsConfirmation(afterLastDelete[0])).toBe(false);
   });
 
+  it("keeps compact context counts and long annotation editors bounded", () => {
+    expect(contextAnnotationCountLabel(0)).toBe("0 annotations");
+    expect(contextAnnotationCountLabel(1)).toBe("1 annotation");
+    expect(contextAnnotationCountLabel(7)).toBe("7 annotations");
+
+    const textarea = { scrollHeight: 64, style: {} };
+    resizeContextEditorTextarea(textarea);
+    expect(textarea.style).toMatchObject({ height: "64px", overflowY: "hidden" });
+
+    textarea.scrollHeight = CONTEXT_EDITOR_MAX_HEIGHT + 100;
+    resizeContextEditorTextarea(textarea);
+    expect(textarea.style).toMatchObject({
+      height: `${CONTEXT_EDITOR_MAX_HEIGHT}px`,
+      overflowY: "auto",
+    });
+
+    textarea.scrollHeight = 0;
+    resizeContextEditorTextarea(textarea);
+    expect(textarea.style.height).toBe(`${CONTEXT_EDITOR_MIN_HEIGHT}px`);
+  });
+
+  it("keeps deletion available while an annotation is being edited", async () => {
+    const [workspace, styles] = await Promise.all([
+      readFile(new URL("../desktop/renderer/src/product-workspace/workspace.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8"),
+    ]);
+    expect(workspace).toContain("Delete annotation being edited for ${node.title}");
+    expect(workspace).toContain("if (contextEditor.annotationIndex != null) controls.append(remove);");
+    expect(styles).toContain(".composer-context-pills{display:flex;flex-wrap:nowrap;gap:7px;overflow-x:auto");
+  });
+
   it("resolves a historical context node while reopening it for the next message", () => {
     const historical = { id: 7, title: "Historical target" };
     const overrides = new Map([["7", historical]]);
@@ -219,6 +255,42 @@ describe("product workspace keyboard behavior", () => {
         { id: 2, threadId: 10, sequence: 2, completionStatus: "running" },
       ],
     }, { id: 10 })).toBe("running");
+  });
+
+  it("only clears the exact composer draft whose send completed", () => {
+    const submittedContexts = [{ target: { nodeId: 3 }, annotations: ["note"] }];
+    expect(composerDraftMatchesSubmission({
+      currentThreadId: 10,
+      submittedThreadId: 10,
+      currentPromptValue: "send A",
+      submittedPromptValue: "send A",
+      currentContexts: submittedContexts,
+      submittedContexts,
+    })).toBe(true);
+    expect(composerDraftMatchesSubmission({
+      currentThreadId: 11,
+      submittedThreadId: 10,
+      currentPromptValue: "send B",
+      submittedPromptValue: "send A",
+      currentContexts: [],
+      submittedContexts,
+    })).toBe(false);
+    expect(composerDraftMatchesSubmission({
+      currentThreadId: 10,
+      submittedThreadId: 10,
+      currentPromptValue: "send B",
+      submittedPromptValue: "send A",
+      currentContexts: submittedContexts,
+      submittedContexts,
+    })).toBe(false);
+    expect(composerDraftMatchesSubmission({
+      currentThreadId: 10,
+      submittedThreadId: 10,
+      currentPromptValue: "send A",
+      submittedPromptValue: "send A",
+      currentContexts: [...submittedContexts],
+      submittedContexts,
+    })).toBe(false);
   });
 
   it("starts at one line, grows to its cap, and then enables vertical scrolling", async () => {

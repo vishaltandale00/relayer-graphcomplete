@@ -4417,6 +4417,170 @@ async fn invalid_context_provenance_is_generic_and_leaves_no_product_intent_or_t
 }
 
 #[tokio::test]
+async fn retryable_startup_reconciliation_submits_identified_interactions_before_resume() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-identified-startup-recovery-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let offline = open_app(&database, &root).await;
+    let thread = response_json(
+        offline
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({"initialMessage":"Seed"})),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+
+    let pool = sqlite_pool(&database).await;
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let receipt = json!({
+        "schemaVersion": 1,
+        "permissionProfileId": "auto",
+        "bindingPresent": true
+    })
+    .to_string();
+    let mut interaction_ids = Vec::new();
+    for (sequence, node_id, status) in [(2, 77, "running"), (3, 78, "waiting_for_approval")] {
+        let result = sqlx::query(
+            "INSERT INTO interactions(
+                thread_id,sequence,text,created_at,graph_node_id,completion_status,
+                harness_configuration_name,harness_configuration_digest,permission_profile_id,
+                effective_execution_digest,effective_permission_receipt_json,input_identity,input_digest
+             ) VALUES (?1,?2,?3,?4,?5,?6,'codex-basic','sha256:test','auto',
+                'sha256:execution',?7,?8,?9)",
+        )
+        .bind(thread_id)
+        .bind(sequence)
+        .bind(format!("Recover {status}"))
+        .bind(&created_at)
+        .bind(node_id)
+        .bind(status)
+        .bind(&receipt)
+        .bind(format!("send-restart-{sequence}"))
+        .bind(format!("sha256:input-{sequence}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+        interaction_ids.push(result.last_insert_rowid());
+    }
+    pool.close().await;
+
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,"configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},
+                "settings":{"model":"test-model"}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let reconciliation_reads = Arc::new(AtomicUsize::new(0));
+    let observed_reads = reconciliation_reads.clone();
+    let resumed_inputs = Arc::new(Mutex::new(Vec::new()));
+    let observed_resumes = resumed_inputs.clone();
+    let graph = Router::new()
+        .route(
+            "/api/control/interactions/{id}",
+            axum::routing::get(move || {
+                let observed_reads = observed_reads.clone();
+                async move {
+                    observed_reads.fetch_add(1, Ordering::SeqCst);
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        axum::Json(json!({"error":"transient metadata failure"})),
+                    )
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let observed_resumes = observed_resumes.clone();
+                async move {
+                    observed_resumes
+                        .lock()
+                        .unwrap()
+                        .push(body["inputIdentity"].as_str().unwrap().to_owned());
+                    (StatusCode::OK, "lost graph create response")
+                }
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::delete(|| async { axum::Json(json!({"revoked":true})) }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+
+    let resumed =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
+    for _ in 0..100 {
+        let both_resumed = {
+            let resumed_inputs = resumed_inputs.lock().unwrap();
+            ["send-restart-2", "send-restart-3"]
+                .iter()
+                .all(|expected| resumed_inputs.iter().any(|actual| actual == expected))
+        };
+        if both_resumed {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(reconciliation_reads.load(Ordering::SeqCst) >= interaction_ids.len());
+    {
+        let resumed_inputs = resumed_inputs.lock().unwrap();
+        for expected in ["send-restart-2", "send-restart-3"] {
+            assert!(resumed_inputs.iter().any(|actual| actual == expected));
+        }
+    }
+    let pool = sqlite_pool(&database).await;
+    for interaction_id in interaction_ids {
+        let (status, error): (String, Option<String>) = sqlx::query_as(
+            "SELECT completion_status,completion_error FROM interactions WHERE id=?1",
+        )
+        .bind(interaction_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(status, "submitted");
+        assert!(
+            error.unwrap().contains(
+                "startup reconciliation was interrupted transiently and is ready to resume"
+            )
+        );
+    }
+    pool.close().await;
+
+    drop(resumed);
+    graph_task.abort();
+    harness_task.abort();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn identified_context_replays_after_response_loss_and_resumes_bound_input_after_restart() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
