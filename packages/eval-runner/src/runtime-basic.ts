@@ -220,19 +220,29 @@ export async function runBasicRuntimeEval(options: {
     throw error;
   } finally {
     const cleanupErrors: unknown[] = [];
+    let workingDirectoryCleanupDeferred = false;
     for (const cleanup of [
       async () => {
         if (harnessHost !== undefined) {
-          await closeHarnessHostForEval(
-            harnessHost,
-            options.harnessCloseGraceMs ?? DEFAULT_EVAL_HARNESS_CLOSE_GRACE_MS,
-            workingDirectory,
-          );
+          try {
+            await closeHarnessHostForEval(
+              harnessHost,
+              options.harnessCloseGraceMs ?? DEFAULT_EVAL_HARNESS_CLOSE_GRACE_MS,
+              workingDirectory,
+            );
+          } catch (error) {
+            if ((error as { code?: unknown }).code === "RELAYER_EVAL_HARNESS_CLOSE_TIMEOUT") {
+              workingDirectoryCleanupDeferred = true;
+            }
+            throw error;
+          }
         }
       },
       async () => graphAuditProxy?.close(),
       async () => { if (graphProcess !== undefined) await terminate(graphProcess.process); },
-      async () => rm(workingDirectory, { recursive: true, force: true }),
+      async () => {
+        if (!workingDirectoryCleanupDeferred) await rm(workingDirectory, { recursive: true, force: true });
+      },
     ]) {
       const result = await settle(cleanup);
       if (!result.ok) cleanupErrors.push(result.error);
@@ -250,11 +260,13 @@ export async function runBasicRuntimeEval(options: {
 async function closeHarnessHostForEval(host: RunningHarnessHost, closeGraceMs: number, workingDirectory: string): Promise<void> {
   const closing = settle(() => host.close());
   if (!(await settlesWithin(closing.then(() => {}), closeGraceMs))) {
-    host.forceClose();
-    void closing.then(async () => {
+    const forcing = settle(() => host.forceClose());
+    void Promise.all([closing, forcing]).then(async () => {
       await rm(workingDirectory, { recursive: true, force: true });
     }).catch(() => undefined);
-    throw new Error(`Harness host did not close within ${closeGraceMs}ms and was forcibly disconnected`);
+    const error = new Error(`Harness host did not close within ${closeGraceMs}ms and was forcibly disconnected`);
+    (error as Error & { code: string }).code = "RELAYER_EVAL_HARNESS_CLOSE_TIMEOUT";
+    throw error;
   }
   const result = await closing;
   if (!result.ok) throw result.error;

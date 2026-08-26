@@ -77,35 +77,60 @@ export interface HarnessHostOptions {
 export interface RunningHarnessHost {
   readonly url: string;
   readonly close: () => Promise<void>;
-  readonly forceClose: () => void;
+  readonly forceClose: () => Promise<void>;
   readonly host: HarnessHost;
 }
 
 export class HarnessHost {
   private readonly sessions = new Map<number, LiveSession>();
+  private readonly lateClosingHarnesses = new Set<Harness>();
   private readonly registrationTails = new Map<number, Promise<void>>();
   private saved = new Map<number, PersistedHarnessSessionDescriptor>();
   private legacySaved = new Map<number, LegacyPersistedHarnessSessionDescriptor>();
   private persistTail: Promise<void> = Promise.resolve();
+  private initialized = false;
   private closed = false;
   private closeAbandoned = false;
+  private initializePromise: Promise<void> | undefined;
+  private closePromise: Promise<void> | undefined;
+  private forceClosePromise: Promise<void> | undefined;
   private readonly traceStore: HarnessTraceStore | undefined;
 
   constructor(private readonly options: HarnessHostOptions) {
     this.traceStore = options.trace === undefined ? undefined : new HarnessTraceStore(options.trace);
   }
 
-  async initialize(): Promise<void> {
+  initialize(): Promise<void> {
+    if (this.initializePromise === undefined) {
+      let resolve!: () => void;
+      let reject!: (error: unknown) => void;
+      this.initializePromise = new Promise<void>((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+      });
+      void this.initializeInternal().then(resolve, reject);
+    }
+    return this.initializePromise;
+  }
+
+  private async initializeInternal(): Promise<void> {
+    await this.traceStore?.ready();
+    if (this.closed) throw new Error("Harness host is closed");
     try {
       const serialized = await readFile(this.options.stateFile, "utf8");
+      if (this.closed) throw new Error("Harness host is closed");
       const parsed = JSON.parse(serialized) as unknown;
       if (!isRecord(parsed) || !Array.isArray(parsed.sessions)) {
         throw new Error("Unsupported harness host state; expected schema version 3 or 4");
       }
       if (parsed.schemaVersion === 3) {
+        if (this.closed) throw new Error("Harness host is closed");
         await this.backupLegacyState(serialized);
+        if (this.closed) throw new Error("Harness host is closed");
         this.legacySaved = readLegacySessions(parsed.sessions);
         await this.persist();
+        if (this.closed) throw new Error("Harness host is closed");
+        this.initialized = true;
         return;
       }
       if (parsed.schemaVersion !== 4) {
@@ -117,9 +142,12 @@ export class HarnessHost {
         throw new Error("Harness state contains invalid legacy sessions");
       }
       this.legacySaved = readLegacySessions(parsed.legacySessions ?? []);
+      if (this.closed) throw new Error("Harness host is closed");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+    if (this.closed) throw new Error("Harness host is closed");
+    this.initialized = true;
   }
 
   async createSession(descriptor: HarnessSessionRegistration): Promise<void> {
@@ -171,7 +199,33 @@ export class HarnessHost {
       ...(savedState === undefined ? {} : { savedState }),
     });
     if (this.closed) {
-      await harness.dispose?.();
+      if (this.forceClosePromise !== undefined) {
+        let forceDisposed = false;
+        if (harness.forceDispose !== undefined) {
+          try {
+            harness.forceDispose();
+            forceDisposed = true;
+          } catch {
+            // The canonical force close has already completed. A late provider
+            // cleanup failure cannot replace its stable registration outcome.
+          }
+        }
+        if (!forceDisposed) {
+          try {
+            void Promise.resolve(harness.dispose?.()).catch(() => undefined);
+          } catch {
+            // A late registration cannot delay or overturn the already-completed
+            // force close. Best-effort fallback disposal is deliberately contained.
+          }
+        }
+        throw new Error("Harness host force-closed while the session was starting");
+      }
+      this.lateClosingHarnesses.add(harness);
+      try {
+        await harness.dispose?.();
+      } finally {
+        this.lateClosingHarnesses.delete(harness);
+      }
       throw new Error("Harness host closed while the session was starting");
     }
     let state: HarnessSessionState;
@@ -381,14 +435,31 @@ export class HarnessHost {
     return this.approvalSession(threadId).decide(requestId, input);
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(): Promise<void> {
+    if (this.forceClosePromise !== undefined) return this.forceClosePromise;
+    if (this.closePromise !== undefined) return this.closePromise;
     this.closed = true;
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    this.closePromise = new Promise<void>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    void this.closeInternal().then(resolve, reject);
+    return this.closePromise;
+  }
+
+  private async closeInternal(): Promise<void> {
     for (const session of this.sessions.values()) {
       session.approvals.close("Harness host closed before the approval was resolved.");
       session.activeCompletion?.controller.abort(new Error("Harness host closed"));
     }
     const errors: unknown[] = [];
+    try {
+      await this.initializePromise;
+    } catch (error) {
+      if (!(error instanceof Error && error.message === "Harness host is closed")) errors.push(error);
+    }
     await Promise.all([...this.sessions.entries()].map(async ([threadId, session]) => {
       await session.tail;
       try {
@@ -404,18 +475,55 @@ export class HarnessHost {
       }
     }));
     this.sessions.clear();
-    if (!this.closeAbandoned) {
+    if (!this.closeAbandoned && this.initialized) {
       try {
         await this.persist();
       } catch (error) {
         errors.push(error);
       }
     }
+    try {
+      await this.traceStore?.close();
+    } catch (error) {
+      errors.push(error);
+    }
     if (errors.length > 0) throw new AggregateError(errors, "Harness host did not close cleanly");
   }
 
   abandonClose(): void {
     this.closeAbandoned = true;
+  }
+
+  forceClose(): Promise<void> {
+    if (this.forceClosePromise !== undefined) return this.forceClosePromise;
+    this.closed = true;
+    this.closeAbandoned = true;
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    this.forceClosePromise = new Promise<void>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    const errors: unknown[] = [];
+    for (const session of this.sessions.values()) {
+      session.approvals.close("Harness host force-closed before the approval was resolved.");
+      session.activeCompletion?.controller.abort(new Error("Harness host force-closed"));
+      try { session.harness.forceDispose?.(); } catch (error) { errors.push(error); }
+    }
+    for (const harness of this.lateClosingHarnesses) {
+      try { harness.forceDispose?.(); } catch (error) { errors.push(error); }
+    }
+    void (async () => {
+      try {
+        await this.initializePromise;
+      } catch (error) {
+        if (!(error instanceof Error && error.message === "Harness host is closed")) errors.push(error);
+      }
+      await this.persistTail;
+      try { await this.traceStore?.forceClose(); } catch (error) { errors.push(error); }
+      if (errors.length > 0) throw new AggregateError(errors, "Harness host did not force-close cleanly");
+    })().then(resolve, reject);
+    return this.forceClosePromise;
   }
 
   sessionCount(): number { return this.sessions.size; }
@@ -508,22 +616,29 @@ export async function startHarnessHost(options: HarnessHostOptions): Promise<Run
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("Harness host did not bind a TCP address");
   const boundHost = address.family === "IPv6" ? `[${address.address}]` : address.address;
+  let runningClosePromise: Promise<void> | undefined;
+  let runningForceClosePromise: Promise<void> | undefined;
   return {
     url: `http://${boundHost}:${address.port}`,
     host,
     forceClose: () => {
-      host.abandonClose();
+      if (runningForceClosePromise !== undefined) return runningForceClosePromise;
+      let forceError: unknown;
+      const forcing = host.forceClose().catch((error) => { forceError = error; });
+      runningForceClosePromise = forcing.then(() => {
+        if (forceError !== undefined) throw forceError;
+      });
       server.close();
       for (const socket of sockets) socket.destroy();
       server.closeAllConnections();
+      return runningForceClosePromise;
     },
-    close: async () => {
+    close: () => {
+      if (runningForceClosePromise !== undefined) return runningForceClosePromise;
+      if (runningClosePromise !== undefined) return runningClosePromise;
       const closingServer = close(server);
-      try {
-        await host.close();
-      } finally {
-        await closingServer;
-      }
+      runningClosePromise = host.close().finally(() => closingServer);
+      return runningClosePromise;
     },
   };
 }

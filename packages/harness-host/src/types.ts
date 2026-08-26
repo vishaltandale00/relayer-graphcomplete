@@ -183,6 +183,7 @@ export interface Harness {
   complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void>;
   state(): HarnessSessionState;
   dispose?(): void | Promise<void>;
+  forceDispose?(): void;
 }
 
 export interface HarnessFactoryContext {

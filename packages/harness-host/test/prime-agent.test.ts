@@ -14,6 +14,235 @@ const configuration: HarnessConfiguration = {
 const fullPermission = { permissionProfileId: "full", permissionBinding: {} } as const;
 
 describe("PrimeAgentHarness", () => {
+  it("aborts once and uses native synchronous Prime Agent disposal for forced shutdown", async () => {
+    const nativeSyncDispose = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: nativeSyncDispose,
+      disposeAsync: vi.fn(async () => undefined),
+    };
+    const harness = await createHarness(session);
+
+    harness.forceDispose();
+    harness.forceDispose();
+
+    expect(session.abort).toHaveBeenCalledOnce();
+    expect(nativeSyncDispose).toHaveBeenCalledOnce();
+    expect(session.disposeAsync).not.toHaveBeenCalled();
+  });
+
+  it("guards native disposal before an asynchronous abort continuation can dispose again", async () => {
+    let releaseAbort!: () => void;
+    let markAbortFinished!: () => void;
+    const abortGate = new Promise<void>((resolve) => { releaseAbort = resolve; });
+    const abortFinished = new Promise<void>((resolve) => { markAbortFinished = resolve; });
+    const nativeSyncDispose = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(async () => {
+        await abortGate;
+        session.dispose();
+        markAbortFinished();
+      }),
+      dispose: nativeSyncDispose,
+    };
+    const harness = await createHarness(session);
+
+    harness.forceDispose();
+    releaseAbort();
+    await abortFinished;
+
+    expect(session.abort).toHaveBeenCalledOnce();
+    expect(nativeSyncDispose).toHaveBeenCalledOnce();
+  });
+
+  it("contains a native abort rejection and still force-disposes the Prime Agent session", async () => {
+    const nativeSyncDispose = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(async () => { throw new Error("abort failed"); }),
+      dispose: nativeSyncDispose,
+    };
+    const harness = await createHarness(session);
+
+    expect(() => harness.forceDispose()).not.toThrow();
+    await Promise.resolve();
+
+    expect(session.abort).toHaveBeenCalledOnce();
+    expect(nativeSyncDispose).toHaveBeenCalledOnce();
+  });
+
+  it("contains a synchronous native abort failure and still force-disposes the Prime Agent session", async () => {
+    const nativeSyncDispose = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(() => { throw new Error("abort failed synchronously"); }),
+      dispose: nativeSyncDispose,
+    };
+    const harness = await createHarness(session);
+
+    expect(() => harness.forceDispose()).not.toThrow();
+
+    expect(session.abort).toHaveBeenCalledOnce();
+    expect(nativeSyncDispose).toHaveBeenCalledOnce();
+  });
+
+  it("lets graceful cleanup retry after forced native disposal throws", async () => {
+    let nativeAttempts = 0;
+    const nativeSyncDispose = vi.fn(() => {
+      nativeAttempts += 1;
+      if (nativeAttempts === 1) throw new Error("forced native disposal failed");
+    });
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: nativeSyncDispose,
+      disposeAsync: vi.fn(async () => { session.dispose(); }),
+    };
+    const harness = await createHarness(session);
+
+    expect(() => harness.forceDispose()).toThrow("forced native disposal failed");
+    await expect(harness.dispose()).resolves.toBeUndefined();
+    harness.forceDispose();
+    await harness.dispose();
+
+    expect(session.abort).toHaveBeenCalledOnce();
+    expect(session.disposeAsync).toHaveBeenCalledOnce();
+    expect(nativeSyncDispose).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses native asynchronous Prime Agent disposal for graceful shutdown", async () => {
+    const nativeSyncDispose = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: nativeSyncDispose,
+      disposeAsync: vi.fn(async () => { nativeSyncDispose(); }),
+    };
+    const harness = await createHarness(session);
+
+    await harness.dispose();
+    harness.forceDispose();
+
+    expect(session.disposeAsync).toHaveBeenCalledOnce();
+    expect(nativeSyncDispose).toHaveBeenCalledOnce();
+    expect(session.abort).not.toHaveBeenCalled();
+  });
+
+  it("does not force-dispose again after successful graceful fallback disposal", async () => {
+    const nativeSyncDispose = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: nativeSyncDispose,
+    };
+    const harness = await createHarness(session);
+
+    await harness.dispose();
+    harness.forceDispose();
+
+    expect(nativeSyncDispose).toHaveBeenCalledOnce();
+    expect(session.abort).not.toHaveBeenCalled();
+  });
+
+  it("preserves native graceful disposal failures when force did not take ownership", async () => {
+    const nativeSyncDispose = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: nativeSyncDispose,
+      disposeAsync: vi.fn(async () => { throw new Error("graceful disposal failed"); }),
+    };
+    const harness = await createHarness(session);
+
+    await expect(harness.dispose()).rejects.toThrow("graceful disposal failed");
+    await expect(harness.dispose()).rejects.toThrow("graceful disposal failed");
+
+    expect(session.disposeAsync).toHaveBeenCalledOnce();
+    expect(nativeSyncDispose).not.toHaveBeenCalled();
+  });
+
+  it("publishes one graceful disposal promise and lets force win before it starts", async () => {
+    const nativeSyncDispose = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: nativeSyncDispose,
+      disposeAsync: vi.fn(async () => undefined),
+    };
+    const harness = await createHarness(session);
+
+    const graceful = harness.dispose();
+    expect(harness.dispose()).toBe(graceful);
+    harness.forceDispose();
+    await graceful;
+    await harness.dispose();
+
+    expect(session.abort).toHaveBeenCalledOnce();
+    expect(nativeSyncDispose).toHaveBeenCalledOnce();
+    expect(session.disposeAsync).not.toHaveBeenCalled();
+  });
+
+  it("contains a stale graceful rejection after force wins an in-flight disposal", async () => {
+    let markGracefulStarted!: () => void;
+    let releaseGraceful!: () => void;
+    const gracefulStarted = new Promise<void>((resolve) => { markGracefulStarted = resolve; });
+    const gracefulGate = new Promise<void>((resolve) => { releaseGraceful = resolve; });
+    const nativeSyncDispose = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: nativeSyncDispose,
+      disposeAsync: vi.fn(async () => {
+        markGracefulStarted();
+        await gracefulGate;
+        throw new Error("stale graceful cleanup failure");
+      }),
+    };
+    const harness = await createHarness(session);
+
+    const graceful = harness.dispose();
+    await gracefulStarted;
+    harness.forceDispose();
+    releaseGraceful();
+    await expect(graceful).resolves.toBeUndefined();
+    await expect(harness.dispose()).resolves.toBeUndefined();
+
+    expect(session.abort).toHaveBeenCalledOnce();
+    expect(nativeSyncDispose).toHaveBeenCalledOnce();
+    expect(session.disposeAsync).toHaveBeenCalledOnce();
+  });
+
+  it("guards the native dispose boundary when force wins a successful in-flight drain", async () => {
+    let markGracefulStarted!: () => void;
+    let releaseGraceful!: () => void;
+    const gracefulStarted = new Promise<void>((resolve) => { markGracefulStarted = resolve; });
+    const gracefulGate = new Promise<void>((resolve) => { releaseGraceful = resolve; });
+    const nativeSyncDispose = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: nativeSyncDispose,
+      disposeAsync: vi.fn(async () => {
+        markGracefulStarted();
+        await gracefulGate;
+        session.dispose();
+      }),
+    };
+    const harness = await createHarness(session);
+
+    const graceful = harness.dispose();
+    await gracefulStarted;
+    harness.forceDispose();
+    releaseGraceful();
+    await expect(graceful).resolves.toBeUndefined();
+
+    expect(session.abort).toHaveBeenCalledOnce();
+    expect(session.disposeAsync).toHaveBeenCalledOnce();
+    expect(nativeSyncDispose).toHaveBeenCalledOnce();
+  });
+
   it("keeps one Prime Agent session while passing a distinct context to each run", async () => {
     const prompts: { text: string; runContext: HarnessRunContext }[] = [];
     const session = {
@@ -344,6 +573,7 @@ interface PrimeAgentSessionFixture {
   readonly promptAndWait: ReturnType<typeof vi.fn>;
   readonly abort: ReturnType<typeof vi.fn>;
   readonly dispose: ReturnType<typeof vi.fn>;
+  readonly disposeAsync?: ReturnType<typeof vi.fn>;
   readonly subscribe?: ReturnType<typeof vi.fn>;
 }
 

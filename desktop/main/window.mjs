@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-export function createWindowFactory({ BrowserWindow, desktopDirectory, getAppearance, updater }) {
+export function createWindowFactory({ BrowserWindow, desktopDirectory, getAppearance, updater, onWindowCreated = () => {} }) {
   return async function createWindow(productSession) {
     const productOrigin = new URL(productSession.origin).origin;
     const window = new BrowserWindow({
@@ -17,6 +17,7 @@ export function createWindowFactory({ BrowserWindow, desktopDirectory, getAppear
         sandbox: true,
       },
     });
+    onWindowCreated(window);
     window.webContents.on("did-fail-load", (_event, code, description) => {
       console.error(`Renderer load failed (${code}): ${description}`);
     });

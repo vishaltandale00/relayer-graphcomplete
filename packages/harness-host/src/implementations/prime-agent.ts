@@ -9,7 +9,10 @@ interface PrimeAgentSession {
   readonly sessionFile?: string;
   promptAndWait(text: string, options: { readonly runContext: HarnessRunContext }): Promise<void>;
   abort(): Promise<void>;
-  dispose(): void | Promise<void>;
+  /** Synchronous native teardown: invalidates the session and recursively disposes child sessions. */
+  dispose(): void;
+  /** Graceful native teardown: drains stateful resources before calling dispose(). */
+  disposeAsync?(): Promise<void>;
   subscribe?(listener: (event: unknown) => void): () => void;
 }
 
@@ -44,10 +47,20 @@ interface PrimeAgentConfiguration {
 }
 
 export class PrimeAgentHarness implements Harness {
+  private forceDisposeStarted = false;
+  private gracefullyDisposed = false;
+  private gracefulDisposePromise: Promise<void> | undefined;
+  private nativeDisposeInProgress = false;
+  private nativeDisposeCompleted = false;
+  private disposeGuardInstalled = false;
+  private readonly nativeSessionDispose: () => void;
+
   private constructor(
     private readonly context: HarnessFactoryContext,
     private readonly session: PrimeAgentSession,
-  ) {}
+  ) {
+    this.nativeSessionDispose = session.dispose.bind(session);
+  }
 
   static async create(context: HarnessFactoryContext, dependencies: PrimeAgentDependencies = {}): Promise<PrimeAgentHarness> {
     const configuration = parsePrimeAgentConfiguration(context);
@@ -126,8 +139,57 @@ export class PrimeAgentHarness implements Harness {
     return this.session.sessionFile === undefined ? {} : { primeAgentSessionFile: this.session.sessionFile };
   }
 
-  async dispose(): Promise<void> {
-    await this.session.dispose();
+  dispose(): Promise<void> {
+    if (this.gracefulDisposePromise !== undefined) return this.gracefulDisposePromise;
+    if (this.nativeDisposeCompleted) return Promise.resolve();
+    this.installNativeDisposeGuard();
+    this.gracefulDisposePromise = Promise.resolve()
+      .then(async () => {
+        if (this.nativeDisposeCompleted) return;
+        if (this.session.disposeAsync !== undefined) await this.session.disposeAsync();
+        else if (!this.nativeDisposeCompleted) this.disposeNativeOnce();
+        if (!this.nativeDisposeCompleted && this.session.disposeAsync !== undefined) {
+          // A conforming disposeAsync drains resources and owns native disposal.
+          // Mark the harness terminal even if it does not call the guarded
+          // synchronous boundary itself.
+          this.nativeDisposeCompleted = true;
+        }
+        this.gracefullyDisposed = true;
+      })
+      .catch((error: unknown) => {
+        if (!this.nativeDisposeCompleted) throw error;
+      });
+    return this.gracefulDisposePromise;
+  }
+
+  forceDispose(): void {
+    if (this.forceDisposeStarted || this.gracefullyDisposed) return;
+    this.forceDisposeStarted = true;
+    this.installNativeDisposeGuard();
+    try {
+      void this.session.abort().catch(() => undefined);
+    } catch {
+      // Force disposal must continue even if a nonconforming provider throws
+      // synchronously instead of returning a rejected abort promise.
+    }
+    this.disposeNativeOnce();
+  }
+
+  private installNativeDisposeGuard(): void {
+    if (this.disposeGuardInstalled) return;
+    this.disposeGuardInstalled = true;
+    this.session.dispose = () => this.disposeNativeOnce();
+  }
+
+  private disposeNativeOnce(): void {
+    if (this.nativeDisposeInProgress || this.nativeDisposeCompleted) return;
+    this.nativeDisposeInProgress = true;
+    try {
+      this.nativeSessionDispose();
+      this.nativeDisposeCompleted = true;
+    } finally {
+      this.nativeDisposeInProgress = false;
+    }
   }
 
   private prompt(context: HarnessRunContext): string {

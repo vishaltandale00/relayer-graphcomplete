@@ -779,7 +779,9 @@ describe("desktop skeleton", () => {
     });
 
     try {
-      const session = await service.start();
+      const [session, concurrentSession] = await Promise.all([service.start(), service.start()]);
+      expect(concurrentSession).toBe(session);
+      expect(invocations).toHaveLength(1);
       expect(session.graphControlToken).toMatch(/^[a-f0-9]{64}$/);
       expect(session.harnessControlToken).toMatch(/^[a-f0-9]{64}$/);
       expect(session.harnessControlToken).not.toBe(session.graphControlToken);
@@ -801,6 +803,538 @@ describe("desktop skeleton", () => {
       expect(unexpectedStops).toEqual([{ code: 9, signal: null }]);
     } finally {
       await service.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not spawn the graph server when close interrupts harness-module loading", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-graph-runtime-import-close-"));
+    const spawnProcess = vi.fn();
+    const hookName = `__relayerRuntimeImportClose${Date.now()}${Math.random().toString(16).slice(2)}`;
+    let resolveImportEntered;
+    let resolveImport;
+    const importEntered = new Promise((resolve) => { resolveImportEntered = resolve; });
+    const importPending = new Promise((resolve) => { resolveImport = resolve; });
+    globalThis[hookName] = { importEntered: resolveImportEntered, importPending };
+    const delayedHarnessModule = `data:text/javascript,${encodeURIComponent(`
+      globalThis[${JSON.stringify(hookName)}].importEntered();
+      await globalThis[${JSON.stringify(hookName)}].importPending;
+      export const digestHarnessConfiguration = () => "digest";
+      export const createCodexBasicFactory = () => ({});
+      export const loadHarnessConfigurations = async () => new Map();
+      export const productHarnessImplementations = () => ({});
+      export const startHarnessHost = async () => { throw new Error("must not start"); };
+    `)}`;
+    const service = new GraphCompleteRuntimeService({
+      userDataDirectory: directory,
+      graphServerBinary: "/test/bin/relayer-graph-server",
+      configurationPaths: [],
+      harnessHostModuleUrl: delayedHarnessModule,
+      spawnProcess,
+    });
+
+    try {
+      const starting = service.start();
+      const startingOutcome = starting.catch((error) => error);
+      await importEntered;
+      const closing = service.close();
+      let closeTimeout;
+      const closeOutcome = await Promise.race([
+        closing.then(() => "closed"),
+        new Promise((resolve) => {
+          closeTimeout = setTimeout(() => resolve("timed out"), 250);
+        }),
+      ]);
+      clearTimeout(closeTimeout);
+      expect(closeOutcome).toBe("closed");
+      expect((await startingOutcome).message).toBe("GraphComplete runtime is shutting down.");
+      expect(spawnProcess).not.toHaveBeenCalled();
+
+      // A dynamic import cannot itself be cancelled. Its eventual settlement must
+      // not resume startup after close has already completed.
+      resolveImport();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(spawnProcess).not.toHaveBeenCalled();
+      expect(service.graphProcess).toBeNull();
+      expect(service.harnessHost).toBeNull();
+      expect(service.session).toBeNull();
+    } finally {
+      resolveImport?.();
+      delete globalThis[hookName];
+      await service.close().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not wait for a pending harness-configuration load during close", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-graph-runtime-config-close-"));
+    const spawnProcess = vi.fn();
+    const hookName = `__relayerRuntimeConfigClose${Date.now()}${Math.random().toString(16).slice(2)}`;
+    let resolveConfigEntered;
+    let resolveConfigurations;
+    const configEntered = new Promise((resolve) => { resolveConfigEntered = resolve; });
+    const configurationsPending = new Promise((resolve) => { resolveConfigurations = resolve; });
+    globalThis[hookName] = {
+      loadHarnessConfigurations: () => {
+        resolveConfigEntered();
+        return configurationsPending;
+      },
+    };
+    const harnessModule = `data:text/javascript,${encodeURIComponent(`
+      export const digestHarnessConfiguration = () => "digest";
+      export const createCodexBasicFactory = () => ({});
+      export const loadHarnessConfigurations = (...args) => globalThis[${JSON.stringify(hookName)}].loadHarnessConfigurations(...args);
+      export const productHarnessImplementations = () => ({});
+      export const startHarnessHost = async () => { throw new Error("must not start"); };
+    `)}`;
+    const service = new GraphCompleteRuntimeService({
+      userDataDirectory: directory,
+      graphServerBinary: "/test/bin/relayer-graph-server",
+      configurationPaths: [],
+      harnessHostModuleUrl: harnessModule,
+      spawnProcess,
+    });
+
+    try {
+      const starting = service.start();
+      const startingOutcome = starting.catch((error) => error);
+      await configEntered;
+      const closing = service.close();
+      let closeTimeout;
+      const closeOutcome = await Promise.race([
+        closing.then(() => "closed"),
+        new Promise((resolve) => {
+          closeTimeout = setTimeout(() => resolve("timed out"), 250);
+        }),
+      ]);
+      clearTimeout(closeTimeout);
+      expect(closeOutcome).toBe("closed");
+      expect((await startingOutcome).message).toBe("GraphComplete runtime is shutting down.");
+      expect(spawnProcess).not.toHaveBeenCalled();
+
+      resolveConfigurations(new Map());
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(spawnProcess).not.toHaveBeenCalled();
+    } finally {
+      resolveConfigurations?.(new Map());
+      delete globalThis[hookName];
+      await service.close().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("closes a harness host that finishes starting after runtime closure begins", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-graph-runtime-harness-close-"));
+    const hookName = `__relayerRuntimeStartClose${Date.now()}${Math.random().toString(16).slice(2)}`;
+    let resolveHarnessStart;
+    let resolveHarnessHost;
+    const harnessStartEntered = new Promise((resolve) => { resolveHarnessStart = resolve; });
+    const harnessHostPending = new Promise((resolve) => { resolveHarnessHost = resolve; });
+    globalThis[hookName] = {
+      startHarnessHost: () => {
+        resolveHarnessStart();
+        return harnessHostPending;
+      },
+    };
+    const harnessModule = `data:text/javascript,${encodeURIComponent(`
+      export const digestHarnessConfiguration = () => "digest";
+      export const createCodexBasicFactory = () => ({});
+      export const loadHarnessConfigurations = async () => new Map();
+      export const productHarnessImplementations = () => ({});
+      export const startHarnessHost = (...args) => globalThis[${JSON.stringify(hookName)}].startHarnessHost(...args);
+    `)}`;
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+      kill: vi.fn(function kill(signal) {
+        if (signal === "SIGKILL") {
+          this.signalCode = signal;
+          this.emit("exit", null, signal);
+          this.emit("close", null, signal);
+        }
+        return true;
+      }),
+    });
+    const service = new GraphCompleteRuntimeService({
+      userDataDirectory: directory,
+      graphServerBinary: "/test/bin/relayer-graph-server",
+      configurationPaths: [],
+      harnessHostModuleUrl: harnessModule,
+      spawnProcess: () => {
+        queueMicrotask(() => child.stdout.write(`${JSON.stringify({ ready: true, url: "http://127.0.0.1:43126" })}\n`));
+        return child;
+      },
+      shutdownTimeoutMs: 10,
+    });
+    const lateCleanupError = new Error("late cleanup failed after shutdown deadline");
+    const lifecycle = [];
+    let listenerOpen = true;
+    const closeHarnessHost = vi.fn(async () => {
+      lifecycle.push("graceful");
+      throw lateCleanupError;
+    });
+    const forceCloseHarnessHost = vi.fn(() => {
+      lifecycle.push("force");
+      listenerOpen = false;
+    });
+
+    try {
+      const starting = service.start();
+      const startingOutcome = starting.catch((error) => error);
+      await harnessStartEntered;
+      const closing = service.close();
+      let closeTimeout;
+      const closeOutcome = await Promise.race([
+        closing.then(
+          () => ({ status: "fulfilled" }),
+          (error) => ({ status: "rejected", error }),
+        ),
+        new Promise((resolve) => {
+          closeTimeout = setTimeout(() => resolve({ status: "timed out" }), 250);
+        }),
+      ]);
+      clearTimeout(closeTimeout);
+      expect(closeOutcome.status).toBe("rejected");
+      expect(closeOutcome.error).toBeInstanceOf(AggregateError);
+      expect(closeOutcome.error.errors.some((error) => error?.code === "RELAYER_RUNTIME_STARTUP_CLEANUP_TIMEOUT")).toBe(true);
+      expect((await startingOutcome).message).toBe("GraphComplete runtime is shutting down.");
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(closeHarnessHost).not.toHaveBeenCalled();
+
+      // A host that is created after close completes remains owned by this
+      // service and is disposed as soon as the pending factory settles.
+      resolveHarnessHost({ url: "http://127.0.0.1:43127", close: closeHarnessHost, forceClose: forceCloseHarnessHost });
+      await vi.waitFor(() => expect(closeHarnessHost).toHaveBeenCalledOnce());
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(closeHarnessHost).toHaveBeenCalledOnce();
+      expect(forceCloseHarnessHost).toHaveBeenCalledOnce();
+      expect(lifecycle).toEqual(["graceful", "force"]);
+      expect(listenerOpen).toBe(false);
+      expect(service.graphProcess).toBeNull();
+      expect(service.harnessHost).toBeNull();
+      expect(service.session).toBeNull();
+    } finally {
+      resolveHarnessHost?.({ url: "http://127.0.0.1:43127", close: closeHarnessHost, forceClose: forceCloseHarnessHost });
+      delete globalThis[hookName];
+      await service.close().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("awaits late harness cleanup within the shutdown grace and reports cleanup failure", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-graph-runtime-harness-cleanup-fence-"));
+    const hookName = `__relayerRuntimeCleanupFence${Date.now()}${Math.random().toString(16).slice(2)}`;
+    let resolveHarnessStart;
+    let resolveHarnessHost;
+    let rejectHarnessClose;
+    const harnessStartEntered = new Promise((resolve) => { resolveHarnessStart = resolve; });
+    const harnessHostPending = new Promise((resolve) => { resolveHarnessHost = resolve; });
+    const harnessClosePending = new Promise((_resolve, reject) => { rejectHarnessClose = reject; });
+    globalThis[hookName] = {
+      startHarnessHost: () => {
+        resolveHarnessStart();
+        return harnessHostPending;
+      },
+    };
+    const harnessModule = `data:text/javascript,${encodeURIComponent(`
+      export const digestHarnessConfiguration = () => "digest";
+      export const createCodexBasicFactory = () => ({});
+      export const loadHarnessConfigurations = async () => new Map();
+      export const productHarnessImplementations = () => ({});
+      export const startHarnessHost = (...args) => globalThis[${JSON.stringify(hookName)}].startHarnessHost(...args);
+    `)}`;
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+      kill: vi.fn(function kill(signal) {
+        this.signalCode = signal;
+        this.emit("exit", null, signal);
+        this.emit("close", null, signal);
+        return true;
+      }),
+    });
+    const service = new GraphCompleteRuntimeService({
+      userDataDirectory: directory,
+      graphServerBinary: "/test/bin/relayer-graph-server",
+      configurationPaths: [],
+      harnessHostModuleUrl: harnessModule,
+      spawnProcess: () => {
+        queueMicrotask(() => child.stdout.write(`${JSON.stringify({ ready: true, url: "http://127.0.0.1:43128" })}\n`));
+        return child;
+      },
+      shutdownTimeoutMs: 500,
+    });
+    const cleanupError = new Error("late harness close failed");
+    const closeHarnessHost = vi.fn(() => harnessClosePending);
+
+    try {
+      const starting = service.start();
+      const startingOutcome = starting.catch((error) => error);
+      await harnessStartEntered;
+      const closing = service.close();
+      let closeSettled = false;
+      void closing.then(
+        () => { closeSettled = true; },
+        () => { closeSettled = true; },
+      );
+      resolveHarnessHost({ url: "http://127.0.0.1:43129", close: closeHarnessHost });
+      await vi.waitFor(() => expect(closeHarnessHost).toHaveBeenCalledOnce());
+      expect(closeSettled).toBe(false);
+      rejectHarnessClose(cleanupError);
+      const closeError = await closing.catch((error) => error);
+      expect(closeError).toBeInstanceOf(AggregateError);
+      expect(closeError.message).toBe("GraphComplete runtime did not close cleanly.");
+      expect(closeError.errors).toContain(cleanupError);
+      expect(closeSettled).toBe(true);
+      expect((await startingOutcome).message).toBe("GraphComplete runtime is shutting down.");
+      expect(closeHarnessHost).toHaveBeenCalledOnce();
+      expect(service.harnessHost).toBeNull();
+      expect(service.session).toBeNull();
+    } finally {
+      rejectHarnessClose?.(cleanupError);
+      resolveHarnessHost?.({ url: "http://127.0.0.1:43129", close: closeHarnessHost });
+      delete globalThis[hookName];
+      await service.close().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not exceed the shared deadline when a late host force drain never settles", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-graph-runtime-late-host-force-"));
+    const hookName = `__relayerRuntimeLateHostForce${Date.now()}${Math.random().toString(16).slice(2)}`;
+    let resolveHarnessStart;
+    let resolveHarnessHost;
+    const harnessStartEntered = new Promise((resolve) => { resolveHarnessStart = resolve; });
+    const harnessHostPending = new Promise((resolve) => { resolveHarnessHost = resolve; });
+    globalThis[hookName] = {
+      startHarnessHost: () => {
+        resolveHarnessStart();
+        return harnessHostPending;
+      },
+    };
+    const harnessModule = `data:text/javascript,${encodeURIComponent(`
+      export const digestHarnessConfiguration = () => "digest";
+      export const createCodexBasicFactory = () => ({});
+      export const loadHarnessConfigurations = async () => new Map();
+      export const productHarnessImplementations = () => ({});
+      export const startHarnessHost = (...args) => globalThis[${JSON.stringify(hookName)}].startHarnessHost(...args);
+    `)}`;
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+      kill: vi.fn(function kill(signal) {
+        this.signalCode = signal;
+        this.emit("exit", null, signal);
+        this.emit("close", null, signal);
+        return true;
+      }),
+    });
+    const service = new GraphCompleteRuntimeService({
+      userDataDirectory: directory,
+      graphServerBinary: "/test/bin/relayer-graph-server",
+      configurationPaths: [],
+      harnessHostModuleUrl: harnessModule,
+      spawnProcess: () => {
+        queueMicrotask(() => child.stdout.write(`${JSON.stringify({ ready: true, url: "http://127.0.0.1:43132" })}\n`));
+        return child;
+      },
+      shutdownTimeoutMs: 20,
+    });
+    const gracefulClosePending = new Promise(() => {});
+    const closeHarnessHost = vi.fn(() => gracefulClosePending);
+    const forceCloseHarnessHost = vi.fn(() => new Promise(() => {}));
+
+    try {
+      const starting = service.start();
+      const startingOutcome = starting.catch((error) => error);
+      await harnessStartEntered;
+      const closing = service.close();
+      resolveHarnessHost({
+        url: "http://127.0.0.1:43133",
+        close: closeHarnessHost,
+        forceClose: forceCloseHarnessHost,
+      });
+      const closeStartedAt = Date.now();
+      const closeError = await closing.catch((error) => error);
+      const closeElapsedMs = Date.now() - closeStartedAt;
+      expect(closeError).toBeInstanceOf(AggregateError);
+      expect(closeError.errors[0]?.code).toBe("RELAYER_RUNTIME_STARTUP_CLEANUP_TIMEOUT");
+      expect(closeElapsedMs).toBeLessThan(200);
+      expect((await startingOutcome).message).toBe("GraphComplete runtime is shutting down.");
+      expect(closeHarnessHost).toHaveBeenCalledOnce();
+      expect(forceCloseHarnessHost).toHaveBeenCalledOnce();
+      expect(service.deferredCleanupFences.size).toBe(1);
+      expect(service.harnessHost).toBeNull();
+      expect(service.session).toBeNull();
+    } finally {
+      resolveHarnessHost?.({
+        url: "http://127.0.0.1:43133",
+        close: closeHarnessHost,
+        forceClose: forceCloseHarnessHost,
+      });
+      delete globalThis[hookName];
+      await service.close().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("force-closes an established harness host when graceful close never settles", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-graph-runtime-established-host-close-"));
+    const hookName = `__relayerRuntimeEstablishedClose${Date.now()}${Math.random().toString(16).slice(2)}`;
+    let rejectGracefulClose;
+    const gracefulClosePending = new Promise((_resolve, reject) => { rejectGracefulClose = reject; });
+    const closeHarnessHost = vi.fn(() => gracefulClosePending);
+    const forceCloseError = new Error("forced harness close failed");
+    const forceCloseHarnessHost = vi.fn(() => { throw forceCloseError; });
+    globalThis[hookName] = {
+      startHarnessHost: async () => ({
+        url: "http://127.0.0.1:43131",
+        close: closeHarnessHost,
+        forceClose: forceCloseHarnessHost,
+      }),
+    };
+    const harnessModule = `data:text/javascript,${encodeURIComponent(`
+      export const digestHarnessConfiguration = () => "digest";
+      export const createCodexBasicFactory = () => ({});
+      export const loadHarnessConfigurations = async () => new Map();
+      export const productHarnessImplementations = () => ({});
+      export const startHarnessHost = (...args) => globalThis[${JSON.stringify(hookName)}].startHarnessHost(...args);
+    `)}`;
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+      kill: vi.fn(function kill(signal) {
+        this.signalCode = signal;
+        this.emit("exit", null, signal);
+        this.emit("close", null, signal);
+        return true;
+      }),
+    });
+    const service = new GraphCompleteRuntimeService({
+      userDataDirectory: directory,
+      graphServerBinary: "/test/bin/relayer-graph-server",
+      configurationPaths: [],
+      harnessHostModuleUrl: harnessModule,
+      spawnProcess: () => {
+        queueMicrotask(() => child.stdout.write(`${JSON.stringify({ ready: true, url: "http://127.0.0.1:43130" })}\n`));
+        return child;
+      },
+      shutdownTimeoutMs: 10,
+    });
+    const lateGracefulError = new Error("graceful host close rejected after force close");
+
+    try {
+      await service.start();
+      const closing = service.close();
+      let closeTimeout;
+      const closeOutcome = await Promise.race([
+        closing.then(
+          () => ({ status: "fulfilled" }),
+          (error) => ({ status: "rejected", error }),
+        ),
+        new Promise((resolve) => {
+          closeTimeout = setTimeout(() => resolve({ status: "timed-out" }), 250);
+        }),
+      ]);
+      clearTimeout(closeTimeout);
+      expect(closeOutcome.status).toBe("rejected");
+      expect(closeOutcome.error).toBeInstanceOf(AggregateError);
+      const resourceErrors = closeOutcome.error.errors.flatMap((error) => error instanceof AggregateError ? error.errors : [error]);
+      expect(resourceErrors[0]?.code).toBe("RELAYER_RUNTIME_HARNESS_CLOSE_TIMEOUT");
+      expect(resourceErrors[1]).toBe(forceCloseError);
+      expect(closeHarnessHost).toHaveBeenCalledOnce();
+      expect(forceCloseHarnessHost).toHaveBeenCalledOnce();
+      expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(service.deferredCleanupFences.size).toBe(1);
+
+      rejectGracefulClose(lateGracefulError);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(closeHarnessHost).toHaveBeenCalledOnce();
+      expect(forceCloseHarnessHost).toHaveBeenCalledOnce();
+      expect(service.deferredCleanupFences.size).toBe(0);
+      expect(service.harnessHost).toBeNull();
+      expect(service.session).toBeNull();
+    } finally {
+      rejectGracefulClose?.(lateGracefulError);
+      delete globalThis[hookName];
+      await service.close().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("shares one shutdown deadline between a stalled harness host and an unkillable graph", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-graph-runtime-shared-close-deadline-"));
+    const hookName = `__relayerRuntimeSharedCloseDeadline${Date.now()}${Math.random().toString(16).slice(2)}`;
+    const shutdownTimeoutMs = 30;
+    const closeHarnessHost = vi.fn(() => new Promise(() => {}));
+    const forceCloseHarnessHost = vi.fn(() => new Promise(() => {}));
+    globalThis[hookName] = {
+      startHarnessHost: async () => ({
+        url: "http://127.0.0.1:43134",
+        close: closeHarnessHost,
+        forceClose: forceCloseHarnessHost,
+      }),
+    };
+    const harnessModule = `data:text/javascript,${encodeURIComponent(`
+      export const digestHarnessConfiguration = () => "digest";
+      export const createCodexBasicFactory = () => ({});
+      export const loadHarnessConfigurations = async () => new Map();
+      export const productHarnessImplementations = () => ({});
+      export const startHarnessHost = (...args) => globalThis[${JSON.stringify(hookName)}].startHarnessHost(...args);
+    `)}`;
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null,
+      signalCode: null,
+      kill: vi.fn(() => true),
+    });
+    const service = new GraphCompleteRuntimeService({
+      userDataDirectory: directory,
+      graphServerBinary: "/test/bin/relayer-graph-server",
+      configurationPaths: [],
+      harnessHostModuleUrl: harnessModule,
+      spawnProcess: () => {
+        queueMicrotask(() => child.stdout.write(`${JSON.stringify({ ready: true, url: "http://127.0.0.1:43135" })}\n`));
+        return child;
+      },
+      shutdownTimeoutMs,
+    });
+
+    try {
+      await service.start();
+      const startedAt = Date.now();
+      const closeError = await service.close().catch((error) => error);
+      const elapsedMs = Date.now() - startedAt;
+      expect(closeError).toBeInstanceOf(AggregateError);
+      expect(elapsedMs).toBeGreaterThanOrEqual(shutdownTimeoutMs - 10);
+      expect(elapsedMs).toBeLessThan(shutdownTimeoutMs * 4);
+      expect(closeError.errors).toHaveLength(1);
+      expect(closeError.errors[0]).toBeInstanceOf(AggregateError);
+      expect(closeError.errors[0].errors.map((error) => error?.code)).toEqual([
+        "RELAYER_RUNTIME_HARNESS_CLOSE_TIMEOUT",
+        "RELAYER_CHILD_SHUTDOWN_TIMEOUT",
+      ]);
+      expect(closeHarnessHost).toHaveBeenCalledOnce();
+      expect(forceCloseHarnessHost).toHaveBeenCalledOnce();
+      expect(child.kill.mock.calls.map(([signal]) => signal)).toEqual(["SIGKILL"]);
+    } finally {
+      delete globalThis[hookName];
+      await service.close().catch(() => {});
       await rm(directory, { recursive: true, force: true });
     }
   });

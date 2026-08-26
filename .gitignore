@@ -12,3 +12,5 @@ desktop/eval-dist/
 desktop/renderer/vendor/
 docs/prd/comments.json
 docs/prd/annotations.json
+docs/prd/assets/evidence/ask-profile-approval/*
+!docs/prd/assets/evidence/ask-profile-approval/README.md

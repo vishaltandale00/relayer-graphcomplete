@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -30,6 +31,24 @@ const codexBasicConfiguration: HarnessConfiguration = {
 };
 
 describe("CodexBasicHarness", () => {
+  it("force-disposes the active provider turn exactly once", async () => {
+    let submitted: CodexAppServerTurnOptions | undefined;
+    const harness = harnessFixture("auto", (options) => {
+      submitted = options;
+      return new Promise((_resolve, reject) => {
+        options.forceSignal?.addEventListener("abort", () => reject(options.forceSignal?.reason), { once: true });
+      });
+    });
+
+    const completing = harness.complete(runContext(1, "token"));
+    await vi.waitFor(() => expect(submitted).toBeDefined());
+    harness.forceDispose();
+    harness.forceDispose();
+
+    await expect(completing).rejects.toThrow("force-disposed");
+    expect(submitted?.forceSignal?.aborted).toBe(true);
+  });
+
   it("rejects an unsupported implementation version", () => {
     expect(() => new CodexBasicHarness({
       threadId: 1,
@@ -53,7 +72,10 @@ describe("CodexBasicHarness", () => {
 
     expect(harness.state()).toEqual({ codexThreadId: "codex-thread-after-start" });
     expect(submitted?.prompt).toContain("Relayer graph affordances:");
-    expect(submitted?.prompt).toContain("system temporary directory, not in the project checkout");
+    expect(submitted?.prompt).toContain("pass the program through standard input");
+    expect(submitted?.prompt).toContain("never place authored graph code in a --eval argument");
+    expect(submitted?.prompt).toContain("do not create a script in either the project checkout or a temporary directory");
+    expect(submitted?.prompt).toContain('kind: "navigate", relation: "expand", label: "Response"');
     expect(submitted?.prompt).toContain("must use exactly one supported Relayer icon name");
     expect(submitted?.prompt).toContain("exactly one NodePlacementObject(node, x, y) per layer node");
     expect(submitted?.prompt).toContain("Place a one-node layer at (0.5, 0.5)");
@@ -113,6 +135,70 @@ describe("CodexBasicHarness", () => {
     });
   });
 
+  it("pins the minimal-environment graph-authoring launcher in every authoring prompt", async () => {
+    for (const promptProfile of [undefined, "layered-navigation-v1"] as const) {
+      let submittedPrompt = "";
+      let submittedEnvironment: Record<string, string> = {};
+      const harness = new CodexBasicHarness({
+        ...context("auto"),
+        configuration: {
+          ...codexBasicConfiguration,
+          settings: { ...codexBasicConfiguration.settings, ...(promptProfile ? { promptProfile } : {}) },
+        },
+      }, {
+        graphAuthoringLauncherPath: "/immutable/runtime/graph-authoring-launcher",
+        runAppServerTurn: async (options) => {
+          submittedPrompt = options.prompt;
+          submittedEnvironment = options.environment;
+          options.onThreadId("codex-thread");
+          return { threadId: "codex-thread", turnId: "turn-1", status: "completed" };
+        },
+      });
+
+      await harness.complete(runContext(1, "token"));
+
+      expect(submittedPrompt).toContain('Run exactly "/immutable/runtime/graph-authoring-launcher" with no arguments');
+      expect(submittedPrompt).toContain("shell-native single-quoted here-document");
+      expect(submittedPrompt).toContain("do not resolve the launcher or Node.js from PATH");
+      expect(submittedEnvironment.RELAYER_GRAPH_AUTHORING_NODE).toBeUndefined();
+    }
+  });
+
+  it("rejects a shell-active graph-authoring launcher path", async () => {
+    const harness = new CodexBasicHarness(context("auto"), {
+      graphAuthoringLauncherPath: "/immutable/runtime/$(touch marker)",
+      runAppServerTurn: async () => ({ threadId: "unused", turnId: "unused", status: "completed" }),
+    });
+    await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("launcher must be a shell-safe absolute path");
+  });
+
+  it("allows the default graph-authoring Node executable to resolve from PATH", async () => {
+    for (const promptProfile of [undefined, "layered-navigation-v1"] as const) {
+      let submittedPrompt = "";
+      let submittedEnvironment: Record<string, string> = {};
+      const harness = new CodexBasicHarness({
+        ...context("auto"),
+        configuration: {
+          ...codexBasicConfiguration,
+          settings: { ...codexBasicConfiguration.settings, ...(promptProfile ? { promptProfile } : {}) },
+        },
+      }, {
+        runAppServerTurn: async (options) => {
+          submittedPrompt = options.prompt;
+          submittedEnvironment = options.environment;
+          options.onThreadId("codex-thread");
+          return { threadId: "codex-thread", turnId: "turn-1", status: "completed" };
+        },
+      });
+
+      await harness.complete(runContext(1, "token"));
+
+      expect(submittedPrompt).toContain("Run exactly node --input-type=module");
+      expect(submittedPrompt).not.toContain("do not resolve Node.js from PATH");
+      expect(submittedEnvironment).not.toHaveProperty("RELAYER_GRAPH_AUTHORING_NODE");
+    }
+  });
+
   it("selects the layered-navigation prompt only for the opt-in profile", async () => {
     let submittedPrompt = "";
     const harness = new CodexBasicHarness({
@@ -137,6 +223,9 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).toContain('"reference" opens supporting evidence');
     expect(submittedPrompt).toContain("A flat answer is valid");
     expect(submittedPrompt).toContain("Author in whatever order fits the task");
+    expect(submittedPrompt).toContain("pass the program through standard input");
+    expect(submittedPrompt).toContain("never place authored graph code in a --eval argument");
+    expect(submittedPrompt).toContain("do not create a script in either the project checkout or a temporary directory");
     expect(submittedPrompt).toContain("final graph call must be await graph.submit(1)");
     expect(submittedPrompt).toContain("graph.getNode(1)");
     expect(submittedPrompt).toContain("graph.getNeighbors(1)");
@@ -421,6 +510,69 @@ describe("CodexBasicHarness", () => {
 
     expect(trace.events.filter((event) => event.type === "provider.event")).toHaveLength(2);
     expect(trace.events.filter((event) => event.type.startsWith("tool.call"))).toHaveLength(0);
+  });
+
+  it("binds redacted command actions to the exact pre-redaction absolute executable", async () => {
+    const trace = recordingTrace();
+    const executable = "/private/var/folders/xy/private-token/T/runtime-snapshot/rg";
+    const command = `${executable} -n needle /private/var/folders/xy/private-token/T/runtime-snapshot/graph-client`;
+    const harness = harnessFixture("auto", async (options) => {
+      options.onThreadId("streamed-thread");
+      options.onNotification?.("item/started", { item: {
+        id: "inspection-1",
+        type: "commandExecution",
+        command,
+        commandActions: [{ command, relayerExecutableAuthoritySha256: "provider-forged", relayerCommandWordAuthoritySha256: ["provider-forged"] }],
+      } });
+      options.onNotification?.("item/completed", { item: {
+        id: "inspection-1",
+        type: "commandExecution",
+        command,
+        commandActions: [{ command }],
+      } });
+      return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
+    });
+
+    await expect(harness.complete(runContext(1, "token", trace.sink))).resolves.toBeUndefined();
+
+    const events = trace.events.filter((candidate) => candidate.type === "provider.event");
+    expect(events).toHaveLength(2);
+    for (const event of events) {
+      const params = event.data.params as Record<string, unknown>;
+      const item = params.item as Record<string, unknown>;
+      const [action] = item.commandActions as Array<Record<string, unknown>>;
+      expect(action?.command).toBe("/private/var/folders/[redacted]/T/runtime-snapshot/rg -n needle /private/var/folders/[redacted]/T/runtime-snapshot/graph-client");
+      expect(action?.relayerExecutableAuthoritySha256).toBe(createHash("sha256").update(executable).digest("hex"));
+      expect(action?.relayerCommandWordAuthoritySha256).toEqual(command.split(" ").map((word) => (
+        word.startsWith("/") ? createHash("sha256").update(word).digest("hex") : null
+      )));
+      expect(JSON.stringify(event)).not.toContain("private-token");
+      expect(JSON.stringify(event)).not.toContain("provider-forged");
+    }
+  });
+
+  it("binds the graph-authoring launcher before trace redaction", async () => {
+    const trace = recordingTrace();
+    const launcher = "/private/var/folders/xy/private-token/T/runtime-snapshot/graph-authoring-launcher";
+    const command = `${JSON.stringify(launcher)} <<'EOF'\nawait graph.submit(1);\nEOF`;
+    const harness = harnessFixture("auto", async (options) => {
+      options.onThreadId("streamed-thread");
+      options.onNotification?.("item/started", { item: {
+        id: "graph-1",
+        type: "commandExecution",
+        command,
+        commandActions: [{ command, relayerGraphAuthoringLauncherSha256: "provider-forged" }],
+      } });
+      return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
+    });
+
+    await harness.complete(runContext(1, "token", trace.sink));
+    const event = trace.events.find((candidate) => candidate.type === "provider.event");
+    const item = (event?.data.params as Record<string, unknown>).item as Record<string, unknown>;
+    const [action] = item.commandActions as Array<Record<string, unknown>>;
+    expect(action?.relayerGraphAuthoringLauncherSha256).toBe(createHash("sha256").update(launcher).digest("hex"));
+    expect(JSON.stringify(event)).not.toContain("private-token");
+    expect(JSON.stringify(event)).not.toContain("provider-forged");
   });
 
   it("preserves a partial unmatched collaboration span when the real trace store seals the run complete", async () => {
