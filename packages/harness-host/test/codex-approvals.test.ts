@@ -4,7 +4,7 @@ import {
   HarnessApprovalRequestTerminatedError,
   type HarnessApprovalChannel,
 } from "../src/approval-coordinator.js";
-import { answerCodexServerRequest } from "../src/implementations/codex-approvals.js";
+import { answerCodexServerRequest, isExactGraphAuthoringLauncherCommand } from "../src/implementations/codex-approvals.js";
 import type { HarnessApprovalDecision, HarnessApprovalRequestInput } from "../src/approval.js";
 import type { JsonObject } from "../src/types.js";
 
@@ -55,6 +55,40 @@ describe("Codex approval bridge", () => {
     }));
     cancelled.items.set("item-1", commandItem());
     await expect(answerCodexServerRequest(v2Command(), cancelled.context)).resolves.toEqual({ decision: "cancel" });
+  });
+
+  it("accepts only the exact pinned internal graph launcher without creating a product approval", async () => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", { ...commandItem(), command });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd: "/workspace/project",
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+
+    expect(isExactGraphAuthoringLauncherCommand(command, launcher)).toBe(true);
+    expect(isExactGraphAuthoringLauncherCommand(`${command}\necho escaped\nEOF`, launcher)).toBe(false);
+    expect(isExactGraphAuthoringLauncherCommand(`"${launcher}" --flag <<'EOF'\ngraph\nEOF`, launcher)).toBe(false);
+  });
+
+  it.each([
+    { name: "different working directory", cwd: "/workspace/other", additionalPermissions: undefined },
+    { name: "additional permissions", cwd: "/workspace/project", additionalPermissions: { fileSystem: { write: ["/workspace/other"] } } },
+  ])("routes a pinned launcher with $name through the product approval channel", async ({ cwd, additionalPermissions }) => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", { ...commandItem(), command, cwd });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd,
+      ...(additionalPermissions === undefined ? {} : { additionalPermissions }),
+    }), context)).resolves.toEqual({ decision: "decline" });
+    expect(fixture.request).toHaveBeenCalledOnce();
   });
 
   it("derives one exact key per proposed file path and change kind", async () => {

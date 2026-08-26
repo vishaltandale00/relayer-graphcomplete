@@ -108,6 +108,9 @@ export class CodexBasicHarness implements Harness {
         approvals: context.approvals,
         workingDirectory: this.context.workingDirectory,
         sandboxPolicy,
+        ...(this.dependencies.graphAuthoringLauncherPath === undefined
+          ? {}
+          : { trustedGraphAuthoringLauncher: this.dependencies.graphAuthoringLauncherPath }),
         ...(signal === undefined ? {} : { signal }),
         forceSignal: forceShutdown.signal,
         ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
@@ -221,7 +224,7 @@ ${renderInteractionInput(context.interactionInput)}
 
 ${INTERACTION_INPUT_GUIDANCE} In JavaScript, call graph.getInteractionInput() to re-read it.
 
-Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Run exactly ${launcher}${launcherArgumentsClause} and pass the program through standard input using a shell-native single-quoted here-document;${launcherClause} never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:
+Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Run exactly ${launcher}${launcherArgumentsClause} and pass the program through standard input using a shell-native single-quoted here-document;${launcherClause} never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. ${this.dependencies.graphAuthoringLauncherPath ? "Request Codex sandbox escalation for this exact launcher command; Relayer preauthorizes only this pinned internal launcher, which applies its own narrower graph sandbox." : ""} The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:
 ${this.clientModuleUrl}
 
 The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Give every persisted node, edge, layer, and action an explicit descriptive clientKey that is unique within this interaction and stable across edits and reruns. For example, use new NodeObject("info", "Summary", "...", "concept", "summary-node"), new EdgeObject([summaryNode, detailNode], "summary-detail-edge"), and new LayerObject(nodes, edges, layout, "response-layer"). Never rely on the constructors' generated client keys in an authored program.
@@ -272,7 +275,7 @@ ${renderInteractionInput(context.interactionInput)}
 
 ${INTERACTION_INPUT_GUIDANCE} In JavaScript, call graph.getInteractionInput() to re-read it.
 
-Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Run exactly ${launcher}${launcherArgumentsClause} and pass the program through standard input using a shell-native single-quoted here-document;${launcherClause} never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:
+Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Run exactly ${launcher}${launcherArgumentsClause} and pass the program through standard input using a shell-native single-quoted here-document;${launcherClause} never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. ${this.dependencies.graphAuthoringLauncherPath ? "Request Codex sandbox escalation for this exact launcher command; Relayer preauthorizes only this pinned internal launcher, which applies its own narrower graph sandbox." : ""} The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:
 ${this.clientModuleUrl}
 
 The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Give every persisted node, edge, layer, and action an explicit descriptive clientKey that is unique within this interaction and stable across edits and reruns. For example, use new NodeObject("info", "Summary", "...", "concept", "summary-node"), new EdgeObject([summaryNode, detailNode], "summary-detail-edge"), and new LayerObject(nodes, edges, layout, "response-layer"). Never rely on the constructors' generated client keys in an authored program. Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.

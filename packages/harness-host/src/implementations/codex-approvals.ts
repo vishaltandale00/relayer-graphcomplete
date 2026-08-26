@@ -11,6 +11,7 @@ export interface CodexApprovalBridgeContext {
   readonly approvals: HarnessApprovalChannel;
   readonly workingDirectory: string;
   readonly sandboxPolicy: JsonObject;
+  readonly trustedGraphAuthoringLauncher?: string;
   readonly threadId: string;
   readonly turnId: string;
   readonly items: ReadonlyMap<string, JsonObject>;
@@ -381,6 +382,12 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
     ? null
     : jsonValue(params.additionalPermissions);
   if (params.additionalPermissions !== undefined && additionalPermissions === undefined) return { decision: "decline" };
+  if (additionalPermissions === null
+    && absoluteCwd === resolve(context.workingDirectory)
+    && context.trustedGraphAuthoringLauncher !== undefined
+    && isExactGraphAuthoringLauncherCommand(command, context.trustedGraphAuthoringLauncher)) {
+    return { decision: "accept" };
+  }
   const input: HarnessApprovalRequestInput = {
     providerItemId: providerItemId(request, itemId),
     title: "Run command",
@@ -398,6 +405,17 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
     scopeDescription: `Run ${command} in ${absoluteCwd} with the displayed Codex sandbox authority for this session.`,
   };
   return answerV2Decision(input, context);
+}
+
+export function isExactGraphAuthoringLauncherCommand(command: string, launcherPath: string): boolean {
+  if (!isAbsolute(launcherPath) || launcherPath.includes("\0") || launcherPath.includes("\n") || launcherPath.includes("\r")) {
+    return false;
+  }
+  const prefix = `${JSON.stringify(launcherPath)} <<'EOF'\n`;
+  const suffix = "\nEOF";
+  if (!command.startsWith(prefix) || !command.endsWith(suffix)) return false;
+  const program = command.slice(prefix.length, -suffix.length);
+  return program.length > 0 && !program.split("\n").includes("EOF");
 }
 
 async function answerV2FileChange(request: CodexServerRequest, context: CodexApprovalBridgeContext): Promise<unknown> {

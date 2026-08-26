@@ -27,6 +27,7 @@ export interface CodexAppServerTurnOptions {
   readonly approvals: HarnessApprovalChannel;
   readonly workingDirectory: string;
   readonly sandboxPolicy: JsonObject;
+  readonly trustedGraphAuthoringLauncher?: string;
   readonly signal?: AbortSignal;
   readonly forceSignal?: AbortSignal;
   readonly shutdownGraceMs?: number;
@@ -335,6 +336,9 @@ class CodexAppServerConnection {
       approvals: this.options.approvals,
       workingDirectory: this.options.workingDirectory,
       sandboxPolicy: this.options.sandboxPolicy,
+      ...(this.options.trustedGraphAuthoringLauncher === undefined
+        ? {}
+        : { trustedGraphAuthoringLauncher: this.options.trustedGraphAuthoringLauncher }),
       threadId: active.threadId,
       turnId: active.turnId,
       items: this.items,
