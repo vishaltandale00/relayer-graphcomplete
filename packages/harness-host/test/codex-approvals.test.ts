@@ -62,7 +62,7 @@ describe("Codex approval bridge", () => {
     const launcher = "/immutable/runtime/graph-authoring-launcher";
     const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
     const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
-    fixture.items.set("item-1", { ...commandItem(), command });
+    fixture.items.set("item-1", { ...commandItem(), command, commandActions: [{ command }] });
 
     await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
       threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd: "/workspace/project",
@@ -97,7 +97,7 @@ describe("Codex approval bridge", () => {
     const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
     const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
     const cwd = "/workspace/other";
-    fixture.items.set("item-1", { ...commandItem(), command, cwd });
+    fixture.items.set("item-1", { ...commandItem(), command, commandActions: [{ command }], cwd });
 
     await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
       threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd,
@@ -110,7 +110,7 @@ describe("Codex approval bridge", () => {
     const launcher = "/immutable/runtime/graph-authoring-launcher";
     const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
     const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
-    fixture.items.set("item-1", { ...commandItem(), command });
+    fixture.items.set("item-1", { ...commandItem(), command, commandActions: [{ command }] });
 
     await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
       threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd: "/workspace/project",
@@ -131,7 +131,7 @@ describe("Codex approval bridge", () => {
     const launcher = "/immutable/runtime/graph-authoring-launcher";
     const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
     const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
-    fixture.items.set("item-1", { ...commandItem(), ...itemOverrides, command });
+    fixture.items.set("item-1", { ...commandItem(), ...itemOverrides, command, commandActions: [{ command }] });
 
     await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
       threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd: "/workspace/project", ...requestOverrides,
@@ -144,7 +144,11 @@ describe("Codex approval bridge", () => {
     const launcher = "/immutable/runtime/graph-authoring-launcher";
     const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
     const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
-    fixture.items.set("item-1", { ...commandItem(), command });
+    fixture.items.set("item-1", {
+      ...commandItem(),
+      command: `/bin/zsh -lc ${JSON.stringify(command)}`,
+      commandActions: [{ command }],
+    });
 
     await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
       threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd: "/workspace/project",
@@ -152,9 +156,13 @@ describe("Codex approval bridge", () => {
     }), context)).resolves.toEqual({ decision: "accept" });
     expect(fixture.request).not.toHaveBeenCalled();
 
-    fixture.items.set("item-1", { ...commandItem(), command: `${command}\necho escaped` });
+    fixture.items.set("item-1", {
+      ...commandItem(),
+      command: `/bin/zsh -lc ${JSON.stringify(command)}`,
+      commandActions: [{ command }, { command: "echo escaped" }],
+    });
     await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
-      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command: `${command}\necho escaped`, cwd: "/workspace/project",
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", cwd: "/workspace/project",
       networkApprovalContext: { host: "127.0.0.1", protocol: "http" },
     }), context)).resolves.toEqual({ decision: "decline" });
   });

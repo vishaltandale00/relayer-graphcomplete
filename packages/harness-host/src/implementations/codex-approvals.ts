@@ -331,16 +331,13 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
   const item = itemId === undefined ? undefined : context.items.get(itemId);
   if (item?.type !== "commandExecution") return { decision: "decline" };
 
-  const trustedCommand = optionalString(params.command) ?? string(item.command);
+  const trustedCommand = trustedGraphAuthoringCommand(item, context.trustedGraphAuthoringLauncher);
   const trustedCwd = optionalString(params.cwd) ?? string(item.cwd);
   const trustedAbsoluteCwd = validAbsolutePath(trustedCwd);
   const trustedAdditionalPermissions = params.additionalPermissions === undefined
     ? null
     : jsonValue(params.additionalPermissions);
-  const trustedFieldsMatch = !(optionalString(params.command) !== undefined
-      && string(item.command) !== undefined
-      && params.command !== item.command)
-    && !(optionalString(params.cwd) !== undefined
+  const trustedFieldsMatch = !(optionalString(params.cwd) !== undefined
       && string(item.cwd) !== undefined
       && params.cwd !== item.cwd);
   // Codex may classify the fixed launcher as unified exec, PTY, or a network
@@ -353,8 +350,7 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
     && trustedFieldsMatch
     && supportsOneRequestDecision(params.availableDecisions)
     && (params.additionalPermissions === undefined || trustedAdditionalPermissions !== undefined)
-    && context.trustedGraphAuthoringLauncher !== undefined
-    && isExactGraphAuthoringLauncherCommand(trustedCommand, context.trustedGraphAuthoringLauncher)) {
+    && context.trustedGraphAuthoringLauncher !== undefined) {
     return { decision: "accept" };
   }
 
@@ -449,6 +445,13 @@ export function isExactGraphAuthoringLauncherCommand(command: string, launcherPa
   // fixed zero-argument launcher, every remaining byte is still stdin rather
   // than a second shell action.
   return closingLine === delimiter || !bodyAndClose.split(/\r?\n/).some((line) => line === delimiter);
+}
+
+function trustedGraphAuthoringCommand(item: JsonObject, launcherPath: string | undefined): string | undefined {
+  if (launcherPath === undefined || !Array.isArray(item.commandActions) || item.commandActions.length !== 1) return undefined;
+  const action = record(item.commandActions[0]);
+  const command = action === undefined ? undefined : string(action.command);
+  return command !== undefined && isExactGraphAuthoringLauncherCommand(command, launcherPath) ? command : undefined;
 }
 
 async function answerV2FileChange(request: CodexServerRequest, context: CodexApprovalBridgeContext): Promise<unknown> {
