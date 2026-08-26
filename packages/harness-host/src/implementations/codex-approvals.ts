@@ -382,8 +382,11 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
     ? null
     : jsonValue(params.additionalPermissions);
   if (params.additionalPermissions !== undefined && additionalPermissions === undefined) return { decision: "decline" };
-  if (additionalPermissions === null
-    && absoluteCwd === resolve(context.workingDirectory)
+  // Codex may need an outer filesystem/network overlay to start a launcher
+  // outside its workspace sandbox. The exact no-argument launcher replaces
+  // the environment and applies its own narrower sandbox before stdin runs,
+  // so a schema-valid outer overlay cannot broaden authored graph code.
+  if (absoluteCwd === resolve(context.workingDirectory)
     && context.trustedGraphAuthoringLauncher !== undefined
     && isExactGraphAuthoringLauncherCommand(command, context.trustedGraphAuthoringLauncher)) {
     return { decision: "accept" };

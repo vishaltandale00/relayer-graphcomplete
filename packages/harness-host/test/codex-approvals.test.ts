@@ -86,21 +86,35 @@ describe("Codex approval bridge", () => {
     expect(isExactGraphAuthoringLauncherCommand(`"${launcher}" --flag <<'EOF'\ngraph\nEOF`, launcher)).toBe(false);
   });
 
-  it.each([
-    { name: "different working directory", cwd: "/workspace/other", additionalPermissions: undefined },
-    { name: "additional permissions", cwd: "/workspace/project", additionalPermissions: { fileSystem: { write: ["/workspace/other"] } } },
-  ])("routes a pinned launcher with $name through the product approval channel", async ({ cwd, additionalPermissions }) => {
+  it("routes a pinned launcher from a different working directory through the product approval channel", async () => {
     const fixture = bridgeFixture("deny");
     const launcher = "/immutable/runtime/graph-authoring-launcher";
     const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
     const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    const cwd = "/workspace/other";
     fixture.items.set("item-1", { ...commandItem(), command, cwd });
 
     await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
       threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd,
-      ...(additionalPermissions === undefined ? {} : { additionalPermissions }),
     }), context)).resolves.toEqual({ decision: "decline" });
     expect(fixture.request).toHaveBeenCalledOnce();
+  });
+
+  it("accepts a schema-valid outer overlay only for the exact pinned launcher", async () => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", { ...commandItem(), command });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd: "/workspace/project",
+      additionalPermissions: {
+        fileSystem: { read: [launcher], write: ["/workspace/other"] },
+        network: { enabled: true },
+      },
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
   });
 
   it("derives one exact key per proposed file path and change kind", async () => {
