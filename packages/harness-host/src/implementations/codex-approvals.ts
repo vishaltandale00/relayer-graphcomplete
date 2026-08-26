@@ -411,11 +411,17 @@ export function isExactGraphAuthoringLauncherCommand(command: string, launcherPa
   if (!isAbsolute(launcherPath) || launcherPath.includes("\0") || launcherPath.includes("\n") || launcherPath.includes("\r")) {
     return false;
   }
-  const prefix = `${JSON.stringify(launcherPath)} <<'EOF'\n`;
-  const suffix = "\nEOF";
-  if (!command.startsWith(prefix) || !command.endsWith(suffix)) return false;
-  const program = command.slice(prefix.length, -suffix.length);
-  return program.length > 0 && !program.split("\n").includes("EOF");
+  const prefix = `${JSON.stringify(launcherPath)} `;
+  if (!command.startsWith(prefix)) return false;
+  const opening = command.slice(prefix.length).match(/^<<'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\r?\n/);
+  if (opening === null) return false;
+  const delimiter = opening[1]!;
+  const bodyAndClose = command.slice(prefix.length + opening[0].length);
+  const lines = bodyAndClose.split(/\r?\n/);
+  const closingLine = lines.pop();
+  return closingLine === delimiter
+    && lines.length > 0
+    && !lines.some((line) => line === delimiter);
 }
 
 async function answerV2FileChange(request: CodexServerRequest, context: CodexApprovalBridgeContext): Promise<unknown> {

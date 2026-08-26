@@ -159,6 +159,7 @@ describe("CodexBasicHarness", () => {
 
       expect(submittedPrompt).toContain('Run exactly "/immutable/runtime/graph-authoring-launcher" with no arguments');
       expect(submittedPrompt).toContain("shell-native single-quoted here-document");
+      expect(submittedPrompt).toContain("delimited by exactly RELAYER_GRAPH_PROGRAM");
       expect(submittedPrompt).toContain("do not resolve the launcher or Node.js from PATH");
       expect(submittedPrompt).toContain("Request Codex sandbox escalation for this exact launcher command");
       expect(submittedPrompt).toContain("applies its own narrower graph sandbox");

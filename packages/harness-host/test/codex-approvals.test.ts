@@ -70,7 +70,15 @@ describe("Codex approval bridge", () => {
     expect(fixture.request).not.toHaveBeenCalled();
 
     expect(isExactGraphAuthoringLauncherCommand(command, launcher)).toBe(true);
+    expect(isExactGraphAuthoringLauncherCommand(
+      `"${launcher}" <<'RELAYER_GRAPH_PROGRAM'\nconsole.log("graph");\nRELAYER_GRAPH_PROGRAM`,
+      launcher,
+    )).toBe(true);
     expect(isExactGraphAuthoringLauncherCommand(`${command}\necho escaped\nEOF`, launcher)).toBe(false);
+    expect(isExactGraphAuthoringLauncherCommand(
+      `"${launcher}" <<'RELAYER_GRAPH_PROGRAM'\nconsole.log("graph");\nRELAYER_GRAPH_PROGRAM\necho escaped\nRELAYER_GRAPH_PROGRAM`,
+      launcher,
+    )).toBe(false);
     expect(isExactGraphAuthoringLauncherCommand(`"${launcher}" --flag <<'EOF'\ngraph\nEOF`, launcher)).toBe(false);
   });
 
