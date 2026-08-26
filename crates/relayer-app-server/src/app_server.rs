@@ -56,12 +56,15 @@ async fn reconcile_interrupted_interaction(
     permission_catalog: &PermissionCatalog,
     mut interaction: Interaction,
 ) -> Result<(), StartupReconciliationError> {
-    if interaction.graph_node_id.is_none()
-        && let Some((source_interaction_node_id, source_action_id)) = storage
-            .invocation_graph_source(interaction.id)
-            .await
-            .map_err(StartupReconciliationError::retryable)?
-    {
+    let invocation = storage
+        .invocation_graph_source(interaction.id)
+        .await
+        .map_err(StartupReconciliationError::retryable)?;
+    let durable_input = storage
+        .interaction_input(interaction.id)
+        .await
+        .map_err(StartupReconciliationError::retryable)?;
+    if interaction.graph_node_id.is_none() && (invocation.is_some() || durable_input.is_some()) {
         if interaction.completion_status == "not_started"
             && !storage
                 .claim_interaction_preparing(interaction.id)
@@ -86,6 +89,13 @@ async fn reconcile_interrupted_interaction(
         let permission = permission_catalog
             .profile(&thread.permission_profile_id)
             .map_err(StartupReconciliationError::deterministic)?;
+        let prepared_invocation =
+            invocation.map(|(source_interaction_node_id, source_action_id)| {
+                crate::runtime::PreparedInvocation {
+                    source_interaction_node_id,
+                    source_action_id,
+                }
+            });
         let prepared = runtime
             .prepare(&crate::runtime::CompleteInteraction {
                 project_id: thread.project_id.map(ProjectId::value),
@@ -97,10 +107,17 @@ async fn reconcile_interrupted_interaction(
                 harness_configuration_name: &thread.harness_configuration_name,
                 permission_profile: permission,
                 model_selection: interaction.model_selection.as_ref(),
-                invocation: Some(crate::runtime::PreparedInvocation {
-                    source_interaction_node_id,
-                    source_action_id,
-                }),
+                invocation: prepared_invocation,
+                input_identity: durable_input
+                    .as_ref()
+                    .map(|input| input.input_identity.as_str()),
+                input_digest: durable_input
+                    .as_ref()
+                    .map(|input| input.input_digest.as_str()),
+                contexts: durable_input
+                    .as_ref()
+                    .map(|input| input.contexts.as_slice())
+                    .unwrap_or(&[]),
             })
             .await
             .map_err(StartupReconciliationError::from_runtime)?;
@@ -162,8 +179,16 @@ async fn reconcile_interrupted_interaction(
         });
         let legacy_unleased_invocation =
             !graph_lease_required && expected.is_some() && metadata.invocation.is_none();
+        let expected_identity = durable_input
+            .as_ref()
+            .map(|input| input.input_identity.as_str());
+        let expected_digest = durable_input
+            .as_ref()
+            .map(|input| input.input_digest.as_str());
         if metadata.node_id != graph_node_id
             || (metadata.invocation != expected && !legacy_unleased_invocation)
+            || metadata.input_identity.as_deref() != expected_identity
+            || metadata.input_digest.as_deref() != expected_digest
         {
             return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
                 "bound graph interaction provenance mismatch for {}",
@@ -191,6 +216,11 @@ async fn reconcile_interrupted_interaction(
                     interaction.id
                 )));
             }
+        } else if durable_input.is_some() {
+            storage.recover_identified_interaction_submitted(
+                interaction.id,
+                "Identified interaction input was recovered after restart and is ready to resume.",
+            ).await.map_err(StartupReconciliationError::retryable)?;
         }
     }
     Ok(())
@@ -275,18 +305,26 @@ impl RelayerAppServer {
                 )
                 .await
                 {
-                    if error.is_retryable()
-                        && storage
-                            .invocation_requires_graph_lease(interaction.id)
-                            .await?
-                    {
-                        // A strict invoke is recoverable by its immutable source pair. Leave its
-                        // nonterminal state intact here: the restart recovery passes below will
-                        // abort any stale approval receipt and normalize it to `submitted`, so a
-                        // later restart or re-invocation can resume the same result. Quarantining
-                        // would make the only interaction allowed to consume the lease terminal.
+                    let graph_lease_recoverable = storage
+                        .invocation_requires_graph_lease(interaction.id)
+                        .await?;
+                    let identified = storage.interaction_input(interaction.id).await?.is_some();
+                    if error.is_retryable() && (graph_lease_recoverable || identified) {
+                        if identified {
+                            storage
+                                .recover_identified_interaction_submitted(
+                                    interaction.id,
+                                    "Identified interaction startup reconciliation was interrupted transiently and is ready to resume.",
+                                )
+                                .await?;
+                        }
+                        // Strict invokes and identified inputs have durable replay identities.
+                        // Preserve that recovery path here: the restart recovery passes below will
+                        // abort any stale approval receipt, and identified interactions are
+                        // normalized to `submitted` before the post-open resume pass. Quarantining
+                        // would make the only interaction allowed to consume its identity terminal.
                         eprintln!(
-                            "preserving interrupted leased action invocation {} after transient startup reconciliation failure: {error}",
+                            "preserving interrupted recoverable interaction {} after transient startup reconciliation failure: {error}",
                             interaction.id
                         );
                         continue;
@@ -341,6 +379,7 @@ impl RelayerAppServer {
         let interrupted = storage
             .recover_interrupted_interactions(
                 "Interaction was interrupted when Relayer stopped. Send a follow-up to continue.",
+                runtime.is_some(),
             )
             .await?;
         if interrupted > 0 {

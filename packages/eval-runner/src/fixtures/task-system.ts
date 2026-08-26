@@ -1,5 +1,5 @@
 import { EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient } from "@relayer/graph-client";
-import type { Harness, HarnessConfiguration, HarnessFactory, HarnessRunContext, HarnessSessionState, HarnessTraceSupport } from "@relayer/harness-host";
+import { renderInteractionInput, type Harness, type HarnessConfiguration, type HarnessFactory, type HarnessRunContext, type HarnessSessionState, type HarnessTraceSupport } from "@relayer/harness-host";
 import { readFile } from "node:fs/promises";
 
 export const taskSystemFixtureConfiguration: HarnessConfiguration = {
@@ -30,10 +30,14 @@ class TaskSystemFixtureHarness implements Harness {
   }
 
   async complete(context: HarnessRunContext): Promise<void> {
-    context.trace.emit({ type: "prompt", data: { text: context.inputGraph.detail, kind: "fixture-input" } });
+    const graph = new RelayerGraphClient(context.graph.acquireCapability());
+    const rereadInput = await graph.getInteractionInput();
+    if (renderInteractionInput(rereadInput) !== renderInteractionInput(context.interactionInput)) {
+      throw new Error("Harness run context does not match the interaction input re-read from its graph capability");
+    }
+    context.trace.emit({ type: "prompt", data: { text: renderInteractionInput(context.interactionInput), kind: "fixture-input" } });
     context.trace.emit({ type: "tool.call.started", data: { tool: "fixture.graph-authoring" } });
     await waitForInvokeEvidenceRelease(context.inputGraph.leasedActionId);
-    const graph = new RelayerGraphClient(context.graph.acquireCapability());
     const interaction = context.inputGraph;
     const queue = new NodeObject("list", "Incoming queue", "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.", "concept", "queue");
     const workers = new NodeObject("users", "Two-worker pool", "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.", "concept", "workers");

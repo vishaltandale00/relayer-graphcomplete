@@ -66,6 +66,9 @@ pub(crate) struct CompleteInteraction<'a> {
     pub(crate) permission_profile: &'a PermissionProfile,
     pub(crate) model_selection: Option<&'a InteractionModelSelection>,
     pub(crate) invocation: Option<PreparedInvocation>,
+    pub(crate) input_identity: Option<&'a str>,
+    pub(crate) input_digest: Option<&'a str>,
+    pub(crate) contexts: &'a [crate::product::InteractionContextIntent],
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -157,6 +160,10 @@ pub(crate) struct RuntimeLayerOwner {
 pub(crate) struct RuntimeInteractionMetadata {
     pub(crate) node_id: i64,
     pub(crate) invocation: Option<PreparedInvocation>,
+    #[serde(default)]
+    pub(crate) input_identity: Option<String>,
+    #[serde(default)]
+    pub(crate) input_digest: Option<String>,
 }
 
 impl RuntimeClient {
@@ -343,6 +350,9 @@ impl RuntimeClient {
             "threadId": command.thread_id,
             "text": command.text,
             "invocation": invocation,
+            "inputIdentity": command.input_identity,
+            "inputDigest": command.input_digest,
+            "contexts": command.contexts,
             "mintCapability": false,
         });
         let mut attempts = 0;
@@ -365,7 +375,9 @@ impl RuntimeClient {
                     RuntimeError::Http(_)
                     | RuntimeError::ResponseDecode(_)
                     | RuntimeError::Timeout(_),
-                ) if command.invocation.is_some() && attempts < CONTROL_RETRY_ATTEMPTS => {
+                ) if (command.invocation.is_some() || command.input_identity.is_some())
+                    && attempts < CONTROL_RETRY_ATTEMPTS =>
+                {
                     // Invoke creation is keyed by the immutable source pair in graph core.
                     // Bounded exact retries recover response loss without another lease.
                     tokio::time::sleep(std::time::Duration::from_millis(
@@ -380,6 +392,14 @@ impl RuntimeClient {
             self.revoke_capability(&interaction.graph_token).await?;
             return Err(RuntimeError::Protocol(
                 "graph server minted a capability before the product binding was durable".into(),
+            ));
+        }
+        if command.input_identity.is_some()
+            && (interaction.input_identity.as_deref() != command.input_identity
+                || interaction.input_digest.as_deref() != command.input_digest)
+        {
+            return Err(RuntimeError::Protocol(
+                "graph server returned a different interaction input identity".into(),
             ));
         }
         let effective_execution_digest = effective_execution_digest(
@@ -689,6 +709,30 @@ impl RuntimeClient {
         )?)
     }
 
+    pub(crate) async fn interaction_input(
+        &self,
+        interaction_node_id: i64,
+    ) -> Result<relayer_graph_core::InteractionInput, RuntimeError> {
+        Ok(serde_json::from_value(
+            self.control_get(&format!(
+                "api/control/interactions/{interaction_node_id}/input"
+            ))
+            .await?,
+        )?)
+    }
+
+    pub(crate) async fn interaction_context_actions(
+        &self,
+        interaction_node_id: i64,
+    ) -> Result<Vec<relayer_graph_core::InteractionContextAction>, RuntimeError> {
+        let value = self
+            .control_get(&format!(
+                "api/control/interactions/{interaction_node_id}/context-actions"
+            ))
+            .await?;
+        Ok(serde_json::from_value(value["actions"].clone())?)
+    }
+
     async fn control_get(&self, path: &str) -> Result<Value, RuntimeError> {
         let response = self
             .client
@@ -748,6 +792,10 @@ struct GraphNodeResponse {
 struct CreateInteractionResponse {
     node: GraphNodeResponse,
     graph_token: String,
+    #[serde(default)]
+    input_identity: Option<String>,
+    #[serde(default)]
+    input_digest: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1014,15 +1062,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invoke_prepare_retries_two_lost_create_responses_with_the_same_source_pair() {
+    async fn invoke_and_identified_prepare_retry_lost_create_responses_with_stable_identity() {
         let creates = Arc::new(AtomicUsize::new(0));
         let observed_creates = creates.clone();
+        let identified_creates = Arc::new(AtomicUsize::new(0));
+        let observed_identified = identified_creates.clone();
         let graph = Router::new()
             .route(
                 "/api/control/interactions",
                 routing::post(move |Json(body): Json<serde_json::Value>| {
                     let observed_creates = observed_creates.clone();
+                    let observed_identified = observed_identified.clone();
                     async move {
+                        if body["inputIdentity"] == "product:99" {
+                            assert_eq!(body["inputDigest"], "sha256:v1:stable");
+                            if observed_identified.fetch_add(1, Ordering::SeqCst) < 2 {
+                                return (StatusCode::OK, "response was truncated").into_response();
+                            }
+                            return Json(json!({
+                                "node": { "id": 42 }, "graphToken": "",
+                                "inputIdentity": "product:99", "inputDigest": "sha256:v1:stable"
+                            }))
+                            .into_response();
+                        }
                         assert_eq!(body["invocation"]["sourceInteractionNodeId"], 17);
                         assert_eq!(body["invocation"]["sourceActionId"], 23);
                         if observed_creates.fetch_add(1, Ordering::SeqCst) < 2 {
@@ -1089,11 +1151,33 @@ mod tests {
                 source_interaction_node_id: 17,
                 source_action_id: 23,
             }),
+            input_identity: None,
+            input_digest: None,
+            contexts: &[],
         };
 
         let prepared = runtime.prepare(&command).await.unwrap();
         assert_eq!(prepared.graph_node_id, 41);
         assert_eq!(creates.load(Ordering::SeqCst), 3);
+        runtime.discard_prepared(prepared).await.unwrap();
+        let identified = CompleteInteraction {
+            project_id: None,
+            product_interaction_id: 99,
+            thread_id: 1,
+            interaction_id: 99,
+            text: "question",
+            working_directory: root.to_str().unwrap(),
+            harness_configuration_name: "test",
+            permission_profile: &permission_profile,
+            model_selection: None,
+            invocation: None,
+            input_identity: Some("product:99"),
+            input_digest: Some("sha256:v1:stable"),
+            contexts: &[],
+        };
+        let prepared = runtime.prepare(&identified).await.unwrap();
+        assert_eq!(prepared.graph_node_id, 42);
+        assert_eq!(identified_creates.load(Ordering::SeqCst), 3);
         runtime.discard_prepared(prepared).await.unwrap();
         graph_task.abort();
         harness_task.abort();
@@ -1164,6 +1248,9 @@ mod tests {
                 source_interaction_node_id: 17,
                 source_action_id: 23,
             }),
+            input_identity: None,
+            input_digest: None,
+            contexts: &[],
         };
         let error = runtime.prepare(&command).await.unwrap_err();
         assert!(matches!(&error, super::RuntimeError::ResponseDecode(_)));
@@ -1291,6 +1378,9 @@ mod tests {
                 permission_profile: &permission_profile,
                 model_selection: None,
                 invocation: None,
+                input_identity: None,
+                input_digest: None,
+                contexts: &[],
             })
             .await;
 
@@ -1414,6 +1504,9 @@ mod tests {
                 permission_profile: &permission_profile,
                 model_selection: None,
                 invocation: None,
+                input_identity: None,
+                input_digest: None,
+                contexts: &[],
             })
             .await
             .unwrap();

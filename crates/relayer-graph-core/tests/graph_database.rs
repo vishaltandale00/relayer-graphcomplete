@@ -48,7 +48,9 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
         turns: vec![ImportedTurn {
             source_turn_id: "turn-1".into(),
             text: "Explain the queue".into(),
+            interaction_node_id: None,
             invoke_origin: None,
+            contexts: vec![],
             accepted_view: Some(ImportedAcceptedView {
                 interaction_node_id: interaction_node_id.into(),
                 root_action: ImportedAction {
@@ -98,7 +100,9 @@ fn imported_invoke_conversation() -> ImportedConversation {
     let source = ImportedTurn {
         source_turn_id: "turn-1".into(),
         text: "Choose a path".into(),
+        interaction_node_id: None,
         invoke_origin: None,
+        contexts: vec![],
         accepted_view: Some(ImportedAcceptedView {
             interaction_node_id: "interaction-1".into(),
             root_action: ImportedAction {
@@ -149,10 +153,12 @@ fn imported_invoke_conversation() -> ImportedConversation {
     let destination = ImportedTurn {
         source_turn_id: "turn-2".into(),
         text: "Continue this path".into(),
+        interaction_node_id: None,
         invoke_origin: Some(ImportedInvokeOrigin {
             source_turn_id: "turn-1".into(),
             source_action_id: "invoke-action-1".into(),
         }),
+        contexts: vec![],
         accepted_view: Some(ImportedAcceptedView {
             interaction_node_id: "interaction-2".into(),
             root_action: ImportedAction {
@@ -244,6 +250,76 @@ async fn imported_conversation_is_materialized_read_only_and_removable() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_turns() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut input = imported_conversation("interaction-1");
+    let target = ImportedNode {
+        id: "node-1".into(),
+        kind: "concept".into(),
+        icon: "box".into(),
+        title: "Queue".into(),
+        detail: "A queue".into(),
+    };
+    input.turns[0].interaction_node_id = Some("interaction-1".into());
+    input.turns[0].contexts = vec![ImportedInteractionContext {
+        id: "context-action-1".into(),
+        target: target.clone(),
+        source_interaction_node_id: "foreign-interaction".into(),
+        source_layer_id: "foreign-layer".into(),
+        annotations: vec!["First note".into(), "Second note".into()],
+    }];
+    input.turns.push(ImportedTurn {
+        source_turn_id: "turn-2".into(),
+        text: "Failed after preparation".into(),
+        interaction_node_id: Some("interaction-2".into()),
+        invoke_origin: None,
+        contexts: vec![ImportedInteractionContext {
+            id: "context-action-2".into(),
+            target,
+            source_interaction_node_id: "another-foreign-interaction".into(),
+            source_layer_id: "another-foreign-layer".into(),
+            annotations: vec!["Failure still keeps this".into()],
+        }],
+        accepted_view: None,
+    });
+
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+    assert_eq!(receipt.turns.len(), 2);
+    assert!(receipt.turns[0].output.is_some());
+    assert!(receipt.turns[1].output.is_none());
+    let first_id = NodeId::new(receipt.turns[0].graph_node_id.unwrap()).unwrap();
+    let second_id = NodeId::new(receipt.turns[1].graph_node_id.unwrap()).unwrap();
+    let first = database
+        .writer_for_subgraph(first_id)
+        .await
+        .unwrap()
+        .interaction_input()
+        .await
+        .unwrap();
+    let second_writer = database.writer_for_subgraph(second_id).await.unwrap();
+    let second = second_writer.interaction_input().await.unwrap();
+    assert_eq!(first.contexts[0].annotations, ["First note", "Second note"]);
+    assert_eq!(second.contexts[0].annotations, ["Failure still keeps this"]);
+    assert_eq!(
+        first.contexts[0].target_node,
+        second.contexts[0].target_node
+    );
+    assert!(second_writer.completion_output().await.unwrap().is_none());
+    assert!(matches!(
+        second_writer
+            .submit_node(&NodeDraft {
+                client_key: "forbidden".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Forbidden".into(),
+                detail: "Imported context is inert".into(),
+            })
+            .await,
+        Err(GraphError::Forbidden(_))
+    ));
 }
 
 #[tokio::test]
@@ -436,6 +512,295 @@ async fn accept_single_node(
         .unwrap();
     writer.complete(interaction.id).await.unwrap();
     layer
+}
+
+#[tokio::test]
+async fn interaction_context_is_control_authored_ordered_and_excluded_from_completion() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let source = database
+        .create_interaction(Some(project(1)), thread(1), "Source")
+        .await
+        .unwrap();
+    let source_writer = database.writer_for_subgraph(source.id).await.unwrap();
+    let target = node(&source_writer, "accepted-target").await;
+    let source_layer = accept_single_node(&source_writer, source.clone(), target.clone()).await;
+
+    let drafts = [InteractionContextDraft {
+        target: InteractionContextTarget {
+            node_id: target.id,
+            source_interaction_node_id: source.id,
+            source_layer_id: source_layer.id,
+        },
+        annotations: vec![
+            "  preserve exact whitespace  ".into(),
+            "Second\nline".into(),
+        ],
+    }];
+    let input_digest =
+        relayer_graph_core::interaction_input_digest("Compare this", &drafts).unwrap();
+    let (interaction, actions) = database
+        .create_identified_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Compare this",
+            "product:41",
+            &input_digest,
+            &drafts,
+        )
+        .await
+        .unwrap();
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].type_id, "interaction.context");
+    let (replayed, replayed_actions) = database
+        .create_identified_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Compare this",
+            "product:41",
+            &input_digest,
+            &drafts,
+        )
+        .await
+        .unwrap();
+    assert_eq!(replayed.id, interaction.id);
+    assert_eq!(replayed_actions, actions);
+    let changed_digest = relayer_graph_core::interaction_input_digest("Changed", &drafts).unwrap();
+    let conflict = database
+        .create_identified_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Changed",
+            "product:41",
+            &changed_digest,
+            &drafts,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        conflict,
+        GraphError::Validation {
+            code: "interaction_input_conflict",
+            ..
+        }
+    ));
+    let forged_digest = database
+        .create_identified_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Compare this",
+            "product:42",
+            "sha256:v1:forged",
+            &drafts,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        forged_digest,
+        GraphError::Validation {
+            code: "interaction_input_digest_mismatch",
+            ..
+        }
+    ));
+
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let input = writer.interaction_input().await.unwrap();
+    assert_eq!(input.interaction.id, interaction.id);
+    assert_eq!(input.contexts.len(), 1);
+    assert_eq!(input.contexts[0].target_node.id, target.id);
+    assert_eq!(input.contexts[0].target_node.title, target.title);
+    assert_eq!(input.contexts[0].target_node.state, RecordState::Accepted);
+    assert_eq!(
+        input.contexts[0].annotations,
+        ["  preserve exact whitespace  ", "Second\nline"]
+    );
+
+    let answer = node(&writer, "answer").await;
+    let answer_layer = single_node_layer(&writer, "answer-layer", &answer).await;
+    let reserved_key = writer
+        .add_action(&ActionDraft {
+            client_key: "\0interaction.context:0".into(),
+            source_node_id: interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(answer_layer.id),
+            interaction_text: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        reserved_key,
+        GraphError::Validation {
+            code: "reserved_action_client_key",
+            ..
+        }
+    ));
+    writer
+        .add_action(&ActionDraft {
+            client_key: "interaction.context:0".into(),
+            source_node_id: interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: ActionVariant::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(answer_layer.id),
+            interaction_text: None,
+        })
+        .await
+        .expect("context control identity must not consume an LM client key");
+    let output = writer.complete(interaction.id).await.unwrap();
+    assert_eq!(output.root_layer.actions.len(), 0);
+    assert_eq!(writer.interaction_input().await.unwrap().contexts.len(), 1);
+}
+
+#[tokio::test]
+async fn interaction_context_rejects_duplicate_invalid_and_empty_input_atomically() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let source = database
+        .create_interaction(Some(project(1)), thread(1), "Source")
+        .await
+        .unwrap();
+    let source_writer = database.writer_for_subgraph(source.id).await.unwrap();
+    let target = node(&source_writer, "target").await;
+    let source_layer = accept_single_node(&source_writer, source.clone(), target.clone()).await;
+    let other = database
+        .create_interaction(Some(project(1)), thread(3), "Other source")
+        .await
+        .unwrap();
+    let other_writer = database.writer_for_subgraph(other.id).await.unwrap();
+    let other_node = node(&other_writer, "other").await;
+    accept_single_node(&other_writer, other.clone(), other_node).await;
+
+    let occurrence = InteractionContextDraft {
+        target: InteractionContextTarget {
+            node_id: target.id,
+            source_interaction_node_id: source.id,
+            source_layer_id: source_layer.id,
+        },
+        annotations: vec!["Use this".into()],
+    };
+    let duplicate = database
+        .create_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Duplicate",
+            &[occurrence.clone(), occurrence.clone()],
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        duplicate,
+        GraphError::Validation {
+            code: "duplicate_context_target",
+            ..
+        }
+    ));
+
+    let invalid = database
+        .create_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "Invalid occurrence",
+            &[InteractionContextDraft {
+                target: InteractionContextTarget {
+                    source_interaction_node_id: other.id,
+                    ..occurrence.target.clone()
+                },
+                annotations: vec!["Use this".into()],
+            }],
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        invalid,
+        GraphError::Validation {
+            code: "invalid_context_occurrence",
+            ..
+        }
+    ));
+
+    let empty = database
+        .create_interaction_with_context(
+            Some(project(1)),
+            thread(2),
+            "",
+            &[InteractionContextDraft {
+                annotations: vec![],
+                ..occurrence
+            }],
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        empty,
+        GraphError::Validation {
+            code: "missing_interaction_input",
+            ..
+        }
+    ));
+
+    let next = database
+        .create_interaction(Some(project(1)), thread(2), "Next valid interaction")
+        .await
+        .unwrap();
+    assert!(
+        database
+            .writer_for_subgraph(next.id)
+            .await
+            .unwrap()
+            .interaction_input()
+            .await
+            .unwrap()
+            .contexts
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn interaction_context_has_no_eight_target_cap() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut drafts = Vec::new();
+    for index in 0..9 {
+        let source = database
+            .create_interaction(Some(project(1)), thread(10 + index), "Source")
+            .await
+            .unwrap();
+        let writer = database.writer_for_subgraph(source.id).await.unwrap();
+        let target = node(&writer, &format!("target-{index}")).await;
+        let layer = accept_single_node(&writer, source.clone(), target.clone()).await;
+        drafts.push(InteractionContextDraft {
+            target: InteractionContextTarget {
+                node_id: target.id,
+                source_interaction_node_id: source.id,
+                source_layer_id: layer.id,
+            },
+            annotations: vec![],
+        });
+    }
+    let (interaction, actions) = database
+        .create_interaction_with_context(Some(project(1)), thread(99), "Use all", &drafts)
+        .await
+        .unwrap();
+    assert_eq!(actions.len(), 9);
+    assert_eq!(
+        database
+            .writer_for_subgraph(interaction.id)
+            .await
+            .unwrap()
+            .interaction_input()
+            .await
+            .unwrap()
+            .contexts
+            .len(),
+        9
+    );
 }
 
 #[tokio::test]

@@ -1,4 +1,5 @@
-import type { GraphCapability, GraphNode } from "@relayer/graph-client";
+import type { GraphCapability } from "@relayer/graph-client";
+import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import { redactTraceData } from "../trace.js";
 import type { Harness, HarnessFactory, HarnessFactoryContext, HarnessRunContext, HarnessSessionState, HarnessTraceStream, HarnessTraceSupport, JsonObject } from "../types.js";
 
@@ -84,7 +85,7 @@ export class PrimeAgentHarness implements Harness {
     signal?.throwIfAborted();
     const childStreams = new Map<string, HarnessTraceStream>();
     const unsubscribe = this.session.subscribe?.((event) => tracePrimeEvent(context, event, childStreams));
-    const prompt = this.prompt(context.inputGraph);
+    const prompt = this.prompt(context);
     context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
     let abortOutcome: Promise<OperationOutcome<void>> | undefined;
     const abort = () => {
@@ -129,14 +130,18 @@ export class PrimeAgentHarness implements Harness {
     await this.session.dispose();
   }
 
-  private prompt(interaction: GraphNode): string {
+  private prompt(context: HarnessRunContext): string {
+    const interaction = context.inputGraph;
     if (this.context.configuration.settings.promptProfile === "layered-navigation-v1") {
-      return this.layeredNavigationPrompt(interaction);
+      return this.layeredNavigationPrompt(context);
     }
     return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response.
 
 Current interaction node: ${interaction.id}
-User text: ${interaction.detail}
+Normalized interaction input:
+${renderInteractionInput(context.interactionInput)}
+
+${INTERACTION_INPUT_GUIDANCE} In Python, call await graph.get_interaction_input() to re-read it.
 
 Use this entry point:
 
@@ -154,11 +159,15 @@ await graph.submit(${interaction.id})
 If a graph call fails, edit and rerun the same authoring code with the same client_key values so it updates the same drafts instead of creating duplicates. Do not add fake navigation merely to make abandoned drafts reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with await graph.discard_layer(layer); this preserves that layer as stopped history without discarding its graph objects. A model turn ending is not completion. If graph.submit() has not succeeded, continue working or report the blocking graph error.`;
   }
 
-  private layeredNavigationPrompt(interaction: GraphNode): string {
+  private layeredNavigationPrompt(context: HarnessRunContext): string {
+    const interaction = context.inputGraph;
     return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 Current interaction node: ${interaction.id}
-User text: ${interaction.detail}
+Normalized interaction input:
+${renderInteractionInput(context.interactionInput)}
+
+${INTERACTION_INPUT_GUIDANCE} In Python, call await graph.get_interaction_input() to re-read it.
 
 Use this entry point:
 

@@ -1,13 +1,13 @@
 use crate::{
     ActionDraft, CompletionOutput, EdgeDraft, GraphAction, GraphDatabase, GraphEdge, GraphError,
-    GraphLayer, GraphNode, LayerDraft, LayerId, NavigateRelation, NodeDraft, NodeId, RecordState,
-    ResolvedLayer,
+    GraphLayer, GraphNode, InteractionInput, LayerDraft, LayerId, NavigateRelation, NodeDraft,
+    NodeId, RecordState, ResolvedLayer,
     graph::{InteractionScope, completion, model::LayerCandidate},
     storage::{
         GraphConnection,
         sqlite::{
-            actions::ActionTable, completions::CompletionTable, edges::EdgeTable, layers,
-            layers::LayerTable, nodes::NodeTable,
+            actions::ActionTable, completions::CompletionTable, contexts::ContextTable,
+            edges::EdgeTable, layers, layers::LayerTable, nodes::NodeTable,
         },
     },
 };
@@ -24,6 +24,13 @@ impl GraphWriter {
 
     pub fn node_id(&self) -> NodeId {
         self.scope.root_node_id
+    }
+
+    pub async fn interaction_input(&self) -> Result<InteractionInput, GraphError> {
+        let mut connection = self.database.storage.acquire().await?;
+        ContextTable::new(&mut connection)
+            .interaction_input(&self.scope)
+            .await
     }
 
     pub async fn submit_node(&self, draft: &NodeDraft) -> Result<GraphNode, GraphError> {

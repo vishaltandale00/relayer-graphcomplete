@@ -24,13 +24,15 @@ impl SqliteProductStore {
     pub(crate) async fn recover_interrupted_interactions(
         &self,
         error: &str,
+        preserve_identified: bool,
     ) -> Result<u64, StorageError> {
         // Ordinary completions cannot resume across a backend restart. Make every remaining
         // nonterminal row explicit and terminal so thread-level exclusivity does not deadlock.
         let result = sqlx::query(
-            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('not_started','running','submitted') AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1) AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('not_started','running','submitted') AND (?2=0 OR input_identity IS NULL) AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1) AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
         )
         .bind(error)
+        .bind(preserve_identified)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())
@@ -215,6 +217,31 @@ impl SqliteProductStore {
         Ok(result.rows_affected() == 1)
     }
 
+    pub(crate) async fn restore_identified_interaction_submitted(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query(
+            "UPDATE interactions SET completion_status='submitted',completion_error=?1
+             WHERE id=?2 AND completion_status='running' AND input_identity IS NOT NULL AND input_digest IS NOT NULL",
+        ).bind(error).bind(interaction_id.value()).execute(&self.pool).await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub(crate) async fn recover_identified_interaction_submitted(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query(
+            "UPDATE interactions SET completion_status='submitted',completion_error=?1
+             WHERE id=?2 AND input_identity IS NOT NULL AND input_digest IS NOT NULL
+               AND completion_status IN ('not_started','running','submitted','waiting_for_approval')",
+        ).bind(error).bind(interaction_id.value()).execute(&self.pool).await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     pub(crate) async fn claim_interaction_preparing(
         &self,
         interaction_id: InteractionId,
@@ -357,7 +384,7 @@ pub(super) fn interaction_from_row(row: &SqliteRow) -> Result<Interaction, Stora
     })
 }
 
-fn interaction_model_selection_from_row(
+pub(super) fn interaction_model_selection_from_row(
     row: &SqliteRow,
     provider_index: usize,
     model_index: usize,
@@ -537,7 +564,7 @@ mod tests {
 
         assert_eq!(
             store
-                .recover_interrupted_interactions("interrupted")
+                .recover_interrupted_interactions("interrupted", false)
                 .await
                 .unwrap(),
             0

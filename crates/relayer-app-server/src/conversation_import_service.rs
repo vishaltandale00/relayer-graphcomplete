@@ -1,7 +1,7 @@
 use relayer_graph_core::{
     ImportedAcceptedView, ImportedAction, ImportedConversationReceipt, ImportedConversationStage,
-    ImportedEdge, ImportedInvokeOrigin, ImportedLayer, ImportedNode, ImportedResolvedLayer,
-    ImportedTurn,
+    ImportedEdge, ImportedInteractionContext, ImportedInvokeOrigin, ImportedLayer, ImportedNode,
+    ImportedResolvedLayer, ImportedTurn,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -366,7 +366,25 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
     ImportedTurn {
         source_turn_id: turn.id,
         text: turn.text,
+        interaction_node_id: turn.interaction_node_id,
         invoke_origin,
+        contexts: turn
+            .contexts
+            .into_iter()
+            .map(|context| ImportedInteractionContext {
+                id: context.id,
+                target: ImportedNode {
+                    id: context.target.id,
+                    kind: context.target.kind,
+                    icon: context.target.icon,
+                    title: context.target.title,
+                    detail: context.target.detail,
+                },
+                source_interaction_node_id: context.source.interaction_node_id,
+                source_layer_id: context.source.layer_id,
+                annotations: context.annotations,
+            })
+            .collect(),
         accepted_view: turn.accepted_view.map(|view| ImportedAcceptedView {
             interaction_node_id: view.interaction_node_id,
             root_action: import_action(view.root_action),
@@ -462,8 +480,9 @@ mod tests {
     use crate::{
         conversation_export::{
             ConversationExportHeader, ConversationExportTurn, EXPORT_VERSION_V1,
-            ExportCompletionReceipt, ExportCompletionStatus, ExportConversation, ExportProducer,
-            ExportTurnManifestEntry, ExportTurnOrigin,
+            ExportCompletionReceipt, ExportCompletionStatus, ExportContextSource,
+            ExportContextTargetSnapshot, ExportConversation, ExportInteractionContext,
+            ExportProducer, ExportRecordState, ExportTurnManifestEntry, ExportTurnOrigin,
         },
         product::ProductService,
         runtime::RuntimeClient,
@@ -501,6 +520,7 @@ mod tests {
             sequence: 1,
             created_at: "1769000001000".into(),
             text: "Why did this happen?".into(),
+            interaction_node_id: None,
             origin: ExportTurnOrigin::User,
             completion: ExportCompletionReceipt {
                 status: ExportCompletionStatus::Failed,
@@ -512,6 +532,7 @@ mod tests {
                 effective_permission_receipt: None,
                 error: Some("fixture failure".into()),
             },
+            contexts: vec![],
             accepted_view: None,
         }
     }
@@ -653,6 +674,67 @@ mod tests {
         );
         let reopened = ProductService::new(reopened_store, true);
         remove_conversation(&import_id, &reopened, &runtime)
+            .await
+            .unwrap();
+        graph_task.abort();
+    }
+
+    #[tokio::test]
+    async fn failed_import_materializes_ordered_context_as_read_only_graph_input() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("product.sqlite");
+        let product = product(&database).await;
+        let mut imported_turn = turn();
+        imported_turn.interaction_node_id = Some("node:input".into());
+        imported_turn.contexts = vec![ExportInteractionContext {
+            id: "action:context".into(),
+            target: ExportContextTargetSnapshot {
+                id: "node:target".into(),
+                kind: "concept".into(),
+                icon: "file".into(),
+                title: "Portable target".into(),
+                detail: "No local path or database ID".into(),
+                state: ExportRecordState::Accepted,
+            },
+            source: ExportContextSource {
+                interaction_node_id: "node:foreign-source".into(),
+                layer_id: "layer:foreign-source".into(),
+            },
+            annotations: vec!["First".into(), "Second".into()],
+        }];
+        let mut stager = ConversationImportStager::begin(header(), &product)
+            .await
+            .unwrap();
+        stager.push_turn(&imported_turn, &product).await.unwrap();
+        let import_id = stager
+            .finish("sha256:context".into(), &product)
+            .await
+            .unwrap()
+            .import_id;
+        let (runtime, graph_task) =
+            runtime(GraphDatabase::in_memory().await.unwrap(), directory.path()).await;
+
+        let receipt = materialize_conversation(&import_id, &product, &runtime)
+            .await
+            .unwrap();
+        let graph_node_id = receipt.turns[0].graph_node_id.unwrap();
+        assert_eq!(
+            receipt.turns[0].completion_status,
+            ExportCompletionStatus::Failed
+        );
+        let input = runtime.interaction_input(graph_node_id).await.unwrap();
+        assert_eq!(input.contexts.len(), 1);
+        assert_eq!(input.contexts[0].annotations, ["First", "Second"]);
+        assert_eq!(input.contexts[0].target_node.title, "Portable target");
+        assert!(
+            runtime
+                .completion_output(graph_node_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        remove_conversation(&import_id, &product, &runtime)
             .await
             .unwrap();
         graph_task.abort();

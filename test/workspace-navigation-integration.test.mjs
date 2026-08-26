@@ -154,12 +154,12 @@ describe("workspace navigation integration", () => {
         return submitted ? afterSubmit : beforeSubmit;
       }
       if (path === "/api/threads/10/interactions") {
-        expect(options).toEqual({
-          method: "POST",
-          body: JSON.stringify({
-            text: "A follow-up",
-            modelSelection: { providerId: "openai", modelId: "gpt-5" },
-          }),
+        expect(options.method).toBe("POST");
+        expect(JSON.parse(options.body)).toEqual({
+          text: "A follow-up",
+          inputId: expect.any(String),
+          contexts: [],
+          modelSelection: { providerId: "openai", modelId: "gpt-5" },
         });
         submitted = true;
         return followup;
@@ -183,6 +183,48 @@ describe("workspace navigation integration", () => {
     completionPersistence.resolve(true);
     await expect(submitting).resolves.toEqual(followup);
     expect(stateReads).toBe(2);
+    expect(controller.viewState.currentInteractionId).toBe(2);
+  });
+
+  it("submits annotation-only context with stable occurrence identity", async () => {
+    const source = { ...interaction(1, 10, rootLayer(101, 11)), graphNodeId: 31 };
+    const followup = {
+      id: 2,
+      threadId: 10,
+      sequence: 2,
+      text: "",
+      completionStatus: "submitted",
+    };
+    const beforeSubmit = productState([{ id: 10, title: "Context" }], [source]);
+    const afterSubmit = productState([{ id: 10, title: "Context" }], [source, followup]);
+    let submitted = false;
+    const contexts = [{
+      target: { nodeId: 11, sourceInteractionNodeId: 31, sourceLayerId: 101 },
+      annotations: ["Use this node"],
+    }];
+    requestImplementation = vi.fn(async (path, options) => {
+      if (path.startsWith("/api/state?threadId=10")) return submitted ? afterSubmit : beforeSubmit;
+      if (path === "/api/threads/10/interactions") {
+        expect(options.method).toBe("POST");
+        expect(JSON.parse(options.body)).toEqual({
+          text: "",
+          inputId: expect.any(String),
+          contexts,
+          modelSelection: { providerId: "openai", modelId: "gpt-5" },
+        });
+        submitted = true;
+        return followup;
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(10);
+
+    await expect(controller.submitInteraction(
+      "",
+      { providerId: "openai", modelId: "gpt-5" },
+      contexts,
+    )).resolves.toEqual(followup);
     expect(controller.viewState.currentInteractionId).toBe(2);
   });
 
@@ -566,6 +608,39 @@ describe("workspace navigation integration", () => {
       expect(controller.appState.actionInvocations[0].resultCompletionStatus).toBe("accepted");
       expect(stateReads).toBe(2);
       expect(layerReads).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries an imported thread until its server projection is fresh", async () => {
+    vi.useFakeTimers();
+    try {
+      const turn = interaction(1, 10, rootLayer(101, 11));
+      const staleTurn = { ...turn, projectionFresh: false };
+      const freshTurn = { ...turn, projectionFresh: true };
+      const threads = [{ id: 10, title: "Imported review", imported: true }];
+      const stale = productState(threads, [staleTurn]);
+      const fresh = productState(threads, [freshTurn]);
+      let stateReads = 0;
+      requestImplementation = vi.fn(async (path) => {
+        if (path.startsWith("/api/state?threadId=10")) {
+          stateReads += 1;
+          return stateReads === 1 ? stale : fresh;
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const controller = await loadModules();
+
+      await controller.loadThread(10);
+      expect(stateReads).toBe(1);
+      expect(controller.appState.interactions[0].projectionFresh).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(stateReads).toBe(2);
+      expect(controller.appState.interactions[0].projectionFresh).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }

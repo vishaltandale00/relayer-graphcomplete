@@ -56,7 +56,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         Handler.requests.append((self.path, dict(self.headers), None))
-        if self.path.endswith("/output"):
+        if self.path.endswith("/input"):
+            self._reply({
+                "interaction": {"id": 7, "kind": "user-interaction", "icon": "user", "title": "Compare", "detail": "Compare", "state": "accepted"},
+                "contexts": [{
+                    "type": "interaction.context",
+                    "targetNode": {"id": 4, "kind": "concept", "icon": "box", "title": "Boundary", "detail": "Evidence", "state": "accepted"},
+                    "annotations": ["First", "Second"],
+                }],
+            })
+        elif self.path.endswith("/output"):
             self._reply({"nodeId": 7, "rootAction": {}, "rootLayer": {}})
         else:
             self._reply({"error": {"message": "not found"}}, 404)
@@ -109,6 +118,14 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         output = await self.client.get_completion_output()
         self.assertEqual(output["nodeId"], 7)
         self.assertEqual(Handler.requests[-1][0], "/api/graph/nodes/7/output")
+
+    async def test_interaction_input_is_typed_and_preserves_annotation_order(self):
+        input = await self.client.get_interaction_input()
+        self.assertEqual(input.interaction.id, 7)
+        self.assertEqual(input.contexts[0].type, "interaction.context")
+        self.assertEqual(input.contexts[0].target_node.title, "Boundary")
+        self.assertEqual(input.contexts[0].annotations, ("First", "Second"))
+        self.assertEqual(Handler.requests[-1][0], "/api/graph/input")
 
     async def test_discard_layer_posts_to_recovery_endpoint_and_refreshes_reference(self):
         layout = LayerLayoutObject((NodePlacementObject(1, 0.5, 0.5),))

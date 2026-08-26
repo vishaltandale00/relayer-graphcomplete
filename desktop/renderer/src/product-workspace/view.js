@@ -24,12 +24,14 @@ export function productWorkspaceMarkup() {
             <p id="interactionText"></p>
           </div>
           <div class="turn-picker" id="turnPicker">
+            <button class="interaction-context-pill hidden" id="interactionContextPill" type="button" title="Show connected nodes" aria-label="Show connected nodes" aria-expanded="false" aria-controls="interactionContextPopover"><span aria-hidden="true">⌘</span><b id="interactionContextCount">0</b></button>
             <button class="annotation-count-badge hidden" id="turnAnnotationBadge" type="button" aria-label="Open turn comments"></button>
             <div class="turn-stepper" role="group" aria-label="Turn navigation">
               <button id="previousTurn" data-review-ref="previous-turn" data-review-kind="turn" disabled title="Previous turn" aria-label="Previous turn">←</button>
               <button id="turnPickerButton" class="turn-picker-button" type="button" aria-expanded="false" aria-controls="turnPopover" disabled>Turn 0 of 0</button>
               <button id="nextTurn" data-review-ref="next-turn" data-review-kind="turn" disabled title="Next turn" aria-label="Next turn">→</button>
             </div>
+            <div class="interaction-context-popover hidden" id="interactionContextPopover" role="group" aria-label="Connected nodes"></div>
             <div class="turn-popover hidden" id="turnPopover" role="group" aria-label="Choose a turn"></div>
           </div>
           <span class="interaction-status" id="interactionStatus" role="status"></span>
@@ -92,10 +94,13 @@ export function productWorkspaceMarkup() {
             </div>
           </div>
         </section>
-        <div class="thread-composer" id="threadComposer"><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div></div>
+        <div class="thread-composer-shell" id="threadComposerShell">
+          <section class="composer-context-tray hidden" id="composerContextTray" aria-label="Connected node draft"></section>
+          <div class="thread-composer" id="threadComposer"><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div></div>
+        </div>
       </div>
       <aside class="inspector hidden" id="inspector" data-review-capture="node-detail" aria-label="Selected node detail">
-        <div class="inspector-header"><span>Node details</span><button class="icon-button" id="closeInspector" data-review-ref="close-node-detail" aria-label="Close node details">×</button></div>
+        <div class="inspector-header"><span>Node details</span><div class="inspector-header-actions"><button class="icon-button hidden" id="attachNodeContext" type="button" title="Connect node to next message" aria-label="Connect node to next message">+</button><button class="icon-button" id="closeInspector" data-review-ref="close-node-detail" aria-label="Close node details">×</button></div></div>
         <div class="inspector-content" id="inspectorContent">
           <div class="node-heading"><div class="node-icon" id="detailIcon">N</div><div><small id="detailKind">CONCEPT</small><h2 id="detailTitle"></h2></div></div>
           <div class="node-content" id="detailContent"></div>

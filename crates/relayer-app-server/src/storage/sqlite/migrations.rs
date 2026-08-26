@@ -164,6 +164,27 @@ mod tests {
         pool.execute("DROP TABLE action_invocations_with_lease")
             .await
             .unwrap();
+        pool.execute("DROP TRIGGER interaction_input_identity_pair_insert")
+            .await
+            .unwrap();
+        pool.execute("DROP TRIGGER interaction_input_identity_pair_update")
+            .await
+            .unwrap();
+        pool.execute("DROP INDEX interactions_input_identity")
+            .await
+            .unwrap();
+        pool.execute("DROP TABLE interaction_context_annotations")
+            .await
+            .unwrap();
+        pool.execute("DROP TABLE interaction_context_intents")
+            .await
+            .unwrap();
+        pool.execute("ALTER TABLE interactions DROP COLUMN input_digest")
+            .await
+            .unwrap();
+        pool.execute("ALTER TABLE interactions DROP COLUMN input_identity")
+            .await
+            .unwrap();
         sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 8")
             .execute(&pool)
             .await

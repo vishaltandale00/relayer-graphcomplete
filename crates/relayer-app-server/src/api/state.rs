@@ -87,9 +87,30 @@ pub(super) async fn product_state(
         &product_state.action_invocations,
     )
     .await;
-    let mut response = ProductStateResponse::from(product_state)
+    let imported_thread_ids = product_state
+        .threads
+        .iter()
+        .filter(|view| view.thread.imported)
+        .map(|view| view.thread.id.value())
+        .collect::<std::collections::HashSet<_>>();
+    let product_interactions = std::mem::take(&mut product_state.interactions);
+    let mut interactions = Vec::with_capacity(product_interactions.len());
+    for interaction in product_interactions {
+        let imported_thread = imported_thread_ids.contains(&interaction.thread_id.value());
+        let projection_stale = stale.contains(&interaction.id.value());
+        interactions.push(
+            super::threads::project_interaction(
+                &state,
+                interaction,
+                imported_thread,
+                projection_stale,
+            )
+            .await?,
+        );
+    }
+    let response = ProductStateResponse::from(product_state)
+        .with_interactions(interactions)
         .with_annotations(annotation_capability(&state, &headers));
-    response.mark_stale_interactions(&stale);
     Ok(Json(response))
 }
 

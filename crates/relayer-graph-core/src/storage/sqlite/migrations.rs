@@ -298,4 +298,93 @@ mod tests {
                 .contains("root_action_already_exists")
         );
     }
+
+    #[tokio::test]
+    async fn interaction_context_migration_preserves_legacy_actions_and_root_guard() {
+        let mut connection = SqliteConnection::connect("sqlite::memory:").await.unwrap();
+        for migration in [
+            include_str!("migrations/0001_graph_schema.sql"),
+            include_str!("migrations/0002_action_presentation.sql"),
+            include_str!("migrations/0003_navigation_relations.sql"),
+            include_str!("migrations/0004_imported_conversations.sql"),
+            include_str!("migrations/0005_interaction_action_leases.sql"),
+            include_str!("migrations/0006_layer_layout.sql"),
+            include_str!("migrations/0007_active_root_action_guard.sql"),
+        ] {
+            sqlx::raw_sql(migration)
+                .execute(&mut connection)
+                .await
+                .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO nodes(id,project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (1,NULL,1,'user-interaction','user','Source','Source','accepted',NULL,NULL),(2,NULL,1,'concept','box','Target','Target','accepted',1,'target'),(3,NULL,1,'user-interaction','user','Input','Input','accepted',NULL,NULL)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO layers(id,project_id,thread_id,state,owner_interaction_id,client_key) VALUES (1,NULL,1,'accepted',1,'root')",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO layer_nodes(layer_id,node_id,position) VALUES (1,2,0)")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO actions(id,project_id,thread_id,source_node_id,source_layer_id,kind,relation,label,variant,target_layer_id,interaction_text,state,owner_interaction_id,client_key) VALUES (1,NULL,1,1,NULL,'navigate','expand','Response','pill',1,NULL,'accepted',1,'response')",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+
+        sqlx::raw_sql(include_str!(
+            "migrations/0008_interaction_context_actions.sql"
+        ))
+        .execute(&mut connection)
+        .await
+        .unwrap();
+
+        let legacy_type: String = sqlx::query_scalar("SELECT type_id FROM actions WHERE id=1")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+        assert_eq!(legacy_type, "graph.action");
+        sqlx::query(
+            "INSERT INTO actions(id,project_id,thread_id,source_node_id,source_layer_id,kind,label,variant,state,owner_interaction_id,client_key,type_id) VALUES (2,NULL,1,3,NULL,'invoke','','pill','accepted',3,char(0) || 'interaction.context:0','interaction.context')",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO interaction_context_actions(action_id,interaction_node_id,target_node_id,source_interaction_node_id,source_layer_id) VALUES (2,3,2,1,1)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO actions(id,project_id,thread_id,source_node_id,source_layer_id,kind,relation,label,variant,state,owner_interaction_id,client_key) VALUES (3,NULL,1,3,NULL,'navigate','expand','Response','pill','draft',3,'interaction.context:0')",
+        )
+        .execute(&mut connection)
+        .await
+        .expect("public root key must not collide with the internal context identity");
+        let duplicate_root = sqlx::query(
+            "INSERT INTO actions(project_id,thread_id,source_node_id,source_layer_id,kind,relation,label,variant,state,owner_interaction_id,client_key) VALUES (NULL,1,1,NULL,'navigate','expand','Other','pill','draft',1,'other')",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap_err();
+        assert!(
+            duplicate_root
+                .to_string()
+                .contains("root_action_already_exists")
+        );
+        let foreign_key_errors: Vec<(String, i64, String, i64)> =
+            sqlx::query_as("PRAGMA foreign_key_check")
+                .fetch_all(&mut connection)
+                .await
+                .unwrap();
+        assert!(foreign_key_errors.is_empty());
+    }
 }

@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "passed": true,
+  "capturedAt": "2026-08-26T04:37:22.194Z",
+  "sourceCommit": "7158294bf2747f4a6058257e4beda1fced62285c",
+  "workingTreeDirty": false,
+  "command": "npm run build && RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE=1 electron scripts/capture-interaction-context-evidence.mjs",
+  "paidInferenceCalls": 0,
+  "runtime": "real Electron BrowserWindow + production renderer + Rust app/graph servers + SQLite",
+  "harness": "fixture-task-system (deterministic zero-inference implementation)",
+  "viewport": {
+    "width": 1480,
+    "height": 920
+  },
+  "thread": {
+    "id": 1,
+    "interactionIds": [
+      1,
+      2,
+      3
+    ],
+    "statuses": [
+      "accepted",
+      "accepted",
+      "accepted"
+    ]
+  },
+  "assertions": {
+    "nodeDetailsOpened": true,
+    "multipleAnnotationsAddedEditedAndOrdered": true,
+    "compactComposerPopoverVisible": true,
+    "compactComposerPopoverAvoidsNodeDetails": true,
+    "multipleNodePillStripScrolls": true,
+    "editPreservesPopoverDimensions": true,
+    "longAnnotationEditorScrolls": true,
+    "annotationDeletedWhileEditing": true,
+    "messageAndContextSent": true,
+    "historyPillAndPopoverVisible": true,
+    "historicalTargetNodeReopened": true,
+    "annotationOnlyInteractionSent": true,
+    "servicesAndWindowRestarted": true,
+    "persistedContextVisibleAfterRestart": true,
+    "targetNodeReopenedAfterRestart": true
+  },
+  "screenshots": [
+    {
+      "file": "grouped-composer.png",
+      "sha256": "963275926d437369b9d8d98dd21c5fc88db4662d7e2851ebf8ccb5580798d3fa"
+    },
+    {
+      "file": "restarted-context.png",
+      "sha256": "141d7a2d1331b37ca5c51f51a2d586964a773ba47f7c6a2da1c611b7458b750b"
+    }
+  ],
+  "video": {
+    "file": "interaction-context.mp4",
+    "sha256": "9d12751bbcf51c6da7f5d0c5cf79af839846cdccafd275a27e6b1ff9f06f3f1f",
+    "durationSeconds": 31.167,
+    "stream": {
+      "codec_name": "h264",
+      "width": 1480,
+      "height": 920,
+      "pix_fmt": "yuv420p",
+      "side_data_list": [
+        {}
+      ]
+    },
+    "playbackDecoded": true,
+    "steps": [
+      "1. Open Node Details for any visible node; the + control connects it to the next interaction",
+      "2. Editing stays inside the fixed popover and keeps an explicit trash control available",
+      "3. Multiple attached-node pills scroll horizontally within the available composer width",
+      "4. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
+      "5. The turn banner shows one connected-node pill; its popover restores both annotations in order",
+      "6. Clicking the connected node reopens its full Node Details from history",
+      "7. A connected node with a non-empty annotation enables send even when message text is empty",
+      "8. Annotation-only history has no derived message label; the context pill preserves the actual input",
+      "9. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
+      "10. The persisted context still reopens the exact target node after restart"
+    ]
+  }
+}

@@ -4,14 +4,33 @@ import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspac
 import {
   COMPOSER_MAX_HEIGHT,
   COMPOSER_MIN_HEIGHT,
+  CONTEXT_EDITOR_MAX_HEIGHT,
+  CONTEXT_EDITOR_MIN_HEIGHT,
+  applyContextEditor,
   bindComposerKeydown,
   composerDisabledForState,
+  composerDraftMatchesSubmission,
   composerFocusRestoration,
   composerKeydownIntent,
   composerSubmissionReady,
+  composerStatusForThread,
+  contextDraftHasAnnotation,
+  contextAnnotationCountLabel,
+  contextDetachNeedsConfirmation,
+  contextEditorCanConfirm,
+  contextEditorPresentation,
+  contextStagingDisabledFor,
   graphTurnNavigationDelta,
+  graphRenderClearsSelection,
+  hasHistoricalContextSelection,
+  historicalContextSelectionOptions,
   handleComposerKeydown,
   resizeComposerTextarea,
+  resizeContextEditorTextarea,
+  interactionContextPayload,
+  interactionContextDraftTransition,
+  removeContextAnnotation,
+  resolveInteractionContextNode,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace keyboard behavior", () => {
@@ -75,10 +94,203 @@ describe("product workspace keyboard behavior", () => {
     expect(composerSubmissionReady("Ask a follow-up")).toBe(true);
     expect(composerSubmissionReady("  \n ")).toBe(false);
     expect(composerSubmissionReady("Ask a follow-up", true)).toBe(false);
+    const contexts = [{
+      target: { nodeId: 3, sourceInteractionNodeId: 2, sourceLayerId: 1 },
+      annotations: ["  note  "],
+      node: { id: 3, title: "Context" },
+    }];
+    expect(contextDraftHasAnnotation(contexts)).toBe(true);
+    expect(composerSubmissionReady("", false, true, contexts)).toBe(true);
+    expect(composerSubmissionReady("", false, true, [{ ...contexts[0], annotations: [] }]))
+      .toBe(false);
+    expect(composerSubmissionReady("message", false, true, contexts, true)).toBe(false);
+    expect(interactionContextPayload(contexts)).toEqual([{
+      target: { nodeId: 3, sourceInteractionNodeId: 2, sourceLayerId: 1 },
+      annotations: ["note"],
+    }]);
     expect(composerDisabledForState("running")).toBe(true);
     expect(composerDisabledForState("waiting_for_approval")).toBe(true);
     expect(composerDisabledForState("accepted")).toBe(false);
     expect(composerDisabledForState("accepted", false)).toBe(true);
+  });
+
+  it("attaches an unannotated node only after confirmation and preserves annotation order", () => {
+    const node = { id: 3, title: "Context" };
+    const target = { nodeId: 3, sourceInteractionNodeId: 2, sourceLayerId: 1 };
+    const attaching = { attaching: true, annotationIndex: null, value: "" };
+    expect(contextEditorCanConfirm(attaching)).toBe(true);
+    const attached = applyContextEditor([], attaching, node, target);
+    expect(attached).toEqual([{ target, node, annotations: [] }]);
+    expect(composerSubmissionReady("", false, true, attached)).toBe(false);
+
+    const first = applyContextEditor(attached, {
+      attaching: false,
+      annotationIndex: null,
+      value: " first ",
+    }, node, target);
+    const second = applyContextEditor(first, {
+      attaching: false,
+      annotationIndex: null,
+      value: "second",
+    }, node, target);
+    expect(second[0].annotations).toEqual(["first", "second"]);
+    const edited = applyContextEditor(second, {
+      attaching: false,
+      annotationIndex: 0,
+      value: "revised",
+    }, node, target);
+    expect(edited[0].annotations).toEqual(["revised", "second"]);
+    expect(contextEditorCanConfirm({ attaching: false, annotationIndex: null, value: "  " }))
+      .toBe(false);
+    expect(contextDetachNeedsConfirmation(edited[0])).toBe(true);
+    const afterFirstDelete = removeContextAnnotation(edited, 3, 0);
+    const afterLastDelete = removeContextAnnotation(afterFirstDelete, 3, 0);
+    expect(afterLastDelete).toHaveLength(1);
+    expect(afterLastDelete[0].annotations).toEqual([]);
+    expect(contextDetachNeedsConfirmation(afterLastDelete[0])).toBe(false);
+  });
+
+  it("keeps compact context counts and long annotation editors bounded", () => {
+    expect(contextAnnotationCountLabel(0)).toBe("0 annotations");
+    expect(contextAnnotationCountLabel(1)).toBe("1 annotation");
+    expect(contextAnnotationCountLabel(7)).toBe("7 annotations");
+
+    const textarea = { scrollHeight: 64, style: {} };
+    resizeContextEditorTextarea(textarea);
+    expect(textarea.style).toMatchObject({ height: "64px", overflowY: "hidden" });
+
+    textarea.scrollHeight = CONTEXT_EDITOR_MAX_HEIGHT + 100;
+    resizeContextEditorTextarea(textarea);
+    expect(textarea.style).toMatchObject({
+      height: `${CONTEXT_EDITOR_MAX_HEIGHT}px`,
+      overflowY: "auto",
+    });
+
+    textarea.scrollHeight = 0;
+    resizeContextEditorTextarea(textarea);
+    expect(textarea.style.height).toBe(`${CONTEXT_EDITOR_MIN_HEIGHT}px`);
+  });
+
+  it("keeps deletion available while an annotation is being edited", async () => {
+    const [workspace, styles] = await Promise.all([
+      readFile(new URL("../desktop/renderer/src/product-workspace/workspace.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8"),
+    ]);
+    expect(workspace).toContain("Delete annotation being edited for ${node.title}");
+    expect(workspace).toContain("if (contextEditor.annotationIndex != null) controls.append(remove);");
+    expect(styles).toContain(".composer-context-pills{display:flex;flex-wrap:nowrap;gap:7px;overflow-x:auto");
+  });
+
+  it("resolves a historical context node while reopening it for the next message", () => {
+    const historical = { id: 7, title: "Historical target" };
+    const overrides = new Map([["7", historical]]);
+    expect(resolveInteractionContextNode(7, [], [], overrides)).toBe(historical);
+
+    const attached = { id: 8, title: "Attached draft" };
+    expect(resolveInteractionContextNode(8, [], [{
+      target: { nodeId: 8 },
+      node: attached,
+    }], overrides)).toBe(attached);
+    expect(hasHistoricalContextSelection(7, { nodeId: 7 }, overrides)).toBe(true);
+    expect(hasHistoricalContextSelection(7, null, overrides)).toBe(false);
+    expect(hasHistoricalContextSelection(8, { nodeId: 8 }, overrides)).toBe(false);
+    expect(graphRenderClearsSelection({
+      hasResponseNodes: false,
+      enteringView: true,
+      nodeInGraph: false,
+      preserveHistoricalSelection: true,
+    })).toBe(false);
+    expect(graphRenderClearsSelection({
+      hasResponseNodes: false,
+      enteringView: true,
+      nodeInGraph: false,
+      preserveHistoricalSelection: false,
+    })).toBe(true);
+    const origin = { id: "context-node" };
+    expect(historicalContextSelectionOptions({ nodeId: 7 }, origin)).toEqual({
+      notify: false,
+      userInitiated: true,
+      focusInspector: true,
+      contextTarget: { nodeId: 7 },
+      origin,
+    });
+  });
+
+  it("keeps context controls symbol-first and accessible", () => {
+    const markup = productWorkspaceMarkup();
+    expect(markup).toContain('id="composerContextTray" aria-label="Connected node draft"');
+    expect(markup).toContain('id="attachNodeContext"');
+    expect(markup).toContain('aria-label="Connect node to next message">+</button>');
+    expect(markup).toContain('id="interactionContextPill"');
+    expect(markup.indexOf('id="interactionContextPill"')).toBeLessThan(
+      markup.indexOf('id="turnPickerButton"'),
+    );
+  });
+
+  it("preserves failed drafts but clears them after durable send or a thread switch", () => {
+    const draft = {
+      contexts: [{ target: { nodeId: 3 }, annotations: ["note"] }],
+      editor: { nodeId: 3, value: "unsaved" },
+    };
+    expect(interactionContextDraftTransition(draft, "send_failure")).toBe(draft);
+    expect(interactionContextDraftTransition(draft, "durable_send"))
+      .toEqual({ contexts: [], editor: null });
+    expect(interactionContextDraftTransition(draft, "thread_change"))
+      .toEqual({ contexts: [], editor: null });
+    expect(contextStagingDisabledFor("running", true, false)).toBe(true);
+    expect(contextStagingDisabledFor("accepted", true, true)).toBe(true);
+    expect(contextStagingDisabledFor("failed", true, false)).toBe(false);
+    expect(contextEditorPresentation({ attaching: true, value: "" }, true)).toEqual({
+      textareaDisabled: true,
+      confirmDisabled: true,
+    });
+    expect(contextEditorPresentation({ attaching: true, value: "" }, false)).toEqual({
+      textareaDisabled: false,
+      confirmDisabled: false,
+    });
+    expect(composerStatusForThread({
+      status: "accepted",
+      interactions: [
+        { id: 1, threadId: 10, sequence: 1, completionStatus: "accepted" },
+        { id: 2, threadId: 10, sequence: 2, completionStatus: "running" },
+      ],
+    }, { id: 10 })).toBe("running");
+  });
+
+  it("only clears the exact composer draft whose send completed", () => {
+    const submittedContexts = [{ target: { nodeId: 3 }, annotations: ["note"] }];
+    expect(composerDraftMatchesSubmission({
+      currentThreadId: 10,
+      submittedThreadId: 10,
+      currentPromptValue: "send A",
+      submittedPromptValue: "send A",
+      currentContexts: submittedContexts,
+      submittedContexts,
+    })).toBe(true);
+    expect(composerDraftMatchesSubmission({
+      currentThreadId: 11,
+      submittedThreadId: 10,
+      currentPromptValue: "send B",
+      submittedPromptValue: "send A",
+      currentContexts: [],
+      submittedContexts,
+    })).toBe(false);
+    expect(composerDraftMatchesSubmission({
+      currentThreadId: 10,
+      submittedThreadId: 10,
+      currentPromptValue: "send B",
+      submittedPromptValue: "send A",
+      currentContexts: submittedContexts,
+      submittedContexts,
+    })).toBe(false);
+    expect(composerDraftMatchesSubmission({
+      currentThreadId: 10,
+      submittedThreadId: 10,
+      currentPromptValue: "send A",
+      submittedPromptValue: "send A",
+      currentContexts: [...submittedContexts],
+      submittedContexts,
+    })).toBe(false);
   });
 
   it("starts at one line, grows to its cap, and then enables vertical scrolling", async () => {

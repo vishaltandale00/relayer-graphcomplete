@@ -83,6 +83,12 @@ pub(crate) fn router(
         annotations_enabled,
         environment_inspector: crate::environment::EnvironmentInspector::new(),
     };
+    if state.runtime.is_some() {
+        let recovery_state = state.clone();
+        tokio::spawn(async move {
+            threads::resume_recovered_identified_interactions(recovery_state).await;
+        });
+    }
     Router::new()
         .route("/health", get(state::health))
         .route("/api/capabilities", get(state::capabilities))
