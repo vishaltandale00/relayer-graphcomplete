@@ -163,6 +163,7 @@ const CAPTURE_DEADLINE_MS = 2_000;
 const LOCAL_OPERATION_TIMEOUT_MS = 30_000;
 const REPLAY_TIMEOUT_MS = 30 * 60_000;
 const MAJOR_OPERATION_TIMEOUT_MS = 120_000;
+const MODEL_COMPLETION_TIMEOUT_MS = 6 * 60_000;
 const FRESH_BUILD_TIMEOUT_MS = 10 * 60_000;
 const APPROVAL_PROMPT_HOLD_MS = 3_000;
 const APPROVAL_PROMPT_MIN_FRAMES = Math.ceil(APPROVAL_PROMPT_HOLD_MS / FRAME_INTERVAL_MS);
@@ -932,7 +933,7 @@ async function threadDetail(session, threadId) {
   return productRequest(session, `/api/threads/${threadId}`);
 }
 
-async function waitForThread(session, threadId, check, label, timeoutMs) {
+async function waitForThread(session, threadId, check, label, timeoutMs = MODEL_COMPLETION_TIMEOUT_MS) {
   return waitFor(label, async () => {
     const detail = await threadDetail(session, threadId);
     return check(detail) ? detail : false;
