@@ -331,7 +331,11 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
   const item = itemId === undefined ? undefined : context.items.get(itemId);
   if (item?.type !== "commandExecution") return { decision: "decline" };
 
-  const trustedCommand = trustedGraphAuthoringCommand(item, context.trustedGraphAuthoringLauncher);
+  const trustedCommand = trustedGraphAuthoringCommand(
+    item,
+    optionalString(params.command),
+    context.trustedGraphAuthoringLauncher,
+  );
   const trustedCwd = optionalString(params.cwd) ?? string(item.cwd);
   const trustedAbsoluteCwd = validAbsolutePath(trustedCwd);
   const trustedAdditionalPermissions = params.additionalPermissions === undefined
@@ -447,11 +451,32 @@ export function isExactGraphAuthoringLauncherCommand(command: string, launcherPa
   return closingLine === delimiter || !bodyAndClose.split(/\r?\n/).some((line) => line === delimiter);
 }
 
-function trustedGraphAuthoringCommand(item: JsonObject, launcherPath: string | undefined): string | undefined {
-  if (launcherPath === undefined || !Array.isArray(item.commandActions) || item.commandActions.length !== 1) return undefined;
-  const action = record(item.commandActions[0]);
-  const command = action === undefined ? undefined : string(action.command);
-  return command !== undefined && isExactGraphAuthoringLauncherCommand(command, launcherPath) ? command : undefined;
+function trustedGraphAuthoringCommand(
+  item: JsonObject,
+  requestCommand: string | undefined,
+  launcherPath: string | undefined,
+): string | undefined {
+  if (launcherPath === undefined) return undefined;
+  const itemCommand = string(item.command);
+  const wrappedCommand = itemCommand === undefined ? undefined : exactZshLoginCommand(itemCommand);
+  const actions = Array.isArray(item.commandActions) ? item.commandActions : undefined;
+  if (actions !== undefined && actions.length !== 1) return undefined;
+  const action = actions?.length === 1 ? record(actions[0]) : undefined;
+  const actionCommand = action === undefined ? undefined : string(action.command);
+  return [requestCommand, actionCommand, wrappedCommand, itemCommand].find((command) => (
+    command !== undefined && isExactGraphAuthoringLauncherCommand(command, launcherPath)
+  ));
+}
+
+function exactZshLoginCommand(command: string): string | undefined {
+  const prefix = "/bin/zsh -lc ";
+  if (!command.startsWith(prefix)) return undefined;
+  try {
+    const inner = JSON.parse(command.slice(prefix.length));
+    return typeof inner === "string" ? inner : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function answerV2FileChange(request: CodexServerRequest, context: CodexApprovalBridgeContext): Promise<unknown> {

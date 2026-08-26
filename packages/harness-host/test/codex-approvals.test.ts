@@ -167,6 +167,30 @@ describe("Codex approval bridge", () => {
     }), context)).resolves.toEqual({ decision: "decline" });
   });
 
+  it("recognizes the exact pinned launcher from Codex's sole zsh display wrapper before command actions arrive", async () => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", {
+      ...commandItem(),
+      command: `/bin/zsh -lc ${JSON.stringify(command)}`,
+    });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", cwd: "/workspace/project",
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+
+    fixture.items.set("item-1", {
+      ...commandItem(),
+      command: `/bin/zsh -lc ${JSON.stringify(command)}; echo escaped`,
+    });
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", cwd: "/workspace/project",
+    }), context)).resolves.toEqual({ decision: "decline" });
+  });
+
   it("derives one exact key per proposed file path and change kind", async () => {
     const fixture = bridgeFixture("approve_always");
     fixture.items.set("file-1", {
