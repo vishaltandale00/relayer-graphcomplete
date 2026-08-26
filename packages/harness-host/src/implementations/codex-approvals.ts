@@ -344,6 +344,38 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
   const trustedFieldsMatch = !(optionalString(params.cwd) !== undefined
       && string(item.cwd) !== undefined
       && params.cwd !== item.cwd);
+  if (context.trustedGraphAuthoringLauncher !== undefined
+    && JSON.stringify(item).includes("graph-authoring-launcher")) {
+    const itemCommand = string(item.command);
+    const wrappedCommand = itemCommand === undefined ? undefined : exactZshLoginCommand(itemCommand);
+    const actions = Array.isArray(item.commandActions) ? item.commandActions : undefined;
+    const action = actions?.length === 1 ? record(actions[0]) : undefined;
+    const actionCommand = action === undefined ? undefined : string(action.command);
+    const requestCommand = optionalString(params.command);
+    console.error(`RELAYER_GRAPH_LAUNCHER_APPROVAL_DIAGNOSTIC ${JSON.stringify({
+      requestCommandDefined: requestCommand !== undefined,
+      requestCommandExact: requestCommand !== undefined
+        && isExactGraphAuthoringLauncherCommand(requestCommand, context.trustedGraphAuthoringLauncher),
+      itemCommandDefined: itemCommand !== undefined,
+      itemCommandExact: itemCommand !== undefined
+        && isExactGraphAuthoringLauncherCommand(itemCommand, context.trustedGraphAuthoringLauncher),
+      wrapperDecoded: wrappedCommand !== undefined,
+      wrapperExact: wrappedCommand !== undefined
+        && isExactGraphAuthoringLauncherCommand(wrappedCommand, context.trustedGraphAuthoringLauncher),
+      actionsDefined: actions !== undefined,
+      actionCount: actions?.length ?? null,
+      actionExact: actionCommand !== undefined
+        && isExactGraphAuthoringLauncherCommand(actionCommand, context.trustedGraphAuthoringLauncher),
+      trustedCommandFound: trustedCommand !== undefined,
+      cwdDefined: trustedAbsoluteCwd !== undefined,
+      cwdMatches: trustedAbsoluteCwd === resolve(context.workingDirectory),
+      fieldsMatch: trustedFieldsMatch,
+      decisionsSupported: supportsOneRequestDecision(params.availableDecisions),
+      permissionsValid: params.additionalPermissions === undefined || trustedAdditionalPermissions !== undefined,
+      networkClassified: optionalRecord(params.networkApprovalContext) !== undefined,
+      tty: params.tty === true,
+    })}`);
+  }
   // Codex may classify the fixed launcher as unified exec, PTY, or a network
   // request because its inner sandbox connects to the graph server. Recognize
   // the exact launcher before those transport-specific generic branches. Its
