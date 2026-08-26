@@ -978,6 +978,10 @@ async function approvalDockState() {
       affectedFiles: document.querySelector('#approvalAffectedFiles')?.textContent?.trim(),
       scope: document.querySelector('#approvalScopeDescription')?.textContent?.trim(),
       queue: document.querySelector('#approvalQueuePosition')?.textContent?.trim(),
+      busy: dock.getAttribute('aria-busy') === 'true',
+      error: document.querySelector('#approvalError')?.classList.contains('hidden')
+        ? ''
+        : document.querySelector('#approvalError')?.textContent?.trim(),
       waiting: document.querySelector('#approvalEyebrow')?.textContent?.trim() === 'Needs approval',
       graphNodeCount: document.querySelectorAll('.graph-node').length,
       graphStageVisible: Boolean(graphStage && !graphStage.classList.contains('hidden')),
@@ -1080,6 +1084,26 @@ async function click(selector) {
     Date.now() + CAPTURE_DEADLINE_MS,
     CAPTURE_DEADLINE_MS,
   );
+}
+
+async function clickApprovalDecision(session, threadId, interactionId, receipt, selector, label) {
+  const requestId = receipt.request.requestId;
+  await click(selector);
+  return waitFor(`${label} decision acknowledgement`, async () => {
+    const dock = await approvalDockState();
+    if (dock?.requestId === requestId && dock.error) {
+      throw new Error(`${label} decision failed in ProductWorkspace: ${dock.error}`);
+    }
+    const detail = await threadDetail(session, threadId);
+    const current = detail.approvals.find((candidate) => candidate.request.requestId === requestId);
+    const interaction = detail.interactions.find((candidate) => String(candidate.id) === String(interactionId));
+    if (current?.resolution) return { phase: "resolved", dock, detail };
+    if (dock?.requestId === requestId && dock.busy) return { phase: "in_flight", dock, detail };
+    if (interaction?.completionStatus !== "waiting_for_approval") {
+      throw new Error(`${label} left the waiting state without a terminal approval receipt: ${JSON.stringify({ interaction, current })}`);
+    }
+    return false;
+  }, 20_000);
 }
 
 async function requireWaitingCaptureState(receipt, label) {
@@ -2128,7 +2152,7 @@ async function decideAndAccept(session, threadId, interaction, selector, label, 
     "prior graph remains visible while waiting",
   ], before.receipt);
   await beforeDecision(before);
-  await click(selector);
+  await clickApprovalDecision(session, threadId, interaction.id, before.receipt, selector, label);
   const after = await waitForThread(
     session,
     threadId,
@@ -2554,7 +2578,14 @@ async function run() {
   if (existsSync(oncePath)) throw new Error("Protected action executed before approve once.");
   await capture("approve-once-waiting", ["action has not executed", "Waiting status and bottom dock", "exact authority visible"], onceWaiting.receipt);
   if (existsSync(oncePath)) throw new Error("Protected action executed while Approve once remained pending.");
-  await click("#approveOnce");
+  await clickApprovalDecision(
+    productSession,
+    threadId,
+    once.id,
+    onceWaiting.receipt,
+    "#approveOnce",
+    "approve-once",
+  );
   let onceAccepted;
   try {
     onceAccepted = await waitForThread(productSession, threadId, (detail) => (
