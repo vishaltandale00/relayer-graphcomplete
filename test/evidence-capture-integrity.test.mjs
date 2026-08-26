@@ -2348,6 +2348,15 @@ describe("evidence capture integrity", () => {
     expect(() => validateEvidenceCommands([event])).toThrow(/permitted shell action|exact pinned graph-authoring launcher heredoc|exactly one launcher heredoc/);
   });
 
+  it("accepts a nonempty pinned launcher heredoc terminated by end-of-input", () => {
+    const command = `${JSON.stringify(GRAPH_AUTHORING_LAUNCHER)} <<'EOF'\nawait graph.submit(1);\n`;
+    const event = {
+      type: "provider.event",
+      data: { method: "item/started", params: { item: { type: "commandExecution", command, commandActions: [{ command }] } } },
+    };
+    expect(validateEvidenceCommands([event])).toBe(1);
+  });
+
   it("rejects a pinned no-op followed by a separate alternate command execution", () => {
     const event = (commandActions) => ({
       type: "provider.event",

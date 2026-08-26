@@ -1848,6 +1848,12 @@ function isExactPinnedGraphLauncherHeredoc(action, allowedGraphAuthoringLauncher
   const bodyAndClose = normalized.slice(opening[0].length);
   const lines = bodyAndClose.split(/\r?\n/);
   const closingLine = lines.pop();
+  const earlierDelimiter = lines.some((line) => line.trimEnd() === delimiter);
+  const hasNonemptyBody = lines.some((line) => line.length > 0)
+    || (closingLine !== undefined && closingLine !== "" && closingLine.trimEnd() !== delimiter);
+  if (earlierDelimiter || !hasNonemptyBody) return false;
+  // A shell-valid EOF-terminated heredoc is safe here: the exact launcher has
+  // no arguments and all remaining bytes are its stdin, not another action.
   return closingLine?.trimEnd() === delimiter
-    && !lines.some((line) => line.trimEnd() === delimiter);
+    || !bodyAndClose.split(/\r?\n/).some((line) => line.trimEnd() === delimiter);
 }

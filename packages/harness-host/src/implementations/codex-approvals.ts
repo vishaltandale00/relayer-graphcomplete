@@ -425,9 +425,13 @@ export function isExactGraphAuthoringLauncherCommand(command: string, launcherPa
   const bodyAndClose = command.slice(prefix.length + opening[0].length);
   const lines = bodyAndClose.split(/\r?\n/);
   const closingLine = lines.pop();
-  return closingLine === delimiter
-    && lines.length > 0
-    && !lines.some((line) => line === delimiter);
+  const hasNonemptyBody = lines.some((line) => line.length > 0)
+    || (closingLine !== undefined && closingLine !== "" && closingLine !== delimiter);
+  if (!hasNonemptyBody || lines.some((line) => line === delimiter)) return false;
+  // POSIX shells accept end-of-input as the heredoc terminator. With this
+  // fixed zero-argument launcher, every remaining byte is still stdin rather
+  // than a second shell action.
+  return closingLine === delimiter || !bodyAndClose.split(/\r?\n/).some((line) => line === delimiter);
 }
 
 async function answerV2FileChange(request: CodexServerRequest, context: CodexApprovalBridgeContext): Promise<unknown> {

@@ -78,6 +78,11 @@ describe("Codex approval bridge", () => {
       `"${launcher}" <<'RELAYER_GRAPH_PROGRAM'\nconsole.log("graph");\nRELAYER_GRAPH_PROGRAM`,
       launcher,
     )).toBe(true);
+    expect(isExactGraphAuthoringLauncherCommand(
+      `"${launcher}" <<'RELAYER_GRAPH_PROGRAM'\nconsole.log("graph");\n`,
+      launcher,
+    )).toBe(true);
+    expect(isExactGraphAuthoringLauncherCommand(`"${launcher}" <<'EOF'\n`, launcher)).toBe(false);
     expect(isExactGraphAuthoringLauncherCommand(`${command}\necho escaped\nEOF`, launcher)).toBe(false);
     expect(isExactGraphAuthoringLauncherCommand(
       `"${launcher}" <<'RELAYER_GRAPH_PROGRAM'\nconsole.log("graph");\nRELAYER_GRAPH_PROGRAM\necho escaped\nRELAYER_GRAPH_PROGRAM`,
