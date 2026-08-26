@@ -117,6 +117,23 @@ describe("Codex approval bridge", () => {
     expect(fixture.request).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["unified exec startup", { source: "unifiedExecStartup" }, {}],
+    ["unified exec interaction", { source: "unifiedExecInteraction" }, {}],
+    ["PTY transport", {}, { tty: true }],
+  ])("accepts the exact pinned launcher over %s without creating reusable command authority", async (_label, itemOverrides, requestOverrides) => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", { ...commandItem(), ...itemOverrides, command });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd: "/workspace/project", ...requestOverrides,
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+  });
+
   it("derives one exact key per proposed file path and change kind", async () => {
     const fixture = bridgeFixture("approve_always");
     fixture.items.set("file-1", {

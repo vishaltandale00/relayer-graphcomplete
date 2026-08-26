@@ -361,12 +361,6 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
     return answerV2Decision(input, context);
   }
 
-  const source = string(item.source);
-  // Unified exec can be PTY-backed, but this approval shape carries no tty bit.
-  // Reusing it would silently broaden authority across terminal modes.
-  if (source === undefined || source === "unifiedExecStartup" || source === "unifiedExecInteraction" || params.tty === true) {
-    return { decision: "decline" };
-  }
   const command = optionalString(params.command) ?? string(item.command);
   const cwd = optionalString(params.cwd) ?? string(item.cwd);
   const absoluteCwd = validAbsolutePath(cwd);
@@ -382,14 +376,21 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
     ? null
     : jsonValue(params.additionalPermissions);
   if (params.additionalPermissions !== undefined && additionalPermissions === undefined) return { decision: "decline" };
-  // Codex may need an outer filesystem/network overlay to start a launcher
-  // outside its workspace sandbox. The exact no-argument launcher replaces
-  // the environment and applies its own narrower sandbox before stdin runs,
-  // so a schema-valid outer overlay cannot broaden authored graph code.
+  // Codex may request this through unified exec or a PTY and need an outer
+  // filesystem/network overlay to start a launcher outside its workspace
+  // sandbox. The exact no-argument launcher replaces the environment and
+  // applies its own narrower sandbox before stdin runs, so those outer
+  // transport details cannot broaden authored graph code.
   if (absoluteCwd === resolve(context.workingDirectory)
     && context.trustedGraphAuthoringLauncher !== undefined
     && isExactGraphAuthoringLauncherCommand(command, context.trustedGraphAuthoringLauncher)) {
     return { decision: "accept" };
+  }
+  const source = string(item.source);
+  // Unified exec can be PTY-backed, but this approval shape carries no tty bit.
+  // Reusing ordinary command authority would silently broaden it across modes.
+  if (source === undefined || source === "unifiedExecStartup" || source === "unifiedExecInteraction" || params.tty === true) {
+    return { decision: "decline" };
   }
   const input: HarnessApprovalRequestInput = {
     providerItemId: providerItemId(request, itemId),
