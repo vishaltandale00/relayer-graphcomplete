@@ -1576,14 +1576,18 @@ describe("evidence capture integrity", () => {
       const canonicalTemporary = join(canonicalDirectory, "tmp");
       writeFileSync(profile, createPinnedFreshBuildSandboxProfile({
         readPaths: [canonicalSource, "/bin", "/System/Library", "/System/Volumes/Preboot/Cryptexes/OS", "/usr/lib", "/dev", "/private/var/db/timezone"],
-        writePaths: [canonicalOutput, canonicalTemporary],
-        executablePaths: ["/bin/cp", "/bin/sh"],
+        writePaths: [canonicalOutput, canonicalTemporary, "/dev/null"],
+        executablePaths: ["/bin/cp", "/bin/sh", "/bin/bash"],
       }));
       const successful = spawnSync("/usr/bin/sandbox-exec", [
         "-f", profile, "/bin/cp", join(source, "input.txt"), join(output, "built.txt"),
       ], { encoding: "utf8" });
       expect(successful.status, successful.stderr).toBe(0);
       expect(readFileSync(join(output, "built.txt"), "utf8")).toBe("authenticated source\n");
+      const nullRedirect = spawnSync("/usr/bin/sandbox-exec", [
+        "-f", profile, "/bin/sh", "-c", "printf ignored > /dev/null",
+      ], { encoding: "utf8" });
+      expect(nullRedirect.status, nullRedirect.stderr).toBe(0);
 
       const denied = spawnSync("/usr/bin/sandbox-exec", [
         "-f", profile, "/bin/sh", "-c", `echo hostile > ${JSON.stringify(join(source, "input.txt"))}`,
@@ -1717,6 +1721,7 @@ describe("evidence capture integrity", () => {
     expect(capture).toContain("isolatedHarnessSessionId === sourceHarnessSessionId");
     expect(capture).toContain('capture("cross-session-exact-waiting"');
     expect(capture).toContain("crossSessionProof: sanitizeEvidence(crossSessionProof)");
+    expect(capture).toContain('freshCargoHome, "/dev/null"], [freshTarget]');
   });
 
   it("rejects at the deadline while a check remains pending", async () => {

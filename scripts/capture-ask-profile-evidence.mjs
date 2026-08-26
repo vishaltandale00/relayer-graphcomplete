@@ -1562,7 +1562,7 @@ async function prepareFreshBuiltRuntime() {
     ...buildToolSpecs.map((spec) => spec.source), "/System/Library", "/System/Volumes/Preboot/Cryptexes/OS",
     "/usr/lib", "/dev/null", "/dev/urandom", "/private/var/db/timezone"];
   const sandboxExecutablePaths = [pinnedBuildNode.nodePath, sourceCargoPath, sourceRustcPath, sourceClangPath, sourceArPath, sourceLdPath, sourceRanlibPath,
-    "/bin/sh", "/usr/bin/env"];
+    "/bin/sh", "/bin/bash", "/usr/bin/env"];
   const writeBuildProfile = async (path, readPaths, writePaths, executableDirectories = []) => writeFile(
     path,
     createPinnedFreshBuildSandboxProfile({
@@ -1575,7 +1575,7 @@ async function prepareFreshBuiltRuntime() {
   );
   await writeBuildProfile(graphBuildSandboxProfile, commonSandboxReadPaths, [join(freshJavaScriptOutput, "graph-client"), freshTemporary]);
   await writeBuildProfile(harnessBuildSandboxProfile, [...commonSandboxReadPaths, join(freshJavaScriptOutput, "graph-client")], [join(freshJavaScriptOutput, "harness-host"), freshTemporary]);
-  await writeBuildProfile(rustBuildSandboxProfile, [...commonSandboxReadPaths, freshRustOutput], [freshRustOutput, freshTemporary, freshCargoHome], [freshTarget]);
+  await writeBuildProfile(rustBuildSandboxProfile, [...commonSandboxReadPaths, freshRustOutput], [freshRustOutput, freshTemporary, freshCargoHome, "/dev/null"], [freshTarget]);
   const runSandboxed = (profile, executable, args, timeout, environment = {}) => execFileSync(SOURCE_SANDBOX_EXEC_PATH, [
     "-f", profile, executable, ...args,
   ], {
