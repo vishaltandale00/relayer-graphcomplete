@@ -8,6 +8,10 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
+// Electron patches Node's fs APIs to present ASAR files as virtual directories.
+// Integrity inventory must hash the signed archive bytes and stable file metadata.
+process.noAsar = true;
+
 import {
   isFreshRecordedPromptFrame,
   validateApprovalPromptHoldEvidence,
