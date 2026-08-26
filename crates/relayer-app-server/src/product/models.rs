@@ -75,6 +75,29 @@ pub(crate) struct Interaction {
     pub(crate) created_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InteractionContextTarget {
+    pub(crate) node_id: i64,
+    pub(crate) source_interaction_node_id: i64,
+    pub(crate) source_layer_id: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InteractionContextIntent {
+    pub(crate) target: InteractionContextTarget,
+    #[serde(default)]
+    pub(crate) annotations: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DurableInteractionInput {
+    pub(crate) input_identity: String,
+    pub(crate) input_digest: String,
+    pub(crate) contexts: Vec<InteractionContextIntent>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActionInvocation {
     pub(crate) source_interaction_id: InteractionId,

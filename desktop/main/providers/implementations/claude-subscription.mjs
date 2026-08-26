@@ -14,7 +14,11 @@ export const CLAUDE_SUBSCRIPTION_MODELS = Object.freeze([
   Object.freeze({ id: "fable", label: "Fable", providerDefault: false, catalogSource: "code-manifest-cli-alias" }),
 ]);
 
-function runClaude(executable, args, environment, { signal, spawnProcess = spawn } = {}) {
+function runClaude(executable, args, environment, {
+  signal,
+  spawnProcess = spawn,
+  acceptedExitCodes = [0],
+} = {}) {
   return new Promise((resolve, reject) => {
     const child = spawnProcess(executable, args, { env: environment, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
@@ -26,7 +30,7 @@ function runClaude(executable, args, environment, { signal, spawnProcess = spawn
     child.once("exit", (code) => {
       signal?.removeEventListener("abort", onAbort);
       if (signal?.aborted) reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
-      else if (code === 0) resolve(stdout);
+      else if (acceptedExitCodes.includes(code)) resolve(stdout);
       else reject(new Error(`Claude CLI command failed (${code ?? "unknown"}).`));
     });
   });
@@ -43,7 +47,11 @@ export class ClaudeCliManagedRuntime {
   async account({ signal } = {}) {
     try {
       const output = await runClaude(this.executable, ["auth", "status", "--json"], this.environment, {
-        signal, spawnProcess: this.spawnProcess,
+        signal,
+        spawnProcess: this.spawnProcess,
+        // Claude emits valid loggedIn:false JSON with exit code 1. That is an
+        // ordinary disconnected state while browser login is still pending.
+        acceptedExitCodes: [0, 1],
       });
       const status = JSON.parse(output);
       return { status: status?.loggedIn === true ? "connected" : "disconnected", account: status };

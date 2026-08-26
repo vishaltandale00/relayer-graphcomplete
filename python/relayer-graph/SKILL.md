@@ -17,6 +17,13 @@ client = RelayerGraphClient(
 )
 ```
 
+Before authoring, call `await client.get_interaction_input()` to recover the
+current message plus every attached target node and its ordered annotations.
+Treat them as one input with no product-defined semantic precedence. Native
+recursive children should use this same capability read instead of relying on
+prompt text inherited from the root. Interaction context is graph-control-owned;
+do not create, modify, or delete it.
+
 Create and submit reusable objects before referencing them:
 
 ```python

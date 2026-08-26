@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   followupRequestBody,
+  markFollowupSendSucceeded,
   newThreadRequestBody,
+  stableFollowupInputId,
 } from "../desktop/renderer/src/interaction-request-model.js";
 import {
   createModelPickerRequestGate,
@@ -162,12 +164,29 @@ describe("composer model picker UI contract", () => {
       projectId: 12,
       ...pickerPayload,
     });
-    expect(followupRequestBody("Next", pickerPayload.modelSelection)).toEqual({
+    expect(followupRequestBody("Next", pickerPayload.modelSelection, "send-1")).toEqual({
       text: "Next",
+      inputId: "send-1",
+      contexts: [],
       modelSelection: pickerPayload.modelSelection,
     });
-    expect(followupRequestBody("Next", pickerPayload.modelSelection)).not.toHaveProperty("harnessId");
+    expect(followupRequestBody("Next", pickerPayload.modelSelection, "send-2")).not.toHaveProperty("harnessId");
     expect(JSON.stringify(pickerPayload)).not.toContain("harnessConfigurationName");
+  });
+
+  it("reuses a draft send identity through failure and rotates on success or content change", () => {
+    const selection = { familyId: 7, providerId: "codex", modelId: "gpt-5" };
+    const first = stableFollowupInputId(3, "Next", selection, []);
+    expect(stableFollowupInputId(3, "Next", selection, [])).toBe(first);
+    const changed = stableFollowupInputId(3, "Changed", selection, []);
+    expect(changed).not.toBe(first);
+    const otherThread = stableFollowupInputId(4, "Next", selection, []);
+    expect(otherThread).not.toBe(first);
+    expect(stableFollowupInputId(3, "Next", selection, [])).toBe(first);
+    markFollowupSendSucceeded(changed);
+    expect(stableFollowupInputId(3, "Changed", selection, [])).not.toBe(changed);
+    expect(stableFollowupInputId(3, "Next", selection, [])).toBe(first);
+    expect(stableFollowupInputId(4, "Next", selection, [])).toBe(otherThread);
   });
 
   it("delegates the one trusted pre-inference refresh to the product backend", async () => {

@@ -39,7 +39,7 @@ export interface GraphLayer {
   readonly state: RecordState;
 }
 
-export type ActionKind = "navigate" | "invoke";
+export type ActionKind = "navigate" | "invoke" | "interaction.context";
 export type NavigateRelation = "expand" | "reference";
 export type ActionVariant = "chip" | "pill" | "wide" | "card";
 
@@ -69,6 +69,27 @@ export interface CompletionOutput {
   readonly nodeId: GraphId;
   readonly rootAction: GraphAction;
   readonly rootLayer: ResolvedLayer;
+}
+
+export interface InteractionContext {
+  readonly type: "interaction.context";
+  readonly targetNode: InteractionInputNode;
+  readonly annotations: readonly string[];
+}
+
+export interface InteractionInput {
+  readonly interaction: InteractionInputNode;
+  readonly contexts: readonly InteractionContext[];
+}
+
+/** Model-visible node contents without invocation or occurrence authority. */
+export interface InteractionInputNode {
+  readonly id: GraphId;
+  readonly kind: string;
+  readonly icon: string;
+  readonly title: string;
+  readonly detail: string;
+  readonly state: RecordState;
 }
 
 export interface GraphCapability {

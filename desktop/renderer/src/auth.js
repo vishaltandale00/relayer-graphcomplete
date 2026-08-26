@@ -124,7 +124,10 @@ async function prepareFamilyStep(definition) {
   $("#providerSetupForm").classList.add("hidden");
   $("#providerFamilyStep").classList.remove("hidden");
   renderChoices();
-  setStatus("Choose the first model in your new default family.");
+  setStatus(onboardingModel
+    ? "Choose the first model in your new default family."
+    : `${provider.label} is connected, but ${trustedHarness?.label ?? onboardingHarness} cannot use its models. Connect another provider to continue.`,
+  onboardingModel ? "" : "error");
 }
 
 async function connectSelectedProvider(event) {
@@ -162,6 +165,12 @@ function bindProviderSetup() {
   bound = true;
   $("#providerSetupForm").onsubmit = connectSelectedProvider;
   $("#providerSetupBack").onclick = showProviderOptions;
+  $("#providerFamilyBack").onclick = async () => {
+    providerStatus = await desktop.providers.status();
+    connectedDefinition = null;
+    onboardingModel = null;
+    showProviderOptions();
+  };
   $("#cancelProviderConnection").onclick = async () => {
     const connectionId = pendingConnectionId;
     pendingConnectionId = null;

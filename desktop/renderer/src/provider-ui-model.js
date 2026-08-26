@@ -51,13 +51,13 @@ export function providerDefinitionStatus(definition) {
 
 export function providerLabelError(label, definitions, currentId = null) {
   const normalized = String(label ?? "").trim().toLocaleLowerCase();
-  if (!normalized) return "Enter a provider name.";
+  if (!normalized) return "Enter a connection name.";
   const duplicate = definitions.some((definition) => (
     String(definition.id) !== String(currentId)
     && definition.lifecycleState !== "tombstoned"
     && String(definition.label).trim().toLocaleLowerCase() === normalized
   ));
-  return duplicate ? "Active provider names must be unique." : null;
+  return duplicate ? "Active connection names must be unique." : null;
 }
 
 export function providerConnectionErrors(descriptor, values, definitions = []) {

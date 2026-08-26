@@ -3,6 +3,7 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type { InteractionInput } from "@relayer/graph-client";
 import { HarnessExecutionFailure, HarnessHost, startHarnessHost } from "../src/host.js";
 import type { HarnessConfiguration, HarnessFactoryContext, HarnessSessionState } from "../src/types.js";
 
@@ -18,6 +19,23 @@ const completion = {
 };
 const emptyState = (): HarnessSessionState => ({});
 const graph = (nodeId = 1, token = "token") => ({ url: "http://127.0.0.1:43123", token, nodeId });
+const graphNode = (nodeId = 1, leasedActionId?: number) => ({
+  id: nodeId,
+  ...(leasedActionId === undefined ? {} : { leasedActionId }),
+  kind: "user-interaction",
+  icon: "user",
+  title: "Question",
+  detail: "Question",
+  state: "accepted" as const,
+});
+const interactionInput = (nodeId = 1, contexts: InteractionInput["contexts"] = []): InteractionInput => ({
+  interaction: graphNode(nodeId),
+  contexts,
+});
+const graphReadResponse = (url: string, nodeId = 1, contexts: InteractionInput["contexts"] = [], leasedActionId?: number) => new Response(
+  JSON.stringify(url.endsWith("/input") ? interactionInput(nodeId, contexts) : { node: graphNode(nodeId, leasedActionId) }),
+  { status: 200, headers: { "content-type": "application/json" } },
+);
 const testConfiguration: HarnessConfiguration = {
   schemaVersion: 1,
   name: "test-default",
@@ -204,7 +222,7 @@ describe("HarnessHost", () => {
     let restoredState: HarnessSessionState | undefined;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
       ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
-      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+      : graphReadResponse(url)));
 
     try {
       const failing = new HarnessHost({
@@ -406,7 +424,7 @@ describe("HarnessHost", () => {
     const started = new Promise<void>((resolveStarted) => { completionStarted = resolveStarted; });
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
       ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
-      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+      : graphReadResponse(url)));
     try {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
@@ -470,7 +488,7 @@ describe("HarnessHost", () => {
     const started = new Promise<void>((resolve) => { approvalStarted = resolve; });
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
       ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
-      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+      : graphReadResponse(url)));
     try {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
@@ -541,11 +559,12 @@ describe("HarnessHost", () => {
     const started = new Promise<void>((resolveStarted) => { completionStarted = resolveStarted; });
     const calls: number[] = [];
     const dispose = vi.fn(async () => undefined);
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/output")) {
         return new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
       }
-      return new Response(JSON.stringify({ node: { id: Number(/nodes\/(\d+)/.exec(url)?.[1]), kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } });
+      const nodeId = new Headers(init?.headers).get("authorization") === "Bearer queued-token" ? 2 : 1;
+      return graphReadResponse(url, nodeId);
     }));
     try {
       const host = new HarnessHost({
@@ -615,7 +634,7 @@ describe("HarnessHost", () => {
     let completionCalls = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
       ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
-      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+      : graphReadResponse(url)));
     try {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
@@ -662,7 +681,7 @@ describe("HarnessHost", () => {
           ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
           : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
       }
-      return new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } });
+      return graphReadResponse(url);
     }));
     try {
       const host = new HarnessHost({
@@ -696,11 +715,14 @@ describe("HarnessHost", () => {
     const adopted: { url: string; token: string; nodeId: number }[] = [];
     const accepted = new Set<number>();
     const scopes: { acquireCapability(): unknown }[] = [];
+    const inputs: InteractionInput[] = [];
+    const leasedActionIds: Array<number | null | undefined> = [];
     const models: unknown[] = [];
     let revocationRequests = 0;
     let factoryCalls = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      const nodeId = Number(/nodes\/(\d+)/.exec(url)?.[1] ?? 1);
+      const authorization = new Headers(init?.headers).get("authorization");
+      const nodeId = authorization === "Bearer second-token" ? 2 : 1;
       if (url.endsWith("/output")) {
         return accepted.has(nodeId)
           ? new Response(JSON.stringify({ ...completion, nodeId }), { status: 200, headers: { "content-type": "application/json" } })
@@ -711,7 +733,12 @@ describe("HarnessHost", () => {
         return new Response(JSON.stringify({ revoked: true }), { status: 200, headers: { "content-type": "application/json" } });
       }
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${nodeId === 1 ? "first-token" : "second-token"}`);
-      return new Response(JSON.stringify({ node: { id: nodeId, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } });
+      const contexts = nodeId === 1 ? [{
+        type: "interaction.context" as const,
+        targetNode: { id: 90, kind: "concept", icon: "box", title: "Attached", detail: "Context", state: "accepted" as const },
+        annotations: ["first", "second"],
+      }] : [];
+      return graphReadResponse(url, nodeId, contexts, nodeId === 1 ? 77 : undefined);
     }));
     try {
       const host = new HarnessHost({
@@ -723,6 +750,8 @@ describe("HarnessHost", () => {
           return {
             async complete(context) {
               scopes.push(context.graph);
+              inputs.push(context.interactionInput);
+              leasedActionIds.push(context.inputGraph.leasedActionId);
               models.push(context.model);
               adopted.push(context.graph.acquireCapability());
               accepted.add(context.inputGraph.id);
@@ -745,6 +774,14 @@ describe("HarnessHost", () => {
         { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-first" },
         { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-second" },
       ]);
+      expect(inputs[0]).toEqual(interactionInput(1, [{
+        type: "interaction.context",
+        targetNode: { id: 90, kind: "concept", icon: "box", title: "Attached", detail: "Context", state: "accepted" },
+        annotations: ["first", "second"],
+      }]));
+      expect(inputs[1]).toEqual(interactionInput(2));
+      expect(leasedActionIds).toEqual([77, undefined]);
+      expect(inputs[0]!.interaction).not.toHaveProperty("leasedActionId");
       expect(revocationRequests).toBe(0);
       expect(() => scopes[0]!.acquireCapability()).toThrow("no longer active");
     } finally {
@@ -1165,11 +1202,11 @@ describe("HarnessHost", () => {
     const finish = new Promise<void>((resolveFinish) => { finishCompletion = resolveFinish; });
     const adopted: string[] = [];
     const accepted = new Set<number>();
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => url.endsWith("/output")
       ? (accepted.has(Number(/nodes\/(\d+)/.exec(url)?.[1]))
         ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
         : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } }))
-      : new Response(JSON.stringify({ node: { id: Number(/nodes\/(\d+)/.exec(url)?.[1]), kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+      : graphReadResponse(url, new Headers(init?.headers).get("authorization") === "Bearer second-token" ? 2 : 1)));
     try {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
@@ -1211,7 +1248,7 @@ describe("HarnessHost", () => {
       ? (accepted
         ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
         : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } }))
-      : new Response(JSON.stringify({ node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } }), { status: 200, headers: { "content-type": "application/json" } })));
+      : graphReadResponse(url)));
     try {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),

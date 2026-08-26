@@ -4,6 +4,7 @@ mod approvals;
 mod attempts;
 mod catalog;
 mod conversation_imports;
+mod interaction_contexts;
 mod interactions;
 mod migrations;
 mod product_state;

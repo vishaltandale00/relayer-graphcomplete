@@ -70,12 +70,48 @@ impl ApiError {
             .and_then(Value::as_str)
             .unwrap_or("unknown API error")
     }
+
+    pub(crate) fn internal_diagnostic(&self) -> String {
+        if let Some(message) = self.1.get("error").and_then(Value::as_str) {
+            return message.to_owned();
+        }
+        if let Some(error) = self.1.get("error").and_then(Value::as_object) {
+            let code = error.get("code").and_then(Value::as_str);
+            let path = error.get("path").and_then(Value::as_str);
+            let message = error.get("message").and_then(Value::as_str);
+            if code.is_some() || path.is_some() || message.is_some() {
+                return [
+                    code.map(|value| format!("code={value}")),
+                    path.map(|value| format!("path={value}")),
+                    message.map(|value| format!("message={value}")),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
+            }
+        }
+        self.1.to_string()
+    }
+
+    pub(crate) fn is_deterministic_input_failure(&self) -> bool {
+        matches!(
+            self.0,
+            StatusCode::BAD_REQUEST
+                | StatusCode::NOT_FOUND
+                | StatusCode::CONFLICT
+                | StatusCode::UNPROCESSABLE_ENTITY
+        )
+    }
 }
 
 impl From<RuntimeError> for ApiError {
     fn from(error: RuntimeError) -> Self {
         match error {
             RuntimeError::Remote { status: 400, body } => Self(StatusCode::BAD_REQUEST, body),
+            RuntimeError::Remote { status: 422, body } => {
+                Self(StatusCode::UNPROCESSABLE_ENTITY, body)
+            }
             RuntimeError::Remote { status: 404, body } => Self(StatusCode::NOT_FOUND, body),
             RuntimeError::Remote { status: 409, body } => Self(StatusCode::CONFLICT, body),
             other => Self::internal(&other.to_string()),
@@ -185,5 +221,28 @@ fn catalog_error(error: CatalogError) -> ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (self.0, Json(self.1)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_graph_validation_keeps_exact_internal_diagnostic() {
+        let error: ApiError = RuntimeError::Remote {
+            status: 422,
+            body: json!({"error":{
+                "code":"invalid_context_occurrence",
+                "path":"contexts[0].target",
+                "message":"exact source occurrence is inaccessible"
+            }}),
+        }
+        .into();
+        assert_eq!(
+            error.internal_diagnostic(),
+            "code=invalid_context_occurrence path=contexts[0].target message=exact source occurrence is inaccessible"
+        );
+        assert_ne!(error.internal_diagnostic(), "unknown API error");
     }
 }

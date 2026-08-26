@@ -1,6 +1,7 @@
 import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -22,7 +23,10 @@ import {
 import { ModelCatalogService } from "../desktop/main/models/model-catalog-service.mjs";
 import { withProviderRetry } from "../desktop/main/providers/provider-retry.mjs";
 import { ProviderHttpError } from "../desktop/main/providers/implementations/api-provider-adapter.mjs";
-import { CLAUDE_SUBSCRIPTION_MODELS } from "../desktop/main/providers/implementations/claude-subscription.mjs";
+import {
+  CLAUDE_SUBSCRIPTION_MODELS,
+  ClaudeCliManagedRuntime,
+} from "../desktop/main/providers/implementations/claude-subscription.mjs";
 
 const expectedAdapters = [
   "codex-subscription",
@@ -74,6 +78,8 @@ describe("authoritative provider adapter registry", () => {
       runtimeRoot: root,
       environment: {
         PATH: "/safe/bin",
+        HOME: "/Users/tester",
+        USERPROFILE: "C:\\Users\\tester",
         OPENAI_API_KEY: "ambient-openai-secret",
         ANTHROPIC_API_KEY: "ambient-anthropic-secret",
         UNRELATED_TOKEN: "ambient-unrelated-secret",
@@ -84,7 +90,7 @@ describe("authoritative provider adapter registry", () => {
       environment: { CODEX_HOME: join(root, "codex-work", "codex-home"), RELAYER_CODEX_BINARY: "/bin/codex" },
     });
     expect(dependencies.environment).toMatchObject({
-      PATH: "/safe/bin", HOME: join(root, "codex-work"), USERPROFILE: join(root, "codex-work"),
+      PATH: "/safe/bin", HOME: "/Users/tester", USERPROFILE: "C:\\Users\\tester",
     });
     expect(dependencies.environment).not.toHaveProperty("OPENAI_API_KEY");
     expect(dependencies.environment).not.toHaveProperty("ANTHROPIC_API_KEY");
@@ -93,13 +99,18 @@ describe("authoritative provider adapter registry", () => {
       id: "claude-work", adapterId: "claude-subscription",
     }, {
       runtimeRoot: root,
-      environment: { PATH: "/safe/bin", ANTHROPIC_API_KEY: "ambient-anthropic-secret" },
+      environment: {
+        PATH: "/safe/bin",
+        HOME: "/Users/tester",
+        USERPROFILE: "C:\\Users\\tester",
+        ANTHROPIC_API_KEY: "ambient-anthropic-secret",
+      },
       claudeBinary: "/bin/claude",
     });
     expect(claudeDependencies.environment).toMatchObject({
       PATH: "/safe/bin",
-      HOME: join(root, "claude-work"),
-      USERPROFILE: join(root, "claude-work"),
+      HOME: "/Users/tester",
+      USERPROFILE: "C:\\Users\\tester",
       CLAUDE_CONFIG_DIR: join(root, "claude-work", "claude-home"),
     });
     expect(claudeDependencies.environment).not.toHaveProperty("ANTHROPIC_API_KEY");
@@ -278,6 +289,30 @@ describe("managed subscription isolation", () => {
     await expect(provider.credentials.account()).resolves.toMatchObject({ status: "unavailable" });
     await expect(provider.credentials.login()).rejects.toThrow("login is unavailable");
     await expect(provider.executionAccess()).rejects.toThrow("not connected");
+  });
+
+  it("keeps Claude browser login pending when auth status returns logged-out JSON with exit code one", async () => {
+    const spawnProcess = vi.fn(() => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = vi.fn();
+      queueMicrotask(() => {
+        child.stdout.emit("data", JSON.stringify({
+          loggedIn: false,
+          authMethod: "none",
+          apiProvider: "firstParty",
+        }));
+        child.emit("exit", 1);
+      });
+      return child;
+    });
+    const runtime = new ClaudeCliManagedRuntime({ executable: "/bin/claude", spawnProcess });
+
+    await expect(runtime.account()).resolves.toMatchObject({
+      status: "disconnected",
+      account: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" },
+    });
   });
 
   it("keeps multiple Claude definitions in definition-scoped runtimes", async () => {

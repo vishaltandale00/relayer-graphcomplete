@@ -36,7 +36,12 @@ import { appState, productApiAvailable, viewState } from "./state.js";
 import { $, threadTitle, toast } from "./ui.js";
 import { addLocalThread } from "./thread-model.js";
 import { closePermissionMenu } from "./permission-profiles.js";
-import { newThreadRequestBody } from "./interaction-request-model.js";
+import {
+  followupRequestBody,
+  markFollowupSendSucceeded,
+  newThreadRequestBody,
+  stableFollowupInputId,
+} from "./interaction-request-model.js";
 import {
   closeNewThreadModelPicker,
   newThreadModelSelectionPayload,
@@ -393,12 +398,18 @@ function schedulePendingRefresh(threadId, { force = false } = {}) {
   clearTimeout(pendingRefreshTimer);
   pendingRefreshTimer = undefined;
   const thread = appState.threads.find((candidate) => String(candidate.id) === String(threadId));
-  if (!threadId || !thread || thread.imported === true) return;
+  if (!threadId || !thread) return;
+  const hasStaleProjection = appState.interactions.some((interaction) => (
+    String(interaction.threadId) === String(threadId)
+    && interaction.projectionFresh === false
+  ));
+  if (thread.imported === true && !hasStaleProjection) return;
   const hasPendingInteraction = appState.interactions.some((interaction) => (
     String(interaction.threadId) === String(threadId)
     && (
       interaction.projectionFresh === false
-      || (["not_started", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
+      || (thread.imported !== true
+        && ["not_started", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
         && !restoredDraftForInteraction(interaction))
     )
   ))
@@ -584,7 +595,7 @@ export function selectTurnById(interactionId) {
   schedulePendingRefresh(viewState.currentThreadId);
 }
 
-export async function submitInteraction(text, modelSelection) {
+export async function submitInteraction(text, modelSelection, contexts = []) {
   if (!viewState.currentThreadId) throw new Error("Select a thread before sending a follow-up.");
   const threadId = viewState.currentThreadId;
   recordCurrentNavigation();
@@ -598,6 +609,7 @@ export async function submitInteraction(text, modelSelection) {
     throw new Error("Choose an available model in Settings before sending.");
   }
   let createdInteraction;
+  const inputId = stableFollowupInputId(threadId, text, modelSelection, contexts);
   try {
     const latestInteraction = appState.interactions
       .filter((interaction) => String(interaction.threadId) === String(threadId))
@@ -610,13 +622,16 @@ export async function submitInteraction(text, modelSelection) {
     );
     const response = await request(path, {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify(path.endsWith("/retry")
+        ? body
+        : followupRequestBody(text, modelSelection, inputId, contexts)),
     });
     createdInteraction = response?.interaction ?? response;
   } catch (error) {
     await refreshAfterModelSelectionRejection(error, true);
     throw error;
   }
+  markFollowupSendSucceeded(inputId);
   try {
     await onboardingTutorialController()?.followupSubmitted({
       threadId,
@@ -629,7 +644,12 @@ export async function submitInteraction(text, modelSelection) {
   if (!current || navigationEntryKey(current) !== sourceLocationKey) return createdInteraction;
   supersedePendingHistory({ presentationChanged: true });
   viewState.currentInteractionId = null;
-  await refreshState(threadId, { historyMode: "push" });
+  try {
+    await refreshState(threadId, { historyMode: "push" });
+  } catch (error) {
+    toast("Message sent. Refreshing the new turn…");
+    schedulePendingRefresh(threadId, { force: true });
+  }
   return createdInteraction;
 }
 

@@ -46,7 +46,7 @@ const PRODUCTION_RUNTIME_DEPENDENCIES = Object.freeze({
     await mkdir(root, { recursive: true });
     return {
       environment: {
-        ...managedRuntimeEnvironment(context.environment, root),
+        ...managedRuntimeEnvironment(context.environment),
         CODEX_HOME: join(root, "codex-home"),
         RELAYER_CODEX_BINARY: context.codexBinary,
       },
@@ -58,7 +58,7 @@ const PRODUCTION_RUNTIME_DEPENDENCIES = Object.freeze({
     return {
       executable: context.claudeBinary || "claude",
       environment: {
-        ...managedRuntimeEnvironment(context.environment, root),
+        ...managedRuntimeEnvironment(context.environment),
         CLAUDE_CONFIG_DIR: join(root, "claude-home"),
       },
     };
@@ -68,13 +68,15 @@ const PRODUCTION_RUNTIME_DEPENDENCIES = Object.freeze({
 const SAFE_MANAGED_RUNTIME_ENVIRONMENT = Object.freeze([
   "PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC",
   "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SHELL",
+  // Native credential stores resolve through the real OS user home. Provider
+  // state remains isolated by CODEX_HOME and CLAUDE_CONFIG_DIR below.
+  "HOME", "USERPROFILE",
 ]);
 
-function managedRuntimeEnvironment(environment = {}, isolatedHome) {
-  const filtered = Object.fromEntries(SAFE_MANAGED_RUNTIME_ENVIRONMENT.flatMap((key) => (
+function managedRuntimeEnvironment(environment = {}) {
+  return Object.fromEntries(SAFE_MANAGED_RUNTIME_ENVIRONMENT.flatMap((key) => (
     typeof environment[key] === "string" ? [[key, environment[key]]] : []
   )));
-  return { ...filtered, HOME: isolatedHome, USERPROFILE: isolatedHome };
 }
 
 export async function productionProviderRuntimeDependencies(definition, context) {

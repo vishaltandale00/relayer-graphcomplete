@@ -253,9 +253,10 @@ mod tests {
             ConversationExportHeader, ConversationExportRecord, ConversationExportTurn,
             EXPORT_VERSION_V1, ExportAcceptedView, ExportAction, ExportActionKind,
             ExportActionVariant, ExportCompletionReceipt, ExportCompletionStatus,
-            ExportConversation, ExportLayer, ExportNavigateRelation, ExportNode, ExportProducer,
-            ExportRecordState, ExportResolvedLayer, ExportTurnManifestEntry, ExportTurnOrigin,
-            MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES, decode_export_jsonl,
+            ExportContextSource, ExportContextTargetSnapshot, ExportConversation,
+            ExportInteractionContext, ExportLayer, ExportNavigateRelation, ExportNode,
+            ExportProducer, ExportRecordState, ExportResolvedLayer, ExportTurnManifestEntry,
+            ExportTurnOrigin, MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES, decode_export_jsonl,
         },
         product::ProductService,
         runtime::RuntimeClient,
@@ -291,6 +292,7 @@ mod tests {
                 sequence: 1,
                 created_at: "1769000001000".into(),
                 text,
+                interaction_node_id: None,
                 origin: ExportTurnOrigin::User,
                 completion: ExportCompletionReceipt {
                     status: ExportCompletionStatus::NotStarted,
@@ -302,6 +304,7 @@ mod tests {
                     effective_permission_receipt: None,
                     error: None,
                 },
+                contexts: vec![],
                 accepted_view: None,
             })),
         ]
@@ -430,8 +433,10 @@ mod tests {
                 sequence: 1,
                 created_at: "1769000001000".into(),
                 text: "Choose a path".into(),
+                interaction_node_id: None,
                 origin: ExportTurnOrigin::User,
                 completion: accepted_receipt(),
+                contexts: vec![],
                 accepted_view: Some(ExportAcceptedView {
                     interaction_node_id: "node:interaction-1".into(),
                     root_action: export_action(
@@ -455,11 +460,13 @@ mod tests {
                 sequence: 2,
                 created_at: "1769000002000".into(),
                 text: "Continue this path".into(),
+                interaction_node_id: None,
                 origin: ExportTurnOrigin::Action {
                     source_turn_id: "turn:1".into(),
                     source_action_id: "action:invoke".into(),
                 },
                 completion: accepted_receipt(),
+                contexts: vec![],
                 accepted_view: Some(ExportAcceptedView {
                     interaction_node_id: "node:interaction-2".into(),
                     root_action: export_action(
@@ -929,6 +936,163 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn imported_eval_thread_exposes_context_for_accepted_failed_and_stopped_turns() {
+        let mut records = resolved_invoke_records();
+        let target = ExportContextTargetSnapshot {
+            id: "node:source".into(),
+            kind: "concept".into(),
+            icon: "file".into(),
+            title: "Source".into(),
+            detail: "Accepted detail for Source".into(),
+            state: ExportRecordState::Accepted,
+        };
+        let context = |id: &str, annotations: &[&str]| ExportInteractionContext {
+            id: id.into(),
+            target: target.clone(),
+            source: ExportContextSource {
+                interaction_node_id: "node:interaction-1".into(),
+                layer_id: "layer:source".into(),
+            },
+            annotations: annotations.iter().map(|value| (*value).into()).collect(),
+        };
+        let ConversationExportRecord::Header(header) = &mut records[0] else {
+            unreachable!()
+        };
+        header.turns.extend([
+            ExportTurnManifestEntry {
+                id: "turn:3".into(),
+                sequence: 3,
+            },
+            ExportTurnManifestEntry {
+                id: "turn:4".into(),
+                sequence: 4,
+            },
+        ]);
+        let ConversationExportRecord::Turn(accepted) = &mut records[1] else {
+            unreachable!()
+        };
+        accepted.interaction_node_id = Some("node:interaction-1".into());
+        accepted.contexts = vec![context("action:context-accepted", &["First", "Second"])];
+        for (sequence, status, suffix) in [
+            (3, ExportCompletionStatus::Failed, "failed"),
+            (4, ExportCompletionStatus::Stopped, "stopped"),
+        ] {
+            records.push(ConversationExportRecord::Turn(Box::new(
+                ConversationExportTurn {
+                    id: format!("turn:{sequence}"),
+                    sequence,
+                    created_at: format!("176900000{sequence}000"),
+                    text: format!("{suffix} turn"),
+                    interaction_node_id: Some(format!("node:interaction-{suffix}")),
+                    origin: ExportTurnOrigin::User,
+                    completion: ExportCompletionReceipt {
+                        status,
+                        harness_configuration_name: Some("codex-basic".into()),
+                        harness_configuration_digest: None,
+                        model_selection: None,
+                        permission_profile_id: "auto".into(),
+                        effective_execution_digest: None,
+                        effective_permission_receipt: None,
+                        error: Some(format!("{suffix} completion")),
+                    },
+                    contexts: vec![context(&format!("action:context-{suffix}"), &["Preserved"])],
+                    accepted_view: None,
+                },
+            )));
+        }
+
+        let (_directory, app, _store, graph_task) = app(true).await;
+        let staged = app
+            .clone()
+            .oneshot(request("POST", "write-token", Body::from(jsonl(&records))))
+            .await
+            .unwrap();
+        assert_eq!(staged.status(), StatusCode::OK);
+        let staged = response_json(staged).await;
+        let published = app
+            .clone()
+            .oneshot(request(
+                "PUT",
+                "write-token",
+                Body::from(serde_json::json!({"importId": staged["importId"]}).to_string()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(published.status(), StatusCode::OK);
+        let published = response_json(published).await;
+        let thread_id = published["threadId"].as_i64().unwrap();
+        let thread = app
+            .clone()
+            .oneshot(request_uri(
+                "GET",
+                &format!("/api/threads/{thread_id}/interactions"),
+                "read-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(thread.status(), StatusCode::OK);
+        let interactions = response_json(thread).await["interactions"]
+            .as_array()
+            .unwrap()
+            .clone();
+        for index in [0, 2, 3] {
+            assert_eq!(interactions[index]["contexts"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                interactions[index]["contexts"][0]["targetNode"]["title"],
+                "Source"
+            );
+            assert!(interactions[index]["contexts"][0]["id"].as_i64().is_some());
+            assert_eq!(
+                interactions[index]["contexts"][0]["type"],
+                "interaction.context"
+            );
+            assert!(
+                interactions[index]["contexts"][0]["target"]["nodeId"]
+                    .as_i64()
+                    .is_some()
+            );
+        }
+        assert_eq!(
+            interactions[0]["contexts"][0]["annotations"],
+            serde_json::json!(["First", "Second"])
+        );
+        assert_eq!(interactions[2]["completionStatus"], "failed");
+        assert_eq!(interactions[3]["completionStatus"], "stopped");
+
+        let reexported = app
+            .oneshot(request_uri(
+                "GET",
+                &format!("/api/threads/{thread_id}/export"),
+                "write-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reexported.status(), StatusCode::OK);
+        let bytes = to_bytes(reexported.into_body(), MAX_EXPORT_BYTES)
+            .await
+            .unwrap();
+        let reexported = decode_export_jsonl(&bytes).unwrap();
+        let ConversationExportRecord::Turn(accepted) = &reexported[1] else {
+            unreachable!()
+        };
+        let ConversationExportRecord::Turn(failed) = &reexported[3] else {
+            unreachable!()
+        };
+        let ConversationExportRecord::Turn(stopped) = &reexported[4] else {
+            unreachable!()
+        };
+        assert_eq!(accepted.contexts[0].id, "action:context-accepted");
+        assert_eq!(accepted.contexts[0].annotations, ["First", "Second"]);
+        assert_eq!(failed.contexts[0].target, accepted.contexts[0].target);
+        assert_eq!(stopped.contexts[0].target, accepted.contexts[0].target);
+        assert_eq!(failed.completion.status, ExportCompletionStatus::Failed);
+        assert_eq!(stopped.completion.status, ExportCompletionStatus::Stopped);
+        graph_task.abort();
+    }
+
+    #[tokio::test]
     async fn hostile_jsonl_corpus_never_panics_or_publishes_partial_state() {
         let (_directory, app, store, graph_task) = app(true).await;
         let valid = jsonl(&records("hostile corpus baseline".into()));
@@ -969,6 +1133,7 @@ mod tests {
                 sequence: 2,
                 created_at: "1769000002000".into(),
                 text: "unresolved action".into(),
+                interaction_node_id: None,
                 origin: ExportTurnOrigin::Action {
                     source_turn_id: "turn:1".into(),
                     source_action_id: "action:missing".into(),
@@ -983,6 +1148,7 @@ mod tests {
                     effective_permission_receipt: None,
                     error: None,
                 },
+                contexts: vec![],
                 accepted_view: None,
             },
         )));

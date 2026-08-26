@@ -26,7 +26,7 @@ function renderDefinitions() {
   $$("[data-provider-rename]", $("#providerDefinitionList")).forEach((button) => {
     button.onclick = async () => {
       const definition = status.definitions.find((item) => item.id === button.dataset.providerRename);
-      const label = window.prompt("Provider name", definition.label)?.trim();
+      const label = window.prompt("Connection name", definition.label)?.trim();
       if (!label || label === definition.label) return;
       try {
         await desktop.providers.rename(definition.id, label);

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
 
 import {
   bindRovingRadioGroup,
   harnessConfigurationsMarkup,
   providerConnectionFormMarkup,
   providerDefinitionsMarkup,
+  providerLogoMarkup,
   providerOptionsMarkup,
   rovingRadioIndex,
 } from "../desktop/renderer/src/provider-ui.js";
@@ -19,6 +21,26 @@ const openAi = normalizeProviderDescriptor({
 });
 
 describe("provider and harness renderer markup", () => {
+  it("keeps incompatible first-run providers connected while offering a recovery path", async () => {
+    const [html, auth] = await Promise.all([
+      readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/renderer/src/auth.js", import.meta.url), "utf8"),
+    ]);
+    expect(html).toContain('id="providerFamilyBack">← Connect another provider</button>');
+    expect(auth).toContain('$("#providerFamilyBack").onclick');
+    expect(auth).toContain("cannot use its models. Connect another provider to continue.");
+  });
+
+  it("renders branded marks for every packaged provider adapter and a generic future fallback", () => {
+    expect(providerLogoMarkup("claude-subscription")).toContain('data-provider-logo="claude"');
+    expect(providerLogoMarkup("codex-subscription")).toContain('data-provider-logo="codex"');
+    expect(providerLogoMarkup("anthropic-api")).toContain('data-provider-logo="anthropic"');
+    expect(providerLogoMarkup("openai-api")).toContain('data-provider-logo="openai"');
+    expect(providerLogoMarkup("openrouter")).toContain('data-provider-logo="openrouter"');
+    expect(providerLogoMarkup("vercel-ai-router")).toContain('data-provider-logo="vercel"');
+    expect(providerLogoMarkup("future-provider")).toContain('data-provider-logo="generic"');
+  });
+
   it("renders a fake registry adapter through the generic onboarding option", () => {
     const markup = providerOptionsMarkup([openAi, {
       adapterId: "fake-test",
@@ -27,6 +49,8 @@ describe("provider and harness renderer markup", () => {
     }]);
     expect(markup).toContain('data-provider-adapter="fake-test"');
     expect(markup).toContain("Fake deterministic provider");
+    expect(markup).toContain('data-provider-logo="openai"');
+    expect(markup).toContain('data-provider-logo="generic"');
     expect(markup).not.toContain("switch");
   });
 
@@ -37,6 +61,7 @@ describe("provider and harness renderer markup", () => {
       fields: { apiKey: "" },
     }, [], true);
     expect(markup).toContain('type="password"');
+    expect(markup).toContain("Connection name");
     expect(markup).toContain('role="alert"');
     expect(markup).toContain("Enter a valid endpoint URL.");
     expect(markup).toContain('aria-invalid="true" aria-describedby="endpointError"');

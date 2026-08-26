@@ -123,6 +123,61 @@ impl<'connection> NodeTable<'connection> {
         })
     }
 
+    pub(crate) async fn identified_interaction(
+        &mut self,
+        thread_id: ThreadId,
+        input_identity: &str,
+        input_digest: &str,
+    ) -> Result<Option<GraphNode>, GraphError> {
+        let row = sqlx::query_as::<_, NodeRow>(
+            "SELECT id,leased_action_id,kind,icon,title,detail,state,owner_interaction_id FROM nodes WHERE thread_id=?1 AND input_identity=?2",
+        ).bind(thread_id.value()).bind(input_identity).fetch_optional(&mut *self.connection).await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let stored: String = sqlx::query_scalar("SELECT input_digest FROM nodes WHERE id=?1")
+            .bind(row.id)
+            .fetch_one(&mut *self.connection)
+            .await?;
+        if stored != input_digest {
+            return Err(GraphError::validation(
+                "interaction_input_conflict",
+                "inputDigest",
+                "This interaction input identity was already used with different content.",
+            ));
+        }
+        Ok(Some(NodeRecord::try_from(row)?.node))
+    }
+
+    pub(crate) async fn interaction_input_identity(
+        &mut self,
+        node_id: NodeId,
+    ) -> Result<Option<(String, String)>, GraphError> {
+        let value = sqlx::query_as("SELECT input_identity,input_digest FROM nodes WHERE id=?1")
+            .bind(node_id.value())
+            .fetch_optional(&mut *self.connection)
+            .await?
+            .ok_or_else(|| GraphError::NotFound(format!("interaction node {node_id}")))?;
+        match value {
+            (None, None) => Ok(None),
+            (Some(identity), Some(digest)) => Ok(Some((identity, digest))),
+            _ => Err(GraphError::Internal(
+                "interaction input identity is partially populated".into(),
+            )),
+        }
+    }
+
+    pub(crate) async fn set_input_identity(
+        &mut self,
+        node_id: NodeId,
+        input_identity: &str,
+        input_digest: &str,
+    ) -> Result<(), GraphError> {
+        sqlx::query("UPDATE nodes SET input_identity=?1,input_digest=?2 WHERE id=?3 AND input_identity IS NULL")
+            .bind(input_identity).bind(input_digest).bind(node_id.value()).execute(&mut *self.connection).await?;
+        Ok(())
+    }
+
     async fn interaction_by_leased_action(
         &mut self,
         action_id: ActionId,

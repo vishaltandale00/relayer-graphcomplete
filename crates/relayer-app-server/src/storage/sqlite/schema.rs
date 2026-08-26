@@ -61,6 +61,21 @@ const INTERACTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("model_provider_id", "TEXT", false, 0),
     ("provider_model_id", "TEXT", false, 0),
     ("model_family_id", "INTEGER", false, 0),
+    ("input_identity", "TEXT", false, 0),
+    ("input_digest", "TEXT", false, 0),
+];
+const INTERACTION_CONTEXT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("interaction_id", "INTEGER", true, 1),
+    ("position", "INTEGER", true, 2),
+    ("target_node_id", "INTEGER", true, 0),
+    ("source_interaction_node_id", "INTEGER", true, 0),
+    ("source_layer_id", "INTEGER", true, 0),
+];
+const INTERACTION_CONTEXT_ANNOTATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("interaction_id", "INTEGER", true, 1),
+    ("context_position", "INTEGER", true, 2),
+    ("position", "INTEGER", true, 3),
+    ("text", "TEXT", true, 0),
 ];
 const INTERACTION_ATTEMPT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "INTEGER", false, 1),
@@ -246,6 +261,18 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "threads", THREAD_COLUMNS).await?;
     validate_columns(pool, "interactions", INTERACTION_COLUMNS).await?;
     validate_columns(pool, "interaction_attempts", INTERACTION_ATTEMPT_COLUMNS).await?;
+    validate_columns(
+        pool,
+        "interaction_context_intents",
+        INTERACTION_CONTEXT_COLUMNS,
+    )
+    .await?;
+    validate_columns(
+        pool,
+        "interaction_context_annotations",
+        INTERACTION_CONTEXT_ANNOTATION_COLUMNS,
+    )
+    .await?;
     validate_columns(pool, "conversation_imports", CONVERSATION_IMPORT_COLUMNS).await?;
     validate_columns(pool, "imported_turns", IMPORTED_TURN_COLUMNS).await?;
     validate_columns(pool, "action_invocations", ACTION_INVOCATION_COLUMNS).await?;
@@ -750,4 +777,40 @@ async fn validate_foreign_key(
 
 fn incompatible(message: &str) -> StorageError {
     StorageError::IncompatibleSchema(message.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::SqliteProductStore;
+
+    #[tokio::test]
+    async fn malformed_interaction_context_table_fails_current_schema_open() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-malformed-context-schema-{}-{}.sqlite3",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        sqlx::query("DROP TABLE interaction_context_annotations")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE interaction_context_annotations(interaction_id INTEGER NOT NULL,context_position INTEGER NOT NULL,position INTEGER NOT NULL,PRIMARY KEY(interaction_id,context_position,position))",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        store.pool.close().await;
+        let error = SqliteProductStore::open(&path).await.err().unwrap();
+        assert!(
+            error.to_string().contains(
+                "table interaction_context_annotations does not match the supported schema"
+            )
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 }

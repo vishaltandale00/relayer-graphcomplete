@@ -1331,7 +1331,7 @@ fn has_applied_transform_filter(
                 "Git returned malformed content-filter attributes",
             )));
         }
-        for record in fields.chunks_exact(3) {
+        for record in fields.as_chunks::<3>().0 {
             let driver = record[2];
             if driver == b"unspecified" || driver == b"unset" || driver == b"set" {
                 continue;

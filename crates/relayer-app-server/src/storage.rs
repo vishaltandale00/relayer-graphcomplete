@@ -40,6 +40,19 @@ pub(crate) struct NewThreadRecord<'a> {
     pub(crate) timestamp: &'a str,
 }
 
+pub(crate) struct NewInteractionInput<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) input_identity: &'a str,
+    pub(crate) input_digest: &'a str,
+    pub(crate) contexts: &'a [crate::product::InteractionContextIntent],
+}
+
+#[derive(Debug)]
+pub(crate) enum InteractionInputInsertOutcome {
+    Created(crate::product::Interaction),
+    Existing(crate::product::Interaction),
+}
+
 pub(crate) enum ActionInvocationInsertOutcome {
     Created {
         invocation: ActionInvocation,

@@ -71,11 +71,17 @@ describe("provider onboarding IPC hard gate", () => {
       userDataDirectory: "/tmp/unused", binaryPath: "/tmp/unused", webDirectory: "/tmp/unused",
       permissionCatalogPath: "/tmp/unused",
     });
-    service.start = async () => ({ origin: "http://127.0.0.1:43123", cookie: { value: "token" } });
+    service.start = async () => ({
+      origin: "http://127.0.0.1:43123",
+      cookie: { name: "relayer_control", value: "token" },
+    });
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("null", {
       status: 200, headers: { "Content-Type": "application/json" },
     }));
     await expect(service.validateProviderOnboarding("codex-basic")).resolves.toBe(false);
+    expect(fetch).toHaveBeenCalledWith(new URL("http://127.0.0.1:43123/api/model-selection/default?harnessId=codex-basic"), {
+      headers: { Cookie: "relayer_control=token" }, signal: undefined,
+    });
     fetch.mockRestore();
   });
 
@@ -84,7 +90,10 @@ describe("provider onboarding IPC hard gate", () => {
       userDataDirectory: "/tmp/unused", binaryPath: "/tmp/unused", webDirectory: "/tmp/unused",
       permissionCatalogPath: "/tmp/unused",
     });
-    service.start = async () => ({ origin: "http://127.0.0.1:43123", cookie: { value: "token" } });
+    service.start = async () => ({
+      origin: "http://127.0.0.1:43123",
+      cookie: { name: "relayer_control", value: "token" },
+    });
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
       providers: [{
         id: "work-api", connected: false,
@@ -96,7 +105,7 @@ describe("provider onboarding IPC hard gate", () => {
       unavailableReason: { code: "credentials_revoked", message: "Reconnect this provider." },
     }]]));
     expect(fetch).toHaveBeenCalledWith(new URL("http://127.0.0.1:43123/api/model-settings"), {
-      headers: { Authorization: "Bearer token" }, signal: undefined,
+      headers: { Cookie: "relayer_control=token" }, signal: undefined,
     });
     fetch.mockRestore();
   });

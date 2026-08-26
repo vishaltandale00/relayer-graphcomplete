@@ -410,7 +410,10 @@ export class HarnessHost {
     } catch (error) {
       if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) throw error;
     }
-    const interaction = await graph.getNode(interactionNodeId);
+    const [interaction, interactionInput] = await Promise.all([
+      graph.getNode(interactionNodeId),
+      graph.getInteractionInput(),
+    ]);
     const scope = new ActiveHarnessGraphScope(capability);
     const support = session.harness.traceSupport?.() ?? NO_HARNESS_TRACE_SUPPORT;
     const trace = this.traceStore?.start({
@@ -461,6 +464,7 @@ export class HarnessHost {
       harnessStarted = true;
       await session.harness.complete({
         inputGraph: interaction,
+        interactionInput,
         graph: scope,
         approvals,
         trace: observedTrace,

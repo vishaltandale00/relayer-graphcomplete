@@ -234,7 +234,7 @@ mod tests {
             .expect("begin");
         assert_eq!(
             store
-                .recover_interrupted_interactions("restart")
+                .recover_interrupted_interactions("restart", false)
                 .await
                 .unwrap(),
             1
@@ -256,7 +256,7 @@ mod tests {
         );
         assert_eq!(
             store
-                .recover_interrupted_interactions("restart again")
+                .recover_interrupted_interactions("restart again", false)
                 .await
                 .unwrap(),
             0
@@ -265,16 +265,32 @@ mod tests {
 
     #[tokio::test]
     async fn restart_preserves_a_recoverable_unsent_draft() {
-        let (store, interaction_id, _) = seeded_store().await;
-        sqlx::query("UPDATE interactions SET completion_status='not_started' WHERE id=?1")
-            .bind(interaction_id.value())
-            .execute(&store.pool)
+        let (store, interaction_id, route) = seeded_store().await;
+        let attempt = store
+            .begin_interaction_attempt(receipt(interaction_id, &route), "10")
+            .await
+            .unwrap();
+        store
+            .fail_interaction_completion_with_attempt(
+                FailedInteractionCompletion {
+                    attempt_id: attempt,
+                    interaction_id,
+                    harness_configuration_name: "codex-basic",
+                    error: "provider unavailable",
+                    outcome: "model_failed",
+                    failure_category: "provider_timeout",
+                    effect_boundary: "none",
+                    return_to_unsent: true,
+                    graph_node_id: None,
+                },
+                "11",
+            )
             .await
             .unwrap();
 
         assert_eq!(
             store
-                .recover_interrupted_interactions("restart")
+                .recover_interrupted_interactions("restart", false)
                 .await
                 .unwrap(),
             0

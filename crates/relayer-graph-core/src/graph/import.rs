@@ -31,8 +31,23 @@ pub struct ImportedTurn {
     pub source_turn_id: String,
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction_node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invoke_origin: Option<ImportedInvokeOrigin>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contexts: Vec<ImportedInteractionContext>,
     pub accepted_view: Option<ImportedAcceptedView>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedInteractionContext {
+    pub id: String,
+    pub target: ImportedNode,
+    pub source_interaction_node_id: String,
+    pub source_layer_id: String,
+    #[serde(default)]
+    pub annotations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -85,7 +100,7 @@ pub struct ImportedNodePlacement {
     pub y: f64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportedNode {
     pub id: String,
@@ -206,7 +221,17 @@ impl crate::GraphDatabase {
 
         for position in 0..turn_count {
             let turn = load_turn(&mut tx, import_id, position).await?;
-            let Some(view) = &turn.accepted_view else {
+            let portable_interaction_id = turn.interaction_node_id.as_ref().or_else(|| {
+                turn.accepted_view
+                    .as_ref()
+                    .map(|view| &view.interaction_node_id)
+            });
+            let Some(portable_interaction_id) = portable_interaction_id else {
+                if !turn.contexts.is_empty() {
+                    return Err(GraphError::Internal(
+                        "imported context turn is missing its interaction node identity".into(),
+                    ));
+                }
                 receipts.push(ImportedTurnReceipt {
                     source_turn_id: turn.source_turn_id,
                     graph_node_id: None,
@@ -218,20 +243,25 @@ impl crate::GraphDatabase {
             };
             let result = sqlx::query("INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (?1,?2,'user-interaction','user',?3,?3,'accepted',NULL,?4)")
                 .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value()).bind(&turn.text)
-                .bind(&view.interaction_node_id).execute(&mut *tx).await?;
+                .bind(portable_interaction_id).execute(&mut *tx).await?;
             let root = result.last_insert_rowid();
             if node_ids
-                .insert(view.interaction_node_id.clone(), root)
+                .insert(portable_interaction_id.clone(), root)
                 .is_some()
             {
                 return Err(GraphError::Internal(
                     "duplicate imported interaction node".into(),
                 ));
             }
-            for resolved in &view.layers {
-                for node in &resolved.nodes {
-                    node_owners.entry(node.id.clone()).or_insert(root);
+            if let Some(view) = &turn.accepted_view {
+                for resolved in &view.layers {
+                    for node in &resolved.nodes {
+                        node_owners.entry(node.id.clone()).or_insert(root);
+                    }
                 }
+            }
+            for context in &turn.contexts {
+                node_owners.entry(context.target.id.clone()).or_insert(root);
             }
             receipts.push(ImportedTurnReceipt {
                 source_turn_id: turn.source_turn_id,
@@ -242,29 +272,31 @@ impl crate::GraphDatabase {
             });
         }
 
-        let mut seen_nodes = HashSet::new();
+        let mut node_definitions = HashMap::<String, ImportedNode>::new();
         for position in 0..turn_count {
             let turn = load_turn(&mut tx, import_id, position).await?;
-            let Some(view) = turn.accepted_view else {
-                continue;
-            };
-            for resolved in view.layers {
-                for node in resolved.nodes {
-                    if !seen_nodes.insert(node.id.clone()) {
-                        continue;
+            if let Some(view) = turn.accepted_view {
+                for resolved in view.layers {
+                    for node in resolved.nodes {
+                        register_imported_node(&mut node_definitions, node)?;
                     }
-                    if node_ids.contains_key(&node.id) {
-                        return Err(GraphError::Internal(
-                            "imported node ID collides with an interaction node ID".into(),
-                        ));
-                    }
-                    let owner = node_owners[&node.id];
-                    let result = sqlx::query("INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,'accepted',?7,?8)")
-                    .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value()).bind(node.kind).bind(node.icon)
-                    .bind(node.title).bind(node.detail).bind(owner).bind(&node.id).execute(&mut *tx).await?;
-                    node_ids.insert(node.id, result.last_insert_rowid());
                 }
             }
+            for context in turn.contexts {
+                register_imported_node(&mut node_definitions, context.target)?;
+            }
+        }
+        for (portable_id, node) in node_definitions {
+            if node_ids.contains_key(&portable_id) {
+                return Err(GraphError::Internal(
+                    "imported node ID collides with an interaction node ID".into(),
+                ));
+            }
+            let owner = node_owners[&portable_id];
+            let result = sqlx::query("INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,'accepted',?7,?8)")
+                .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value()).bind(node.kind).bind(node.icon)
+                .bind(node.title).bind(node.detail).bind(owner).bind(&portable_id).execute(&mut *tx).await?;
+            node_ids.insert(portable_id, result.last_insert_rowid());
         }
 
         let mut edge_ids = HashMap::<String, i64>::new();
@@ -350,6 +382,35 @@ impl crate::GraphDatabase {
             }
         }
 
+        // Imported context snapshots are deliberately materialized outside the
+        // authored output closure. Each distinct portable target receives one
+        // inert accepted occurrence layer so shared targets deduplicate without
+        // granting authority to foreign source IDs or paths.
+        let mut context_occurrence_layers = HashMap::<String, i64>::new();
+        for position in 0..turn_count {
+            let turn = load_turn(&mut tx, import_id, position).await?;
+            for imported_context in turn.contexts {
+                if context_occurrence_layers.contains_key(&imported_context.target.id) {
+                    continue;
+                }
+                let owner = node_owners[&imported_context.target.id];
+                let result = sqlx::query("INSERT INTO layers(project_id,thread_id,layout_schema_version,state,owner_interaction_id,client_key) VALUES (?1,?2,NULL,'accepted',?3,?4)")
+                    .bind(metadata.project_id.map(ProjectId::value))
+                    .bind(metadata.thread_id.value())
+                    .bind(owner)
+                    .bind(format!("\0import.context.occurrence:{}", imported_context.target.id))
+                    .execute(&mut *tx)
+                    .await?;
+                let layer_id = result.last_insert_rowid();
+                sqlx::query("INSERT INTO layer_nodes(layer_id,node_id,position) VALUES (?1,?2,0)")
+                    .bind(layer_id)
+                    .bind(node_ids[&imported_context.target.id])
+                    .execute(&mut *tx)
+                    .await?;
+                context_occurrence_layers.insert(imported_context.target.id, layer_id);
+            }
+        }
+
         let mut action_ids = HashMap::<String, i64>::new();
         let context = InsertContext {
             metadata: &metadata,
@@ -378,6 +439,73 @@ impl crate::GraphDatabase {
                             .await?;
                     }
                 }
+            }
+        }
+
+        for position in 0..turn_count {
+            let turn = load_turn(&mut tx, import_id, position).await?;
+            let portable_interaction_id = turn.interaction_node_id.as_ref().or_else(|| {
+                turn.accepted_view
+                    .as_ref()
+                    .map(|view| &view.interaction_node_id)
+            });
+            let Some(portable_interaction_id) = portable_interaction_id else {
+                if !turn.contexts.is_empty() {
+                    return Err(GraphError::Internal(
+                        "imported context turn is missing its interaction node identity".into(),
+                    ));
+                }
+                continue;
+            };
+            let interaction_node_id = node_ids[portable_interaction_id];
+            let mut seen_targets = HashSet::new();
+            for (context_position, imported_context) in turn.contexts.iter().enumerate() {
+                if !seen_targets.insert(&imported_context.target.id) {
+                    return Err(GraphError::Internal(
+                        "imported turn attaches one context target more than once".into(),
+                    ));
+                }
+                if action_ids.contains_key(&imported_context.id) {
+                    return Err(GraphError::Internal(
+                        "imported context action ID collides with another action".into(),
+                    ));
+                }
+                let target_node_id = node_ids[&imported_context.target.id];
+                let source_layer_id = context_occurrence_layers[&imported_context.target.id];
+                let source_interaction_node_id = node_owners[&imported_context.target.id];
+                let result = sqlx::query("INSERT INTO actions(project_id,thread_id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,response,state,owner_interaction_id,client_key,type_id) VALUES (?1,?2,?3,NULL,'invoke',NULL,'','pill',NULL,NULL,NULL,NULL,0,'accepted',?3,?4,'interaction.context')")
+                    .bind(metadata.project_id.map(ProjectId::value))
+                    .bind(metadata.thread_id.value())
+                    .bind(interaction_node_id)
+                    .bind(format!("\0import.interaction.context:{context_position}"))
+                    .execute(&mut *tx)
+                    .await?;
+                let action_id = result.last_insert_rowid();
+                sqlx::query("INSERT INTO interaction_context_actions(action_id,interaction_node_id,target_node_id,source_interaction_node_id,source_layer_id,position) VALUES (?1,?2,?3,?4,?5,?6)")
+                    .bind(action_id)
+                    .bind(interaction_node_id)
+                    .bind(target_node_id)
+                    .bind(source_interaction_node_id)
+                    .bind(source_layer_id)
+                    .bind(i64::try_from(context_position).map_err(|_| GraphError::Internal("imported context position exceeds SQLite range".into()))?)
+                    .execute(&mut *tx)
+                    .await?;
+                for (annotation_position, annotation) in
+                    imported_context.annotations.iter().enumerate()
+                {
+                    if annotation.trim().is_empty() {
+                        return Err(GraphError::Internal(
+                            "imported context annotation is empty".into(),
+                        ));
+                    }
+                    sqlx::query("INSERT INTO interaction_context_annotations(action_id,position,text) VALUES (?1,?2,?3)")
+                        .bind(action_id)
+                        .bind(i64::try_from(annotation_position).map_err(|_| GraphError::Internal("imported annotation position exceeds SQLite range".into()))?)
+                        .bind(annotation)
+                        .execute(&mut *tx)
+                        .await?;
+                }
+                action_ids.insert(imported_context.id.clone(), action_id);
             }
         }
 
@@ -650,6 +778,22 @@ async fn load_turn(
     .fetch_one(&mut **tx)
     .await?;
     serde_json::from_str(&json).map_err(|error| GraphError::Internal(error.to_string()))
+}
+
+fn register_imported_node(
+    definitions: &mut HashMap<String, ImportedNode>,
+    node: ImportedNode,
+) -> Result<(), GraphError> {
+    if let Some(existing) = definitions.get(&node.id) {
+        if existing != &node {
+            return Err(GraphError::Internal(
+                "imported node snapshot changed for one portable ID".into(),
+            ));
+        }
+        return Ok(());
+    }
+    definitions.insert(node.id.clone(), node);
+    Ok(())
 }
 
 struct InsertContext<'a> {

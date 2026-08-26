@@ -34,6 +34,21 @@ class GraphNode:
 
 
 @dataclass(frozen=True, slots=True)
+class InteractionInputNode:
+    id: int
+    kind: str
+    icon: str
+    title: str
+    detail: str
+    state: str
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "InteractionInputNode":
+        return cls(int(value["id"]), str(value["kind"]), str(value["icon"]),
+                   str(value["title"]), str(value["detail"]), str(value["state"]))
+
+
+@dataclass(frozen=True, slots=True)
 class GraphEdge:
     id: int
     endpoints: tuple[int, int]
@@ -43,6 +58,33 @@ class GraphEdge:
     def from_dict(cls, value: Mapping[str, Any]) -> "GraphEdge":
         endpoints = value["endpoints"]
         return cls(int(value["id"]), (int(endpoints[0]), int(endpoints[1])), str(value["state"]))
+
+
+@dataclass(frozen=True, slots=True)
+class InteractionContext:
+    target_node: InteractionInputNode
+    annotations: tuple[str, ...]
+    type: Literal["interaction.context"] = "interaction.context"
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "InteractionContext":
+        return cls(
+            InteractionInputNode.from_dict(value["targetNode"]),
+            tuple(str(annotation) for annotation in value.get("annotations", ())),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class InteractionInput:
+    interaction: InteractionInputNode
+    contexts: tuple[InteractionContext, ...]
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "InteractionInput":
+        return cls(
+            InteractionInputNode.from_dict(value["interaction"]),
+            tuple(InteractionContext.from_dict(item) for item in value.get("contexts", ())),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +205,9 @@ class RelayerGraphClient:
     async def get_neighbors(self, node: NodeReference) -> tuple[GraphNode, ...]:
         value = await self._request("GET", f"/api/graph/nodes/{_node_id(node)}/neighbors")
         return tuple(GraphNode.from_dict(item) for item in value["nodes"])
+
+    async def get_interaction_input(self) -> InteractionInput:
+        return InteractionInput.from_dict(await self._request("GET", "/api/graph/input"))
 
     async def submit_node(self, node: NodeObject) -> GraphNode:
         value = await self._request("POST", "/api/graph/nodes", {

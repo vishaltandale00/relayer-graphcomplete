@@ -7,6 +7,8 @@ use crate::{ActionId, GraphError, LayerId, NodeId, RecordState, ValidationIssue}
 pub enum ActionKind {
     Navigate,
     Invoke,
+    #[serde(rename = "interaction.context")]
+    InteractionContext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +101,7 @@ impl ActionKind {
         match self {
             Self::Navigate => "navigate",
             Self::Invoke => "invoke",
+            Self::InteractionContext => "interaction.context",
         }
     }
 
@@ -106,6 +109,7 @@ impl ActionKind {
         match value {
             "navigate" => Ok(Self::Navigate),
             "invoke" => Ok(Self::Invoke),
+            "interaction.context" => Ok(Self::InteractionContext),
             other => Err(GraphError::Internal(format!("unknown action kind {other}"))),
         }
     }
@@ -152,6 +156,13 @@ pub struct ActionDraft {
 impl ActionDraft {
     pub(crate) fn validate_shape(&self) -> Result<Option<&'static str>, GraphError> {
         super::require_nonempty(&self.client_key, "clientKey")?;
+        if self.client_key.contains('\0') {
+            return Err(GraphError::validation(
+                "reserved_action_client_key",
+                "clientKey",
+                "Action client keys cannot contain NUL characters, which are reserved for graph-control identities.",
+            ));
+        }
         super::require_nonempty(&self.label, "label")?;
         if matches!(self.variant, ActionVariant::Unsupported(_)) {
             return Err(GraphError::validation(
@@ -246,6 +257,13 @@ impl ActionDraft {
                         "An invoke action starts an interaction and cannot have an expand or reference relation.",
                     ));
                 }
+            }
+            ActionKind::InteractionContext => {
+                return Err(GraphError::validation(
+                    "control_only_action",
+                    "kind",
+                    "interaction.context actions are immutable input records created only by graph control.",
+                ));
             }
         }
         if !issues.is_empty() {

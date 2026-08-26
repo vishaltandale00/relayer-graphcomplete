@@ -232,7 +232,7 @@ export class RelayerAppServerService {
     const url = new URL("/api/model-selection/default", session.origin);
     url.searchParams.set("harnessId", harnessId);
     const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${session.cookie.value}` },
+      headers: { Cookie: `${session.cookie.name}=${session.cookie.value}` },
       signal,
     });
     if (!response.ok) return false;
@@ -243,7 +243,7 @@ export class RelayerAppServerService {
   async providerStatuses({ signal } = {}) {
     const session = await this.start();
     const response = await fetch(new URL("/api/model-settings", session.origin), {
-      headers: { Authorization: `Bearer ${session.cookie.value}` },
+      headers: { Cookie: `${session.cookie.name}=${session.cookie.value}` },
       signal,
     });
     if (!response.ok) throw new Error(`Provider status read failed (${response.status}).`);

@@ -49,8 +49,8 @@ describe("provider renderer model", () => {
       { id: "pending", label: "Company Proxy", lifecycleState: "removal_pending" },
       { id: "old", label: "OpenAI Personal", lifecycleState: "tombstoned" },
     ];
-    expect(providerLabelError("openai work", definitions)).toBe("Active provider names must be unique.");
-    expect(providerLabelError("company proxy", definitions)).toBe("Active provider names must be unique.");
+    expect(providerLabelError("openai work", definitions)).toBe("Active connection names must be unique.");
+    expect(providerLabelError("company proxy", definitions)).toBe("Active connection names must be unique.");
     expect(providerLabelError("openai personal", definitions)).toBeNull();
     expect(providerLabelError("OPENAI WORK", definitions, "work")).toBeNull();
   });

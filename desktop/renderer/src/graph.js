@@ -59,7 +59,7 @@ function workspace() {
     onExportConversation: desktop?.conversation?.export
       ? (threadId) => desktop.conversation.export(threadId)
       : null,
-    onSubmitInteraction: (text, modelSelection) => import("./threads.js").then(({ submitInteraction }) => submitInteraction(text, modelSelection)),
+    onSubmitInteraction: (text, modelSelection, contexts) => import("./threads.js").then(({ submitInteraction }) => submitInteraction(text, modelSelection, contexts)),
     onOpenSettings: () => {
       setSettingsTab("models");
       document.querySelector("#settingsButton")?.click();

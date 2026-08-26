@@ -146,6 +146,27 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("await graph.discard_layer(layer)");
   });
 
+  it("delivers the same ordered normalized context to Prime and its native children", async () => {
+    let prompt = "";
+    const session = {
+      promptAndWait: vi.fn(async (text: string) => { prompt = text; }),
+      abort: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const harness = await createHarness(session);
+
+    await harness.complete(attachedRunContext(11, "token"));
+
+    expect(prompt).toContain('"message": "Question"');
+    expect(prompt.indexOf('"title": "First target"')).toBeLessThan(prompt.indexOf('"title": "Second target"'));
+    expect(prompt.indexOf('"first annotation"')).toBeLessThan(prompt.indexOf('"second annotation"'));
+    expect(prompt).toContain("product assigns no semantic precedence");
+    expect(prompt).toContain("including in native child agents");
+    expect(prompt).toContain("await graph.get_interaction_input()");
+    expect(prompt).not.toContain("sourceNodeId");
+    expect(prompt).not.toContain("sourceLayerId");
+  });
+
   it("does not start a prompt when the run was already cancelled", async () => {
     const session = {
       promptAndWait: vi.fn(async () => undefined),
@@ -270,14 +291,38 @@ describe("PrimeAgentHarness", () => {
 });
 
 function runContext(nodeId: number, token: string, trace: HarnessTraceSink = createNoopHarnessTraceSink()): HarnessRunContext {
+  const inputGraph = { id: nodeId, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" as const };
   return {
-    inputGraph: { id: nodeId, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" },
+    inputGraph,
+    interactionInput: { interaction: inputGraph, contexts: [] },
     graph: {
       interactionNodeId: nodeId,
       acquireCapability: () => ({ url: "http://127.0.0.1:43123", token, nodeId }),
     },
     approvals: { request: async () => { throw new Error("unused approval channel"); } },
     trace,
+  };
+}
+
+function attachedRunContext(nodeId: number, token: string): HarnessRunContext {
+  const context = runContext(nodeId, token);
+  return {
+    ...context,
+    interactionInput: {
+      interaction: context.inputGraph,
+      contexts: [
+        {
+          type: "interaction.context",
+          targetNode: { id: 20, kind: "concept", icon: "box", title: "First target", detail: "First detail", state: "accepted" },
+          annotations: ["first annotation", "second annotation"],
+        },
+        {
+          type: "interaction.context",
+          targetNode: { id: 21, kind: "concept", icon: "box", title: "Second target", detail: "Second detail", state: "accepted" },
+          annotations: ["third annotation"],
+        },
+      ],
+    },
   };
 }
 
