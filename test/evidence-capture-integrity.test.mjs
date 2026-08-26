@@ -981,7 +981,7 @@ describe("evidence capture integrity", () => {
     expect(capture).toContain('{ key: "sandbox-exec", source: SOURCE_SANDBOX_EXEC_PATH, label: "<sandbox-executable>", copy: false, provenance: "external", discoveredSha256: discoveredMachOSha256(SOURCE_SANDBOX_EXEC_PATH), allowHardlinks: sealedSystemHardlinkPolicy(SOURCE_SANDBOX_EXEC_PATH) }');
     expect(capture).toContain('target: "graph-authoring-network.sb"');
     expect(capture).toContain("sandboxExecPath: SOURCE_SANDBOX_EXEC_PATH");
-    expect(capture).toContain('networkProfilePath: join(snapshotRoot, "graph-authoring-network.sb")');
+    expect(capture).toContain('networkProfilePath: join(canonicalSnapshotRoot, "graph-authoring-network.sb")');
     expect(capture).not.toContain('process.env.RELAYER_GIT_PATH || "git"');
   });
 

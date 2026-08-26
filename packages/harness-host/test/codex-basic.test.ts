@@ -158,6 +158,7 @@ describe("CodexBasicHarness", () => {
       await harness.complete(runContext(1, "token"));
 
       expect(submittedPrompt).toContain('Run exactly "/immutable/runtime/graph-authoring-launcher" with no arguments');
+      expect(submittedPrompt).toContain("including the displayed double quotes");
       expect(submittedPrompt).toContain("shell-native single-quoted here-document");
       expect(submittedPrompt).toContain("delimited by exactly RELAYER_GRAPH_PROGRAM");
       expect(submittedPrompt).toContain("do not resolve the launcher or Node.js from PATH");

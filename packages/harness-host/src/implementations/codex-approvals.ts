@@ -411,8 +411,10 @@ export function isExactGraphAuthoringLauncherCommand(command: string, launcherPa
   if (!isAbsolute(launcherPath) || launcherPath.includes("\0") || launcherPath.includes("\n") || launcherPath.includes("\r")) {
     return false;
   }
-  const prefix = `${JSON.stringify(launcherPath)} `;
-  if (!command.startsWith(prefix)) return false;
+  const prefix = [JSON.stringify(launcherPath), launcherPath]
+    .map((candidate) => `${candidate} `)
+    .find((candidate) => command.startsWith(candidate));
+  if (prefix === undefined) return false;
   const opening = command.slice(prefix.length).match(/^<<'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\r?\n/);
   if (opening === null) return false;
   const delimiter = opening[1]!;

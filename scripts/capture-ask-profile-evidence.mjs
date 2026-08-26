@@ -1748,12 +1748,13 @@ async function prepareProviderWrapperSource(snapshotRoot) {
 }
 
 async function prepareGraphAuthoringLauncherSource(snapshotRoot) {
+  const canonicalSnapshotRoot = join(realpathSync(dirname(snapshotRoot)), basename(snapshotRoot));
   await writeFile(graphAuthoringNetworkProfileSource, createPinnedGraphAuthoringNetworkProfile(), { mode: 0o600 });
   await writeFile(graphAuthoringLauncherSource, createPinnedGraphAuthoringLauncherScript({
-    nodePath: join(snapshotRoot, "node"),
-    graphClientRoot: join(snapshotRoot, "node_modules", "@relayer", "graph-client"),
+    nodePath: join(canonicalSnapshotRoot, "node"),
+    graphClientRoot: join(canonicalSnapshotRoot, "node_modules", "@relayer", "graph-client"),
     sandboxExecPath: SOURCE_SANDBOX_EXEC_PATH,
-    networkProfilePath: join(snapshotRoot, "graph-authoring-network.sb"),
+    networkProfilePath: join(canonicalSnapshotRoot, "graph-authoring-network.sb"),
   }));
   await chmod(graphAuthoringLauncherSource, 0o700);
 }
@@ -1952,7 +1953,7 @@ async function prepareImmutableRuntime(sourceInventory) {
   desktopDirectory = specs.find((spec) => spec.key === "desktop").source;
   permissionCatalogPath = join(specs.find((spec) => spec.key === "permissions").source, "desktop.json");
   harnessConfigurationPath = join(specs.find((spec) => spec.key === "harnesses").source, "codex-basic.yaml");
-  graphClientModuleUrl = pathToFileURL(join(specs.find((spec) => spec.key === "graph-client-dist").source, "index.js")).href;
+  graphClientModuleUrl = pathToFileURL(join(realpathSync(specs.find((spec) => spec.key === "graph-client-dist").source), "index.js")).href;
   harnessHostModuleUrl = pathToFileURL(join(specs.find((spec) => spec.key === "harness-host-dist").source, "index.js")).href;
   return { sourceRuntimeArtifacts: sourceInventory, runtimeArtifacts: snapshotInventory };
 }

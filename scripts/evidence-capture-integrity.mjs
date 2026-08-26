@@ -1838,8 +1838,10 @@ function isExactPinnedGraphLauncherHeredoc(action, allowedGraphAuthoringLauncher
   if (action.relayerGraphAuthoringLauncherSha256 !== allowedGraphAuthoringLauncherSha256) return false;
   const command = action.command;
   const normalized = command.trim();
-  const expectedPrefix = `${JSON.stringify(allowedGraphAuthoringLauncher)} `;
-  if (!normalized.startsWith(expectedPrefix)) return false;
+  const expectedPrefix = [JSON.stringify(allowedGraphAuthoringLauncher), allowedGraphAuthoringLauncher]
+    .map((candidate) => `${candidate} `)
+    .find((candidate) => normalized.startsWith(candidate));
+  if (expectedPrefix === undefined) return false;
   const opening = normalized.slice(expectedPrefix.length).match(/^<<'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\r?\n/);
   if (!opening) return false;
   const delimiter = opening[1];
