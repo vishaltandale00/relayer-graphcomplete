@@ -2555,9 +2555,28 @@ async function run() {
   await capture("approve-once-waiting", ["action has not executed", "Waiting status and bottom dock", "exact authority visible"], onceWaiting.receipt);
   if (existsSync(oncePath)) throw new Error("Protected action executed while Approve once remained pending.");
   await click("#approveOnce");
-  const onceAccepted = await waitForThread(productSession, threadId, (detail) => (
-    detail.interactions.find((item) => String(item.id) === String(once.id))?.completionStatus === "accepted"
-  ), "approve-once resumed completion");
+  let onceAccepted;
+  try {
+    onceAccepted = await waitForThread(productSession, threadId, (detail) => (
+      detail.interactions.find((item) => String(item.id) === String(once.id))?.completionStatus === "accepted"
+    ), "approve-once resumed completion");
+  } catch (error) {
+    const detail = await threadDetail(productSession, threadId);
+    const interaction = detail.interactions.find((item) => String(item.id) === String(once.id));
+    const receipt = detail.approvals.find((candidate) => candidate.request.requestId === onceWaiting.dock.requestId);
+    let trace;
+    try {
+      trace = await failedTraceDiagnostics(once, threadId, "approve-once-timeout");
+    } catch (diagnosticError) {
+      trace = { exportError: diagnosticError.message };
+    }
+    throw new Error(`Approve-once continuation failed. Diagnostics: ${JSON.stringify({
+      interaction,
+      receipt,
+      markerContent: await markerText(oncePath),
+      trace,
+    })}`, { cause: error });
+  }
   const approveOnceContent = await markerText(oncePath);
   if (approveOnceContent !== "approved-once\n") throw new Error("Approve once did not execute the protected action.");
   const onceReceipt = onceAccepted.approvals.find((receipt) => receipt.request.requestId === onceWaiting.dock.requestId);
