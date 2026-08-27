@@ -1,4 +1,6 @@
-use super::{SqliteProductStore, catalog};
+use super::{
+    SqliteProductStore, catalog, context_drafts::ensure_context_confirmation_restore_safe,
+};
 use crate::product::{
     AcceptedInteractionCompletion, Interaction, InteractionId, InteractionModelSelection,
     ModelFamilyId, PreparedInteractionBinding, ProviderId, ThreadId, ValidateModelSelectionCommand,
@@ -293,6 +295,15 @@ impl SqliteProductStore {
         harness_configuration_name: &str,
     ) -> Result<bool, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut confirmation_ids = input.context_confirmation_ids.to_vec();
+        confirmation_ids.sort();
+        if confirmation_ids.iter().any(|id| id.trim().is_empty())
+            || confirmation_ids.windows(2).any(|ids| ids[0] == ids[1])
+        {
+            return Err(StorageError::IncompatibleSchema(
+                "context confirmation IDs must be non-empty and unique".into(),
+            ));
+        }
         let attempt: Option<(String, String)> = sqlx::query_as(
             "SELECT outcome,effect_boundary FROM interaction_attempts WHERE id=?1 AND interaction_id=?2",
         )
@@ -308,10 +319,11 @@ impl SqliteProductStore {
                 ),
             ));
         }
-        let retry_row = sqlx::query("SELECT completion_status,input_identity,input_digest,model_provider_id,provider_model_id,model_family_id,harness_configuration_name FROM interactions WHERE id=?1")
+        let retry_row = sqlx::query("SELECT thread_id,completion_status,input_identity,input_digest,model_provider_id,provider_model_id,model_family_id,harness_configuration_name FROM interactions WHERE id=?1")
             .bind(interaction_id.value())
             .fetch_one(&mut *transaction)
             .await?;
+        let thread_id: i64 = retry_row.try_get("thread_id")?;
         let status: String = retry_row.try_get("completion_status")?;
         if status != "not_started" {
             let exact_replay = retry_row
@@ -337,6 +349,18 @@ impl SqliteProductStore {
                     .as_deref()
                     == Some(harness_configuration_name);
             if exact_replay {
+                let consumed: Vec<String> = sqlx::query_scalar(
+                    "SELECT draft_id FROM node_context_draft_resolutions WHERE consumed_interaction_id=?1 ORDER BY draft_id",
+                )
+                .bind(interaction_id.value())
+                .fetch_all(&mut *transaction)
+                .await?;
+                if consumed != confirmation_ids {
+                    return Err(StorageError::IncompatibleSchema(
+                        "interaction retry identity was reused with different context confirmations"
+                            .into(),
+                    ));
+                }
                 transaction.commit().await?;
                 return Ok(false);
             }
@@ -395,6 +419,56 @@ impl SqliteProductStore {
                         .bind(interaction_id.value()).bind(context_position as i64).bind(annotation_position as i64).bind(annotation)
                         .execute(&mut *transaction).await?;
                 }
+            }
+            let mut submitted_annotations = input
+                .contexts
+                .iter()
+                .flat_map(|context| {
+                    context.annotations.iter().map(|annotation| {
+                        (
+                            context.target.node_id,
+                            context.target.source_interaction_node_id,
+                            context.target.source_layer_id,
+                            annotation.as_str(),
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+            for draft_id in &confirmation_ids {
+                let row = sqlx::query("SELECT target_node_id,source_interaction_node_id,source_layer_id,composer_text FROM node_context_draft_resolutions WHERE draft_id=?1 AND thread_id=?2 AND outcome='confirmed' AND dismissed_at IS NULL AND consumed_interaction_id IS NULL")
+                    .bind(draft_id)
+                    .bind(thread_id)
+                    .fetch_optional(&mut *transaction)
+                    .await?
+                    .ok_or_else(|| StorageError::ContextDraftConflict {
+                        code: "context_confirmation_not_pending",
+                        message: "A submitted context confirmation is no longer pending.".into(),
+                    })?;
+                let target = (
+                    row.try_get::<i64, _>("target_node_id")?,
+                    row.try_get::<i64, _>("source_interaction_node_id")?,
+                    row.try_get::<i64, _>("source_layer_id")?,
+                    row.try_get::<String, _>("composer_text")?,
+                );
+                let Some(position) = submitted_annotations.iter().position(|candidate| {
+                    candidate.0 == target.0
+                        && candidate.1 == target.1
+                        && candidate.2 == target.2
+                        && candidate.3 == target.3
+                }) else {
+                    return Err(StorageError::ContextDraftConflict {
+                        code: "context_confirmation_payload_mismatch",
+                        message: "A submitted context confirmation does not match the interaction contexts."
+                            .into(),
+                    });
+                };
+                submitted_annotations.swap_remove(position);
+                sqlx::query("UPDATE node_context_draft_resolutions SET consumed_interaction_id=?1 WHERE draft_id=?2 AND thread_id=?3 AND consumed_interaction_id IS NULL")
+                    .bind(interaction_id.value())
+                    .bind(draft_id)
+                    .bind(thread_id)
+                    .execute(&mut *transaction)
+                    .await?;
             }
         }
         if result.rows_affected() == 0 {
@@ -515,6 +589,17 @@ impl SqliteProductStore {
                 "interaction was not running while finalizing its attempt".into(),
             ));
         }
+        if failure.return_to_unsent {
+            ensure_context_confirmation_restore_safe(
+                &mut transaction,
+                failure.interaction_id.value(),
+            )
+            .await?;
+            sqlx::query("UPDATE node_context_draft_resolutions SET consumed_interaction_id=NULL WHERE consumed_interaction_id=?1")
+                .bind(failure.interaction_id.value())
+                .execute(&mut *transaction)
+                .await?;
+        }
         transaction.commit().await?;
         Ok(())
     }
@@ -555,8 +640,20 @@ impl SqliteProductStore {
         interaction_id: InteractionId,
         harness_configuration_name: &str,
     ) -> Result<(), StorageError> {
-        sqlx::query("UPDATE interactions SET completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='running'")
-            .bind(harness_configuration_name).bind(interaction_id.value()).execute(&self.pool).await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let restored = sqlx::query("UPDATE interactions SET completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='running'")
+            .bind(harness_configuration_name).bind(interaction_id.value()).execute(&mut *transaction).await?;
+        if restored.rows_affected() != 1 {
+            return Err(StorageError::IncompatibleSchema(
+                "interaction was not running while returning its draft to unsent".into(),
+            ));
+        }
+        ensure_context_confirmation_restore_safe(&mut transaction, interaction_id.value()).await?;
+        sqlx::query("UPDATE node_context_draft_resolutions SET consumed_interaction_id=NULL WHERE consumed_interaction_id=?1")
+            .bind(interaction_id.value())
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
         Ok(())
     }
 }
@@ -821,6 +918,7 @@ mod tests {
             input_identity: "retry-input",
             input_digest: "sha256:retry-input",
             contexts: &contexts,
+            context_confirmation_ids: &[],
         };
         let first = store.claim_interaction_retry(
             thread.root_interaction_id,
@@ -861,6 +959,7 @@ mod tests {
                     input_identity: "retry-input-conflict",
                     input_digest: "sha256:retry-input-conflict",
                     contexts: &conflicting_contexts,
+                    context_confirmation_ids: &[],
                 },
                 &next_model,
                 "codex-basic",

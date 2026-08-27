@@ -38,7 +38,13 @@ impl NodeContextDraftConfirmationService {
             .runtime
             .as_ref()
             .ok_or(NodeContextDraftConfirmationError::TargetUnavailable)?;
-        let draft = self.product.node_context_draft(thread_id, draft_id).await?;
+        let draft = match self.product.node_context_draft(thread_id, draft_id).await {
+            Ok(draft) => draft,
+            Err(ProductError::NotFound(_)) => {
+                return Err(NodeContextDraftConfirmationError::TargetUnavailable);
+            }
+            Err(error) => return Err(error.into()),
+        };
         if draft.text.trim().is_empty() {
             return Err(ProductError::Invalid(
                 "An annotation is required before this draft can be confirmed.".into(),

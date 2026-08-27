@@ -17,8 +17,15 @@ import { createRelayerIcon } from "./icons.js";
 import { graphLayoutSignature, projectLayerNodePositions } from "./graph-layout.js";
 import { renderMarkdown } from "./markdown.js";
 import { productWorkspaceMarkup } from "./view.js";
-import { restoredDraftForInteraction } from "../interaction-failure-model.js";
+import {
+  confirmationRestorationKey,
+  restoredDraftForInteraction,
+} from "../interaction-failure-model.js";
 import { createNodeContextDraftController } from "../node-context-drafts.js";
+import {
+  captureComposerSubmission,
+  settleComposerSubmission,
+} from "./composer-submission.js";
 import {
   annotationNavigationContext,
   annotationRatingLabel,
@@ -521,13 +528,62 @@ export function sendAttemptBlocksThread(pendingThreadId, currentThreadId) {
   return pendingThreadId != null && String(pendingThreadId) === String(currentThreadId);
 }
 
+export function threadHasInFlightSend(inFlightThreadIds, threadId) {
+  return inFlightThreadIds.has(String(threadId));
+}
+
+export function releaseInFlightSend(inFlightSends, attempt) {
+  if (!attempt || inFlightSends.get(String(attempt.threadId)) !== attempt) return false;
+  inFlightSends.delete(String(attempt.threadId));
+  return true;
+}
+
+export function confirmationSendReplayIntent({
+  intent,
+  threadId,
+  draftScopeKey,
+  promptRevision,
+  contextRevision,
+  replayContextRevision,
+  modelSelection,
+}) {
+  if (!intent?.contextConfirmationIds?.length) return null;
+  if (!sendIntentIsCurrentThread(threadId, intent.threadId)) return null;
+  if (intent.draftScopeKey !== draftScopeKey) return null;
+  if (!Object.is(intent.submission.prompt.revision, promptRevision)) return null;
+  if (!Object.is(replayContextRevision, contextRevision)) return null;
+  return JSON.stringify(intent.modelSelection ?? null) === JSON.stringify(modelSelection ?? null)
+    ? intent
+    : null;
+}
+
+export function confirmationSendFailureMayHaveCommitted(error) {
+  return error?.status == null || Number(error.status) >= 500;
+}
+
+export function settleConfirmationSendReplay(replays, {
+  threadId,
+  intent,
+  contextRevision,
+  preserve,
+}) {
+  const next = new Map(replays);
+  const key = String(threadId);
+  if (preserve) next.set(key, Object.freeze({ intent, contextRevision }));
+  else next.delete(key);
+  return next;
+}
+
 export function interactionSendIntent({
   threadId,
   draftScopeKey,
   promptValue,
+  promptRevision = 0,
   contexts,
+  contextRevision = 0,
   modelSelection,
 }) {
+  const confirmationIds = contextConfirmationIds(contexts);
   return Object.freeze({
     threadId,
     draftScopeKey,
@@ -535,6 +591,13 @@ export function interactionSendIntent({
     text: String(promptValue).trim(),
     contexts,
     contextPayload: Object.freeze(interactionContextPayload(contexts)),
+    contextConfirmationIds: Object.freeze(confirmationIds),
+    submission: captureComposerSubmission({
+      threadId,
+      scopeKey: draftScopeKey,
+      prompt: { value: promptValue, revision: promptRevision },
+      contexts: { value: contexts, revision: contextRevision },
+    }),
     modelSelection,
   });
 }
@@ -563,8 +626,111 @@ export function interactionContextPayload(contexts = []) {
   }));
 }
 
+export function contextConfirmationIds(contexts = []) {
+  return contexts.flatMap((context) => (
+    context.annotationConfirmations || []
+  )).filter(Boolean).map((confirmation) => confirmation.draftId);
+}
+
+export function composerContextsFromConfirmations(confirmations = []) {
+  const contexts = [];
+  for (const confirmation of confirmations) {
+    let context = contexts.find((candidate) => (
+      String(candidate.target.nodeId) === String(confirmation.target.nodeId)
+      && String(candidate.target.sourceInteractionNodeId)
+        === String(confirmation.target.sourceInteractionNodeId)
+      && String(candidate.target.sourceLayerId) === String(confirmation.target.sourceLayerId)
+    ));
+    if (!context) {
+      context = {
+        target: confirmation.target,
+        node: confirmation.targetNode,
+        annotations: [],
+        annotationConfirmations: [],
+      };
+      contexts.push(context);
+    }
+    context.annotations.push(confirmation.annotation);
+    context.annotationConfirmations.push(confirmation);
+  }
+  return contexts;
+}
+
+export function composerContextsMergedWithConfirmations(contexts, confirmations) {
+  const merged = composerContextsFromConfirmations(confirmations);
+  for (const context of contexts) {
+    for (const [index, annotation] of (context.annotations || []).entries()) {
+      if (context.annotationConfirmations?.[index]) continue;
+      let target = merged.find((candidate) => (
+        String(candidate.target.nodeId) === String(context.target.nodeId)
+        && String(candidate.target.sourceInteractionNodeId)
+          === String(context.target.sourceInteractionNodeId)
+        && String(candidate.target.sourceLayerId) === String(context.target.sourceLayerId)
+      ));
+      if (!target) {
+        target = {
+          target: context.target,
+          node: context.node,
+          annotations: [],
+          annotationConfirmations: [],
+        };
+        merged.push(target);
+      }
+      target.annotations.push(annotation);
+      target.annotationConfirmations.push(null);
+    }
+  }
+  return merged;
+}
+
+export function settledComposerContextsWithConfirmations(contexts, confirmations) {
+  return {
+    ...contexts,
+    value: composerContextsMergedWithConfirmations(contexts.value, confirmations),
+  };
+}
+
+export function composerConfirmationAuthorityChanged(contexts, confirmations) {
+  const identity = (confirmation) => JSON.stringify([
+    String(confirmation.draftId),
+    interactionContextTargetKey(confirmation.target),
+    String(confirmation.annotation),
+    Number(confirmation.confirmationRevision ?? 0),
+  ]);
+  const local = contexts.flatMap((context) => (
+    context.annotationConfirmations || []
+  )).filter(Boolean).map(identity).sort();
+  const authoritative = confirmations.map(identity).sort();
+  return JSON.stringify(local) !== JSON.stringify(authoritative);
+}
+
+export async function refreshComposerContextsAfterFailedConfirmationSend({
+  controller,
+  threadId,
+  currentContextState,
+}) {
+  await controller.load(threadId);
+  const state = currentContextState();
+  const confirmations = controller.confirmationsForThread(threadId);
+  return composerConfirmationAuthorityChanged(state.value, confirmations)
+    ? {
+      changed: true,
+      sourceValue: state.value,
+      sourceRevision: state.revision,
+      value: composerContextsMergedWithConfirmations(state.value, confirmations),
+    }
+    : {
+      changed: false,
+      sourceValue: state.value,
+      sourceRevision: state.revision,
+      value: state.value,
+    };
+}
+
 export function contextEditorCanConfirm(editor) {
-  return Boolean(editor) && (editor.attaching || Boolean(String(editor.value).trim()));
+  return Boolean(editor) && (
+    (editor.attaching && !editor.durable) || Boolean(String(editor.value).trim())
+  );
 }
 
 export function contextEditorPresentation(editor, stagingDisabled = false, resolving = false) {
@@ -594,6 +760,10 @@ export function applyMountedContextEditorInput({
   threadId,
   nodeId,
 }) {
+  if (textarea.disabled) {
+    textarea.value = editor.value;
+    return false;
+  }
   if (editor.durable && !controller.update(threadId, nodeId, textarea.value)) {
     textarea.value = editor.value;
     return false;
@@ -617,17 +787,37 @@ export function contextConfirmationDestination(currentThreadId, confirmingThread
   return String(currentThreadId) === String(confirmingThreadId) ? "current" : "deferred";
 }
 
+export function interactionContextTargetKey(target) {
+  return JSON.stringify([
+    String(target?.nodeId),
+    String(target?.sourceInteractionNodeId),
+    String(target?.sourceLayerId),
+  ]);
+}
+
 export function applyContextEditor(contexts, editor, node, target) {
   if (!contextEditorCanConfirm(editor)) return contexts;
-  const next = contexts.map((context) => ({ ...context, annotations: [...context.annotations] }));
-  let context = next.find((candidate) => String(candidate.target.nodeId) === String(node.id));
+  const next = contexts.map((context) => ({
+    ...context,
+    annotations: [...context.annotations],
+    annotationConfirmations: [...(context.annotationConfirmations || [])],
+  }));
+  const targetKey = interactionContextTargetKey(target);
+  let context = next.find((candidate) => (
+    interactionContextTargetKey(candidate.target) === targetKey
+  ));
   if (!context) {
-    context = { target, node, annotations: [] };
+    context = { target, node, annotations: [], annotationConfirmations: [] };
     next.push(context);
   }
   const value = String(editor.value).trim();
-  if (editor.annotationIndex != null) context.annotations[editor.annotationIndex] = value;
-  else if (value) context.annotations.push(value);
+  if (editor.annotationIndex != null) {
+    context.annotations[editor.annotationIndex] = value;
+    context.annotationConfirmations[editor.annotationIndex] = editor.confirmation || null;
+  } else if (value) {
+    context.annotations.push(value);
+    context.annotationConfirmations.push(editor.confirmation || null);
+  }
   return next;
 }
 
@@ -635,39 +825,62 @@ export function contextDetachNeedsConfirmation(context) {
   return Boolean(context?.annotations?.length);
 }
 
-export function removeContextAnnotation(contexts, nodeId, annotationIndex) {
+export function removeContextAnnotation(contexts, target, annotationIndex) {
+  const targetKey = interactionContextTargetKey(target);
   return contexts.map((context) => (
-    String(context.target.nodeId) === String(nodeId)
+    interactionContextTargetKey(context.target) === targetKey
       ? {
         ...context,
         annotations: context.annotations.filter((_, index) => index !== annotationIndex),
+        annotationConfirmations: (context.annotationConfirmations || [])
+          .filter((_, index) => index !== annotationIndex),
       }
       : context
   ));
 }
 
-export function interactionContextDraftTransition(draft, event) {
-  if (event === "durable_send" || event === "thread_change") {
-    return { contexts: [], editor: null };
-  }
-  if (event === "send_failure") return draft;
-  throw new Error(`Unknown interaction context draft event: ${event}`);
+export function interactionContextTargetForEditor({
+  nodeId,
+  contextTarget,
+  selectedContextTarget,
+  sourceInteractionNodeId,
+  sourceLayerId,
+}) {
+  if (contextTarget) return contextTarget;
+  if (String(selectedContextTarget?.nodeId) === String(nodeId)) return selectedContextTarget;
+  return { nodeId, sourceInteractionNodeId, sourceLayerId };
 }
 
-export function composerDraftMatchesSubmission({
-  currentThreadId,
-  submittedThreadId,
-  currentDraftScopeKey,
-  submittedDraftScopeKey,
-  currentPromptValue,
-  submittedPromptValue,
-  currentContexts,
-  submittedContexts,
-}) {
-  return String(currentThreadId) === String(submittedThreadId)
-    && currentDraftScopeKey === submittedDraftScopeKey
-    && currentPromptValue === submittedPromptValue
-    && currentContexts === submittedContexts;
+export function createComposerContextState() {
+  return {
+    value: [],
+    revision: 0,
+  };
+}
+
+export function transitionComposerContextState(state, event) {
+  if (event.type === "user_replace") {
+    return {
+      ...state,
+      value: event.value,
+      revision: state.revision + 1,
+    };
+  }
+  if (event.type === "settlement") {
+    return {
+      ...state,
+      value: event.field.value,
+      revision: event.field.revision,
+    };
+  }
+  if (event.type === "thread_change") {
+    const revision = state.revision + 1;
+    return {
+      value: [],
+      revision,
+    };
+  }
+  throw new Error(`Unknown composer context state event: ${String(event.type)}`);
 }
 
 export function composerDraftScopeKey(threadId, interactionId) {
@@ -682,20 +895,26 @@ export function transitionComposerDraftScope(state, {
   threadId,
   interactionId,
   currentPromptValue,
+  currentPromptRevision = 0,
   restoredDraft = null,
 }) {
   const nextScopeKey = composerDraftScopeKey(threadId, interactionId);
   if (state.activeScopeKey === nextScopeKey) {
     const currentDraft = state.drafts.get(nextScopeKey) ?? {
       promptValue: currentPromptValue,
+      promptRevision: currentPromptRevision,
       restoredDraftInteractionId: null,
     };
     const restorationArrived = restoredDraft
       && String(currentDraft.restoredDraftInteractionId) !== String(interactionId);
     const promptValue = restorationArrived ? restoredDraft.text : currentPromptValue;
+    const promptRevision = restorationArrived
+      ? currentPromptRevision + 1
+      : currentPromptRevision;
     const drafts = new Map(state.drafts);
     drafts.set(nextScopeKey, {
       promptValue,
+      promptRevision,
       restoredDraftInteractionId: restorationArrived
         ? interactionId
         : currentDraft.restoredDraftInteractionId,
@@ -703,6 +922,7 @@ export function transitionComposerDraftScope(state, {
     return {
       state: { activeScopeKey: nextScopeKey, drafts },
       promptValue,
+      promptRevision,
     };
   }
 
@@ -710,6 +930,7 @@ export function transitionComposerDraftScope(state, {
   if (state.activeScopeKey !== null) {
     drafts.set(state.activeScopeKey, {
       promptValue: currentPromptValue,
+      promptRevision: currentPromptRevision,
       restoredDraftInteractionId: state.drafts.get(state.activeScopeKey)
         ?.restoredDraftInteractionId ?? null,
     });
@@ -717,20 +938,27 @@ export function transitionComposerDraftScope(state, {
   if (!drafts.has(nextScopeKey)) {
     drafts.set(nextScopeKey, {
       promptValue: restoredDraft?.text ?? "",
+      promptRevision: currentPromptRevision + 1,
       restoredDraftInteractionId: restoredDraft ? interactionId : null,
     });
   }
   return {
     state: { activeScopeKey: nextScopeKey, drafts },
     promptValue: drafts.get(nextScopeKey).promptValue,
+    promptRevision: drafts.get(nextScopeKey).promptRevision,
   };
 }
 
-export function clearSubmittedComposerDraft(state, submittedScopeKey, submittedPromptValue, currentPromptValue) {
-  const retainedPromptValue = state.activeScopeKey === submittedScopeKey
-    ? currentPromptValue
-    : state.drafts.get(submittedScopeKey)?.promptValue;
-  if (retainedPromptValue !== submittedPromptValue) return state;
+export function clearSubmittedComposerDraft(
+  state,
+  submittedScopeKey,
+  submittedPromptRevision,
+  currentPromptRevision,
+) {
+  const retainedPromptRevision = state.activeScopeKey === submittedScopeKey
+    ? currentPromptRevision
+    : state.drafts.get(submittedScopeKey)?.promptRevision;
+  if (retainedPromptRevision !== submittedPromptRevision) return state;
   const drafts = new Map(state.drafts);
   drafts.delete(submittedScopeKey);
   return { activeScopeKey: state.activeScopeKey, drafts };
@@ -810,6 +1038,21 @@ export function actionActivationPresentation(
     label: retryableInvoke ? `Retry ${actionPresentation(action).label}` : actionPresentation(action).label,
     disabled: navigational ? false : invoked || !canInvokeMutatingActions,
   });
+}
+
+export async function navigateWorkspaceAction({
+  action,
+  activation,
+  sourceNode,
+  collapseContextPreviews,
+  onNavigateResolvedInvoke,
+  onNavigateLayer,
+}) {
+  if (activation.resolvedInvoke) {
+    await onNavigateResolvedInvoke(action, { beforeCommit: collapseContextPreviews });
+    return;
+  }
+  await onNavigateLayer(action.targetLayerId, { action, sourceNode });
 }
 
 export function actionReviewKind(action) {
@@ -911,12 +1154,13 @@ export function createProductWorkspace({
   let annotationSubject = null;
   let annotationThreadId = null;
   let renderedThreadId = null;
+  let renderedWithoutThread = false;
   let annotationRatingTouched = false;
   let editingAnnotation = null;
   let inspectorFocusOrigin = null;
-  let composerContexts = [];
+  let composerContextState = createComposerContextState();
   let contextEditor = null;
-  let openComposerContextNodeId = null;
+  let openComposerContextKey = null;
   let contextPopoverOpen = false;
   const contextNodeOverrides = new Map();
   let selectedContextTarget = null;
@@ -927,18 +1171,55 @@ export function createProductWorkspace({
     })
     : null;
   const contextDraftLoads = new Map();
-  const deferredContextConfirmations = new Map();
+  const loadedContextDraftThreads = new Set();
+  const recoveredConfirmationThreads = new Set();
+  const contextDraftLoadRetryTimers = new Map();
+  const contextDraftLoadRetryAttempts = new Map();
+  let disposed = false;
 
   const ensureContextDraftsLoaded = (threadId) => {
     if (!contextDraftController || threadId == null) return Promise.resolve();
     const key = String(threadId);
+    if (loadedContextDraftThreads.has(key)) return Promise.resolve();
     if (contextDraftLoads.has(key)) return contextDraftLoads.get(key);
-    const load = contextDraftController.load(threadId).catch((error) => {
-      contextDraftLoads.delete(key);
-      throw error;
-    });
+    const expectedRevision = String(getThread()?.id) === String(threadId)
+      ? composerContextState.revision
+      : null;
+    const load = contextDraftController.load(threadId)
+      .then(() => {
+        if (disposed) return;
+        loadedContextDraftThreads.add(key);
+        contextDraftLoadRetryAttempts.delete(key);
+        hydrateConfirmedComposerContexts(threadId, expectedRevision);
+      })
+      .catch((error) => {
+        contextDraftLoads.delete(key);
+        loadedContextDraftThreads.delete(key);
+        throw error;
+      });
     contextDraftLoads.set(key, load);
     return load;
+  };
+
+  const scheduleContextDraftLoadRetry = (threadId) => {
+    const key = String(threadId);
+    if (disposed || contextDraftLoadRetryTimers.has(key)) return;
+    const attempt = contextDraftLoadRetryAttempts.get(key) || 0;
+    const delayMs = Math.min(500 * (2 ** Math.min(attempt, 4)), 5_000);
+    contextDraftLoadRetryAttempts.set(key, attempt + 1);
+    const timer = graphWindow.setTimeout(() => {
+      contextDraftLoadRetryTimers.delete(key);
+      if (disposed || String(getThread()?.id) !== key || loadedContextDraftThreads.has(key)) {
+        contextDraftLoadRetryAttempts.delete(key);
+        return;
+      }
+      void ensureContextDraftsLoaded(threadId).catch((error) => {
+        if (!disposed && String(getThread()?.id) === key) {
+          scheduleContextDraftLoadRetry(threadId);
+        }
+      });
+    }, delayMs);
+    contextDraftLoadRetryTimers.set(key, timer);
   };
 
   const $ = (selector) => root.querySelector(selector);
@@ -1125,7 +1406,10 @@ export function createProductWorkspace({
     const history = getNavigationHistory() || {};
     const presentation = historyNavigationPresentation(history);
     if (presentation[direction].disabled) return;
-    await onNavigateHistory(direction);
+    const beforeCommit = history[`${direction}ChangesTurn`] === true
+      ? collapseContextPreviews
+      : undefined;
+    await onNavigateHistory(direction, { beforeCommit });
   };
   $("#historyBack").onclick = (event) => (
     activateHistoryControl(event.currentTarget, "back", navigateHistory)
@@ -1135,10 +1419,12 @@ export function createProductWorkspace({
   );
   $("#previousTurn").onclick = () => {
     closeTurnPopover();
+    collapseContextPreviews();
     onSelectTurn(-1);
   };
   $("#nextTurn").onclick = () => {
     closeTurnPopover();
+    collapseContextPreviews();
     onSelectTurn(1);
   };
   const closeContextPopover = ({ restoreFocus = false } = {}) => {
@@ -1146,6 +1432,10 @@ export function createProductWorkspace({
     $("#interactionContextPopover").classList.add("hidden");
     $("#interactionContextPill").setAttribute("aria-expanded", "false");
     if (restoreFocus) $("#interactionContextPill").focus();
+  };
+  const collapseContextPreviews = () => {
+    openComposerContextKey = null;
+    closeContextPopover();
   };
   const closeContextPopoverFromOutside = (event) => {
     if (!contextPopoverOpen || $("#turnPicker").contains(event.target)) return;
@@ -1515,7 +1805,10 @@ export function createProductWorkspace({
     if (delta === null) return;
     event.preventDefault();
     const turnButton = delta < 0 ? $("#previousTurn") : $("#nextTurn");
-    if (!turnButton.disabled) onSelectTurn(delta);
+    if (!turnButton.disabled) {
+      collapseContextPreviews();
+      onSelectTurn(delta);
+    }
   };
   const localStagePoint = (event) => {
     const rect = graphStage.getBoundingClientRect();
@@ -1631,13 +1924,34 @@ export function createProductWorkspace({
   const cancelContextDraftSend = $("#cancelContextDraftSend");
   const confirmContextDraftSend = $("#confirmContextDraftSend");
   let sendAttempt = null;
+  const inFlightSendThreads = new Map();
   let sendWarningIntent = null;
+  let failedConfirmationSends = new Map();
+  const establishConfirmationReplayContextRevision = (threadId) => {
+    const key = String(threadId);
+    const replay = failedConfirmationSends.get(key);
+    if (!replay || replay.contextRevision != null
+      || String(getThread()?.id) !== key) return;
+    failedConfirmationSends = settleConfirmationSendReplay(failedConfirmationSends, {
+      threadId: key,
+      intent: replay.intent,
+      contextRevision: composerContextState.revision,
+      preserve: true,
+    });
+  };
   let pickerInheritanceKey = null;
   let composerDraftScopeState = createComposerDraftScopeState();
+  let composerPromptRevision = 0;
   let restoredDraftActive = false;
   let modelPicker;
-  const contextForNode = (nodeId) => composerContexts.find((context) => (
-    String(context.target.nodeId) === String(nodeId)
+  const replaceComposerContexts = (value) => {
+    composerContextState = transitionComposerContextState(composerContextState, {
+      type: "user_replace",
+      value,
+    });
+  };
+  const contextForTarget = (target) => composerContextState.value.find((context) => (
+    interactionContextTargetKey(context.target) === interactionContextTargetKey(target)
   ));
   const contextStagingDisabled = () => {
     const status = composerStatusForThread(getState(), getThread());
@@ -1652,12 +1966,19 @@ export function createProductWorkspace({
     contextEditor = null;
     renderComposerContexts();
   };
+  const closeDurableEditor = (ownerThreadId, draftId) => {
+    if (contextEditor?.durable
+      && contextEditor.ownerThreadId === String(ownerThreadId)
+      && contextEditor.draftId === draftId) {
+      contextEditor = null;
+    }
+  };
   const updateAttachContextControl = () => {
     const button = $("#attachNodeContext");
     const node = resolveInteractionContextNode(
       selection.selectedNodeId,
       getState().nodes,
-      composerContexts,
+      composerContextState.value,
       contextNodeOverrides,
     );
     const status = composerStatusForThread(getState(), getThread());
@@ -1668,31 +1989,43 @@ export function createProductWorkspace({
     button.classList.toggle("hidden", !available);
     button.disabled = !available;
   };
-  const openContextEditor = (node, annotationIndex = null) => {
+  const openContextEditor = (node, annotationIndex = null, contextTarget = null) => {
     if (!node || contextStagingDisabled() || contextEditor) return;
-    const context = contextForNode(node.id);
+    const context = contextTarget ? contextForTarget(contextTarget) : null;
     const interaction = currentInteraction();
-    const sourceTarget = String(selectedContextTarget?.nodeId) === String(node.id)
-      ? selectedContextTarget
-      : {
-        nodeId: node.id,
-        sourceInteractionNodeId: interaction?.graphNodeId,
-        sourceLayerId: currentLayerId(),
-      };
-    const durableDraft = annotationIndex == null && contextDraftController
-      ? contextDraftController.open(getThread()?.id, sourceTarget, {
-        id: node.id,
-        kind: node.kind,
-        icon: node.icon,
-        title: node.title,
-        detail: node.detail,
-        state: node.state || "accepted",
-      })
-      : null;
-    openComposerContextNodeId = context ? node.id : null;
-    contextEditor = {
+    const sourceTarget = interactionContextTargetForEditor({
       nodeId: node.id,
+      contextTarget: context?.target,
+      selectedContextTarget,
+      sourceInteractionNodeId: interaction?.graphNodeId,
+      sourceLayerId: currentLayerId(),
+    });
+    let durableDraft = null;
+    if (annotationIndex == null && contextDraftController) {
+      try {
+        durableDraft = contextDraftController.open(getThread()?.id, sourceTarget, {
+          id: node.id,
+          kind: node.kind,
+          icon: node.icon,
+          title: node.title,
+          detail: node.detail,
+          state: node.state || "accepted",
+        });
+      } catch (error) {
+        toast(error.message);
+        return;
+      }
+    }
+    openComposerContextKey = null;
+    contextEditor = {
+      ownerThreadId: String(getThread()?.id),
+      nodeId: node.id,
+      draftId: durableDraft?.id || null,
+      target: durableDraft?.target || sourceTarget,
       annotationIndex,
+      confirmation: annotationIndex == null
+        ? null
+        : context?.annotationConfirmations?.[annotationIndex] || null,
       value: annotationIndex == null
         ? durableDraft?.text || ""
         : context?.annotations?.[annotationIndex] || "",
@@ -1703,32 +2036,78 @@ export function createProductWorkspace({
     $("#contextAnnotationEditor")?.focus();
   };
   const applyConfirmedContextDraft = (confirmation) => {
-    composerContexts = applyContextEditor(
-      composerContexts,
-      { attaching: false, annotationIndex: null, value: confirmation.annotation },
+    replaceComposerContexts(applyContextEditor(
+      composerContextState.value,
+      {
+        attaching: false,
+        annotationIndex: null,
+        value: confirmation.annotation,
+        confirmation,
+      },
       confirmation.targetNode,
       confirmation.target,
-    );
-    openComposerContextNodeId = confirmation.target.nodeId;
+    ));
+    openComposerContextKey = null;
+  };
+  const hydrateConfirmedComposerContexts = (threadId, expectedRevision = null) => {
+    if (String(getThread()?.id) !== String(threadId)) return;
+    const confirmations = contextDraftController.confirmationsForThread(threadId);
+    replaceComposerContexts(expectedRevision != null
+      && composerContextState.revision !== expectedRevision
+      ? composerContextsMergedWithConfirmations(composerContextState.value, confirmations)
+      : composerContextsFromConfirmations(confirmations));
+    establishConfirmationReplayContextRevision(threadId);
+    openComposerContextKey = null;
+    renderComposerContexts();
+  };
+  const reconcileConfirmedComposerContexts = async (threadId, { reload = false } = {}) => {
+    if (reload) {
+      try {
+        await contextDraftController.load(threadId);
+      } catch {
+        // Reconcile successful local dismissals even when the authoritative refresh fails.
+      }
+    }
+    if (String(getThread()?.id) !== String(threadId)) return;
+    replaceComposerContexts(composerContextsMergedWithConfirmations(
+      composerContextState.value,
+      contextDraftController.confirmationsForThread(threadId),
+    ));
+    renderComposerContexts();
   };
   function renderContextDraftStatus() {
     if (!contextEditor?.durable) return;
     const status = $(".composer-context-draft-status");
     if (!status) return;
     const draft = contextDraftController.draftForNode(getThread()?.id, contextEditor.nodeId);
+    if (draft) {
+      contextEditor.draftId = draft.id;
+      contextEditor.target = draft.target;
+    }
     const textarea = $("#contextAnnotationEditor");
-    if (draft?.editVersion === 0 && textarea && contextEditor.value !== draft.text) {
+    if (draft?.editVersion === 0
+      && textarea
+      && (contextEditor.value !== draft.text || textarea.value !== draft.text)) {
       contextEditor.value = draft.text;
       textarea.value = draft.text;
       resizeContextEditorTextarea(textarea);
       const confirm = textarea.parentElement?.querySelector('[aria-label="Confirm annotation"]');
       if (confirm) confirm.disabled = !String(draft.text).trim() || contextStagingDisabled();
     }
-    const editorPresentation = contextEditorPresentation(
+    const resolving = Boolean(contextEditor.resolving)
+      || ["confirming", "discarding", "reconciling"].includes(draft?.operation?.kind);
+    const basePresentation = contextEditorPresentation(
       contextEditor,
       contextStagingDisabled(),
-      ["confirming", "discarding"].includes(draft?.operation?.kind),
+      resolving,
     );
+    const canContinueLocalEditing = capabilities.canCompose
+      && contextEditor.ownerThreadId === String(getThread()?.id)
+      && !resolving;
+    const editorPresentation = {
+      ...basePresentation,
+      textareaDisabled: basePresentation.textareaDisabled && !canContinueLocalEditing,
+    };
     syncMountedContextEditorControls(textarea, editorPresentation, contextEditor.value);
     const presentation = contextDraftStatusPresentation(draft);
     status.className = presentation.className;
@@ -1737,10 +2116,102 @@ export function createProductWorkspace({
   function renderComposerContexts() {
     const tray = $("#composerContextTray");
     const parts = [];
-    const openContext = composerContexts.find((context) => (
-      String(context.node.id) === String(openComposerContextNodeId)
+    if (
+      contextEditor
+      && contextEditor.ownerThreadId !== String(getThread()?.id)
+    ) {
+      contextEditor = null;
+    }
+    const liveDurableDraft = contextEditor?.durable
+      ? contextDraftController.draftForNode(contextEditor.ownerThreadId, contextEditor.nodeId)
+      : null;
+    if (liveDurableDraft) {
+      contextEditor.draftId = liveDurableDraft.id;
+      contextEditor.target = liveDurableDraft.target;
+    }
+    const openContext = composerContextState.value.find((context) => (
+      interactionContextTargetKey(context.target) === openComposerContextKey
     ));
-    if (!openContext) openComposerContextNodeId = null;
+    if (!openContext) openComposerContextKey = null;
+
+    const editorIdentity = contextEditor ? JSON.stringify([
+      contextEditor.ownerThreadId,
+      contextEditor.draftId,
+      String(contextEditor.nodeId),
+      contextEditor.target?.sourceInteractionNodeId,
+      contextEditor.target?.sourceLayerId,
+      contextEditor.annotationIndex,
+      contextEditor.attaching,
+      contextEditor.durable,
+    ]) : null;
+    const existingTextarea = $("#contextAnnotationEditor");
+    if (
+      editorIdentity !== null
+      && existingTextarea?.dataset.contextEditorIdentity === editorIdentity
+      && existingTextarea.isConnected
+    ) {
+      const active = graphDocument.activeElement === existingTextarea;
+      const value = existingTextarea.value;
+      const selectionStart = existingTextarea.selectionStart;
+      const selectionEnd = existingTextarea.selectionEnd;
+      const selectionDirection = existingTextarea.selectionDirection;
+      const scrollTop = existingTextarea.scrollTop;
+      const scrollLeft = existingTextarea.scrollLeft;
+      contextEditor.value = value;
+      const resolving = Boolean(contextEditor.resolving)
+        || ["confirming", "discarding", "reconciling"]
+          .includes(liveDurableDraft?.operation?.kind);
+      const editorPresentation = contextEditorPresentation(
+        contextEditor,
+        contextStagingDisabled(),
+        resolving,
+      );
+      const editorNode = resolveInteractionContextNode(
+        contextEditor.nodeId,
+        getState().nodes,
+        composerContextState.value,
+        contextNodeOverrides,
+      );
+      existingTextarea.placeholder = contextEditor.attaching
+        ? "Add a note (optional for a new node)…"
+        : "Add an annotation…";
+      if (editorNode) {
+        existingTextarea.setAttribute("aria-label", `Annotation for ${editorNode.title}`);
+      }
+      const canContinueLocalEditing = capabilities.canCompose
+        && contextEditor.ownerThreadId === String(getThread()?.id)
+        && !resolving;
+      existingTextarea.disabled = editorPresentation.textareaDisabled && !canContinueLocalEditing;
+      const editorBody = existingTextarea.closest(".composer-context-inline-editor");
+      const confirm = editorBody?.querySelector('[aria-label="Confirm annotation"]');
+      const remove = editorBody?.querySelector(
+        '[aria-label^="Delete annotation being edited for "], [aria-label^="Discard annotation draft"]',
+      );
+      const cancel = editorBody?.querySelector('[aria-label="Cancel annotation edit"]');
+      if (confirm) {
+        confirm.disabled = editorPresentation.confirmDisabled
+          || (contextEditor.durable && !String(value).trim());
+      }
+      if (cancel) cancel.disabled = editorPresentation.controlsDisabled;
+      if (remove) {
+        remove.disabled = editorPresentation.controlsDisabled
+          || (!contextEditor.durable && contextEditor.annotationIndex == null);
+      }
+      resizeContextEditorTextarea(existingTextarea);
+      existingTextarea.value = value;
+      if (!existingTextarea.disabled) {
+        existingTextarea.setSelectionRange(
+          selectionStart,
+          selectionEnd,
+          selectionDirection || "none",
+        );
+        existingTextarea.scrollTop = scrollTop;
+        existingTextarea.scrollLeft = scrollLeft;
+        if (active) existingTextarea.focus({ preventScroll: true });
+      }
+      syncComposer();
+      return;
+    }
 
     const createEditorBody = (node) => {
       const durableDraft = contextEditor?.durable
@@ -1749,7 +2220,8 @@ export function createProductWorkspace({
       const editorPresentation = contextEditorPresentation(
         contextEditor,
         contextStagingDisabled(),
-        ["confirming", "discarding"].includes(durableDraft?.operation?.kind),
+        Boolean(contextEditor.resolving)
+          || ["confirming", "discarding"].includes(durableDraft?.operation?.kind),
       );
       const body = graphDocument.createElement("div");
       body.className = "composer-context-inline-editor";
@@ -1760,6 +2232,7 @@ export function createProductWorkspace({
         ? "Add a note (optional for a new node)…"
         : "Add an annotation…";
       textarea.setAttribute("aria-label", `Annotation for ${node.title}`);
+      textarea.dataset.contextEditorIdentity = editorIdentity;
       textarea.value = contextEditor.value;
       textarea.disabled = editorPresentation.textareaDisabled;
       const controls = graphDocument.createElement("div");
@@ -1783,8 +2256,8 @@ export function createProductWorkspace({
         if (contextEditor?.durable) {
           const discardingEditor = contextEditor;
           try {
-            await contextDraftController.discard(getThread()?.id, node.id);
-            if (contextEditor === discardingEditor) contextEditor = null;
+            await contextDraftController.discard(discardingEditor.ownerThreadId, node.id);
+            closeDurableEditor(discardingEditor.ownerThreadId, discardingEditor.draftId);
             renderComposerContexts();
           } catch (error) {
             toast(error.message);
@@ -1792,11 +2265,27 @@ export function createProductWorkspace({
           return;
         }
         if (contextEditor.annotationIndex != null) {
-          composerContexts = removeContextAnnotation(
-            composerContexts,
-            node.id,
-            contextEditor.annotationIndex,
-          );
+          const removingEditor = contextEditor;
+          const removingThreadId = removingEditor.ownerThreadId;
+          if (removingEditor.confirmation) {
+            try {
+              await contextDraftController.dismissConfirmations(
+                removingThreadId,
+                [removingEditor.confirmation.draftId],
+              );
+            } catch (error) {
+              await reconcileConfirmedComposerContexts(removingThreadId, { reload: true });
+              toast(error.message);
+              return;
+            }
+          }
+          if (contextEditor !== removingEditor
+            || String(getThread()?.id) !== String(removingThreadId)) return;
+          replaceComposerContexts(removeContextAnnotation(
+            composerContextState.value,
+            removingEditor.target,
+            removingEditor.annotationIndex,
+          ));
           contextEditor = null;
           renderComposerContexts();
         }
@@ -1827,36 +2316,115 @@ export function createProductWorkspace({
             }
             if (contextConfirmationDestination(getThread()?.id, confirmingThreadId) === "current") {
               applyConfirmedContextDraft(confirmation);
-              if (contextEditor === confirmingEditor) contextEditor = null;
+              closeDurableEditor(confirmingThreadId, confirmingEditor.draftId);
               renderComposerContexts();
-            } else {
-              const pending = deferredContextConfirmations.get(confirmingThreadId) || [];
-              if (!pending.some((item) => item.draftId === confirmation.draftId)) {
-                pending.push(confirmation);
-              }
-              deferredContextConfirmations.set(confirmingThreadId, pending);
             }
           } catch (error) {
+            const resolvedElsewhere = contextDraftController
+              .confirmationsForThread(confirmingThreadId)
+              .some((item) => item.draftId === confirmingEditor.draftId);
+            if (resolvedElsewhere
+              && !contextDraftController.draftForNode(confirmingThreadId, node.id)) {
+              closeDurableEditor(confirmingThreadId, confirmingEditor.draftId);
+              await reconcileConfirmedComposerContexts(confirmingThreadId);
+            }
             toast(error.message);
             renderComposerContexts();
           }
           return;
         }
-        const interaction = currentInteraction();
-        const sourceTarget = String(selectedContextTarget?.nodeId) === String(node.id)
-          ? selectedContextTarget
-          : null;
-        composerContexts = applyContextEditor(
-          composerContexts,
+        if (contextEditor.confirmation) {
+          const updatingEditor = contextEditor;
+          const updatingThreadId = updatingEditor.ownerThreadId;
+          const updatingRevision = composerContextState.revision;
+          const submittedValue = updatingEditor.value;
+          const confirmationId = updatingEditor.confirmation.draftId;
+          updatingEditor.resolving = true;
+          confirm.disabled = true;
+          renderComposerContexts();
+          const reprojectUpdatingEditor = () => {
+            const authoritativeConfirmations = contextDraftController
+              .confirmationsForThread(updatingThreadId);
+            const refreshed = authoritativeConfirmations
+              .find((item) => item.draftId === confirmationId) || null;
+            updatingEditor.confirmation = refreshed;
+            if (contextEditor !== updatingEditor
+              || String(getThread()?.id) !== String(updatingThreadId)) return;
+            let reconciledContexts = composerContextsMergedWithConfirmations(
+              composerContextState.value,
+              authoritativeConfirmations,
+            );
+            if (!refreshed) {
+              reconciledContexts = applyContextEditor(
+                reconciledContexts,
+                {
+                  ...updatingEditor,
+                  annotationIndex: null,
+                  value: submittedValue,
+                  confirmation: null,
+                },
+                node,
+                updatingEditor.target,
+              );
+            }
+            const reboundContext = reconciledContexts.find((context) => (
+              interactionContextTargetKey(context.target)
+                === interactionContextTargetKey(updatingEditor.target)
+            ));
+            updatingEditor.annotationIndex = refreshed
+              ? reboundContext?.annotationConfirmations?.findIndex((confirmation) => (
+                confirmation?.draftId === confirmationId
+              ))
+              : (reboundContext?.annotations?.length ?? 0) - 1;
+            replaceComposerContexts(reconciledContexts);
+          };
+          try {
+            const updatedConfirmation = await contextDraftController.updateConfirmation(
+              updatingThreadId,
+              confirmationId,
+              submittedValue,
+            );
+            if (!updatedConfirmation) {
+              reprojectUpdatingEditor();
+              updatingEditor.resolving = false;
+              if (contextEditor === updatingEditor) renderComposerContexts();
+              return;
+            }
+            updatingEditor.confirmation = updatedConfirmation;
+          } catch (error) {
+            updatingEditor.resolving = false;
+            let reconciled = false;
+            try {
+              await contextDraftController.load(updatingThreadId);
+              reconciled = true;
+            } catch {
+              // Keep the typed value available for retry even if reconciliation also fails.
+            }
+            if (contextEditor === updatingEditor) {
+              if (reconciled) reprojectUpdatingEditor();
+              renderComposerContexts();
+            }
+            toast(error.message);
+            return;
+          }
+          if (!updatingEditor.confirmation
+            || contextEditor !== updatingEditor
+            || String(getThread()?.id) !== String(updatingThreadId)
+            || composerContextState.revision !== updatingRevision) {
+            updatingEditor.resolving = false;
+            if (contextEditor === updatingEditor) renderComposerContexts();
+            return;
+          }
+          updatingEditor.value = submittedValue;
+          updatingEditor.resolving = false;
+        }
+        replaceComposerContexts(applyContextEditor(
+          composerContextState.value,
           contextEditor,
           node,
-          sourceTarget || {
-            nodeId: node.id,
-            sourceInteractionNodeId: interaction?.graphNodeId,
-            sourceLayerId: currentLayerId(),
-          },
-        );
-        openComposerContextNodeId = node.id;
+          contextEditor.target,
+        ));
+        openComposerContextKey = null;
         contextEditor = null;
         renderComposerContexts();
       };
@@ -1914,7 +2482,7 @@ export function createProductWorkspace({
       add.textContent = "+";
       add.title = "Add annotation";
       add.setAttribute("aria-label", `Add annotation to ${openContext.node.title}`);
-      add.onclick = () => openContextEditor(openContext.node);
+      add.onclick = () => openContextEditor(openContext.node, null, openContext.target);
       add.disabled = contextStagingDisabled() || Boolean(contextEditor);
       const close = graphDocument.createElement("button");
       close.type = "button";
@@ -1924,7 +2492,7 @@ export function createProductWorkspace({
       close.setAttribute("aria-label", `Close ${openContext.node.title} annotations`);
       close.onclick = () => {
         if (contextEditor) return;
-        openComposerContextNodeId = null;
+        openComposerContextKey = null;
         renderComposerContexts();
       };
       close.disabled = Boolean(contextEditor);
@@ -1934,7 +2502,8 @@ export function createProductWorkspace({
       list.className = "composer-context-annotations";
       openContext.annotations.forEach((annotation, index) => {
         const item = graphDocument.createElement("li");
-        const editing = String(contextEditor?.nodeId) === String(openContext.node.id)
+        const editing = interactionContextTargetKey(contextEditor?.target)
+            === interactionContextTargetKey(openContext.target)
           && contextEditor.annotationIndex === index;
         if (editing) {
           item.className = "editing";
@@ -1951,7 +2520,7 @@ export function createProductWorkspace({
             "aria-label",
             `Edit annotation ${index + 1} for ${openContext.node.title}`,
           );
-          edit.onclick = () => openContextEditor(openContext.node, index);
+          edit.onclick = () => openContextEditor(openContext.node, index, openContext.target);
           edit.disabled = contextStagingDisabled() || Boolean(contextEditor);
           const remove = graphDocument.createElement("button");
           remove.type = "button";
@@ -1962,13 +2531,33 @@ export function createProductWorkspace({
             "aria-label",
             `Delete annotation ${index + 1} for ${openContext.node.title}`,
           );
-          remove.onclick = () => {
+          remove.onclick = async () => {
             if (contextStagingDisabled() || contextEditor) return;
-            composerContexts = removeContextAnnotation(
-              composerContexts,
-              openContext.node.id,
+            const confirmation = openContext.annotationConfirmations?.[index];
+            if (confirmation) {
+              const removingThreadId = String(getThread()?.id);
+              const removingRevision = composerContextState.revision;
+              try {
+                await contextDraftController.dismissConfirmations(
+                  removingThreadId,
+                  [confirmation.draftId],
+                );
+              } catch (error) {
+                await reconcileConfirmedComposerContexts(removingThreadId, { reload: true });
+                toast(error.message);
+                return;
+              }
+              if (String(getThread()?.id) !== removingThreadId) return;
+              if (composerContextState.revision !== removingRevision) {
+                await reconcileConfirmedComposerContexts(removingThreadId);
+                return;
+              }
+            }
+            replaceComposerContexts(removeContextAnnotation(
+              composerContextState.value,
+              openContext.target,
               index,
-            );
+            ));
             renderComposerContexts();
           };
           remove.disabled = contextStagingDisabled() || Boolean(contextEditor);
@@ -1976,7 +2565,8 @@ export function createProductWorkspace({
         }
         list.append(item);
       });
-      const adding = String(contextEditor?.nodeId) === String(openContext.node.id)
+      const adding = interactionContextTargetKey(contextEditor?.target)
+          === interactionContextTargetKey(openContext.target)
         && contextEditor.annotationIndex == null
         && !contextEditor.attaching;
       if (adding) {
@@ -1993,7 +2583,7 @@ export function createProductWorkspace({
       ? resolveInteractionContextNode(
         contextEditor.nodeId,
         getState().nodes,
-        composerContexts,
+        composerContextState.value,
         contextNodeOverrides,
       )
       : null;
@@ -2012,11 +2602,30 @@ export function createProductWorkspace({
       parts.push(editor);
     }
 
-    if (composerContexts.length) {
+    const standaloneEditorContext = !contextEditor?.attaching && !openContext
+      ? contextForTarget(contextEditor?.target)
+      : null;
+    if (standaloneEditorContext) {
+      const editor = graphDocument.createElement("section");
+      editor.className = "composer-context-editor";
+      const heading = graphDocument.createElement("div");
+      heading.className = "composer-context-heading";
+      heading.append(createRelayerIcon(
+        standaloneEditorContext.node.icon
+          || standaloneEditorContext.node.metadata?.relayer?.icon,
+      ));
+      const title = graphDocument.createElement("strong");
+      title.textContent = standaloneEditorContext.node.title;
+      heading.append(title);
+      editor.append(heading, createEditorBody(standaloneEditorContext.node));
+      parts.push(editor);
+    }
+
+    if (composerContextState.value.length) {
       const pills = graphDocument.createElement("div");
       pills.className = "composer-context-pills";
       pills.setAttribute("aria-label", "Attached node context");
-      composerContexts.forEach((context) => {
+      composerContextState.value.forEach((context) => {
         const wrap = graphDocument.createElement("div");
         wrap.className = "composer-context-pill-wrap";
         const pill = graphDocument.createElement("button");
@@ -2024,7 +2633,7 @@ export function createProductWorkspace({
         pill.className = "composer-context-pill";
         pill.setAttribute(
           "aria-expanded",
-          String(String(openComposerContextNodeId) === String(context.node.id)),
+          String(openComposerContextKey === interactionContextTargetKey(context.target)),
         );
         pill.setAttribute("aria-label", `Show ${context.node.title} annotations`);
         pill.append(createRelayerIcon(context.node.icon || context.node.metadata?.relayer?.icon));
@@ -2038,9 +2647,10 @@ export function createProductWorkspace({
         pill.append(title, count, chevron);
         pill.onclick = () => {
           if (contextEditor) return;
-          openComposerContextNodeId = String(openComposerContextNodeId) === String(context.node.id)
+          const contextKey = interactionContextTargetKey(context.target);
+          openComposerContextKey = openComposerContextKey === contextKey
             ? null
-            : context.node.id;
+            : contextKey;
           renderComposerContexts();
         };
         pill.disabled = Boolean(contextEditor);
@@ -2050,13 +2660,37 @@ export function createProductWorkspace({
         detach.textContent = "×";
         detach.title = "Detach node";
         detach.setAttribute("aria-label", `Detach ${context.node.title}`);
-        detach.onclick = () => {
+        detach.onclick = async () => {
           if (contextStagingDisabled() || contextEditor) return;
           if (contextDetachNeedsConfirmation(context)
             && !graphWindow.confirm(`Detach ${context.node.title} and its annotations?`)) return;
-          composerContexts = composerContexts.filter((candidate) => candidate !== context);
-          if (String(openComposerContextNodeId) === String(context.node.id)) {
-            openComposerContextNodeId = null;
+          const confirmationIds = (context.annotationConfirmations || [])
+            .filter(Boolean)
+            .map((confirmation) => confirmation.draftId);
+          if (confirmationIds.length) {
+            const detachingThreadId = String(getThread()?.id);
+            const detachingRevision = composerContextState.revision;
+            try {
+              await contextDraftController.dismissConfirmations(
+                detachingThreadId,
+                confirmationIds,
+              );
+            } catch (error) {
+              await reconcileConfirmedComposerContexts(detachingThreadId, { reload: true });
+              toast(error.message);
+              return;
+            }
+            if (String(getThread()?.id) !== detachingThreadId) return;
+            if (composerContextState.revision !== detachingRevision) {
+              await reconcileConfirmedComposerContexts(detachingThreadId);
+              return;
+            }
+          }
+          replaceComposerContexts(
+            composerContextState.value.filter((candidate) => candidate !== context),
+          );
+          if (openComposerContextKey === interactionContextTargetKey(context.target)) {
+            openComposerContextKey = null;
           }
           renderComposerContexts();
         };
@@ -2075,13 +2709,30 @@ export function createProductWorkspace({
   }
   const syncComposer = () => {
     resizeComposerTextarea(prompt);
-    send.disabled = !composerSubmissionReady(
+    const contextDraftsReady = !contextDraftController
+      || loadedContextDraftThreads.has(String(getThread()?.id));
+    const failedConfirmationSend = failedConfirmationSends.get(String(getThread()?.id));
+    const replayIntent = confirmationSendReplayIntent({
+      intent: failedConfirmationSend?.intent,
+      threadId: getThread()?.id,
+      draftScopeKey: composerDraftScopeState.activeScopeKey,
+      promptRevision: composerPromptRevision,
+      contextRevision: composerContextState.revision,
+      replayContextRevision: failedConfirmationSend?.contextRevision,
+      modelSelection: pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection,
+    });
+    const replayReady = replayIntent
+      && !prompt.disabled
+      && (modelPicker?.isReady() ?? false)
+      && !contextEditor;
+    send.disabled = threadHasInFlightSend(inFlightSendThreads, getThread()?.id)
+      || !contextDraftsReady || (!replayReady && !composerSubmissionReady(
       prompt.value,
       prompt.disabled,
       modelPicker?.isReady() ?? false,
-      composerContexts,
+      composerContextState.value,
       Boolean(contextEditor),
-    );
+    ));
     send.title = modelPicker?.isReady()
       ? "Send"
       : "Choose an available model in Settings before sending";
@@ -2092,9 +2743,13 @@ export function createProductWorkspace({
     confirmContextDraftSend.disabled = false;
     syncComposer();
   };
+  const cancelSendAttempt = () => {
+    releaseInFlightSend(inFlightSendThreads, sendAttempt);
+    releaseSendAttempt();
+  };
   const closeContextDraftSendWarning = ({ focusSend = true, cancelAttempt = true } = {}) => {
     sendWarningIntent = null;
-    if (cancelAttempt) releaseSendAttempt();
+    if (cancelAttempt) cancelSendAttempt();
     if (contextDraftSendWarning.open) contextDraftSendWarning.close();
     if (focusSend) send.focus({ preventScroll: true });
   };
@@ -2152,39 +2807,116 @@ export function createProductWorkspace({
 
   const submitInteraction = async (intent) => {
     const submittedThreadId = intent.threadId;
-    const submittedDraftScopeKey = intent.draftScopeKey;
-    const submittedPromptValue = intent.promptValue;
     const submittedContexts = intent.contexts;
+    const submittedConfirmationIds = intent.contextConfirmationIds;
+    const submission = intent.submission;
     prompt.disabled = true;
     send.disabled = true;
     renderComposerContexts();
     updateAttachContextControl();
     try {
-      await onSubmitInteraction(intent.text, intent.modelSelection, intent.contextPayload);
+      await onSubmitInteraction(
+        intent.text,
+        intent.modelSelection,
+        intent.contextPayload,
+        submittedConfirmationIds,
+      );
+      const failedConfirmationSend = failedConfirmationSends.get(String(submittedThreadId));
+      if (failedConfirmationSend?.intent === intent) {
+        failedConfirmationSends = settleConfirmationSendReplay(failedConfirmationSends, {
+          threadId: submittedThreadId,
+          intent,
+          contextRevision: null,
+          preserve: false,
+        });
+      }
+      contextDraftController?.consumeConfirmations(
+        submittedThreadId,
+        submittedConfirmationIds,
+      );
+      const currentComposer = {
+        threadId: getThread()?.id,
+        scopeKey: composerDraftScopeState.activeScopeKey,
+        prompt: { value: prompt.value, revision: composerPromptRevision },
+        contexts: {
+          value: composerContextState.value,
+          revision: composerContextState.revision,
+        },
+      };
+      const settlement = settleComposerSubmission({
+        submission,
+        outcome: "succeeded",
+        current: currentComposer,
+      });
       composerDraftScopeState = clearSubmittedComposerDraft(
         composerDraftScopeState,
-        submittedDraftScopeKey,
-        submittedPromptValue,
-        prompt.value,
+        settlement.submittedScopeKey,
+        submission.prompt.revision,
+        composerPromptRevision,
       );
-      if (composerDraftMatchesSubmission({
-        currentThreadId: getThread()?.id,
-        submittedThreadId,
-        currentDraftScopeKey: composerDraftScopeState.activeScopeKey,
-        submittedDraftScopeKey,
-        currentPromptValue: prompt.value,
-        submittedPromptValue,
-        currentContexts: composerContexts,
-        submittedContexts,
-      })) {
-        prompt.value = "";
-        ({ contexts: composerContexts, editor: contextEditor } = interactionContextDraftTransition(
-          { contexts: composerContexts, editor: contextEditor },
-          "durable_send",
-        ));
+      if (settlement.current.prompt !== currentComposer.prompt) {
+        prompt.value = settlement.current.prompt.value;
+        composerPromptRevision = settlement.current.prompt.revision;
+      }
+      if (submittedConfirmationIds.length
+        && String(getThread()?.id) === String(submittedThreadId)) {
+        composerContextState = transitionComposerContextState(composerContextState, {
+          type: "settlement",
+          field: settledComposerContextsWithConfirmations(
+            settlement.current.contexts,
+            contextDraftController.confirmationsForThread(submittedThreadId),
+          ),
+        });
+        if (composerContextState.value.length === 0) {
+          contextEditor = null;
+          openComposerContextKey = null;
+        }
+        renderComposerContexts();
+      } else if (settlement.current.contexts !== currentComposer.contexts) {
+        composerContextState = transitionComposerContextState(composerContextState, {
+          type: "settlement",
+          field: settlement.current.contexts,
+        });
+        if (composerContextState.value.length === 0) {
+          contextEditor = null;
+          openComposerContextKey = null;
+        }
         renderComposerContexts();
       }
     } catch (error) {
+      const preserveReplay = submittedConfirmationIds.length
+        && confirmationSendFailureMayHaveCommitted(error);
+      if (submittedConfirmationIds.length && contextDraftController) {
+        try {
+          const refreshed = await refreshComposerContextsAfterFailedConfirmationSend({
+            controller: contextDraftController,
+            threadId: submittedThreadId,
+            currentContextState: () => composerContextState,
+          });
+          if (String(getThread()?.id) === String(submittedThreadId)
+            && composerContextState.value === refreshed.sourceValue
+            && composerContextState.revision === refreshed.sourceRevision
+            && refreshed.changed) {
+            replaceComposerContexts(refreshed.value);
+            if (composerContextState.value.length === 0) {
+              contextEditor = null;
+              openComposerContextKey = null;
+            }
+            renderComposerContexts();
+          }
+        } catch {
+          // Preserve the exact local composition when authority cannot be refreshed.
+        }
+      }
+      failedConfirmationSends = settleConfirmationSendReplay(failedConfirmationSends, {
+        threadId: submittedThreadId,
+        intent,
+        contextRevision: preserveReplay
+          && String(getThread()?.id) === String(submittedThreadId)
+          ? composerContextState.revision
+          : null,
+        preserve: preserveReplay,
+      });
       toast(error.message);
     } finally {
       prompt.disabled = composerDisabledForState(
@@ -2204,18 +2936,32 @@ export function createProductWorkspace({
       || !sendIntentIsCurrentThread(getThread()?.id, sendWarningIntent?.threadId)
     )) return;
     const threadId = getThread()?.id;
-    if (sendAttemptBlocksThread(sendAttempt?.threadId, threadId)) return;
+    if (threadHasInFlightSend(inFlightSendThreads, threadId)
+      || sendAttemptBlocksThread(sendAttempt?.threadId, threadId)) return;
+    const failedConfirmationSend = failedConfirmationSends.get(String(threadId));
+    const replayIntent = confirmationSendReplayIntent({
+      intent: failedConfirmationSend?.intent,
+      threadId,
+      draftScopeKey: composerDraftScopeState.activeScopeKey,
+      promptRevision: composerPromptRevision,
+      contextRevision: composerContextState.revision,
+      replayContextRevision: failedConfirmationSend?.contextRevision,
+      modelSelection: pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection,
+    });
     const intent = draftOverride
       ? sendWarningIntent
-      : interactionSendIntent({
+      : replayIntent || interactionSendIntent({
         threadId,
         draftScopeKey: composerDraftScopeState.activeScopeKey,
         promptValue: prompt.value,
-        contexts: composerContexts,
+        promptRevision: composerPromptRevision,
+        contexts: composerContextState.value,
+        contextRevision: composerContextState.revision,
         modelSelection: pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection,
       });
     if (!intent || !sendIntentIsCurrentThread(threadId, intent.threadId)) return;
     const attempt = { threadId: String(threadId) };
+    inFlightSendThreads.set(attempt.threadId, attempt);
     sendAttempt = attempt;
     send.setAttribute("aria-busy", "true");
     try {
@@ -2239,7 +2985,9 @@ export function createProductWorkspace({
     } catch (error) {
       toast(error.message);
     } finally {
+      releaseInFlightSend(inFlightSendThreads, attempt);
       if (sendAttempt === attempt) releaseSendAttempt();
+      else syncComposer();
     }
   };
   confirmContextDraftSend.onclick = () => {
@@ -2255,7 +3003,16 @@ export function createProductWorkspace({
       onOpenSettings,
     });
   }
-  prompt.oninput = syncComposer;
+  prompt.oninput = () => {
+    failedConfirmationSends = settleConfirmationSendReplay(failedConfirmationSends, {
+      threadId: getThread()?.id,
+      intent: null,
+      contextRevision: null,
+      preserve: false,
+    });
+    composerPromptRevision += 1;
+    syncComposer();
+  };
   bindComposerKeydown(prompt, () => {
     if (!modelPicker?.isReady()) modelPicker?.open("model");
     else send.click();
@@ -2265,7 +3022,7 @@ export function createProductWorkspace({
     const node = resolveInteractionContextNode(
       selection.selectedNodeId,
       getState().nodes,
-      composerContexts,
+      composerContextState.value,
       contextNodeOverrides,
     );
     openContextEditor(node);
@@ -2408,9 +3165,10 @@ export function createProductWorkspace({
         row.append(meta);
       }
       row.onclick = () => {
-        closeTurnPopover();
         const intent = turnSelectionIntent(turns, interaction?.id, turn.id);
+        closeTurnPopover();
         if (!intent) return;
+        collapseContextPreviews();
         if (onSelectTurnById) onSelectTurnById(intent.interactionId);
         else onSelectTurn(intent.offset);
       };
@@ -2487,13 +3245,21 @@ export function createProductWorkspace({
       if (contextDraftSendWarning.open) {
         closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });
       }
+      renderedWithoutThread = true;
       showEmpty();
       return;
     }
     const threadId = String(thread.id);
-    if (contextDraftController && !contextDraftLoads.has(threadId)) {
+    const enteringLoadedThread = renderedWithoutThread
+      && loadedContextDraftThreads.has(threadId);
+    renderedWithoutThread = false;
+    if (contextDraftController
+      && !contextDraftLoads.has(threadId)
+      && !contextDraftLoadRetryTimers.has(threadId)) {
       void ensureContextDraftsLoaded(thread.id).catch((error) => {
+        if (disposed) return;
         toast(`Annotation drafts could not be restored: ${error.message}`);
+        scheduleContextDraftLoadRetry(thread.id);
       });
     }
     if (renderedThreadId !== null && renderedThreadId !== threadId) {
@@ -2509,18 +3275,27 @@ export function createProductWorkspace({
       $("#inspector").classList.add("hidden");
       selection.selectedNodeId = null;
       selectedContextTarget = null;
-      ({ contexts: composerContexts, editor: contextEditor } = interactionContextDraftTransition(
-        { contexts: composerContexts, editor: contextEditor },
-        "thread_change",
+      contextEditor = null;
+      composerContextState = transitionComposerContextState(composerContextState, {
+        type: "thread_change",
+      });
+      openComposerContextKey = null;
+      if (contextDraftController.confirmationsForThread(thread.id).length) {
+        replaceComposerContexts(composerContextsFromConfirmations(
+          contextDraftController.confirmationsForThread(thread.id),
+        ));
+      }
+    }
+    if (enteringLoadedThread) {
+      replaceComposerContexts(composerContextsMergedWithConfirmations(
+        composerContextState.value,
+        contextDraftController.confirmationsForThread(thread.id),
       ));
-      openComposerContextNodeId = null;
+      openComposerContextKey = null;
+      renderComposerContexts();
     }
+    establishConfirmationReplayContextRevision(thread.id);
     renderedThreadId = threadId;
-    const deferred = deferredContextConfirmations.get(threadId) || [];
-    if (deferred.length) {
-      deferredContextConfirmations.delete(threadId);
-      deferred.forEach(applyConfirmedContextDraft);
-    }
     if (annotationSubject?.anchor.kind !== "thread") {
       const interactionId = currentInteraction(state, thread)?.id;
       const layerId = currentLayerId(state, thread);
@@ -2563,6 +3338,19 @@ export function createProductWorkspace({
     const latestInteraction = turns.at(-1);
     const restoredDraft = restoredDraftForInteraction(latestInteraction);
     restoredDraftActive = Boolean(restoredDraft);
+    const restoredConfirmationKey = confirmationRestorationKey(threadId, latestInteraction);
+    if (restoredConfirmationKey
+      && !recoveredConfirmationThreads.has(restoredConfirmationKey)
+      && contextDraftController) {
+      recoveredConfirmationThreads.add(restoredConfirmationKey);
+      contextDraftController.allowConfirmationRestoration(threadId);
+      loadedContextDraftThreads.delete(threadId);
+      void ensureContextDraftsLoaded(threadId).catch((error) => {
+        if (!disposed && String(getThread()?.id) === threadId) {
+          toast(`Confirmed context could not be restored: ${error.message}`);
+        }
+      });
+    }
     const retryMessage = $("#composerRetryMessage");
     retryMessage.classList.toggle("hidden", !restoredDraft);
     retryMessage.textContent = restoredDraft?.message ?? "";
@@ -2570,10 +3358,12 @@ export function createProductWorkspace({
       threadId,
       interactionId: latestInteraction?.id,
       currentPromptValue: prompt.value,
+      currentPromptRevision: composerPromptRevision,
       restoredDraft,
     });
     composerDraftScopeState = draftTransition.state;
     prompt.value = draftTransition.promptValue;
+    composerPromptRevision = draftTransition.promptRevision;
     const inheritanceKey = `${thread.id}:${latestInteraction?.id ?? "none"}`;
     if (modelPicker) {
       const replaceSelection = inheritanceKey !== pickerInheritanceKey;
@@ -3134,7 +3924,7 @@ export function createProductWorkspace({
     const node = resolveInteractionContextNode(
       id,
       state.nodes,
-      composerContexts,
+      composerContextState.value,
       contextNodeOverrides,
     );
     if (!node) return;
@@ -3243,8 +4033,14 @@ export function createProductWorkspace({
         if (activation.navigational) {
           button.disabled = true;
           try {
-            if (activation.resolvedInvoke) await onNavigateResolvedInvoke(action);
-            else await onNavigateLayer(action.targetLayerId, { action, sourceNode: node });
+            await navigateWorkspaceAction({
+              action,
+              activation,
+              sourceNode: node,
+              collapseContextPreviews,
+              onNavigateResolvedInvoke,
+              onNavigateLayer,
+            });
           } finally {
             if (button.isConnected) button.disabled = false;
           }
@@ -3266,11 +4062,15 @@ export function createProductWorkspace({
   }
 
   function dispose() {
+    disposed = true;
     releaseSendAttempt();
     if (contextDraftSendWarning.open) {
       closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });
     }
     modelPicker?.dispose();
+    for (const timer of contextDraftLoadRetryTimers.values()) graphWindow.clearTimeout(timer);
+    contextDraftLoadRetryTimers.clear();
+    contextDraftLoadRetryAttempts.clear();
     graphDocument.defaultView.removeEventListener("resize", repositionContextDraftSendWarning);
     cancelInspectorFit();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);

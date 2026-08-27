@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  confirmationRestorationKey,
   interactionSubmissionTarget,
   restoredDraftForInteraction,
 } from "../desktop/renderer/src/interaction-failure-model.js";
@@ -124,6 +125,23 @@ describe("composer provider lifecycle", () => {
     });
   });
 
+  it("restores confirmations again when the same interaction fails on a later retry attempt", () => {
+    const interaction = {
+      id: 91,
+      completionStatus: "not_started",
+      text: "Review this repository",
+      latestAttempt: {
+        id: 44,
+        outcome: "model_failed",
+        failureCategory: "rate_limit",
+      },
+    };
+
+    expect(confirmationRestorationKey(7, interaction)).toBe("7:91:44");
+    interaction.latestAttempt.id = 45;
+    expect(confirmationRestorationKey(7, interaction)).toBe("7:91:45");
+  });
+
   it("does not restore harness, graph, tool, permission, or app failures", () => {
     for (const failureCategory of ["harness_logic", "graph_validation", "tool_failure", "permission_denied", "application_bug"]) {
       expect(restoredDraftForInteraction({
@@ -162,6 +180,7 @@ describe("composer provider lifecycle", () => {
         text: "Review this repository carefully",
         inputId: "retry-input-2",
         contexts: [{ target: { nodeId: 8, sourceInteractionNodeId: 3, sourceLayerId: 4 }, annotations: ["new context"] }],
+        contextConfirmationIds: [],
         modelSelection: { familyId: 12, providerId: "openai-personal", modelId: "gpt-5.2" },
       },
     });

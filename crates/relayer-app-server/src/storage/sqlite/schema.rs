@@ -100,6 +100,10 @@ const NODE_CONTEXT_DRAFT_RESOLUTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("target_node_json", "TEXT", true, 0),
     ("text", "TEXT", true, 0),
     ("resolved_at", "TEXT", true, 0),
+    ("composer_text", "TEXT", false, 0),
+    ("composer_revision", "INTEGER", true, 0),
+    ("dismissed_at", "TEXT", false, 0),
+    ("consumed_interaction_id", "INTEGER", false, 0),
 ];
 const INTERACTION_ATTEMPT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "INTEGER", false, 1),
@@ -556,6 +560,15 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         "threads",
         "id",
         "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "node_context_draft_resolutions",
+        "consumed_interaction_id",
+        "interactions",
+        "id",
+        "SET NULL",
     )
     .await?;
     validate_foreign_key(

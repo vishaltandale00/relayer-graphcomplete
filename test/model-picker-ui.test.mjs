@@ -168,6 +168,7 @@ describe("composer model picker UI contract", () => {
       text: "Next",
       inputId: "send-1",
       contexts: [],
+      contextConfirmationIds: [],
       modelSelection: pickerPayload.modelSelection,
     });
     expect(followupRequestBody("Next", pickerPayload.modelSelection, "send-2")).not.toHaveProperty("harnessId");
@@ -182,11 +183,40 @@ describe("composer model picker UI contract", () => {
     expect(changed).not.toBe(first);
     const otherThread = stableFollowupInputId(4, "Next", selection, []);
     expect(otherThread).not.toBe(first);
+    expect(stableFollowupInputId(3, "Next", selection, [], ["confirmation-a"]))
+      .not.toBe(first);
     expect(stableFollowupInputId(3, "Next", selection, [])).toBe(first);
     markFollowupSendSucceeded(changed);
     expect(stableFollowupInputId(3, "Changed", selection, [])).not.toBe(changed);
     expect(stableFollowupInputId(3, "Next", selection, [])).toBe(first);
     expect(stableFollowupInputId(4, "Next", selection, [])).toBe(otherThread);
+
+    const contexts = [{
+      target: { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 },
+      annotations: ["Confirmed context"],
+    }];
+    const confirmationSend = stableFollowupInputId(
+      3,
+      "Confirmed follow-up",
+      selection,
+      contexts,
+      ["confirmation-a"],
+    );
+    expect(stableFollowupInputId(
+      3,
+      "Confirmed follow-up",
+      selection,
+      contexts,
+      ["confirmation-a"],
+    )).toBe(confirmationSend);
+    markFollowupSendSucceeded(confirmationSend);
+    expect(stableFollowupInputId(
+      3,
+      "Confirmed follow-up",
+      selection,
+      contexts,
+      ["confirmation-a"],
+    )).not.toBe(confirmationSend);
   });
 
   it("delegates the one trusted pre-inference refresh to the product backend", async () => {

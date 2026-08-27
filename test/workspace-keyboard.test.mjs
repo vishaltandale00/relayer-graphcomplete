@@ -12,14 +12,19 @@ import {
   bindComposerKeydown,
   clearSubmittedComposerDraft,
   composerDisabledForState,
-  composerDraftMatchesSubmission,
+  confirmationSendFailureMayHaveCommitted,
+  confirmationSendReplayIntent,
+  composerConfirmationAuthorityChanged,
   composerDraftScopeKey,
+  composerContextsFromConfirmations,
+  composerContextsMergedWithConfirmations,
   composerFocusRestoration,
   composerKeydownIntent,
   composerSubmissionReady,
   composerStatusForThread,
   contextDraftHasAnnotation,
   contextDraftSendWarningPresentation,
+  contextConfirmationIds,
   contextAnnotationCountLabel,
   contextDetachNeedsConfirmation,
   contextEditorCanConfirm,
@@ -38,15 +43,146 @@ import {
   syncMountedContextEditorControls,
   interactionContextPayload,
   interactionSendIntent,
-  interactionContextDraftTransition,
+  interactionContextTargetForEditor,
   removeContextAnnotation,
+  refreshComposerContextsAfterFailedConfirmationSend,
   resolveInteractionContextNode,
   sendIntentIsCurrentThread,
   sendAttemptBlocksThread,
+  releaseInFlightSend,
+  settleConfirmationSendReplay,
+  threadHasInFlightSend,
+  settledComposerContextsWithConfirmations,
   transitionComposerDraftScope,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace keyboard behavior", () => {
+  it("projects durable confirmations into grouped composer contexts with exact identities", () => {
+    const target = { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 };
+    const targetNode = { id: 7, title: "Queue" };
+    const confirmations = [
+      { draftId: "a", target, targetNode, annotation: "FIFO", draftRevision: 1 },
+      { draftId: "b", target, targetNode, annotation: "Bounded", draftRevision: 2 },
+    ];
+    const contexts = composerContextsFromConfirmations(confirmations);
+    expect(contexts).toEqual([{
+      target,
+      node: targetNode,
+      annotations: ["FIFO", "Bounded"],
+      annotationConfirmations: confirmations,
+    }]);
+    expect(contextConfirmationIds(contexts)).toEqual(["a", "b"]);
+  });
+
+  it("keeps repeated node IDs separate when their source occurrences differ", () => {
+    const target = { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 };
+    const targetNode = { id: 7, title: "Queue" };
+    const confirmations = [
+      { draftId: "a", target, targetNode, annotation: "First" },
+      {
+        draftId: "b",
+        target: { ...target, sourceInteractionNodeId: 9, sourceLayerId: 12 },
+        targetNode,
+        annotation: "Second",
+      },
+    ];
+    expect(composerContextsFromConfirmations(confirmations)).toHaveLength(2);
+  });
+
+  it("merges late restored confirmations without clearing newer ephemeral work", () => {
+    const target = { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 };
+    const targetNode = { id: 7, title: "Queue" };
+    const ephemeral = [{
+      target,
+      node: targetNode,
+      annotations: ["Newer"],
+      annotationConfirmations: [null],
+    }];
+    const confirmation = {
+      draftId: "a",
+      target,
+      targetNode,
+      annotation: "Restored",
+    };
+    expect(composerContextsMergedWithConfirmations(ephemeral, [confirmation])).toEqual([{
+      target,
+      node: targetNode,
+      annotations: ["Restored", "Newer"],
+      annotationConfirmations: [confirmation, null],
+    }]);
+  });
+
+  it("reprojects failed-send confirmation conflicts without dropping newer local work", async () => {
+    const target = { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 };
+    const targetNode = { id: 7, title: "Queue" };
+    const obsolete = {
+      draftId: "obsolete",
+      target,
+      targetNode,
+      annotation: "Consumed elsewhere",
+      confirmationRevision: 1,
+    };
+    const current = [{
+      target,
+      node: targetNode,
+      annotations: [obsolete.annotation, "Newer unsent note"],
+      annotationConfirmations: [obsolete, null],
+    }];
+
+    expect(composerConfirmationAuthorityChanged(current, [obsolete])).toBe(false);
+    expect(composerConfirmationAuthorityChanged(current, [])).toBe(true);
+    expect(composerContextsMergedWithConfirmations(current, [])).toEqual([{
+      target,
+      node: targetNode,
+      annotations: ["Newer unsent note"],
+      annotationConfirmations: [null],
+    }]);
+
+    const edited = {
+      ...obsolete,
+      annotation: "Authoritative edit",
+      confirmationRevision: 2,
+    };
+    expect(composerConfirmationAuthorityChanged(current, [edited])).toBe(true);
+    expect(composerContextsMergedWithConfirmations(current, [edited])).toEqual([{
+      target,
+      node: targetNode,
+      annotations: ["Authoritative edit", "Newer unsent note"],
+      annotationConfirmations: [edited, null],
+    }]);
+
+    const load = vi.fn(async () => undefined);
+    const refreshed = await refreshComposerContextsAfterFailedConfirmationSend({
+      controller: {
+        load,
+        confirmationsForThread: () => [],
+      },
+      threadId: "thread-a",
+      currentContextState: () => ({ value: current, revision: 7 }),
+    });
+    expect(load).toHaveBeenCalledWith("thread-a");
+    expect(refreshed).toEqual({
+      changed: true,
+      sourceValue: current,
+      sourceRevision: 7,
+      value: [{
+        target,
+        node: targetNode,
+        annotations: ["Newer unsent note"],
+        annotationConfirmations: [null],
+      }],
+    });
+
+    await expect(refreshComposerContextsAfterFailedConfirmationSend({
+      controller: {
+        load: vi.fn(async () => { throw new Error("offline"); }),
+        confirmationsForThread: vi.fn(),
+      },
+      threadId: "thread-a",
+      currentContextState: () => ({ value: current, revision: 7 }),
+    })).rejects.toThrow("offline");
+  });
+
   it("never presents a failed context-draft save as saved", () => {
     expect(contextDraftStatusPresentation({ status: "saved" }).text).toBe("Saved");
     expect(contextDraftStatusPresentation({ status: "error", error: "disk full" })).toEqual({
@@ -97,6 +233,32 @@ describe("product workspace keyboard behavior", () => {
     expect(sendAttemptBlocksThread(null, "thread-a")).toBe(false);
   });
 
+  it("retains the owning thread's in-flight lock across navigation", () => {
+    const attemptA1 = { threadId: "thread-a" };
+    const inFlightThreadIds = new Map([["thread-a", attemptA1]]);
+    expect(threadHasInFlightSend(inFlightThreadIds, "thread-a")).toBe(true);
+    expect(threadHasInFlightSend(inFlightThreadIds, "thread-b")).toBe(false);
+
+    // Returning to A cannot start A2 until A1 settles, even when the visible
+    // send-attempt pointer was released while B was rendered.
+    expect(sendAttemptBlocksThread(null, "thread-a")).toBe(false);
+    expect(threadHasInFlightSend(inFlightThreadIds, "thread-a")).toBe(true);
+    expect(releaseInFlightSend(inFlightThreadIds, attemptA1)).toBe(true);
+    expect(threadHasInFlightSend(inFlightThreadIds, "thread-a")).toBe(false);
+  });
+
+  it("does not let cancelled preflight cleanup release its replacement's lock", () => {
+    const attemptA1 = { threadId: "thread-a" };
+    const attemptA2 = { threadId: "thread-a" };
+    const inFlightSends = new Map([["thread-a", attemptA1]]);
+
+    expect(releaseInFlightSend(inFlightSends, attemptA1)).toBe(true);
+    inFlightSends.set("thread-a", attemptA2);
+    expect(releaseInFlightSend(inFlightSends, attemptA1)).toBe(false);
+    expect(inFlightSends.get("thread-a")).toBe(attemptA2);
+    expect(threadHasInFlightSend(inFlightSends, "thread-a")).toBe(true);
+  });
+
   it("snapshots the submitted composer payload before asynchronous draft restoration", () => {
     const contexts = [{
       target: { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 },
@@ -121,6 +283,137 @@ describe("product workspace keyboard behavior", () => {
       }],
     });
     expect(Object.isFrozen(intent)).toBe(true);
+  });
+
+  it("replays the exact confirmation-bearing intent after ambiguous failure", () => {
+    const confirmation = {
+      draftId: "confirmation-a",
+      target: { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 },
+      annotation: "Original context",
+    };
+    const intent = interactionSendIntent({
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptValue: "Original prompt",
+      promptRevision: 4,
+      contexts: [{
+        target: confirmation.target,
+        annotations: [confirmation.annotation],
+        annotationConfirmations: [confirmation],
+      }],
+      contextRevision: 8,
+      modelSelection: { providerId: "fixture", modelId: "deterministic" },
+    });
+
+    expect(confirmationSendReplayIntent({
+      intent,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptRevision: 4,
+      contextRevision: 9,
+      replayContextRevision: 9,
+      modelSelection: intent.modelSelection,
+    })).toBe(intent);
+    expect(confirmationSendReplayIntent({
+      intent,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptRevision: 5,
+      contextRevision: 9,
+      replayContextRevision: 9,
+      modelSelection: intent.modelSelection,
+    })).toBeNull();
+    expect(confirmationSendReplayIntent({
+      intent,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-b",
+      promptRevision: 4,
+      contextRevision: 9,
+      replayContextRevision: 9,
+      modelSelection: intent.modelSelection,
+    })).toBeNull();
+    expect(confirmationSendReplayIntent({
+      intent,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptRevision: 4,
+      contextRevision: 10,
+      replayContextRevision: 9,
+      modelSelection: intent.modelSelection,
+    })).toBeNull();
+    expect(confirmationSendReplayIntent({
+      intent,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptRevision: 4,
+      contextRevision: 9,
+      replayContextRevision: 9,
+      modelSelection: { providerId: "fixture", modelId: "other" },
+    })).toBeNull();
+    expect(confirmationSendFailureMayHaveCommitted(new Error("network lost"))).toBe(true);
+    expect(confirmationSendFailureMayHaveCommitted({ status: 503 })).toBe(true);
+    expect(confirmationSendFailureMayHaveCommitted({ status: 409 })).toBe(false);
+  });
+
+  it("settles overlapping confirmation replays without cross-thread clobbering", () => {
+    const intentA = { contextConfirmationIds: ["confirmation-a"] };
+    const intentB = { contextConfirmationIds: ["confirmation-b"] };
+    let replays = new Map();
+    replays = settleConfirmationSendReplay(replays, {
+      threadId: "thread-b",
+      intent: intentB,
+      contextRevision: 12,
+      preserve: true,
+    });
+
+    replays = settleConfirmationSendReplay(replays, {
+      threadId: "thread-a",
+      intent: intentA,
+      contextRevision: null,
+      preserve: false,
+    });
+    expect(replays.get("thread-b")).toEqual({ intent: intentB, contextRevision: 12 });
+
+    replays = settleConfirmationSendReplay(replays, {
+      threadId: "thread-a",
+      intent: intentA,
+      contextRevision: 7,
+      preserve: true,
+    });
+    expect(replays.get("thread-b")).toEqual({ intent: intentB, contextRevision: 12 });
+    expect(replays.get("thread-a")).toEqual({ intent: intentA, contextRevision: 7 });
+  });
+
+  it("settles submitted confirmations without discarding newer composer work", () => {
+    const target = { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 };
+    const submitted = {
+      draftId: "submitted",
+      target,
+      annotation: "Submitted note",
+    };
+    const remaining = {
+      draftId: "remaining",
+      target,
+      annotation: "Other authoritative note",
+    };
+    const newerContexts = {
+      revision: 9,
+      value: [{
+        target,
+        annotations: [submitted.annotation, "Newer unsent note"],
+        annotationConfirmations: [submitted, null],
+      }],
+    };
+
+    expect(settledComposerContextsWithConfirmations(newerContexts, [remaining])).toEqual({
+      revision: 9,
+      value: [{
+        target,
+        node: undefined,
+        annotations: ["Other authoritative note", "Newer unsent note"],
+        annotationConfirmations: [remaining, null],
+      }],
+    });
   });
 
   it("locks already-mounted draft controls and rejects a racing input event", () => {
@@ -167,6 +460,43 @@ describe("product workspace keyboard behavior", () => {
   it("defers a context confirmation that resolves after a thread switch", () => {
     expect(contextConfirmationDestination("thread-b", "thread-a")).toBe("deferred");
     expect(contextConfirmationDestination("thread-a", "thread-a")).toBe("current");
+  });
+
+  it("keeps an empty durable attach editor disabled across reconciliation", () => {
+    expect(contextEditorCanConfirm({ attaching: true, durable: false, value: "" })).toBe(true);
+    expect(contextEditorCanConfirm({ attaching: true, durable: true, value: "" })).toBe(false);
+    expect(contextEditorCanConfirm({ attaching: true, durable: true, value: "note" })).toBe(true);
+  });
+
+  it("pins a context editor to the source occurrence captured when it opens", () => {
+    const selectedTarget = {
+      nodeId: 7,
+      sourceInteractionNodeId: 31,
+      sourceLayerId: 41,
+    };
+    expect(interactionContextTargetForEditor({
+      nodeId: 7,
+      selectedContextTarget: selectedTarget,
+      sourceInteractionNodeId: 99,
+      sourceLayerId: 100,
+    })).toBe(selectedTarget);
+    const existingTarget = {
+      nodeId: 7,
+      sourceInteractionNodeId: 11,
+      sourceLayerId: 12,
+    };
+    expect(interactionContextTargetForEditor({
+      nodeId: 7,
+      contextTarget: existingTarget,
+      selectedContextTarget: selectedTarget,
+      sourceInteractionNodeId: 99,
+      sourceLayerId: 100,
+    })).toBe(existingTarget);
+    expect(interactionContextTargetForEditor({
+      nodeId: 7,
+      sourceInteractionNodeId: 21,
+      sourceLayerId: 22,
+    })).toEqual({ nodeId: 7, sourceInteractionNodeId: 21, sourceLayerId: 22 });
   });
   it("keeps composer-owned review elements mounted while disabling composition", () => {
     const element = () => ({ classList: { toggle: vi.fn() } });
@@ -272,7 +602,12 @@ describe("product workspace keyboard behavior", () => {
     const attaching = { attaching: true, annotationIndex: null, value: "" };
     expect(contextEditorCanConfirm(attaching)).toBe(true);
     const attached = applyContextEditor([], attaching, node, target);
-    expect(attached).toEqual([{ target, node, annotations: [] }]);
+    expect(attached).toEqual([{
+      target,
+      node,
+      annotations: [],
+      annotationConfirmations: [],
+    }]);
     expect(composerSubmissionReady("", false, true, attached)).toBe(false);
 
     const first = applyContextEditor(attached, {
@@ -295,11 +630,67 @@ describe("product workspace keyboard behavior", () => {
     expect(contextEditorCanConfirm({ attaching: false, annotationIndex: null, value: "  " }))
       .toBe(false);
     expect(contextDetachNeedsConfirmation(edited[0])).toBe(true);
-    const afterFirstDelete = removeContextAnnotation(edited, 3, 0);
-    const afterLastDelete = removeContextAnnotation(afterFirstDelete, 3, 0);
+    const afterFirstDelete = removeContextAnnotation(edited, target, 0);
+    const afterLastDelete = removeContextAnnotation(afterFirstDelete, target, 0);
     expect(afterLastDelete).toHaveLength(1);
     expect(afterLastDelete[0].annotations).toEqual([]);
     expect(contextDetachNeedsConfirmation(afterLastDelete[0])).toBe(false);
+  });
+
+  it("edits and deletes only the exact repeated node occurrence", () => {
+    const node = { id: 3, title: "Repeated context" };
+    const firstTarget = { nodeId: 3, sourceInteractionNodeId: 2, sourceLayerId: 1 };
+    const secondTarget = { nodeId: 3, sourceInteractionNodeId: 8, sourceLayerId: 9 };
+    const first = applyContextEditor([], {
+      attaching: false,
+      annotationIndex: null,
+      value: "first occurrence",
+    }, node, firstTarget);
+    const both = applyContextEditor(first, {
+      attaching: false,
+      annotationIndex: null,
+      value: "second occurrence",
+    }, node, secondTarget);
+
+    const edited = applyContextEditor(both, {
+      attaching: false,
+      annotationIndex: 0,
+      value: "edited second occurrence",
+    }, node, secondTarget);
+    expect(edited.map((context) => context.annotations)).toEqual([
+      ["first occurrence"],
+      ["edited second occurrence"],
+    ]);
+
+    const removed = removeContextAnnotation(edited, secondTarget, 0);
+    expect(removed.map((context) => context.annotations)).toEqual([
+      ["first occurrence"],
+      [],
+    ]);
+  });
+
+  it("preserves edited text while clearing a remotely consumed confirmation identity", () => {
+    const node = { id: 3, title: "Context" };
+    const target = { nodeId: 3, sourceInteractionNodeId: 2, sourceLayerId: 1 };
+    const confirmation = { draftId: "confirmed-a" };
+    const contexts = [{
+      target,
+      node,
+      annotations: ["stale text"],
+      annotationConfirmations: [confirmation],
+    }];
+
+    expect(applyContextEditor(contexts, {
+      attaching: false,
+      annotationIndex: 0,
+      value: "new local text",
+      confirmation: null,
+    }, node, target)).toEqual([{
+      target,
+      node,
+      annotations: ["new local text"],
+      annotationConfirmations: [null],
+    }]);
   });
 
   it("keeps compact context counts and long annotation editors bounded", () => {
@@ -379,16 +770,7 @@ describe("product workspace keyboard behavior", () => {
     );
   });
 
-  it("preserves failed drafts but clears them after durable send or a thread switch", () => {
-    const draft = {
-      contexts: [{ target: { nodeId: 3 }, annotations: ["note"] }],
-      editor: { nodeId: 3, value: "unsaved" },
-    };
-    expect(interactionContextDraftTransition(draft, "send_failure")).toBe(draft);
-    expect(interactionContextDraftTransition(draft, "durable_send"))
-      .toEqual({ contexts: [], editor: null });
-    expect(interactionContextDraftTransition(draft, "thread_change"))
-      .toEqual({ contexts: [], editor: null });
+  it("keeps context editing enabled only for an available composer", () => {
     expect(contextStagingDisabledFor("running", true, false)).toBe(true);
     expect(contextStagingDisabledFor("accepted", true, true)).toBe(true);
     expect(contextStagingDisabledFor("failed", true, false)).toBe(false);
@@ -416,61 +798,6 @@ describe("product workspace keyboard behavior", () => {
     }, { id: 10 })).toBe("running");
   });
 
-  it("only clears the exact composer draft whose send completed", () => {
-    const submittedContexts = [{ target: { nodeId: 3 }, annotations: ["note"] }];
-    const submittedDraftScopeKey = composerDraftScopeKey(10, 100);
-    expect(composerDraftMatchesSubmission({
-      currentThreadId: 10,
-      submittedThreadId: 10,
-      currentDraftScopeKey: submittedDraftScopeKey,
-      submittedDraftScopeKey,
-      currentPromptValue: "send A",
-      submittedPromptValue: "send A",
-      currentContexts: submittedContexts,
-      submittedContexts,
-    })).toBe(true);
-    expect(composerDraftMatchesSubmission({
-      currentThreadId: 11,
-      submittedThreadId: 10,
-      currentDraftScopeKey: composerDraftScopeKey(11, 200),
-      submittedDraftScopeKey,
-      currentPromptValue: "send B",
-      submittedPromptValue: "send A",
-      currentContexts: [],
-      submittedContexts,
-    })).toBe(false);
-    expect(composerDraftMatchesSubmission({
-      currentThreadId: 10,
-      submittedThreadId: 10,
-      currentDraftScopeKey: submittedDraftScopeKey,
-      submittedDraftScopeKey,
-      currentPromptValue: "send B",
-      submittedPromptValue: "send A",
-      currentContexts: submittedContexts,
-      submittedContexts,
-    })).toBe(false);
-    expect(composerDraftMatchesSubmission({
-      currentThreadId: 10,
-      submittedThreadId: 10,
-      currentDraftScopeKey: submittedDraftScopeKey,
-      submittedDraftScopeKey,
-      currentPromptValue: "send A",
-      submittedPromptValue: "send A",
-      currentContexts: [...submittedContexts],
-      submittedContexts,
-    })).toBe(false);
-    expect(composerDraftMatchesSubmission({
-      currentThreadId: 10,
-      submittedThreadId: 10,
-      currentDraftScopeKey: composerDraftScopeKey(10, 101),
-      submittedDraftScopeKey,
-      currentPromptValue: "send A",
-      submittedPromptValue: "send A",
-      currentContexts: submittedContexts,
-      submittedContexts,
-    })).toBe(false);
-  });
-
   it("scopes restored and user-authored drafts across A to B to A switches", () => {
     let state = createComposerDraftScopeState();
     let transition = transitionComposerDraftScope(state, {
@@ -488,22 +815,43 @@ describe("product workspace keyboard behavior", () => {
       threadId: "thread-b",
       interactionId: "interaction-b",
       currentPromptValue: "edited retry A",
+      currentPromptRevision: transition.promptRevision + 1,
     });
     state = transition.state;
     expect(transition.promptValue).toBe("");
     expect(state.drafts.get(composerDraftScopeKey("thread-b", "interaction-b")))
-      .toEqual({ promptValue: "", restoredDraftInteractionId: null });
+      .toMatchObject({ promptValue: "", restoredDraftInteractionId: null });
 
     transition = transitionComposerDraftScope(state, {
       threadId: "thread-a",
       interactionId: "interaction-a",
       currentPromptValue: "draft B",
+      currentPromptRevision: transition.promptRevision + 1,
       restoredDraft: { text: "retry A" },
     });
     state = transition.state;
     expect(transition.promptValue).toBe("edited retry A");
     expect(state.drafts.get(composerDraftScopeKey("thread-b", "interaction-b")))
-      .toEqual({ promptValue: "draft B", restoredDraftInteractionId: null });
+      .toMatchObject({ promptValue: "draft B", restoredDraftInteractionId: null });
+  });
+
+  it("retains a newer prompt revision across unrelated renders in the same scope", () => {
+    const initial = transitionComposerDraftScope(createComposerDraftScopeState(), {
+      threadId: 10,
+      interactionId: 100,
+      currentPromptValue: "",
+      currentPromptRevision: 0,
+    });
+    const rerendered = transitionComposerDraftScope(initial.state, {
+      threadId: 10,
+      interactionId: 100,
+      currentPromptValue: "same text retyped",
+      currentPromptRevision: initial.promptRevision + 1,
+    });
+
+    expect(rerendered.promptRevision).toBe(initial.promptRevision + 1);
+    expect(rerendered.state.drafts.get(rerendered.state.activeScopeKey))
+      .toMatchObject({ promptValue: "same text retyped", promptRevision: rerendered.promptRevision });
   });
 
   it("does not restore a durably sent inactive draft after returning to its thread", () => {
@@ -514,21 +862,24 @@ describe("product workspace keyboard behavior", () => {
       restoredDraft: { text: "retry A" },
     });
     const submittedScopeKey = transition.state.activeScopeKey;
+    const submittedPromptRevision = transition.promptRevision;
     transition = transitionComposerDraftScope(transition.state, {
       threadId: "thread-b",
       interactionId: "interaction-b",
       currentPromptValue: "retry A",
+      currentPromptRevision: submittedPromptRevision,
     });
     const cleared = clearSubmittedComposerDraft(
       transition.state,
       submittedScopeKey,
-      "retry A",
-      "draft B",
+      submittedPromptRevision,
+      transition.promptRevision,
     );
     transition = transitionComposerDraftScope(cleared, {
       threadId: "thread-a",
       interactionId: "interaction-a",
       currentPromptValue: "draft B",
+      currentPromptRevision: transition.promptRevision + 1,
     });
     expect(transition.promptValue).toBe("");
 
@@ -541,8 +892,8 @@ describe("product workspace keyboard behavior", () => {
     const preserved = clearSubmittedComposerDraft(
       edited.state,
       edited.state.activeScopeKey,
-      "retry A again",
-      "user edited A while the send settled",
+      edited.promptRevision,
+      edited.promptRevision + 1,
     );
     expect(preserved.drafts.get(edited.state.activeScopeKey).promptValue).toBe("retry A again");
   });
@@ -589,7 +940,7 @@ describe("product workspace keyboard behavior", () => {
     });
     expect(transition.promptValue).toBe("");
     expect(transition.state.drafts.get(composerDraftScopeKey(10, 101)))
-      .toEqual({ promptValue: "", restoredDraftInteractionId: null });
+      .toMatchObject({ promptValue: "", restoredDraftInteractionId: null });
   });
 
   it("applies a model-failed restoration that arrives after the running interaction rendered", () => {
@@ -608,7 +959,7 @@ describe("product workspace keyboard behavior", () => {
     });
     expect(transition.promptValue).toBe("retry after model failure");
     expect(transition.state.drafts.get(composerDraftScopeKey(10, 100)))
-      .toEqual({
+      .toMatchObject({
         promptValue: "retry after model failure",
         restoredDraftInteractionId: 100,
       });
@@ -621,7 +972,7 @@ describe("product workspace keyboard behavior", () => {
     });
     expect(transition.promptValue).toBe("user edited the restored prompt");
     expect(transition.state.drafts.get(composerDraftScopeKey(10, 100)))
-      .toEqual({
+      .toMatchObject({
         promptValue: "user edited the restored prompt",
         restoredDraftInteractionId: 100,
       });

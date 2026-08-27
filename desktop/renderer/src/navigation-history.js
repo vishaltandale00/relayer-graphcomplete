@@ -46,6 +46,12 @@ export function navigationEntriesEqual(left, right) {
   });
 }
 
+export function navigationEntriesChangeTurn(left, right) {
+  if (!left || !right) return false;
+  return String(left.threadId) !== String(right.threadId)
+    || String(left.turnId) !== String(right.turnId);
+}
+
 function positiveLimit(value, name) {
   if (!Number.isInteger(value) || value < 1) {
     throw new TypeError(`${name} must be a positive integer`);

@@ -24,11 +24,30 @@ export function createNodeContextDraftApi() {
       `${base(threadId)}/${encodeURIComponent(draft.id)}?expectedRevision=${encodeURIComponent(draft.revision)}`,
       { method: "DELETE" },
     ),
+    updateConfirmation: (threadId, confirmation, annotation) => request(
+      `/api/threads/${encodeURIComponent(threadId)}/context-confirmations/${encodeURIComponent(confirmation.draftId)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          annotation,
+          expectedRevision: confirmation.confirmationRevision,
+        }),
+      },
+    ),
+    dismissConfirmation: (threadId, confirmation) => request(
+      `/api/threads/${encodeURIComponent(threadId)}/context-confirmations/${encodeURIComponent(confirmation.draftId)}?expectedRevision=${encodeURIComponent(confirmation.confirmationRevision)}`,
+      { method: "DELETE" },
+    ),
   });
 }
 
 const nodeKey = (nodeId) => String(nodeId);
 const threadKey = (threadId) => String(threadId);
+const sameTarget = (left, right) => (
+  String(left?.nodeId) === String(right?.nodeId)
+  && String(left?.sourceInteractionNodeId) === String(right?.sourceInteractionNodeId)
+  && String(left?.sourceLayerId) === String(right?.sourceLayerId)
+);
 
 function hydratedDraft(draft) {
   return {
@@ -70,12 +89,42 @@ export function createNodeContextDraftController({
   onChange = () => {},
 } = {}) {
   const draftsByThread = new Map();
+  const confirmationsByThread = new Map();
+  const confirmationAuthoritySequenceByThread = new Map();
+  const removedConfirmationIdsByThread = new Map();
+  const resolvedDraftIdsByThread = new Map();
+  let confirmationAuthoritySequence = 0;
+  const beginConfirmationAuthorityRequest = () => {
+    confirmationAuthoritySequence += 1;
+    return confirmationAuthoritySequence;
+  };
+  const mayApplyConfirmationAuthority = (threadId, sequence) => (
+    sequence >= (confirmationAuthoritySequenceByThread.get(threadKey(threadId)) ?? 0)
+  );
+  const appliedConfirmationAuthority = (threadId, sequence) => {
+    confirmationAuthoritySequenceByThread.set(threadKey(threadId), sequence);
+  };
   const threadDrafts = (threadId) => {
     const key = threadKey(threadId);
     if (!draftsByThread.has(key)) draftsByThread.set(key, new Map());
     return draftsByThread.get(key);
   };
   const changed = () => onChange();
+  const threadConfirmations = (threadId) => {
+    const key = threadKey(threadId);
+    if (!confirmationsByThread.has(key)) confirmationsByThread.set(key, new Map());
+    return confirmationsByThread.get(key);
+  };
+  const removedConfirmationIds = (threadId) => {
+    const key = threadKey(threadId);
+    if (!removedConfirmationIdsByThread.has(key)) removedConfirmationIdsByThread.set(key, new Set());
+    return removedConfirmationIdsByThread.get(key);
+  };
+  const resolvedDraftIds = (threadId) => {
+    const key = threadKey(threadId);
+    if (!resolvedDraftIdsByThread.has(key)) resolvedDraftIdsByThread.set(key, new Set());
+    return resolvedDraftIdsByThread.get(key);
+  };
   const settleCurrentSave = async (drafts, key) => {
     while (true) {
       const save = currentSave(drafts.get(key));
@@ -87,7 +136,13 @@ export function createNodeContextDraftController({
 
   const controller = {
     async load(threadId) {
+      const confirmationAuthorityRequest = beginConfirmationAuthorityRequest();
+      const confirmationBaseline = new Map(threadConfirmations(threadId));
       const response = await api.list(threadId);
+      const authoritativeResolvedIds = new Set(
+        (response?.confirmations || []).map((confirmation) => String(confirmation.draftId)),
+      );
+      for (const id of authoritativeResolvedIds) resolvedDraftIds(threadId).add(id);
       const localDrafts = threadDrafts(threadId);
       const responseBaseline = new Map([...localDrafts].map(([key, draft]) => [key, {
         draft,
@@ -98,6 +153,7 @@ export function createNodeContextDraftController({
       const retryNodeIds = new Set();
       const observedLocal = new Map();
       for (const draft of response?.drafts || []) {
+        if (resolvedDraftIds(threadId).has(String(draft.id))) continue;
         const key = nodeKey(draft.target.nodeId);
         const local = await settleCurrentSave(localDrafts, key);
         const baseline = responseBaseline.get(key);
@@ -121,6 +177,8 @@ export function createNodeContextDraftController({
           operation: local.operation,
         });
         if (!local || (
+          String(local.id) !== String(draft.id) && isResolving(local)
+        ) || (
           local.editVersion === 0 && !isResolving(local) && !isReconciling(local)
         )) {
           if (local?.timer != null) cancel(local.timer);
@@ -141,6 +199,15 @@ export function createNodeContextDraftController({
       for (const [key, local] of localDrafts) {
         if (drafts.has(key)) continue;
         await settleCurrentSave(localDrafts, key);
+        if (authoritativeResolvedIds.has(String(local.id))) {
+          if (local.timer != null) cancel(local.timer);
+          observedLocal.set(key, {
+            draft: local,
+            editVersion: local.editVersion,
+            operation: local.operation,
+          });
+          continue;
+        }
         observedLocal.set(key, {
           draft: local,
           editVersion: local.editVersion,
@@ -164,6 +231,23 @@ export function createNodeContextDraftController({
         }
       }
       draftsByThread.set(threadKey(threadId), drafts);
+      const confirmations = new Map();
+      const removed = removedConfirmationIds(threadId);
+      for (const confirmation of response?.confirmations || []) {
+        if (!removed.has(String(confirmation.draftId))) {
+          confirmations.set(String(confirmation.draftId), confirmation);
+        }
+      }
+      for (const [id, confirmation] of threadConfirmations(threadId)) {
+        if (!removed.has(id)
+          && confirmationBaseline.get(id) !== confirmation) {
+          confirmations.set(id, confirmation);
+        }
+      }
+      if (mayApplyConfirmationAuthority(threadId, confirmationAuthorityRequest)) {
+        confirmationsByThread.set(threadKey(threadId), confirmations);
+        appliedConfirmationAuthority(threadId, confirmationAuthorityRequest);
+      }
       for (const nodeId of retryNodeIds) {
         const draft = controller.draftForNode(threadId, nodeId);
         draft.timer = schedule(() => controller.flush(threadId, nodeId));
@@ -192,9 +276,61 @@ export function createNodeContextDraftController({
       }
       return controller.draftsForThread(threadId);
     },
+    confirmationsForThread(threadId) {
+      return [...threadConfirmations(threadId).values()];
+    },
+    consumeConfirmations(threadId, confirmationIds) {
+      const confirmations = threadConfirmations(threadId);
+      const removed = removedConfirmationIds(threadId);
+      for (const id of confirmationIds) {
+        confirmations.delete(String(id));
+        removed.add(String(id));
+      }
+      changed();
+    },
+    allowConfirmationRestoration(threadId) {
+      removedConfirmationIds(threadId).clear();
+    },
+    async updateConfirmation(threadId, confirmationId, annotation) {
+      const confirmations = threadConfirmations(threadId);
+      const key = String(confirmationId);
+      const current = confirmations.get(key);
+      if (!current) return null;
+      const currentRevision = current.confirmationRevision;
+      const updated = await api.updateConfirmation(threadId, current, annotation);
+      const latestConfirmations = threadConfirmations(threadId);
+      if (latestConfirmations.get(key) !== current
+        || current.confirmationRevision !== currentRevision) return null;
+      latestConfirmations.set(key, updated);
+      changed();
+      return updated;
+    },
+    async dismissConfirmations(threadId, confirmationIds) {
+      for (const id of confirmationIds) {
+        const current = threadConfirmations(threadId).get(String(id));
+        if (!current) continue;
+        await api.dismissConfirmation(threadId, current);
+        threadConfirmations(threadId).delete(String(id));
+        removedConfirmationIds(threadId).add(String(id));
+        changed();
+      }
+    },
     open(threadId, target, targetNode) {
       const drafts = threadDrafts(threadId);
       const key = nodeKey(target.nodeId);
+      const existing = drafts.get(key);
+      if (existing && !sameTarget(existing.target, target)) {
+        throw new Error(
+          "Finish the existing annotation draft for this node before editing another occurrence.",
+        );
+      }
+      const confirmedElsewhere = [...threadConfirmations(threadId).values()].find((confirmation) => (
+        String(confirmation.target.nodeId) === String(target.nodeId)
+        && !sameTarget(confirmation.target, target)
+      ));
+      if (confirmedElsewhere) {
+        throw new Error("This node is already attached from another occurrence.");
+      }
       if (!drafts.has(key)) {
         const draft = {
           id: createId(),
@@ -313,17 +449,33 @@ export function createNodeContextDraftController({
       let draft = controller.draftForNode(threadId, nodeId);
       if (!draft) return null;
       if (isResolving(draft)) return null;
+      const confirmationDraftId = String(draft.id);
       if (draft.status !== "saved") await controller.flush(threadId, nodeId);
       draft = controller.draftForNode(threadId, nodeId);
-      if (!draft || isResolving(draft) || draft.status !== "saved" || draft.revision == null) {
+      if (!draft
+        || String(draft.id) !== confirmationDraftId
+        || isResolving(draft)
+        || draft.status !== "saved"
+        || draft.revision == null) {
         return null;
       }
+      const confirmationAuthorityRequest = beginConfirmationAuthorityRequest();
+      let confirmationOperation;
       const confirmationPromise = api.confirm(threadId, { ...draft }).then((confirmation) => {
-        threadDrafts(threadId).delete(nodeKey(nodeId));
+        const current = controller.draftForNode(threadId, nodeId);
+        const currentAuthority = current?.operation === confirmationOperation
+          && String(current.id) === confirmationDraftId
+          && mayApplyConfirmationAuthority(threadId, confirmationAuthorityRequest);
+        if (currentAuthority) {
+          threadDrafts(threadId).delete(nodeKey(nodeId));
+          resolvedDraftIds(threadId).add(confirmationDraftId);
+          threadConfirmations(threadId).set(String(confirmation.draftId), confirmation);
+          appliedConfirmationAuthority(threadId, confirmationAuthorityRequest);
+        }
         changed();
-        return confirmation;
+        return currentAuthority ? confirmation : null;
       });
-      const confirmationOperation = { kind: "confirming", promise: confirmationPromise };
+      confirmationOperation = { kind: "confirming", promise: confirmationPromise };
       draft.operation = confirmationOperation;
       changed();
       try {
@@ -336,21 +488,40 @@ export function createNodeContextDraftController({
         return confirmation;
       } catch (error) {
         const unresolved = controller.draftForNode(threadId, nodeId);
-        if (unresolved?.operation === confirmationOperation) unresolved.operation = { kind: "idle" };
+        const ownsConfirmation = unresolved?.operation === confirmationOperation
+          && String(unresolved.id) === confirmationDraftId;
+        if (ownsConfirmation) unresolved.operation = { kind: "idle" };
         changed();
-        if (error.code === "context_draft_revision_conflict" && allowReconcile && unresolved) {
+        if (error.code === "context_draft_revision_conflict" && allowReconcile && ownsConfirmation) {
           const staleRevision = unresolved.revision;
-          unresolved.operation = { kind: "reconciling" };
-          await controller.load(threadId);
+          unresolved.operation = confirmationOperation;
+          try {
+            await controller.load(threadId);
+          } catch (loadError) {
+            const retained = controller.draftForNode(threadId, nodeId);
+            if (retained?.operation === confirmationOperation
+              && String(retained.id) === confirmationDraftId) {
+              retained.operation = { kind: "idle" };
+              changed();
+            }
+            throw loadError;
+          }
           let reconciled = controller.draftForNode(threadId, nodeId);
-          if (!reconciled || reconciled.revision === staleRevision || reconciled.status === "error") {
+          const ownsConfirmation = reconciled?.operation === confirmationOperation
+            && String(reconciled.id) === confirmationDraftId;
+          if (ownsConfirmation) reconciled.operation = { kind: "idle" };
+          if (!reconciled
+            || String(reconciled.id) !== confirmationDraftId
+            || reconciled.revision === staleRevision
+            || reconciled.status === "error") {
             throw error;
           }
           if (reconciled.status === "unsaved") {
             await controller.flush(threadId, nodeId, { allowReconcile: false });
             reconciled = controller.draftForNode(threadId, nodeId);
           }
-          if (reconciled?.status === "saved") {
+          if (reconciled?.status === "saved"
+            && String(reconciled.id) === confirmationDraftId) {
             return controller.confirm(threadId, nodeId, { allowReconcile: false });
           }
         }
@@ -363,6 +534,7 @@ export function createNodeContextDraftController({
       if (isResolving(draft)) return false;
       const pendingSave = currentSave(draft);
       const operation = { kind: "discarding" };
+      let discardRequestDraftId = null;
       draft.operation = operation;
       changed();
       try {
@@ -376,35 +548,61 @@ export function createNodeContextDraftController({
         }
         draft = controller.draftForNode(threadId, nodeId);
         if (!draft) return true;
+        if (draft.operation !== operation) return true;
         if (pendingSaveError?.code === "context_draft_revision_conflict") {
           await controller.load(threadId);
           draft = controller.draftForNode(threadId, nodeId);
         }
         if (!draft) return true;
+        if (draft.operation !== operation) return true;
         if (draft?.revision == null && draft?.status === "error") {
           await controller.flush(threadId, nodeId, { allowResolving: true });
           draft = controller.draftForNode(threadId, nodeId);
         }
         if (!draft) return true;
+        if (draft.operation !== operation) return true;
         if (draft?.revision == null && draft?.status === "error") {
           throw new Error("The saved draft state is uncertain. Retry discard when persistence recovers.");
         }
+        const discardedDraftId = String(draft.id);
+        discardRequestDraftId = discardedDraftId;
         if (draft.revision != null) await api.discard(threadId, { ...draft });
-        threadDrafts(threadId).delete(nodeKey(nodeId));
+        const current = controller.draftForNode(threadId, nodeId);
+        if (current?.operation === operation && String(current.id) === discardedDraftId) {
+          threadDrafts(threadId).delete(nodeKey(nodeId));
+        }
         changed();
         return true;
       } catch (error) {
         const unresolved = controller.draftForNode(threadId, nodeId);
-        if (unresolved?.operation === operation) unresolved.operation = { kind: "idle" };
+        const ownsDiscard = unresolved?.operation === operation
+          && (discardRequestDraftId == null || String(unresolved.id) === discardRequestDraftId);
+        if (ownsDiscard) unresolved.operation = { kind: "idle" };
         changed();
-        if (error.code === "context_draft_revision_conflict" && allowReconcile && unresolved) {
+        if (error.code === "context_draft_revision_conflict" && allowReconcile && ownsDiscard) {
           const staleRevision = unresolved.revision;
-          unresolved.operation = { kind: "reconciling" };
-          await controller.load(threadId);
+          unresolved.operation = operation;
+          try {
+            await controller.load(threadId);
+          } catch (loadError) {
+            const retained = controller.draftForNode(threadId, nodeId);
+            if (retained?.operation === operation
+              && String(retained.id) === discardRequestDraftId) {
+              retained.operation = { kind: "idle" };
+              changed();
+            }
+            throw loadError;
+          }
           const reconciled = controller.draftForNode(threadId, nodeId);
-          if (reconciled && reconciled.revision !== staleRevision && reconciled.status !== "error") {
+          if (reconciled
+            && String(reconciled.id) === discardRequestDraftId
+            && reconciled.revision !== staleRevision
+            && reconciled.status !== "error") {
+            if (reconciled.operation === operation) reconciled.operation = { kind: "idle" };
             return controller.discard(threadId, nodeId, { allowReconcile: false });
           }
+          if (reconciled?.operation === operation) reconciled.operation = { kind: "idle" };
+          changed();
         }
         throw error;
       }

@@ -201,6 +201,11 @@ pub(crate) fn router(
             axum::routing::post(context_drafts::confirm),
         )
         .route(
+            "/api/threads/{thread_id}/context-confirmations/{draft_id}",
+            axum::routing::put(context_drafts::update_confirmation)
+                .delete(context_drafts::dismiss_confirmation),
+        )
+        .route(
             "/api/internal/annotation-sessions",
             axum::routing::post(annotations::register_session)
                 .delete(annotations::revoke_session),

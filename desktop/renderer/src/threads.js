@@ -8,6 +8,7 @@ import {
   createAcceptedLayerCache,
   createLatestRequestGate,
   createNavigationHistory,
+  navigationEntriesChangeTurn,
 } from "./navigation-history.js";
 import { renderThread } from "./graph.js";
 import {
@@ -596,7 +597,12 @@ export function selectTurnById(interactionId) {
   schedulePendingRefresh(viewState.currentThreadId);
 }
 
-export async function submitInteraction(text, modelSelection, contexts = []) {
+export async function submitInteraction(
+  text,
+  modelSelection,
+  contexts = [],
+  contextConfirmationIds = [],
+) {
   if (!viewState.currentThreadId) throw new Error("Select a thread before sending a follow-up.");
   const threadId = viewState.currentThreadId;
   recordCurrentNavigation();
@@ -610,7 +616,13 @@ export async function submitInteraction(text, modelSelection, contexts = []) {
     throw new Error("Choose an available model in Settings before sending.");
   }
   let createdInteraction;
-  const inputId = stableFollowupInputId(threadId, text, modelSelection, contexts);
+  const inputId = stableFollowupInputId(
+    threadId,
+    text,
+    modelSelection,
+    contexts,
+    contextConfirmationIds,
+  );
   try {
     const latestInteraction = appState.interactions
       .filter((interaction) => String(interaction.threadId) === String(threadId))
@@ -622,10 +634,17 @@ export async function submitInteraction(text, modelSelection, contexts = []) {
       modelSelection,
       inputId,
       contexts,
+      contextConfirmationIds,
     );
     const body = restoredDraftForInteraction(latestInteraction)
       ? retryBody
-      : followupRequestBody(text, modelSelection, inputId, contexts);
+      : followupRequestBody(
+        text,
+        modelSelection,
+        inputId,
+        contexts,
+        contextConfirmationIds,
+      );
     const response = await request(path, {
       method: "POST",
       body: JSON.stringify(body),
@@ -770,7 +789,7 @@ export async function navigateLayer(layerId, navigation = {}) {
   }
 }
 
-export async function navigateResolvedInvoke(action) {
+export async function navigateResolvedInvoke(action, { beforeCommit } = {}) {
   const sourceThreadId = viewState.currentThreadId;
   const sourceInteractionId = viewState.currentInteractionId;
   if (
@@ -821,6 +840,7 @@ export async function navigateResolvedInvoke(action) {
     refreshGate.invalidate();
     layerNavigationCoordinator.cancel();
     applyResolvedPresentation(resolved);
+    beforeCommit?.();
     recordCurrentNavigation("push");
     schedulePendingRefresh(viewState.currentThreadId);
     return true;
@@ -835,11 +855,14 @@ export async function navigateResolvedInvoke(action) {
 export function getNavigationHistory() {
   const back = navigationHistory.destination(-1);
   const forward = navigationHistory.destination(1);
+  const current = navigationHistory.current;
   return Object.freeze({
     canGoBack: Boolean(back),
     canGoForward: Boolean(forward),
     pendingDirection: pendingHistoryTransition?.direction ?? null,
     pendingResolvedInvokeNavigation,
+    backChangesTurn: navigationEntriesChangeTurn(current, back?.entry),
+    forwardChangesTurn: navigationEntriesChangeTurn(current, forward?.entry),
     backLabel: navigationDestinationLabel("back", back?.metadata),
     forwardLabel: navigationDestinationLabel("forward", forward?.metadata),
   });
@@ -956,7 +979,7 @@ function applyResolvedPresentation(resolved) {
   renderThread();
 }
 
-export async function navigateHistory(deltaOrDirection) {
+export async function navigateHistory(deltaOrDirection, { beforeCommit } = {}) {
   const delta = deltaOrDirection === "back" ? -1
     : deltaOrDirection === "forward" ? 1
       : Number(deltaOrDirection);
@@ -990,6 +1013,7 @@ export async function navigateHistory(deltaOrDirection) {
     refreshGate.invalidate();
     applied = true;
     applyResolvedPresentation(resolved);
+    beforeCommit?.();
     if (!navigationHistory.commit(transition)) throw navigationSupersededError();
     committed = true;
     navigationHistory.replaceCurrent(resolved.entry);

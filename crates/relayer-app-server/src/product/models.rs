@@ -141,6 +141,7 @@ pub(crate) struct NodeContextDraftConfirmation {
     pub(crate) target_node: relayer_graph_core::InteractionInputNode,
     pub(crate) annotation: String,
     pub(crate) draft_revision: i64,
+    pub(crate) confirmation_revision: i64,
     pub(crate) confirmed_at: String,
 }
 

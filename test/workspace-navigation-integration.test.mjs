@@ -129,6 +129,7 @@ describe("workspace navigation integration", () => {
     expect(controller.getNavigationHistory()).toMatchObject({
       canGoBack: false,
       canGoForward: true,
+      forwardChangesTurn: true,
       pendingDirection: null,
     });
   });
@@ -159,6 +160,7 @@ describe("workspace navigation integration", () => {
           text: "A follow-up",
           inputId: expect.any(String),
           contexts: [],
+          contextConfirmationIds: [],
           modelSelection: { providerId: "openai", modelId: "gpt-5" },
         });
         submitted = true;
@@ -210,6 +212,7 @@ describe("workspace navigation integration", () => {
           text: "",
           inputId: expect.any(String),
           contexts,
+          contextConfirmationIds: [],
           modelSelection: { providerId: "openai", modelId: "gpt-5" },
         });
         submitted = true;
@@ -247,13 +250,15 @@ describe("workspace navigation integration", () => {
     await controller.loadThread(10);
     await controller.loadThread(20);
 
-    const pending = controller.navigateHistory(-1);
+    const beforeCommit = vi.fn();
+    const pending = controller.navigateHistory(-1, { beforeCommit });
     await vi.waitFor(() => expect(controller.getNavigationHistory().pendingDirection).toBe("back"));
     controller.selectTurnById(2);
     expect(controller.getNavigationHistory().pendingDirection).toBeNull();
     restore.resolve({ thread: state1.threads[0], interactions: [turn1], actionInvocations: [] });
 
     await expect(pending).rejects.toMatchObject({ code: "navigation_superseded" });
+    expect(beforeCommit).not.toHaveBeenCalled();
     expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
   });
 
@@ -306,8 +311,12 @@ describe("workspace navigation integration", () => {
     });
     const controller = await loadModules();
     await controller.loadThread(10);
+    const beforeInvokeCommit = vi.fn();
 
-    await expect(controller.navigateResolvedInvoke(action)).resolves.toBe(true);
+    await expect(controller.navigateResolvedInvoke(action, {
+      beforeCommit: beforeInvokeCommit,
+    })).resolves.toBe(true);
+    expect(beforeInvokeCommit).toHaveBeenCalledOnce();
     expect(controller.viewState).toMatchObject({
       currentThreadId: 20,
       currentInteractionId: 2,
@@ -317,7 +326,9 @@ describe("workspace navigation integration", () => {
     expect(controller.getNavigationHistory().canGoBack).toBe(true);
     expect(controller.appState.actionInvocations).toEqual([acceptedInvocation]);
 
-    await controller.navigateHistory("back");
+    const beforeHistoryCommit = vi.fn();
+    await controller.navigateHistory("back", { beforeCommit: beforeHistoryCommit });
+    expect(beforeHistoryCommit).toHaveBeenCalledOnce();
     expect(controller.viewState).toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
     expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([101]);
     expect(controller.appState.actionInvocations).toEqual([acceptedInvocation]);
@@ -392,8 +403,9 @@ describe("workspace navigation integration", () => {
     const controller = await loadModules();
     await controller.loadThread(10);
     controller.replaceCurrentSelection(11);
+    const beforeCommit = vi.fn();
 
-    const pending = controller.navigateResolvedInvoke(action);
+    const pending = controller.navigateResolvedInvoke(action, { beforeCommit });
     expect(controller.getNavigationHistory().pendingResolvedInvokeNavigation).toBe(true);
     controller.replaceCurrentSelection(12);
     expect(controller.getNavigationHistory().pendingResolvedInvokeNavigation).toBe(false);
@@ -407,6 +419,7 @@ describe("workspace navigation integration", () => {
     });
 
     await expect(pending).resolves.toBe(false);
+    expect(beforeCommit).not.toHaveBeenCalled();
     expect(controller.viewState).toMatchObject({
       currentThreadId: 10,
       currentInteractionId: 1,
@@ -943,6 +956,10 @@ describe("workspace navigation integration", () => {
       sourceNode: root.nodes[0],
     });
     await controller.navigateLayer(101, { restore: true, pathIndex: 0 });
+    expect(controller.getNavigationHistory()).toMatchObject({
+      canGoBack: true,
+      backChangesTurn: false,
+    });
     await controller.navigateHistory(-1);
 
     expect(controller.appState.visibleLayer.layer.id).toBe(102);
@@ -967,8 +984,11 @@ describe("workspace navigation integration", () => {
     await controller.loadThread(10);
     await controller.loadThread(20);
     throwOnRender = rendered + 2;
+    const beforeCommit = vi.fn();
 
-    await expect(controller.navigateHistory(-1)).rejects.toThrow("injected render failure");
+    await expect(controller.navigateHistory(-1, { beforeCommit }))
+      .rejects.toThrow("injected render failure");
+    expect(beforeCommit).not.toHaveBeenCalled();
 
     expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
     expect(controller.getNavigationHistory()).toMatchObject({

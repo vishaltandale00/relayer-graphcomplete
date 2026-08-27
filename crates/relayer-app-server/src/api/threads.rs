@@ -11,9 +11,10 @@ use crate::{
     approval::{ApprovalDecision, ApprovalDecisionSubmission, ApprovalReceipt},
     product::{
         CreateThreadCommand, Interaction, InteractionContextIntent, InteractionId,
-        InteractionModelSelection, InvokeActionOutcome, ModelFamilyId, PreparedInteractionBinding,
-        ProjectId, ProviderId, RECONCILIATION_PENDING_PREFIX, RetryInteractionCommand, Thread,
-        ThreadId, ThreadView, record_background_failure, validate_decision_resolution,
+        InteractionModelSelection, InvokeActionOutcome, ModelFamilyId, PreExecutionModelFailure,
+        PreparedInteractionBinding, ProjectId, ProviderId, RECONCILIATION_PENDING_PREFIX,
+        RetryInteractionCommand, Thread, ThreadId, ThreadView, record_background_failure,
+        validate_decision_resolution,
     },
     runtime::{CompleteInteraction, PreparedInteraction, PreparedInvocation, RuntimeError},
 };
@@ -46,6 +47,8 @@ pub(super) struct CreateInteractionRequest {
     input_id: Option<String>,
     #[serde(default)]
     contexts: Vec<InteractionContextIntent>,
+    #[serde(default)]
+    context_confirmation_ids: Vec<String>,
     model_selection: Option<ModelSelectionRequest>,
 }
 
@@ -57,6 +60,8 @@ pub(super) struct RetryInteractionRequest {
     input_id: String,
     #[serde(default)]
     contexts: Vec<InteractionContextIntent>,
+    #[serde(default)]
+    context_confirmation_ids: Vec<String>,
     model_selection: ModelSelectionRequest,
 }
 
@@ -254,7 +259,7 @@ pub(super) async fn create(
         .product
         .get_interaction(thread.root_interaction_id)
         .await?;
-    start_interaction(&state, &thread, interaction).await?;
+    start_interaction(&state, &thread, interaction, true).await?;
     Ok((
         StatusCode::CREATED,
         Json(
@@ -462,6 +467,11 @@ pub(super) async fn create_interaction(
             .validate_interaction_model_selection(&thread.harness_configuration_name, selection)
             .await?;
     }
+    if !request.context_confirmation_ids.is_empty() && request.contexts.is_empty() {
+        return Err(ApiError::invalid(
+            "contextConfirmationIds require at least one context",
+        ));
+    }
     if !request.contexts.is_empty() && request.input_id.is_none() {
         eprintln!("rejected context-bearing interaction without a stable inputId");
         return Err(ApiError::internal(
@@ -478,11 +488,14 @@ pub(super) async fn create_interaction(
             .product
             .create_identified_interaction(
                 thread_id,
-                &request.text,
-                &input_id,
-                &request.contexts,
-                model_selection.as_ref(),
-                allow_unselected_model,
+                crate::product::CreateIdentifiedInteractionCommand {
+                    text: &request.text,
+                    input_identity: &input_id,
+                    contexts: &request.contexts,
+                    context_confirmation_ids: &request.context_confirmation_ids,
+                    model_selection: model_selection.as_ref(),
+                    allow_unselected_model,
+                },
             )
             .await;
         match created {
@@ -490,6 +503,11 @@ pub(super) async fn create_interaction(
             Err(crate::product::ProductError::Storage(crate::storage::StorageError::Catalog(
                 error,
             ))) => return Err(error.into()),
+            Err(
+                error @ crate::product::ProductError::Storage(
+                    crate::storage::StorageError::ContextDraftConflict { .. },
+                ),
+            ) => return Err(error.into()),
             Err(error) if !request.contexts.is_empty() => {
                 eprintln!(
                     "context-bearing interaction was rejected before graph preparation: {error}"
@@ -516,26 +534,30 @@ pub(super) async fn create_interaction(
             .await?
     };
     let interaction_id = interaction.id;
-    let interaction = match start_interaction(&state, &thread, interaction).await {
+    let interaction = match start_interaction(&state, &thread, interaction, !identified).await {
         Ok(interaction) => interaction,
-        Err(error) if !request.contexts.is_empty() => {
+        Err(error) if identified => {
             let diagnostic = error.internal_diagnostic();
             eprintln!(
-                "interaction context send {interaction_id} failed before graph binding: {diagnostic}"
+                "identified interaction {interaction_id} failed before graph binding: {diagnostic}"
             );
-            if error.is_deterministic_input_failure()
+            if (error.is_deterministic_input_failure()
+                || !request.context_confirmation_ids.is_empty())
                 && let Err(cleanup) = state
                     .product
                     .discard_unbound_interaction_input(interaction_id)
                     .await
             {
                 eprintln!(
-                    "could not discard invalid interaction context send {interaction_id}: {cleanup}"
+                    "could not discard invalid identified interaction {interaction_id}: {cleanup}"
                 );
             }
-            return Err(ApiError::internal(
-                "Relayer could not send this message. Your draft was preserved.",
-            ));
+            if !request.contexts.is_empty() {
+                return Err(ApiError::internal(
+                    "Relayer could not send this message. Your draft was preserved.",
+                ));
+            }
+            return Err(error);
         }
         Err(error) => return Err(error),
     };
@@ -574,6 +596,7 @@ pub(super) async fn retry_interaction(
                 text: &request.text,
                 input_identity: &request.input_id,
                 contexts: &request.contexts,
+                context_confirmation_ids: &request.context_confirmation_ids,
                 model_selection: &model_selection,
                 harness_configuration_name: &thread.harness_configuration_name,
             },
@@ -581,6 +604,7 @@ pub(super) async fn retry_interaction(
         .await?;
     let interaction = state.product.get_interaction(interaction_id).await?;
     if claimed {
+        let consumes_context_confirmations = !request.context_confirmation_ids.is_empty();
         let state = state.clone();
         let thread = thread.clone();
         let execution = interaction.clone();
@@ -596,11 +620,36 @@ pub(super) async fn retry_interaction(
                 }
                 Ok(None) => {}
                 Err(error) => {
+                    if consumes_context_confirmations {
+                        let selection = execution
+                            .model_selection
+                            .as_ref()
+                            .expect("a retry always has a validated model selection");
+                        match state
+                            .product
+                            .record_pre_execution_model_failure(PreExecutionModelFailure {
+                                interaction_id: execution.id,
+                                harness_name: &thread.harness_configuration_name,
+                                selection,
+                                route: None,
+                                policy: None,
+                                adapter_version: None,
+                                failure_category: "configuration",
+                            })
+                            .await
+                        {
+                            Ok(_) => return,
+                            Err(persistence_error) => eprintln!(
+                                "could not preserve retry preparation failure {} as an unsent attempt: {persistence_error}; falling back to a terminal failure",
+                                execution.id,
+                            ),
+                        }
+                    }
                     record_background_failure(
                         &state.product,
                         &thread,
                         &execution,
-                        error.message().to_owned(),
+                        error.internal_diagnostic(),
                     )
                     .await;
                 }
@@ -646,12 +695,37 @@ pub(crate) async fn resume_recovered_identified_interactions(state: ApiState) {
                 continue;
             }
         };
-        if let Err(error) = start_interaction(&state, &thread, interaction.clone()).await {
+        let consumes_context_confirmations = match state
+            .product
+            .interaction_consumes_context_confirmations(interaction.id)
+            .await
+        {
+            Ok(consumes) => consumes,
+            Err(error) => {
+                eprintln!(
+                    "could not inspect recovered interaction {} confirmation ownership: {error}",
+                    interaction.id
+                );
+                false
+            }
+        };
+        if let Err(error) = start_interaction(&state, &thread, interaction.clone(), false).await {
             eprintln!(
                 "could not resume recovered identified interaction {}: {}",
                 interaction.id,
                 error.message()
             );
+            if (error.is_deterministic_input_failure() || consumes_context_confirmations)
+                && let Err(cleanup) = state
+                    .product
+                    .discard_unbound_interaction_input(interaction.id)
+                    .await
+            {
+                eprintln!(
+                    "could not discard recovered invalid interaction {}: {cleanup}",
+                    interaction.id
+                );
+            }
         }
     }
 }
@@ -1219,6 +1293,7 @@ async fn start_interaction(
     state: &ApiState,
     thread: &Thread,
     interaction: Interaction,
+    record_deterministic_failure: bool,
 ) -> Result<Interaction, ApiError> {
     if state.runtime.is_none() {
         return Ok(interaction);
@@ -1226,13 +1301,15 @@ async fn start_interaction(
     let prepared = match prepare_and_claim_interaction(state, thread, &interaction, false).await {
         Ok(prepared) => prepared,
         Err(error) => {
-            record_background_failure(
-                &state.product,
-                thread,
-                &interaction,
-                error.internal_diagnostic(),
-            )
-            .await;
+            if record_deterministic_failure || !error.is_deterministic_input_failure() {
+                record_background_failure(
+                    &state.product,
+                    thread,
+                    &interaction,
+                    error.internal_diagnostic(),
+                )
+                .await;
+            }
             return Err(error);
         }
     };

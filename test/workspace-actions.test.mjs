@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   actionActivationPresentation,
   actionPresentation,
   actionReviewKind,
+  navigateWorkspaceAction,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("workspace action presentation grammar", () => {
@@ -72,5 +73,54 @@ describe("workspace action presentation grammar", () => {
     })).toMatchObject({ resolvedInvoke: true, navigational: true, disabled: false });
     expect(actionReviewKind(unresolved)).toBe("invoke-action");
     expect(actionReviewKind(resolved)).toBe("navigate-action");
+  });
+
+  it("collapses previews before resolved-invoke turn navigation but preserves them for layer navigation", async () => {
+    const events = [];
+    const collapseContextPreviews = vi.fn(() => events.push("collapse"));
+    const onNavigateResolvedInvoke = vi.fn(async (_action, { beforeCommit }) => {
+      events.push("resolved-start");
+      beforeCommit();
+      events.push("resolved-commit");
+    });
+    const onNavigateLayer = vi.fn(async () => events.push("layer"));
+    const sourceNode = { id: 11 };
+
+    await navigateWorkspaceAction({
+      action: { id: 7, kind: "invoke", targetLayerId: 91 },
+      activation: { resolvedInvoke: true },
+      sourceNode,
+      collapseContextPreviews,
+      onNavigateResolvedInvoke,
+      onNavigateLayer,
+    });
+    expect(events).toEqual(["resolved-start", "collapse", "resolved-commit"]);
+
+    events.length = 0;
+    onNavigateResolvedInvoke.mockImplementationOnce(async () => false);
+    await navigateWorkspaceAction({
+      action: { id: 7, kind: "invoke", targetLayerId: 91 },
+      activation: { resolvedInvoke: true },
+      sourceNode,
+      collapseContextPreviews,
+      onNavigateResolvedInvoke,
+      onNavigateLayer,
+    });
+    expect(events).toEqual([]);
+
+    events.length = 0;
+    await navigateWorkspaceAction({
+      action: { id: 8, kind: "navigate", targetLayerId: 92 },
+      activation: { resolvedInvoke: false },
+      sourceNode,
+      collapseContextPreviews,
+      onNavigateResolvedInvoke,
+      onNavigateLayer,
+    });
+    expect(events).toEqual(["layer"]);
+    expect(onNavigateLayer).toHaveBeenLastCalledWith(92, {
+      action: { id: 8, kind: "navigate", targetLayerId: 92 },
+      sourceNode,
+    });
   });
 });

@@ -12,6 +12,7 @@ import { startModelCatalogRefreshServer } from "../desktop/main/models/model-cat
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { createWindowFactory } from "../desktop/main/window.mjs";
+import { createElectronWorkspaceDriver } from "./electron-workspace-driver.mjs";
 
 const OPT_IN = "RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE";
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -40,6 +41,22 @@ let product;
 let productSession;
 let mainWindow;
 let keepaliveWindow;
+
+const {
+  click,
+  clickNode,
+  evaluate,
+  productRequest,
+  setValue,
+  sleep,
+  waitFor,
+  waitForAcceptedInteractions,
+  waitForPaint,
+} = createElectronWorkspaceDriver({
+  getWindow: () => mainWindow,
+  getProductSession: () => productSession,
+  diagnosticBodyLength: 3_500,
+});
 
 if (process.env[OPT_IN] !== "1") {
   throw new Error(`Evidence capture is opt-in. Set ${OPT_IN}=1.`);
@@ -76,10 +93,6 @@ const catalogSnapshot = {
   systemFamily: { key: "codex", name: "Codex", modelIds: ["fixture-model"] },
 };
 
-function sleep(milliseconds) {
-  return new Promise((resolveWait) => setTimeout(resolveWait, milliseconds));
-}
-
 function registerIpc() {
   ipcMain.handle("relayer:account-read", () => ({
     status: "connected",
@@ -111,46 +124,6 @@ function unregisterIpc() {
   ]) ipcMain.removeHandler(channel);
 }
 
-async function productRequest(path, options = {}) {
-  const response = await fetch(new URL(path, productSession.origin), {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`,
-      ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
-      ...options.headers,
-    },
-  });
-  const value = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(value?.error?.message || JSON.stringify(value));
-  return value;
-}
-
-async function waitFor(label, check, timeoutMs = 20_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const value = await check();
-    if (value) return value;
-    await sleep(40);
-  }
-  const diagnostic = mainWindow && !mainWindow.isDestroyed()
-    ? await mainWindow.webContents.executeJavaScript(`({
-      url: location.href,
-      body: document.body?.innerText?.slice(0, 3500),
-      toast: document.querySelector('#toast')?.textContent,
-    })`).catch(() => null)
-    : null;
-  throw new Error(`Timed out waiting for ${label}: ${JSON.stringify(diagnostic)}`);
-}
-
-async function evaluate(expression) {
-  return mainWindow.webContents.executeJavaScript(expression);
-}
-
-async function waitForPaint() {
-  await evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
-}
-
 async function refreshCaptureSurface() {
   if (process.platform === "darwin") app.focus({ steal: true });
   mainWindow.focus();
@@ -160,48 +133,6 @@ async function refreshCaptureSurface() {
   mainWindow.webContents.invalidate();
   await waitForPaint();
   await sleep(120);
-}
-
-async function click(selector) {
-  const exists = await evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)}))`);
-  if (!exists) throw new Error(`Cannot click missing element ${selector}.`);
-  await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
-}
-
-async function setValue(selector, value) {
-  const updated = await evaluate(`(() => {
-    const field = document.querySelector(${JSON.stringify(selector)});
-    if (!field) return false;
-    field.value = ${JSON.stringify(value)};
-    field.dispatchEvent(new InputEvent('input', {
-      bubbles: true,
-      inputType: 'insertText',
-      data: ${JSON.stringify(value)},
-    }));
-    field.focus();
-    return true;
-  })()`);
-  if (!updated) throw new Error(`Cannot update missing field ${selector}.`);
-}
-
-async function clickNode(title) {
-  const clicked = await evaluate(`(() => {
-    const node = [...document.querySelectorAll('.graph-node')]
-      .find((candidate) => candidate.querySelector('b')?.textContent === ${JSON.stringify(title)});
-    node?.click();
-    return Boolean(node);
-  })()`);
-  if (!clicked) throw new Error(`Cannot find graph node ${title}.`);
-}
-
-async function waitForAcceptedInteractions(threadId, count) {
-  return waitFor(`${count} accepted interactions`, async () => {
-    const detail = await productRequest(`/api/threads/${threadId}`);
-    return detail.interactions.length === count
-      && detail.interactions.every((interaction) => interaction.completionStatus === "accepted")
-      ? detail
-      : false;
-  }, 30_000);
 }
 
 async function captureStep(caption, selector, duration = 2.4) {
@@ -384,13 +315,23 @@ async function run() {
   await waitFor("new context annotation editor", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
   await setValue("#contextAnnotationEditor", "Queue order controls which task is claimed next.");
   await click("[aria-label='Confirm annotation']");
-  await waitFor("first compact annotation", () => evaluate(`
+  await waitFor("first collapsed context pill", () => evaluate(`
     document.querySelectorAll('.composer-context-pill-wrap').length === 1
-      && document.querySelectorAll('.composer-context-annotations li').length === 1
+      && document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
+      && !document.querySelector('.composer-context-preview')
+  `));
+  await click("[aria-label='Show Incoming queue annotations']");
+  await waitFor("first compact annotation preview", () => evaluate(`
+    document.querySelectorAll('.composer-context-annotations li').length === 1
   `));
   await click("[aria-label='Add annotation to Incoming queue']");
   await setValue("#contextAnnotationEditor", "Prioritize worker availability when reasoning.");
   await click("[aria-label='Confirm annotation']");
+  await waitFor("second confirmation collapsed", () => evaluate(`
+    document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
+      && !document.querySelector('.composer-context-preview')
+  `));
+  await click("[aria-label='Show Incoming queue annotations']");
   await waitFor("second ordered annotation", () => evaluate(`
     document.querySelectorAll('.composer-context-annotations li').length === 2
   `));
@@ -429,6 +370,11 @@ async function run() {
     throw new Error(`Long annotation edit changed preview geometry: ${JSON.stringify({ previewBeforeEdit, previewDuringEdit })}`);
   }
   await click("[aria-label='Confirm annotation']");
+  await waitFor("edited annotation confirmation collapsed", () => evaluate(`
+    document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
+      && !document.querySelector('.composer-context-preview')
+  `));
+  await click("[aria-label='Show Incoming queue annotations']");
   await waitFor("edited ordered annotations", () => evaluate(`(() => {
     const values = [...document.querySelectorAll('.composer-context-annotations li > span')]
       .map((element) => element.textContent);
@@ -451,13 +397,26 @@ async function run() {
   await click("[aria-label='Add annotation to Incoming queue']");
   await setValue("#contextAnnotationEditor", "Prioritize worker availability when reasoning.");
   await click("[aria-label='Confirm annotation']");
+  await waitFor("re-added annotation confirmation settled", () => evaluate(`
+    !document.querySelector('#contextAnnotationEditor')
+      && !document.querySelector('[aria-label="Show Incoming queue annotations"]')?.disabled
+  `));
+  await click("[aria-label='Show Incoming queue annotations']");
   await click("[aria-label='Close Incoming queue annotations']");
   await clickNode("Two-worker pool");
   await click("#attachNodeContext");
   await click("[aria-label='Confirm annotation']");
+  await waitFor("worker-pool context confirmation settled", () => evaluate(`
+    !document.querySelector('#contextAnnotationEditor')
+      && document.querySelectorAll('.composer-context-pill').length === 2
+  `));
   await clickNode("Results store");
   await click("#attachNodeContext");
   await click("[aria-label='Confirm annotation']");
+  await waitFor("results context confirmation settled", () => evaluate(`
+    !document.querySelector('#contextAnnotationEditor')
+      && document.querySelectorAll('.composer-context-pill').length === 3
+  `));
   mainWindow.setSize(1104, 920);
   await waitForPaint();
   const pillOverflow = await waitFor("multiple node pills scroll horizontally", () => evaluate(`(() => {
@@ -493,6 +452,7 @@ async function run() {
     "#composerContextTray",
     3,
   );
+  await click("[aria-label='Close Incoming queue annotations']");
   await click("#sendInteraction");
   const secondDetail = await waitForAcceptedInteractions(thread.id, 2);
   await waitFor("second turn context pill", () => evaluate(`

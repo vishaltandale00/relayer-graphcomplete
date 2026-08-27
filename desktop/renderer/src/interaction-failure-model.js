@@ -14,7 +14,21 @@ export function restoredDraftForInteraction(interaction) {
   };
 }
 
-export function interactionSubmissionTarget(threadId, latestInteraction, text, modelSelection, inputId, contexts = []) {
+export function confirmationRestorationKey(threadId, interaction) {
+  const restoredDraft = restoredDraftForInteraction(interaction);
+  if (!restoredDraft) return null;
+  return `${threadId}:${interaction.id}:${restoredDraft.retryAttemptId}`;
+}
+
+export function interactionSubmissionTarget(
+  threadId,
+  latestInteraction,
+  text,
+  modelSelection,
+  inputId,
+  contexts = [],
+  contextConfirmationIds = [],
+) {
   const restoredDraft = restoredDraftForInteraction(latestInteraction);
   if (!restoredDraft) {
     return {
@@ -29,6 +43,7 @@ export function interactionSubmissionTarget(threadId, latestInteraction, text, m
       text,
       inputId,
       contexts,
+      contextConfirmationIds,
       modelSelection,
     },
   };

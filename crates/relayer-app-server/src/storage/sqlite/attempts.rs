@@ -1,4 +1,6 @@
-use super::{SqliteProductStore, catalog};
+use super::{
+    SqliteProductStore, catalog, context_drafts::ensure_context_confirmation_restore_safe,
+};
 #[cfg(test)]
 use crate::product::{ExecutionModelSelection, InteractionId, InteractionModelSelection};
 use crate::{
@@ -76,6 +78,12 @@ impl SqliteProductStore {
                 "interaction changed while recording its pre-execution model failure".into(),
             ));
         }
+        ensure_context_confirmation_restore_safe(&mut transaction, failure.interaction_id.value())
+            .await?;
+        sqlx::query("UPDATE node_context_draft_resolutions SET consumed_interaction_id=NULL WHERE consumed_interaction_id=?1")
+            .bind(failure.interaction_id.value())
+            .execute(&mut *transaction)
+            .await?;
         transaction.commit().await?;
         Ok(id)
     }
@@ -259,6 +267,12 @@ impl SqliteProductStore {
                 "interaction changed while recording its failed attempt admission".into(),
             ));
         }
+        ensure_context_confirmation_restore_safe(&mut transaction, receipt.interaction_id.value())
+            .await?;
+        sqlx::query("UPDATE node_context_draft_resolutions SET consumed_interaction_id=NULL WHERE consumed_interaction_id=?1")
+            .bind(receipt.interaction_id.value())
+            .execute(&mut *transaction)
+            .await?;
         transaction.commit().await?;
         Ok(id)
     }
@@ -379,6 +393,7 @@ mod tests {
             input_identity: "retry-input",
             input_digest: "sha256:retry-input",
             contexts: &[],
+            context_confirmation_ids: &[],
         }
     }
 
@@ -598,6 +613,18 @@ mod tests {
     #[tokio::test]
     async fn pre_execution_model_failure_atomically_preserves_receipt_and_restores_draft() {
         let (store, interaction_id, route) = seeded_store().await;
+        let thread_id: i64 = sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+            .bind(interaction_id.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO node_context_draft_resolutions(draft_id,thread_id,outcome,draft_revision,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,resolved_at,composer_text,consumed_interaction_id) VALUES ('draft-retry',?1,'confirmed',1,7,3,5,?2,'FIFO','2','FIFO',?3)")
+            .bind(thread_id)
+            .bind(r#"{"id":7,"kind":"concept","icon":"list","title":"Queue","detail":"Tasks","state":"accepted"}"#)
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
         let policy = store
             .load_execution_harness_policy("codex-basic")
             .await
@@ -648,6 +675,54 @@ mod tests {
         assert_eq!(interaction.completion_status, "not_started");
         assert_eq!(interaction.text, "hello");
         assert_eq!(interaction.latest_attempt.unwrap().id, attempt);
+        let consumed_by: Option<i64> = sqlx::query_scalar(
+            "SELECT consumed_interaction_id FROM node_context_draft_resolutions WHERE draft_id='draft-retry'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(consumed_by, None);
+
+        sqlx::query("UPDATE interactions SET completion_status='submitted' WHERE id=?1")
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE node_context_draft_resolutions SET consumed_interaction_id=?1 WHERE draft_id='draft-retry'")
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let second_attempt = store
+            .record_pre_execution_model_failure(
+                PreExecutionModelFailure {
+                    interaction_id,
+                    harness_name: "codex-basic",
+                    selection: &selection,
+                    route: Some(&route),
+                    policy: Some(&policy),
+                    adapter_version: None,
+                    failure_category: "configuration",
+                },
+                "11",
+            )
+            .await
+            .unwrap();
+        assert_ne!(second_attempt, attempt);
+        let interaction = store
+            .get_interaction(interaction_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(interaction.completion_status, "not_started");
+        assert_eq!(interaction.latest_attempt.unwrap().id, second_attempt);
+        let consumed_by: Option<i64> = sqlx::query_scalar(
+            "SELECT consumed_interaction_id FROM node_context_draft_resolutions WHERE draft_id='draft-retry'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(consumed_by, None);
     }
 
     #[tokio::test]

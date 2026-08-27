@@ -135,7 +135,7 @@ async function evaluate(expression) {
   }
 }
 
-async function setPrompt(value) {
+async function setPrompt(value, { waitForSend = true } = {}) {
   const updated = await evaluate(`(() => {
     const prompt = document.querySelector('#threadPrompt');
     if (!prompt) return false;
@@ -149,9 +149,11 @@ async function setPrompt(value) {
     return true;
   })()`);
   if (!updated) throw new Error("The ongoing prompt was not mounted.");
-  await waitFor("enabled ongoing send", () => evaluate(
-    `document.querySelector('#sendInteraction')?.disabled === false`,
-  ));
+  if (waitForSend) {
+    await waitFor("enabled ongoing send", () => evaluate(
+      `document.querySelector('#sendInteraction')?.disabled === false`,
+    ));
+  }
 }
 
 async function setField(selector, value) {
@@ -294,6 +296,7 @@ async function installFetchProbe() {
     const originalFetch = window.fetch.bind(window);
     window.__contextDraftWarningFetchProbe = {
       failNextInteraction: false,
+      remainingDraftLoadFailures: 0,
       holdNextDraftLoad: false,
       draftLoadHeld: false,
       draftLoadResponseReady: false,
@@ -316,6 +319,15 @@ async function installFetchProbe() {
     window.fetch = async (input, init = {}) => {
       const requestUrl = new URL(typeof input === 'string' ? input : input.url, location.href);
       const method = String(init.method || (typeof input === 'string' ? 'GET' : input.method) || 'GET').toUpperCase();
+      if (method === 'GET'
+        && /^\\/api\\/threads\\/[^/]+\\/context-drafts$/.test(requestUrl.pathname)
+        && window.__contextDraftWarningFetchProbe.remainingDraftLoadFailures > 0) {
+        window.__contextDraftWarningFetchProbe.remainingDraftLoadFailures -= 1;
+        return new Response(JSON.stringify({ error: 'transient context load failure' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (method === 'GET'
         && /^\\/api\\/threads\\/[^/]+\\/context-drafts$/.test(requestUrl.pathname)
         && window.__contextDraftWarningFetchProbe.holdNextDraftLoad) {
@@ -569,8 +581,9 @@ async function run() {
   await click("[aria-label='Confirm annotation']");
   await waitFor("confirmed context pill", () => evaluate(`(() => (
     document.querySelectorAll('.composer-context-pill-wrap').length === 1
-      && document.querySelector('.composer-context-annotations li > span')?.textContent
-        === ${JSON.stringify(confirmedAnnotation)}
+      && document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
+      && document.querySelector('.composer-context-pill span')?.textContent === '1 annotation'
+      && !document.querySelector('.composer-context-preview')
   ))()`));
   await exactDrafts(withDraft.thread.id);
   const promptValue = "Explain how the queue handles backpressure.";
@@ -840,14 +853,26 @@ async function run() {
 
   await openThreadWindow(withoutDraft.thread.id);
   await installFetchProbe();
+  await evaluate(`window.__contextDraftWarningFetchProbe.remainingDraftLoadFailures = 2`);
+  await recreateInteractiveWorkspace("Could not recreate workspace for transient load recovery");
+  await setPrompt("Enable Send after one transient context restoration failure.");
+  if (await evaluate(`document.querySelector('#sendInteraction')?.disabled`) !== false) {
+    throw new Error("Send did not recover after the context restoration retry succeeded.");
+  }
   const disposeRacePrompt = "Do not send after this workspace is disposed during draft loading.";
-  await evaluate(`window.__contextDraftWarningFetchProbe.holdNextDraftLoad = true`);
+  await evaluate(`Object.assign(window.__contextDraftWarningFetchProbe, {
+    remainingDraftLoadFailures: 1,
+    holdNextDraftLoad: true,
+  })`);
   await recreateInteractiveWorkspace("Could not recreate workspace for held load");
   await waitFor("completed no-draft response held from recreated workspace", () => evaluate(
     `window.__contextDraftWarningFetchProbe.draftLoadHeld === true
       && window.__contextDraftWarningFetchProbe.draftLoadResponseReady === true`,
   ));
-  await setPrompt(disposeRacePrompt);
+  await setPrompt(disposeRacePrompt, { waitForSend: false });
+  if (await evaluate(`document.querySelector('#sendInteraction')?.disabled`) !== true) {
+    throw new Error("Send became actionable before initial context restoration completed.");
+  }
   await click("#sendInteraction", { focus: true });
   await recreateInteractiveWorkspace("Could not dispose workspace during held send");
   await evaluate(`window.__contextDraftWarningFetchProbe.releaseDraftLoad = true`);
@@ -866,6 +891,36 @@ async function run() {
   if (detailAfterWorkspaceDisposal.interactions.length !== 1) {
     throw new Error("Disposed workspace created an interaction after draft loading resumed.");
   }
+  const newThreadInteraction = withoutDraft.detail.interactions[0];
+  const newThreadRoot = newThreadInteraction.completionOutput?.rootLayer;
+  const newThreadNode = newThreadRoot?.nodes?.[0];
+  if (!newThreadInteraction.graphNodeId || !newThreadRoot?.layer?.id || !newThreadNode) {
+    throw new Error("The no-draft fixture did not expose a context target for New Thread restoration.");
+  }
+  const newThreadConfirmationId = "new-thread-restored-confirmation";
+  const newThreadAnnotation = "Restore this confirmation after returning from New Thread.";
+  const newThreadDraftUri = `/api/threads/${withoutDraft.thread.id}/context-drafts/${newThreadConfirmationId}`;
+  await productRequest(newThreadDraftUri, {
+    method: "PUT",
+    body: JSON.stringify({
+      target: {
+        nodeId: newThreadNode.id,
+        sourceInteractionNodeId: newThreadInteraction.graphNodeId,
+        sourceLayerId: newThreadRoot.layer.id,
+      },
+      targetNode: {
+        id: newThreadNode.id,
+        kind: newThreadNode.kind,
+        icon: newThreadNode.icon,
+        title: newThreadNode.title,
+        detail: newThreadNode.detail,
+        state: newThreadNode.state || "accepted",
+      },
+      text: newThreadAnnotation,
+      expectedRevision: null,
+    }),
+  });
+  await productRequest(`${newThreadDraftUri}/confirm?expectedRevision=1`, { method: "POST" });
   await evaluate(`Object.assign(window.__contextDraftWarningFetchProbe, {
     holdNextDraftLoad: true,
     draftLoadHeld: false,
@@ -878,27 +933,29 @@ async function run() {
     `window.__contextDraftWarningFetchProbe.draftLoadHeld === true
       && window.__contextDraftWarningFetchProbe.draftLoadResponseReady === true`,
   ));
-  await setPrompt("Do not send after entering New Thread during draft loading.");
+  await setPrompt("Do not send after entering New Thread during draft loading.", { waitForSend: false });
+  if (await evaluate(`document.querySelector('#sendInteraction')?.disabled`) !== true) {
+    throw new Error("New Thread race exposed Send before initial context restoration completed.");
+  }
   await click("#sendInteraction", { focus: true });
-  const navigateThroughNewThread = await evaluate(`(async () => {
+  const enterNewThread = await evaluate(`(async () => {
     try {
       const { appState, viewState } = await import('./src/state.js');
       const { renderThread } = await import('./src/graph.js');
-      const threadId = viewState.currentThreadId;
-      const activeStates = appState.threads.map((thread) => thread.active);
+      window.__contextDraftWarningNewThreadReturn = {
+        threadId: viewState.currentThreadId,
+        activeStates: appState.threads.map((thread) => thread.active),
+      };
       viewState.currentThreadId = null;
       appState.threads.forEach((thread) => { thread.active = false; });
-      renderThread();
-      viewState.currentThreadId = threadId;
-      appState.threads.forEach((thread, index) => { thread.active = activeStates[index]; });
       renderThread();
       return 'ok';
     } catch (error) {
       return String(error?.stack || error);
     }
   })()`);
-  if (navigateThroughNewThread !== "ok") {
-    throw new Error(`Could not navigate through New Thread: ${navigateThroughNewThread}`);
+  if (enterNewThread !== "ok") {
+    throw new Error(`Could not enter New Thread: ${enterNewThread}`);
   }
   await evaluate(`window.__contextDraftWarningFetchProbe.releaseDraftLoad = true`);
   await waitFor("New Thread-cancelled draft response delivery", () => evaluate(
@@ -906,6 +963,43 @@ async function run() {
       && window.__contextDraftWarningFetchProbe.draftLoadDelivered === true`,
   ));
   await evaluate(`Promise.resolve().then(() => Promise.resolve()).then(() => true)`);
+  const returnFromNewThread = await evaluate(`(async () => {
+    try {
+      const { appState, viewState } = await import('./src/state.js');
+      const { renderThread } = await import('./src/graph.js');
+      const saved = window.__contextDraftWarningNewThreadReturn;
+      viewState.currentThreadId = saved.threadId;
+      appState.threads.forEach((thread, index) => { thread.active = saved.activeStates[index]; });
+      renderThread();
+      return 'ok';
+    } catch (error) {
+      return String(error?.stack || error);
+    }
+  })()`);
+  if (returnFromNewThread !== "ok") {
+    throw new Error(`Could not return from New Thread: ${returnFromNewThread}`);
+  }
+  await waitFor("confirmation restored after off-thread load", () => evaluate(`(() => (
+    document.querySelectorAll('.composer-context-pill-wrap').length === 1
+      && document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
+      && document.querySelector('.composer-context-pill span')?.textContent === '1 annotation'
+      && !document.querySelector('.composer-context-preview')
+  ))()`));
+  await click(".composer-context-pill");
+  const restoredNewThreadAnnotation = await evaluate(
+    `document.querySelector('.composer-context-annotations li > span')?.textContent`,
+  );
+  if (restoredNewThreadAnnotation !== newThreadAnnotation) {
+    throw new Error(`New Thread restored the wrong confirmation: ${JSON.stringify(restoredNewThreadAnnotation)}`);
+  }
+  await click(".composer-context-annotations [aria-label^='Delete annotation 1 for ']");
+  await waitFor("restored New Thread annotation dismissal", () => evaluate(
+    `document.querySelector('.composer-context-pill span')?.textContent === '0 annotations'`,
+  ));
+  await click(".composer-context-pill-remove");
+  await waitFor("restored New Thread context detachment", () => evaluate(
+    `document.querySelectorAll('.composer-context-pill-wrap').length === 0`,
+  ));
   const requestsAfterNewThread = await evaluate(
     `window.__contextDraftWarningFetchProbe.interactionRequests.length`,
   );
@@ -950,6 +1044,7 @@ async function run() {
     pendingPersistenceCancelPassed: true,
     workspaceDisposalCancelPassed: true,
     newThreadCancelPassed: true,
+    newThreadRestorationPassed: true,
     failureRecovered: true,
     repeatActivationPassed: true,
     overrideContexts: requests[1].body.contexts,
