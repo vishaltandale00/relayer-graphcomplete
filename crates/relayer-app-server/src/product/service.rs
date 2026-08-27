@@ -181,7 +181,7 @@ impl ProductService {
         let managed_policy = self
             .apply_default_harness_family_policy(&definition, &mut snapshot)
             .await?;
-        validate_provider_snapshot(&snapshot)?;
+        validate_provider_snapshot(&snapshot, managed_policy.as_ref())?;
         self.storage
             .create_provider_with_catalog(&definition, &snapshot, managed_policy.as_ref(), &now())
             .await
@@ -688,7 +688,7 @@ impl ProductService {
         let managed_policy = self
             .apply_default_harness_family_policy(&definition, &mut snapshot)
             .await?;
-        validate_provider_snapshot(&snapshot)?;
+        validate_provider_snapshot(&snapshot, managed_policy.as_ref())?;
         match self
             .storage
             .publish_provider_catalog(&snapshot, managed_policy.as_ref(), &now())
@@ -742,7 +742,7 @@ impl ProductService {
             let error = super::CatalogError::invalid(
                 "family_policy_empty",
                 format!(
-                    "Model-family policy {}@{} did not resolve any visible default models.",
+                    "Model-family policy {}@{} did not resolve any eligible visible models.",
                     policy.id, policy.version
                 ),
             );
@@ -1852,7 +1852,10 @@ fn normalize_member_positions(members: &mut [super::ModelFamilyMember]) {
     }
 }
 
-fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), CatalogError> {
+fn validate_provider_snapshot(
+    snapshot: &ProviderCatalogSnapshot,
+    managed_policy: Option<&FamilyPolicyReference>,
+) -> Result<(), CatalogError> {
     super::catalog::validate_stable_id(snapshot.provider_id.as_str(), "providerId")?;
     if snapshot.label.trim().is_empty() {
         return Err(CatalogError::invalid(
@@ -1895,8 +1898,8 @@ fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), 
             ));
         }
     }
-    // Multiple normalized defaults are valid. Product-owned family policies
-    // decide which ordered subset becomes a managed family.
+    // Provider metadata may expose multiple eligible models. Product-owned
+    // family policies decide which ordered subset becomes a managed family.
     if let Some(family) = &snapshot.system_family {
         if family.model_ids.len() > 5 {
             return Err(CatalogError::invalid(
@@ -1913,17 +1916,22 @@ fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), 
                 "system family key and name must be non-empty",
             ));
         }
-        let mut defaults = snapshot
-            .models
+        let Some(policy) = managed_policy else {
+            return Err(CatalogError::invalid(
+                "system_family_policy_required",
+                "managed family membership requires a product-owned policy",
+            ));
+        };
+        let expected = super::model_policy::derive_managed_family_members(policy, snapshot)?;
+        if !family
+            .model_ids
             .iter()
-            .filter(|model| model.visible && model.provider_default)
-            .collect::<Vec<_>>();
-        defaults.sort_by_key(|model| model.order);
-        let expected = defaults.into_iter().take(5).map(|model| model.id.as_str());
-        if !family.model_ids.iter().map(String::as_str).eq(expected) {
+            .map(String::as_str)
+            .eq(expected.iter().map(|member| member.model_id.as_str()))
+        {
             return Err(CatalogError::invalid(
                 "system_family_members_invalid",
-                "managed family must contain visible provider-default models in provider order",
+                "managed family must match its product-owned policy in provider order",
             ));
         }
     }
@@ -2187,7 +2195,7 @@ mod tests {
                 .map(|policy| (policy.policy_id.as_str(), policy.policy_version)),
             Some(("claude-default-family", 1))
         );
-        refreshed_snapshot.models[0].provider_default = false;
+        refreshed_snapshot.models[0].visible = false;
         service
             .publish_provider_catalog(refreshed_snapshot)
             .await

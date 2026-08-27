@@ -65,10 +65,11 @@ pub(crate) fn derive_managed_family_members(
 ) -> Result<Vec<ModelFamilyMember>, CatalogError> {
     match (policy.id.as_str(), policy.version) {
         (CODEX_DEFAULT_FAMILY_POLICY_ID, 1 | 2) | (CLAUDE_DEFAULT_FAMILY_POLICY_ID, 1) => {
+            let include_all_visible = policy.id == CLAUDE_DEFAULT_FAMILY_POLICY_ID;
             let mut models = snapshot
                 .models
                 .iter()
-                .filter(|model| model.visible && model.provider_default)
+                .filter(|model| model.visible && (include_all_visible || model.provider_default))
                 .collect::<Vec<_>>();
             models.sort_by_key(|model| model.order);
             Ok(models
@@ -177,14 +178,15 @@ mod tests {
                 &snapshot(vec![
                     model("opus", 1, true, false),
                     model("sonnet", 0, true, true),
-                    model("hidden", 2, false, true),
+                    model("fable", 2, true, false),
+                    model("hidden", 3, false, true),
                 ]),
             )
             .unwrap()
             .iter()
             .map(|member| member.model_id.as_str())
             .collect::<Vec<_>>(),
-            vec!["sonnet"]
+            vec!["sonnet", "opus", "fable"]
         );
     }
 
