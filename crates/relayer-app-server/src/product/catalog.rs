@@ -92,6 +92,8 @@ pub(crate) struct RuntimeProductHarness {
     pub(crate) model_rules: Option<HarnessModelRules>,
     pub(crate) execution_access_contracts: Vec<String>,
     pub(crate) family_policy: Option<FamilyPolicyReference>,
+    pub(crate) runtime_available: bool,
+    pub(crate) unavailable_reason: Option<UnavailableReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -99,7 +101,9 @@ pub(crate) struct RuntimeProductHarness {
 pub(crate) struct ExecutionHarnessPolicy {
     pub(crate) configuration_revision: u32,
     pub(crate) configuration_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) model_rules: Option<HarnessModelRules>,
+    pub(crate) execution_access_contracts: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -379,9 +383,38 @@ pub(crate) struct ModelSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ProviderOnboardingModel {
-    pub(crate) id: String,
+pub(crate) struct ProviderOnboardingProvider {
+    pub(crate) id: ProviderId,
     pub(crate) label: String,
+    pub(crate) adapter_id: String,
+    pub(crate) access_contract: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderOnboardingModel {
+    pub(crate) provider_id: ProviderId,
+    pub(crate) model_id: String,
+    pub(crate) label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderOnboardingFamily {
+    pub(crate) id: ModelFamilyId,
+    pub(crate) name: String,
+    pub(crate) revision: u32,
+    pub(crate) members: Vec<ModelFamilyMember>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderOnboardingManagedFamily {
+    pub(crate) provider_id: ProviderId,
+    pub(crate) policy_id: String,
+    pub(crate) policy_version: u32,
+    pub(crate) name: String,
+    pub(crate) members: Vec<ModelFamilyMember>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -389,32 +422,81 @@ pub(crate) struct ProviderOnboardingModel {
 pub(crate) struct ProviderOnboardingHarness {
     pub(crate) id: String,
     pub(crate) label: String,
-    pub(crate) is_app_default: bool,
-    pub(crate) models: Vec<ProviderOnboardingModel>,
+    pub(crate) configuration_revision: u32,
+    pub(crate) selectable: bool,
+    pub(crate) selected_initially: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) matching_access_contract: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) incompatibility_reason: Option<UnavailableReason>,
+    pub(crate) existing_custom_families: Vec<ProviderOnboardingFamily>,
+    pub(crate) existing_managed_families: Vec<ProviderOnboardingFamily>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) managed_family_candidate: Option<ProviderOnboardingManagedFamily>,
+    pub(crate) eligible_models: Vec<ProviderOnboardingModel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderOnboardingProjection {
-    pub(crate) provider_id: ProviderId,
+    pub(crate) provider: ProviderOnboardingProvider,
     pub(crate) app_default_harness_id: String,
+    pub(crate) initial_harness_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) app_default_reason: Option<UnavailableReason>,
     pub(crate) harnesses: Vec<ProviderOnboardingHarness>,
+    pub(crate) projection_revision: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) blocking_reason: Option<UnavailableReason>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ProviderOnboardingFamilyIntent {
+    Existing {
+        family_id: ModelFamilyId,
+    },
+    Managed {
+        policy_id: String,
+        policy_version: u32,
+    },
+    Create {
+        name: String,
+        members: Vec<ModelFamilyMember>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CompleteProviderOnboardingCommand {
     pub(crate) provider_id: ProviderId,
     pub(crate) harness_id: String,
-    pub(crate) family_name: String,
-    pub(crate) model_id: String,
+    pub(crate) expected_projection_revision: String,
+    pub(crate) family: ProviderOnboardingFamilyIntent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderOnboardingResolution {
+    pub(crate) family_id: ModelFamilyId,
+    pub(crate) family_revision: u32,
+    pub(crate) resolvable_members: Vec<ModelFamilyMember>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderOnboardingCompletion {
     pub(crate) defaults: ModelSettingsDefaults,
-    pub(crate) family: ModelFamily,
-    pub(crate) selection: ModelSelection,
+    pub(crate) resolution: ProviderOnboardingResolution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderOnboardingStatus {
+    pub(crate) complete: bool,
+    pub(crate) defaults: ModelSettingsDefaults,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) resolution: Option<ProviderOnboardingResolution>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) blocking_reason: Option<UnavailableReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -441,6 +523,45 @@ pub(crate) struct ExecutionModelSelection {
     pub(crate) adapter_id: String,
     pub(crate) access_contract: String,
     pub(crate) model_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExecutionModelRoute {
+    pub(crate) provider_id: ProviderId,
+    pub(crate) adapter_id: String,
+    pub(crate) access_contract: String,
+    pub(crate) model_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExecutionModelPlan {
+    pub(crate) family_id: ModelFamilyId,
+    pub(crate) family_revision: i64,
+    pub(crate) orchestrator: ExecutionModelRoute,
+    pub(crate) roster: Vec<ExecutionModelRoute>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AdmittedExecutionModelRoute {
+    pub(crate) provider_id: ProviderId,
+    pub(crate) adapter_id: String,
+    pub(crate) access_contract: String,
+    pub(crate) model_id: String,
+    pub(crate) adapter_implementation_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AdmittedExecutionModelPlan {
+    pub(crate) family_id: ModelFamilyId,
+    pub(crate) family_revision: i64,
+    pub(crate) orchestrator: AdmittedExecutionModelRoute,
+    pub(crate) roster: Vec<AdmittedExecutionModelRoute>,
+    pub(crate) harness_policy_digest: String,
+    pub(crate) digest: String,
 }
 
 impl From<ModelSelection> for InteractionModelSelection {

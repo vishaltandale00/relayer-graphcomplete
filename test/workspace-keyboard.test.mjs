@@ -6,8 +6,10 @@ import {
   COMPOSER_MIN_HEIGHT,
   CONTEXT_EDITOR_MAX_HEIGHT,
   CONTEXT_EDITOR_MIN_HEIGHT,
+  applyComposerCapabilities,
   applyContextEditor,
   bindComposerKeydown,
+  clearSubmittedComposerDraft,
   composerDisabledForState,
   composerDraftMatchesSubmission,
   composerDraftScopeKey,
@@ -37,6 +39,23 @@ import {
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace keyboard behavior", () => {
+  it("keeps composer-owned review elements mounted while disabling composition", () => {
+    const element = () => ({ classList: { toggle: vi.fn() } });
+    const composer = element();
+    const prompt = element();
+    const send = element();
+    const readOnlyMessage = element();
+
+    applyComposerCapabilities({ composer, prompt, send, readOnlyMessage }, false);
+
+    expect(composer.classList.toggle).toHaveBeenCalledWith("disabled-composer", true);
+    expect(prompt.classList.toggle).toHaveBeenCalledWith("hidden", true);
+    expect(send.classList.toggle).toHaveBeenCalledWith("hidden", true);
+    expect(readOnlyMessage.classList.toggle).toHaveBeenCalledWith("hidden", false);
+    expect(productWorkspaceMarkup()).toContain('id="composerRetryMessage"');
+    expect(productWorkspaceMarkup()).toContain('id="readOnlyComposerMessage"');
+  });
+
   it("navigates turns only for unmodified arrows while the graph owns focus", () => {
     expect(graphTurnNavigationDelta({ key: "ArrowLeft" }, true)).toBe(-1);
     expect(graphTurnNavigationDelta({ key: "ArrowRight" }, true)).toBe(1);
@@ -349,6 +368,47 @@ describe("product workspace keyboard behavior", () => {
     expect(transition.promptValue).toBe("edited retry A");
     expect(state.drafts.get(composerDraftScopeKey("thread-b", "interaction-b")))
       .toEqual({ promptValue: "draft B", restoredDraftInteractionId: null });
+  });
+
+  it("does not restore a durably sent inactive draft after returning to its thread", () => {
+    let transition = transitionComposerDraftScope(createComposerDraftScopeState(), {
+      threadId: "thread-a",
+      interactionId: "interaction-a",
+      currentPromptValue: "",
+      restoredDraft: { text: "retry A" },
+    });
+    const submittedScopeKey = transition.state.activeScopeKey;
+    transition = transitionComposerDraftScope(transition.state, {
+      threadId: "thread-b",
+      interactionId: "interaction-b",
+      currentPromptValue: "retry A",
+    });
+    const cleared = clearSubmittedComposerDraft(
+      transition.state,
+      submittedScopeKey,
+      "retry A",
+      "draft B",
+    );
+    transition = transitionComposerDraftScope(cleared, {
+      threadId: "thread-a",
+      interactionId: "interaction-a",
+      currentPromptValue: "draft B",
+    });
+    expect(transition.promptValue).toBe("");
+
+    const edited = transitionComposerDraftScope(transition.state, {
+      threadId: "thread-a",
+      interactionId: "interaction-a",
+      currentPromptValue: "",
+      restoredDraft: { text: "retry A again" },
+    });
+    const preserved = clearSubmittedComposerDraft(
+      edited.state,
+      edited.state.activeScopeKey,
+      "retry A again",
+      "user edited A while the send settled",
+    );
+    expect(preserved.drafts.get(edited.state.activeScopeKey).promptValue).toBe("retry A again");
   });
 
   it("never exposes another interaction's restored prompt as the active send value", () => {

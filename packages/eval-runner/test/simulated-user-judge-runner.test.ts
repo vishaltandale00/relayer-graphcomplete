@@ -7,6 +7,7 @@ import {
 } from "../src/simulated-user/mcp-server.js";
 import {
   assertReviewOnlyCodexTrace,
+  buildRecursivePresentationJudgePrompt,
   runSimulatedUserJudge,
   sanitizeJudgeEnvironment,
   type JudgeThreadResult,
@@ -14,10 +15,30 @@ import {
   type JudgeThreadStartRequest,
 } from "../src/simulated-user/judge-runner.js";
 import { inventoryReviewSubjects } from "../src/simulated-user/inventory.js";
+import { GRAPH_PRESENTATION_RUBRIC_V5 } from "../src/simulated-user/rubric.js";
 import { IncrementalReviewStore } from "../src/simulated-user/review-store.js";
 import type { LayerReview, NodeReview, TurnReview } from "../src/simulated-user/contracts.js";
 
 describe("simulated-user Codex judge runner", () => {
+  it("requires first-class artifact-grounded findings for materially absent actions", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-1",
+      rootLayerId: "layer-1",
+      layers: [{ id: "layer-1", nodeIds: ["node-1"], actions: [] }],
+    });
+    const prompt = buildRecursivePresentationJudgePrompt(
+      "Explain the completed repair.",
+      GRAPH_PRESENTATION_RUBRIC_V5,
+      inventory,
+    );
+
+    expect(prompt).toContain("A flat graph does not escape recursive judgment");
+    expect(prompt).toContain("missingActionOpportunity");
+    expect(prompt).toContain("distinct unanswered user question");
+    expect(prompt).toContain("Generic requests for more detail");
+    expect(prompt).toContain("caps final recursive_coherence at 3");
+  });
+
   it("starts a locked-down injected Codex thread and records an immutable audit artifact", async () => {
     const store = finalizedStore();
     let startRequest: JudgeThreadStartRequest | undefined;
@@ -55,6 +76,17 @@ describe("simulated-user Codex judge runner", () => {
         RANDOM_SECRET: "must-not-leak",
       },
       workingDirectory: process.cwd(),
+      artifact: {
+        kind: "git_workspace",
+        workingDirectory: process.cwd(),
+        baseRevision: "base-commit",
+      },
+      artifactEvidence: {
+        schemaVersion: 1,
+        source: "bounded_host_packet",
+        summary: "Changed src/file.ts and verified the focused suite.",
+        facts: ["src/file.ts changed", "focused tests passed"],
+      },
       threadFactory: factory,
       mcpServer: { bearerToken: "test-token-with-at-least-24-characters" },
     });
@@ -76,6 +108,16 @@ describe("simulated-user Codex judge runner", () => {
     expect(startRequest?.codexOptions.env).not.toHaveProperty("OPENAI_API_KEY");
     expect(startRequest?.codexOptions.env).not.toHaveProperty("RELAYER_GRAPH_TOKEN");
     expect(startRequest?.codexOptions.config).toMatchObject({
+      features: {
+        apps: false,
+        browser_use: false,
+        computer_use: false,
+        image_generation: false,
+        shell_tool: true,
+        skill_search: false,
+        unified_exec: true,
+        view_image: false,
+      },
       mcp_servers: {
         [SIMULATED_USER_MCP_SERVER_NAME]: {
           url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/),
@@ -88,7 +130,7 @@ describe("simulated-user Codex judge runner", () => {
       schemaVersion: 1,
       executionId: "execution-1",
       judge: { model: "gpt-test", modelReasoningEffort: "high" },
-      prompt: { version: "simulated-user-judge-prompt-v1" },
+      prompt: { version: "simulated-user-judge-prompt-v4" },
       rubric: { rubricVersion: "simulated-user-rubric-v1" },
       codexThreadId: "codex-thread-1",
       finalResponse: "Review submitted.",
@@ -99,12 +141,17 @@ describe("simulated-user Codex judge runner", () => {
         networkAccessEnabled: false,
         webSearchMode: "disabled",
         allowedMcpServer: SIMULATED_USER_MCP_SERVER_NAME,
+        shellAccess: true,
       },
     });
     expect(result.prompt.text).toContain("Original user request:\nExplain the architecture.");
     expect(result.prompt.text).toContain("root and expansion layers have no different rules");
     expect(result.prompt.text).toContain("Do not regrade the reference destination node by node");
     expect(result.prompt.text).toContain("Need is independent of execution");
+    expect(result.prompt.text).not.toContain(process.cwd());
+    expect(result.prompt.text).not.toContain('"baseRevision": "base-commit"');
+    expect(result.prompt.text).toContain("Changed src/file.ts and verified the focused suite.");
+    expect(result.prompt.text).toContain("The rubric is the contract");
     expect(result.codexTrace).toEqual([{ id: "message-1", type: "agent_message", text: "Review submitted." }]);
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.codexTrace)).toBe(true);
@@ -112,14 +159,22 @@ describe("simulated-user Codex judge runner", () => {
     expect(Object.isFrozen(result.review)).toBe(true);
   });
 
-  it("rejects shell, file, web, and non-review MCP activity in returned Codex traces", () => {
+  it("allows read-only shell evidence while rejecting file, web, and non-review MCP activity", () => {
     const forbidden: ThreadItem[] = [
-      { id: "shell", type: "command_execution", command: "pwd", aggregated_output: "", exit_code: 0, status: "completed" },
       { id: "file", type: "file_change", changes: [{ path: "x", kind: "add" }], status: "completed" },
       { id: "web", type: "web_search", query: "anything" },
       { id: "mcp", type: "mcp_tool_call", server: "other", tool: "read", arguments: {}, status: "completed" },
     ];
     for (const item of forbidden) expect(() => assertReviewOnlyCodexTrace([item])).toThrow(/forbidden/i);
+
+    expect(() => assertReviewOnlyCodexTrace([{
+      id: "shell",
+      type: "command_execution",
+      command: "git diff --stat HEAD^",
+      aggregated_output: "src/file.ts | 2 ++",
+      exit_code: 0,
+      status: "completed",
+    }])).not.toThrow();
 
     expect(() => assertReviewOnlyCodexTrace([{
       id: "allowed",
@@ -170,6 +225,14 @@ function finalizedStore(): IncrementalReviewStore<LayerReview, NodeReview, TurnR
     evidence: { context: ["shot-layer"], detail: ["shot-node"] },
     ratings: { layer_fit: 4, title_detail_alignment: 4, substance: 4, detail_presentation: 4 },
     actions: [],
+    structure: {
+      rating: 4,
+      expansion: { need: "none", result: "absent" },
+      references: { need: "none", result: "absent" },
+      invoke: { need: "none", result: "absent" },
+      reason: "A flat node is sufficient.",
+      evidence: ["shot-node"],
+    },
     summary: "Useful.",
     findings: [],
   });
@@ -191,6 +254,11 @@ function finalizedStore(): IncrementalReviewStore<LayerReview, NodeReview, TurnR
       expansion: { need: "none", result: "absent" },
       references: { need: "none", result: "absent" },
       reason: "A flat response is sufficient.",
+      evidence: ["shot-layer"],
+    },
+    scoreCeiling: {
+      maximum: 4,
+      reason: "No critical comprehension gap exists.",
       evidence: ["shot-layer"],
     },
   });

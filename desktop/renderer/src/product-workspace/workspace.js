@@ -644,12 +644,34 @@ export function transitionComposerDraftScope(state, {
   };
 }
 
-export function contextStagingDisabledFor(status, canCompose = true, requestDisabled = false) {
-  return requestDisabled || composerDisabledForState(status, canCompose);
+export function clearSubmittedComposerDraft(state, submittedScopeKey, submittedPromptValue, currentPromptValue) {
+  const retainedPromptValue = state.activeScopeKey === submittedScopeKey
+    ? currentPromptValue
+    : state.drafts.get(submittedScopeKey)?.promptValue;
+  if (retainedPromptValue !== submittedPromptValue) return state;
+  const drafts = new Map(state.drafts);
+  drafts.delete(submittedScopeKey);
+  return { activeScopeKey: state.activeScopeKey, drafts };
+}
+
+export function contextStagingDisabledFor(
+  status,
+  canCompose = true,
+  requestDisabled = false,
+  restoredDraft = false,
+) {
+  return requestDisabled || composerDisabledForState(status, canCompose, restoredDraft);
 }
 
 export function composerDisabledForState(status, canCompose = true, restoredDraft = false) {
   return !canCompose || (PENDING_COMPLETION_STATUSES.has(status) && !restoredDraft);
+}
+
+export function applyComposerCapabilities({ composer, prompt, send, readOnlyMessage }, canCompose) {
+  composer.classList.toggle("disabled-composer", !canCompose);
+  prompt.classList.toggle("hidden", !canCompose);
+  send.classList.toggle("hidden", !canCompose);
+  readOnlyMessage.classList.toggle("hidden", canCompose);
 }
 
 export function composerStatusForThread(state, thread) {
@@ -1511,7 +1533,12 @@ export function createProductWorkspace({
   ));
   const contextStagingDisabled = () => {
     const status = composerStatusForThread(getState(), getThread());
-    return contextStagingDisabledFor(status, capabilities.canCompose, prompt.disabled);
+    return contextStagingDisabledFor(
+      status,
+      capabilities.canCompose,
+      prompt.disabled,
+      restoredDraftActive,
+    );
   };
   const closeContextEditor = () => {
     contextEditor = null;
@@ -1527,7 +1554,7 @@ export function createProductWorkspace({
     );
     const status = composerStatusForThread(getState(), getThread());
     const available = capabilities.canCompose
-      && !composerDisabledForState(status, true)
+      && !composerDisabledForState(status, true, restoredDraftActive)
       && !prompt.disabled
       && Boolean(node);
     button.classList.toggle("hidden", !available);
@@ -1858,6 +1885,12 @@ export function createProductWorkspace({
     try {
       const modelSelection = pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection;
       await onSubmitInteraction(text, modelSelection, interactionContextPayload(submittedContexts));
+      composerDraftScopeState = clearSubmittedComposerDraft(
+        composerDraftScopeState,
+        submittedDraftScopeKey,
+        submittedPromptValue,
+        prompt.value,
+      );
       if (composerDraftMatchesSubmission({
         currentThreadId: getThread()?.id,
         submittedThreadId,
@@ -1956,10 +1989,12 @@ export function createProductWorkspace({
     threadView.dataset.canCompose = String(capabilities.canCompose);
     threadView.dataset.canInvokeMutatingActions = String(capabilities.canInvokeMutatingActions);
     threadView.dataset.canExportConversation = String(capabilities.canExportConversation);
-    $("#threadComposer").classList.toggle("disabled-composer", !capabilities.canCompose);
-    prompt.classList.toggle("hidden", !capabilities.canCompose);
-    send.classList.toggle("hidden", !capabilities.canCompose);
-    if (!capabilities.canCompose) $("#threadComposer").textContent = "Read-only evaluation result";
+    applyComposerCapabilities({
+      composer: $("#threadComposer"),
+      prompt,
+      send,
+      readOnlyMessage: $("#readOnlyComposerMessage"),
+    }, capabilities.canCompose);
   }
 
   function renderHistoryNavigation() {

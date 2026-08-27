@@ -139,8 +139,19 @@ export interface NodeReview {
   readonly ratings: NodeRatings;
   readonly nullRatingJustifications?: Readonly<Partial<Record<keyof NodeRatings, string>>>;
   readonly actions: readonly ActionReview[];
+  /** Required recursive-disclosure judgment, including absent-but-needed affordances. */
+  readonly structure: NodeStructureReview;
   readonly summary: string;
   readonly findings: readonly Finding[];
+}
+
+export interface NodeStructureReview {
+  readonly rating: 1 | 2 | 3 | 4;
+  readonly expansion: StructureDimensionReview;
+  readonly references: StructureDimensionReview;
+  readonly invoke: StructureDimensionReview;
+  readonly reason: string;
+  readonly evidence: readonly ScreenshotEvidenceRef[];
 }
 
 export interface TurnReview {
@@ -151,6 +162,14 @@ export interface TurnReview {
   readonly summary: string;
   readonly findings: readonly Finding[];
   readonly structure: StructureReview;
+  /** Explicit ceiling applied after weighted presentation aggregation. */
+  readonly scoreCeiling: PresentationScoreCeiling;
+}
+
+export interface PresentationScoreCeiling {
+  readonly maximum: 1 | 2 | 3 | 4;
+  readonly reason: string;
+  readonly evidence: readonly ScreenshotEvidenceRef[];
 }
 
 export type StructureNeed = "none" | "helpful" | "required";

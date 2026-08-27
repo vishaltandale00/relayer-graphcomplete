@@ -26,13 +26,16 @@ describe("harness configuration", () => {
     await expect(Promise.all(paths.map(loadHarnessConfiguration))).resolves.toHaveLength(paths.length);
   });
 
-  it("loads the production codex.basic configuration", async () => {
-    await expect(loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-basic.yaml"))).resolves.toEqual({
+  it.each([
+    ["codex-basic", "medium"],
+    ["codex-basic-high", "high"],
+  ])("loads the production %s configuration", async (name, modelReasoningEffort) => {
+    await expect(loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`))).resolves.toEqual({
       schemaVersion: 1,
-      name: "codex-basic",
+      name,
       implementation: "codex.basic",
       implementationVersion: 1,
-      revision: 1,
+      revision: 2,
       permissionBindings: {
         ask: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user", networkAccessEnabled: true },
         auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
@@ -49,9 +52,9 @@ describe("harness configuration", () => {
         deny: [],
       },
       executionAccessContracts: ["managed-runtime@1", "secret@1"],
-      modelDefaults: { familyPolicy: { id: "codex-default-family", version: 1 } },
+      modelDefaults: { familyPolicy: { id: "codex-default-family", version: 2 } },
       settings: {
-        modelReasoningEffort: "medium",
+        modelReasoningEffort,
         skipGitRepoCheck: true,
       },
     });
@@ -293,6 +296,21 @@ describe("harness configuration", () => {
     expect([...catalog.keys()]).toEqual(["prime-agent-basic", "prime-agent-deep"]);
     expect([...catalog.values()].map(({ implementation }) => implementation)).toEqual(["prime.agent", "prime.agent"]);
     expect(catalog.get("prime-agent-basic")?.settings).not.toEqual(catalog.get("prime-agent-deep")?.settings);
+    for (const selected of catalog.values()) {
+      expect(selected.permissionBindings).toEqual({
+        ask: { boundary: "workspace-write@1", reviewer: "user", networkAccessEnabled: true },
+        auto: { boundary: "workspace-write@1", reviewer: "automatic", networkAccessEnabled: true },
+        full: {},
+      });
+      expect(selected.modelRules?.allow.map(({ adapterId }) => adapterId)).toEqual([
+        "openai-api",
+        "anthropic-api",
+        "openrouter",
+        "vercel-ai-router",
+      ]);
+      expect(selected.executionAccessContracts).toEqual(["secret@1"]);
+      expect(selected.settings).not.toHaveProperty("model");
+    }
   });
 
   it("loads the opt-in Luna layered-navigation configurations without changing legacy names", async () => {
@@ -313,10 +331,22 @@ describe("harness configuration", () => {
       promptProfile: "layered-navigation-v1",
     });
     expect(catalog.get("prime-agent-layered-navigation-luna")?.settings).toMatchObject({
-      model: { provider: "openai-codex", id: "gpt-5.6-luna" },
       thinkingLevel: "medium",
       promptProfile: "layered-navigation-v1",
     });
+    expect(catalog.get("prime-agent-layered-navigation-luna")?.settings).not.toHaveProperty("model");
+    expect(catalog.get("prime-agent-layered-navigation-luna")?.permissionBindings).toEqual({
+      ask: { boundary: "workspace-write@1", reviewer: "user", networkAccessEnabled: true },
+      auto: { boundary: "workspace-write@1", reviewer: "automatic", networkAccessEnabled: true },
+      full: {},
+    });
+    expect(catalog.get("prime-agent-layered-navigation-luna")?.modelRules?.allow.map(({ adapterId }) => adapterId)).toEqual([
+      "openai-api",
+      "anthropic-api",
+      "openrouter",
+      "vercel-ai-router",
+    ]);
+    expect(catalog.get("prime-agent-layered-navigation-luna")?.executionAccessContracts).toEqual(["secret@1"]);
   });
 
   it("loads the model-neutral Codex multi-agent layered-navigation configuration", async () => {

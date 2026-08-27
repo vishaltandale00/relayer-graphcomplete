@@ -1,18 +1,20 @@
 use super::{
-    ActionInvocation, Annotation, AnnotationAnchor, AnnotationState, CatalogError,
-    CreateModelFamilyCommand, FamilyPolicyReference, Interaction, InteractionId,
+    ActionInvocation, Annotation, AnnotationAnchor, AnnotationState, BeginInteractionAttempt,
+    CatalogError, CreateModelFamilyCommand, FamilyPolicyReference, Interaction, InteractionId,
     InteractionModelSelection, MAX_ANNOTATION_SNAPSHOT_THREADS, ModelFamily, ModelFamilyId,
-    ModelFamilyKind, ModelFamilyMember, ModelSelection, ModelSettings, ModelSettingsDefaults,
-    NewAnnotationRevision, ProductCapabilities, ProductState, Project, ProjectId,
-    ProviderCatalogSnapshot, ProviderId, ReorderModelFamiliesCommand, SystemFamilySnapshot, Thread,
-    ThreadId, ThreadView, UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand,
-    ValidateModelSelectionCommand, validate_family, validate_revision_content, validate_stable_id,
+    ModelFamilyKind, ModelSelection, ModelSettings, ModelSettingsDefaults, NewAnnotationRevision,
+    ProductCapabilities, ProductState, Project, ProjectId, ProviderCatalogSnapshot,
+    ReorderModelFamiliesCommand, SystemFamilySnapshot, Thread, ThreadId, ThreadView,
+    UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand, ValidateModelSelectionCommand,
+    validate_family, validate_revision_content,
 };
 use crate::approval::{ApprovalReceipt, ApprovalRequest, ApprovalResolution};
 use crate::storage::{
     ActionInvocationInsertOutcome, ConversationImportRecord, NewConversationImport,
-    NewThreadRecord, SqliteProductStore, StagedConversationImport, StorageError,
+    NewInteractionInput, NewThreadRecord, SqliteProductStore, StagedConversationImport,
+    StorageError,
 };
+use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
@@ -32,6 +34,15 @@ pub(crate) struct CreateThreadCommand {
     pub(crate) permission_profile_id: String,
     pub(crate) model_selection: Option<InteractionModelSelection>,
     pub(crate) allow_unselected_model: bool,
+}
+
+pub(crate) struct RetryInteractionCommand<'a> {
+    pub(crate) expected_attempt_id: i64,
+    pub(crate) text: &'a str,
+    pub(crate) input_identity: &'a str,
+    pub(crate) contexts: &'a [super::InteractionContextIntent],
+    pub(crate) model_selection: &'a InteractionModelSelection,
+    pub(crate) harness_configuration_name: &'a str,
 }
 
 pub(crate) struct AcceptedInteractionCompletion<'a> {
@@ -405,193 +416,100 @@ impl ProductService {
 
     pub(crate) async fn provider_onboarding_projection(
         &self,
-        provider_id: ProviderId,
+        provider_id: &super::ProviderId,
+        app_default_harness_id: &str,
+        permission_available_harnesses: &HashSet<String>,
     ) -> Result<super::ProviderOnboardingProjection, ProductError> {
-        let settings = self.storage.load_model_settings().await?;
-        let provider = settings
-            .providers
-            .iter()
-            .find(|provider| provider.id == provider_id)
-            .ok_or_else(|| ProductError::NotFound(format!("provider {}", provider_id.as_str())))?;
-        if !provider.connected {
-            return Err(super::CatalogError::invalid(
-                "provider_disconnected",
-                "The selected provider is not connected.",
+        self.storage
+            .provider_onboarding_projection(
+                provider_id,
+                app_default_harness_id,
+                permission_available_harnesses,
             )
-            .into());
-        }
-        let mut harnesses = Vec::new();
-        for harness in settings
-            .harnesses
-            .iter()
-            .filter(|harness| harness.available)
-        {
-            let mut models = Vec::new();
-            for model in &provider.models {
-                if self
-                    .storage
-                    .provider_onboarding_model_compatible(&harness.id, &provider_id, &model.id)
-                    .await?
-                {
-                    models.push(super::ProviderOnboardingModel {
-                        id: model.id.clone(),
-                        label: model.label.clone(),
-                    });
-                }
-            }
-            if !models.is_empty() {
-                harnesses.push(super::ProviderOnboardingHarness {
-                    id: harness.id.clone(),
-                    label: harness.label.clone(),
-                    is_app_default: harness.id == settings.defaults.harness_id,
-                    models,
-                });
-            }
-        }
-        harnesses.sort_by_key(|harness| (!harness.is_app_default, harness.label.clone()));
-        Ok(super::ProviderOnboardingProjection {
-            provider_id,
-            app_default_harness_id: settings.defaults.harness_id,
-            harnesses,
-        })
-    }
-
-    pub(crate) async fn complete_default_provider_onboarding(
-        &self,
-        provider_id: ProviderId,
-    ) -> Result<Option<super::ProviderOnboardingCompletion>, ProductError> {
-        for _attempt in 0..2 {
-            let settings = self.storage.load_model_settings().await?;
-            let provider = settings
-                .providers
-                .iter()
-                .find(|provider| provider.id == provider_id)
-                .ok_or_else(|| {
-                    ProductError::NotFound(format!("provider {}", provider_id.as_str()))
-                })?;
-            if !provider.connected {
-                return Err(super::CatalogError::invalid(
-                    "provider_disconnected",
-                    "The selected provider is not connected.",
-                )
-                .into());
-            }
-            let Some(default) = super::model_policy::resolve_default_onboarding_policy(
-                &settings.harnesses,
-                &settings.defaults.harness_id,
-                &provider.adapter_id,
-            ) else {
-                return Ok(None);
-            };
-            let snapshot = ProviderCatalogSnapshot {
-                provider_id: provider.id.clone(),
-                label: provider.label.clone(),
-                connected: provider.connected,
-                unavailable_reason: provider.unavailable_reason.clone(),
-                models: provider
-                    .models
-                    .iter()
-                    .enumerate()
-                    .map(|(order, model)| super::catalog::CatalogModelSnapshot {
-                        id: model.id.clone(),
-                        label: model.label.clone(),
-                        order,
-                        visible: model.visible,
-                        available: model.available,
-                        unavailable_reason: model.unavailable_reason.clone(),
-                        provider_default: model.provider_default,
-                        replacement_model_id: model.replacement_model_id.clone(),
-                        metadata: serde_json::json!({}),
-                    })
-                    .collect(),
-                system_family: None,
-            };
-            let members =
-                super::model_policy::derive_managed_family_members(&default.policy, &snapshot)?;
-            let mut selected_model_id = None;
-            for member in &members {
-                let executable = provider
-                    .models
-                    .iter()
-                    .any(|model| model.id == member.model_id && model.available);
-                if executable
-                    && self
-                        .storage
-                        .provider_onboarding_model_compatible(
-                            &default.harness_id,
-                            &provider_id,
-                            &member.model_id,
-                        )
-                        .await?
-                {
-                    selected_model_id = Some(member.model_id.clone());
-                    break;
-                }
-            }
-            let Some(selected_model_id) = selected_model_id else {
-                return Ok(None);
-            };
-            let system_family = SystemFamilySnapshot {
-                key: format!("{}@{}", default.policy.id, default.policy.version),
-                name: format!("{} defaults", provider.label),
-                model_ids: members
-                    .iter()
-                    .map(|member| member.model_id.clone())
-                    .collect(),
-            };
-            let Some((defaults, family)) = self
-                .storage
-                .complete_managed_provider_onboarding(
-                    &settings.defaults,
-                    &snapshot,
-                    &system_family,
-                    &default.policy,
-                    &default.harness_id,
-                    &selected_model_id,
-                )
-                .await?
-            else {
-                continue;
-            };
-            return Ok(Some(super::ProviderOnboardingCompletion {
-                defaults,
-                selection: super::ModelSelection {
-                    harness_id: default.harness_id,
-                    family_id: family.id,
-                    provider_id,
-                    model_id: selected_model_id,
-                },
-                family,
-            }));
-        }
-        Ok(None)
+            .await
+            .map_err(Into::into)
     }
 
     pub(crate) async fn complete_provider_onboarding(
         &self,
-        mut command: super::CompleteProviderOnboardingCommand,
+        command: &super::CompleteProviderOnboardingCommand,
+        app_default_harness_id: &str,
+        permission_available_harnesses: &HashSet<String>,
     ) -> Result<super::ProviderOnboardingCompletion, ProductError> {
-        validate_stable_id(&command.harness_id, "harnessId")?;
-        validate_stable_id(&command.model_id, "modelId")?;
-        command.family_name = validate_family(
-            &command.family_name,
-            &[ModelFamilyMember {
-                provider_id: command.provider_id.clone(),
-                model_id: command.model_id.clone(),
-                position: 0,
-            }],
-        )?;
-        let (defaults, family) = self.storage.complete_provider_onboarding(&command).await?;
-        Ok(super::ProviderOnboardingCompletion {
-            selection: ModelSelection {
-                harness_id: command.harness_id,
-                family_id: family.id,
-                provider_id: command.provider_id,
-                model_id: command.model_id,
+        self.storage
+            .complete_provider_onboarding(
+                command,
+                app_default_harness_id,
+                permission_available_harnesses,
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn complete_default_provider_onboarding(
+        &self,
+        provider_id: &super::ProviderId,
+        app_default_harness_id: &str,
+        permission_available_harnesses: &HashSet<String>,
+    ) -> Result<Option<super::ProviderOnboardingCompletion>, ProductError> {
+        let projection = self
+            .provider_onboarding_projection(
+                provider_id,
+                app_default_harness_id,
+                permission_available_harnesses,
+            )
+            .await?;
+        let mut candidates = projection
+            .harnesses
+            .iter()
+            .filter(|harness| harness.selectable)
+            .filter_map(|harness| {
+                harness
+                    .managed_family_candidate
+                    .as_ref()
+                    .map(|family| (harness, family))
+            })
+            .collect::<Vec<_>>();
+        let Some((_, policy)) = candidates.first().copied() else {
+            return Ok(None);
+        };
+        if candidates.iter().any(|(_, candidate)| {
+            candidate.policy_id != policy.policy_id
+                || candidate.policy_version != policy.policy_version
+        }) {
+            return Ok(None);
+        }
+        candidates.sort_by(|(left, _), (right, _)| left.id.cmp(&right.id));
+        let (harness, policy) = candidates
+            .iter()
+            .copied()
+            .find(|(harness, _)| harness.id == projection.app_default_harness_id)
+            .unwrap_or(candidates[0]);
+        self.complete_provider_onboarding(
+            &super::CompleteProviderOnboardingCommand {
+                provider_id: provider_id.clone(),
+                harness_id: harness.id.clone(),
+                expected_projection_revision: projection.projection_revision,
+                family: super::ProviderOnboardingFamilyIntent::Managed {
+                    policy_id: policy.policy_id.clone(),
+                    policy_version: policy.policy_version,
+                },
             },
-            defaults,
-            family,
-        })
+            app_default_harness_id,
+            permission_available_harnesses,
+        )
+        .await
+        .map(Some)
+    }
+
+    pub(crate) async fn provider_onboarding_status(
+        &self,
+        permission_available_harnesses: &HashSet<String>,
+    ) -> Result<super::ProviderOnboardingStatus, ProductError> {
+        self.storage
+            .provider_onboarding_status(permission_available_harnesses)
+            .await
+            .map_err(Into::into)
     }
 
     pub(crate) async fn execution_harness_policy(
@@ -742,7 +660,7 @@ impl ProductService {
             let error = super::CatalogError::invalid(
                 "family_policy_empty",
                 format!(
-                    "Model-family policy {}@{} did not resolve any eligible visible models.",
+                    "Model-family policy {}@{} did not resolve any visible default models.",
                     policy.id, policy.version
                 ),
             );
@@ -901,6 +819,17 @@ impl ProductService {
     ) -> Result<super::ExecutionModelSelection, ProductError> {
         self.storage
             .validate_execution_model_selection(harness_id, selection)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn resolve_execution_model_plan(
+        &self,
+        harness_id: &str,
+        selection: &InteractionModelSelection,
+    ) -> Result<(super::ExecutionModelPlan, super::ExecutionModelSelection), ProductError> {
+        self.storage
+            .resolve_execution_model_plan(harness_id, selection)
             .await
             .map_err(Into::into)
     }
@@ -1175,66 +1104,12 @@ impl ProductService {
         allow_unselected_model: bool,
     ) -> Result<crate::storage::InteractionInputInsertOutcome, ProductError> {
         let input_identity = required(input_identity, "inputId")?;
-        if text.trim().is_empty()
-            && !contexts
-                .iter()
-                .flat_map(|context| &context.annotations)
-                .any(|annotation| !annotation.trim().is_empty())
-        {
-            return Err(ProductError::Invalid(
-                "An interaction needs message text or at least one context annotation.".into(),
-            ));
-        }
-        let mut targets = std::collections::HashSet::new();
-        for context in contexts {
-            if context.target.node_id <= 0
-                || context.target.source_interaction_node_id <= 0
-                || context.target.source_layer_id <= 0
-            {
-                return Err(ProductError::Invalid(
-                    "context provenance IDs must be positive".into(),
-                ));
-            }
-            if !targets.insert(context.target.node_id) {
-                return Err(ProductError::Invalid(
-                    "a context target can only be attached once".into(),
-                ));
-            }
-            if context
-                .annotations
-                .iter()
-                .any(|annotation| annotation.trim().is_empty())
-            {
-                return Err(ProductError::Invalid(
-                    "context annotations must contain non-whitespace text".into(),
-                ));
-            }
-        }
+        let input_digest = validated_interaction_input_digest(text, contexts)?;
         if self.storage.thread_is_imported(thread_id).await? {
             return Err(ProductError::Invalid(
                 "imported conversations are immutable".into(),
             ));
         }
-        let graph_contexts = contexts
-            .iter()
-            .map(|context| relayer_graph_core::InteractionContextDraft {
-                target: relayer_graph_core::InteractionContextTarget {
-                    node_id: relayer_graph_core::NodeId::new(context.target.node_id)
-                        .expect("validated positive node ID"),
-                    source_interaction_node_id: relayer_graph_core::NodeId::new(
-                        context.target.source_interaction_node_id,
-                    )
-                    .expect("validated positive source node ID"),
-                    source_layer_id: relayer_graph_core::LayerId::new(
-                        context.target.source_layer_id,
-                    )
-                    .expect("validated positive layer ID"),
-                },
-                annotations: context.annotations.clone(),
-            })
-            .collect::<Vec<_>>();
-        let input_digest = relayer_graph_core::interaction_input_digest(text, &graph_contexts)
-            .map_err(|error| ProductError::Invalid(error.to_string()))?;
         self.storage
             .insert_interaction_input(
                 thread_id,
@@ -1515,48 +1390,22 @@ impl ProductService {
     pub(crate) async fn claim_interaction_retry(
         &self,
         interaction_id: super::InteractionId,
-        expected_attempt_id: i64,
-        text: &str,
-        model_selection: &super::InteractionModelSelection,
-        harness_configuration_name: &str,
+        command: RetryInteractionCommand<'_>,
     ) -> Result<bool, ProductError> {
-        let text = required(text, "text")?;
-        let input_digest = match self.storage.interaction_input(interaction_id).await? {
-            Some(input) => {
-                let contexts = input
-                    .contexts
-                    .iter()
-                    .map(|context| relayer_graph_core::InteractionContextDraft {
-                        target: relayer_graph_core::InteractionContextTarget {
-                            node_id: relayer_graph_core::NodeId::new(context.target.node_id)
-                                .expect("stored context node ID is positive"),
-                            source_interaction_node_id: relayer_graph_core::NodeId::new(
-                                context.target.source_interaction_node_id,
-                            )
-                            .expect("stored source interaction node ID is positive"),
-                            source_layer_id: relayer_graph_core::LayerId::new(
-                                context.target.source_layer_id,
-                            )
-                            .expect("stored source layer ID is positive"),
-                        },
-                        annotations: context.annotations.clone(),
-                    })
-                    .collect::<Vec<_>>();
-                Some(
-                    relayer_graph_core::interaction_input_digest(text, &contexts)
-                        .map_err(|error| ProductError::Invalid(error.to_string()))?,
-                )
-            }
-            None => None,
-        };
+        let input_identity = required(command.input_identity, "inputId")?;
+        let input_digest = validated_interaction_input_digest(command.text, command.contexts)?;
         self.storage
             .claim_interaction_retry(
                 interaction_id,
-                expected_attempt_id,
-                text,
-                input_digest.as_deref(),
-                model_selection,
-                harness_configuration_name,
+                command.expected_attempt_id,
+                NewInteractionInput {
+                    text: command.text,
+                    input_identity,
+                    input_digest: &input_digest,
+                    contexts: command.contexts,
+                },
+                command.model_selection,
+                command.harness_configuration_name,
             )
             .await
             .map_err(Into::into)
@@ -1683,46 +1532,25 @@ impl ProductService {
 
     pub(crate) async fn begin_interaction_attempt(
         &self,
-        interaction_id: super::InteractionId,
-        harness_name: &str,
-        route: &super::ExecutionModelSelection,
-        adapter_version: u32,
-        harness_policy: &super::ExecutionHarnessPolicy,
+        receipt: BeginInteractionAttempt<'_>,
     ) -> Result<i64, ProductError> {
         self.storage
-            .begin_interaction_attempt(
-                super::BeginInteractionAttempt {
-                    interaction_id,
-                    harness_name,
-                    route,
-                    adapter_version,
-                    expected_harness_policy: Some(harness_policy),
-                },
-                &now(),
-            )
+            .begin_interaction_attempt(receipt, &now())
             .await
             .map_err(Into::into)
     }
 
     pub(crate) async fn record_model_attempt_admission_failure(
         &self,
-        interaction_id: super::InteractionId,
-        harness_name: &str,
-        route: &super::ExecutionModelSelection,
-        adapter_version: u32,
-        harness_policy: &super::ExecutionHarnessPolicy,
+        receipt: BeginInteractionAttempt<'_>,
         failure_category: &str,
+        execution_lease_reconciled: bool,
     ) -> Result<i64, ProductError> {
         self.storage
             .record_model_attempt_admission_failure(
-                super::BeginInteractionAttempt {
-                    interaction_id,
-                    harness_name,
-                    route,
-                    adapter_version,
-                    expected_harness_policy: Some(harness_policy),
-                },
+                receipt,
                 failure_category,
+                execution_lease_reconciled,
                 &now(),
             )
             .await
@@ -1735,6 +1563,36 @@ impl ProductService {
     ) -> Result<i64, ProductError> {
         self.storage
             .record_pre_execution_model_failure(failure, &now())
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn execution_lease_debt(
+        &self,
+        attempt_id: i64,
+    ) -> Result<Option<super::ExecutionLeaseDebt>, ProductError> {
+        self.storage
+            .execution_lease_debt(attempt_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn unreconciled_execution_lease_debts(
+        &self,
+    ) -> Result<Vec<super::ExecutionLeaseDebt>, ProductError> {
+        self.storage
+            .unreconciled_execution_lease_debts()
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn acknowledge_execution_lease_reconciled(
+        &self,
+        attempt_id: i64,
+        execution_lease_id: &str,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .acknowledge_execution_lease_reconciled(attempt_id, execution_lease_id, &now())
             .await
             .map_err(Into::into)
     }
@@ -1827,6 +1685,63 @@ fn stored_project_path(canonical_path: &std::path::Path) -> Result<String, Produ
     })
 }
 
+fn validated_interaction_input_digest(
+    text: &str,
+    contexts: &[super::InteractionContextIntent],
+) -> Result<String, ProductError> {
+    if text.trim().is_empty()
+        && !contexts
+            .iter()
+            .flat_map(|context| &context.annotations)
+            .any(|annotation| !annotation.trim().is_empty())
+    {
+        return Err(ProductError::Invalid(
+            "An interaction needs message text or at least one context annotation.".into(),
+        ));
+    }
+    let mut targets = std::collections::HashSet::new();
+    let mut graph_contexts = Vec::with_capacity(contexts.len());
+    for context in contexts {
+        if context.target.node_id <= 0
+            || context.target.source_interaction_node_id <= 0
+            || context.target.source_layer_id <= 0
+        {
+            return Err(ProductError::Invalid(
+                "context provenance IDs must be positive".into(),
+            ));
+        }
+        if !targets.insert(context.target.node_id) {
+            return Err(ProductError::Invalid(
+                "a context target can only be attached once".into(),
+            ));
+        }
+        if context
+            .annotations
+            .iter()
+            .any(|annotation| annotation.trim().is_empty())
+        {
+            return Err(ProductError::Invalid(
+                "context annotations must contain non-whitespace text".into(),
+            ));
+        }
+        graph_contexts.push(relayer_graph_core::InteractionContextDraft {
+            target: relayer_graph_core::InteractionContextTarget {
+                node_id: relayer_graph_core::NodeId::new(context.target.node_id)
+                    .expect("validated positive node ID"),
+                source_interaction_node_id: relayer_graph_core::NodeId::new(
+                    context.target.source_interaction_node_id,
+                )
+                .expect("validated positive source node ID"),
+                source_layer_id: relayer_graph_core::LayerId::new(context.target.source_layer_id)
+                    .expect("validated positive layer ID"),
+            },
+            annotations: context.annotations.clone(),
+        });
+    }
+    relayer_graph_core::interaction_input_digest(text, &graph_contexts)
+        .map_err(|error| ProductError::Invalid(error.to_string()))
+}
+
 fn required<'a>(value: &'a str, name: &str) -> Result<&'a str, ProductError> {
     let value = value.trim();
     if value.is_empty() {
@@ -1898,8 +1813,8 @@ fn validate_provider_snapshot(
             ));
         }
     }
-    // Provider metadata may expose multiple eligible models. Product-owned
-    // family policies decide which ordered subset becomes a managed family.
+    // Multiple normalized defaults are valid. Product-owned family policies
+    // decide which ordered subset becomes a managed family.
     if let Some(family) = &snapshot.system_family {
         if family.model_ids.len() > 5 {
             return Err(CatalogError::invalid(
@@ -1919,19 +1834,19 @@ fn validate_provider_snapshot(
         let Some(policy) = managed_policy else {
             return Err(CatalogError::invalid(
                 "system_family_policy_required",
-                "managed family membership requires a product-owned policy",
+                "managed family membership requires an active product policy",
             ));
         };
         let expected = super::model_policy::derive_managed_family_members(policy, snapshot)?;
-        if !family
+        if family
             .model_ids
             .iter()
             .map(String::as_str)
-            .eq(expected.iter().map(|member| member.model_id.as_str()))
+            .ne(expected.iter().map(|member| member.model_id.as_str()))
         {
             return Err(CatalogError::invalid(
                 "system_family_members_invalid",
-                "managed family must match its product-owned policy in provider order",
+                "managed family must match its active product policy",
             ));
         }
     }
@@ -1942,9 +1857,9 @@ fn validate_provider_snapshot(
 mod tests {
     use super::*;
     use crate::product::{
-        CatalogModelSnapshot, CompleteProviderOnboardingCommand, FamilyPolicyReference,
-        HarnessModelCompatibility, HarnessModelRule, HarnessModelRules, ModelFamilyMember,
-        ProviderDefinition, ProviderId, RuntimeProductHarness, UnavailableReason,
+        CatalogModelSnapshot, FamilyPolicyReference, HarnessModelCompatibility, HarnessModelRule,
+        HarnessModelRules, ModelFamilyMember, ProviderDefinition, ProviderId,
+        RuntimeProductHarness, UnavailableReason,
     };
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1978,13 +1893,22 @@ mod tests {
         let storage = SqliteProductStore::open(&path).await.unwrap();
         let mut harnesses = runtime_harnesses();
         harnesses.push(RuntimeProductHarness {
-            id: "rule-owned".into(),
-            configuration_digest: "sha256:rule-owned".into(),
-            model_compatibility: Vec::new(),
+            id: "model-selecting-prime".into(),
+            configuration_digest: "sha256:model-selecting-prime".into(),
+            model_compatibility: vec![],
             configuration_revision: 1,
-            model_rules: Some(HarnessModelRules::default()),
-            execution_access_contracts: vec!["managed-runtime@1".into()],
+            model_rules: Some(HarnessModelRules {
+                allow: vec![HarnessModelRule {
+                    adapter_id: "openai-api".into(),
+                    model_id_exact: None,
+                    model_id_regex: Some(".*".into()),
+                }],
+                deny: vec![],
+            }),
+            execution_access_contracts: vec!["secret@1".into()],
             family_policy: None,
+            runtime_available: true,
+            unavailable_reason: None,
         });
         storage
             .initialize_model_catalog("prime-agent-basic", &harnesses)
@@ -2006,271 +1930,10 @@ mod tests {
         );
         assert!(
             !service
-                .harness_uses_configuration_model("rule-owned")
+                .harness_uses_configuration_model("model-selecting-prime")
                 .await
                 .unwrap()
         );
-
-        drop(service);
-        drop(storage);
-        std::fs::remove_file(path).unwrap();
-    }
-
-    #[tokio::test]
-    async fn onboarding_projects_compatible_models_and_commits_family_and_defaults_atomically() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "relayer-provider-onboarding-{}-{unique}.sqlite3",
-            std::process::id()
-        ));
-        let storage = SqliteProductStore::open(&path).await.unwrap();
-        storage
-            .initialize_model_catalog("codex-basic", &managed_runtime_harnesses(1))
-            .await
-            .unwrap();
-        let service = ProductService::new(storage.clone(), true);
-        let (definition, snapshot) = staged_codex_catalog();
-        service
-            .create_provider_with_catalog(definition, snapshot)
-            .await
-            .unwrap();
-
-        let projection = service
-            .provider_onboarding_projection(ProviderId::parse("onboarding-codex").unwrap())
-            .await
-            .unwrap();
-        assert_eq!(projection.app_default_harness_id, "codex-basic");
-        assert_eq!(projection.harnesses.len(), 1);
-        assert!(projection.harnesses[0].is_app_default);
-        assert_eq!(
-            projection.harnesses[0]
-                .models
-                .iter()
-                .map(|model| model.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["default", "second"]
-        );
-
-        service
-            .create_model_family(CreateModelFamilyCommand {
-                name: "Explicit onboarding choice".into(),
-                enabled: true,
-                members: vec![ModelFamilyMember {
-                    provider_id: ProviderId::parse("onboarding-codex").unwrap(),
-                    model_id: "default".into(),
-                    position: 0,
-                }],
-            })
-            .await
-            .unwrap();
-
-        let completed = service
-            .complete_provider_onboarding(CompleteProviderOnboardingCommand {
-                provider_id: ProviderId::parse("onboarding-codex").unwrap(),
-                harness_id: "codex-basic".into(),
-                family_name: "Explicit onboarding choice".into(),
-                model_id: "second".into(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(completed.defaults.harness_id, "codex-basic");
-        assert_eq!(completed.defaults.family_id, Some(completed.family.id));
-        assert_eq!(completed.selection.model_id, "second");
-        assert_eq!(completed.family.members[0].model_id, "second");
-        assert_eq!(completed.family.name, "Explicit onboarding choice (2)");
-
-        let retried = service
-            .complete_provider_onboarding(CompleteProviderOnboardingCommand {
-                provider_id: ProviderId::parse("onboarding-codex").unwrap(),
-                harness_id: "codex-basic".into(),
-                family_name: "Explicit onboarding choice".into(),
-                model_id: "second".into(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(retried.family.id, completed.family.id);
-        assert_eq!(retried.defaults, completed.defaults);
-
-        drop(service);
-        drop(storage);
-        std::fs::remove_file(path).unwrap();
-    }
-
-    #[tokio::test]
-    async fn onboarding_projects_a_declared_default_for_a_compatible_alternate_harness() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "relayer-provider-onboarding-alternate-{}-{unique}.sqlite3",
-            std::process::id()
-        ));
-        let storage = SqliteProductStore::open(&path).await.unwrap();
-        let harness = |id: &str, adapter_id: &str| RuntimeProductHarness {
-            id: id.into(),
-            configuration_digest: format!("sha256:{id}"),
-            model_compatibility: vec![],
-            configuration_revision: 1,
-            model_rules: Some(HarnessModelRules {
-                allow: vec![HarnessModelRule {
-                    adapter_id: adapter_id.into(),
-                    model_id_exact: None,
-                    model_id_regex: Some(".*".into()),
-                }],
-                deny: vec![],
-            }),
-            execution_access_contracts: vec!["managed-runtime@1".into()],
-            family_policy: (adapter_id == "claude-subscription").then(|| FamilyPolicyReference {
-                id: super::super::model_policy::CLAUDE_DEFAULT_FAMILY_POLICY_ID.into(),
-                version: 1,
-            }),
-        };
-        storage
-            .initialize_model_catalog(
-                "codex-basic",
-                &[
-                    harness("codex-basic", "codex-subscription"),
-                    harness("claude-basic", "claude-subscription"),
-                    harness("claude-basic-high", "claude-subscription"),
-                ],
-            )
-            .await
-            .unwrap();
-        let service = ProductService::new(storage.clone(), true);
-        let (mut definition, mut snapshot) = staged_codex_catalog();
-        let provider_id = ProviderId::parse("claude-work").unwrap();
-        definition.id = provider_id.clone();
-        definition.adapter_id = "claude-subscription".into();
-        definition.label = "Claude Work".into();
-        snapshot.provider_id = provider_id.clone();
-        snapshot.label = "Claude Work".into();
-        snapshot.system_family = None;
-        snapshot.models[1].provider_default = true;
-        snapshot.models[0].available = false;
-        snapshot.models[0].unavailable_reason = Some(UnavailableReason {
-            code: "model_unavailable".into(),
-            message: "Default alias is temporarily unavailable.".into(),
-        });
-        let mut refreshed_snapshot = snapshot.clone();
-        service
-            .create_provider_with_catalog(definition, snapshot)
-            .await
-            .unwrap();
-
-        let projection = service
-            .provider_onboarding_projection(provider_id.clone())
-            .await
-            .unwrap();
-        assert_eq!(projection.app_default_harness_id, "codex-basic");
-        assert_eq!(projection.harnesses.len(), 2);
-        assert_eq!(projection.harnesses[0].id, "claude-basic");
-        assert!(!projection.harnesses[0].is_app_default);
-
-        let completed = service
-            .complete_default_provider_onboarding(provider_id.clone())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(completed.defaults.harness_id, "claude-basic");
-        assert_eq!(completed.selection.model_id, "second");
-        assert_eq!(completed.family.kind, ModelFamilyKind::System);
-        assert_eq!(
-            completed
-                .family
-                .members
-                .iter()
-                .map(|member| member.model_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["default", "second"]
-        );
-        assert_eq!(
-            completed
-                .family
-                .managed_policy
-                .as_ref()
-                .map(|policy| (policy.policy_id.as_str(), policy.policy_version)),
-            Some(("claude-default-family", 1))
-        );
-        refreshed_snapshot.models[0].visible = false;
-        service
-            .publish_provider_catalog(refreshed_snapshot)
-            .await
-            .unwrap();
-        let refreshed = service.model_settings().await.unwrap();
-        let refreshed_family = refreshed
-            .families
-            .iter()
-            .find(|family| family.id == completed.family.id)
-            .unwrap();
-        assert_eq!(
-            refreshed_family
-                .members
-                .iter()
-                .map(|member| member.model_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["second"]
-        );
-        assert_eq!(refreshed.defaults.family_id, Some(completed.family.id));
-        let harness_error = service
-            .update_model_settings_defaults(UpdateModelSettingsDefaultsCommand {
-                harness_id: Some("codex-basic".into()),
-                provider_id: None,
-                family_id: None,
-            })
-            .await
-            .unwrap_err();
-        assert!(harness_error.to_string().contains("default family"));
-        let disable_error = service
-            .update_model_family(UpdateModelFamilyCommand {
-                id: completed.family.id,
-                name: None,
-                enabled: false,
-                members: None,
-            })
-            .await
-            .unwrap_err();
-        assert!(disable_error.to_string().contains("before disabling"));
-        let delete_error = service
-            .delete_model_family(completed.family.id)
-            .await
-            .unwrap_err();
-        assert!(delete_error.to_string().contains("cannot be deleted"));
-
-        let (mut unavailable_definition, mut unavailable_snapshot) = staged_codex_catalog();
-        let unavailable_provider_id = ProviderId::parse("claude-unavailable").unwrap();
-        unavailable_definition.id = unavailable_provider_id.clone();
-        unavailable_definition.adapter_id = "claude-subscription".into();
-        unavailable_definition.label = "Claude Unavailable".into();
-        unavailable_snapshot.provider_id = unavailable_provider_id.clone();
-        unavailable_snapshot.label = "Claude Unavailable".into();
-        unavailable_snapshot.system_family = None;
-        for model in &mut unavailable_snapshot.models {
-            model.provider_default = true;
-            model.available = false;
-            model.unavailable_reason = Some(UnavailableReason {
-                code: "model_unavailable".into(),
-                message: "The model is temporarily unavailable.".into(),
-            });
-        }
-        service
-            .create_provider_with_catalog(unavailable_definition, unavailable_snapshot)
-            .await
-            .unwrap();
-        let before_unavailable = service.model_settings().await.unwrap();
-        assert!(
-            service
-                .complete_default_provider_onboarding(unavailable_provider_id)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        let after_unavailable = service.model_settings().await.unwrap();
-        assert_eq!(after_unavailable.defaults, before_unavailable.defaults);
-        assert_eq!(after_unavailable.families, before_unavailable.families);
 
         drop(service);
         drop(storage);
@@ -2389,13 +2052,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn staged_codex_provider_gets_managed_default_and_policy_version_migrates_it() {
+    async fn staged_codex_provider_uses_its_managed_default_then_policy_migrates_it() {
         let (path, storage, service) = managed_policy_service(1).await;
         let (definition, snapshot) = staged_codex_catalog();
         service
             .create_provider_with_catalog(definition, snapshot.clone())
             .await
             .unwrap();
+        let connected = service.model_settings().await.unwrap();
+        assert_ne!(connected.defaults.provider_id.as_str(), "onboarding-codex");
+        assert!(connected.families.iter().any(|family| {
+            family.managed_policy.as_ref().is_some_and(|policy| {
+                policy.provider_id.as_str() == "onboarding-codex" && policy.policy_version == 1
+            })
+        }));
+        let permissions = HashSet::from(["codex-basic".to_owned()]);
+        let status = service
+            .provider_onboarding_status(&permissions)
+            .await
+            .unwrap();
+        assert!(!status.complete);
+        let completion = service
+            .complete_default_provider_onboarding(
+                &ProviderId::parse("onboarding-codex").unwrap(),
+                "codex-basic",
+                &permissions,
+            )
+            .await
+            .unwrap();
+        assert!(completion.is_some());
         let first = service.model_settings().await.unwrap();
         let first_default = first
             .defaults
@@ -2459,7 +2144,24 @@ mod tests {
             .initialize_model_catalog("codex-basic", &managed_runtime_harnesses(2))
             .await
             .unwrap();
-        service.publish_provider_catalog(snapshot).await.unwrap();
+        let mut v2_snapshot = snapshot;
+        for (order, id) in ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]
+            .into_iter()
+            .enumerate()
+        {
+            v2_snapshot.models.push(CatalogModelSnapshot {
+                id: id.into(),
+                label: id.into(),
+                order: order + 2,
+                visible: true,
+                available: true,
+                unavailable_reason: None,
+                provider_default: false,
+                replacement_model_id: None,
+                metadata: serde_json::json!({}),
+            });
+        }
+        service.publish_provider_catalog(v2_snapshot).await.unwrap();
         let migrated = service.model_settings().await.unwrap();
         let migrated_default = migrated.defaults.family_id.unwrap();
         assert_ne!(migrated_default, first_default);
@@ -2474,6 +2176,18 @@ mod tests {
                 .unwrap()
                 .policy_version,
             2
+        );
+        assert_eq!(
+            migrated
+                .families
+                .iter()
+                .find(|family| family.id == migrated_default)
+                .unwrap()
+                .members
+                .iter()
+                .map(|member| member.model_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "default"]
         );
         assert!(
             !migrated
@@ -2692,6 +2406,8 @@ mod tests {
                 id: super::super::model_policy::CODEX_DEFAULT_FAMILY_POLICY_ID.into(),
                 version,
             }),
+            runtime_available: true,
+            unavailable_reason: None,
         }]
     }
 
@@ -2705,6 +2421,8 @@ mod tests {
                 model_rules: None,
                 execution_access_contracts: vec![],
                 family_policy: None,
+                runtime_available: true,
+                unavailable_reason: None,
             },
             RuntimeProductHarness {
                 id: "codex-basic".into(),
@@ -2718,6 +2436,8 @@ mod tests {
                 model_rules: None,
                 execution_access_contracts: vec![],
                 family_policy: None,
+                runtime_available: true,
+                unavailable_reason: None,
             },
         ]
     }

@@ -41,11 +41,126 @@ function validateGraphReady(message) {
   return url.origin;
 }
 
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function stringRecord(value) {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function validatedExecutionAccess(resolved, definition, descriptor) {
+  if (definition.accessContract === "secret@1") {
+    if (resolved?.kind !== "secret"
+      || !nonEmptyString(resolved.endpoint)
+      || resolved.endpoint !== definition.endpoint
+      || !stringRecord(resolved.fields)) {
+      throw new Error("Provider adapter returned invalid secret execution access.");
+    }
+    return Object.freeze({
+      kind: "secret",
+      contract: definition.accessContract,
+      providerId: definition.id,
+      adapterId: definition.adapterId,
+      adapterImplementationVersion: descriptor.implementationVersion,
+      endpoint: resolved.endpoint,
+      fields: Object.freeze({ ...resolved.fields }),
+    });
+  }
+  if (definition.accessContract === "managed-runtime@1") {
+    if (resolved?.kind !== "managed-runtime"
+      || !stringRecord(resolved.environment)
+      || (resolved.executable !== undefined && !nonEmptyString(resolved.executable))) {
+      throw new Error("Provider adapter returned invalid managed-runtime execution access.");
+    }
+    return Object.freeze({
+      kind: "managed-runtime",
+      contract: definition.accessContract,
+      providerId: definition.id,
+      adapterId: definition.adapterId,
+      adapterImplementationVersion: descriptor.implementationVersion,
+      ...(resolved.executable === undefined ? {} : { executable: resolved.executable }),
+      environment: Object.freeze({ ...resolved.environment }),
+    });
+  }
+  throw new Error("Provider definition declares an unsupported execution contract.");
+}
+
+function onceRelease(release) {
+  let releasePromise;
+  return () => {
+    if (!releasePromise) {
+      const attempt = Promise.resolve().then(() => release());
+      releasePromise = attempt;
+      void attempt.catch(() => {
+        if (releasePromise === attempt) releasePromise = undefined;
+      });
+    }
+    return releasePromise;
+  };
+}
+
+export function createProviderExecutionAccessBroker(acquireProviderExecution) {
+  if (typeof acquireProviderExecution !== "function") {
+    throw new TypeError("Provider execution acquisition must be a function.");
+  }
+  return Object.freeze({
+    async acquire(selection, acceptedContracts, signal) {
+      if (!nonEmptyString(selection?.providerId) || !nonEmptyString(selection?.adapterId)) {
+        throw new Error("Execution selection must identify an exact provider definition and adapter.");
+      }
+      if (!Array.isArray(acceptedContracts)
+        || acceptedContracts.length === 0
+        || acceptedContracts.some((contract) => !nonEmptyString(contract))) {
+        throw new Error("Harness execution contracts must be a non-empty string list.");
+      }
+      signal?.throwIfAborted();
+      const lease = await acquireProviderExecution(selection.providerId);
+      if (!lease || typeof lease.release !== "function") {
+        throw new Error("Provider execution acquisition returned an invalid lease.");
+      }
+      const release = onceRelease(lease.release);
+      try {
+        const { definition, descriptor, runtime } = lease;
+        if (definition?.id !== selection.providerId
+          || definition?.adapterId !== selection.adapterId
+          || descriptor?.adapterId !== selection.adapterId
+          || descriptor?.accessContract !== definition?.accessContract
+          || !acceptedContracts.includes(definition?.accessContract)
+          || !nonEmptyString(descriptor?.implementationVersion)) {
+          throw new Error("Selected provider does not satisfy the harness execution contract.");
+        }
+        if (typeof runtime?.executionAccess !== "function") {
+          throw new Error("Provider adapter does not expose executable access.");
+        }
+        signal?.throwIfAborted();
+        const resolved = await runtime.executionAccess({ signal });
+        const access = validatedExecutionAccess(resolved, definition, descriptor);
+        return Object.freeze({ access, release });
+      } catch (error) {
+        try {
+          await release();
+        } catch (releaseError) {
+          throw new AggregateError(
+            [error, releaseError],
+            "Provider execution admission failed and lease rollback failed.",
+          );
+        }
+        throw error;
+      }
+    },
+  });
+}
+
 export class GraphCompleteRuntimeService {
   constructor({
     userDataDirectory,
     graphServerBinary,
     configurationPaths,
+    unavailableConfigurations = [],
     additionalImplementations = {},
     codexBasicClientModuleUrl,
     graphAuthoringLauncherPath,
@@ -62,6 +177,7 @@ export class GraphCompleteRuntimeService {
     this.userDataDirectory = userDataDirectory;
     this.graphServerBinary = graphServerBinary;
     this.configurationPaths = configurationPaths;
+    this.unavailableConfigurations = unavailableConfigurations;
     this.additionalImplementations = additionalImplementations;
     this.codexBasicClientModuleUrl = codexBasicClientModuleUrl;
     this.graphAuthoringLauncherPath = graphAuthoringLauncherPath;
@@ -113,6 +229,13 @@ export class GraphCompleteRuntimeService {
       await this.#awaitStartupOperation(mkdir(runtimeDirectory, { recursive: true }));
       await this.#awaitStartupOperation(chmod(runtimeDirectory, 0o700));
       const configurations = await this.#awaitStartupOperation(loadHarnessConfigurations(this.configurationPaths));
+      const unavailableConfigurations = this.unavailableConfigurations
+        .filter((unavailable) => !configurations.has(unavailable.name))
+        .map((unavailable) => ({
+          name: unavailable.name,
+          reason: unavailable.reason,
+          diagnostics: unavailable.diagnostics,
+        }));
       const catalogPath = join(runtimeDirectory, "harness-configurations.json");
       await this.#awaitStartupOperation(writeFile(catalogPath, `${JSON.stringify({
         schemaVersion: 1,
@@ -120,6 +243,7 @@ export class GraphCompleteRuntimeService {
           configuration,
           digest: digestHarnessConfiguration(configuration),
         })),
+        unavailableConfigurations,
       }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 }));
 
       const graphControlToken = randomBytes(32).toString("hex");
@@ -152,32 +276,7 @@ export class GraphCompleteRuntimeService {
         controlToken: harnessControlToken,
         ...(this.candidateTrace ? { trace: this.candidateTrace } : {}),
         ...(this.acquireProviderExecution ? {
-          accessBroker: {
-            acquire: async (selection, acceptedContracts, signal) => {
-              const lease = await this.acquireProviderExecution(selection.providerId);
-              try {
-                const { definition, descriptor, runtime } = lease;
-                if (definition.adapterId !== selection.adapterId || !acceptedContracts.includes(definition.accessContract)) {
-                  throw new Error("Selected provider does not satisfy the harness execution contract.");
-                }
-                const resolved = await runtime.executionAccess?.({ signal });
-                if (!resolved) throw new Error("Provider adapter does not expose executable access.");
-                return Object.freeze({
-                  access: Object.freeze({
-                    ...resolved,
-                    contract: definition.accessContract,
-                    providerId: definition.id,
-                    adapterId: definition.adapterId,
-                    adapterImplementationVersion: descriptor.implementationVersion,
-                  }),
-                  release: lease.release,
-                });
-              } catch (error) {
-                await lease.release();
-                throw error;
-              }
-            },
-          },
+          accessBroker: createProviderExecutionAccessBroker(this.acquireProviderExecution),
         } : {}),
       }), async (lateHarnessHost) => {
         await lateHarnessHost.close();

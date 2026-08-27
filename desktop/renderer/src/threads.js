@@ -413,6 +413,7 @@ function schedulePendingRefresh(threadId, { force = false } = {}) {
         && !restoredDraftForInteraction(interaction))
     )
   ))
+    || hasStaleProjection
     || layerContainsPendingInvokedAction(
       appState.visibleLayer,
       appState.actionInvocations,
@@ -614,17 +615,20 @@ export async function submitInteraction(text, modelSelection, contexts = []) {
     const latestInteraction = appState.interactions
       .filter((interaction) => String(interaction.threadId) === String(threadId))
       .at(-1);
-    const { path, body } = interactionSubmissionTarget(
+    const { path, body: retryBody } = interactionSubmissionTarget(
       threadId,
       latestInteraction,
       text,
       modelSelection,
+      inputId,
+      contexts,
     );
+    const body = restoredDraftForInteraction(latestInteraction)
+      ? retryBody
+      : followupRequestBody(text, modelSelection, inputId, contexts);
     const response = await request(path, {
       method: "POST",
-      body: JSON.stringify(path.endsWith("/retry")
-        ? body
-        : followupRequestBody(text, modelSelection, inputId, contexts)),
+      body: JSON.stringify(body),
     });
     createdInteraction = response?.interaction ?? response;
   } catch (error) {

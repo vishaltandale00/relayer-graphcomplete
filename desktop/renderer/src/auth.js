@@ -1,39 +1,55 @@
 import {
   completeDefaultProviderOnboarding,
   completeProviderOnboarding,
-  loadDefaultModelSelection,
-  loadModelSettings,
   loadProviderOnboardingProjection,
 } from "./model-settings-api.js";
-import { defaultFamilySelectionForProvider } from "./model-picker-model.js";
-import { resetNewThreadModelPicker } from "./composer-model-picker.js";
-import { refreshModelFamilySettings } from "./model-family-settings.js";
 import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload } from "./provider-ui-model.js";
-import { bindRovingRadioGroup, providerConnectionFormMarkup, providerOptionsMarkup } from "./provider-ui.js";
-import { appState, desktop, productApiAvailable } from "./state.js";
+import {
+  providerOnboardingCompletionIntent,
+  reconcileProviderOnboardingState,
+  resumableProviderDefinitions,
+  setProviderOnboardingControlsBusy,
+} from "./provider-onboarding-model.js";
+import {
+  bindRovingRadioGroup,
+  onboardingFamilyOptionsMarkup,
+  onboardingHarnessOptionsMarkup,
+  providerConnectionFormMarkup,
+  providerOptionsMarkup,
+} from "./provider-ui.js";
+import { desktop, productApiAvailable } from "./state.js";
 import { $, $$, escapeHtml, escapeHtmlAttribute } from "./ui.js";
 
 let providerStatus;
 let selectedDescriptor;
 let connectionValues;
 let connectedDefinition;
-let onboardingModel;
 let onboardingHarness;
+let onboardingFamilyIntent;
 let onboardingProjection;
 let bound = false;
 let pendingConnectionId = null;
+let refreshProductAfterOnboarding = async () => {};
+
+export function setProviderOnboardingCompletionHandler(handler) {
+  if (typeof handler !== "function") throw new TypeError("Provider onboarding completion handler must be a function.");
+  refreshProductAfterOnboarding = handler;
+}
 
 function setStatus(message = "", kind = "") {
   const status = $("#authStatus");
   status.textContent = message;
   status.className = `auth-status${kind ? ` ${kind}` : ""}`;
+  status.setAttribute("role", kind === "error" ? "alert" : "status");
 }
 
 function setBusy(busy) {
-  $(".provider-setup-card")?.setAttribute("aria-busy", String(Boolean(busy)));
-  $("#connectProvider").disabled = Boolean(busy);
-  $("#finishProviderSetup").disabled = Boolean(busy) || !onboardingModel;
-  $("#providerFamilyBack").disabled = Boolean(busy);
+  const card = $(".provider-setup-card");
+  card?.setAttribute("aria-busy", String(Boolean(busy)));
+  setProviderOnboardingControlsBusy(
+    $$("button,input,select,textarea", card).filter((control) => control.id !== "cancelProviderConnection"),
+    busy,
+  );
 }
 
 function currentFormValues() {
@@ -52,7 +68,14 @@ function showProviderOptions() {
   $("#providerSetupOptions").classList.remove("hidden");
   $("#providerSetupForm").classList.add("hidden");
   $("#providerFamilyStep").classList.add("hidden");
-  $("#providerSetupOptions").innerHTML = providerOptionsMarkup(providerStatus?.adapters ?? []);
+  const resumable = resumableProviderDefinitions(providerStatus);
+  $("#providerSetupOptions").innerHTML = `${resumable.map((definition) => `<div class="connected-provider-resume"><strong>${escapeHtml(definition.label)}</strong><small>Connected and ready for harness and family setup.</small><button type="button" class="primary" data-resume-provider-onboarding="${escapeHtmlAttribute(definition.id)}">Continue setup</button></div>`).join("")}${providerOptionsMarkup(providerStatus?.adapters ?? [])}`;
+  $$('[data-resume-provider-onboarding]', $("#providerSetupOptions")).forEach((button) => {
+    button.addEventListener("click", () => {
+      connectedDefinition = resumable.find(({ id }) => String(id) === button.dataset.resumeProviderOnboarding) ?? null;
+      if (connectedDefinition) prepareFamilyStep(connectedDefinition, { preserveIntent: true }).catch((error) => setStatus(error.message, "error"));
+    });
+  });
   $$("[data-provider-adapter]", $("#providerSetupOptions")).forEach((button) => {
     button.onclick = () => showProviderForm(button.dataset.providerAdapter);
   });
@@ -83,84 +106,120 @@ function showProviderForm(adapterId, { showErrors = false } = {}) {
 }
 
 async function completeOnboarding() {
-  if (productApiAvailable) {
-    await refreshModelFamilySettings();
-    resetNewThreadModelPicker();
-    await loadDefaultModelSelection(appState.modelSettings.defaults.harnessId);
-  }
   await desktop.providers.completeOnboarding();
+  await refreshProductAfterOnboarding();
   showApplication();
 }
 
-async function prepareFamilyStep(definition) {
-  if (!productApiAvailable) return completeOnboarding();
-  const settings = await loadModelSettings();
-  if (defaultFamilySelectionForProvider(settings, settings.defaults.harnessId, definition.id)) {
-    return completeOnboarding();
-  }
-  const declaredDefault = await completeDefaultProviderOnboarding(definition.id);
-  if (declaredDefault) return completeOnboarding();
-  const provider = settings.providers.find((item) => String(item.id) === String(definition.id));
-  onboardingProjection = await loadProviderOnboardingProjection(definition.id);
-  const appDefault = onboardingProjection.harnesses.find((harness) => harness.isAppDefault);
-  onboardingHarness = appDefault?.id ?? null;
-  const renderChoices = () => {
-    const selectedHarness = onboardingProjection.harnesses.find(({ id }) => id === onboardingHarness);
-    const models = selectedHarness?.models ?? [];
-    if (!models.some(({ id }) => id === onboardingModel)) onboardingModel = null;
-    const harnessTabStopId = onboardingHarness ?? onboardingProjection.harnesses[0]?.id;
-    const modelTabStopId = onboardingModel ?? models[0]?.id;
-    $("#onboardingFamilyOptions").innerHTML = `
-      <div class="provider-form-field"><span>Harness</span><div class="onboarding-model-list" role="radiogroup" aria-label="Default harness">
-        ${onboardingProjection.harnesses.map((harness) => `<button type="button" role="radio" aria-checked="${harness.id === onboardingHarness}" tabindex="${harness.id === harnessTabStopId ? 0 : -1}" data-onboarding-harness="${escapeHtmlAttribute(harness.id)}"><span><strong>${escapeHtml(harness.label)}</strong><small>${harness.isAppDefault ? "Relayer app default" : "Compatible harness"}</small></span><i aria-hidden="true">${harness.id === onboardingHarness ? "✓" : ""}</i></button>`).join("") || `<p class="field-error" role="alert">No available harness can use this provider.</p>`}
-      </div></div>
-      ${selectedHarness ? `<div class="provider-form-field"><span>Model</span><div class="onboarding-model-list" role="radiogroup" aria-label="Default model">
-        ${models.map((model) => `<button type="button" role="radio" aria-checked="${model.id === onboardingModel}" tabindex="${model.id === modelTabStopId ? 0 : -1}" data-onboarding-model="${escapeHtmlAttribute(model.id)}"><span><strong>${escapeHtml(model.label)}</strong><small>${escapeHtml(provider.label)}</small></span><i aria-hidden="true">${model.id === onboardingModel ? "✓" : ""}</i></button>`).join("")}
-      </div></div>` : ""}
-    `;
-    $$("[data-onboarding-harness]", $("#onboardingFamilyOptions")).forEach((button) => {
-      button.onclick = () => {
-        onboardingHarness = button.dataset.onboardingHarness;
-        onboardingModel = null;
-        renderChoices();
-        requestAnimationFrame(() => $(`[data-onboarding-harness="${CSS.escape(onboardingHarness)}"]`)?.focus());
-      };
-    });
-    bindRovingRadioGroup($("#onboardingFamilyOptions").querySelector('[aria-label="Default harness"]'), {
-      onMove: (button) => {
-        onboardingHarness = button.dataset.onboardingHarness;
-        onboardingModel = null;
-        renderChoices();
-        requestAnimationFrame(() => $(`[data-onboarding-harness="${CSS.escape(onboardingHarness)}"]`)?.focus());
-      },
-    });
-    $$("[data-onboarding-model]", $("#onboardingFamilyOptions")).forEach((button) => {
-      button.onclick = () => {
-        onboardingModel = button.dataset.onboardingModel;
-        renderChoices();
-        requestAnimationFrame(() => $(`[data-onboarding-model="${CSS.escape(onboardingModel)}"]`)?.focus());
-      };
-    });
-    bindRovingRadioGroup($("#onboardingFamilyOptions").querySelector('[aria-label="Default model"]'), {
-      onMove: (button) => {
-        onboardingModel = button.dataset.onboardingModel;
-        renderChoices();
-        requestAnimationFrame(() => $(`[data-onboarding-model="${CSS.escape(onboardingModel)}"]`)?.focus());
-      },
-    });
-    $("#finishProviderSetup").disabled = !onboardingModel;
+function chosenHarness() {
+  return onboardingProjection?.harnesses?.find(({ id }) => id === onboardingHarness) ?? null;
+}
+
+function finishIntentValid() {
+  return Boolean(chosenHarness()?.selectable && providerOnboardingCompletionIntent({
+    providerId: connectedDefinition?.id,
+    projection: onboardingProjection,
+    harnessId: onboardingHarness,
+    family: onboardingFamilyIntent,
+  }));
+}
+
+function focusRequiredOnboardingChoice() {
+  let target;
+  if (!onboardingHarness) target = $("#onboardingHarnessOptions [role=radio]:not(:disabled)");
+  else if (!onboardingFamilyIntent) target = $("#onboardingFamilyOptions [role=radio]");
+  else if (onboardingFamilyIntent.kind === "create" && !onboardingFamilyIntent.name?.trim()) target = $("#onboardingFamilyName");
+  else if (onboardingFamilyIntent.kind === "create" && !onboardingFamilyIntent.members?.length) target = $(".onboarding-model-members input");
+  (target ?? $("#authStatus"))?.focus();
+}
+
+function selectFamily(button) {
+  const harness = chosenHarness();
+  if (!harness) return;
+  const kind = button.dataset.onboardingFamilyKind;
+  if (kind === "existing") {
+    const family = [...(harness.existingCustomFamilies ?? []), ...(harness.existingManagedFamilies ?? [])]
+      .find(({ id }) => String(id) === button.dataset.onboardingFamilyId);
+    if (!family) return;
+    onboardingFamilyIntent = { kind, familyId: family.id };
+  } else if (kind === "managed" && harness.managedFamilyCandidate) {
+    onboardingFamilyIntent = {
+      kind,
+      policyId: harness.managedFamilyCandidate.policyId,
+      policyVersion: harness.managedFamilyCandidate.policyVersion,
+    };
+  } else if (kind === "create") {
+    onboardingFamilyIntent = {
+      kind,
+      name: onboardingFamilyIntent?.kind === "create"
+        ? onboardingFamilyIntent.name
+        : `${connectedDefinition.label} default`,
+      members: onboardingFamilyIntent?.kind === "create" ? onboardingFamilyIntent.members : [],
+    };
+  } else return;
+  renderOnboardingChoices({ focus: "family" });
+}
+
+function bindOnboardingChoices({ focus } = {}) {
+  const harnessGroup = $("#onboardingHarnessOptions [role=radiogroup]");
+  const chooseHarness = (button) => {
+    const nextHarness = button.dataset.onboardingHarness;
+    if (nextHarness !== onboardingHarness) onboardingFamilyIntent = null;
+    onboardingHarness = nextHarness;
+    renderOnboardingChoices({ focus: "harness" });
   };
-  const models = (provider?.models ?? []).filter((model) => model.visible !== false && model.available !== false);
-  if (!models.length) throw new Error("The connected provider has no available models.");
-  onboardingModel = null;
+  $$('[data-onboarding-harness]:not(:disabled)', harnessGroup).forEach((button) => { button.onclick = () => chooseHarness(button); });
+  bindRovingRadioGroup(harnessGroup, { onMove: chooseHarness, onActivate: chooseHarness });
+
+  const familyGroup = $("#onboardingFamilyOptions [role=radiogroup]");
+  if (familyGroup) $$('[data-onboarding-family-kind]', familyGroup).forEach((button) => { button.onclick = () => selectFamily(button); });
+  bindRovingRadioGroup(familyGroup, { onMove: selectFamily, onActivate: selectFamily });
+  $("#onboardingFamilyName")?.addEventListener("input", (event) => {
+    onboardingFamilyIntent.name = event.target.value;
+    $("#finishProviderSetup").disabled = !finishIntentValid();
+  });
+  $$('[data-onboarding-member-model]', $("#onboardingFamilyOptions")).forEach((input) => {
+    input.onchange = () => {
+      const member = { providerId: input.dataset.onboardingMemberProvider, modelId: input.dataset.onboardingMemberModel };
+      const key = ({ providerId, modelId }) => `${providerId}\0${modelId}`;
+      onboardingFamilyIntent.members = input.checked
+        ? [...onboardingFamilyIntent.members.filter((value) => key(value) !== key(member)), member]
+        : onboardingFamilyIntent.members.filter((value) => key(value) !== key(member));
+      $("#finishProviderSetup").disabled = !finishIntentValid();
+    };
+  });
+  if (focus) requestAnimationFrame(() => $(`#onboarding${focus === "harness" ? "Harness" : "Family"}Options [aria-checked=true]`)?.focus());
+}
+
+function renderOnboardingChoices({ focus } = {}) {
+  $("#onboardingHarnessOptions").innerHTML = onboardingHarnessOptionsMarkup(onboardingProjection, onboardingHarness);
+  const harness = chosenHarness();
+  $("#onboardingFamilyOptions").innerHTML = harness
+    ? onboardingFamilyOptionsMarkup(harness, onboardingFamilyIntent ?? {})
+    : `<p class="field-error" role="alert">${onboardingProjection.blockingReason?.message ?? "Choose a compatible harness to continue."}</p>`;
+  $("#finishProviderSetup").disabled = !finishIntentValid();
+  bindOnboardingChoices({ focus });
+}
+
+async function prepareFamilyStep(definition, { preserveIntent = false } = {}) {
+  if (!productApiAvailable) return completeOnboarding();
+  if (!preserveIntent) {
+    const declaredDefault = await completeDefaultProviderOnboarding(definition.id);
+    if (declaredDefault) return completeOnboarding();
+  }
+  const previous = preserveIntent ? { harnessId: onboardingHarness, family: onboardingFamilyIntent } : null;
+  onboardingProjection = await loadProviderOnboardingProjection(definition.id);
+  const reconciled = reconcileProviderOnboardingState(onboardingProjection, previous);
+  onboardingHarness = reconciled.harnessId;
+  onboardingFamilyIntent = reconciled.family;
   $("#providerSetupOptions").classList.add("hidden");
   $("#providerSetupForm").classList.add("hidden");
   $("#providerFamilyStep").classList.remove("hidden");
-  renderChoices();
-  setStatus(onboardingProjection.harnesses.length
-    ? "Choose a compatible harness and model. Relayer will not choose a model for you."
-    : `${provider.label} is connected, but no available harness can use its models. Connect another provider to continue.`,
-  onboardingProjection.harnesses.length ? "" : "error");
+  const hasCompatibleHarness = onboardingProjection.harnesses.some((harness) => harness.selectable);
+  $("#providerFamilyBack").textContent = hasCompatibleHarness ? "← All providers" : "← Connect another provider";
+  renderOnboardingChoices();
+  setStatus(onboardingProjection.blockingReason?.message
+    ?? "Choose a compatible harness and explicitly confirm a default family.");
 }
 
 async function connectSelectedProvider(event) {
@@ -207,13 +266,7 @@ function bindProviderSetup() {
   bound = true;
   $("#providerSetupForm").onsubmit = connectSelectedProvider;
   $("#providerSetupBack").onclick = showProviderOptions;
-  $("#providerFamilyBack").onclick = async () => {
-    providerStatus = await desktop.providers.status();
-    connectedDefinition = null;
-    onboardingModel = null;
-    onboardingProjection = null;
-    showProviderOptions();
-  };
+  $("#providerFamilyBack").onclick = showProviderOptions;
   $("#cancelProviderConnection").onclick = async () => {
     const connectionId = pendingConnectionId;
     pendingConnectionId = null;
@@ -222,21 +275,30 @@ function bindProviderSetup() {
     showProviderOptions();
   };
   $("#finishProviderSetup").onclick = async () => {
-    if (!connectedDefinition || !onboardingModel) return;
+    if (!connectedDefinition || !finishIntentValid()) {
+      setStatus("Choose a compatible harness and default family before continuing.", "error");
+      focusRequiredOnboardingChoice();
+      return;
+    }
     setBusy(true);
+    let blockingError = null;
     try {
-      await completeProviderOnboarding({
+      const intent = providerOnboardingCompletionIntent({
         providerId: connectedDefinition.id,
+        projection: onboardingProjection,
         harnessId: onboardingHarness,
-        familyName: `${connectedDefinition.label} default`,
-        modelId: onboardingModel,
+        family: onboardingFamilyIntent,
       });
+      await completeProviderOnboarding(intent);
       await completeOnboarding();
     } catch (error) {
+      blockingError = error;
+      await prepareFamilyStep(connectedDefinition, { preserveIntent: true }).catch(() => {});
       setStatus(error.message, "error");
     } finally {
       setBusy(false);
     }
+    if (blockingError) focusRequiredOnboardingChoice();
   };
 }
 
@@ -261,17 +323,7 @@ export async function refreshAccount() {
   if (providerStatus) {
     if (providerStatus.hasCompletedOnboarding) {
       showApplication();
-      const account = await desktop.account?.read?.().catch(() => null);
-      if (account?.status === "connected") {
-        const label = account.account?.email || "Codex connected";
-        const settingsAccount = $("#settingsAccount");
-        if (settingsAccount) {
-          settingsAccount.textContent = account.account?.planType
-            ? `${label} · ${account.account.planType}`
-            : label;
-        }
-      }
-      return { status: "connected", providerStatus, account: account?.account };
+      return { status: "connected", providerStatus };
     }
     showAuth();
     showProviderOptions();

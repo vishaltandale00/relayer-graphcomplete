@@ -531,6 +531,8 @@ mod tests {
                 effective_execution_digest: None,
                 effective_permission_receipt: None,
                 error: Some("fixture failure".into()),
+                attempt_admission_id: None,
+                admitted_model_plan: None,
             },
             contexts: vec![],
             accepted_view: None,

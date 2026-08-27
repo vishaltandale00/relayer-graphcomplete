@@ -35,5 +35,13 @@ contextBridge.exposeInMainWorld("relayerEvalReview", {
       throw new Error("The review presentation adapter is incomplete.");
     }
     presentationAdapter = adapter;
+    const state = presentationAdapter.snapshot();
+    const navigationToken = new URL(location.href).searchParams.get("reviewSession");
+    ipcRenderer.send("relayer-eval:review-workspace-ready", {
+      executionId,
+      threadId: state?.threadId == null ? "" : String(state.threadId),
+      turnId: state?.turnId == null ? "" : String(state.turnId),
+      navigationToken: navigationToken || "",
+    });
   },
 });

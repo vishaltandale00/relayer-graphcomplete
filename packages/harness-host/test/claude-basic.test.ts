@@ -7,6 +7,7 @@ import {
 } from "../src/implementations/claude-basic.js";
 import { createNoopHarnessTraceSink } from "../src/trace.js";
 import type { HarnessExecutionAccess, HarnessFactoryContext, HarnessRunContext } from "../src/types.js";
+import { expectGraphPresentationGuidance } from "./graph-presentation-guidance-assertions.js";
 
 function factoryContext(approvalMode: string, savedState = {}): HarnessFactoryContext {
   return {
@@ -132,6 +133,7 @@ describe("ClaudeBasicHarness", () => {
       const { prompt, options } = calls[0]!;
       expect(prompt).toContain("sourceLayer");
       expect(prompt).toContain("clientKey");
+      expectGraphPresentationGuidance(prompt);
       expect(options).toMatchObject({
         cwd: "/tmp",
         model: "claude-sonnet-4",

@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { readFile } from "node:fs/promises";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   bindRovingRadioGroup,
   harnessConfigurationsMarkup,
+  onboardingFamilyOptionsMarkup,
+  onboardingHarnessOptionsMarkup,
   providerConnectionFormMarkup,
   providerDefinitionsMarkup,
   providerLogoMarkup,
@@ -21,26 +22,7 @@ const openAi = normalizeProviderDescriptor({
 });
 
 describe("provider and harness renderer markup", () => {
-  it("keeps incompatible first-run providers connected while offering a recovery path", async () => {
-    const [html, auth] = await Promise.all([
-      readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8"),
-      readFile(new URL("../desktop/renderer/src/auth.js", import.meta.url), "utf8"),
-    ]);
-    expect(html).toContain('id="providerFamilyBack">← Connect another provider</button>');
-    expect(auth).toContain('$("#providerFamilyBack").onclick');
-    expect(auth).toContain("loadProviderOnboardingProjection");
-    expect(auth).toContain("completeDefaultProviderOnboarding(definition.id)");
-    expect(auth).toContain("if (declaredDefault) return completeOnboarding()");
-    expect(auth).toContain('data-onboarding-harness=');
-    expect(auth).toContain("Relayer will not choose a model for you.");
-    expect(auth).toContain("const harnessTabStopId = onboardingHarness ?? onboardingProjection.harnesses[0]?.id");
-    expect(auth).toContain("const modelTabStopId = onboardingModel ?? models[0]?.id");
-    expect(auth).toContain('data-onboarding-model="${CSS.escape(onboardingModel)}"');
-    expect(auth).toContain('$("#finishProviderSetup").disabled = Boolean(busy) || !onboardingModel');
-    expect(auth).not.toContain("onboardingModel = models[0]?.id");
-  });
-
-  it("renders branded marks for every packaged provider adapter and a generic future fallback", () => {
+  it("renders branded marks for packaged adapters and a generic fallback", () => {
     expect(providerLogoMarkup("claude-subscription")).toContain('data-provider-logo="claude"');
     expect(providerLogoMarkup("codex-subscription")).toContain('data-provider-logo="codex"');
     expect(providerLogoMarkup("anthropic-api")).toContain('data-provider-logo="anthropic"');
@@ -123,6 +105,65 @@ describe("provider and harness renderer markup", () => {
     expect(moved).toEqual([2]);
   });
 
+  it("activates a focused radio with Space or Enter while preserving focus", () => {
+    const radio = {
+      tabIndex: 0,
+      click: vi.fn(),
+      focus: vi.fn(),
+      closest() { return this; },
+    };
+    const group = { querySelectorAll: () => [radio], onkeydown: null };
+    bindRovingRadioGroup(group);
+    const space = { key: " ", target: radio, preventDefault: vi.fn() };
+    group.onkeydown(space);
+    expect(space.preventDefault).toHaveBeenCalledOnce();
+    expect(radio.click).toHaveBeenCalledOnce();
+    expect(radio.focus).toHaveBeenCalledOnce();
+    const enter = { key: "Enter", target: radio, preventDefault: vi.fn() };
+    group.onkeydown(enter);
+    expect(radio.click).toHaveBeenCalledTimes(2);
+    expect(radio.focus).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the incompatible app default but selects only an authoritative compatible initial harness", () => {
+    const projection = {
+      appDefaultHarnessId: "codex-basic",
+      harnesses: [
+        { id: "codex-basic", label: "Codex", selectable: false, incompatibilityReason: { code: "access_contract_mismatch", message: "Requires managed access." } },
+        { id: "universal", label: "Universal", selectable: true, selectedInitially: false, matchingAccessContract: "secret@1" },
+      ],
+    };
+    const withoutSelection = onboardingHarnessOptionsMarkup(projection, null);
+    expect(withoutSelection).toContain('data-onboarding-harness="codex-basic" disabled');
+    expect(withoutSelection).toContain("Requires managed access.");
+    expect(withoutSelection).not.toContain('aria-checked="true"');
+    const explicitlySelected = onboardingHarnessOptionsMarkup(projection, "universal");
+    expect(explicitlySelected).toContain('aria-checked="true" tabindex="0" data-onboarding-harness="universal"');
+  });
+
+  it("separates existing, managed, and custom family choices without silently checking a model", () => {
+    const harness = {
+      label: "Universal",
+      existingCustomFamilies: [{ id: 12, name: "Work", members: [{ providerId: "work", modelId: "large" }] }],
+      existingManagedFamilies: [],
+      managedFamilyCandidate: { name: "Provider defaults", members: [{ providerId: "work", modelId: "large" }] },
+      eligibleModels: [
+        { providerId: "work", modelId: "large", label: "Large" },
+        { providerId: "work", modelId: "small", label: "Small" },
+      ],
+    };
+    const unselected = onboardingFamilyOptionsMarkup(harness, {});
+    expect(unselected).toContain('data-onboarding-family-kind="existing"');
+    expect(unselected).toContain('data-onboarding-family-kind="managed"');
+    expect(unselected).toContain('data-onboarding-family-kind="create"');
+    expect(unselected).toContain("Existing custom families");
+    expect(unselected).toContain("Managed family candidate");
+    expect(unselected).not.toContain('type="checkbox"');
+    const creating = onboardingFamilyOptionsMarkup(harness, { kind: "create", name: "Work choices", members: [] });
+    expect(creating.match(/type="checkbox"/g)).toHaveLength(2);
+    expect(creating).not.toContain("checked />");
+  });
+
   it("keeps duplicate model access paths distinguishable by provider definition labels", () => {
     const markup = providerDefinitionsMarkup([
       { id: "work", adapterId: "openai-api", adapterLabel: "OpenAI API", label: "OpenAI Work", endpoint: "https://api.openai.com/v1", accessContract: "secret@1", lifecycleState: "active" },
@@ -171,5 +212,21 @@ describe("provider and harness renderer markup", () => {
     expect(markup).toContain("openai-api · is gpt-5.2");
     expect(markup).toContain("anthropic-api · matches -haiku-");
     expect(markup).not.toContain("API key");
+  });
+
+  it("shows an actionable unavailable runtime in Settings without enabling edits", () => {
+    const markup = harnessConfigurationsMarkup([{
+      id: "prime-agent-basic",
+      label: "Prime Agent Basic",
+      available: false,
+      unavailableReason: {
+        code: "prime_agent_boundary_unsupported",
+        message: "Prime Agent Ask and Auto require macOS. Choose another available harness on this device.",
+      },
+      executionAccessContracts: ["secret@1"],
+    }]);
+    expect(markup).toContain("Unavailable");
+    expect(markup).toContain("Choose another available harness on this device.");
+    expect(markup).toContain('data-harness-rules-edit="prime-agent-basic" disabled');
   });
 });

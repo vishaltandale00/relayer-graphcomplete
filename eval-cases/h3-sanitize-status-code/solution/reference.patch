@@ -1,0 +1,37 @@
+diff --git a/src/utils/sanitize.ts b/src/utils/sanitize.ts
+index bb00c3a..3c8d6bf 100644
+--- a/src/utils/sanitize.ts
++++ b/src/utils/sanitize.ts
+@@ -25,7 +25,7 @@ export function sanitizeStatusCode(statusCode?: string | number, defaultStatusCo
+   // `+statusCode` on a non-numeric string), floats, and non-numeric values such as objects or
+   // arrays, whose comparisons are all `false`. Without it an invalid code leaks through and
+   // breaks `Response`.
+-  if (!Number.isFinite(statusCode) || statusCode < 100 || statusCode > 599) {
++  if (!Number.isInteger(statusCode) || statusCode < 100 || statusCode > 599) {
+     return defaultStatusCode;
+   }
+   return statusCode;
+diff --git a/test/unit/sanitize.test.ts b/test/unit/sanitize.test.ts
+index 5690091..db54196 100644
+--- a/test/unit/sanitize.test.ts
++++ b/test/unit/sanitize.test.ts
+@@ -3,15 +3,19 @@ import { sanitizeStatusCode, sanitizeStatusMessage } from "../../src/utils/sanit
+ 
+ describe("sanitizeStatusCode", () => {
+   it("returns valid status codes unchanged", () => {
++    expect(sanitizeStatusCode(100)).toBe(100);
+     expect(sanitizeStatusCode(200)).toBe(200);
+     expect(sanitizeStatusCode(404)).toBe(404);
+     expect(sanitizeStatusCode(599)).toBe(599);
++    expect(sanitizeStatusCode("599")).toBe(599);
+     expect(sanitizeStatusCode("301")).toBe(301);
+   });
+ 
+   it("returns the default for out-of-range codes", () => {
+     expect(sanitizeStatusCode(99)).toBe(200);
+     expect(sanitizeStatusCode(600)).toBe(200);
++    expect(sanitizeStatusCode(200.5)).toBe(200);
++    expect(sanitizeStatusCode("200.5")).toBe(200);
+     expect(sanitizeStatusCode(99, 500)).toBe(500);
+   });
+ 

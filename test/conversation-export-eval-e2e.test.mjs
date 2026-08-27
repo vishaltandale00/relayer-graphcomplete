@@ -59,7 +59,11 @@ describe("conversation export to Eval end to end", () => {
       additionalImplementations: { "fixture.task-system": complexConversationFactory(canonicalProjectPath) },
       acquireProviderExecution: async (providerId) => ({
         definition: { id: providerId, adapterId: "codex-subscription", accessContract: "managed-runtime@1" },
-        descriptor: { implementationVersion: "1" },
+        descriptor: {
+          adapterId: "codex-subscription",
+          accessContract: "managed-runtime@1",
+          implementationVersion: "1",
+        },
         runtime: { async executionAccess() { return { kind: "managed-runtime", environment: {} }; } },
         async release() {},
       }),

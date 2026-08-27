@@ -37,7 +37,7 @@ function statusMarkup(turn) {
 
 function coverageMarkup(coverage) {
   if (!coverage) return "";
-  const groups = ["layers", "nodes", "actions", "turn"].flatMap((name) => {
+  const groups = ["layers", "nodes", "actions", "allocations", "turn"].flatMap((name) => {
     const item = coverage[name];
     return item ? [`<span><b>${escapeHtml(item.reviewed ?? 0)}/${escapeHtml(item.required ?? 0)}</b> ${escapeHtml(name)}</span>`] : [];
   });
@@ -88,13 +88,22 @@ function nodeChipMarkup(node) {
 
 function layerMarkup(layer) {
   const active = state.selection.layerId === layer.layerId;
+  const recursiveSlots = Array.isArray(layer.review?.nodeScores)
+    ? `<div class="node-chips recursive-slots" aria-label="Eight aligned node result slots">${layer.review.nodeScores.map((score, index) => {
+        const semantic = layer.review.nodeSemantics?.[index] ?? null;
+        const node = score ? layer.nodes.find((candidate) => candidate.nodeId === String(score.nodeId)) : null;
+        return node
+          ? `<div class="recursive-slot"><small>Slot ${index + 1}</small>${nodeChipMarkup(node)}<dl><div><dt>C</dt><dd>${escapeHtml(score.content)}</dd></div><div><dt>A</dt><dd>${escapeHtml(score.actionAllocation)}</dd></div><div><dt>D</dt><dd>${score.actionDelivery === null ? "N/A" : escapeHtml(score.actionDelivery)}</dd></div><div><dt>R</dt><dd>${score.recursiveQuality === null ? "N/A" : escapeHtml(score.recursiveQuality)}</dd></div></dl><p>${escapeHtml(semantic?.effectOnLayer || semantic?.delivered || "No aligned semantic summary")}</p></div>`
+          : `<span class="recursive-slot empty-slot"><small>Slot ${index + 1}</small><b>Score null</b><p>Semantic null</p></span>`;
+      }).join("")}</div>`
+    : `<div class="node-chips" aria-label="Nodes in layer ${escapeHtml(layer.layerId)}">${layer.nodes.map(nodeChipMarkup).join("") || '<span class="empty-note">No inventoried nodes</span>'}</div>`;
   return `<article class="layer-card ${active ? "active" : ""} ${layer.reviewed ? "" : "missing"}">
     <button class="layer-heading" data-layer-id="${escapeHtml(layer.layerId)}">
       <span><small>Depth ${escapeHtml(layer.depth)}</small><b>Layer ${escapeHtml(layer.layerId)}</b></span>
       <strong>${layer.reviewed ? scoreLabel(layer.review?.ratings) : "Not reviewed"}</strong>
     </button>
     <p>${escapeHtml(layer.review?.summary || "The judge did not submit a review for this layer.")}</p>
-    <div class="node-chips" aria-label="Nodes in layer ${escapeHtml(layer.layerId)}">${layer.nodes.map(nodeChipMarkup).join("") || '<span class="empty-note">No inventoried nodes</span>'}</div>
+    ${recursiveSlots}
   </article>`;
 }
 
@@ -114,8 +123,35 @@ function actionsMarkup(subject) {
   return `<section class="detail-section"><h3>Actions</h3><div class="action-list">${subject.actions.map((action) => {
     const active = state.selection.kind === "action" && state.selection.actionId === action.actionId;
     const actionLabel = action.relation ? `${titleCase(action.relation)} navigation` : titleCase(action.actionKind);
-    return `<button class="action-chip ${active ? "active" : ""} ${action.reviewed ? "" : "missing"}" data-action-id="${escapeHtml(action.actionId)}" data-layer-id="${escapeHtml(subject.layerId)}" data-node-id="${escapeHtml(subject.nodeId)}"><span>${escapeHtml(actionLabel)} ${escapeHtml(action.actionId)}</span><b>${action.reviewed ? scoreLabel(action.review?.ratings) : "Not reviewed"}</b></button>`;
+    const resultLayerId = action.review?.kind === "reference"
+      ? action.review?.reusedLayerId
+      : action.review?.targetLayerId;
+    return `<div class="action-result"><button class="action-chip ${active ? "active" : ""} ${action.reviewed ? "" : "missing"}" data-action-id="${escapeHtml(action.actionId)}" data-layer-id="${escapeHtml(subject.layerId)}" data-node-id="${escapeHtml(subject.nodeId)}"><span>${escapeHtml(actionLabel)} ${escapeHtml(action.actionId)}</span><b>${action.reviewed ? (Object.keys(action.review?.ratings || {}).length ? scoreLabel(action.review?.ratings) : titleCase(action.review.kind)) : "Not reviewed"}</b></button>${resultLayerId ? `<button class="result-link" data-result-layer="${escapeHtml(resultLayerId)}">${action.review.kind === "reference" ? "Open reused" : "Open child"} LayerResult ${escapeHtml(resultLayerId)}</button>` : action.review?.kind === "invoke" ? '<span class="null-result">Delivery null · recursion null</span>' : ""}</div>`;
   }).join("")}</div></section>`;
+}
+
+function semanticMarkup(subject) {
+  const semantic = subject?.kind === "node" ? subject.review?.semantic : null;
+  if (!semantic) return "";
+  return `<section class="detail-section"><h3>Semantic compression</h3><dl class="semantic-summary"><div><dt>Meaning</dt><dd>${escapeHtml(semantic.meaning)}</dd></div><div><dt>Delivered</dt><dd>${escapeHtml(semantic.delivered)}</dd></div><div><dt>Limitations</dt><dd>${escapeHtml(semantic.limitations)}</dd></div><div><dt>Effect on layer</dt><dd>${escapeHtml(semantic.effectOnLayer)}</dd></div></dl></section>`;
+}
+
+function allocationMarkup(subject) {
+  const steps = subject?.kind === "node" ? subject.review?.allocationSteps : null;
+  if (!Array.isArray(steps)) return "";
+  return `<section class="detail-section"><h3>Sequential action allocation</h3><div class="allocation-list">${steps.map((step) => `<article><header><b>Step ${escapeHtml(step.step)}</b><span>${escapeHtml(titleCase(step.authoredChoice))}${step.authoredActionId ? ` · ${escapeHtml(step.authoredActionId)}` : ""}</span><strong>${escapeHtml(titleCase(step.margin))}</strong></header><ol>${[...(step.ranking || [])].sort((left, right) => left.rank - right.rank).map((entry) => `<li><b>${escapeHtml(entry.rank)}</b> ${escapeHtml(titleCase(entry.choice))}</li>`).join("")}</ol><p>${escapeHtml(step.selectionFinding)}</p></article>`).join("")}</div></section>`;
+}
+
+function missingActionOpportunitiesMarkup(subject) {
+  const opportunities = subject?.kind === "node" ? subject.review?.missingActionOpportunities : null;
+  if (!Array.isArray(opportunities) || opportunities.length === 0) return "";
+  return `<section class="detail-section"><h3>Missing action opportunities</h3><ul class="findings">${opportunities.map((opportunity) => `<li class="issue"><span>${escapeHtml(opportunity.importance)} · missing ${escapeHtml(opportunity.preferredChoice)}</span><p><b>${escapeHtml(opportunity.unansweredQuestion)}</b></p><p>${escapeHtml(opportunity.expectedContribution)}</p><small>${escapeHtml((opportunity.artifactEvidence || []).join(" · "))}</small></li>`).join("")}</ul></section>`;
+}
+
+function consumedRootMarkup(subject) {
+  const root = subject?.kind === "turn" ? subject.review?.rootLayerResult : null;
+  if (!root?.layerId) return "";
+  return `<section class="detail-section"><h3>Consumed recursive result</h3><div class="consumed-root"><p><b>Root LayerResult ${escapeHtml(root.layerId)}</b><span>${escapeHtml(root.layerSummary || "Finalized semantic root")}</span></p><button class="result-link" data-result-layer="${escapeHtml(root.layerId)}">Open consumed root LayerResult</button></div></section>`;
 }
 
 function structureMarkup(subject) {
@@ -175,6 +211,10 @@ function render() {
         ${turn.stateReason ? `<p class="state-reason">${escapeHtml(turn.stateReason)}</p>` : ""}
         <p class="review-summary">${escapeHtml(review?.summary || turn.result?.summary || "The judge did not submit a review for this subject.")}</p>
         <section class="detail-section"><h3>Criterion scores</h3>${ratingsMarkup(review)}</section>
+        ${semanticMarkup(subject)}
+        ${allocationMarkup(subject)}
+        ${missingActionOpportunitiesMarkup(subject)}
+        ${consumedRootMarkup(subject)}
         ${structureMarkup(subject)}
         ${actionsMarkup(subject)}
         <section class="detail-section"><h3>Findings</h3>${findingsMarkup(review)}</section>
@@ -207,6 +247,9 @@ function bindEvents() {
   });
   document.querySelectorAll("[data-action-id]").forEach((button) => {
     button.onclick = () => { state.selection = { kind: "action", layerId: button.dataset.layerId, nodeId: button.dataset.nodeId, actionId: button.dataset.actionId }; state.evidenceMode = "subject"; render(); };
+  });
+  document.querySelectorAll("[data-result-layer]").forEach((button) => {
+    button.onclick = () => { state.selection = { kind: "layer", layerId: button.dataset.resultLayer }; state.evidenceMode = "subject"; render(); };
   });
   document.querySelectorAll("[data-crumb-kind]").forEach((button) => {
     button.onclick = () => {

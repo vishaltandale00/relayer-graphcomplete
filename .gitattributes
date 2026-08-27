@@ -1,0 +1,2 @@
+harnesses/*.yaml text eol=lf
+python/relayer-graph/src/relayer_graph/**/*.py text eol=lf

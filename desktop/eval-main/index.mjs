@@ -13,6 +13,7 @@ import { EvalService } from "./eval-service.mjs";
 import { loadAtomicAnnotationSnapshots } from "./annotation-snapshot-loader.mjs";
 import { loadJudgeScreenshotArtifact } from "./judge-screenshot-loader.mjs";
 import { ReviewSession } from "./review-session.mjs";
+import { loadReadyReviewWorkspace } from "./review-workspace-readiness.mjs";
 import {
   createLocalSimulatedUserJudgeRunner,
   resolveLocalSimulatedUserAutorun,
@@ -153,7 +154,18 @@ async function createReviewWindow(executionId) {
     if (manualReviewWindows.get(executionId) === window) manualReviewWindows.delete(executionId);
     if (reviewSessions.get(executionId) === reviewSession) reviewSessions.delete(executionId);
   });
-  await window.loadURL(`${productOrigin}/?threadId=${encodeURIComponent(threadId)}&review=1`);
+  const navigationToken = randomBytes(16).toString("hex");
+  await loadReadyReviewWorkspace({
+    window,
+    ipc: ipcMain,
+    url: `${productOrigin}/?threadId=${encodeURIComponent(threadId)}`
+      + `&review=1&reviewSession=${encodeURIComponent(navigationToken)}`,
+    expected: {
+      executionId,
+      threadId,
+      navigationToken,
+    },
+  });
   reviewSession = new ReviewSession({
     executionId,
     readOnly: context.readOnly,
@@ -265,49 +277,55 @@ async function createReadOnlyReviewWindow(executionId, { annotations = false } =
   });
   reviewWindows.add(window);
   window.on("closed", () => reviewWindows.delete(window));
-  windowSecurity(window, productOrigin);
-  await window.webContents.session.cookies.set({
-    url: productSession.origin,
-    name: productSession.readOnlyCookie.name,
-    value: productSession.readOnlyCookie.value,
-    httpOnly: true,
-    sameSite: "strict",
-    secure: false,
-  });
-  if (annotations) {
-    const annotationSessionToken = randomBytes(32).toString("hex");
-    const context = evalService.reviewContext(executionId);
-    const annotationThreadIds = [...new Set(
-      context.cases.flatMap((item) => item.threadIds || []),
-    )];
-    const displayName = String(process.env.RELAYER_EVAL_ANNOTATOR_NAME || userInfo().username).trim();
-    const response = await fetch(new URL("/api/internal/annotation-sessions", productSession.origin), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`,
-      },
-      body: JSON.stringify({
-        token: annotationSessionToken,
-        threadIds: annotationThreadIds,
-        authorId: `local:${userInfo().username}`,
-        authorDisplayName: displayName,
-      }),
-    });
-    if (!response.ok) {
-      const value = await response.json().catch(() => ({}));
-      throw new Error(value?.error || `Annotation session registration failed (${response.status}).`);
-    }
+  try {
+    windowSecurity(window, productOrigin);
     await window.webContents.session.cookies.set({
       url: productSession.origin,
-      name: "relayer_annotation",
-      value: annotationSessionToken,
+      name: productSession.readOnlyCookie.name,
+      value: productSession.readOnlyCookie.value,
       httpOnly: true,
       sameSite: "strict",
       secure: false,
     });
+    if (annotations) {
+      const annotationSessionToken = randomBytes(32).toString("hex");
+      const context = evalService.reviewContext(executionId);
+      const annotationThreadIds = [...new Set(
+        context.cases.flatMap((item) => item.threadIds || []),
+      )];
+      const displayName = String(process.env.RELAYER_EVAL_ANNOTATOR_NAME || userInfo().username).trim();
+      const response = await fetch(new URL("/api/internal/annotation-sessions", productSession.origin), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`,
+        },
+        body: JSON.stringify({
+          token: annotationSessionToken,
+          threadIds: annotationThreadIds,
+          authorId: `local:${userInfo().username}`,
+          authorDisplayName: displayName,
+        }),
+      });
+      if (!response.ok) {
+        const value = await response.json().catch(() => ({}));
+        throw new Error(value?.error || `Annotation session registration failed (${response.status}).`);
+      }
+      await window.webContents.session.cookies.set({
+        url: productSession.origin,
+        name: "relayer_annotation",
+        value: annotationSessionToken,
+        httpOnly: true,
+        sameSite: "strict",
+        secure: false,
+      });
+    }
+    return { window, productOrigin };
+  } catch (error) {
+    reviewWindows.delete(window);
+    if (!window.isDestroyed()) window.destroy();
+    throw error;
   }
-  return { window, productOrigin };
 }
 
 async function openAutomatedReviewSession({
@@ -332,10 +350,20 @@ async function openAutomatedReviewSession({
       }
     });
   }
-  await entry.window.loadURL(
-    `${entry.productOrigin}/?threadId=${encodeURIComponent(threadId)}`
-      + `&interactionId=${encodeURIComponent(turnId)}&review=1`,
-  );
+  const navigationToken = randomBytes(16).toString("hex");
+  await loadReadyReviewWorkspace({
+    window: entry.window,
+    ipc: ipcMain,
+    url: `${entry.productOrigin}/?threadId=${encodeURIComponent(threadId)}`
+      + `&interactionId=${encodeURIComponent(turnId)}&review=1`
+      + `&reviewSession=${encodeURIComponent(navigationToken)}`,
+    expected: {
+      executionId,
+      threadId,
+      turnId,
+      navigationToken,
+    },
+  });
   const session = new ReviewSession({
     executionId,
     readOnly: context.readOnly,

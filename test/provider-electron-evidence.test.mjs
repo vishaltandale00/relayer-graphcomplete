@@ -24,11 +24,14 @@ describe("provider browser evidence", () => {
   it("locks every committed frame, variant, poster, and video to the evidence manifest", async () => {
     const manifest = JSON.parse(await readFile(new URL("manifest.json", evidenceDirectory), "utf8"));
     expect(manifest).toMatchObject({ schemaVersion: 1, inference: false, viewport: { width: 1280, height: 800 } });
+    expect(manifest.activeAdapters).toEqual([
+      "codex-subscription", "claude-subscription", "openai-api", "anthropic-api", "openrouter", "vercel-ai-router",
+    ]);
     expect(Object.keys(manifest.scenes)).toEqual([
       "onboarding", "endpoint", "family", "providers", "families", "harnesses", "recovery",
     ]);
     expect(Object.keys(manifest.variants)).toEqual([
-      "light", "narrow", "long-label", "loading", "error", "unavailable", "authorization",
+      "light", "narrow", "long-label", "loading", "invalid", "error", "unavailable", "stale", "removed", "no-compatible", "authorization",
     ]);
     expect(manifest.recording).toMatchObject({
       kind: "cdp-interaction-frames",
@@ -101,7 +104,7 @@ describe("provider browser evidence", () => {
         .filter((name) => name.endsWith(".png"))
         .sort();
       expect(variants).toEqual([
-        "authorization.png", "error.png", "light.png", "loading.png", "long-label.png", "narrow.png", "unavailable.png",
+        "authorization.png", "error.png", "invalid.png", "light.png", "loading.png", "long-label.png", "narrow.png", "no-compatible.png", "removed.png", "stale.png", "unavailable.png",
       ]);
       expect(existsSync(join(output, "manifest.json"))).toBe(true);
       expect(existsSync(join(output, "provider-ux-poster.png"))).toBe(true);

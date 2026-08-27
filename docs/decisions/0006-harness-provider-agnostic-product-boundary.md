@@ -16,7 +16,7 @@ Harness configurations declare compatible providers, models, and product permiss
 
 Harness- and provider-agnostic means the product contract remains stable across supported implementations. It does not create a generic agent protocol or make arbitrary providers and harnesses work without explicit adapters, compatibility declarations, tests, and release inclusion.
 
-The packaged application currently includes the `codex.basic` implementation through `codex-basic` and `codex-basic-high`. The `prime.agent` implementation is an optional development and evaluation target until its dependency is consumable in a clean packaged installation. Neither implementation defines the product identity.
+The packaged application includes the `codex.basic` implementation through `codex-basic` and `codex-basic-high`, plus the reviewed `prime.agent` implementation through `prime-agent-basic` and `prime-agent-deep`. Prime is included only when its content-addressed runtime, exact API contract, harness configurations, and Python client pass packaged integrity verification. Neither implementation defines the product identity.
 
 ## Consequences
 

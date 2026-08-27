@@ -1,0 +1,86 @@
+diff --git a/src/fetch.ts b/src/fetch.ts
+index 10c9158..d11e30b 100644
+--- a/src/fetch.ts
++++ b/src/fetch.ts
+@@ -48,10 +48,18 @@ export function createFetch(globalOptions: CreateFetchOptions = {}): $Fetch {
+     // Retry
+     if (context.options.retry !== false && !isAbort) {
+       let retries;
+-      if (typeof context.options.retry === "number") {
++      const method = (context.options.method || "GET").toUpperCase();
++      const retryMethodAllowed = context.options.retryMethods
++        ? context.options.retryMethods.some(
++            (retryMethod) => retryMethod.toUpperCase() === method
++          )
++        : !isPayloadMethod(method);
++      if (!retryMethodAllowed) {
++        retries = 0;
++      } else if (typeof context.options.retry === "number") {
+         retries = context.options.retry;
+       } else {
+-        retries = isPayloadMethod(context.options.method) ? 0 : 1;
++        retries = 1;
+       }
+ 
+       const responseCode = (context.response && context.response.status) || 500;
+diff --git a/src/types.ts b/src/types.ts
+index 66a84fa..b11775d 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -68,6 +68,9 @@ export interface FetchOptions<R extends ResponseType = ResponseType, T = any>
+ 
+   /** Default is [408, 409, 425, 429, 500, 502, 503, 504] */
+   retryStatusCodes?: number[];
++
++  /** HTTP methods eligible for retry. Method names are case-insensitive. */
++  retryMethods?: string[];
+ }
+ 
+ export interface ResolvedFetchOptions<
+diff --git a/test/index.test.ts b/test/index.test.ts
+index 5ac20b0..958a6e9 100644
+--- a/test/index.test.ts
++++ b/test/index.test.ts
+@@ -9,7 +9,7 @@ import {
+ } from "vitest";
+ import { Readable } from "node:stream";
+ import { H3, HTTPError, readBody, serve } from "h3";
+-import { $fetch } from "../src/index.ts";
++import { $fetch, createFetch } from "../src/index.ts";
+ 
+ describe("ofetch", () => {
+   let listener: ReturnType<typeof serve>;
+@@ -295,6 +295,33 @@ describe("ofetch", () => {
+     expect(race).to.equal("fast");
+   });
+ 
++  it("uses a case-insensitive retryMethods allowlist", async () => {
++    let calls = 0;
++    const localFetch = createFetch({
++      fetch: async () => {
++        calls++;
++        return new Response("retry", { status: calls === 1 ? 500 : 200 });
++      },
++    });
++
++    await localFetch.raw("https://example.test", {
++      method: "post",
++      retry: 1,
++      retryMethods: ["POST"],
++    });
++    expect(calls).toBe(2);
++
++    calls = 0;
++    await expect(
++      localFetch.raw("https://example.test", {
++        method: "GET",
++        retry: 1,
++        retryMethods: ["post"],
++      })
++    ).rejects.toMatchObject({ status: 500 });
++    expect(calls).toBe(1);
++  });
++
+   it("abort with retry", async () => {
+     const controller = new AbortController();
+     async function abortHandle() {

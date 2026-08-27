@@ -2,9 +2,9 @@ use crate::approval::{ApprovalDecisionSubmission, ApprovalRequest, ApprovalResol
 use crate::{
     permissions::PermissionProfile,
     product::{
-        ExecutionHarnessPolicy, ExecutionModelSelection, FamilyPolicyReference,
-        HarnessModelCompatibility, HarnessModelRule, HarnessModelRules, RuntimeProductHarness,
-        validate_stable_id,
+        AdmittedExecutionModelPlan, ExecutionHarnessPolicy, ExecutionModelPlan,
+        ExecutionModelSelection, FamilyPolicyReference, HarnessModelCompatibility,
+        HarnessModelRule, HarnessModelRules, RuntimeProductHarness, validate_stable_id,
     },
 };
 use relayer_graph_core::{ImportedConversationReceipt, ImportedConversationStage, ImportedTurn};
@@ -57,11 +57,23 @@ struct CatalogEntry {
     digest: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnavailableCatalogEntry {
+    name: String,
+    reason: crate::product::UnavailableReason,
+    #[serde(default)]
+    #[serde(rename = "diagnostics")]
+    _diagnostics: Value,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ConfigurationCatalog {
     schema_version: u32,
     configurations: Vec<CatalogEntry>,
+    #[serde(default)]
+    unavailable_configurations: Vec<UnavailableCatalogEntry>,
 }
 
 #[derive(Clone)]
@@ -72,6 +84,7 @@ pub(crate) struct RuntimeClient {
     graph_control_token: String,
     harness_control_token: String,
     configurations: HashMap<String, CatalogEntry>,
+    unavailable_configurations: HashMap<String, UnavailableCatalogEntry>,
 }
 
 pub(crate) struct CompleteInteraction<'a> {
@@ -84,6 +97,8 @@ pub(crate) struct CompleteInteraction<'a> {
     pub(crate) harness_configuration_name: &'a str,
     pub(crate) permission_profile: &'a PermissionProfile,
     pub(crate) model_selection: Option<&'a ExecutionModelSelection>,
+    pub(crate) model_plan: Option<&'a ExecutionModelPlan>,
+    pub(crate) attempt_admission_id: Option<&'a str>,
     pub(crate) execution_lease_id: Option<&'a str>,
     pub(crate) harness_policy: Option<&'a ExecutionHarnessPolicy>,
     pub(crate) invocation: Option<PreparedInvocation>,
@@ -96,6 +111,7 @@ pub(crate) struct CompleteInteraction<'a> {
 pub(crate) struct RuntimeExecutionAdmission {
     pub(crate) execution_lease_id: String,
     pub(crate) adapter_implementation_version: u32,
+    pub(crate) admitted_plan: AdmittedExecutionModelPlan,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -292,6 +308,24 @@ impl RuntimeClient {
                 )));
             }
         }
+        let mut unavailable_configurations = HashMap::new();
+        for entry in catalog.unavailable_configurations {
+            let name = entry.name.clone();
+            if !machine_identifier(&name) {
+                return Err(RuntimeError::Configuration(
+                    "invalid unavailable harness configuration name".into(),
+                ));
+            }
+            if configurations.contains_key(&name)
+                || unavailable_configurations
+                    .insert(name.clone(), entry)
+                    .is_some()
+            {
+                return Err(RuntimeError::Configuration(format!(
+                    "duplicate harness configuration {name}"
+                )));
+            }
+        }
         Ok(Self {
             client: Client::new(),
             graph_url: loopback_url(graph_url, "graph")?,
@@ -299,6 +333,7 @@ impl RuntimeClient {
             graph_control_token,
             harness_control_token,
             configurations,
+            unavailable_configurations,
         })
     }
 
@@ -322,8 +357,23 @@ impl RuntimeClient {
                     .model_defaults
                     .as_ref()
                     .map(|defaults| defaults.family_policy.clone()),
+                runtime_available: true,
+                unavailable_reason: None,
             })
             .collect::<Vec<_>>();
+        harnesses.extend(self.unavailable_configurations.values().map(|entry| {
+            RuntimeProductHarness {
+                id: entry.name.clone(),
+                configuration_digest: "sha256:unavailable".into(),
+                model_compatibility: Vec::new(),
+                configuration_revision: 1,
+                model_rules: None,
+                execution_access_contracts: Vec::new(),
+                family_policy: None,
+                runtime_available: false,
+                unavailable_reason: Some(entry.reason.clone()),
+            }
+        }));
         harnesses.sort_by(|left, right| left.id.cmp(&right.id));
         harnesses
     }
@@ -573,6 +623,13 @@ impl RuntimeClient {
             if let Some(execution_lease_id) = command.execution_lease_id {
                 complete_body["executionLeaseId"] = Value::String(execution_lease_id.to_owned());
             }
+            if let Some(attempt_admission_id) = command.attempt_admission_id {
+                complete_body["attemptAdmissionId"] =
+                    Value::String(attempt_admission_id.to_owned());
+            }
+            if let Some(model_plan) = command.model_plan {
+                complete_body["modelPlan"] = serde_json::to_value(model_plan)?;
+            }
             if let Some(harness_policy) = command.harness_policy {
                 complete_body["harnessPolicy"] = serde_json::to_value(harness_policy)?;
             }
@@ -645,6 +702,14 @@ impl RuntimeClient {
                 "provider execution admission requires a current harness policy".into(),
             )
         })?;
+        let model_plan = command.model_plan.ok_or_else(|| {
+            RuntimeError::Configuration("provider execution admission requires a model plan".into())
+        })?;
+        let attempt_admission_id = command.attempt_admission_id.ok_or_else(|| {
+            RuntimeError::Configuration(
+                "provider execution admission requires an attempt admission id".into(),
+            )
+        })?;
         let _: Value = self
             .post(
                 self.harness_url.join("sessions")?,
@@ -663,11 +728,9 @@ impl RuntimeClient {
                 self.harness_url
                     .join(&format!("sessions/{}/execution-leases", command.thread_id))?,
                 &serde_json::json!({
-                    "model": {
-                        "providerId": model.provider_id.as_str(),
-                        "adapterId": &model.adapter_id,
-                        "modelId": &model.model_id,
-                    },
+                    "interactionId": command.interaction_id,
+                    "attemptAdmissionId": attempt_admission_id,
+                    "modelPlan": model_plan,
                     "harnessPolicy": harness_policy,
                 }),
                 &self.harness_control_token,
@@ -687,9 +750,43 @@ impl RuntimeClient {
                 "provider broker returned an invalid adapter implementation version".into(),
             ));
         };
+        if let Err(error) =
+            validate_admitted_plan(model_plan, harness_policy, &admitted.admitted_plan)
+        {
+            let _ = self
+                .release_provider_execution(command.thread_id, &admitted.execution_lease_id)
+                .await;
+            return Err(error);
+        }
+        if admitted
+            .admitted_plan
+            .orchestrator
+            .adapter_implementation_version
+            != admitted.adapter_implementation_version
+        {
+            let _ = self
+                .release_provider_execution(command.thread_id, &admitted.execution_lease_id)
+                .await;
+            return Err(RuntimeError::Protocol(
+                "provider broker returned inconsistent orchestrator adapter versions".into(),
+            ));
+        }
+        if admitted.admitted_plan.orchestrator.provider_id != model.provider_id
+            || admitted.admitted_plan.orchestrator.adapter_id != model.adapter_id
+            || admitted.admitted_plan.orchestrator.access_contract != model.access_contract
+            || admitted.admitted_plan.orchestrator.model_id != model.model_id
+        {
+            let _ = self
+                .release_provider_execution(command.thread_id, &admitted.execution_lease_id)
+                .await;
+            return Err(RuntimeError::Protocol(
+                "provider broker changed the selected orchestrator".into(),
+            ));
+        }
         Ok(RuntimeExecutionAdmission {
             execution_lease_id: admitted.execution_lease_id,
             adapter_implementation_version,
+            admitted_plan: admitted.admitted_plan,
         })
     }
 
@@ -951,6 +1048,7 @@ struct CreateInteractionResponse {
 struct ExecutionAdmissionResponse {
     execution_lease_id: String,
     adapter_implementation_version: String,
+    admitted_plan: AdmittedExecutionModelPlan,
 }
 
 #[derive(Deserialize)]
@@ -1088,6 +1186,16 @@ fn validate_configuration(entry: &CatalogEntry) -> Result<(), RuntimeError> {
     Ok(())
 }
 
+fn machine_identifier(value: &str) -> bool {
+    value
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_alphanumeric())
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+        })
+}
+
 fn validate_model_rule(rule: &HarnessModelRule) -> Result<(), RuntimeError> {
     validate_stable_id(&rule.adapter_id, "adapterId")
         .map_err(|error| RuntimeError::Configuration(error.to_string()))?;
@@ -1155,6 +1263,83 @@ fn effective_execution_digest(
         digest.update(model_selection.model_id.as_bytes());
     }
     format!("sha256:{:x}", digest.finalize())
+}
+
+fn validate_admitted_plan(
+    requested: &ExecutionModelPlan,
+    harness_policy: &ExecutionHarnessPolicy,
+    admitted: &AdmittedExecutionModelPlan,
+) -> Result<(), RuntimeError> {
+    if admitted.family_id != requested.family_id
+        || admitted.family_revision != requested.family_revision
+        || admitted.roster.len() != requested.roster.len()
+    {
+        return Err(RuntimeError::Protocol(
+            "provider broker changed the requested model plan".into(),
+        ));
+    }
+    let route_matches =
+        |requested: &crate::product::ExecutionModelRoute,
+         admitted: &crate::product::AdmittedExecutionModelRoute| {
+            requested.provider_id == admitted.provider_id
+                && requested.adapter_id == admitted.adapter_id
+                && requested.access_contract == admitted.access_contract
+                && requested.model_id == admitted.model_id
+                && admitted
+                    .adapter_implementation_version
+                    .parse::<u32>()
+                    .is_ok_and(|version| version > 0)
+        };
+    if !route_matches(&requested.orchestrator, &admitted.orchestrator)
+        || !requested
+            .roster
+            .iter()
+            .zip(&admitted.roster)
+            .all(|(requested, admitted)| route_matches(requested, admitted))
+    {
+        return Err(RuntimeError::Protocol(
+            "provider broker changed the requested model plan roster".into(),
+        ));
+    }
+    let expected_policy_digest = harness_policy_digest(harness_policy)?;
+    if admitted.harness_policy_digest != expected_policy_digest {
+        return Err(RuntimeError::Protocol(
+            "provider broker admitted a different harness policy".into(),
+        ));
+    }
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct UnsignedPlan<'a> {
+        family_id: crate::product::ModelFamilyId,
+        family_revision: i64,
+        orchestrator: &'a crate::product::AdmittedExecutionModelRoute,
+        roster: &'a [crate::product::AdmittedExecutionModelRoute],
+        harness_policy_digest: &'a str,
+    }
+    let unsigned = UnsignedPlan {
+        family_id: admitted.family_id,
+        family_revision: admitted.family_revision,
+        orchestrator: &admitted.orchestrator,
+        roster: &admitted.roster,
+        harness_policy_digest: &admitted.harness_policy_digest,
+    };
+    let mut plan_hasher = Sha256::new();
+    plan_hasher.update(b"relayer.harness-model-plan.v1\0");
+    plan_hasher.update(serde_json::to_vec(&unsigned)?);
+    let expected_plan_digest = format!("sha256:{:x}", plan_hasher.finalize());
+    if admitted.digest != expected_plan_digest {
+        return Err(RuntimeError::Protocol(
+            "provider broker returned an invalid admitted model-plan digest".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn harness_policy_digest(harness_policy: &ExecutionHarnessPolicy) -> Result<String, RuntimeError> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"relayer.harness-policy.v1\0");
+    hasher.update(serde_json::to_vec(&serde_json::to_value(harness_policy)?)?);
+    Ok(format!("sha256:{:x}", hasher.finalize()))
 }
 
 #[derive(Debug, Error)]
@@ -1306,7 +1491,7 @@ mod tests {
     use super::{
         CompleteInteraction, HarnessConfiguration, PreparedInvocation, RuntimeClient, RuntimeError,
     };
-    use crate::permissions::PermissionProfile;
+    use crate::{permissions::PermissionProfile, product::ExecutionHarnessPolicy};
     use axum::{
         Json, Router,
         http::{HeaderMap, StatusCode},
@@ -1414,6 +1599,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unavailable_catalog_entries_are_visible_but_never_executable() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let catalog = std::env::temp_dir().join(format!(
+            "relayer-unavailable-runtime-{}-{unique}.json",
+            std::process::id()
+        ));
+        fs::write(
+            &catalog,
+            json!({
+                "schemaVersion": 1,
+                "configurations": [],
+                "unavailableConfigurations": [{
+                    "name": "prime-agent-basic",
+                    "reason": {
+                        "code": "prime_agent_boundary_unsupported",
+                        "message": "Prime Agent Ask and Auto require macOS. Choose another available harness on this device."
+                    },
+                    "diagnostics": {
+                        "sourceCommit": "2f4977eceb39e228b78241bd8084eb82b43efe6b",
+                        "packages": [{"name": "@earendil-works/pi-coding-agent", "version": "0.8.1"}]
+                    }
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            "http://127.0.0.1:1",
+            "http://127.0.0.1:2",
+            "graph-control".into(),
+            "harness-control".into(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+        assert!(!runtime.has_configuration("prime-agent-basic"));
+        let harness = runtime.product_harnesses().pop().unwrap();
+        assert!(!harness.runtime_available);
+        assert_eq!(
+            harness.unavailable_reason.unwrap().code,
+            "prime_agent_boundary_unsupported"
+        );
+        assert!(harness.model_rules.is_none());
+        assert!(harness.execution_access_contracts.is_empty());
+        fs::remove_file(catalog).unwrap();
+    }
+
+    #[test]
+    fn absent_model_rules_match_the_host_harness_policy_digest() {
+        let policy = ExecutionHarnessPolicy {
+            configuration_revision: 7,
+            configuration_digest: "sha256:test".into(),
+            model_rules: None,
+            execution_access_contracts: vec!["managed-runtime@1".into()],
+        };
+
+        let serialized = serde_json::to_value(&policy).unwrap();
+        assert_eq!(
+            serialized,
+            json!({
+                "configurationRevision": 7,
+                "configurationDigest": "sha256:test",
+                "executionAccessContracts": ["managed-runtime@1"]
+            })
+        );
+        assert_eq!(
+            super::harness_policy_digest(&policy).unwrap(),
+            "sha256:3481694b27c6a207f740f67968966c423a8b2e2172d8707d913f44a33c649f61"
+        );
+    }
+
+    #[tokio::test]
     async fn rejects_shared_graph_and_harness_control_authority() {
         let error = RuntimeClient::open(
             "http://127.0.0.1:1234/",
@@ -1515,6 +1775,8 @@ mod tests {
             harness_configuration_name: "test",
             permission_profile: &permission_profile,
             model_selection: None,
+            model_plan: None,
+            attempt_admission_id: None,
             execution_lease_id: None,
             harness_policy: None,
             invocation: Some(PreparedInvocation {
@@ -1540,6 +1802,8 @@ mod tests {
             harness_configuration_name: "test",
             permission_profile: &permission_profile,
             model_selection: None,
+            model_plan: None,
+            attempt_admission_id: None,
             execution_lease_id: None,
             harness_policy: None,
             invocation: None,
@@ -1616,6 +1880,8 @@ mod tests {
             harness_configuration_name: "test",
             permission_profile: &permission_profile,
             model_selection: None,
+            model_plan: None,
+            attempt_admission_id: None,
             execution_lease_id: None,
             harness_policy: None,
             invocation: Some(PreparedInvocation {
@@ -1751,6 +2017,8 @@ mod tests {
                 harness_configuration_name: "test",
                 permission_profile: &permission_profile,
                 model_selection: None,
+                model_plan: None,
+                attempt_admission_id: None,
                 execution_lease_id: None,
                 harness_policy: None,
                 invocation: None,
@@ -1879,6 +2147,8 @@ mod tests {
                 harness_configuration_name: "test",
                 permission_profile: &permission_profile,
                 model_selection: None,
+                model_plan: None,
+                attempt_admission_id: None,
                 execution_lease_id: None,
                 harness_policy: None,
                 invocation: None,

@@ -231,7 +231,8 @@ describe("desktop skeleton", () => {
     expect(desktopWindow).toContain('setWindowOpenHandler(() => ({ action: "deny" }))');
     expect(desktopIpc).toContain("onUpdateInstallFailure");
     expect(packageManifest).not.toContain("@openai/codex-sdk");
-    expect(desktopManifest).not.toContain("prime-agent");
+    expect(desktopManifest).toContain('"@earendil-works/pi-coding-agent"');
+    expect(desktopManifest).toContain("file:../vendor/prime-agent/");
     expect(desktopManifest).not.toContain("@openai/codex-sdk");
     expect(JSON.parse(desktopManifest).dependencies).toMatchObject({ semver: "7.8.5", tar: "7.5.22" });
     expect(JSON.parse(desktopManifest).dependencies).not.toHaveProperty("@openai/codex");
@@ -251,7 +252,7 @@ describe("desktop skeleton", () => {
     expect(packaging).toContain('"macos/entitlements.mac.plist"');
     expect(packaging).toContain('"!packaging/**/*"');
     expect(packaging).toContain('target/${serverTarget}/release/relayer-app-server');
-    expect(packaging).toContain('afterPack: target.platform === "darwin" ? "desktop/packaging/verify-bundled-app-server.mjs" : undefined');
+    expect(packaging).toContain('afterPack: "desktop/packaging/verify-bundled-app-server.mjs"');
     expect(packaging).toContain('win: {\n      icon: resolve(desktopRoot, "renderer/assets/relayer-logo.svg")');
     expect(desktopPreload).toContain("platform: process.platform");
     expect(rendererMain).toContain('desktop?.platform === "win32"');
@@ -769,6 +770,17 @@ describe("desktop skeleton", () => {
       userDataDirectory: directory,
       graphServerBinary: "/test/bin/relayer-graph-server",
       configurationPaths: [fileURLToPath(new URL("../harnesses/codex-basic.yaml", import.meta.url))],
+      unavailableConfigurations: [{
+        name: "prime-agent-basic",
+        reason: {
+          code: "prime_agent_boundary_unsupported",
+          message: "Prime Agent Ask and Auto require macOS. Choose another available harness on this device.",
+        },
+        diagnostics: {
+          sourceCommit: "2f4977eceb39e228b78241bd8084eb82b43efe6b",
+          packages: [{ name: "@earendil-works/pi-coding-agent", version: "0.8.1" }],
+        },
+      }],
       onUnexpectedStop: (event) => unexpectedStops.push(event),
       spawnProcess: (binary, args, options) => {
         invocations.push({ binary, args, options });
@@ -784,6 +796,13 @@ describe("desktop skeleton", () => {
       expect(session.graphControlToken).toMatch(/^[a-f0-9]{64}$/);
       expect(session.harnessControlToken).toMatch(/^[a-f0-9]{64}$/);
       expect(session.harnessControlToken).not.toBe(session.graphControlToken);
+      expect(session.configurationNames).toEqual(["codex-basic"]);
+      const catalog = JSON.parse(await readFile(session.catalogPath, "utf8"));
+      expect(catalog.unavailableConfigurations).toEqual([expect.objectContaining({
+        name: "prime-agent-basic",
+        reason: expect.objectContaining({ code: "prime_agent_boundary_unsupported" }),
+        diagnostics: expect.objectContaining({ sourceCommit: "2f4977eceb39e228b78241bd8084eb82b43efe6b" }),
+      })]);
       expect(suppliedToken).toBe(`${session.graphControlToken}\n`);
       expect(invocations[0].args).not.toContain("--control-token");
       expect(invocations[0].args).not.toContain(session.graphControlToken);
@@ -2060,7 +2079,13 @@ describe("desktop skeleton", () => {
       productName: "Relayer Dev",
       channelName: "development",
       signingMode: "unsigned",
+      sourceCommit: null,
     });
+    expect(resolveDesktopReleaseContract({
+      environment: { RELAYER_DESKTOP_TARGET: "macos-arm64" },
+      version: "0.2.0",
+      sourceCommit,
+    }).sourceCommit).toBe(sourceCommit);
 
     const windowsEnvironment = {
       RELAYER_DESKTOP_RELEASE: "1",
@@ -2145,26 +2170,60 @@ describe("desktop skeleton", () => {
         "node_modules/@relayer/harness-host/dist/index.js",
         "node_modules/@relayer/eval-runner/dist/index.js",
       ];
+      const verifyPrimeAgent = async () => ({ sourceCommit: "fixture", packages: 4 });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
         listPackageEntries: packagedRuntimeEntries,
+        verifyPrimeAgent,
       })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "arm64" });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
         expectedArchitecture: "x86_64",
         listPackageEntries: packagedRuntimeEntries,
+        verifyPrimeAgent,
       })).resolves.toEqual({ binaryPath: bundledBinary, architecture: "x86_64" });
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
         expectedArchitecture: "arm64",
         listPackageEntries: packagedRuntimeEntries,
+        verifyPrimeAgent,
       })).rejects.toThrow("must contain only arm64");
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",
         listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/@relayer/graph-client/dist/index.js"),
+        verifyPrimeAgent,
       })).rejects.toThrow("missing node_modules/@relayer/graph-client/dist/index.js");
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
+        listPackageEntries: packagedRuntimeEntries,
+        verifyPrimeAgent: async () => { throw Object.assign(new Error("missing nested Prime asset"), { code: "ENOENT" }); },
+      })).rejects.toThrow("missing nested Prime asset");
+
+      const windowsPath = join(directory, "win-unpacked");
+      await mkdir(join(windowsPath, "resources", "bin"), { recursive: true });
+      await mkdir(join(windowsPath, "resources", "graph-client"), { recursive: true });
+      await mkdir(join(windowsPath, "resources", "renderer", "vendor"), { recursive: true });
+      await Promise.all([
+        writeFile(join(windowsPath, "resources", "bin", "relayer-app-server.exe"), "binary-fixture"),
+        writeFile(join(windowsPath, "resources", "bin", "relayer-graph-server.exe"), "binary-fixture"),
+        writeFile(join(windowsPath, "resources", "graph-client", "index.js"), "client-fixture"),
+        writeFile(join(windowsPath, "resources", "renderer", "vendor", "marked.umd.js"), "marked-fixture"),
+      ]);
+      await expect(verifyBundledAppServer(windowsPath, {
+        platform: "win32",
+        execute: async () => { throw new Error("lipo must not run for Windows"); },
+        listPackageEntries: () => packagedRuntimeEntries().map((entry) => `\\${entry.replaceAll("/", "\\")}`),
+        verifyPrimeAgent: async (_resourcesPath, packagedEntries) => {
+          expect(packagedEntries).toEqual(new Set(packagedRuntimeEntries()));
+          return verifyPrimeAgent();
+        },
+      })).resolves.toEqual({
+        binaryPath: join(windowsPath, "resources", "bin", "relayer-app-server.exe"),
+        architecture: null,
+      });
 
       const names = desktopReleaseArtifactNames(contract);
       const dmg = Buffer.from("signed-notarized-dmg-fixture");

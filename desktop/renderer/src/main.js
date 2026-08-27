@@ -1,4 +1,8 @@
-import { refreshAccount, showApplication } from "./auth.js";
+import {
+  refreshAccount,
+  setProviderOnboardingCompletionHandler,
+  showApplication,
+} from "./auth.js";
 import { returnFromSettings, selectScope, setMainView, setSettingsTab } from "./navigation.js";
 import {
   closePermissionMenu,
@@ -281,6 +285,13 @@ async function boot() {
   if (desktop?.appearance) applyAppearance((await desktop.appearance.read()).appearance);
   else applyAppearance(document.documentElement.dataset.theme);
   if (desktop) renderUpdate(await desktop.updater.status());
+  setProviderOnboardingCompletionHandler(async () => {
+    await refreshProviderModelUi();
+    await loadPermissionProfiles(appState.modelSettings?.defaults?.harnessId);
+    resetNewThreadModelPicker();
+    updateCreateThreadAvailability();
+    updateTutorialAvailability();
+  });
   const account = await refreshAccount();
   await initializeProviderSettings();
   if (productApiAvailable) await initializeModelFamilySettings();
