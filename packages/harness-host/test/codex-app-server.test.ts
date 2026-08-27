@@ -34,6 +34,26 @@ describe("Codex app-server transport", () => {
     expect(child.kill).not.toHaveBeenCalled();
   });
 
+  it("signals the complete Codex process group on POSIX", () => {
+    const child = { pid: 4321, kill: vi.fn() };
+    const killProcessGroup = vi.fn();
+
+    forceTerminateCodexProcessTree(child as never, "linux", spawn, undefined, killProcessGroup);
+
+    expect(killProcessGroup).toHaveBeenCalledWith(-4321, "SIGKILL");
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("falls back to direct POSIX termination when the process group is unavailable", () => {
+    const child = { pid: 4321, kill: vi.fn() };
+    const killProcessGroup = vi.fn(() => { throw new Error("missing process group"); });
+
+    forceTerminateCodexProcessTree(child as never, "darwin", spawn, undefined, killProcessGroup);
+
+    expect(killProcessGroup).toHaveBeenCalledWith(-4321, "SIGUSR2");
+    expect(child.kill).toHaveBeenCalledWith("SIGUSR2");
+  });
+
   it("falls back to direct termination if Windows taskkill cannot start", () => {
     const child = { pid: 4321, kill: vi.fn() };
     const killer = new EventEmitter();
@@ -92,6 +112,7 @@ describe("Codex app-server transport", () => {
       input: [{ type: "text", text: "Build the graph" }],
     });
     expect(fake.spawn).toEqual({ command: process.execPath, args: ["app-server", "--listen", "stdio://"] });
+    expect(fake.spawnOptions?.detached).toBe(process.platform !== "win32");
     expect(fake.killed).toBe(true);
   });
 
@@ -520,6 +541,7 @@ class FakeCodexProcess extends EventEmitter {
   killed = false;
   messages: Record<string, any>[] = [];
   spawn: { command: string; args: readonly string[] } | undefined;
+  spawnOptions: Parameters<CodexAppServerSpawn>[2] | undefined;
   private buffer = "";
 
   constructor(private readonly onMessage: (message: Record<string, any>) => void) {
@@ -538,8 +560,9 @@ class FakeCodexProcess extends EventEmitter {
     });
   }
 
-  readonly spawnProcess: CodexAppServerSpawn = (command, args) => {
+  readonly spawnProcess: CodexAppServerSpawn = (command, args, spawnOptions) => {
     this.spawn = { command, args };
+    this.spawnOptions = spawnOptions;
     return this as unknown as ChildProcessWithoutNullStreams;
   };
 
@@ -581,6 +604,10 @@ function options(fake: FakeCodexProcess, overrides: Partial<CodexAppServerTurnOp
     sandboxPolicy: { type: "workspaceWrite", writableRoots: ["/workspace"], networkAccess: true },
     onThreadId: () => undefined,
     spawnProcess: fake.spawnProcess,
+    killProcessGroup: (_pid, signal): true => {
+      fake.kill(signal as NodeJS.Signals | undefined);
+      return true;
+    },
     ...overrides,
   };
 }

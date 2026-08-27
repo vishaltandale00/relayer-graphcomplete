@@ -26,6 +26,8 @@ The runner gives the live Codex app-server a disposable `CODEX_HOME` containing 
 
 The runner requires a clean source worktree, records its exact commit in the manifest, generates into a staging directory, and replaces the ignored local output only after the replay, artifact checks, and service shutdown all succeed. This README is the only tracked file in the directory.
 
+The runner detects source and runtime drift, and it rejects environment-based runtime injection. It does not claim to isolate the replay from another malicious process already running as the same macOS user. Such a process can mutate user-owned runtime files and invalidates the local evidence session.
+
 The macOS-only command is intentionally excluded from default tests because it spends paid inference and needs a connected local Codex account:
 
 ```sh

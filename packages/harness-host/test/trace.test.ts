@@ -634,6 +634,52 @@ describe("HarnessTraceStore", () => {
     expect(redactTraceData(prose)).toBe(prose);
   });
 
+  it("redacts structurally valid standalone JWT access tokens without matching ordinary dotted text", () => {
+    const jwt = [
+      "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9",
+      "eyJzdWIiOiIxMjM0NTY3ODkwIiwic2NvcGUiOiJyZWFkIn0",
+      "abcdefghijklmnopqrstuvwxyz012345",
+    ].join(".");
+    const once = redactTraceData(`access ${jwt}; retain docs.example.com, alpha.beta.gamma, and not.a.jwt`);
+
+    expect(once).toBe("access [redacted-jwt]; retain docs.example.com, alpha.beta.gamma, and not.a.jwt");
+    expect(once).not.toContain(jwt);
+    expect(redactTraceData(once)).toBe(once);
+  });
+
+  it("treats auth as a credential name while preserving semantic token accounting", () => {
+    expect(redactTraceData({
+      auth: "object-auth-private",
+      nested: { auth: "nested-auth-private" },
+      tokenUsage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+      tokenCount: 14,
+      tokenLimit: 100,
+    })).toEqual({
+      auth: "[redacted]",
+      nested: { auth: "[redacted]" },
+      tokenUsage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+      tokenCount: 14,
+      tokenLimit: 100,
+    });
+
+    const structured = redactTraceData("auth: yaml-auth-private\ntokenCount: 14\ntokenUsage:\n  inputTokens: 10");
+    expect(structured).not.toContain("yaml-auth-private");
+    expect(parseYaml(String(structured))).toEqual({ auth: "[redacted]", tokenCount: 14, tokenUsage: { inputTokens: 10 } });
+  });
+
+  it("redacts signed URL query credentials while preserving non-credential parameters", () => {
+    const azure = "https://storage.example.test/blob?sv=2025-01-05&sp=r&sig=azure-private-signature%2Bvalue%3D&restype=container";
+    const aws = `https://objects.example.test/item?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=${"a".repeat(64)}&tokenCount=14`;
+    const once = redactTraceData(`${azure}\n${aws}`);
+
+    expect(once).toBe([
+      "https://storage.example.test/blob?sv=2025-01-05&sp=r&sig=[redacted]&restype=container",
+      "https://objects.example.test/item?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=[redacted]&tokenCount=14",
+    ].join("\n"));
+    expect(once).not.toContain("azure-private-signature");
+    expect(redactTraceData(once)).toBe(once);
+  });
+
   it("redacts passphrase-named object, structured, and shell fields", () => {
     const object = redactTraceData({
       passphrase: "object-passphrase-private",

@@ -1141,13 +1141,31 @@ describe("evidence capture integrity", () => {
 
   it("resolves the installed Electron executable using the host platform layout", async () => {
     const { resolveInstalledElectronExecutable } = await import("../scripts/launch-ask-profile-evidence.mjs");
-    const executable = resolveInstalledElectronExecutable();
-    if (process.platform === "darwin") {
-      expect(executable).toContain("Electron.app/Contents/MacOS/Electron");
-    } else if (process.platform === "win32") {
-      expect(basename(executable).toLowerCase()).toBe("electron.exe");
-    } else {
-      expect(basename(executable)).toBe("electron");
+    const fixture = mkdtempSync(join(tmpdir(), "relayer-electron-package-"));
+    const packageRoot = join(fixture, "node_modules", "electron");
+    const relativeExecutable = process.platform === "darwin"
+      ? join("Electron.app", "Contents", "MacOS", "Electron")
+      : process.platform === "win32" ? "electron.exe" : "electron";
+    const expectedExecutable = join(packageRoot, "dist", relativeExecutable);
+    try {
+      mkdirSync(dirname(expectedExecutable), { recursive: true });
+      writeFileSync(join(fixture, "package.json"), '{"private":true}\n');
+      writeFileSync(join(packageRoot, "package.json"), '{"name":"electron","version":"0.0.0-test"}\n');
+      writeFileSync(join(packageRoot, "path.txt"), `${relativeExecutable}\n`);
+      writeFileSync(expectedExecutable, "fake Electron executable\n", { mode: 0o755 });
+      chmodSync(expectedExecutable, 0o755);
+
+      const executable = resolveInstalledElectronExecutable(join(fixture, "package.json"));
+      expect(executable).toBe(realpathSync(expectedExecutable));
+      if (process.platform === "darwin") {
+        expect(executable).toContain("Electron.app/Contents/MacOS/Electron");
+      } else if (process.platform === "win32") {
+        expect(basename(executable).toLowerCase()).toBe("electron.exe");
+      } else {
+        expect(basename(executable)).toBe("electron");
+      }
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
     }
   });
 

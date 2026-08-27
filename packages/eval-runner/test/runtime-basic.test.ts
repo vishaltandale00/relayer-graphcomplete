@@ -242,7 +242,7 @@ describe("first runtime evaluation", () => {
     }
   });
 
-  it("defers runtime-state removal until a stalled harness shutdown actually settles", async () => {
+  it("removes runtime state after forced shutdown settles even when graceful disposal remains stalled", async () => {
     const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-stalled-dispose-"));
     temporary.push(outputDirectory);
     let runtimeDirectory: string | undefined;
@@ -273,10 +273,9 @@ describe("first runtime evaluation", () => {
 
     expect(Date.now() - startedAt).toBeLessThan(2_000);
     expect(runtimeDirectory).toBeDefined();
-    await expect(stat(runtimeDirectory!)).resolves.toMatchObject({ isDirectory: expect.any(Function) });
+    await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
     releaseDispose();
     await disposeFinished;
-    await expect.poll(async () => stat(runtimeDirectory!).then(() => false, () => true)).toBe(true);
   });
 
   it("allows a slow successful harness disposal to finish within the configured grace period", async () => {

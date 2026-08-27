@@ -431,26 +431,31 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
 }
 
 export function isExactGraphAuthoringLauncherCommand(command: string, launcherPath: string): boolean {
+  return canonicalGraphAuthoringProgram(command, launcherPath) !== undefined;
+}
+
+function canonicalGraphAuthoringProgram(command: string, launcherPath: string): string | undefined {
   if (!isAbsolute(launcherPath) || launcherPath.includes("\0") || launcherPath.includes("\n") || launcherPath.includes("\r")) {
-    return false;
+    return undefined;
   }
   const prefix = [JSON.stringify(launcherPath), launcherPath]
     .map((candidate) => `${candidate} `)
     .find((candidate) => command.startsWith(candidate));
-  if (prefix === undefined) return false;
+  if (prefix === undefined) return undefined;
   const opening = command.slice(prefix.length).match(/^<<'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\r?\n/);
-  if (opening === null) return false;
+  if (opening === null) return undefined;
   const delimiter = opening[1]!;
-  const bodyAndClose = command.slice(prefix.length + opening[0].length);
-  const lines = bodyAndClose.split(/\r?\n/);
+  const bodyAndClose = command.slice(prefix.length + opening[0].length).replaceAll("\r\n", "\n");
+  const lines = bodyAndClose.split("\n");
   const closingLine = lines.pop();
   const hasNonemptyBody = lines.some((line) => line.length > 0)
     || (closingLine !== undefined && closingLine !== "" && closingLine !== delimiter);
-  if (!hasNonemptyBody || lines.some((line) => line === delimiter)) return false;
+  if (!hasNonemptyBody || lines.some((line) => line === delimiter)) return undefined;
   // POSIX shells accept end-of-input as the heredoc terminator. With this
   // fixed zero-argument launcher, every remaining byte is still stdin rather
   // than a second shell action.
-  return closingLine === delimiter || !bodyAndClose.split(/\r?\n/).some((line) => line === delimiter);
+  if (closingLine === delimiter) return `${lines.join("\n")}\n`;
+  return bodyAndClose.split("\n").some((line) => line === delimiter) ? undefined : bodyAndClose;
 }
 
 function trustedGraphAuthoringCommand(
@@ -472,9 +477,25 @@ function trustedGraphAuthoringCommand(
   const actionCommand = action === undefined ? undefined : string(action.command);
   const requestAction = requestActions?.length === 1 ? record(requestActions[0]) : undefined;
   const requestActionCommand = requestAction === undefined ? undefined : string(requestAction.command);
-  return [requestActionCommand, requestCommand, actionCommand, wrappedCommand, itemCommand].find((command) => (
-    command !== undefined && isExactGraphAuthoringLauncherCommand(command, launcherPath)
-  ));
+  if ((action !== undefined && actionCommand === undefined) || (requestAction !== undefined && requestActionCommand === undefined)) {
+    return undefined;
+  }
+  const itemRepresentation = wrappedCommand
+    ?? (isOpaqueRedactedCommand(itemCommand) && (actionCommand !== undefined || requestActionCommand !== undefined)
+      ? undefined
+      : itemCommand);
+  const representations = [requestActionCommand, requestCommand, actionCommand, itemRepresentation]
+    .filter((command): command is string => command !== undefined);
+  if (representations.length === 0) return undefined;
+  const programs = representations.map((command) => canonicalGraphAuthoringProgram(command, launcherPath));
+  if (programs.some((program) => program === undefined)) return undefined;
+  const authenticatedProgram = programs[0]!;
+  if (programs.some((program) => program !== authenticatedProgram)) return undefined;
+  return representations[0];
+}
+
+function isOpaqueRedactedCommand(command: string | undefined): boolean {
+  return command === "/bin/zsh -c <redacted>" || command === "/bin/zsh -lc <redacted>";
 }
 
 function exactZshLoginCommand(command: string): string | undefined {

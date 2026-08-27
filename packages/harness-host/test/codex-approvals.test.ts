@@ -105,6 +105,54 @@ describe("Codex approval bridge", () => {
     expect(isExactGraphAuthoringLauncherCommand(`"${launcher}" --flag <<'EOF'\ngraph\nEOF`, launcher)).toBe(false);
   });
 
+  it.each([
+    { label: "request command", requestOverrides: { command: "echo escaped" } },
+    { label: "request command action", requestOverrides: { commandActions: [{ command: "echo escaped" }] } },
+    { label: "item command action", requestOverrides: {}, itemActions: [{ command: "echo escaped" }] },
+  ])("rejects a trusted launcher when the supplied $label conflicts", async ({ requestOverrides, itemActions }) => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", {
+      ...commandItem(),
+      command,
+      commandActions: itemActions ?? [{ command }],
+    });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      command,
+      cwd: "/workspace/project",
+      ...requestOverrides,
+    }), context)).resolves.toEqual({ decision: "decline" });
+  });
+
+  it("accepts semantically equivalent trusted launcher representations", async () => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const quoted = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const unquoted = `${launcher} <<'GRAPH'\nconsole.log("graph");\nGRAPH`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", {
+      ...commandItem(),
+      command: `/bin/zsh -lc ${JSON.stringify(quoted)}`,
+      commandActions: [{ command: unquoted }],
+    });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      command: quoted,
+      cwd: "/workspace/project",
+      commandActions: [{ command: unquoted }],
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+  });
+
   it("routes a pinned launcher from a different working directory through the product approval channel", async () => {
     const fixture = bridgeFixture("deny");
     const launcher = "/immutable/runtime/graph-authoring-launcher";

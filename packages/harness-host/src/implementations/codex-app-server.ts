@@ -32,6 +32,7 @@ export interface CodexAppServerTurnOptions {
   readonly forceSignal?: AbortSignal;
   readonly shutdownGraceMs?: number;
   readonly spawnProcess?: CodexAppServerSpawn;
+  readonly killProcessGroup?: typeof process.kill;
   readonly onThreadId: (threadId: string) => void;
   readonly onNotification?: (method: string, params: unknown) => void;
   readonly onServerRequest?: (method: string, params: unknown) => void;
@@ -52,9 +53,19 @@ export function forceTerminateCodexProcessTree(
   platform = process.platform,
   spawnTreeKiller: typeof spawn = spawn,
   systemRoot = process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows",
+  killProcessGroup: typeof process.kill = process.kill,
+  signal = codexForceTerminationSignal(platform),
 ): void {
-  if (platform !== "win32" || child.pid === undefined) {
-    child.kill(codexForceTerminationSignal(platform));
+  if (child.pid === undefined) {
+    child.kill(signal);
+    return;
+  }
+  if (platform !== "win32") {
+    try {
+      killProcessGroup(-child.pid, signal);
+    } catch {
+      child.kill(signal);
+    }
     return;
   }
   const fallback = () => {
@@ -83,6 +94,7 @@ export async function runCodexAppServerTurn(options: CodexAppServerTurnOptions):
     ].join(delimiter);
   }
   const child = (options.spawnProcess ?? spawn)(executable.path, ["app-server", "--listen", "stdio://"], {
+    detached: process.platform !== "win32",
     env: environment,
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -237,7 +249,16 @@ class CodexAppServerConnection {
     const graceMs = this.options.shutdownGraceMs ?? 250;
     if (!await this.waitForChildExit(graceMs)) this.forceTerminate();
     if (!await this.waitForChildExit(graceMs)) {
-      if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGKILL");
+      if (this.child.exitCode === null && this.child.signalCode === null) {
+        forceTerminateCodexProcessTree(
+          this.child,
+          process.platform,
+          spawn,
+          process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows",
+          this.options.killProcessGroup ?? process.kill,
+          "SIGKILL",
+        );
+      }
       if (!await this.waitForChildExit(graceMs)) throw new Error("Codex app-server process did not exit after forced termination.");
     }
     this.detachForceAbort();
@@ -469,7 +490,13 @@ class CodexAppServerConnection {
     if (this.forceTerminationSent || this.child.exitCode !== null || this.child.signalCode !== null) return;
     this.forceTerminationSent = true;
     try {
-      forceTerminateCodexProcessTree(this.child);
+      forceTerminateCodexProcessTree(
+        this.child,
+        process.platform,
+        spawn,
+        process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows",
+        this.options.killProcessGroup ?? process.kill,
+      );
     } catch {
       // AbortSignal listeners must never surface process-kill errors. Bounded close
       // observes the missing exit and reports it after exhausting escalation.

@@ -765,7 +765,7 @@ function isCredentialName(name: string): boolean {
     && parts.some((part) => ["usage", "count", "limit", "input", "output", "total", "cached", "reasoning", "billed"].includes(part))
     && !parts.some((part) => ["access", "refresh", "auth", "bearer", "secret", "api"].includes(part));
   if (tokenAccounting) return false;
-  if (parts.some((part) => ["token", "secret", "password", "passwd", "passphrase", "passphrases", "authorization", "cookie", "credential"].includes(part))) {
+  if (parts.some((part) => ["auth", "token", "secret", "password", "passwd", "passphrase", "passphrases", "authorization", "cookie", "credential"].includes(part))) {
     return true;
   }
   const keyQualifiers = new Set(["api", "private", "signing", "access", "secret", "encryption", "ssh"]);
@@ -1765,6 +1765,69 @@ function redactPrivateKeyBlocks(input: string): { readonly value: string; readon
   return { value: parts.join(""), count };
 }
 
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function decodeJwtSegment(segment: string, maxDecodedBytes: number): unknown | undefined {
+  if (segment.length % 4 === 1) return undefined;
+  const decoded = Buffer.from(segment, "base64url");
+  if (decoded.byteLength === 0 || decoded.byteLength > maxDecodedBytes || decoded.toString("base64url") !== segment) return undefined;
+  try {
+    return JSON.parse(decoded.toString("utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function isStructurallyValidJwt(candidate: string): boolean {
+  const segments = candidate.split(".");
+  if (segments.length !== 3) return false;
+  const [encodedHeader, encodedPayload, encodedSignature] = segments;
+  if (encodedHeader === undefined || encodedPayload === undefined || encodedSignature === undefined) return false;
+  const header = decodeJwtSegment(encodedHeader, 2_048);
+  const payload = decodeJwtSegment(encodedPayload, 16_384);
+  if (!isJsonObject(header) || typeof header.alg !== "string" || header.alg.length === 0 || !isJsonObject(payload)) return false;
+  if (encodedSignature.length < 16 || encodedSignature.length % 4 === 1) return false;
+  const signature = Buffer.from(encodedSignature, "base64url");
+  return signature.byteLength >= 12 && signature.toString("base64url") === encodedSignature;
+}
+
+function redactStandaloneJwts(input: string): { readonly value: string; readonly count: number } {
+  let count = 0;
+  const value = input.replace(
+    /(?<![A-Za-z0-9_.-])([A-Za-z0-9_-]{2,2048}\.[A-Za-z0-9_-]{2,16384}\.[A-Za-z0-9_-]{16,8192})(?![A-Za-z0-9_.-])/g,
+    (candidate) => {
+      if (!isStructurallyValidJwt(candidate)) return candidate;
+      count += 1;
+      return "[redacted-jwt]";
+    },
+  );
+  return { value, count };
+}
+
+function isSignedQueryCredentialName(name: string): boolean {
+  let decoded = name;
+  try {
+    decoded = decodeURIComponent(name.replace(/\+/g, " "));
+  } catch {
+    // Keep the raw spelling so malformed percent escapes cannot hide an
+    // otherwise recognizable credential name.
+  }
+  const normalized = decoded.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/[^A-Za-z0-9]+/g, "_").toLowerCase();
+  return normalized === "sig" || normalized === "signature" || normalized.endsWith("_signature") || isCredentialName(decoded);
+}
+
+function redactSignedQueryCredentials(input: string): { readonly value: string; readonly count: number } {
+  let count = 0;
+  const value = input.replace(/([?&])([^=?&#\s'"`]{1,256})=(\[redacted\]|[^&#\s'"`()\[\]{},;]+)/g, (match, separator, name, credential) => {
+    if (!isSignedQueryCredentialName(name) || credential === "[redacted]") return match;
+    count += 1;
+    return `${separator}${name}=[redacted]`;
+  });
+  return { value, count };
+}
+
 function redactString(input: string): { readonly value: string; readonly count: number } {
   const structured = redactStructuredYaml(input);
   let value = structured?.value ?? input;
@@ -1873,6 +1936,12 @@ function redactString(input: string): { readonly value: string; readonly count: 
   const privateKeyBlocks = redactPrivateKeyBlocks(value);
   value = privateKeyBlocks.value;
   count += privateKeyBlocks.count;
+  const standaloneJwts = redactStandaloneJwts(value);
+  value = standaloneJwts.value;
+  count += standaloneJwts.count;
+  const signedQueryCredentials = redactSignedQueryCredentials(value);
+  value = signedQueryCredentials.value;
+  count += signedQueryCredentials.count;
   replace(/\b(?:sizeJustification|size_justification)\s*(?::|=)\s*[\"'][^\"']*[\"']/gi, "sizeJustification=[private rationale omitted]");
   replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, "[redacted-api-key]");
   replace(/(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{36}(?![A-Za-z0-9_])|github_pat_[A-Za-z0-9_]{82}(?![A-Za-z0-9_]))/g, "[redacted-github-token]");

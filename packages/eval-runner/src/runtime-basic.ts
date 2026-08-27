@@ -261,8 +261,8 @@ async function closeHarnessHostForEval(host: RunningHarnessHost, closeGraceMs: n
   const closing = settle(() => host.close());
   if (!(await settlesWithin(closing.then(() => {}), closeGraceMs))) {
     const forcing = settle(() => host.forceClose());
-    void Promise.all([closing, forcing]).then(async () => {
-      await rm(workingDirectory, { recursive: true, force: true });
+    void forcing.then(async (result) => {
+      if (result.ok) await rm(workingDirectory, { recursive: true, force: true });
     }).catch(() => undefined);
     const error = new Error(`Harness host did not close within ${closeGraceMs}ms and was forcibly disconnected`);
     (error as Error & { code: string }).code = "RELAYER_EVAL_HARNESS_CLOSE_TIMEOUT";

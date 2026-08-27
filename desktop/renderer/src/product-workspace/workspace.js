@@ -105,6 +105,45 @@ export function focusedTurnIdForRerender(popoverOpen, activeElement) {
   return activeElement?.closest?.("[data-turn-id]")?.dataset?.turnId ?? null;
 }
 
+export function approvalHistoryRenderIdentity(workspaceMode, threadId, dockMode) {
+  return JSON.stringify([String(workspaceMode), String(threadId), String(dockMode)]);
+}
+
+export function approvalHistoryReceiptIdentity(history) {
+  return JSON.stringify((history || []).map((receipt) => [
+    String(receipt?.request?.requestId ?? ""),
+    String(receipt?.resolution?.resolvedAt ?? ""),
+    String(receipt?.resolution?.outcome ?? ""),
+    String(receipt?.resolution?.decision ?? ""),
+  ]));
+}
+
+export function approvalHistoryRenderTransition({
+  previousIdentity,
+  identity,
+  previousReceiptIdentity,
+  receiptIdentity,
+  dockMode,
+  wasHidden,
+  wasHistoryOnly,
+  open,
+  scrollTop,
+}) {
+  const identityChanged = previousIdentity !== identity;
+  const revealHistory = shouldRevealApprovalHistory({
+    dockMode,
+    wasHidden,
+    wasHistoryOnly,
+    threadChanged: identityChanged,
+  });
+  return {
+    open: identityChanged ? dockMode === "history" : revealHistory ? true : open,
+    scrollTop: identityChanged
+      || previousReceiptIdentity !== receiptIdentity
+      || revealHistory ? 0 : scrollTop,
+  };
+}
+
 export function graphNodeLayoutBounds(width, height) {
   return {
     halfWidth: Math.max(GRAPH_NODE_HALF_WIDTH, width / 2),
@@ -2320,23 +2359,35 @@ export function createProductWorkspace({
     const activeWasInside = approvalDock.contains(graphDocument.activeElement);
     const wasHidden = approvalDock.classList.contains("hidden");
     const wasHistoryOnly = approvalDock.classList.contains("history-only");
-    const threadChanged = approvalDock.dataset.threadId !== threadKey;
     const history = resolvedApprovalHistoryForThread(state, thread);
     const dockMode = approvalDockMode(pending, history);
-    const revealHistory = shouldRevealApprovalHistory({
+    const historyDisclosure = $("#approvalHistory");
+    const historyList = $("#approvalHistoryList");
+    const historyIdentity = approvalHistoryRenderIdentity(mode, threadKey, dockMode);
+    const receiptIdentity = approvalHistoryReceiptIdentity(history);
+    const historyTransition = approvalHistoryRenderTransition({
+      previousIdentity: historyDisclosure.dataset.renderIdentity,
+      identity: historyIdentity,
+      previousReceiptIdentity: historyDisclosure.dataset.receiptIdentity,
+      receiptIdentity,
       dockMode,
       wasHidden,
       wasHistoryOnly,
-      threadChanged,
+      open: historyDisclosure.open,
+      scrollTop: historyList.scrollTop,
     });
     const renderHistory = () => {
-      $("#approvalHistory").classList.toggle("hidden", history.length === 0);
+      historyDisclosure.classList.toggle("hidden", history.length === 0);
       $("#approvalHistorySummary").textContent = `Approval history (${history.length})`;
-      $("#approvalHistoryList").replaceChildren(...history.map((receipt) => {
+      historyList.replaceChildren(...history.map((receipt) => {
         const item = graphDocument.createElement("li");
         item.textContent = `${receipt.request.title} — ${approvalResolutionLabel(receipt)}`;
         return item;
       }));
+      historyDisclosure.open = historyTransition.open;
+      historyList.scrollTop = historyTransition.scrollTop;
+      historyDisclosure.dataset.renderIdentity = historyIdentity;
+      historyDisclosure.dataset.receiptIdentity = receiptIdentity;
     };
     if (!selected) {
       approvalSelections.delete(threadKey);
@@ -2365,7 +2416,6 @@ export function createProductWorkspace({
         $("#approvalError").classList.add("hidden");
         $(".approval-actions").classList.add("hidden");
         renderHistory();
-        if (revealHistory) $("#approvalHistory").open = true;
       }
       if (focus.shouldFocus) {
         prompt.focus({ preventScroll: true });
