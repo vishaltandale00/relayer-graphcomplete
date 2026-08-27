@@ -164,9 +164,16 @@ async function connectSelectedProvider(event) {
   const errors = providerConnectionErrors(selectedDescriptor, connectionValues, providerStatus.definitions);
   if (Object.keys(errors).length) return showProviderForm(selectedDescriptor.adapterId, { showErrors: true });
   setBusy(true);
-  setStatus("Connecting and discovering models…");
+  setStatus(`Preparing ${selectedDescriptor.label} runtime and connecting…`);
+  const connectionId = crypto.randomUUID().toLowerCase();
+  pendingConnectionId = connectionId;
   try {
-    let result = await desktop.providers.connect(providerCreationPayload(selectedDescriptor, connectionValues));
+    let result = await desktop.providers.connect(providerCreationPayload(
+      selectedDescriptor,
+      connectionValues,
+      { connectionId },
+    ));
+    if (pendingConnectionId !== connectionId) return;
     pendingConnectionId = result.status === "pending" ? result.connectionId : null;
     while (result.status === "pending" && pendingConnectionId === result.connectionId) {
       setStatus("Complete sign-in in your browser. Relayer will continue automatically.");
@@ -180,6 +187,8 @@ async function connectSelectedProvider(event) {
     providerStatus = await desktop.providers.status();
     await prepareFamilyStep(connectedDefinition);
   } catch (error) {
+    if (pendingConnectionId !== connectionId && error.message === "Provider connection was cancelled.") return;
+    pendingConnectionId = null;
     setStatus(error.message, "error");
     showProviderForm(selectedDescriptor.adapterId);
   } finally {

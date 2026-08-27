@@ -42,6 +42,20 @@ function definition(adapterId, endpoint, id = "test-provider") {
   return { id, adapterId, label: "Test provider", endpoint, credentialReference: `provider:${id}` };
 }
 
+const codexRuntime = Object.freeze({
+  runtimeId: "codex", version: "0.150.1", executable: "/managed/codex",
+});
+const claudeRuntime = Object.freeze({
+  runtimeId: "claude", version: "0.3.247", executable: "/managed/claude",
+  moduleUrl: "file:///managed/claude/sdk.mjs",
+});
+
+function runtimeForAdapter(adapterId) {
+  return adapterId === "anthropic-api" || adapterId === "claude-subscription"
+    ? claudeRuntime
+    : codexRuntime;
+}
+
 describe("authoritative provider adapter registry", () => {
   it("contains exactly the six initial production adapters with valid contracts", async () => {
     expect(ACTIVE_PROVIDER_ADAPTER_IDS).toEqual(expectedAdapters);
@@ -71,53 +85,47 @@ describe("authoritative provider adapter registry", () => {
     expect(() => createProviderAdapterRegistry([{ ...descriptor, implementationVersion: "v1" }])).toThrow("positive integer");
   });
 
-  it("keeps managed runtime dependency routing inside the authoritative registry", async () => {
+  it("requires and routes an explicit managed runtime for every active adapter", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-provider-dependencies-"));
-    const dependencies = await productionProviderRuntimeDependencies({
-      id: "codex-work", adapterId: "codex-subscription",
-    }, {
-      runtimeRoot: root,
-      environment: {
-        PATH: "/safe/bin",
-        HOME: "/Users/tester",
-        USERPROFILE: "C:\\Users\\tester",
-        OPENAI_API_KEY: "ambient-openai-secret",
-        ANTHROPIC_API_KEY: "ambient-anthropic-secret",
-        UNRELATED_TOKEN: "ambient-unrelated-secret",
-      },
-      codexBinary: "/bin/codex",
-    });
-    expect(dependencies).toMatchObject({
-      environment: { CODEX_HOME: join(root, "codex-work", "codex-home"), RELAYER_CODEX_BINARY: "/bin/codex" },
-    });
-    expect(dependencies.environment).toMatchObject({
-      PATH: "/safe/bin", HOME: "/Users/tester", USERPROFILE: "C:\\Users\\tester",
-    });
-    expect(dependencies.environment).not.toHaveProperty("OPENAI_API_KEY");
-    expect(dependencies.environment).not.toHaveProperty("ANTHROPIC_API_KEY");
-    expect(dependencies.environment).not.toHaveProperty("UNRELATED_TOKEN");
-    const claudeDependencies = await productionProviderRuntimeDependencies({
-      id: "claude-work", adapterId: "claude-subscription",
-    }, {
-      runtimeRoot: root,
-      environment: {
-        PATH: "/safe/bin",
-        HOME: "/Users/tester",
-        USERPROFILE: "C:\\Users\\tester",
-        ANTHROPIC_API_KEY: "ambient-anthropic-secret",
-      },
-      claudeBinary: "/bin/claude",
-    });
-    expect(claudeDependencies.environment).toMatchObject({
-      PATH: "/safe/bin",
-      HOME: "/Users/tester",
-      USERPROFILE: "C:\\Users\\tester",
-      CLAUDE_CONFIG_DIR: join(root, "claude-work", "claude-home"),
-    });
-    expect(claudeDependencies.environment).not.toHaveProperty("ANTHROPIC_API_KEY");
+    for (const adapterId of expectedAdapters) {
+      const id = `${adapterId}-work`;
+      const managedRuntime = runtimeForAdapter(adapterId);
+      const dependencies = await productionProviderRuntimeDependencies({ id, adapterId }, {
+        runtimeRoot: root,
+        managedRuntime,
+        environment: {
+          PATH: "/safe/bin",
+          HOME: "/Users/tester",
+          USERPROFILE: "C:\\Users\\tester",
+          OPENAI_API_KEY: "ambient-openai-secret",
+          ANTHROPIC_API_KEY: "ambient-anthropic-secret",
+          UNRELATED_TOKEN: "ambient-unrelated-secret",
+        },
+      });
+      expect(dependencies.managedRuntime).toEqual(managedRuntime);
+      expect(dependencies.environment).toMatchObject({
+        PATH: "/safe/bin", HOME: "/Users/tester", USERPROFILE: "C:\\Users\\tester",
+      });
+      expect(dependencies.environment).not.toHaveProperty("OPENAI_API_KEY");
+      expect(dependencies.environment).not.toHaveProperty("ANTHROPIC_API_KEY");
+      expect(dependencies.environment).not.toHaveProperty("UNRELATED_TOKEN");
+      if (managedRuntime.runtimeId === "codex") {
+        expect(dependencies.environment).toMatchObject({
+          CODEX_HOME: join(root, id, "codex-home"),
+          RELAYER_CODEX_BINARY: managedRuntime.executable,
+        });
+      } else {
+        expect(dependencies.environment.CLAUDE_CONFIG_DIR).toBe(join(root, id, "claude-home"));
+      }
+    }
     await expect(productionProviderRuntimeDependencies({
       id: "openai-work", adapterId: "openai-api",
-    }, { runtimeRoot: root, environment: {} })).resolves.toEqual({});
+    }, { runtimeRoot: root, environment: {}, codexBinary: "/ambient/codex" }))
+      .rejects.toThrow("managed runtime");
+    await expect(productionProviderRuntimeDependencies({
+      id: "claude-work", adapterId: "claude-subscription",
+    }, { runtimeRoot: root, environment: {}, managedRuntime: codexRuntime }))
+      .rejects.toThrow("requires the claude managed runtime");
   });
 
   it("preserves the legacy Codex home only for the migrated default definition across restarts", async () => {
@@ -134,7 +142,7 @@ describe("authoritative provider adapter registry", () => {
       runtimeRoot,
       legacyCodexHome: legacyHome,
       environment: { PATH: "/safe/bin" },
-      codexBinary: "/bin/codex",
+      managedRuntime: codexRuntime,
     };
     const migrated = { id: "codex", adapterId: "codex-subscription" };
     const firstStart = await productionProviderRuntimeDependencies(migrated, context);
@@ -187,7 +195,7 @@ describe("secret-backed API adapters", () => {
       const descriptor = productionProviderAdapterRegistry.get(adapterId);
       const adapter = productionProviderAdapterRegistry.create(
         definition(adapterId, descriptor.defaultEndpoint),
-        { fetch, secrets: { "api-key": "sk-not-logged" } },
+        { fetch, secrets: { "api-key": "sk-not-logged" }, managedRuntime: runtimeForAdapter(adapterId), environment: { PATH: "/safe/bin" } },
       );
 
       const snapshot = await adapter.connect();
@@ -200,11 +208,34 @@ describe("secret-backed API adapters", () => {
     });
   }
 
+  it.each([
+    ["openai-api", codexRuntime],
+    ["openrouter", codexRuntime],
+    ["vercel-ai-router", codexRuntime],
+    ["anthropic-api", claudeRuntime],
+  ])("%s carries its provisioned runtime into secret execution access", (adapterId, managedRuntime) => {
+    const descriptor = productionProviderAdapterRegistry.get(adapterId);
+    const environment = managedRuntime.runtimeId === "codex"
+      ? { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: managedRuntime.executable }
+      : { CLAUDE_CONFIG_DIR: "/isolated/claude" };
+    const adapter = productionProviderAdapterRegistry.create(
+      definition(adapterId, descriptor.defaultEndpoint),
+      { fetch: vi.fn(), secrets: { "api-key": "secret" }, managedRuntime, environment },
+    );
+
+    expect(adapter.executionAccess()).toEqual({
+      kind: "secret",
+      endpoint: descriptor.defaultEndpoint,
+      fields: { "api-key": "secret" },
+      runtime: { ...managedRuntime, environment },
+    });
+  });
+
   it("rejects malformed or empty discovery without manual model entry", async () => {
     const descriptor = productionProviderAdapterRegistry.get("openai-api");
     const adapter = productionProviderAdapterRegistry.create(
       definition("openai-api", descriptor.defaultEndpoint),
-      { fetch: async () => ({ ok: true, json: async () => ({ data: [] }) }), secrets: { "api-key": "secret" } },
+      { fetch: async () => ({ ok: true, json: async () => ({ data: [] }) }), secrets: { "api-key": "secret" }, managedRuntime: codexRuntime, environment: {} },
     );
     await expect(adapter.connect()).rejects.toThrow("visible models");
   });
@@ -214,7 +245,7 @@ describe("secret-backed API adapters", () => {
     const descriptor = productionProviderAdapterRegistry.get("openai-api");
     const adapter = productionProviderAdapterRegistry.create(
       definition("openai-api", descriptor.defaultEndpoint, "revoked-api"),
-      { fetch, secrets: { "api-key": "opaque" } },
+      { fetch, secrets: { "api-key": "opaque" }, managedRuntime: codexRuntime, environment: {} },
     );
     const published = [];
     const catalog = new ModelCatalogService({
@@ -239,7 +270,7 @@ describe("secret-backed API adapters", () => {
         async createWithCatalog(candidate) { definitions.push(candidate); },
       },
       credentialStore: { set: credentialSet, async delete() {} },
-      runtimeDependencies: async () => ({ fetch }),
+      runtimeDependencies: async () => ({ fetch, managedRuntime: codexRuntime, environment: {} }),
       idGenerator: () => "revoked-staged",
     });
     await expect(setup.connect({
@@ -440,18 +471,59 @@ describe("managed subscription isolation", () => {
     }));
   });
 
+  it("refuses ambient subscription executable discovery", () => {
+    expect(() => productionProviderAdapterRegistry.create({
+      id: "codex-ambient", adapterId: "codex-subscription", label: "Codex", endpoint: null,
+    }, { environment: { PATH: "/ambient/bin" }, managedRuntime: codexRuntime }))
+      .toThrow("requires the provisioned managed runtime executable");
+    expect(() => new ClaudeCliManagedRuntime({ environment: { PATH: "/ambient/bin" } }))
+      .toThrow("managed runtime executable is required");
+  });
+
   it("fails closed before handing out a revoked Codex managed runtime", async () => {
     const provider = productionProviderAdapterRegistry.create({
       id: "codex-revoked", adapterId: "codex-subscription", label: "Codex Revoked", endpoint: null,
-    }, { environment: { PATH: "" } });
+    }, { environment: { PATH: "", RELAYER_CODEX_BINARY: codexRuntime.executable }, managedRuntime: codexRuntime });
     provider.credentials.account = async () => ({ status: "disconnected", account: null });
     await expect(provider.executionAccess()).rejects.toThrow("not connected");
+  });
+
+  it("hands subscription harnesses the exact provisioned runtime descriptor", async () => {
+    const codexEnvironment = {
+      CODEX_HOME: "/isolated/codex",
+      RELAYER_CODEX_BINARY: codexRuntime.executable,
+    };
+    const codex = productionProviderAdapterRegistry.create({
+      id: "codex-connected", adapterId: "codex-subscription", label: "Codex", endpoint: null,
+    }, { environment: codexEnvironment, managedRuntime: codexRuntime });
+    codex.credentials.account = async () => ({ status: "connected", account: {} });
+    await expect(codex.executionAccess()).resolves.toEqual({
+      kind: "managed-runtime", ...codexRuntime, environment: codexEnvironment,
+    });
+
+    const claudeEnvironment = { CLAUDE_CONFIG_DIR: "/isolated/claude" };
+    const claude = productionProviderAdapterRegistry.create({
+      id: "claude-connected", adapterId: "claude-subscription", label: "Claude", endpoint: null,
+    }, {
+      managedRuntime: claudeRuntime,
+      runtimeFactory: async () => ({
+        environment: claudeEnvironment,
+        account: async () => ({ status: "connected", account: {} }),
+        close: async () => {},
+      }),
+    });
+    await expect(claude.executionAccess()).resolves.toEqual({
+      kind: "managed-runtime", ...claudeRuntime, environment: claudeEnvironment,
+    });
   });
 
   it("production Claude composition fails unavailable when its definition-scoped CLI is missing", async () => {
     const provider = productionProviderAdapterRegistry.create({
       id: "claude-missing", adapterId: "claude-subscription", label: "Claude Missing", endpoint: null,
-    }, { executable: "/definitely/missing/relayer-claude" });
+    }, {
+      executable: "/definitely/missing/relayer-claude",
+      managedRuntime: { ...claudeRuntime, executable: "/definitely/missing/relayer-claude" },
+    });
     await expect(provider.credentials.account()).resolves.toMatchObject({ status: "unavailable" });
     await expect(provider.credentials.login()).rejects.toThrow("login is unavailable");
     await expect(provider.executionAccess()).rejects.toThrow("not connected");
@@ -495,6 +567,7 @@ describe("managed subscription isolation", () => {
     const dependencies = {
       runtimeFactory,
       discoverModels: async () => [{ id: "claude-model", label: "Claude model" }],
+      managedRuntime: claudeRuntime,
     };
     const first = productionProviderAdapterRegistry.create({
       id: "claude-work", adapterId: "claude-subscription", label: "Claude Work", endpoint: null,

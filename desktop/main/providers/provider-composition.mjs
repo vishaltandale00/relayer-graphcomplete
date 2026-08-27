@@ -12,6 +12,7 @@ export function createProviderComposition({
   publishCatalog,
   providerStatuses = async () => new Map(),
   runtimeDependencies = async () => ({}),
+  prepareRuntime = async () => null,
   removeRuntimeState = async () => false,
   diagnostics = null,
   modelCatalogOptions = {},
@@ -29,6 +30,7 @@ export function createProviderComposition({
     diagnostics,
     providerStatuses,
     runtimeDependencies,
+    prepareRuntime,
     removeRuntimeState,
     publishCatalog: (snapshot, options) => publishCatalog(toProductCatalogSnapshot(snapshot), options),
     onRuntimeReady: (definition, runtime) => {

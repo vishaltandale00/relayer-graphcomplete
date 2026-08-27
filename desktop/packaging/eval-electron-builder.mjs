@@ -22,6 +22,12 @@ export default {
     "main/single-instance.mjs",
     "preload/eval-*.cjs",
     "node_modules/**/*",
+    "!node_modules/@openai/codex/package.json",
+    "!node_modules/@openai/codex/**/*",
+    "!node_modules/@openai/codex-darwin-*/**/*",
+    "!node_modules/@openai/codex-linux-*/**/*",
+    "!node_modules/@openai/codex-win32-*/**/*",
+    "!node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
   ],
   extraResources: [
     { from: resolve(repositoryRoot, `target/${rustTarget}/release/relayer-app-server${binarySuffix}`), to: `bin/relayer-app-server${binarySuffix}` },

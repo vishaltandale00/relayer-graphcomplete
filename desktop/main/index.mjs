@@ -25,13 +25,21 @@ import { resolveDesktopHarnessConfiguration } from "./services/desktop-harness-c
 import { createSettingsStore } from "./services/settings-store.mjs";
 import { createTutorialLifecycle } from "./services/tutorial-lifecycle.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
+import { createManagedRuntimeInstaller } from "./managed-runtimes/installer.mjs";
+import { confirmManagedRuntimeQuit } from "./managed-runtimes/quit-guard.mjs";
 import { claimPrimaryDesktopInstance } from "./single-instance.mjs";
 import { createWindowFactory } from "./window.mjs";
 import {
   DESKTOP_UPDATE_BASE_URL,
   packagedDesktopReleaseMetadata,
 } from "../shared/release-metadata.mjs";
-import { codexBinaryPath, nativeBinaryName } from "../shared/target.mjs";
+import { nativeBinaryName } from "../shared/target.mjs";
+import {
+  activeProviderRuntimeRequirements,
+  compatibleHarnessImplementationForAdapter,
+  managedRuntimeRequirementForHarness,
+  parseUpdateRuntimeRequirements,
+} from "../shared/managed-runtime-requirements.mjs";
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(desktopDirectory, "..");
@@ -47,15 +55,13 @@ app.setName(metadata.relayerProductName || "Relayer Dev");
 
 const userDataPath = app.getPath("userData");
 const providerRuntimeRoot = join(userDataPath, "provider-runtimes");
+const managedRuntimeInstaller = createManagedRuntimeInstaller({
+  root: join(userDataPath, "managed-runtimes"),
+});
 const legacyCodexHome = resolveLegacyCodexHome(userDataPath, process.env);
 const updateBaseUrl = packagedRelease?.updateBaseUrl || (
   app.isPackaged ? null : process.env.RELAYER_DESKTOP_UPDATE_BASE_URL || DESKTOP_UPDATE_BASE_URL
 );
-const bundledCodexBinary = codexBinaryPath({
-  packaged: app.isPackaged,
-  resourcesPath: process.resourcesPath,
-  repositoryRoot,
-});
 const relayerAppServerBinary = app.isPackaged
   ? join(process.resourcesPath, "bin", nativeBinaryName("relayer-app-server"))
   : resolve(process.env.RELAYER_APP_SERVER_BINARY || join(repositoryRoot, "target", "debug", "relayer-app-server"));
@@ -96,7 +102,6 @@ if (primaryInstance) {
       "claude-basic",
     ])].map((name) => join(harnessDirectory, `${name}.yaml`)),
     codexBasicClientModuleUrl: graphClientModuleUrl,
-    codexPathOverride: bundledCodexBinary,
     acquireProviderExecution: (providerId) => {
       if (!providerSetup) throw new Error("Provider execution broker is not ready.");
       return providerSetup.acquireExecution(providerId);
@@ -114,6 +119,13 @@ if (primaryInstance) {
   let providerSetup;
   let providerComposition;
 
+  const managedRuntimeDescriptor = (runtime) => Object.freeze({
+    runtimeId: runtime.runtimeId,
+    version: runtime.version,
+    executable: runtime.executable,
+    ...(runtime.modulePath ? { moduleUrl: pathToFileURL(runtime.modulePath).href } : {}),
+  });
+
   const canaryEvidenceLog = createCanaryEvidenceLog({
     appIsPackaged: app.isPackaged,
     releaseMetadata: packagedRelease,
@@ -129,6 +141,21 @@ if (primaryInstance) {
       getVersion: () => app.getVersion(),
     },
     updateBaseUrl,
+    prefetchRuntimeUpdate: async (info) => {
+      if (!providerSetup) return;
+      const incoming = parseUpdateRuntimeRequirements(info);
+      const requirements = activeProviderRuntimeRequirements(await providerSetup.list())
+        .map(({ runtimeId }) => ({ runtimeId, minimumVersion: incoming[runtimeId] }));
+      if (requirements.length === 0) return;
+      const result = await managedRuntimeInstaller.stageForAppUpdate(info.version, requirements);
+      if (result.failures.length) {
+        throw new AggregateError(
+          result.failures.map(({ error }) => error),
+          "One or more managed runtimes could not be prefetched for the app update.",
+        );
+      }
+    },
+    onRuntimePrefetchFailure: (error) => console.error("Managed runtime update prefetch failed:", error),
     emit: (state) => {
       void canaryEvidenceLog.write(state).catch((error) => console.error("Canary evidence log failed:", error));
       mainWindow?.webContents.send("relayer:update-changed", state);
@@ -145,6 +172,13 @@ if (primaryInstance) {
 
   let shutdownPromise;
   let shutdownComplete = false;
+  let quitFlowPromise;
+
+  const confirmQuit = () => confirmManagedRuntimeQuit({
+    installer: managedRuntimeInstaller,
+    dialog,
+    parent: mainWindow,
+  });
 
   async function shutdownServices() {
     shutdownPromise ??= (async () => {
@@ -172,6 +206,22 @@ if (primaryInstance) {
     nativeTheme.themeSource = appearance;
     const channel = resolveUpdateChannel(saved.updateChannel);
     if (channel === "preview") updater.setChannel("preview");
+    const activation = await managedRuntimeInstaller.activatePendingAppUpdate(app.getVersion());
+    if (activation.failures.length) {
+      console.error("Managed runtime update activation failed:", new AggregateError(
+        activation.failures.map(({ error }) => error),
+        "One or more managed runtimes could not be activated after the app update.",
+      ));
+    }
+    // Previous generations may have been leased by provider adapters until the
+    // prior process exited. Prune them locally before creating new adapters.
+    const pruning = await managedRuntimeInstaller.pruneInactiveInstallations();
+    if (pruning.failures.length) {
+      console.error("Retired managed runtime cleanup failed:", new AggregateError(
+        pruning.failures.map(({ error }) => error),
+        "One or more retired managed runtimes could not be removed.",
+      ));
+    }
     const runtimeSession = await graphRuntime.start();
     productServer = new RelayerAppServerService({
       userDataDirectory: userDataPath,
@@ -213,13 +263,27 @@ if (primaryInstance) {
         registry: productionProviderAdapterRegistry,
       }),
       providerStatuses: () => productServer.providerStatuses(),
-      runtimeDependencies: (definition) => productionProviderRuntimeDependencies(definition, {
-        runtimeRoot: providerRuntimeRoot,
-        legacyCodexHome,
-        environment: process.env,
-        codexBinary: bundledCodexBinary,
-        claudeBinary: process.env.RELAYER_CLAUDE_BINARY,
-      }),
+      runtimeDependencies: async (definition) => {
+        const requirement = managedRuntimeRequirementForHarness(
+          compatibleHarnessImplementationForAdapter(definition.adapterId),
+        );
+        const managedRuntime = managedRuntimeDescriptor(await managedRuntimeInstaller.installed(
+          requirement.runtimeId,
+          requirement.minimumVersion,
+        ));
+        return productionProviderRuntimeDependencies(definition, {
+          runtimeRoot: providerRuntimeRoot,
+          legacyCodexHome,
+          environment: process.env,
+          managedRuntime,
+        });
+      },
+      prepareRuntime: async ({ adapterId }) => {
+        const requirement = managedRuntimeRequirementForHarness(
+          compatibleHarnessImplementationForAdapter(adapterId),
+        );
+        await managedRuntimeInstaller.ensure(requirement.runtimeId, requirement.minimumVersion);
+      },
       publishCatalog,
     });
     ({ modelCatalog, providerDefinitions: providerSetup } = providerComposition);
@@ -246,8 +310,10 @@ if (primaryInstance) {
       getAppearance: () => appearance,
       setAppearance: (value) => { appearance = value; },
       beforeUpdateInstall: async () => {
+        if (!await confirmQuit()) return false;
         await shutdownServices();
         shutdownComplete = true;
+        return true;
       },
       onUpdateInstallFailure: () => {
         app.relaunch();
@@ -275,11 +341,18 @@ if (primaryInstance) {
   app.on("before-quit", (event) => {
     if (shutdownComplete) return;
     event.preventDefault();
-    void shutdownServices().catch((error) => {
-      console.error("Relayer shutdown failed:", error);
-    }).finally(() => {
+    if (quitFlowPromise) return;
+    quitFlowPromise = (async () => {
+      if (!await confirmQuit()) return;
+      try {
+        await shutdownServices();
+      } catch (error) {
+        console.error("Relayer shutdown failed:", error);
+      }
       shutdownComplete = true;
       app.quit();
+    })().finally(() => {
+      if (!shutdownComplete) quitFlowPromise = undefined;
     });
   });
 }

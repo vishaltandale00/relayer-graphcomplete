@@ -9,6 +9,7 @@ import { codexSubscriptionDescriptor } from "./implementations/codex-subscriptio
 import { openAiApiDescriptor } from "./implementations/openai-api.mjs";
 import { openRouterDescriptor } from "./implementations/openrouter.mjs";
 import { vercelAiRouterDescriptor } from "./implementations/vercel-ai-router.mjs";
+import { requireManagedRuntime } from "./implementations/managed-runtime-contract.mjs";
 
 const ACTIVE_PROVIDER_ADAPTERS = Object.freeze([
   Object.freeze({ descriptor: codexSubscriptionDescriptor, module: "providers/implementations/codex-subscription.mjs" }),
@@ -27,6 +28,7 @@ export const ACTIVE_PROVIDER_ADAPTER_MODULES = Object.freeze(Object.fromEntries(
 ));
 
 export const PROVIDER_ADAPTER_SUPPORT_MODULES = Object.freeze([
+  "providers/implementations/managed-runtime-contract.mjs",
   "providers/implementations/api-provider-adapter.mjs",
   "providers/implementations/managed-subscription-adapter.mjs",
 ]);
@@ -44,8 +46,13 @@ export function resolveLegacyCodexHome(userDataPath, environment = {}) {
   return environment.RELAYER_CODEX_HOME || join(userDataPath, "codex-home");
 }
 
+const CODEX_PROVIDER_ADAPTERS = new Set([
+  "codex-subscription", "openai-api", "openrouter", "vercel-ai-router",
+]);
+const CLAUDE_PROVIDER_ADAPTERS = new Set(["claude-subscription", "anthropic-api"]);
+
 const PRODUCTION_RUNTIME_DEPENDENCIES = Object.freeze({
-  "codex-subscription": async (definition, context) => {
+  codex: async (definition, context, managedRuntime) => {
     // The provider-platform migration preserves the built-in definition's
     // stable `codex` id. Keep that one definition on the home used by prior
     // releases so an existing subscription session survives the update. Every
@@ -55,21 +62,26 @@ const PRODUCTION_RUNTIME_DEPENDENCIES = Object.freeze({
       : join(context.runtimeRoot, definition.id, "codex-home");
     await mkdir(codexHome, { recursive: true });
     return {
+      managedRuntime,
+      executable: managedRuntime.executable,
       environment: {
         ...managedRuntimeEnvironment(context.environment),
         CODEX_HOME: codexHome,
-        RELAYER_CODEX_BINARY: context.codexBinary,
+        RELAYER_CODEX_BINARY: managedRuntime.executable,
       },
     };
   },
-  "claude-subscription": async (definition, context) => {
+  claude: async (definition, context, managedRuntime) => {
     const root = join(context.runtimeRoot, definition.id);
-    await mkdir(root, { recursive: true });
+    const claudeHome = join(root, "claude-home");
+    await mkdir(claudeHome, { recursive: true });
     return {
-      executable: context.claudeBinary || "claude",
+      managedRuntime,
+      executable: managedRuntime.executable,
+      moduleUrl: managedRuntime.moduleUrl,
       environment: {
         ...managedRuntimeEnvironment(context.environment),
-        CLAUDE_CONFIG_DIR: join(root, "claude-home"),
+        CLAUDE_CONFIG_DIR: claudeHome,
       },
     };
   },
@@ -90,5 +102,12 @@ function managedRuntimeEnvironment(environment = {}) {
 }
 
 export async function productionProviderRuntimeDependencies(definition, context) {
-  return PRODUCTION_RUNTIME_DEPENDENCIES[definition.adapterId]?.(definition, context) ?? {};
+  const runtimeId = CODEX_PROVIDER_ADAPTERS.has(definition.adapterId)
+    ? "codex"
+    : CLAUDE_PROVIDER_ADAPTERS.has(definition.adapterId)
+      ? "claude"
+      : null;
+  if (!runtimeId) return {};
+  const managedRuntime = requireManagedRuntime(context?.managedRuntime, runtimeId);
+  return PRODUCTION_RUNTIME_DEPENDENCIES[runtimeId](definition, context, managedRuntime);
 }

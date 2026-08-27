@@ -85,6 +85,17 @@ describe("provider renderer model", () => {
     });
   });
 
+  it("carries a renderer-owned connection attempt id without provider authority", () => {
+    expect(providerCreationPayload(normalizeProviderDescriptor(descriptors[0]), {
+      label: "OpenAI Work",
+      endpoint: "https://proxy.example/v1",
+      fields: { apiKey: "sk-test" },
+    }, { connectionId: "attempt-1" })).toMatchObject({
+      connectionId: "attempt-1",
+      adapterId: "openai-api",
+    });
+  });
+
   it("hard-gates only first run and distinguishes provider from family resolution", () => {
     expect(firstRunGateState({ hasCompletedOnboarding: false, providers: [], defaultResolution: null }))
       .toEqual({ blocked: true, reason: "Connect a working provider to continue." });

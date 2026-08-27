@@ -33,7 +33,7 @@ const variants = [
   { scene: "light", caption: "Light appearance", width: 1280, required: ["OpenAI Work", "data-theme=\"light\""] },
   { scene: "narrow", caption: "Narrow responsive settings", width: 620, required: ["OpenAI Work", "Providers"] },
   { scene: "long-label", caption: "Long provider identity", width: 1280, required: ["North America Platform Engineering and Applied Research"] },
-  { scene: "loading", caption: "Connecting and discovering models", width: 1280, required: ["Connecting and discovering models"] },
+  { scene: "loading", caption: "Preparing provider runtime and connecting", width: 1280, required: ["Preparing OpenAI API runtime and connecting"] },
   { scene: "error", caption: "Authentication error", width: 1280, required: ["Authentication failed", "Check the API key"] },
   { scene: "unavailable", caption: "Unavailable provider", width: 1280, required: ["Connection unavailable", "OpenAI Work"] },
   { scene: "authorization", caption: "Authorization pending", width: 1280, required: ["Complete sign-in in your browser", "Claude subscription"] },

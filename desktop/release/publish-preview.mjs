@@ -11,6 +11,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { DESKTOP_RELEASE, desktopReleaseTarget } from "./contract.mjs";
 import { compareNumericVersions, isNumericVersion } from "./numeric-version.mjs";
+import { RELEASE_MANAGED_RUNTIME_REQUIREMENTS } from "../shared/managed-runtime-requirements.mjs";
 
 const execFileAsync = promisify(execFile);
 const IMMUTABLE_CACHE_CONTROL = "public,max-age=31536000,immutable";
@@ -116,6 +117,7 @@ export function preparePreviewManifest({ manifestText, version, artifactEvidence
     throw new Error("Preview manifest legacy update identity is invalid.");
   }
   manifest.path = `releases/${version}/${updateName}`;
+  manifest.relayerManagedRuntimes = RELEASE_MANAGED_RUNTIME_REQUIREMENTS;
   return stringifyYaml(manifest);
 }
 

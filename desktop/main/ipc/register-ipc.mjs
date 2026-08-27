@@ -136,7 +136,8 @@ export function registerDesktopIpc({
   ipcMain.handle("relayer:update-install", async () => {
     if (updater.status().phase !== "ready") throw new Error("No verified update is ready to install.");
     try {
-      await beforeUpdateInstall();
+      const proceed = await beforeUpdateInstall();
+      if (proceed === false) return { installing: false };
       updater.install();
       return { installing: true };
     } catch (error) {

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadHarnessConfigurations, productHarnessImplementations, type HarnessConfiguration } from "@relayer/harness-host";
+import { createCodexBasicFactory, loadHarnessConfigurations, productHarnessImplementations, type HarnessConfiguration } from "@relayer/harness-host";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "./fixtures/task-system.js";
 import { expandTestRun, type TestRunSelection } from "./run-plan.js";
 import { basicEvalCaseId, basicEvalPythonPath, executionDirectory, runBasicRuntimeEval, type BasicJudgeConfiguration } from "./runtime-basic.js";
@@ -32,7 +32,15 @@ async function main(): Promise<void> {
     judgeConfiguration,
   };
   const executions = expandTestRun(selection, harnessConfigurations);
-  const implementations = productHarnessImplementations({ "fixture.task-system": taskSystemFixtureFactory });
+  const usesCodex = [...harnessConfigurations.values()].some(({ implementation }) => implementation === "codex.basic");
+  const codexBinary = process.env.RELAYER_CODEX_BINARY?.trim();
+  if (usesCodex && !codexBinary) {
+    throw new Error("Live Codex Eval requires an explicit managed executable in RELAYER_CODEX_BINARY.");
+  }
+  const implementations = productHarnessImplementations({
+    "fixture.task-system": taskSystemFixtureFactory,
+    ...(usesCodex ? { "codex.basic": createCodexBasicFactory({ codexPathOverride: resolve(codexBinary!) }) } : {}),
+  });
   const results = [];
 
   for (const execution of executions) {

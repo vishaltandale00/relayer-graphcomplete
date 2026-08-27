@@ -1,4 +1,5 @@
 import { ModelCatalogAdapter, sanitizeModelCatalogSnapshot } from "../../models/model-catalog-adapter.mjs";
+import { managedRuntimeExecutionDetails, requireManagedRuntime } from "./managed-runtime-contract.mjs";
 
 export class ProviderHttpError extends Error {
   constructor(message, { status = null, code = null } = {}) {
@@ -52,7 +53,7 @@ function modelArray(payload) {
 }
 
 export class SecretApiProviderAdapter extends ModelCatalogAdapter {
-  constructor({ definition, fetch: fetchImplementation = globalThis.fetch, credentials, headers, modelsPath = "/models" }) {
+  constructor({ definition, fetch: fetchImplementation = globalThis.fetch, credentials, headers, modelsPath = "/models", managedRuntime, runtimeId, environment }) {
     super({ providerId: definition.id, providerLabel: definition.label });
     if (typeof fetchImplementation !== "function") throw new Error("API provider adapter requires fetch().");
     this.definition = definition;
@@ -60,6 +61,8 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     this.credentials = Object.freeze({ ...credentials });
     this.headers = headers;
     this.modelsPath = modelsPath;
+    this.managedRuntime = requireManagedRuntime(managedRuntime, runtimeId);
+    this.runtimeExecution = managedRuntimeExecutionDetails(this.managedRuntime, environment);
   }
 
   async discover({ signal } = {}) {
@@ -119,6 +122,7 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
       kind: "secret",
       endpoint: this.definition.endpoint,
       fields: Object.freeze({ "api-key": this.credentials.apiKey }),
+      runtime: this.runtimeExecution,
     });
   }
 }

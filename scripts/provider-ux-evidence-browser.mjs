@@ -181,7 +181,7 @@ async function prepareScene() {
     if (scene === "family") await waitFor("#providerFamilyStep:not(.hidden)");
     if (scene === "loading") {
       await waitForCondition(
-        () => document.querySelector("#authStatus")?.textContent.includes("Connecting and discovering models"),
+        () => document.querySelector("#authStatus")?.textContent.includes("Preparing OpenAI API runtime and connecting"),
         "connecting status",
       );
     }

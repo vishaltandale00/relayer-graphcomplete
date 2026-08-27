@@ -27,7 +27,7 @@ import {
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
 import { ACTIVE_PROVIDER_ADAPTER_MODULES } from "../desktop/main/providers/provider-adapter-registry.mjs";
 import { verifyBundledAppServer } from "../desktop/packaging/verify-bundled-app-server.mjs";
-import { codexBinaryPath, desktopTarget } from "../desktop/shared/target.mjs";
+import { desktopTarget } from "../desktop/shared/target.mjs";
 import {
   DESKTOP_RELEASE,
   DESKTOP_RELEASE_TARGETS,
@@ -41,7 +41,6 @@ import {
 import { desktopReleaseAppPath } from "../desktop/release/app-path.mjs";
 import { finalizeDesktopUpdateArtifact } from "../desktop/release/finalize-update-artifact.mjs";
 import { createDesktopCanaryEvidence, deriveDesktopCanaryTrace } from "../desktop/release/canary-evidence.mjs";
-import { macOSNativeRuntimeExecutables } from "../desktop/release/verify-macos-app.mjs";
 import { verifyWindowsSignatures, windowsApplicationExecutables } from "../desktop/release/verify-windows-app.mjs";
 import {
   buildPutObjectArgs,
@@ -234,6 +233,8 @@ describe("desktop skeleton", () => {
     expect(packageManifest).not.toContain("@openai/codex-sdk");
     expect(desktopManifest).not.toContain("prime-agent");
     expect(desktopManifest).not.toContain("@openai/codex-sdk");
+    expect(JSON.parse(desktopManifest).dependencies).toMatchObject({ semver: "7.8.5", tar: "7.5.22" });
+    expect(JSON.parse(desktopManifest).dependencies).not.toHaveProperty("@openai/codex");
     expect(desktopManifest).toContain('"main": "main/index.mjs"');
     expect(JSON.parse(packageManifest).workspaces).toEqual(["desktop", "packages/*"]);
     expect(JSON.parse(packageManifest).devDependencies).not.toHaveProperty("@openai/codex");
@@ -257,7 +258,8 @@ describe("desktop skeleton", () => {
     expect(packaging).toContain('"packages/graph-client/dist"');
     expect(desktopMain).toContain('"graph-client", "index.js"');
     expect(desktopMain).toContain("codexBasicClientModuleUrl: graphClientModuleUrl");
-    expect(desktopMain).toContain("codexPathOverride: bundledCodexBinary");
+    expect(desktopMain).not.toContain("bundledCodexBinary");
+    expect(desktopMain).toContain("createManagedRuntimeInstaller");
     expect(packaging).toContain('to: "renderer"');
     expect(threads).not.toContain("/messages");
     expect(threads).not.toContain("EventSource");
@@ -303,23 +305,23 @@ describe("desktop skeleton", () => {
     expect(permissionProfileDescription(profiles[2])).toContain("not hard-confined");
   });
 
-  it("resolves native Codex bundles for supported desktop targets", () => {
-    expect(desktopTarget({ platform: "darwin", architecture: "x64" }).codexVendor).toBe("x86_64-apple-darwin");
-    expect(codexBinaryPath({ platform: "win32", architecture: "x64", packaged: true, resourcesPath: "C:/resources" }))
-      .toMatch(/codex-win32-x64[\\/]vendor[\\/]x86_64-pc-windows-msvc[\\/]bin[\\/]codex\.exe$/);
-    expect(macOSNativeRuntimeExecutables("/Applications/Relayer.app", "x86_64")).toEqual([
-      expect.stringMatching(/codex-darwin-x64[\\/]vendor[\\/]x86_64-apple-darwin[\\/]bin[\\/]codex$/),
-      expect.stringMatching(/codex-darwin-x64[\\/]vendor[\\/]x86_64-apple-darwin[\\/]bin[\\/]codex-code-mode-host$/),
-      expect.stringMatching(/codex-darwin-x64[\\/]vendor[\\/]x86_64-apple-darwin[\\/]codex-path[\\/]rg$/),
-      expect.stringMatching(/codex-darwin-x64[\\/]vendor[\\/]x86_64-apple-darwin[\\/]codex-resources[\\/]zsh[\\/]bin[\\/]zsh$/),
-    ]);
-    expect(windowsApplicationExecutables("C:/Relayer")).toEqual(expect.arrayContaining([
-      expect.stringMatching(/codex-win32-x64[\\/]vendor[\\/]x86_64-pc-windows-msvc[\\/]bin[\\/]codex\.exe$/),
-      expect.stringMatching(/codex-win32-x64[\\/]vendor[\\/]x86_64-pc-windows-msvc[\\/]bin[\\/]codex-code-mode-host\.exe$/),
-      expect.stringMatching(/codex-win32-x64[\\/]vendor[\\/]x86_64-pc-windows-msvc[\\/]codex-path[\\/]rg\.exe$/),
-      expect.stringMatching(/codex-resources[\\/]codex-command-runner\.exe$/),
-      expect.stringMatching(/codex-resources[\\/]codex-windows-sandbox-setup\.exe$/),
+  it("keeps release targets and signature verification free of bundled harness runtimes", () => {
+    for (const target of [
+      desktopTarget({ platform: "darwin", architecture: "arm64" }),
+      desktopTarget({ platform: "darwin", architecture: "x64" }),
+      desktopTarget({ platform: "win32", architecture: "x64" }),
+    ]) {
+      expect(target).not.toHaveProperty("codexPackage");
+      expect(target).not.toHaveProperty("codexVendor");
+    }
+    const windowsExecutables = windowsApplicationExecutables("C:/Relayer");
+    expect(windowsExecutables).toHaveLength(3);
+    expect(windowsExecutables).toEqual(expect.arrayContaining([
+      expect.stringMatching(/Relayer\.exe$/),
+      expect.stringMatching(/relayer-app-server\.exe$/),
+      expect.stringMatching(/relayer-graph-server\.exe$/),
     ]));
+    expect(windowsExecutables.join("\n")).not.toMatch(/codex|claude/i);
   });
 
   it("requires the exact timestamped Windows certificate subject", async () => {
@@ -2306,6 +2308,8 @@ describe("desktop skeleton", () => {
     const preparedManifest = preparePreviewManifest({ manifestText, version, artifactEvidence: evidence });
     expect(preparedManifest).toContain(`releases/${version}/${zip.name}`);
     expect(preparedManifest).toContain(`releases/${version}/${dmg.name}`);
+    expect(preparedManifest).toContain("relayerManagedRuntimes:");
+    expect(preparedManifest).toContain("codex: 0.147.0");
     expect(createPreviewPublicationPlan({ version, evidence })).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: zip.name, key: `desktop/macos/arm64/releases/${version}/${zip.name}` }),
       expect.objectContaining({ name: dmg.name, key: `desktop/macos/arm64/releases/${version}/${dmg.name}` }),

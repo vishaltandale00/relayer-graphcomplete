@@ -4,6 +4,7 @@ import {
 } from "./managed-subscription-adapter.mjs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { managedRuntimeExecutionDetails, requireManagedRuntime } from "./managed-runtime-contract.mjs";
 
 // Claude Code does not currently expose a subscription-authenticated model
 // catalog command. Keep only the literal CLI-documented execution aliases in
@@ -37,7 +38,10 @@ function runClaude(executable, args, environment, {
 }
 
 export class ClaudeCliManagedRuntime {
-  constructor({ environment = process.env, executable = "claude", spawnProcess = spawn } = {}) {
+  constructor({ environment = process.env, executable, spawnProcess = spawn } = {}) {
+    if (typeof executable !== "string" || executable.trim() === "") {
+      throw new Error("Claude managed runtime executable is required.");
+    }
     this.environment = environment;
     this.executable = executable;
     this.spawnProcess = spawnProcess;
@@ -104,8 +108,11 @@ export const claudeSubscriptionDescriptor = Object.freeze({
   endpointEditableDuringCreation: false,
   connection: { mode: "managed-login", fields: [] },
   catalog: { source: "code-manifest" },
-  create: ({ definition, runtimeFactory, discoverModels, environment, executable, spawnProcess }) => {
-    const effectiveRuntimeFactory = runtimeFactory ?? (() => new ClaudeCliManagedRuntime({ environment, executable, spawnProcess }));
+  create: ({ definition, runtimeFactory, discoverModels, environment, managedRuntime: runtimeDescriptor, spawnProcess }) => {
+    const managedRuntime = requireManagedRuntime(runtimeDescriptor, "claude");
+    const effectiveRuntimeFactory = runtimeFactory ?? (() => new ClaudeCliManagedRuntime({
+      environment, executable: managedRuntime.executable, spawnProcess,
+    }));
     const credentials = new ManagedRuntimeCredentialAdapter({ definition, runtimeFactory: effectiveRuntimeFactory });
     const catalog = new ManagedRuntimeModelCatalogAdapter({
       definition,
@@ -123,8 +130,7 @@ export const claudeSubscriptionDescriptor = Object.freeze({
         if (!credentials.runtime) throw new Error("Claude managed runtime is unavailable.");
         return Object.freeze({
           kind: "managed-runtime",
-          executable: credentials.runtime.executable,
-          environment: Object.freeze({ ...credentials.runtime.environment }),
+          ...managedRuntimeExecutionDetails(managedRuntime, credentials.runtime.environment),
         });
       },
       close: () => credentials.close(),

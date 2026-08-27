@@ -11,6 +11,7 @@ import {
   PACKAGED_PROVIDER_MODULES,
 } from "../desktop/main/providers/provider-adapter-registry.mjs";
 import { resolveDesktopReleaseContract } from "../desktop/release/contract.mjs";
+import { assertNoBundledHarnessRuntimes } from "../desktop/release/verify-packaged-contract.mjs";
 
 const temporaryDirectories = [];
 
@@ -42,6 +43,22 @@ async function buildConfiguredAsar({ source, stage, archive, patterns }) {
 }
 
 describe("provider adapter packaging", () => {
+  it.each([
+    "node_modules/@openai/codex/vendor/aarch64-apple-darwin/bin/codex",
+    "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude",
+  ])("rejects a packaged native harness runtime: %s", (entry) => {
+    expect(() => assertNoBundledHarnessRuntimes(new Set([entry]))).toThrow(/must not package a native harness runtime/);
+  });
+
+  it("allows the JavaScript SDK and installer dependencies without native harness artifacts", () => {
+    expect(() => assertNoBundledHarnessRuntimes(new Set([
+      "node_modules/@openai/codex-sdk/dist/index.js",
+      "node_modules/semver/index.js",
+      "node_modules/tar/dist/commonjs/index.js",
+    ]))).not.toThrow();
+  });
+
   it("generates an ASAR containing every active adapter and no test provider fixtures", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-provider-package-"));
     temporaryDirectories.push(root);
@@ -94,5 +111,11 @@ describe("provider adapter packaging", () => {
     expect([...packaged].some((entry) => entry.startsWith("packaging/"))).toBe(false);
     expect([...packaged].some((entry) => entry.startsWith("release/"))).toBe(false);
     expect([...packaged].some((entry) => entry.startsWith("renderer/"))).toBe(false);
+    expect([...packaged].some((entry) => (
+      entry === "node_modules/@openai/codex/package.json" ||
+      entry.startsWith("node_modules/@openai/codex/") ||
+      /^node_modules\/@openai\/codex-(?:darwin|linux|win32)-/u.test(entry)
+    ))).toBe(false);
+    expect([...packaged].some((entry) => entry.startsWith("node_modules/@anthropic-ai/claude-agent-sdk-"))).toBe(false);
   });
 });

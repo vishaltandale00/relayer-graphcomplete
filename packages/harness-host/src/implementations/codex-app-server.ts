@@ -1,8 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from "node:child_process";
-import { createRequire } from "node:module";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import { statSync } from "node:fs";
-import { delimiter, dirname, join, win32 } from "node:path";
+import { win32 } from "node:path";
 import {
   answerCodexServerRequest,
   type CodexApprovalBridgeContext,
@@ -18,7 +17,7 @@ export type CodexAppServerSpawn = (
 ) => ChildProcessWithoutNullStreams;
 
 export interface CodexAppServerTurnOptions {
-  readonly codexPathOverride?: string;
+  readonly codexPathOverride: string;
   readonly environment: Readonly<Record<string, string>>;
   readonly savedThreadId?: string;
   readonly threadParams: JsonObject;
@@ -86,16 +85,9 @@ export function forceTerminateCodexProcessTree(
 /** Run one isolated stdio app-server process for one GraphComplete call. */
 export async function runCodexAppServerTurn(options: CodexAppServerTurnOptions): Promise<CodexAppServerTurnResult> {
   const executable = resolveCodexExecutable(options.codexPathOverride);
-  const environment = { ...options.environment };
-  if (executable.pathDirectories.length > 0) {
-    environment.PATH = [
-      ...executable.pathDirectories,
-      ...(environment.PATH ?? "").split(delimiter).filter((entry) => entry !== "" && !executable.pathDirectories.includes(entry)),
-    ].join(delimiter);
-  }
-  const child = (options.spawnProcess ?? spawn)(executable.path, ["app-server", "--listen", "stdio://"], {
+  const child = (options.spawnProcess ?? spawn)(executable, ["app-server", "--listen", "stdio://"], {
     detached: process.platform !== "win32",
-    env: environment,
+    env: { ...options.environment },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const connection = new CodexAppServerConnection(child, options);
@@ -544,55 +536,16 @@ function waitForSpawn(child: ChildProcessWithoutNullStreams): Promise<void> {
   });
 }
 
-function resolveCodexExecutable(override: string | undefined): { readonly path: string; readonly pathDirectories: readonly string[] } {
-  if (override !== undefined) {
-    if (override.trim() === "" || !isFile(override)) throw new Error("Codex executable override is not a file");
-    return { path: override, pathDirectories: [] };
+function resolveCodexExecutable(path: string | undefined): string {
+  if (path === undefined || path.trim() === "") {
+    throw new Error("Codex app-server requires an explicit executable path");
   }
-  const target = codexTarget();
-  const packageName = CODEX_PLATFORM_PACKAGES[target];
-  if (packageName === undefined) throw new Error(`Unsupported Codex target: ${target}`);
-  try {
-    const require = createRequire(import.meta.url);
-    const packageJson = require.resolve(`${packageName}/package.json`);
-    const vendor = join(dirname(packageJson), "vendor", target);
-    const binary = join(vendor, "bin", process.platform === "win32" ? "codex.exe" : "codex");
-    const pathDirectory = join(vendor, "codex-path");
-    if (!isFile(binary)) throw new Error("missing binary");
-    return { path: binary, pathDirectories: isDirectory(pathDirectory) ? [pathDirectory] : [] };
-  } catch (error) {
-    throw new Error(`Unable to locate the pinned Codex 0.147 executable for ${target}`, { cause: error });
-  }
-}
-
-const CODEX_PLATFORM_PACKAGES: Readonly<Record<string, string>> = {
-  "x86_64-unknown-linux-musl": "@openai/codex-linux-x64",
-  "aarch64-unknown-linux-musl": "@openai/codex-linux-arm64",
-  "x86_64-apple-darwin": "@openai/codex-darwin-x64",
-  "aarch64-apple-darwin": "@openai/codex-darwin-arm64",
-  "x86_64-pc-windows-msvc": "@openai/codex-win32-x64",
-  "aarch64-pc-windows-msvc": "@openai/codex-win32-arm64",
-};
-
-function codexTarget(): string {
-  const arch = process.arch === "x64" ? "x86_64" : process.arch === "arm64" ? "aarch64" : undefined;
-  const platform = process.platform === "darwin"
-    ? "apple-darwin"
-    : process.platform === "win32"
-      ? "pc-windows-msvc"
-      : process.platform === "linux"
-        ? "unknown-linux-musl"
-        : undefined;
-  if (arch === undefined || platform === undefined) throw new Error(`Unsupported platform: ${process.platform} (${process.arch})`);
-  return `${arch}-${platform}`;
+  if (!isFile(path)) throw new Error("Codex executable override is not a file");
+  return path;
 }
 
 function isFile(path: string): boolean {
   try { return statSync(path).isFile(); } catch { return false; }
-}
-
-function isDirectory(path: string): boolean {
-  try { return statSync(path).isDirectory(); } catch { return false; }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

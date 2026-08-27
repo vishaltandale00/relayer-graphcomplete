@@ -1,0 +1,225 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { createProviderAdapterRegistry } from "../desktop/main/providers/provider-adapter-contract.mjs";
+import { ProviderDefinitionService } from "../desktop/main/providers/provider-definition-service.mjs";
+import { productionProviderAdapterRegistry } from "../desktop/main/providers/provider-adapter-registry.mjs";
+import { CodexBasicHarness } from "../packages/harness-host/src/implementations/codex-basic.ts";
+import { createNoopHarnessTraceSink } from "../packages/harness-host/src/trace.ts";
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((complete) => { resolve = complete; });
+  return { promise, resolve };
+}
+
+function fixture({ prepareRuntime = async () => ({ runtimeId: "codex" }), discover, credentialSet } = {}) {
+  const order = [];
+  const definitions = [];
+  const create = vi.fn(() => {
+    order.push("create-provider");
+    return {
+      discover: async () => {
+        order.push("discover-models");
+        if (discover) return discover();
+        return { models: [{ visible: true }] };
+      },
+      close: vi.fn(async () => {}),
+    };
+  });
+  const service = new ProviderDefinitionService({
+    registry: createProviderAdapterRegistry([{
+      adapterId: "fake-api",
+      implementationVersion: "1",
+      label: "Fake API",
+      accessContract: "secret@1",
+      defaultEndpoint: "https://example.test/v1",
+      endpointEditableDuringCreation: true,
+      connection: {
+        mode: "secret-fields",
+        fields: [{ id: "api-key", label: "API key", kind: "secret", required: true }],
+      },
+      create,
+    }]),
+    definitionStore: {
+      async load() { return definitions; },
+      async createWithCatalog(candidate) {
+        order.push("commit-provider");
+        definitions.push(candidate);
+      },
+    },
+    credentialStore: {
+      async set() {
+        order.push("commit-credential");
+        await credentialSet?.();
+      },
+      async delete() {},
+    },
+    prepareRuntime: async (...args) => {
+      order.push("ensure-runtime");
+      return prepareRuntime(...args);
+    },
+  });
+  return { service, create, definitions, order };
+}
+
+describe("managed runtime provider Connect boundary", () => {
+  it("carries API provider runtime access through the broker shape into Codex", async () => {
+    let submitted;
+    const adapter = productionProviderAdapterRegistry.create({
+      id: "openai-work", adapterId: "openai-api", label: "OpenAI Work",
+      endpoint: "https://api.openai.test/v1", accessContract: "secret@1", credentialReference: "provider:openai-work",
+      lifecycleState: "active", removedAt: null,
+    }, {
+      fetch: vi.fn(), secrets: { "api-key": "secret" },
+      managedRuntime: { runtimeId: "codex", version: "0.150.1", executable: "/managed/codex" },
+      environment: { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: "/managed/codex" },
+    });
+    const harness = new CodexBasicHarness({
+      threadId: 1, permissionProfileId: "auto", workingDirectory: process.cwd(),
+      permissionBinding: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
+      configuration: {
+        schemaVersion: 1, name: "codex-basic", implementation: "codex.basic", implementationVersion: 1,
+        permissionBindings: { auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true } },
+        settings: {},
+      },
+    }, {
+      runAppServerTurn: async (options) => {
+        submitted = options;
+        options.onThreadId("thread-1");
+        return { threadId: "thread-1", turnId: "turn-1", status: "completed" };
+      },
+    });
+    const inputGraph = { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" };
+    await harness.complete({
+      inputGraph, interactionInput: { interaction: inputGraph, contexts: [] },
+      model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-test" },
+      access: {
+        ...adapter.executionAccess(), contract: "secret@1", providerId: "openai-work",
+        adapterId: "openai-api", adapterImplementationVersion: "1",
+      },
+      graph: { interactionNodeId: 1, acquireCapability: () => ({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }) },
+      approvals: { request: async () => { throw new Error("unused"); } },
+      trace: createNoopHarnessTraceSink(),
+    });
+
+    expect(submitted.codexPathOverride).toBe("/managed/codex");
+    expect(submitted.environment.CODEX_HOME).toBe("/isolated/codex");
+  });
+
+  it("finishes managed runtime preparation before provider authentication or discovery", async () => {
+    const subject = fixture();
+
+    await expect(subject.service.connect({
+      connectionId: "connect-1",
+      harnessId: "codex-basic",
+      adapterId: "fake-api",
+      label: "Work",
+      fields: { "api-key": "secret" },
+    })).resolves.toMatchObject({ status: "connected" });
+
+    expect(subject.order).toEqual([
+      "ensure-runtime",
+      "create-provider",
+      "discover-models",
+      "commit-credential",
+      "commit-provider",
+    ]);
+  });
+
+  it("cancels onboarding without cancelling the installer-owned operation or committing a provider", async () => {
+    const installation = deferred();
+    const subject = fixture({ prepareRuntime: () => installation.promise });
+    const connection = subject.service.connect({
+      connectionId: "connect-cancelled",
+      harnessId: "claude-basic",
+      adapterId: "fake-api",
+      label: "Cancelled",
+      fields: { "api-key": "secret" },
+    });
+    await vi.waitFor(() => expect(subject.order).toEqual(["ensure-runtime"]));
+
+    await expect(subject.service.cancelConnection("connect-cancelled")).resolves.toBe(true);
+    installation.resolve({ runtimeId: "claude" });
+
+    await expect(connection).rejects.toThrow("Provider connection was cancelled");
+    expect(subject.create).not.toHaveBeenCalled();
+    expect(subject.definitions).toEqual([]);
+  });
+
+  it("honors cancellation sent immediately after Connect before its queued work starts", async () => {
+    const installation = deferred();
+    const subject = fixture({ prepareRuntime: () => installation.promise });
+    const connection = subject.service.connect({
+      connectionId: "connect-immediate-cancel",
+      harnessId: "codex-basic",
+      adapterId: "fake-api",
+      label: "Cancelled immediately",
+      fields: { "api-key": "secret" },
+    });
+
+    await expect(subject.service.cancelConnection("connect-immediate-cancel")).resolves.toBe(true);
+    installation.resolve({ runtimeId: "codex" });
+
+    await expect(connection).rejects.toThrow("Provider connection was cancelled");
+    expect(subject.create).not.toHaveBeenCalled();
+  });
+
+  it("does not commit a secret provider when onboarding is cancelled during discovery", async () => {
+    const discovery = deferred();
+    const subject = fixture({ discover: () => discovery.promise });
+    const connection = subject.service.connect({
+      connectionId: "connect-discovery-cancel",
+      harnessId: "codex-basic",
+      adapterId: "fake-api",
+      label: "Cancelled during discovery",
+      fields: { "api-key": "secret" },
+    });
+    await vi.waitFor(() => expect(subject.order).toContain("discover-models"));
+
+    await expect(subject.service.cancelConnection("connect-discovery-cancel")).resolves.toBe(true);
+    discovery.resolve({ models: [{ visible: true }] });
+
+    await expect(connection).rejects.toThrow("Provider connection was cancelled");
+    expect(subject.order).not.toContain("commit-credential");
+    expect(subject.order).not.toContain("commit-provider");
+    expect(subject.definitions).toEqual([]);
+  });
+
+  it("does not report cancellation once the atomic provider commit has started", async () => {
+    const credentialCommit = deferred();
+    const subject = fixture({ credentialSet: () => credentialCommit.promise });
+    const connection = subject.service.connect({
+      connectionId: "connect-commit-race",
+      harnessId: "codex-basic",
+      adapterId: "fake-api",
+      label: "Commit race",
+      fields: { "api-key": "secret" },
+    });
+    await vi.waitFor(() => expect(subject.order).toContain("commit-credential"));
+
+    await expect(subject.service.cancelConnection("connect-commit-race")).resolves.toBe(false);
+    credentialCommit.resolve();
+
+    await expect(connection).resolves.toMatchObject({ status: "connected" });
+    expect(subject.order).toContain("commit-provider");
+  });
+
+  it("does not hold the provider queue while a runtime download is in progress", async () => {
+    const installation = deferred();
+    const subject = fixture({ prepareRuntime: ({ providerDefinition }) => (
+      providerDefinition.id === "slow-connect" ? installation.promise : Promise.resolve()
+    ) });
+    await subject.service.connect({
+      connectionId: "existing", adapterId: "fake-api", label: "Existing", fields: { "api-key": "secret" },
+    });
+    const connecting = subject.service.connect({
+      connectionId: "slow-connect", adapterId: "fake-api", label: "Slow", fields: { "api-key": "secret" },
+    });
+    await vi.waitFor(() => expect(subject.order.filter((item) => item === "ensure-runtime")).toHaveLength(2));
+
+    const lease = await subject.service.acquireExecution("existing");
+    await lease.release();
+    installation.resolve();
+    await expect(connecting).resolves.toMatchObject({ status: "connected" });
+  });
+});

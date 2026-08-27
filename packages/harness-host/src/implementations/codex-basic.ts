@@ -1,4 +1,3 @@
-import type { ApprovalMode, ModelReasoningEffort, SandboxMode, WebSearchMode } from "@openai/codex-sdk";
 import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relayer/graph-client";
 import { createHash } from "node:crypto";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
@@ -8,6 +7,12 @@ import {
   type CodexAppServerSpawn,
   type CodexAppServerTurnOptions,
 } from "./codex-app-server.js";
+import type {
+  CodexApprovalMode,
+  CodexModelReasoningEffort,
+  CodexSandboxMode,
+  CodexWebSearchMode,
+} from "./codex-option-types.js";
 import type {
   Harness,
   HarnessExecutionAccess,
@@ -38,15 +43,16 @@ export interface CodexBasicDependencies {
   readonly clientModuleUrl?: string;
   readonly graphAuthoringLauncherPath?: string;
   readonly codexPathOverride?: string;
+  readonly resolveCodexPath?: () => Promise<string>;
 }
 
 interface CodexBasicConfiguration {
   readonly model?: string;
-  readonly modelReasoningEffort?: ModelReasoningEffort;
-  readonly sandboxMode?: SandboxMode;
-  readonly approvalPolicy?: ApprovalMode;
+  readonly modelReasoningEffort?: CodexModelReasoningEffort;
+  readonly sandboxMode?: CodexSandboxMode;
+  readonly approvalPolicy?: CodexApprovalMode;
   readonly networkAccessEnabled?: boolean;
-  readonly webSearchMode?: WebSearchMode;
+  readonly webSearchMode?: CodexWebSearchMode;
   readonly skipGitRepoCheck?: boolean;
   readonly additionalDirectories?: readonly string[];
 }
@@ -58,8 +64,8 @@ interface ResolvedCodexConfiguration {
 }
 
 interface ResolvedCodexPermission {
-  readonly sandboxMode: SandboxMode;
-  readonly approvalPolicy: ApprovalMode;
+  readonly sandboxMode: CodexSandboxMode;
+  readonly approvalPolicy: CodexApprovalMode;
   readonly approvalsReviewer?: "user" | "auto_review";
   readonly networkAccessEnabled?: boolean;
 }
@@ -109,11 +115,11 @@ export class CodexBasicHarness implements Harness {
     const traceState: CodexTraceState = { collaborationSpans: new Map() };
     const forceShutdown = new AbortController();
     this.activeForceShutdowns.add(forceShutdown);
-    const codexPathOverride = this.codexExecutable(context.access);
     try {
+      const codexPathOverride = await this.codexExecutable(context.access);
       await run({
         environment,
-        ...(codexPathOverride === undefined ? {} : { codexPathOverride }),
+        codexPathOverride,
         ...(this.codexThreadId === undefined ? {} : { savedThreadId: this.codexThreadId }),
         threadParams: this.threadParams(model),
         turnParams: this.turnParams(sandboxPolicy, model),
@@ -174,6 +180,12 @@ export class CodexBasicHarness implements Harness {
       }
       const apiKey = access.fields["api-key"];
       if (!apiKey) throw new Error("codex.basic requires the provider API key");
+      if (access.runtime && access.runtime.runtimeId !== "codex") {
+        throw new Error("codex.basic cannot consume a non-Codex managed runtime");
+      }
+      Object.assign(environment, Object.fromEntries(Object.entries(access.runtime?.environment ?? {}).filter(([key]) => (
+        CODEX_MANAGED_RUNTIME_ENVIRONMENT.has(key)
+      ))));
       environment.OPENAI_API_KEY = apiKey;
       environment.OPENAI_BASE_URL = access.endpoint;
     }
@@ -187,8 +199,19 @@ export class CodexBasicHarness implements Harness {
     return environment;
   }
 
-  private codexExecutable(access: HarnessExecutionAccess | undefined): string | undefined {
-    return access?.kind === "managed-runtime" ? access.executable ?? this.dependencies.codexPathOverride : this.dependencies.codexPathOverride;
+  private async codexExecutable(access: HarnessExecutionAccess | undefined): Promise<string> {
+    let executable = access?.kind === "managed-runtime"
+      ? access.executable ?? this.dependencies.codexPathOverride
+      : access?.kind === "secret"
+        ? access.runtime?.executable ?? this.dependencies.codexPathOverride
+        : this.dependencies.codexPathOverride;
+    if ((executable === undefined || executable.trim() === "") && this.dependencies.resolveCodexPath) {
+      executable = await this.dependencies.resolveCodexPath();
+    }
+    if (executable === undefined || executable.trim() === "") {
+      throw new Error("codex.basic requires an explicit managed Codex executable");
+    }
+    return executable;
   }
 
   private selectedModel(context: HarnessRunContext): string | undefined {

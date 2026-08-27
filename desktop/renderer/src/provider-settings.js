@@ -135,9 +135,16 @@ async function connect() {
   readValues();
   const errors = providerConnectionErrors(selectedDescriptor, values, status.definitions);
   if (Object.keys(errors).length) return renderConnectionForm(selectedDescriptor.adapterId, true);
-  dialogStatus("Connecting and discovering models…");
+  dialogStatus(`Preparing ${selectedDescriptor.label} runtime and connecting…`);
+  const connectionId = crypto.randomUUID().toLowerCase();
+  pendingConnectionId = connectionId;
   try {
-    let result = await desktop.providers.connect(providerCreationPayload(selectedDescriptor, values));
+    let result = await desktop.providers.connect(providerCreationPayload(
+      selectedDescriptor,
+      values,
+      { connectionId },
+    ));
+    if (pendingConnectionId !== connectionId) return;
     pendingConnectionId = result.status === "pending" ? result.connectionId : null;
     while (result.status === "pending" && result.connectionId === pendingConnectionId) {
       dialogStatus("Complete sign-in in your browser. Relayer will continue automatically.");
@@ -153,6 +160,8 @@ async function connect() {
     refreshNewThreadModelPicker();
     setStatus("Provider connected.", "success");
   } catch (error) {
+    if (pendingConnectionId !== connectionId && error.message === "Provider connection was cancelled.") return;
+    pendingConnectionId = null;
     dialogStatus(error.message, "error");
   }
 }

@@ -16,7 +16,6 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@openai/codex-sdk": "^0.147.0",
     "@relayer/graph-client": "*",
     "yaml": "2.9.0"
   }

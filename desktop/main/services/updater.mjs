@@ -2,8 +2,16 @@ export function resolveUpdateChannel(savedChannel) {
   return savedChannel === "preview" ? "preview" : "stable";
 }
 
-export function createDesktopUpdater({ autoUpdater, app, emit, updateBaseUrl }) {
+export function createDesktopUpdater({
+  autoUpdater,
+  app,
+  emit,
+  updateBaseUrl,
+  prefetchRuntimeUpdate = async () => {},
+  onRuntimePrefetchFailure = () => {},
+}) {
   let channel = "stable";
+  let availableInfo = null;
   let displayedDownloadPercent = 0;
   let state = { phase: app.isPackaged ? "idle" : "development", channel, version: app.getVersion() };
   const publish = (patch) => {
@@ -31,10 +39,12 @@ export function createDesktopUpdater({ autoUpdater, app, emit, updateBaseUrl }) 
       publish({ phase: "checking", percent: null, error: null });
     });
     autoUpdater.on("update-available", (info) => {
+      availableInfo = info;
       resetDownloadProgress();
       publish({ phase: "available", availableVersion: info.version, percent: null, error: null });
     });
     autoUpdater.on("update-not-available", () => {
+      availableInfo = null;
       resetDownloadProgress();
       publish({ phase: "idle", availableVersion: null, percent: null, error: null });
     });
@@ -69,6 +79,7 @@ export function createDesktopUpdater({ autoUpdater, app, emit, updateBaseUrl }) 
         throw new Error("Finish the current update before changing channels.");
       }
       channel = next;
+      availableInfo = null;
       configureFeed();
       resetDownloadProgress();
       return publish({
@@ -91,6 +102,9 @@ export function createDesktopUpdater({ autoUpdater, app, emit, updateBaseUrl }) 
     async download() {
       if (!app.isPackaged) throw new Error("Updates are available only in packaged builds.");
       resetDownloadProgress();
+      if (availableInfo !== null) {
+        void Promise.resolve(prefetchRuntimeUpdate(availableInfo)).catch(onRuntimePrefetchFailure);
+      }
       await autoUpdater.downloadUpdate();
       return state;
     },
