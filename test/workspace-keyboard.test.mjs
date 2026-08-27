@@ -6,6 +6,7 @@ import {
   COMPOSER_MIN_HEIGHT,
   CONTEXT_EDITOR_MAX_HEIGHT,
   CONTEXT_EDITOR_MIN_HEIGHT,
+  applyComposerCapabilities,
   applyContextEditor,
   bindComposerKeydown,
   composerDisabledForState,
@@ -37,6 +38,23 @@ import {
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace keyboard behavior", () => {
+  it("keeps composer-owned review elements mounted while disabling composition", () => {
+    const element = () => ({ classList: { toggle: vi.fn() } });
+    const composer = element();
+    const prompt = element();
+    const send = element();
+    const readOnlyMessage = element();
+
+    applyComposerCapabilities({ composer, prompt, send, readOnlyMessage }, false);
+
+    expect(composer.classList.toggle).toHaveBeenCalledWith("disabled-composer", true);
+    expect(prompt.classList.toggle).toHaveBeenCalledWith("hidden", true);
+    expect(send.classList.toggle).toHaveBeenCalledWith("hidden", true);
+    expect(readOnlyMessage.classList.toggle).toHaveBeenCalledWith("hidden", false);
+    expect(productWorkspaceMarkup()).toContain('id="composerRetryMessage"');
+    expect(productWorkspaceMarkup()).toContain('id="readOnlyComposerMessage"');
+  });
+
   it("navigates turns only for unmodified arrows while the graph owns focus", () => {
     expect(graphTurnNavigationDelta({ key: "ArrowLeft" }, true)).toBe(-1);
     expect(graphTurnNavigationDelta({ key: "ArrowRight" }, true)).toBe(1);
