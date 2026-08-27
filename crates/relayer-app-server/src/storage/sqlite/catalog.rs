@@ -2402,6 +2402,26 @@ async fn retire_absent_product_codex_high(
     )
     .execute(&mut *connection)
     .await?;
+    // Identified sends and authoritative invoke results have durable replay identities. An
+    // interrupted preparation may therefore be rebound to the same graph interaction under the
+    // replacement product harness. Clear only that unfinished mutable binding; accepted rows and
+    // immutable attempt receipts continue to describe the harness that actually executed.
+    sqlx::query(
+        "UPDATE interactions
+         SET graph_node_id=NULL,completion_status='submitted',
+             harness_configuration_name='codex-basic',harness_configuration_digest=NULL,
+             effective_execution_digest=NULL,effective_permission_receipt_json=NULL,
+             completion_output_json=NULL,completion_error=NULL
+         WHERE harness_configuration_name='codex-basic-high'
+           AND completion_status IN ('not_started','running','submitted','waiting_for_approval')
+           AND graph_node_id IS NOT NULL
+           AND (input_identity IS NOT NULL OR EXISTS (
+               SELECT 1 FROM action_invocations
+               WHERE result_interaction_id=interactions.id AND authoritative=1
+           ))",
+    )
+    .execute(&mut *connection)
+    .await?;
     sqlx::query(
         "UPDATE product_model_preferences SET default_harness_configuration_name='codex-basic' WHERE singleton=1 AND default_harness_configuration_name='codex-basic-high'",
     )
@@ -2466,6 +2486,16 @@ mod provider_definition_tests {
             .execute(&store.pool).await.unwrap();
         sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name) VALUES (1,1,1,'Historical','1','accepted','codex-basic-high')")
             .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,effective_execution_digest,effective_permission_receipt_json,input_identity,input_digest) VALUES (2,1,2,'Recoverable','1',22,'running','codex-basic-high','sha256:high','sha256:execution','{}','send-2','sha256:input')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,effect_boundary) VALUES (2,1,'1',1,1,'codex-basic-high',1,'sha256:high','codex','codex-subscription',1,'test','managed-runtime@1','running','unknown')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name) VALUES (3,1,3,'Source','1',33,'accepted','codex-basic-high')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,effective_execution_digest,effective_permission_receipt_json) VALUES (4,1,4,'Leased invoke','1',44,'waiting_for_approval','codex-basic-high','sha256:high','sha256:execution','{}')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative) VALUES (3,41,4,'1',1,1)")
+            .execute(&store.pool).await.unwrap();
 
         store
             .initialize_model_catalog("codex-basic", &[runtime_harness("codex-basic")])
@@ -2494,11 +2524,33 @@ mod provider_definition_tests {
                 .fetch_one(&store.pool)
                 .await
                 .unwrap();
+        type RecoverableBinding = (Option<i64>, String, String, Option<String>, Option<String>);
+        let recoverable_bindings: Vec<RecoverableBinding> = sqlx::query_as("SELECT graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,effective_execution_digest FROM interactions WHERE id IN (2,4) ORDER BY id")
+                .fetch_all(&store.pool)
+                .await
+                .unwrap();
+        let attempt_history: (String, String) = sqlx::query_as(
+            "SELECT harness_configuration_name,harness_configuration_digest FROM interaction_attempts WHERE interaction_id=2",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
 
         assert_eq!(thread_harness, "codex-basic");
         assert_eq!(default_harness, "codex-basic");
         assert_eq!(retired, (false, false, Some("harness_retired".into())));
         assert_eq!(historical_harness, "codex-basic-high");
+        assert_eq!(
+            recoverable_bindings,
+            vec![
+                (None, "submitted".into(), "codex-basic".into(), None, None),
+                (None, "submitted".into(), "codex-basic".into(), None, None),
+            ]
+        );
+        assert_eq!(
+            attempt_history,
+            ("codex-basic-high".into(), "sha256:high".into())
+        );
         drop(store);
         let _ = std::fs::remove_file(path);
     }

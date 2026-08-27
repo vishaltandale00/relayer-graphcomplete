@@ -4714,7 +4714,10 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
     })
     .to_string();
     let mut interaction_ids = Vec::new();
-    for (sequence, status) in [(2, "running"), (3, "waiting_for_approval")] {
+    for (sequence, status, graph_node_id) in [
+        (2, "running", Some(902_i64)),
+        (3, "waiting_for_approval", None),
+    ] {
         let result = sqlx::query(
             "INSERT INTO interactions(
                 thread_id,sequence,text,created_at,graph_node_id,completion_status,
@@ -4727,7 +4730,7 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
         .bind(sequence)
         .bind(format!("Recover {status}"))
         .bind(&created_at)
-        .bind(Option::<i64>::None)
+        .bind(graph_node_id)
         .bind(status)
         .bind(&receipt)
         .bind(format!("send-restart-{sequence}"))
