@@ -24,6 +24,13 @@ import type {
 
 export const CODEX_BASIC_KEY = "codex.basic";
 
+const GRAPH_PRESENTATION_GUIDANCE = `Graph presentation guidance:
+- Each layer should explain its scope as a coherent whole. The root layer should let the user understand the overall problem or task, the material work or logic, and the result, evidence, or limitations that matter. A child layer should do the same for the narrower scope it owns.
+- Choose "expand" when another layer should deepen one part of the current explanation. Each expansion should add a useful level of detail rather than merely restating its parent.
+- Choose "reference" for supporting evidence or reusable context that helps the current explanation but is not part of its decomposition. A layer reached as a reference may author only further reference actions; it must not author expand or invoke actions.
+- Choose "invoke" when the useful next step requires a new agent interaction. Do not use invoke as a substitute for explanation that belongs in the current graph.
+- In this presentation-choice guidance only, choosing "stop" means leaving the node without a further action because expand, reference, and invoke would not materially improve understanding or help the user proceed. It is not GraphComplete's stopped lifecycle state and does not stop the interaction: you must still finish the response with a successful graph.submit call.`;
+
 const SAFE_SUBPROCESS_ENVIRONMENT = new Set([
   "PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC",
   "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SHELL",
@@ -290,7 +297,10 @@ ${RELAYER_ICON_NAMES.join(", ")}
 Relayer graph affordances:
 - A node can be a complete explanation in the current layer.
 - A node can open a more detailed child layer. Submit the stable-keyed child LayerObject, then attach it with await graph.addAction(node, { kind: "navigate", relation: "expand", sourceLayer: layer, label: "Useful label", target: childLayer, variant: "pill", clientKey: "node-detail" }).
+- A node can open supporting evidence or reusable context. Submit the stable-keyed target LayerObject, then attach it with await graph.addAction(node, { kind: "navigate", relation: "reference", sourceLayer: layer, label: "View evidence", target: evidenceLayer, variant: "pill", clientKey: "node-evidence" }).
 - A node can offer a useful follow-up interaction with await graph.addAction(node, { kind: "invoke", sourceLayer: layer, label: "Useful label", interactionText: "A useful follow-up", variant: "chip", clientKey: "node-follow-up" }).
+
+${GRAPH_PRESENTATION_GUIDANCE}
 
 Every action uses Relayer's renderer-independent presentation grammar. You author its order, kind and payload, label, optional supported icon, and one of these variants:
 - "chip": the most compact inline action;
@@ -348,6 +358,8 @@ The current interaction may carry an invoke lease created by the product. Before
 Navigation has two meanings:
 - "expand" continues the explanation with a more detailed layer. Expansion must not point back to an expansion ancestor.
 - "reference" opens supporting evidence or context. References may reuse an accepted layer, may point to other reference layers, and may revisit a layer.
+
+${GRAPH_PRESENTATION_GUIDANCE}
 
 The interaction node must have one root navigate action with relation: "expand" and no sourceLayer. Every action on a response node must include sourceLayer: the LayerObject in which you are authoring that action. Expansion layers may author expand, reference, or invoke actions. A layer reached as a reference may author only reference actions. Do not create both expand and reference actions to the same new target layer.
 
