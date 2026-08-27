@@ -826,6 +826,8 @@ function codexAccess() {
     providerId: "codex",
     adapterId: "codex-subscription",
     adapterImplementationVersion: "1",
+    runtimeId: "codex",
+    version: "0.147.0",
     executable: "/managed/codex",
     environment: {},
   };

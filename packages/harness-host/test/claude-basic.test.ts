@@ -61,7 +61,7 @@ function managedAccess(overrides = {}): HarnessExecutionAccess {
     adapterId: "claude-subscription",
     adapterImplementationVersion: "1",
     runtimeId: "claude-code",
-    runtimeVersion: "0.3.247",
+    version: "0.3.247",
     executable: "/managed/claude",
     moduleUrl: "file:///managed/claude-agent-sdk/sdk.mjs",
     environment: { CLAUDE_CONFIG_DIR: "/isolated" },

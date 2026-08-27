@@ -228,18 +228,22 @@ export type HarnessExecutionAccess =
       readonly fields: Readonly<Record<string, string>>;
       readonly runtime?: HarnessManagedRuntimeAccess;
     }
-  | {
+  | ({
       readonly kind: "managed-runtime";
       readonly contract: "managed-runtime@1";
       readonly providerId: string;
       readonly adapterId: string;
       readonly adapterImplementationVersion: string;
-      readonly executable?: string;
-      readonly moduleUrl?: string;
-      readonly runtimeId?: string;
-      readonly runtimeVersion?: string;
-      readonly environment: Readonly<Record<string, string>>;
-    };
+    } & (
+      | HarnessManagedRuntimeAccess
+      | {
+          readonly runtimeId?: never;
+          readonly version?: never;
+          readonly executable?: never;
+          readonly moduleUrl?: never;
+          readonly environment: Readonly<Record<string, string>>;
+        }
+    ));
 
 export interface HarnessExecutionAccessLease {
   readonly access: HarnessExecutionAccess;
