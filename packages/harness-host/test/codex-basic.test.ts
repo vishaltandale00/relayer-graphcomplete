@@ -72,6 +72,12 @@ describe("CodexBasicHarness", () => {
 
     expect(harness.state()).toEqual({ codexThreadId: "codex-thread-after-start" });
     expect(submitted?.prompt).toContain("Relayer graph affordances:");
+    expect(submitted?.prompt).toContain("Each layer should explain its scope as a coherent whole");
+    expect(submitted?.prompt).toContain('Choose "expand" when another layer should deepen one part');
+    expect(submitted?.prompt).toContain('Choose "reference" for supporting evidence or reusable context');
+    expect(submitted?.prompt).toContain('Choose "invoke" when the useful next step requires a new agent interaction');
+    expect(submitted?.prompt).toContain('Choosing "stop" means authoring no further action on that node');
+    expect(submitted?.prompt).toContain("It does not stop the interaction");
     expect(submitted?.prompt).toContain("pass the program through standard input");
     expect(submitted?.prompt).toContain("never place authored graph code in a --eval argument");
     expect(submitted?.prompt).toContain("do not create a script in either the project checkout or a temporary directory");
@@ -238,6 +244,8 @@ describe("CodexBasicHarness", () => {
 
     expect(submittedPrompt).toContain('"expand" continues the explanation');
     expect(submittedPrompt).toContain('"reference" opens supporting evidence');
+    expect(submittedPrompt).toContain("Each layer should explain its scope as a coherent whole");
+    expect(submittedPrompt).toContain('Choosing "stop" means authoring no further action on that node');
     expect(submittedPrompt).toContain("A flat answer is valid");
     expect(submittedPrompt).toContain("Author in whatever order fits the task");
     expect(submittedPrompt).toContain("final graph call must be await graph.submit(1)");
