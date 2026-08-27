@@ -53,7 +53,10 @@ impl SqliteProductStore {
                     "This draft identity is already bound to a different node occurrence.",
                 ));
             }
-            if expected_revision == Some(existing.revision - 1) && existing.text == draft.text {
+            let lost_response_replay = existing.text == draft.text
+                && (expected_revision == Some(existing.revision - 1)
+                    || (expected_revision.is_none() && existing.revision == 1));
+            if lost_response_replay {
                 tx.commit().await?;
                 return Ok(existing);
             }

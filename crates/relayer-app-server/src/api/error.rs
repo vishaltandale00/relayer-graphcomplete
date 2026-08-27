@@ -2,7 +2,9 @@ use super::types::ProjectResponse;
 use crate::conversation_export_service::ConversationExportBuildError;
 use crate::conversation_import_service::ConversationImportError;
 use crate::permissions::PermissionError;
-use crate::product::{CatalogError, InvalidProductId, ProductError};
+use crate::product::{
+    CatalogError, InvalidProductId, NodeContextDraftConfirmationError, ProductError,
+};
 use crate::runtime::RuntimeError;
 use crate::storage::StorageError;
 use axum::{
@@ -115,6 +117,18 @@ impl From<RuntimeError> for ApiError {
             RuntimeError::Remote { status: 404, body } => Self(StatusCode::NOT_FOUND, body),
             RuntimeError::Remote { status: 409, body } => Self(StatusCode::CONFLICT, body),
             other => Self::internal(&other.to_string()),
+        }
+    }
+}
+
+impl From<NodeContextDraftConfirmationError> for ApiError {
+    fn from(error: NodeContextDraftConfirmationError) -> Self {
+        match error {
+            NodeContextDraftConfirmationError::Product(error) => error.into(),
+            NodeContextDraftConfirmationError::TargetUnavailable => Self::conflict(
+                "context_draft_target_unavailable",
+                "The saved node occurrence is no longer available. The draft was preserved.",
+            ),
         }
     }
 }

@@ -167,18 +167,41 @@ export function createNodeContextDraftController({
     async confirm(threadId, nodeId) {
       const draft = controller.draftForNode(threadId, nodeId);
       if (!draft) return null;
+      if (draft.confirming) return null;
       if (draft.status !== "saved") await controller.flush(threadId, nodeId);
       const current = controller.draftForNode(threadId, nodeId);
       if (!current || current.status !== "saved" || current.revision == null) return null;
-      const confirmation = await api.confirm(threadId, current);
-      threadDrafts(threadId).delete(nodeKey(nodeId));
+      const confirmationPromise = api.confirm(threadId, current);
+      current.confirming = confirmationPromise;
       changed();
-      return confirmation;
+      try {
+        const confirmation = await confirmationPromise;
+        threadDrafts(threadId).delete(nodeKey(nodeId));
+        changed();
+        return confirmation;
+      } catch (error) {
+        const unresolved = controller.draftForNode(threadId, nodeId);
+        if (unresolved?.confirming === confirmationPromise) unresolved.confirming = null;
+        changed();
+        throw error;
+      }
     },
     async discard(threadId, nodeId) {
-      const draft = controller.draftForNode(threadId, nodeId);
+      let draft = controller.draftForNode(threadId, nodeId);
       if (!draft) return false;
       if (draft.timer != null) cancel(draft.timer);
+      draft.timer = null;
+      if (draft.inFlight) await draft.inFlight.catch(() => null);
+      draft = controller.draftForNode(threadId, nodeId);
+      if (!draft) return true;
+      if (draft?.revision == null && draft?.status === "error") {
+        await controller.flush(threadId, nodeId);
+        draft = controller.draftForNode(threadId, nodeId);
+      }
+      if (!draft) return true;
+      if (draft?.revision == null && draft?.status === "error") {
+        throw new Error("The saved draft state is uncertain. Retry discard when persistence recovers.");
+      }
       if (draft.revision != null) await api.discard(threadId, draft);
       threadDrafts(threadId).delete(nodeKey(nodeId));
       changed();

@@ -1,5 +1,6 @@
 mod annotations;
 mod catalog;
+mod context_drafts;
 mod execution;
 mod ids;
 mod model_policy;
@@ -60,6 +61,9 @@ pub(crate) use catalog::ValidateModelSelectionCommand;
 pub(crate) use catalog::validate_family;
 pub(crate) use catalog::validate_harness_model_rules;
 pub(crate) use catalog::validate_stable_id;
+pub(crate) use context_drafts::{
+    NodeContextDraftConfirmationError, NodeContextDraftConfirmationService,
+};
 pub(crate) use execution::{
     InteractionExecutionService, RECONCILIATION_PENDING_PREFIX, record_background_failure,
     validate_decision_resolution,

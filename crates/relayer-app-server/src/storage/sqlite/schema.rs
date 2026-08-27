@@ -339,6 +339,20 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "annotation_revisions", ANNOTATION_REVISION_COLUMNS).await?;
     validate_index(pool, "projects", &["path"], true).await?;
     validate_index(pool, "interactions", &["thread_id", "sequence"], true).await?;
+    validate_index(
+        pool,
+        "node_context_drafts",
+        &["thread_id", "target_node_id"],
+        true,
+    )
+    .await?;
+    validate_index(
+        pool,
+        "node_context_drafts",
+        &["thread_id", "created_at", "id"],
+        false,
+    )
+    .await?;
     validate_index(pool, "threads", &["conversation_import_id"], false).await?;
     validate_index(
         pool,
@@ -526,6 +540,24 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     )
     .await?;
     validate_foreign_key(pool, "annotations", "thread_id", "threads", "id", "CASCADE").await?;
+    validate_foreign_key(
+        pool,
+        "node_context_drafts",
+        "thread_id",
+        "threads",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "node_context_draft_resolutions",
+        "thread_id",
+        "threads",
+        "id",
+        "CASCADE",
+    )
+    .await?;
     validate_foreign_key(
         pool,
         "annotation_revisions",
@@ -870,6 +902,32 @@ fn incompatible(message: &str) -> StorageError {
 #[cfg(test)]
 mod tests {
     use super::super::SqliteProductStore;
+
+    #[tokio::test]
+    async fn missing_node_context_draft_order_index_fails_current_schema_open() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-malformed-context-draft-schema-{}-{}.sqlite3",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        sqlx::query("DROP INDEX node_context_drafts_thread_order")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        store.pool.close().await;
+        let error = SqliteProductStore::open(&path).await.err().unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains("table node_context_drafts is missing its required non-unique index"),
+            "{error}"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[tokio::test]
     async fn malformed_active_family_name_index_fails_current_schema_open() {

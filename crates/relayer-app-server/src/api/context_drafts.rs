@@ -148,56 +148,12 @@ pub(super) async fn confirm(
 ) -> Result<Json<NodeContextDraftConfirmationResponse>, ApiError> {
     authorize_write(&state, &headers)?;
     let thread_id = ThreadId::try_from(thread_id)?;
-    if let Some(confirmation) = state
-        .product
-        .node_context_draft_confirmation(thread_id, &draft_id, query.expected_revision)
-        .await?
-    {
-        return Ok(Json(confirmation.into()));
-    }
-    let draft = state
-        .product
-        .node_context_draft(thread_id, &draft_id)
-        .await?;
-    if draft.text.trim().is_empty() {
-        return Err(ApiError::invalid(
-            "An annotation is required before this draft can be confirmed.",
-        ));
-    }
-    let source = state
-        .product
-        .get_interaction_by_graph_node_id(draft.target.source_interaction_node_id)
-        .await
-        .map_err(|_| unavailable_target())?;
-    if source.thread_id != thread_id || source.completion_status != "accepted" {
-        return Err(unavailable_target());
-    }
-    let runtime = state.runtime.as_ref().ok_or_else(unavailable_target)?;
-    let layer: relayer_graph_core::ResolvedLayer = runtime
-        .get_layer(
-            draft.target.source_interaction_node_id,
-            draft.target.source_layer_id,
-        )
-        .await
-        .map_err(|_| unavailable_target())
-        .and_then(|value| serde_json::from_value(value).map_err(|_| unavailable_target()))?;
-    let current_target = layer
-        .nodes
-        .into_iter()
-        .find(|node| {
-            node.id.value() == draft.target.node_id
-                && node.state == relayer_graph_core::RecordState::Accepted
-        })
-        .map(relayer_graph_core::InteractionInputNode::from);
-    if layer.layer.id.value() != draft.target.source_layer_id
-        || layer.layer.state != relayer_graph_core::RecordState::Accepted
-        || current_target.as_ref() != Some(&draft.target_node)
-    {
-        return Err(unavailable_target());
-    }
-    let confirmation = state
-        .product
-        .confirm_node_context_draft(thread_id, &draft_id, query.expected_revision)
+    let service = state
+        .context_draft_confirmation
+        .as_ref()
+        .ok_or_else(unavailable_target)?;
+    let confirmation = service
+        .confirm(thread_id, &draft_id, query.expected_revision)
         .await?;
     Ok(Json(confirmation.into()))
 }

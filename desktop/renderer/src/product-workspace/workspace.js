@@ -536,6 +536,21 @@ export function contextEditorPresentation(editor, stagingDisabled = false) {
   };
 }
 
+export function contextDraftStatusPresentation(draft) {
+  const status = draft?.status || "unsaved";
+  return {
+    className: `composer-context-draft-status status-${status}`,
+    text: status === "error"
+      ? `Not saved: ${draft.error}`
+      : ({ saving: "Saving…", saved: "Saved", unsaved: "Not saved yet" }[status]
+        || "Not saved yet"),
+  };
+}
+
+export function contextConfirmationDestination(currentThreadId, confirmingThreadId) {
+  return String(currentThreadId) === String(confirmingThreadId) ? "current" : "deferred";
+}
+
 export function applyContextEditor(contexts, editor, node, target) {
   if (!contextEditorCanConfirm(editor)) return contexts;
   const next = contexts.map((context) => ({ ...context, annotations: [...context.annotations] }));
@@ -846,6 +861,7 @@ export function createProductWorkspace({
     })
     : null;
   const loadedContextDraftThreads = new Set();
+  const deferredContextConfirmations = new Map();
 
   const $ = (selector) => root.querySelector(selector);
   const $$ = (selector) => [...root.querySelectorAll(selector)];
@@ -1603,6 +1619,15 @@ export function createProductWorkspace({
     renderComposerContexts();
     $("#contextAnnotationEditor")?.focus();
   };
+  const applyConfirmedContextDraft = (confirmation) => {
+    composerContexts = applyContextEditor(
+      composerContexts,
+      { attaching: false, annotationIndex: null, value: confirmation.annotation },
+      confirmation.targetNode,
+      confirmation.target,
+    );
+    openComposerContextNodeId = confirmation.target.nodeId;
+  };
   function renderContextDraftStatus() {
     if (!contextEditor?.durable) return;
     const status = $(".composer-context-draft-status");
@@ -1616,11 +1641,9 @@ export function createProductWorkspace({
       const confirm = textarea.parentElement?.querySelector('[aria-label="Confirm annotation"]');
       if (confirm) confirm.disabled = !String(draft.text).trim() || contextStagingDisabled();
     }
-    status.className = `composer-context-draft-status status-${draft?.status || "unsaved"}`;
-    status.textContent = draft?.status === "error"
-      ? `Not saved: ${draft.error}`
-      : ({ saving: "Saving…", saved: "Saved", unsaved: "Not saved yet" }[draft?.status]
-        || "Not saved yet");
+    const presentation = contextDraftStatusPresentation(draft);
+    status.className = presentation.className;
+    status.textContent = presentation.text;
   }
   function renderComposerContexts() {
     const tray = $("#composerContextTray");
@@ -1695,24 +1718,28 @@ export function createProductWorkspace({
       confirm.onclick = async () => {
         if (contextStagingDisabled()) return;
         if (contextEditor.durable) {
+          const confirmingThreadId = String(getThread()?.id);
+          confirm.disabled = true;
           try {
             const confirmation = await contextDraftController.confirm(
-              getThread()?.id,
+              confirmingThreadId,
               node.id,
             );
             if (!confirmation) {
               renderComposerContexts();
               return;
             }
-            composerContexts = applyContextEditor(
-              composerContexts,
-              { ...contextEditor, value: confirmation.annotation },
-              confirmation.targetNode,
-              confirmation.target,
-            );
-            openComposerContextNodeId = node.id;
-            contextEditor = null;
-            renderComposerContexts();
+            if (contextConfirmationDestination(getThread()?.id, confirmingThreadId) === "current") {
+              applyConfirmedContextDraft(confirmation);
+              contextEditor = null;
+              renderComposerContexts();
+            } else {
+              const pending = deferredContextConfirmations.get(confirmingThreadId) || [];
+              if (!pending.some((item) => item.draftId === confirmation.draftId)) {
+                pending.push(confirmation);
+              }
+              deferredContextConfirmations.set(confirmingThreadId, pending);
+            }
           } catch (error) {
             toast(error.message);
             renderComposerContexts();
@@ -1755,11 +1782,10 @@ export function createProductWorkspace({
       if (contextEditor.durable) {
         const draft = contextDraftController.draftForNode(getThread()?.id, node.id);
         const status = graphDocument.createElement("small");
-        status.className = `composer-context-draft-status status-${draft?.status || "unsaved"}`;
+        const presentation = contextDraftStatusPresentation(draft);
+        status.className = presentation.className;
         status.setAttribute("aria-live", "polite");
-        status.textContent = draft?.status === "error"
-          ? `Not saved: ${draft.error}`
-          : ({ saving: "Saving…", saved: "Saved", unsaved: "Not saved yet" }[draft?.status] || "Not saved yet");
+        status.textContent = presentation.text;
         body.append(status);
       }
       return body;
@@ -2274,6 +2300,11 @@ export function createProductWorkspace({
       openComposerContextNodeId = null;
     }
     renderedThreadId = threadId;
+    const deferred = deferredContextConfirmations.get(threadId) || [];
+    if (deferred.length) {
+      deferredContextConfirmations.delete(threadId);
+      deferred.forEach(applyConfirmedContextDraft);
+    }
     if (annotationSubject?.anchor.kind !== "thread") {
       const interactionId = currentInteraction(state, thread)?.id;
       const layerId = currentLayerId(state, thread);

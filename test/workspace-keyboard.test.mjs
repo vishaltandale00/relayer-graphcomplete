@@ -22,6 +22,8 @@ import {
   contextDetachNeedsConfirmation,
   contextEditorCanConfirm,
   contextEditorPresentation,
+  contextDraftStatusPresentation,
+  contextConfirmationDestination,
   contextStagingDisabledFor,
   createComposerDraftScopeState,
   graphTurnNavigationDelta,
@@ -39,6 +41,18 @@ import {
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace keyboard behavior", () => {
+  it("never presents a failed context-draft save as saved", () => {
+    expect(contextDraftStatusPresentation({ status: "saved" }).text).toBe("Saved");
+    expect(contextDraftStatusPresentation({ status: "error", error: "disk full" })).toEqual({
+      className: "composer-context-draft-status status-error",
+      text: "Not saved: disk full",
+    });
+  });
+
+  it("defers a context confirmation that resolves after a thread switch", () => {
+    expect(contextConfirmationDestination("thread-b", "thread-a")).toBe("deferred");
+    expect(contextConfirmationDestination("thread-a", "thread-a")).toBe("current");
+  });
   it("keeps composer-owned review elements mounted while disabling composition", () => {
     const element = () => ({ classList: { toggle: vi.fn() } });
     const composer = element();

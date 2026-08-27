@@ -13,7 +13,7 @@ mod types;
 use crate::{approval::ApprovalDecision, runtime::RuntimeClient};
 use crate::{
     permissions::PermissionCatalog,
-    product::{InteractionExecutionService, ProductService},
+    product::{InteractionExecutionService, NodeContextDraftConfirmationService, ProductService},
 };
 use auth::DesktopSessionAuthenticator;
 use axum::{Router, routing::get};
@@ -39,6 +39,7 @@ pub(crate) struct ApiState {
     pub(crate) authenticator: DesktopSessionAuthenticator,
     pub(crate) runtime: Option<RuntimeClient>,
     pub(crate) interaction_execution: Option<InteractionExecutionService>,
+    pub(crate) context_draft_confirmation: Option<NodeContextDraftConfirmationService>,
     pub(crate) permission_catalog: PermissionCatalog,
     pub(crate) default_harness_configuration: String,
     pub(crate) allow_harness_override: bool,
@@ -81,11 +82,15 @@ pub(crate) fn router(
             runtime.execution_lease_reconciler.clone(),
         )
     });
+    let context_draft_confirmation = runtime.runtime.as_ref().map(|runtime_client| {
+        NodeContextDraftConfirmationService::new(product.clone(), runtime_client.clone())
+    });
     let state = ApiState {
         product,
         authenticator: DesktopSessionAuthenticator::new(control_token, read_only_control_token),
         runtime: runtime.runtime,
         interaction_execution,
+        context_draft_confirmation,
         permission_catalog: runtime.permission_catalog,
         default_harness_configuration: runtime.default_harness_configuration,
         allow_harness_override: runtime.allow_harness_override,

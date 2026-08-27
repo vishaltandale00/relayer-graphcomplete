@@ -132,4 +132,60 @@ describe("node-context draft renderer state", () => {
       status: "saved",
     });
   });
+
+  it("coalesces concurrent confirms into one confirmation request", async () => {
+    let resolveConfirm;
+    const api = {
+      list: vi.fn(),
+      save: vi.fn(async (_threadId, draft) => ({ ...draft, revision: 1 })),
+      confirm: vi.fn(() => new Promise((resolve) => { resolveConfirm = resolve; })),
+    };
+    const controller = createNodeContextDraftController({
+      api,
+      createId: () => "draft-a",
+      schedule: () => 1,
+      cancel: vi.fn(),
+    });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "FIFO");
+    await controller.flush("alpha", 7);
+
+    const first = controller.confirm("alpha", 7);
+    const duplicate = controller.confirm("alpha", 7);
+    resolveConfirm({ draftId: "draft-a", target, targetNode, annotation: "FIFO" });
+
+    await expect(first).resolves.toMatchObject({ draftId: "draft-a" });
+    await expect(duplicate).resolves.toBeNull();
+    expect(api.confirm).toHaveBeenCalledTimes(1);
+    expect(controller.draftForNode("alpha", 7)).toBeNull();
+  });
+
+  it("resolves an uncertain first save before discarding the durable draft", async () => {
+    const api = {
+      list: vi.fn(),
+      save: vi.fn()
+        .mockRejectedValueOnce(new Error("response lost"))
+        .mockImplementationOnce(async (_threadId, draft) => ({ ...draft, revision: 1 })),
+      discard: vi.fn(async () => null),
+    };
+    const controller = createNodeContextDraftController({
+      api,
+      createId: () => "draft-a",
+      schedule: () => 1,
+      cancel: vi.fn(),
+    });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "FIFO");
+    await controller.flush("alpha", 7);
+    expect(controller.draftForNode("alpha", 7)?.status).toBe("error");
+
+    await controller.discard("alpha", 7);
+
+    expect(api.save).toHaveBeenCalledTimes(2);
+    expect(api.discard).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({ id: "draft-a", revision: 1 }),
+    );
+    expect(controller.draftForNode("alpha", 7)).toBeNull();
+  });
 });

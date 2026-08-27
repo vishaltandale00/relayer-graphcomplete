@@ -80,7 +80,9 @@ async fn node_context_drafts_are_thread_scoped_and_survive_reopen() {
                         "icon": "list",
                         "title": "Incoming queue",
                         "detail": "Tasks wait here while workers are busy.",
-                        "state": "accepted"
+                        "state": "accepted",
+                        "workspacePath": "/private/secret",
+                        "leaseId": "must-not-persist"
                     },
                     "text": "Call out FIFO ordering.",
                     "expectedRevision": null
@@ -95,6 +97,8 @@ async fn node_context_drafts_are_thread_scoped_and_survive_reopen() {
     assert_eq!(saved["threadId"], thread_id);
     assert_eq!(saved["revision"], 1);
     assert_eq!(saved["targetNode"]["title"], "Incoming queue");
+    assert!(saved["targetNode"].get("workspacePath").is_none());
+    assert!(saved["targetNode"].get("leaseId").is_none());
 
     drop(app);
     let reopened = open_app(&database, &root).await;
@@ -156,13 +160,21 @@ async fn node_context_draft_autosave_is_revisioned_and_idempotent() {
             true,
         )
     };
-    response_json(
+    let created = response_json(
         app.clone()
             .oneshot(save("draft-incoming", "First", None))
             .await
             .unwrap(),
     )
     .await;
+    let create_replay = response_json(
+        app.clone()
+            .oneshot(save("draft-incoming", "First", None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(create_replay, created);
     let updated = response_json(
         app.clone()
             .oneshot(save("draft-incoming", "Second", Some(1)))
