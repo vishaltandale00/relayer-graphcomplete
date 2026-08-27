@@ -137,8 +137,8 @@ interface LegacyPersistedHarnessSessionDescriptor {
   readonly state?: HarnessSessionState;
 }
 
-const CURRENT_HOST_STATE_SCHEMA_VERSION = 5;
-const SUPPORTED_HOST_STATE_SCHEMA_VERSIONS = "3, 4, or 5";
+const CURRENT_HOST_STATE_SCHEMA_VERSION = 6;
+const SUPPORTED_HOST_STATE_SCHEMA_VERSIONS = "3, 4, 5, or 6";
 
 export interface HarnessHostOptions {
   readonly implementations: HarnessImplementationMap;
@@ -225,6 +225,21 @@ export class HarnessHost {
         this.initialized = true;
         return;
       }
+      if (parsed.schemaVersion === 5) {
+        if (this.closed) throw new Error("Harness host is closed");
+        await this.backupState(serialized, "v5");
+        if (this.closed) throw new Error("Harness host is closed");
+        const sessions = uniqueSessions(parsed.sessions.map(readPersistedSession));
+        this.saved = new Map(sessions.map((session) => [session.threadId, session]));
+        if (parsed.legacySessions !== undefined && !Array.isArray(parsed.legacySessions)) {
+          throw new Error("Harness state contains invalid legacy sessions");
+        }
+        this.legacySaved = readLegacySessions(parsed.legacySessions ?? []);
+        await this.persist();
+        if (this.closed) throw new Error("Harness host is closed");
+        this.initialized = true;
+        return;
+      }
       if (parsed.schemaVersion !== CURRENT_HOST_STATE_SCHEMA_VERSION) {
         throw new Error(`Unsupported harness host state; expected schema version ${SUPPORTED_HOST_STATE_SCHEMA_VERSIONS}`);
       }
@@ -269,18 +284,30 @@ export class HarnessHost {
       return;
     }
     const prior = this.saved.get(descriptor.threadId);
-    if (prior !== undefined && (!sameHarnessExecutionConfiguration(prior.configuration, descriptor.configuration)
+    const priorUpgrade = prior !== undefined
+      && productCodexUpgradeMatches(prior.configuration, descriptor.configuration);
+    const priorMatches = prior !== undefined && (sameHarnessExecutionConfiguration(prior.configuration, descriptor.configuration)
+      || priorUpgrade);
+    if (prior !== undefined && (!priorMatches
       || prior.permissionProfileId !== descriptor.permissionProfileId
       || prior.workingDirectory !== descriptor.workingDirectory)) {
       throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${prior.configuration.name}`);
     }
+    if (priorUpgrade) {
+      console.warn(`Migrating retired product Codex configuration for harness thread ${descriptor.threadId} during registration`);
+    }
     const legacy = this.legacySaved.get(descriptor.threadId);
-    const legacyState = legacy !== undefined
+    const legacyUpgrade = legacy !== undefined
+      && legacyProductCodexUpgradeMatches(legacy.configuration, descriptor.configuration);
+    const legacyAccepted = legacy !== undefined
       && descriptor.permissionProfileId === legacyPermissionProfileId(descriptor.configuration)
-      && sameLegacyHarnessConfiguration(legacy.configuration, descriptor.configuration)
-      && legacy.workingDirectory === descriptor.workingDirectory
-      ? legacy.state
-      : undefined;
+      && (sameLegacyHarnessConfiguration(legacy.configuration, descriptor.configuration)
+        || legacyUpgrade)
+      && legacy.workingDirectory === descriptor.workingDirectory;
+    if (legacyAccepted && legacyUpgrade) {
+      console.warn(`Migrating deferred product Codex configuration for harness thread ${descriptor.threadId} during registration`);
+    }
+    const legacyState = legacyAccepted ? legacy.state : undefined;
     const savedState = prior?.state ?? legacyState;
     const harness = await resolveHarnessFactory(this.options.implementations, descriptor.configuration.implementation)({
       threadId: descriptor.threadId,
@@ -966,7 +993,7 @@ export class HarnessHost {
     }
   }
 
-  private async backupState(serialized: string, version: "v3" | "v4"): Promise<void> {
+  private async backupState(serialized: string, version: "v3" | "v4" | "v5"): Promise<void> {
     const stateFile = resolve(this.options.stateFile);
     await mkdir(dirname(stateFile), { recursive: true });
     try {
@@ -1299,6 +1326,68 @@ function migrateSchemaV4Session(value: unknown): readonly PersistedHarnessSessio
     console.warn(`Discarding pre-access-contract provider state for harness thread ${threadId} during schema v4 migration`);
     return [];
   }
+}
+
+function migratedProductCodexConfiguration(configuration: HarnessConfiguration): HarnessConfiguration {
+  const legacySettings = stableJson(configuration.settings);
+  const expectedLegacySettings = configuration.name === "codex-basic-high"
+    ? stableJson({ modelReasoningEffort: "high", skipGitRepoCheck: true })
+    : stableJson({ modelReasoningEffort: "medium", skipGitRepoCheck: true });
+  if ((configuration.name !== "codex-basic" && configuration.name !== "codex-basic-high")
+    || configuration.implementation !== "codex.basic"
+    || configuration.implementationVersion !== 1
+    || (configuration.revision !== 1 && configuration.revision !== 2)
+    || legacySettings !== expectedLegacySettings) return configuration;
+  return parseHarnessConfiguration({
+    ...configuration,
+    name: "codex-basic",
+    revision: 3,
+    settings: {
+      modelReasoningEffort: "medium",
+      promptProfile: "layered-navigation-multi-agent-v1",
+      skipGitRepoCheck: true,
+    },
+  });
+}
+
+function productCodexUpgradeMatches(
+  prior: HarnessConfiguration,
+  current: HarnessConfiguration,
+): boolean {
+  const migrated = migratedProductCodexConfiguration(prior);
+  return migrated !== prior && sameHarnessExecutionConfiguration(migrated, current);
+}
+
+function migratedLegacyProductCodexConfiguration(
+  configuration: Omit<HarnessConfiguration, "permissionBindings">,
+): Omit<HarnessConfiguration, "permissionBindings"> {
+  const legacySettings = stableJson(configuration.settings);
+  const expectedLegacySettings = configuration.name === "codex-basic-high"
+    ? stableJson({ modelReasoningEffort: "high", skipGitRepoCheck: true })
+    : stableJson({ modelReasoningEffort: "medium", skipGitRepoCheck: true });
+  if ((configuration.name !== "codex-basic" && configuration.name !== "codex-basic-high")
+    || configuration.implementation !== "codex.basic"
+    || configuration.implementationVersion !== 1
+    || legacySettings !== expectedLegacySettings) return configuration;
+  return {
+    ...configuration,
+    name: "codex-basic",
+    revision: 3,
+    executionAccessContracts: ["managed-runtime@1", "secret@1"],
+    settings: {
+      modelReasoningEffort: "medium",
+      promptProfile: "layered-navigation-multi-agent-v1",
+      skipGitRepoCheck: true,
+    },
+  };
+}
+
+function legacyProductCodexUpgradeMatches(
+  prior: Omit<HarnessConfiguration, "permissionBindings">,
+  current: HarnessConfiguration,
+): boolean {
+  const migrated = migratedLegacyProductCodexConfiguration(prior);
+  return migrated !== prior && sameLegacyHarnessConfiguration(migrated, current);
 }
 
 function preAccessContractThreadId(value: unknown): number | undefined {

@@ -5122,7 +5122,7 @@ async fn invalid_context_provenance_is_generic_and_leaves_no_product_intent_or_t
 }
 
 #[tokio::test]
-async fn retryable_startup_reconciliation_submits_identified_interactions_before_resume() {
+async fn product_harness_retirement_precedes_retryable_startup_reconciliation() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -5149,6 +5149,11 @@ async fn retryable_startup_reconciliation_submits_identified_interactions_before
     let thread_id = thread["id"].as_i64().unwrap();
 
     let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE threads SET harness_configuration_name='codex-basic-high' WHERE id=?1")
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let created_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -5161,20 +5166,23 @@ async fn retryable_startup_reconciliation_submits_identified_interactions_before
     })
     .to_string();
     let mut interaction_ids = Vec::new();
-    for (sequence, node_id, status) in [(2, 77, "running"), (3, 78, "waiting_for_approval")] {
+    for (sequence, status, graph_node_id) in [
+        (2, "running", Some(902_i64)),
+        (3, "waiting_for_approval", None),
+    ] {
         let result = sqlx::query(
             "INSERT INTO interactions(
                 thread_id,sequence,text,created_at,graph_node_id,completion_status,
                 harness_configuration_name,harness_configuration_digest,permission_profile_id,
                 effective_execution_digest,effective_permission_receipt_json,input_identity,input_digest
-             ) VALUES (?1,?2,?3,?4,?5,?6,'codex-basic','sha256:test','auto',
+             ) VALUES (?1,?2,?3,?4,?5,?6,'codex-basic-high','sha256:test','auto',
                 'sha256:execution',?7,?8,?9)",
         )
         .bind(thread_id)
         .bind(sequence)
         .bind(format!("Recover {status}"))
         .bind(&created_at)
-        .bind(node_id)
+        .bind(graph_node_id)
         .bind(status)
         .bind(&receipt)
         .bind(format!("send-restart-{sequence}"))
@@ -5202,24 +5210,9 @@ async fn retryable_startup_reconciliation_submits_identified_interactions_before
     )
     .unwrap();
 
-    let reconciliation_reads = Arc::new(AtomicUsize::new(0));
-    let observed_reads = reconciliation_reads.clone();
     let resumed_inputs = Arc::new(Mutex::new(Vec::new()));
     let observed_resumes = resumed_inputs.clone();
     let graph = Router::new()
-        .route(
-            "/api/control/interactions/{id}",
-            axum::routing::get(move || {
-                let observed_reads = observed_reads.clone();
-                async move {
-                    observed_reads.fetch_add(1, Ordering::SeqCst);
-                    (
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        axum::Json(json!({"error":"transient metadata failure"})),
-                    )
-                }
-            }),
-        )
         .route(
             "/api/control/interactions",
             axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
@@ -5256,7 +5249,6 @@ async fn retryable_startup_reconciliation_submits_identified_interactions_before
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
-    assert!(reconciliation_reads.load(Ordering::SeqCst) >= interaction_ids.len());
     {
         let resumed_inputs = resumed_inputs.lock().unwrap();
         for expected in ["send-restart-2", "send-restart-3"] {
@@ -5264,6 +5256,13 @@ async fn retryable_startup_reconciliation_submits_identified_interactions_before
         }
     }
     let pool = sqlite_pool(&database).await;
+    let migrated_harness: String =
+        sqlx::query_scalar("SELECT harness_configuration_name FROM threads WHERE id=?1")
+            .bind(thread_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(migrated_harness, "codex-basic");
     for interaction_id in interaction_ids {
         let (status, error): (String, Option<String>) = sqlx::query_as(
             "SELECT completion_status,completion_error FROM interactions WHERE id=?1",
