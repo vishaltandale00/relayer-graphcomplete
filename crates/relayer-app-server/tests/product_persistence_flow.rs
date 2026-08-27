@@ -4412,7 +4412,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 19);
+    assert_eq!(applied_migrations, 20);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");

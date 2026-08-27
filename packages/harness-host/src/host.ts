@@ -137,8 +137,8 @@ interface LegacyPersistedHarnessSessionDescriptor {
   readonly state?: HarnessSessionState;
 }
 
-const CURRENT_HOST_STATE_SCHEMA_VERSION = 5;
-const SUPPORTED_HOST_STATE_SCHEMA_VERSIONS = "3, 4, or 5";
+const CURRENT_HOST_STATE_SCHEMA_VERSION = 6;
+const SUPPORTED_HOST_STATE_SCHEMA_VERSIONS = "3, 4, 5, or 6";
 
 export interface HarnessHostOptions {
   readonly implementations: HarnessImplementationMap;
@@ -215,6 +215,21 @@ export class HarnessHost {
         await this.backupState(serialized, "v4");
         if (this.closed) throw new Error("Harness host is closed");
         const sessions = uniqueSessions(parsed.sessions.flatMap(migrateSchemaV4Session));
+        this.saved = new Map(sessions.map((session) => [session.threadId, session]));
+        if (parsed.legacySessions !== undefined && !Array.isArray(parsed.legacySessions)) {
+          throw new Error("Harness state contains invalid legacy sessions");
+        }
+        this.legacySaved = readLegacySessions(parsed.legacySessions ?? []);
+        await this.persist();
+        if (this.closed) throw new Error("Harness host is closed");
+        this.initialized = true;
+        return;
+      }
+      if (parsed.schemaVersion === 5) {
+        if (this.closed) throw new Error("Harness host is closed");
+        await this.backupState(serialized, "v5");
+        if (this.closed) throw new Error("Harness host is closed");
+        const sessions = uniqueSessions(parsed.sessions.map(migrateSchemaV5Session));
         this.saved = new Map(sessions.map((session) => [session.threadId, session]));
         if (parsed.legacySessions !== undefined && !Array.isArray(parsed.legacySessions)) {
           throw new Error("Harness state contains invalid legacy sessions");
@@ -966,7 +981,7 @@ export class HarnessHost {
     }
   }
 
-  private async backupState(serialized: string, version: "v3" | "v4"): Promise<void> {
+  private async backupState(serialized: string, version: "v3" | "v4" | "v5"): Promise<void> {
     const stateFile = resolve(this.options.stateFile);
     await mkdir(dirname(stateFile), { recursive: true });
     try {
@@ -1299,6 +1314,36 @@ function migrateSchemaV4Session(value: unknown): readonly PersistedHarnessSessio
     console.warn(`Discarding pre-access-contract provider state for harness thread ${threadId} during schema v4 migration`);
     return [];
   }
+}
+
+function migrateSchemaV5Session(value: unknown): PersistedHarnessSessionDescriptor {
+  const session = readPersistedSession(value);
+  const configuration = migratedProductCodexConfiguration(session.configuration);
+  if (configuration === session.configuration) return session;
+  console.warn(`Migrating retired product Codex configuration for harness thread ${session.threadId} during schema v5 migration`);
+  return { ...session, configuration };
+}
+
+function migratedProductCodexConfiguration(configuration: HarnessConfiguration): HarnessConfiguration {
+  const legacySettings = stableJson(configuration.settings);
+  const expectedLegacySettings = configuration.name === "codex-basic-high"
+    ? stableJson({ modelReasoningEffort: "high", skipGitRepoCheck: true })
+    : stableJson({ modelReasoningEffort: "medium", skipGitRepoCheck: true });
+  if ((configuration.name !== "codex-basic" && configuration.name !== "codex-basic-high")
+    || configuration.implementation !== "codex.basic"
+    || configuration.implementationVersion !== 1
+    || configuration.revision !== 2
+    || legacySettings !== expectedLegacySettings) return configuration;
+  return parseHarnessConfiguration({
+    ...configuration,
+    name: "codex-basic",
+    revision: 3,
+    settings: {
+      modelReasoningEffort: "medium",
+      promptProfile: "layered-navigation-multi-agent-v1",
+      skipGitRepoCheck: true,
+    },
+  });
 }
 
 function preAccessContractThreadId(value: unknown): number | undefined {

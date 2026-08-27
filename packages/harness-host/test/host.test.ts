@@ -1619,7 +1619,7 @@ describe("HarnessHost", () => {
       const persisted = await readFile(stateFile, "utf8");
       expect(persisted).not.toContain("secret");
       expect(JSON.parse(persisted)).toEqual({
-        schemaVersion: 5,
+        schemaVersion: 6,
         sessions: [{
           threadId: 1, permissionProfileId: "auto",
           configuration: testConfiguration,
@@ -1628,6 +1628,78 @@ describe("HarnessHost", () => {
         }],
       });
     } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["codex-basic", "medium"],
+    ["codex-basic-high", "high"],
+  ])("migrates schema-v5 %s sessions to the product Codex configuration", async (legacyName, legacyEffort) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v5-product-codex-"));
+    const stateFile = join(directory, "sessions.json");
+    const legacy: HarnessConfiguration = {
+      ...testConfiguration,
+      name: legacyName,
+      implementation: "codex.basic",
+      revision: 2,
+      settings: { modelReasoningEffort: legacyEffort, skipGitRepoCheck: true },
+    };
+    const current: HarnessConfiguration = {
+      ...legacy,
+      name: "codex-basic",
+      revision: 3,
+      settings: {
+        modelReasoningEffort: "medium",
+        promptProfile: "layered-navigation-multi-agent-v1",
+        skipGitRepoCheck: true,
+      },
+    };
+    const serialized = JSON.stringify({
+      schemaVersion: 5,
+      sessions: [{
+        threadId: 1,
+        configuration: legacy,
+        permissionProfileId: "auto",
+        workingDirectory: directory,
+        state: { providerSessionId: "existing-session" },
+      }],
+    });
+    let restoredState: HarnessSessionState | undefined;
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const host = new HarnessHost({
+      stateFile,
+      controlToken: "control",
+      implementations: { "codex.basic": (context) => {
+        restoredState = context.savedState;
+        return { async complete() {}, state: () => context.savedState ?? emptyState() };
+      } },
+    });
+    try {
+      await writeFile(stateFile, serialized, { mode: 0o600 });
+
+      await host.initialize();
+
+      expect(await readFile(`${stateFile}.v5.backup`, "utf8")).toBe(serialized);
+      expect(warning).toHaveBeenCalledWith(
+        "Migrating retired product Codex configuration for harness thread 1 during schema v5 migration",
+      );
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).toMatchObject({
+        schemaVersion: 6,
+        sessions: [{ threadId: 1, configuration: current, state: { providerSessionId: "existing-session" } }],
+      });
+
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: current,
+        workingDirectory: directory,
+      });
+
+      expect(restoredState).toEqual({ providerSessionId: "existing-session" });
+    } finally {
+      warning.mockRestore();
+      await host.close();
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -1720,7 +1792,7 @@ describe("HarnessHost", () => {
         "Discarding pre-access-contract provider state for harness thread 1 during schema v4 migration",
       );
       expect(JSON.parse(await readFile(stateFile, "utf8"))).toEqual({
-        schemaVersion: 5,
+        schemaVersion: 6,
         sessions: [],
       });
 
@@ -1733,7 +1805,7 @@ describe("HarnessHost", () => {
 
       expect(restoredState).toBeUndefined();
       expect(JSON.parse(await readFile(stateFile, "utf8"))).toEqual({
-        schemaVersion: 5,
+        schemaVersion: 6,
         sessions: [{
           threadId: 1,
           configuration: currentConfiguration,
@@ -1809,7 +1881,7 @@ describe("HarnessHost", () => {
 
       expect(await readFile(`${stateFile}.v3.backup`, "utf8")).toBe(serialized);
       expect(JSON.parse(await readFile(stateFile, "utf8"))).toEqual({
-        schemaVersion: 5,
+        schemaVersion: 6,
         sessions: [],
         legacySessions: [{
           threadId: 1,
@@ -1828,7 +1900,7 @@ describe("HarnessHost", () => {
 
       expect(restoredState).toEqual({ providerSessionId: "legacy-session" });
       expect(JSON.parse(await readFile(stateFile, "utf8"))).toEqual({
-        schemaVersion: 5,
+        schemaVersion: 6,
         sessions: [{
           threadId: 1,
           configuration: testConfiguration,
@@ -1876,7 +1948,7 @@ describe("HarnessHost", () => {
 
       expect(restoredState).toBeUndefined();
       expect(JSON.parse(await readFile(stateFile, "utf8"))).toMatchObject({
-        schemaVersion: 5,
+        schemaVersion: 6,
         sessions: [{ threadId: 1, permissionProfileId: "full", state: {} }],
       });
       expect(JSON.parse(await readFile(stateFile, "utf8"))).not.toHaveProperty("legacySessions");
@@ -1924,7 +1996,7 @@ describe("HarnessHost", () => {
 
       expect(restoredState).toEqual({ providerSessionId: "legacy-prime-session" });
       expect(JSON.parse(await readFile(stateFile, "utf8"))).toMatchObject({
-        schemaVersion: 5,
+        schemaVersion: 6,
         sessions: [{ threadId: 1, permissionProfileId: "full" }],
       });
     } finally {
@@ -1967,7 +2039,7 @@ describe("HarnessHost", () => {
 
       expect(restoredState).toBeUndefined();
       expect(JSON.parse(await readFile(stateFile, "utf8"))).toMatchObject({
-        schemaVersion: 5,
+        schemaVersion: 6,
         sessions: [{
           threadId: 1,
           configuration: currentConfiguration,
@@ -2026,7 +2098,7 @@ describe("HarnessHost", () => {
       }), { mode: 0o600 });
       const host = new HarnessHost({ stateFile, controlToken: "control", implementations: {} });
 
-      await expect(host.initialize()).rejects.toThrow("expected schema version 3, 4, or 5");
+      await expect(host.initialize()).rejects.toThrow("expected schema version 3, 4, 5, or 6");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
