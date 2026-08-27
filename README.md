@@ -30,7 +30,7 @@ The Node runtime is split into explicit workspace packages: `@relayer/graph-clie
 
 ## Core design
 
-- The selected harness owns model execution. Prime Agent alone owns recursive child scheduling; GraphComplete does not add another scheduler.
+- The selected harness owns model execution and any provider-native delegation it uses. Codex may use native subagents and Prime Agent may use its native RLM children; GraphComplete does not add another scheduler.
 - GraphComplete owns graph records, active-interaction write authority, validation, accepted-history integrity, and explicit submission. Accepted records are immutable except for ADR 0005's exact one-shot leased-invoke target transition.
 - Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
 - The Node harness host owns live per-thread harness objects and provider-session resume state, not graph rules or product lifecycle.
@@ -137,7 +137,7 @@ npm install
 npm run desktop:dev
 ```
 
-Ask a question in the composer to open the thread immediately while the default `codex-basic` harness builds its graph in the background. Follow-up turns reuse the same harness/provider session while receiving a fresh graph capability. The accepted layer owns semantic node placement in normalized coordinates. The graph workspace projects it into a stable world plane while fit, pan, zoom, resizing, and the details inspector change only the camera. Dragging a node is an ephemeral local view override. Historical coordinate-free layers use a deterministic viewport-independent fallback without rewriting accepted history. Product and read-only Eval use this same renderer path.
+Ask a question in the composer to open the thread immediately while the default `codex-basic` harness builds its graph in the background. The product configuration uses layered navigation and makes Codex-native subagents available when useful; model and reasoning choices remain independent picker selections. Follow-up turns reuse the same harness/provider session while receiving a fresh graph capability. The accepted layer owns semantic node placement in normalized coordinates. The graph workspace projects it into a stable world plane while fit, pan, zoom, resizing, and the details inspector change only the camera. Dragging a node is an ephemeral local view override. Historical coordinate-free layers use a deterministic viewport-independent fallback without rewriting accepted history. Product and read-only Eval use this same renderer path. `codex-basic-high` remains an internal Eval configuration and is not loaded or packaged by Relayer Desktop.
 
 To try the Prime Agent harness in the real Relayer chat, install the repository
 dependencies and use the checked-in runtime:

@@ -30,7 +30,7 @@ describe("product documentation boundary", () => {
     expect(walkthrough).not.toContain("See in App");
     expect(walkthrough).not.toContain("Continue with this configuration");
     expect(decision).toContain("It does not create a generic agent protocol or make arbitrary providers and harnesses work without explicit adapters");
-    expect(decision).toContain("Prime Agent remains the only recursive scheduler");
+    expect(decision).toContain("Each harness owns any provider-native delegation it uses");
     expect(supersededDecision).toContain("Status: superseded by [ADR 0006]");
   });
 });

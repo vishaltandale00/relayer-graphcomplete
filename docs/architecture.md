@@ -11,13 +11,13 @@ Product host
         -> selected harness implementation
             -> selected provider adapter and model
             -> direct execution
-            -> or Prime Agent-owned recursive delegation
+            -> or harness-owned native delegation
         -> graph.submit(interaction node)
         -> accepted resolved root layer or explicit failure
     -> product persistence and activation
 ```
 
-Product records pin stable provider, model, harness-configuration, and permission identifiers. Harness implementations and provider adapters translate those selections into runtime-specific credentials, sessions, and model calls. Prime Agent alone owns recursive delegation. Supporting a new implementation requires an explicit adapter; agnostic does not mean arbitrary runtimes work without integration.
+Product records pin stable provider, model, harness-configuration, and permission identifiers. Harness implementations and provider adapters translate those selections into runtime-specific credentials, sessions, and model calls. Each harness owns any provider-native delegation it uses, including Codex subagents and Prime Agent RLM children. Supporting a new implementation requires an explicit adapter; agnostic does not mean arbitrary runtimes work without integration.
 
 ## Working desktop product path
 
@@ -105,7 +105,7 @@ Each product or Eval review window owns one bounded renderer-side navigation his
 10. New layer submissions include complete versioned normalized placement data. Layout integrity is deterministic graph validation; spatial meaning remains model judgment. Legacy accepted layers may lack layout, but reads never infer and persist replacement graph content.
 11. A model turn ending is not completion; the root must explicitly submit or stop. Submission validates authored closure, expansion cycles, reference visibility, orphan drafts, layer size, and current-draft layout completeness. For a leased interaction, the same submission transaction also changes the exact accepted source action's `target_layer_id` once from `null` to the accepted result root layer. Its kind remains `invoke`; no `resolveAction` authoring API or resolution table exists.
 12. A resolved invoke is project-visible cross-interaction navigation wherever its node-owned action is reused, not an `expand` or `reference` relation. Generic renderer navigation history remains an independent product concern.
-13. The selected harness owns model execution. Prime Agent owns recursive child scheduling. GraphComplete does not add a model-call or recursive-agent scheduler. See [ADR 0005](decisions/0005-layered-navigation-contract.md) and [ADR 0006](decisions/0006-harness-provider-agnostic-product-boundary.md).
+13. The selected harness owns model execution and any provider-native child scheduling. GraphComplete does not add a model-call or recursive-agent scheduler. See [ADR 0005](decisions/0005-layered-navigation-contract.md) and [ADR 0006](decisions/0006-harness-provider-agnostic-product-boundary.md).
 
 ## Target self-assessing policy invariants
 
@@ -126,20 +126,20 @@ The following apply when the optional recursive self-assessment policy is enable
 
 Model selection is a stable product choice resolved against the selected harness's declared provider and model compatibility. Thinking level is a separate choice. Execution must fail clearly when the selected combination is unavailable.
 
-Prime Agent may define an internal multi-model policy for delegation or review. It may assign different supported models to content ownership, revision, and self-assessment. That policy belongs to its configuration and must not become a Relayer product invariant. Other harnesses execute directly under the current accepted boundary.
+A harness may define an internal multi-model policy for native delegation or review. Codex coordination remains Codex-owned, and Prime Agent may assign different supported models to content ownership, revision, and self-assessment. Those policies belong to their configurations and must not become Relayer product invariants.
 
 ## Harness configurations and evaluation
 
-The packaged `codex-basic` and `codex-basic-high` configurations currently select the `codex.basic` implementation. A named YAML configuration selects an implementation, contains that implementation's settings, declares provider/model compatibility, and supplies bindings for the three product permission profiles. The host treats implementation settings and bindings as opaque. A code-owned implementation map connects implementation types to executable factories without adding implementation-specific fields to product records.
+The packaged product `codex-basic` configuration selects the `codex.basic` implementation with layered navigation and Codex-native subagents available when useful. `codex-basic-high` remains a checked-in internal Eval configuration and is not loaded or packaged by Relayer Desktop. A named YAML configuration selects an implementation, contains that implementation's settings, declares provider/model compatibility, and supplies bindings for the three product permission profiles. The host treats implementation settings and bindings as opaque. A code-owned implementation map connects implementation types to executable factories without adding implementation-specific fields to product records.
 
 Configuration, implementation code, session state, and live authority are deliberately separate:
 
-1. Files such as `harnesses/codex-basic.yaml` and `harnesses/codex-basic-high.yaml` are durable production configurations. Each has a unique `name`, while `implementation` selects executable code. Many configurations commonly select the same implementation with different settings.
+1. Files such as `harnesses/codex-basic.yaml` and `harnesses/codex-basic-high.yaml` are durable named configurations, but release inclusion determines which are product-facing. Each has a unique `name`, while `implementation` selects executable code. Many configurations commonly select the same implementation with different settings.
 2. The implementation registry maps `codex.basic`, `prime.agent`, or a test implementation to a factory.
 3. The host copies the selected configuration onto the thread and persists the implementation's opaque JSON resume state. For `codex.basic`, that state is only the Codex thread ID.
 4. The current graph URL, token, and interaction node form a per-call graph scope. They are never factory inputs or harness state. The host closes its in-memory scope when the call settles; the calling runtime that minted the capability owns token revocation.
 
-The current packaged harness uses the TypeScript Codex SDK with the existing local Codex login. It keeps one resumable Codex thread per Relayer thread and asks Codex to execute the TypeScript graph client. The graph is not returned as structured JSON: Codex submits objects to the Rust engine, reacts to repairable validation errors, and ends with `graph.submit(interactionNode)`. The development-only `prime.agent` implementation uses the same host and graph contracts while owning its own recursive runtime policy.
+The packaged Codex harness uses the TypeScript Codex SDK with the selected provider access. It keeps one resumable Codex thread per Relayer thread, makes Codex-native subagents available under shared interaction authority, and asks Codex to execute the TypeScript graph client. The graph is not returned as structured JSON: Codex submits objects to the Rust engine, reacts to repairable validation errors, and ends with `graph.submit(interactionNode)`. The optional `prime.agent` implementation uses the same host and graph contracts while owning its own recursive runtime policy.
 
 The default and opt-in live evals start from an empty temporary folder and run two interactions through one cached harness object. Each serialized Complete call receives a distinct graph capability while the harness retains its provider-session identity, and the eval runtime revokes that capability after the call settles. The case owns harness-agnostic graph-contract checks. The Eval application waits for each product interaction to reach a terminal state before starting the next turn. A selected judge configuration may add semantic scoring without changing the case:
 
