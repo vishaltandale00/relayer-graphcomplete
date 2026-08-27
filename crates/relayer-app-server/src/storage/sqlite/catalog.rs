@@ -2089,6 +2089,12 @@ async fn replace_system_family(
             .bind(policy.version)
             .fetch_optional(&mut *connection)
             .await?;
+    let family_name = collision_free_managed_family_name(
+        connection,
+        &system_family.name,
+        family_id.map(ModelFamilyId::from_database),
+    )
+    .await?;
     let id = match family_id {
         Some(id) => {
             let existing = sqlx::query_as::<_, (String, String)>(
@@ -2108,7 +2114,7 @@ async fn replace_system_family(
                     })
                     .collect::<Vec<_>>();
             sqlx::query("UPDATE model_families SET name=?1,revision=revision+?2,system_key=?3,lifecycle_state='active',removed_at=NULL WHERE id=?4")
-                .bind(&system_family.name)
+                .bind(&family_name)
                 .bind(i64::from(changed))
                 .bind(&key)
                 .bind(id)
@@ -2124,7 +2130,7 @@ async fn replace_system_family(
             let result = sqlx::query(
                 "INSERT INTO model_families(name,kind,system_key,enabled,position,managed_provider_id,policy_id,policy_version) VALUES (?1,'system',?2,1,?3,?4,?5,?6)",
             )
-            .bind(&system_family.name)
+            .bind(&family_name)
             .bind(key)
             .bind(position)
             .bind(snapshot.provider_id.as_str())
@@ -2148,6 +2154,42 @@ async fn replace_system_family(
             .await?;
     }
     Ok(id)
+}
+
+async fn collision_free_managed_family_name(
+    connection: &mut SqliteConnection,
+    preferred: &str,
+    except_id: Option<ModelFamilyId>,
+) -> Result<String, StorageError> {
+    let mut ordinal = 1usize;
+    loop {
+        let candidate = if ordinal == 1 {
+            preferred.to_owned()
+        } else {
+            let suffix = format!(" ({ordinal})");
+            let stem = preferred
+                .chars()
+                .take(80usize.saturating_sub(suffix.chars().count()))
+                .collect::<String>();
+            format!("{}{suffix}", stem.trim_end())
+        };
+        let duplicate: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM model_families WHERE lifecycle_state='active' AND name=?1 COLLATE NOCASE AND (?2 IS NULL OR id!=?2))",
+        )
+        .bind(&candidate)
+        .bind(except_id.map(ModelFamilyId::value))
+        .fetch_one(&mut *connection)
+        .await?;
+        if !duplicate {
+            return Ok(candidate);
+        }
+        ordinal = ordinal.checked_add(1).ok_or_else(|| {
+            StorageError::Catalog(CatalogError::invalid(
+                "model_family_name_exhausted",
+                "No unique managed model-family name is available.",
+            ))
+        })?;
+    }
 }
 
 async fn replace_family_members(
@@ -3010,7 +3052,7 @@ mod provider_definition_tests {
     }
 
     #[tokio::test]
-    async fn onboarding_managed_preview_comes_from_the_candidate_harness_policy() {
+    async fn onboarding_managed_preview_uses_policy_and_avoids_custom_name_collision() {
         let path = std::env::temp_dir().join(format!(
             "relayer-managed-onboarding-{}-{}.sqlite3",
             std::process::id(),
@@ -3066,6 +3108,22 @@ mod provider_definition_tests {
         .unwrap();
         sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('codex','default','Default',0,1,1,1,'{}')")
             .execute(&store.pool).await.unwrap();
+        let custom_name = "CODEX DEFAULTS";
+        let custom_family = sqlx::query(
+            "INSERT INTO model_families(name,kind,system_key,enabled,position) VALUES (?1,'custom',NULL,1,0)",
+        )
+        .bind(custom_name)
+        .execute(&store.pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        sqlx::query(
+            "INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (?1,0,'codex','default')",
+        )
+        .bind(custom_family)
+        .execute(&store.pool)
+        .await
+        .unwrap();
         let allowed = HashSet::from(["plain-basic".into(), "managed-codex".into()]);
         let projection = store
             .provider_onboarding_projection(
@@ -3092,6 +3150,8 @@ mod provider_definition_tests {
             .managed_family_candidate
             .clone()
             .unwrap();
+        let preferred_name = candidate.name.clone();
+        assert!(preferred_name.eq_ignore_ascii_case(custom_name));
         let completion = store
             .complete_provider_onboarding(
                 &CompleteProviderOnboardingCommand {
@@ -3113,6 +3173,20 @@ mod provider_definition_tests {
             completion.resolution.resolvable_members[0].model_id,
             "default"
         );
+        let managed_name: String =
+            sqlx::query_scalar("SELECT name FROM model_families WHERE id=?1")
+                .bind(completion.resolution.family_id.value())
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(managed_name, format!("{preferred_name} (2)"));
+        let retained_custom_name: String =
+            sqlx::query_scalar("SELECT name FROM model_families WHERE id=?1")
+                .bind(custom_family)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(retained_custom_name, custom_name);
         std::fs::remove_file(path).unwrap();
     }
 
