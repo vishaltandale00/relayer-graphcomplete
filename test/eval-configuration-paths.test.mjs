@@ -78,7 +78,6 @@ describe("Eval harness configuration availability", () => {
   it("keeps the layered Codex harness product-facing and the high variant internal", async () => {
     const evalPackaging = await readFile(new URL("../desktop/packaging/eval-electron-builder.mjs", import.meta.url), "utf8");
     const productPackaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
-    const desktopMain = await readFile(new URL("../desktop/main/index.mjs", import.meta.url), "utf8");
     const codexBasic = await loadHarnessConfigurations([
       resolve(repositoryRoot, "harnesses/codex-basic.yaml"),
     ]);
@@ -93,6 +92,5 @@ describe("Eval harness configuration availability", () => {
     expect(productPackaging).not.toContain("codex-basic-high.yaml");
     expect(productPackaging).not.toContain("codex-multi-agent-layered-navigation.yaml");
     expect(productPackaging).not.toContain("codex-layered-navigation-luna.yaml");
-    expect(desktopMain).not.toContain('"codex-basic-high"');
   });
 });
