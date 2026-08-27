@@ -70,6 +70,7 @@ export function evidenceIdsForReview(review) {
   if (!review || typeof review !== "object") return [];
   const evidence = collectEvidence(review.evidence);
   for (const finding of asArray(review.findings)) collectEvidence(finding?.evidence, evidence);
+  for (const opportunity of asArray(review.missingActionOpportunities)) collectEvidence(opportunity?.evidence, evidence);
   collectEvidence(review.structure?.evidence, evidence);
   return [...evidence];
 }
@@ -218,7 +219,8 @@ function normalizeTurn(turn, position, judgeConfigurationName) {
     ]),
   ];
 
-  const recursive = review?.schemaVersion === 2 || review?.contractId === "recursive-presentation-judge-v2";
+  const recursive = [2, 3].includes(review?.schemaVersion)
+    || ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3"].includes(review?.contractId);
   if (recursive) layers.sort((left, right) => right.depth - left.depth || left.position - right.position);
   return {
     kind: "turn",

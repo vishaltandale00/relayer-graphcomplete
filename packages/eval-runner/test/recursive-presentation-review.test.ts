@@ -226,6 +226,7 @@ describe("recursive semantic presentation review", () => {
 
     expect(result.rootLayerResult).toEqual(root);
     expect(result.layers.map(({ subject }) => subject.layerId)).toEqual(["root", "child"]);
+    expect(result.nodes.every(({ history }) => Array.isArray(history.current.missingActionOpportunities))).toBe(true);
     expect(result.coverage.complete).toBe(true);
     expect(Object.isFrozen(result)).toBe(true);
   });
@@ -429,9 +430,9 @@ describe("recursive semantic presentation review", () => {
 
   it.each([
     ["flat stop", "stop", "close", 4, "Atomic answer should stop."],
-    ["missed useful expansion", "expand", "clearly_better", 3, "A useful expansion was missed."],
-    ["missed required expansion", "expand", "necessary", 2, "A required expansion was missed."],
-  ] as const)("represents %s without a deterministic scoring formula", (_name, preferred, margin, content, effect) => {
+    ["missed useful expansion", "expand", "clearly_better", 2, "A useful expansion was missed."],
+    ["missed required expansion", "expand", "necessary", 1, "A required expansion was missed."],
+  ] as const)("represents %s with a coherent allocation consequence", (_name, preferred, margin, actionAllocation, effect) => {
     const inventory = inventoryReviewSubjects({
       turnId: "flat-turn",
       rootLayerId: "flat-layer",
@@ -442,7 +443,7 @@ describe("recursive semantic presentation review", () => {
       layerId: "flat-layer",
       nodeId: "flat-node",
       evidence: { context: ["shot-flat"], detail: ["shot-flat"] },
-      score: score("flat-node", { content }),
+      score: score("flat-node", { actionAllocation }),
       semantic: { ...semantic("flat-node", ["shot-flat"]), effectOnLayer: effect },
       allocationSteps: [{
         step: 0,
@@ -454,11 +455,227 @@ describe("recursive semantic presentation review", () => {
         selectionFinding: effect,
         evidence: ["shot-flat"],
       }],
+      missingActionOpportunities: preferred === "stop" ? [] : [{
+        allocationStep: 0,
+        preferredChoice: preferred,
+        importance: margin === "necessary" ? "critical" : "material",
+        unansweredQuestion: "What mechanism or evidence supports this status claim?",
+        expectedContribution: "Explain the distinct causal or evidentiary depth omitted from the root node.",
+        artifactEvidence: ["src/example.ts"],
+        evidence: ["shot-flat"],
+      }],
       actions: [],
       findings: [],
     };
     store.reviewNode(node);
-    expect(store.reviewLayer(layerResult("flat-layer", 0, node)).review.nodeScores[0]?.content).toBe(content);
+    expect(store.reviewLayer(layerResult("flat-layer", 0, node)).review.nodeScores[0]?.actionAllocation).toBe(actionAllocation);
+  });
+
+  it("rejects a perfect allocation score when a material expansion opportunity is missing", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "flat-turn",
+      rootLayerId: "flat-layer",
+      layers: [{ id: "flat-layer", nodeIds: ["flat-node"], actions: [] }],
+    });
+    const store = new RecursivePresentationReviewStore({ inventory });
+    const node = {
+      layerId: "flat-layer",
+      nodeId: "flat-node",
+      evidence: { context: ["shot-flat"], detail: ["shot-flat"] },
+      score: score("flat-node", { actionAllocation: 4 }),
+      semantic: semantic("flat-node", ["shot-flat"]),
+      allocationSteps: [{
+        step: 0,
+        ranking: ranking("expand"),
+        preferredChoice: "expand",
+        authoredChoice: "stop",
+        authoredActionId: null,
+        margin: "clearly_better",
+        selectionFinding: "The mechanism is missing.",
+        evidence: ["shot-flat"],
+      }],
+      missingActionOpportunities: [{
+        allocationStep: 0,
+        preferredChoice: "expand",
+        importance: "material",
+        unansweredQuestion: "How does the failure reach the response boundary?",
+        expectedContribution: "Trace the causal path from input to failure.",
+        artifactEvidence: ["src/utils/sanitize.ts", "src/response.ts"],
+        evidence: ["shot-flat"],
+      }],
+      actions: [],
+      findings: [],
+    } as const satisfies RecursiveNodeReview;
+
+    expect(() => store.reviewNode(node)).toThrow(
+      "material missing-action opportunity caps actionAllocation at 2",
+    );
+  });
+
+  it("requires a first-class finding when a materially better expansion is absent", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "flat-turn",
+      rootLayerId: "flat-layer",
+      layers: [{ id: "flat-layer", nodeIds: ["flat-node"], actions: [] }],
+    });
+    const store = new RecursivePresentationReviewStore({ inventory });
+    const node: RecursiveNodeReview = {
+      layerId: "flat-layer",
+      nodeId: "flat-node",
+      evidence: { context: ["shot-flat"], detail: ["shot-flat"] },
+      score: score("flat-node", { actionAllocation: 2 }),
+      semantic: semantic("flat-node", ["shot-flat"]),
+      allocationSteps: [{
+        step: 0,
+        ranking: ranking("expand"),
+        preferredChoice: "expand",
+        authoredChoice: "stop",
+        authoredActionId: null,
+        margin: "clearly_better",
+        selectionFinding: "The status claim omits the failure mechanism.",
+        evidence: ["shot-flat"],
+      }],
+      actions: [],
+      findings: [],
+    };
+
+    expect(() => store.reviewNode(node)).toThrow(
+      "materially preferred absent expand action requires a missing-action opportunity",
+    );
+  });
+
+  it("prevents a material missing expansion from receiving perfect recursive coherence", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "flat-turn",
+      rootLayerId: "flat-layer",
+      layers: [{ id: "flat-layer", nodeIds: ["flat-node"], actions: [] }],
+    });
+    const store = new RecursivePresentationReviewStore({ inventory });
+    const node: RecursiveNodeReview = {
+      layerId: "flat-layer",
+      nodeId: "flat-node",
+      evidence: { context: ["shot-flat"], detail: ["shot-flat"] },
+      score: score("flat-node", { actionAllocation: 2 }),
+      semantic: semantic("flat-node", ["shot-flat"]),
+      allocationSteps: [{
+        step: 0,
+        ranking: ranking("expand"),
+        preferredChoice: "expand",
+        authoredChoice: "stop",
+        authoredActionId: null,
+        margin: "clearly_better",
+        selectionFinding: "The mechanism is missing.",
+        evidence: ["shot-flat"],
+      }],
+      missingActionOpportunities: [{
+        allocationStep: 0,
+        preferredChoice: "expand",
+        importance: "material",
+        unansweredQuestion: "How does the failure reach the response boundary?",
+        expectedContribution: "Trace the causal path from input to failure.",
+        artifactEvidence: ["src/utils/sanitize.ts", "src/response.ts"],
+        evidence: ["shot-flat"],
+      }],
+      actions: [],
+      findings: [],
+    };
+    store.reviewNode(node);
+    const root = store.reviewLayer(layerResult("flat-layer", 0, node)).review;
+    const turn: RecursiveTurnReview = {
+      turnId: "flat-turn",
+      rootLayerResult: root,
+      evidence: { representative: ["shot-flat"] },
+      ratings: {
+        answer_quality: 4,
+        recursive_coherence: 4,
+        navigation_value: 4,
+        presentation_quality: 4,
+        follow_up_progress: null,
+      },
+      nullRatingJustifications: { follow_up_progress: "This is the first turn." },
+      summary: "A flat handoff with a material missing expansion.",
+      findings: [],
+      scoreCeiling: { maximum: 4, reason: "No critical omission.", evidence: ["shot-flat"] },
+    };
+
+    expect(() => store.submitReview(turn)).toThrow(
+      "material missing-action opportunity caps recursive_coherence at 3",
+    );
+    const result = store.submitReview({
+      ...turn,
+      ratings: { ...turn.ratings, recursive_coherence: 3 },
+    });
+    expect(result.coverage.allocations).toEqual({
+      required: 1,
+      reviewed: 1,
+      missing: 0,
+      authoredActions: 0,
+      missingOpportunities: 1,
+      correctStops: 0,
+    });
+  });
+
+  it("caps the whole presentation when an absent action is necessary", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "critical-turn",
+      rootLayerId: "critical-layer",
+      layers: [{ id: "critical-layer", nodeIds: ["critical-node"], actions: [] }],
+    });
+    const store = new RecursivePresentationReviewStore({ inventory });
+    const node: RecursiveNodeReview = {
+      layerId: "critical-layer",
+      nodeId: "critical-node",
+      evidence: { context: ["shot-critical"], detail: ["shot-critical"] },
+      score: score("critical-node", { actionAllocation: 1 }),
+      semantic: semantic("critical-node", ["shot-critical"]),
+      allocationSteps: [{
+        step: 0,
+        ranking: ranking("expand"),
+        preferredChoice: "expand",
+        authoredChoice: "stop",
+        authoredActionId: null,
+        margin: "necessary",
+        selectionFinding: "The main result cannot be understood without the missing explanation.",
+        evidence: ["shot-critical"],
+      }],
+      missingActionOpportunities: [{
+        allocationStep: 0,
+        preferredChoice: "expand",
+        importance: "critical",
+        unansweredQuestion: "What was actually changed and why does it solve the request?",
+        expectedContribution: "Explain the otherwise absent main result.",
+        artifactEvidence: ["src/change.ts"],
+        evidence: ["shot-critical"],
+      }],
+      actions: [],
+      findings: [],
+    };
+    store.reviewNode(node);
+    const root = store.reviewLayer(layerResult("critical-layer", 0, node)).review;
+    const turn: RecursiveTurnReview = {
+      turnId: "critical-turn",
+      rootLayerResult: root,
+      evidence: { representative: ["shot-critical"] },
+      ratings: {
+        answer_quality: 2,
+        recursive_coherence: 2,
+        navigation_value: 2,
+        presentation_quality: 3,
+        follow_up_progress: null,
+      },
+      nullRatingJustifications: { follow_up_progress: "This is the first turn." },
+      summary: "The main explanation is absent.",
+      findings: [],
+      scoreCeiling: { maximum: 4, reason: "No ceiling applied.", evidence: ["shot-critical"] },
+    };
+
+    expect(() => store.submitReview(turn)).toThrow(
+      "Critical missing-action opportunity caps the presentation score at 2",
+    );
+    expect(store.submitReview({
+      ...turn,
+      scoreCeiling: { maximum: 2, reason: "The main explanation is absent.", evidence: ["shot-critical"] },
+    }).turn.scoreCeiling.maximum).toBe(2);
   });
 
   it.each([

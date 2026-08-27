@@ -7,6 +7,7 @@ import {
 } from "../src/simulated-user/mcp-server.js";
 import {
   assertReviewOnlyCodexTrace,
+  buildRecursivePresentationJudgePrompt,
   runSimulatedUserJudge,
   sanitizeJudgeEnvironment,
   type JudgeThreadResult,
@@ -14,10 +15,30 @@ import {
   type JudgeThreadStartRequest,
 } from "../src/simulated-user/judge-runner.js";
 import { inventoryReviewSubjects } from "../src/simulated-user/inventory.js";
+import { GRAPH_PRESENTATION_RUBRIC_V5 } from "../src/simulated-user/rubric.js";
 import { IncrementalReviewStore } from "../src/simulated-user/review-store.js";
 import type { LayerReview, NodeReview, TurnReview } from "../src/simulated-user/contracts.js";
 
 describe("simulated-user Codex judge runner", () => {
+  it("requires first-class artifact-grounded findings for materially absent actions", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-1",
+      rootLayerId: "layer-1",
+      layers: [{ id: "layer-1", nodeIds: ["node-1"], actions: [] }],
+    });
+    const prompt = buildRecursivePresentationJudgePrompt(
+      "Explain the completed repair.",
+      GRAPH_PRESENTATION_RUBRIC_V5,
+      inventory,
+    );
+
+    expect(prompt).toContain("A flat graph does not escape recursive judgment");
+    expect(prompt).toContain("missingActionOpportunity");
+    expect(prompt).toContain("distinct unanswered user question");
+    expect(prompt).toContain("Generic requests for more detail");
+    expect(prompt).toContain("caps final recursive_coherence at 3");
+  });
+
   it("starts a locked-down injected Codex thread and records an immutable audit artifact", async () => {
     const store = finalizedStore();
     let startRequest: JudgeThreadStartRequest | undefined;
@@ -109,7 +130,7 @@ describe("simulated-user Codex judge runner", () => {
       schemaVersion: 1,
       executionId: "execution-1",
       judge: { model: "gpt-test", modelReasoningEffort: "high" },
-      prompt: { version: "simulated-user-judge-prompt-v3" },
+      prompt: { version: "simulated-user-judge-prompt-v4" },
       rubric: { rubricVersion: "simulated-user-rubric-v1" },
       codexThreadId: "codex-thread-1",
       finalResponse: "Review submitted.",

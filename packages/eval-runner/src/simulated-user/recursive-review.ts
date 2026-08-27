@@ -14,8 +14,8 @@ import type {
   ReviewSubjectInventory,
 } from "./inventory.js";
 
-export const RECURSIVE_PRESENTATION_CONTRACT_VERSION = 2 as const;
-export const RECURSIVE_PRESENTATION_CONTRACT_ID = "recursive-presentation-judge-v2" as const;
+export const RECURSIVE_PRESENTATION_CONTRACT_VERSION = 3 as const;
+export const RECURSIVE_PRESENTATION_CONTRACT_ID = "recursive-presentation-judge-v3" as const;
 
 export type RecursivePresentationRating = 1 | 2 | 3 | 4;
 export type AllocationChoice = "expand" | "reference" | "invoke" | "stop";
@@ -54,6 +54,16 @@ export interface AllocationStepReview {
   readonly evidence: readonly ScreenshotEvidenceRef[];
 }
 
+export interface MissingActionOpportunity {
+  readonly allocationStep: number;
+  readonly preferredChoice: Exclude<AllocationChoice, "stop">;
+  readonly importance: "material" | "critical";
+  readonly unansweredQuestion: string;
+  readonly expectedContribution: string;
+  readonly artifactEvidence: readonly string[];
+  readonly evidence: readonly ScreenshotEvidenceRef[];
+}
+
 export interface RecursiveActionReview {
   readonly actionId: string;
   readonly kind: "expand" | "reference" | "invoke";
@@ -73,6 +83,7 @@ export interface RecursiveNodeReview {
   readonly score: RecursiveNodeScore;
   readonly semantic: RecursiveNodeSemanticSummary;
   readonly allocationSteps: readonly AllocationStepReview[];
+  readonly missingActionOpportunities?: readonly MissingActionOpportunity[];
   readonly actions: readonly RecursiveActionReview[];
   readonly findings: readonly Finding[];
 }
@@ -140,7 +151,7 @@ export type RecursiveReviewTraceEntry = {
 };
 
 export interface RecursiveReviewSnapshot {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly contractId: typeof RECURSIVE_PRESENTATION_CONTRACT_ID;
   readonly inventory: ReviewSubjectInventory;
   readonly layers: readonly RecursiveLayerReviewState[];
@@ -210,23 +221,27 @@ export class RecursivePresentationReviewStore {
 
   reviewNode(review: RecursiveNodeReview): RecursiveReviewRevision<RecursiveNodeReview> {
     this.#assertMutable();
-    const key = nodeSubjectKey(review.layerId, review.nodeId);
+    const normalizedReview: RecursiveNodeReview = {
+      ...review,
+      missingActionOpportunities: review.missingActionOpportunities ?? [],
+    };
+    const key = nodeSubjectKey(normalizedReview.layerId, normalizedReview.nodeId);
     const subject = this.#nodeSubjects.get(key);
-    if (subject === undefined) throw new Error(`Unknown node review subject: ${review.layerId}/${review.nodeId}`);
-    if (this.#layers.has(review.layerId)) {
-      throw new Error(`Layer ${review.layerId} is already finalized; revise its nodes before finalizing the LayerResult`);
+    if (subject === undefined) throw new Error(`Unknown node review subject: ${normalizedReview.layerId}/${normalizedReview.nodeId}`);
+    if (this.#layers.has(normalizedReview.layerId)) {
+      throw new Error(`Layer ${normalizedReview.layerId} is already finalized; revise its nodes before finalizing the LayerResult`);
     }
     const actionSubjects = this.#actionSubjects.get(key)!;
-    validateNodeReview(review, actionSubjects, this.#layers, new Set(this.#layerSubjects.keys()));
-    const saved = immutable(review);
+    validateNodeReview(normalizedReview, actionSubjects, this.#layers, new Set(this.#layerSubjects.keys()));
+    const saved = immutable(normalizedReview);
     this.#validateEvidence?.({ kind: "node", subject, actionSubjects, review: saved });
     const revision = appendRevision(this.#nodes, key, saved);
     this.#trace.push(immutable({
       sequence: this.#trace.length + 1,
       tool: "reviewNode" as const,
       subjectRevision: revision.revision,
-      layerId: review.layerId,
-      nodeId: review.nodeId,
+      layerId: normalizedReview.layerId,
+      nodeId: normalizedReview.nodeId,
     }));
     return revision;
   }
@@ -252,9 +267,10 @@ export class RecursivePresentationReviewStore {
   }
 
   coverage(turnReviewed = false): ReviewCoverage {
+    const currentNodes = [...this.#nodes.values()].map(({ current }) => current);
     return computeReviewCoverage(this.inventory, {
       reviewedLayerIds: [...this.#layers.keys()],
-      reviewedNodes: [...this.#nodes.values()].map(({ current }) => ({
+      reviewedNodes: currentNodes.map((current) => ({
         layerId: current.layerId,
         nodeId: current.nodeId,
         actions: current.actions.map((action) => ({
@@ -262,13 +278,24 @@ export class RecursivePresentationReviewStore {
           kind: action.kind === "invoke" ? "invoke" as const : "navigate" as const,
         })),
       })),
+      allocationDecisions: {
+        reviewed: currentNodes.reduce((total, node) => total + node.allocationSteps.length, 0),
+        missingOpportunities: currentNodes.reduce(
+          (total, node) => total + (node.missingActionOpportunities?.length ?? 0),
+          0,
+        ),
+        correctStops: currentNodes.filter((node) => {
+          const finalStep = node.allocationSteps.at(-1);
+          return finalStep?.authoredChoice === "stop" && finalStep.preferredChoice === "stop";
+        }).length,
+      },
       turnReviewed,
     });
   }
 
   snapshot(): RecursiveReviewSnapshot {
     return immutable({
-      schemaVersion: 2 as const,
+      schemaVersion: 3 as const,
       contractId: RECURSIVE_PRESENTATION_CONTRACT_ID,
       inventory: this.inventory,
       layers: this.inventory.layers.flatMap((subject) => {
@@ -296,6 +323,21 @@ export class RecursivePresentationReviewStore {
     const currentRoot = rootLayer === undefined ? undefined : this.#layers.get(rootLayer.layerId)?.current;
     if (currentRoot === undefined || !deepEqual(review.rootLayerResult, currentRoot)) {
       throw new Error("Final turn judgment must consume the current root LayerResult");
+    }
+    const missingOpportunities = [...this.#nodes.values()].flatMap(
+      ({ current }) => current.missingActionOpportunities ?? [],
+    );
+    const criticalOpportunity = missingOpportunities.some(({ importance }) => importance === "critical");
+    const materialOpportunity = missingOpportunities.some(({ importance }) => importance === "material");
+    const recursiveCeiling = criticalOpportunity ? 2 : materialOpportunity ? 3 : 4;
+    if (missingOpportunities.length > 0 && (
+      review.ratings.recursive_coherence === null || review.ratings.recursive_coherence > recursiveCeiling
+    )) {
+      const importance = criticalOpportunity ? "critical" : "material";
+      throw new Error(`${importance} missing-action opportunity caps recursive_coherence at ${recursiveCeiling}`);
+    }
+    if (criticalOpportunity && review.scoreCeiling.maximum > 2) {
+      throw new Error("Critical missing-action opportunity caps the presentation score at 2");
     }
     const saved = immutable(review);
     this.#validateEvidence?.({
@@ -418,6 +460,53 @@ function validateNodeReview(
     requireText(step.selectionFinding, `Node ${review.nodeId} allocation selection finding`);
     requireEvidence(step.evidence, `Node ${review.nodeId} allocation evidence`);
   });
+  const missingOpportunities = review.missingActionOpportunities ?? [];
+  const opportunitySteps = new Set<number>();
+  for (const opportunity of missingOpportunities) {
+    if (opportunitySteps.has(opportunity.allocationStep)) {
+      throw new Error(`Node ${review.nodeId} has duplicate missing-action opportunities for step ${opportunity.allocationStep}`);
+    }
+    opportunitySteps.add(opportunity.allocationStep);
+    const step = review.allocationSteps[opportunity.allocationStep];
+    if (
+      step === undefined
+      || step.authoredChoice !== "stop"
+      || step.preferredChoice !== opportunity.preferredChoice
+      || step.margin === "close"
+    ) {
+      throw new Error(`Node ${review.nodeId} missing-action opportunity ${opportunity.allocationStep} does not match a materially preferred absent action`);
+    }
+    const expectedImportance = step.margin === "necessary" ? "critical" : "material";
+    if (opportunity.importance !== expectedImportance) {
+      throw new Error(`Node ${review.nodeId} missing-action opportunity ${opportunity.allocationStep} importance must be ${expectedImportance}`);
+    }
+    requireText(opportunity.unansweredQuestion, `Node ${review.nodeId} missing-action unanswered question`);
+    requireText(opportunity.expectedContribution, `Node ${review.nodeId} missing-action expected contribution`);
+    requireEvidence(opportunity.artifactEvidence, `Node ${review.nodeId} missing-action artifact evidence`);
+    requireEvidence(opportunity.evidence, `Node ${review.nodeId} missing-action screenshot evidence`);
+  }
+  for (const step of review.allocationSteps) {
+    if (
+      step.authoredChoice === "stop"
+      && step.preferredChoice !== "stop"
+      && step.margin !== "close"
+      && !missingOpportunities.some((opportunity) => (
+        opportunity.allocationStep === step.step
+        && opportunity.preferredChoice === step.preferredChoice
+      ))
+    ) {
+      throw new Error(
+        `Node ${review.nodeId} materially preferred absent ${step.preferredChoice} action requires a missing-action opportunity`,
+      );
+    }
+  }
+  const criticalOpportunity = missingOpportunities.some(({ importance }) => importance === "critical");
+  const materialOpportunity = missingOpportunities.some(({ importance }) => importance === "material");
+  const allocationCeiling = criticalOpportunity ? 1 : materialOpportunity ? 2 : 4;
+  if (review.score.actionAllocation > allocationCeiling) {
+    const importance = criticalOpportunity ? "critical" : "material";
+    throw new Error(`Node ${review.nodeId} ${importance} missing-action opportunity caps actionAllocation at ${allocationCeiling}`);
+  }
   for (const action of review.actions) {
     if (review.allocationSteps[action.allocationStep]?.authoredActionId !== action.actionId) {
       throw new Error(`Action ${action.actionId} allocation step does not identify that action`);

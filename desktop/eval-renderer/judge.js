@@ -37,7 +37,7 @@ function statusMarkup(turn) {
 
 function coverageMarkup(coverage) {
   if (!coverage) return "";
-  const groups = ["layers", "nodes", "actions", "turn"].flatMap((name) => {
+  const groups = ["layers", "nodes", "actions", "allocations", "turn"].flatMap((name) => {
     const item = coverage[name];
     return item ? [`<span><b>${escapeHtml(item.reviewed ?? 0)}/${escapeHtml(item.required ?? 0)}</b> ${escapeHtml(name)}</span>`] : [];
   });
@@ -142,6 +142,12 @@ function allocationMarkup(subject) {
   return `<section class="detail-section"><h3>Sequential action allocation</h3><div class="allocation-list">${steps.map((step) => `<article><header><b>Step ${escapeHtml(step.step)}</b><span>${escapeHtml(titleCase(step.authoredChoice))}${step.authoredActionId ? ` · ${escapeHtml(step.authoredActionId)}` : ""}</span><strong>${escapeHtml(titleCase(step.margin))}</strong></header><ol>${[...(step.ranking || [])].sort((left, right) => left.rank - right.rank).map((entry) => `<li><b>${escapeHtml(entry.rank)}</b> ${escapeHtml(titleCase(entry.choice))}</li>`).join("")}</ol><p>${escapeHtml(step.selectionFinding)}</p></article>`).join("")}</div></section>`;
 }
 
+function missingActionOpportunitiesMarkup(subject) {
+  const opportunities = subject?.kind === "node" ? subject.review?.missingActionOpportunities : null;
+  if (!Array.isArray(opportunities) || opportunities.length === 0) return "";
+  return `<section class="detail-section"><h3>Missing action opportunities</h3><ul class="findings">${opportunities.map((opportunity) => `<li class="issue"><span>${escapeHtml(opportunity.importance)} · missing ${escapeHtml(opportunity.preferredChoice)}</span><p><b>${escapeHtml(opportunity.unansweredQuestion)}</b></p><p>${escapeHtml(opportunity.expectedContribution)}</p><small>${escapeHtml((opportunity.artifactEvidence || []).join(" · "))}</small></li>`).join("")}</ul></section>`;
+}
+
 function consumedRootMarkup(subject) {
   const root = subject?.kind === "turn" ? subject.review?.rootLayerResult : null;
   if (!root?.layerId) return "";
@@ -207,6 +213,7 @@ function render() {
         <section class="detail-section"><h3>Criterion scores</h3>${ratingsMarkup(review)}</section>
         ${semanticMarkup(subject)}
         ${allocationMarkup(subject)}
+        ${missingActionOpportunitiesMarkup(subject)}
         ${consumedRootMarkup(subject)}
         ${structureMarkup(subject)}
         ${actionsMarkup(subject)}

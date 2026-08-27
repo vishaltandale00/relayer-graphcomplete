@@ -166,6 +166,15 @@ describe("judge analysis view model", () => {
           semantic: { delivered: "Delivered the root.", effectOnLayer: "Compressed the child.", evidence: ["shot-root", "shot-child"] },
           evidence: { context: ["shot-root"], detail: ["shot-root"] },
           allocationSteps: [],
+          missingActionOpportunities: [{
+            allocationStep: 1,
+            preferredChoice: "expand",
+            importance: "material",
+            unansweredQuestion: "How does the repair work?",
+            expectedContribution: "Explain the causal mechanism.",
+            artifactEvidence: ["src/change.ts"],
+            evidence: ["shot-missing-action"],
+          }],
           actions: [{ actionId: "expand", kind: "expand", allocationStep: 0, labelAndPlacement: "Clear.", delivery: "Delivered.", recursiveContribution: "Useful.", targetLayerId: "child", reusedLayerId: null, evidence: ["shot-root", "shot-child"] }],
           findings: [],
         } } }],
@@ -189,5 +198,10 @@ describe("judge analysis view model", () => {
       summary: "Compressed the child.",
     });
     expect(recursive.layers[1].nodes[0].actions[0].review.summary).toContain("Delivered.");
+    expect(recursive.layers[1].nodes[0].review.missingActionOpportunities[0]).toMatchObject({
+      importance: "material",
+      unansweredQuestion: "How does the repair work?",
+    });
+    expect(recursive.layers[1].nodes[0].evidenceIds).toContain("shot-missing-action");
   });
 });

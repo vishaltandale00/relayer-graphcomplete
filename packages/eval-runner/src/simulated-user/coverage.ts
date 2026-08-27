@@ -23,6 +23,11 @@ export interface ReviewCoverageState {
   readonly reviewedLayerIds: readonly ReviewSubjectId[];
   readonly reviewedNodes: readonly ReviewNodeReference[];
   readonly turnReviewed: boolean;
+  readonly allocationDecisions?: {
+    readonly reviewed: number;
+    readonly missingOpportunities: number;
+    readonly correctStops: number;
+  };
 }
 
 export type MissingCoverageSubject = MissingReviewSubject;
@@ -38,6 +43,11 @@ export interface ReviewCoverage {
   readonly layers: ReviewCoverageCounts;
   readonly nodes: ReviewCoverageCounts;
   readonly actions: ReviewCoverageCounts;
+  readonly allocations?: ReviewCoverageCounts & {
+    readonly authoredActions: number;
+    readonly missingOpportunities: number;
+    readonly correctStops: number;
+  };
   readonly turn: ReviewCoverageCounts;
   readonly missingSubjects: readonly MissingCoverageSubject[];
 }
@@ -94,6 +104,17 @@ export function computeReviewCoverage(
     layers: counts(inventory.layers.length, missingLayerSubjects.length),
     nodes: counts(inventory.nodes.length, missingNodeSubjects.length),
     actions: counts(inventory.actions.length, missingActionSubjects.length),
+    ...(state.allocationDecisions === undefined ? {} : {
+      allocations: {
+        ...counts(
+          inventory.actions.length + inventory.nodes.length,
+          inventory.actions.length + inventory.nodes.length - state.allocationDecisions.reviewed,
+        ),
+        authoredActions: inventory.actions.length,
+        missingOpportunities: state.allocationDecisions.missingOpportunities,
+        correctStops: state.allocationDecisions.correctStops,
+      },
+    }),
     turn: counts(1, missingTurn.length),
     missingSubjects,
   };

@@ -130,7 +130,8 @@ export interface SimulatedUserRubricManifest {
     | "simulated-user-rubric-v1"
     | "graph-presentation-rubric-v2"
     | "graph-presentation-rubric-v3"
-    | "graph-presentation-rubric-v4";
+    | "graph-presentation-rubric-v4"
+    | "graph-presentation-rubric-v5";
   readonly ratingScale: Readonly<Record<1 | 2 | 3 | 4, string>>;
   readonly nullRating: {
     readonly meaning: string;
@@ -326,6 +327,29 @@ export const GRAPH_PRESENTATION_RUBRIC_V4 = {
         recursive_coherence: {
           label: "Recursive semantic allocation",
           description: "Judge bottom-up whether each node chose well among expand, reference, invoke, and stop; whether authored destinations delivered; and whether child findings were compressed into the parent at the right semantic importance.",
+        },
+      },
+    },
+  },
+} as const satisfies SimulatedUserRubricManifest;
+
+/** Missing-action-aware recursive rubric. Historical v1-v4 artifacts remain readable unchanged. */
+export const GRAPH_PRESENTATION_RUBRIC_V5 = {
+  ...GRAPH_PRESENTATION_RUBRIC_V4,
+  rubricVersion: "graph-presentation-rubric-v5",
+  recursiveJudgment: {
+    ...GRAPH_PRESENTATION_RUBRIC_V4.recursiveJudgment,
+    contractId: "recursive-presentation-judge-v3",
+  },
+  subjects: {
+    ...GRAPH_PRESENTATION_RUBRIC_V4.subjects,
+    turn: {
+      ...GRAPH_PRESENTATION_RUBRIC_V4.subjects.turn,
+      criteria: {
+        ...GRAPH_PRESENTATION_RUBRIC_V4.subjects.turn.criteria,
+        recursive_coherence: {
+          label: "Recursive semantic allocation",
+          description: "Judge every authored action and every implicit stop. Record a first-class missing-action opportunity when a distinct artifact-grounded user question materially needs absent expansion, reference, or invocation.",
         },
       },
     },

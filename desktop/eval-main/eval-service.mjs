@@ -15,7 +15,7 @@ import {
   canonicalJson,
   checkNodeNavigation,
   checkBasicOutput,
-  GRAPH_PRESENTATION_RUBRIC_V4,
+  GRAPH_PRESENTATION_RUBRIC_V5,
   expandTestRun,
   gradeH3Workspace,
   gradeFrontierProjectWorkspace,
@@ -174,8 +174,8 @@ function presentationGradeFromTurns(turns, requested) {
     : completed.length === results.length ? "completed"
       : failed.length === results.length ? "failed" : "partial";
   const recursive = completed.length > 0 && completed.every((result) => (
-    result.review?.schemaVersion === 2
-    && result.review?.contractId === "recursive-presentation-judge-v2"
+    [2, 3].includes(result.review?.schemaVersion)
+    && ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3"].includes(result.review?.contractId)
   ));
   if (recursive) {
     return buildRecursiveGraphPresentationGrade({
@@ -238,6 +238,7 @@ function presentationLayers(results) {
             ...(node?.structure?.evidence || []),
             ...(node?.semantic?.evidence || []),
             ...(node?.allocationSteps || []).flatMap((step) => step?.evidence || []),
+            ...(node?.missingActionOpportunities || []).flatMap((opportunity) => opportunity?.evidence || []),
             ...(node?.actions || []).flatMap((action) => action?.evidence || []),
             ...(node?.findings || []).flatMap((finding) => finding?.evidence || []),
           ])],
@@ -1387,7 +1388,7 @@ export class EvalService {
       completedAt: null,
       artifactDirectory,
       artifactAuthority: "references",
-      rubricVersion: GRAPH_PRESENTATION_RUBRIC_V4.rubricVersion,
+      rubricVersion: GRAPH_PRESENTATION_RUBRIC_V5.rubricVersion,
       judgeConfiguration: copy(execution.judgeConfiguration),
       references: emptyJudgeReferences(),
       review: null,
@@ -1428,7 +1429,7 @@ export class EvalService {
         },
         artifact: judgeArtifactForExecution(execution),
         artifactEvidence: judgeArtifactEvidenceForExecution(execution),
-        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V4),
+        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V5),
         judgeConfiguration: copy(execution.judgeConfiguration),
         ...(provenance === null ? {} : { provenance: copy(provenance) }),
       };

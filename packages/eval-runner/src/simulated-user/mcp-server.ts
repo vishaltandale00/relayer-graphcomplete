@@ -248,6 +248,15 @@ const allocationStepSchema = z.object({
   selectionFinding: z.string().min(1),
   evidence: z.array(screenshotReferenceSchema).min(1),
 }).strict();
+const missingActionOpportunitySchema = z.object({
+  allocationStep: z.number().int().nonnegative(),
+  preferredChoice: z.enum(["expand", "reference", "invoke"]),
+  importance: z.enum(["material", "critical"]),
+  unansweredQuestion: z.string().min(1),
+  expectedContribution: z.string().min(1),
+  artifactEvidence: z.array(z.string().min(1)).min(1),
+  evidence: z.array(screenshotReferenceSchema).min(1),
+}).strict();
 const recursiveActionSchema = z.object({
   actionId: z.string().min(1),
   kind: z.enum(["expand", "reference", "invoke"]),
@@ -269,6 +278,7 @@ const recursiveNodeReviewSchema = z.object({
   score: recursiveScoreSchema,
   semantic: recursiveSemanticSchema,
   allocationSteps: z.array(allocationStepSchema).min(1),
+  missingActionOpportunities: z.array(missingActionOpportunitySchema).default([]),
   actions: z.array(recursiveActionSchema),
   findings: z.array(findingSchema),
 }).strict();

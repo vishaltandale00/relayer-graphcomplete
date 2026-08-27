@@ -9,6 +9,7 @@ import {
   DEFAULT_SIMULATED_USER_RUBRIC,
   GRAPH_PRESENTATION_RUBRIC_V3,
   GRAPH_PRESENTATION_RUBRIC_V4,
+  GRAPH_PRESENTATION_RUBRIC_V5,
   SIMULATED_USER_RUBRIC_V1,
   getRubricCriterionKeys,
   validateRubricRatings,
@@ -171,6 +172,13 @@ describe("recursive simulated-user rubric", () => {
       finalTurnInput: ["original_request", "artifact_evidence", "root_layer_result"],
       arithmeticCompression: false,
     });
+  });
+
+  it("versions missing-action-aware recursive judgment independently", () => {
+    expect(GRAPH_PRESENTATION_RUBRIC_V5.rubricVersion).toBe("graph-presentation-rubric-v5");
+    expect(GRAPH_PRESENTATION_RUBRIC_V5.recursiveJudgment.contractId).toBe("recursive-presentation-judge-v3");
+    expect(GRAPH_PRESENTATION_RUBRIC_V5.subjects.turn.criteria.recursive_coherence.description)
+      .toContain("first-class missing-action opportunity");
   });
 
   it("reports missing, unknown, and invalid rating keys without inference", () => {

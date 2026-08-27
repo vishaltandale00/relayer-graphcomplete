@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LayerReview, NodeReview, TurnReview } from "../src/simulated-user/contracts.js";
 import { inventoryReviewSubjects } from "../src/simulated-user/inventory.js";
 import { IncrementalReviewStore } from "../src/simulated-user/review-store.js";
+import { RecursivePresentationReviewStore } from "../src/simulated-user/recursive-review.js";
 import {
   SIMULATED_USER_MCP_TOOL_NAMES,
   startSimulatedUserReviewMcpServer,
@@ -199,6 +200,73 @@ describe("simulated-user MCP server", () => {
       "reviewNode:completed",
       "submitReview:completed",
     ]);
+    await transport.close();
+  });
+
+  it("accepts and persists a first-class missing action opportunity through the recursive review tool", async () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-1",
+      rootLayerId: "layer-1",
+      layers: [{ id: "layer-1", nodeIds: ["node-1"], actions: [] }],
+    });
+    const reviewStore = new RecursivePresentationReviewStore({ inventory });
+    const server = await startSimulatedUserReviewMcpServer({
+      controller: unusedController(),
+      reviewStore,
+      bearerToken: "test-token-with-at-least-24-characters",
+    });
+    openServers.push(server);
+    const { client, transport } = await connectClient(server);
+
+    const result = await client.callTool({
+      name: "reviewNode",
+      arguments: { review: {
+        layerId: "layer-1",
+        nodeId: "node-1",
+        evidence: { context: ["shot-node"], detail: ["shot-node"] },
+        score: { nodeId: "node-1", content: 4, actionAllocation: 2, actionDelivery: null, recursiveQuality: null },
+        semantic: {
+          nodeId: "node-1",
+          meaning: "The node reports a completed repair.",
+          delivered: "The result is visible.",
+          limitations: "The failure mechanism is not explained.",
+          effectOnLayer: "The root remains shallow.",
+          evidence: ["shot-node"],
+        },
+        allocationSteps: [{
+          step: 0,
+          ranking: [
+            { choice: "expand", rank: 1 },
+            { choice: "stop", rank: 2 },
+            { choice: "reference", rank: 3 },
+            { choice: "invoke", rank: 4 },
+          ],
+          preferredChoice: "expand",
+          authoredChoice: "stop",
+          authoredActionId: null,
+          margin: "clearly_better",
+          selectionFinding: "A causal explanation is materially missing.",
+          evidence: ["shot-node"],
+        }],
+        missingActionOpportunities: [{
+          allocationStep: 0,
+          preferredChoice: "expand",
+          importance: "material",
+          unansweredQuestion: "How does the invalid value reach the response boundary?",
+          expectedContribution: "Trace the causal path and repaired boundary.",
+          artifactEvidence: ["src/utils/sanitize.ts", "src/response.ts"],
+          evidence: ["shot-node"],
+        }],
+        actions: [],
+        findings: [],
+      } },
+    });
+
+    expect(result.structuredContent).toMatchObject({ ok: true, nodeId: "node-1" });
+    expect(reviewStore.snapshot().nodes[0]?.history.current.missingActionOpportunities).toEqual([expect.objectContaining({
+      preferredChoice: "expand",
+      importance: "material",
+    })]);
     await transport.close();
   });
 });

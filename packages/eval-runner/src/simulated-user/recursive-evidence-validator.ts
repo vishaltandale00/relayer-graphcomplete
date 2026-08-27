@@ -61,6 +61,12 @@ export function createRecursiveScreenshotEvidenceValidator(
         isNode,
         `Allocation evidence must show source node ${request.subject.nodeId}`,
       ));
+      (request.review.missingActionOpportunities ?? []).forEach((opportunity, index) => validate(
+        opportunity.evidence,
+        ["missingActionOpportunities", index, "evidence"],
+        isNode,
+        `Missing-action evidence must show source node ${request.subject.nodeId}`,
+      ));
       request.review.actions.forEach((action, index) => {
         const subject = request.actionSubjects.find((candidate) => candidate.actionId === action.actionId);
         const actionScreenshots = action.evidence.map((screenshotId) => options.screenshots.get(screenshotId));
@@ -105,6 +111,7 @@ export function createRecursiveScreenshotEvidenceValidator(
           ...node.evidence.detail,
           ...node.semantic.evidence,
           ...node.allocationSteps.flatMap((step) => step.evidence),
+          ...(node.missingActionOpportunities ?? []).flatMap((opportunity) => opportunity.evidence),
           ...node.actions.flatMap((action) => action.evidence),
         ]),
       ]);
