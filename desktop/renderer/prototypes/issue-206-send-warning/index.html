@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PROTOTYPE — Issue 206 send warning</title>
+  <style>
+    /* PROTOTYPE ONLY: Three issue #206 warning-popup variants, switched with ?variant=.
+       Human-gate verdict (2026-08-27): Variant B, Composer anchored. */
+    :root {
+      color-scheme: dark;
+      --bg: #0b0d0e;
+      --surface: #101214;
+      --raised: #171a1d;
+      --panel: #141719;
+      --hover: #22262a;
+      --line: #2c3034;
+      --line-strong: #3a4046;
+      --text: #f1f3f4;
+      --muted: #a2a8ae;
+      --faint: #70777f;
+      --blue: #77aef7;
+      --amber: #e7b35d;
+      --green: #72d5a0;
+      --danger: #ef8b8b;
+      --shadow: 0 26px 100px rgba(0, 0, 0, .66);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); }
+    button, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .hidden { display: none !important; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    .app { display: grid; grid-template-columns: 230px minmax(0, 1fr) 324px; grid-template-rows: 58px minmax(0, 1fr); height: 100%; }
+    .sidebar { grid-row: 1 / -1; padding: 18px 14px; border-right: 1px solid var(--line); background: #0d0f10; }
+    .brand { display: flex; align-items: center; gap: 10px; height: 42px; font-weight: 720; letter-spacing: -.02em; }
+    .brand-mark { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--raised); color: var(--blue); }
+    .section-label { margin: 30px 8px 10px; color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+    .thread-item { width: 100%; display: flex; gap: 9px; padding: 10px; border: 0; border-radius: 8px; background: var(--hover); color: var(--text); text-align: left; }
+    .thread-item span:first-child { color: var(--faint); }
+    .thread-item span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 650; }
+    .thread-header { grid-column: 2 / -1; display: flex; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); background: #0d0f10; }
+    .nav-arrows { color: var(--faint); letter-spacing: 9px; }
+    .thread-header h1 { margin: 0; font-size: 14px; }
+    .workspace { position: relative; min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; }
+    .interaction { margin: 14px 16px 12px; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+    .interaction-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; background: var(--hover); color: var(--muted); font-weight: 800; }
+    .interaction small, .details small { color: var(--faint); font-size: 9px; font-weight: 720; letter-spacing: .1em; text-transform: uppercase; }
+    .interaction p { margin: 6px 0 0; color: #d5d9dc; font-size: 12px; line-height: 1.4; }
+    .status { display: flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; }
+    .status i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+    .graph { position: relative; min-height: 0; overflow: hidden; border-top: 1px solid var(--line); background-color: #0c0e0f; background-image: radial-gradient(#262a2e 1px, transparent 1px); background-size: 26px 26px; }
+    .graph-label { position: absolute; top: 18px; left: 20px; color: var(--muted); font-size: 11px; font-weight: 650; }
+    .edge { position: absolute; left: 25%; right: 20%; top: 51%; height: 1px; background: #444a50; }
+    .node { position: absolute; top: calc(51% - 37px); width: 126px; margin-left: -63px; text-align: center; }
+    .node.one { left: 27%; } .node.two { left: 52%; } .node.three { left: 78%; }
+    .node-orb { position: relative; width: 64px; height: 64px; margin: 0 auto 9px; display: grid; place-items: center; border: 2px solid #5a6169; border-radius: 50%; background: #1a1e21; box-shadow: 0 8px 24px rgba(0,0,0,.5); font-size: 24px; }
+    .node.selected .node-orb { border-color: var(--blue); box-shadow: 0 0 0 5px rgba(119,174,247,.13), 0 8px 24px rgba(0,0,0,.5); }
+    .draft-dot { position: absolute; right: -3px; top: -3px; min-width: 21px; height: 21px; display: grid; place-items: center; border-radius: 999px; background: var(--amber); color: #241708; font-size: 10px; font-weight: 800; }
+    .node strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    .graph-controls { position: absolute; right: 14px; bottom: 14px; display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+    .graph-controls span { padding: 8px 11px; border-right: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+    .composer-shell { position: relative; border-top: 1px solid var(--line); background: #0e1011; }
+    .confirmed-pills { display: flex; gap: 6px; padding: 9px 14px 0; overflow: hidden; }
+    .pill { flex: none; display: flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--raised); color: var(--muted); font-size: 10px; }
+    .composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; padding: 9px 14px 14px; }
+    .composer textarea { width: 100%; min-height: 58px; max-height: 120px; resize: none; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); color: var(--text); }
+    .send { width: 43px; height: 43px; display: grid; place-items: center; border: 0; border-radius: 50%; background: #f1f2f3; color: #181a1c; font-size: 18px; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+    .send:hover { background: #fff; transform: translateY(-1px); }
+    .send:disabled { cursor: wait; opacity: .45; transform: none; }
+    .details { min-width: 0; display: grid; grid-template-rows: 1fr auto; border-left: 1px solid var(--line); background: var(--surface); }
+    .details-content { padding: 22px; overflow: auto; }
+    .details h2 { margin: 16px 0 8px; font-size: 19px; }
+    .details p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .details-meta { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--faint); font-size: 10px; }
+    .draft-editor { height: 31vh; min-height: 190px; display: flex; flex-direction: column; padding: 13px; border-top: 1px solid var(--line-strong); background: #111315; }
+    .draft-editor header { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
+    .draft-saved { color: var(--green); }
+    .draft-editor textarea { flex: 1; min-height: 0; margin-top: 9px; resize: none; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
+    .draft-editor footer { display: flex; justify-content: flex-end; gap: 5px; margin-top: 7px; }
+    .icon-button { width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
+    .icon-button:hover { background: var(--hover); color: var(--text); }
+
+    .scrim { position: fixed; inset: 0; z-index: 50; background: rgba(3,4,5,.67); backdrop-filter: blur(1px); }
+    .warning { position: fixed; z-index: 51; border: 1px solid var(--line-strong); background: #191c1f; color: var(--text); box-shadow: var(--shadow); }
+    .warning-kicker { display: flex; align-items: center; gap: 8px; color: var(--amber); font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    .warning-kicker i { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid rgba(231,179,93,.42); border-radius: 50%; background: rgba(231,179,93,.1); font-style: normal; }
+    .warning h2 { margin: 11px 0 7px; font-size: 19px; line-height: 1.22; letter-spacing: -.015em; }
+    .warning-copy { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .draft-count { margin: 18px 0 8px; color: #cfd3d6; font-size: 10px; font-weight: 680; }
+    .draft-list { margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; border: 1px solid var(--line); border-radius: 9px; background: #121416; }
+    .draft-list li { display: grid; grid-template-columns: 31px minmax(0, 1fr); gap: 9px; align-items: center; min-height: 47px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+    .draft-list li:last-child { border-bottom: 0; }
+    .draft-list .node-mini { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--muted); }
+    .draft-list strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    .draft-list span { display: block; margin-top: 2px; overflow: hidden; color: var(--faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .warning-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+    .warning-actions button { min-height: 38px; padding: 0 13px; border-radius: 8px; font-size: 11px; font-weight: 680; }
+    .go-back { border: 1px solid var(--line-strong); background: transparent; color: var(--text); }
+    .override { border: 1px solid rgba(231,179,93,.34); background: #f1f2f3; color: #181a1c; }
+    .override:hover { background: #fff; }
+
+    /* A: centered, deliberate confirmation dialog. */
+    .variant-a { top: 50%; left: 50%; width: min(470px, calc(100vw - 36px)); padding: 21px; border-radius: 14px; transform: translate(-50%, -50%); }
+    .variant-a .draft-list { max-height: min(258px, 34vh); }
+    .variant-a .warning-actions { margin-top: 17px; }
+
+    /* B: compact warning anchored to the Send control. */
+    .variant-b { right: 338px; bottom: 91px; width: min(395px, calc(100vw - 36px)); padding: 17px; border-radius: 12px; }
+    .variant-b::after { content: ""; position: absolute; right: 24px; bottom: -8px; width: 14px; height: 14px; border-right: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); background: #191c1f; transform: rotate(45deg); }
+    .variant-b h2 { font-size: 16px; }
+    .variant-b .draft-count { margin-top: 13px; }
+    .variant-b .draft-list { max-height: min(188px, 25vh); }
+    .variant-b .warning-actions { margin-top: 13px; }
+    body[data-variant="B"] .scrim { background: rgba(3,4,5,.38); backdrop-filter: none; }
+
+    /* C: a composer-connected bottom sheet with wide information hierarchy. */
+    .variant-c { left: 230px; right: 324px; bottom: 0; display: grid; grid-template-columns: minmax(230px, .85fr) minmax(300px, 1.15fr); gap: 22px; padding: 21px 24px 70px; border-width: 1px 1px 0; border-radius: 15px 15px 0 0; }
+    .variant-c .warning-copy { max-width: 410px; }
+    .variant-c .draft-count { margin-top: 16px; }
+    .variant-c .draft-list { max-height: min(235px, 28vh); }
+    .variant-c .warning-actions { align-self: end; margin-top: 17px; }
+    body[data-variant="C"] .scrim { background: linear-gradient(to bottom, rgba(3,4,5,.56), rgba(3,4,5,.3)); backdrop-filter: none; }
+
+    .prototype-state { position: fixed; z-index: 80; top: 12px; left: 244px; max-width: 360px; display: flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px dashed #685632; border-radius: 7px; background: rgba(26,22,15,.93); color: #e7c98f; font: 9px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .prototype-state b { color: #fff0c8; }
+    .prototype-tools { position: fixed; z-index: 80; right: 12px; top: 12px; display: flex; align-items: center; gap: 5px; padding: 6px; border: 1px dashed #4b5661; border-radius: 9px; background: rgba(17,20,22,.95); box-shadow: 0 8px 25px rgba(0,0,0,.35); }
+    .prototype-tools label { color: var(--faint); font-size: 9px; }
+    .prototype-tools select, .prototype-tools button { height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--muted); font-size: 9px; }
+    .prototype-tools button { padding: 0 8px; }
+    .prototype-switcher { position: fixed; z-index: 90; left: 50%; bottom: 13px; display: grid; grid-template-columns: 36px minmax(180px, auto) 36px; align-items: center; border: 1px solid #5b646d; border-radius: 999px; overflow: hidden; background: #f1f2f3; color: #17191b; box-shadow: 0 10px 35px rgba(0,0,0,.5); transform: translateX(-50%); }
+    .prototype-switcher button { height: 38px; border: 0; background: transparent; color: inherit; font-size: 17px; }
+    .prototype-switcher button:hover { background: #d9dde0; }
+    .prototype-switcher output { padding: 0 12px; font-size: 10px; font-weight: 750; text-align: center; }
+    .toast { position: fixed; z-index: 75; left: 50%; top: 72px; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--raised); color: var(--text); box-shadow: 0 10px 30px rgba(0,0,0,.45); font-size: 10px; transform: translateX(-50%); }
+    .toast.error { border-color: rgba(239,139,139,.5); color: var(--danger); }
+
+    body.large-text { font-size: 125%; }
+    body.large-text .warning h2 { font-size: 23px; }
+    body.large-text .warning-copy, body.large-text .warning-actions button, body.large-text .draft-list strong { font-size: 13px; }
+    body.large-text .draft-list span, body.large-text .draft-count { font-size: 11px; }
+    @media (max-width: 980px) {
+      .app { grid-template-columns: 1fr 280px; }
+      .sidebar { display: none; }
+      .thread-header { grid-column: 1 / -1; }
+      .variant-b { right: 294px; }
+      .variant-c { left: 0; right: 280px; }
+      .prototype-state { left: 12px; top: 64px; }
+    }
+    @media (max-width: 720px) {
+      .app { grid-template-columns: 1fr; }
+      .details { display: none; }
+      .thread-header { grid-column: 1; }
+      .variant-b { left: 12px; right: 12px; bottom: 91px; width: auto; }
+      .variant-c { left: 0; right: 0; grid-template-columns: 1fr; gap: 12px; }
+      .prototype-tools { top: 62px; }
+    }
+    @media (forced-colors: active) {
+      .warning, .draft-list, .go-back, .override { border: 2px solid CanvasText; }
+      .scrim { background: transparent; }
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .warning { animation: appear 130ms ease-out; }
+      @keyframes appear { from { opacity: 0; translate: 0 7px; } }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" aria-hidden="false">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">R</span><span>Relayer</span></div>
+      <p class="section-label">Threads</p>
+      <button class="thread-item"><span>1</span><span>Understand the task pipeline</span></button>
+    </aside>
+    <header class="thread-header"><span class="nav-arrows">← →</span><h1>Understand the task pipeline</h1></header>
+    <main class="workspace">
+      <section class="interaction">
+        <span class="interaction-icon">›_</span>
+        <div><small>Your interaction</small><p>Explain how a task moves through the system, and what happens when both workers are busy.</p></div>
+        <span class="status"><i></i> Complete</span>
+      </section>
+      <section class="graph" aria-label="Visible graph layer">
+        <span class="graph-label">Response</span><div class="edge"></div>
+        <div class="node one selected"><div class="node-orb">☷<span class="draft-dot">1</span></div><strong>Incoming queue</strong></div>
+        <div class="node two"><div class="node-orb">♙<span class="draft-dot">1</span></div><strong>Two-worker pool</strong></div>
+        <div class="node three"><div class="node-orb">▱<span class="draft-dot">1</span></div><strong>Results store</strong></div>
+        <div class="graph-controls"><span>−</span><span>115%</span><span>+</span><span>Fit</span></div>
+      </section>
+      <section class="composer-shell">
+        <div class="confirmed-pills"><span class="pill">⌘ Incoming queue <b>2 notes</b></span></div>
+        <div class="composer"><textarea id="message" aria-label="Follow-up message">What should the queue surface when capacity is exhausted?</textarea><button class="send" id="send" aria-label="Send">↑</button></div>
+      </section>
+    </main>
+    <aside class="details">
+      <div class="details-content"><small>Node details</small><h2>Incoming queue</h2><p>Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.</p><div class="details-meta">Accepted concept · visible in this response</div></div>
+      <section class="draft-editor"><header><span>Unconfirmed annotation</span><span class="draft-saved">Saved</span></header><textarea aria-label="Draft annotation">Call out whether tasks are ordered FIFO when the queue starts growing.</textarea><footer><button class="icon-button" aria-label="Discard draft">×</button><button class="icon-button" aria-label="Confirm annotation">✓</button></footer></section>
+    </aside>
+  </div>
+
+  <div class="scrim hidden" id="scrim"></div>
+  <section class="warning hidden" id="warning" role="dialog" aria-modal="true" aria-labelledby="warningTitle" aria-describedby="warningCopy draftCount">
+    <div id="warningBody"></div>
+  </section>
+  <div class="toast hidden" id="toast" role="status"></div>
+
+  <aside class="prototype-state" aria-label="Prototype state"><b>PROTOTYPE</b><span id="stateText"></span></aside>
+  <aside class="prototype-tools" aria-label="Prototype controls">
+    <label for="draftScenario">Drafts</label><select id="draftScenario"><option value="3">3</option><option value="12">12</option><option value="0">0</option></select>
+    <button id="largeText" aria-pressed="false">Large text</button>
+    <button id="failNext" aria-pressed="false">Fail next send</button>
+  </aside>
+  <nav class="prototype-switcher" aria-label="Prototype variants"><button id="previousVariant" aria-label="Previous variant">←</button><output id="variantLabel"></output><button id="nextVariant" aria-label="Next variant">→</button></nav>
+
+  <script>
+    const variants = {
+      A: "Centered decision",
+      B: "Composer anchored",
+      C: "Bottom sheet",
+    };
+    const draftFixtures = [
+      ["Incoming queue", "Call out whether tasks are ordered FIFO…", "☷"],
+      ["Two-worker pool", "Explain how worker availability is detected…", "♙"],
+      ["Results store", "Clarify how completed output is retained…", "▱"],
+      ["Backpressure policy", "Mention the threshold before producers wait…", "↯"],
+      ["Retry lane", "Separate retries from new work…", "↻"],
+      ["Dead-letter queue", "Name the operator recovery path…", "!"],
+      ["Capacity signal", "Show where saturation becomes visible…", "⌁"],
+      ["Worker lease", "Describe expiry and reassignment…", "◷"],
+      ["Result notification", "Say whether consumers poll or subscribe…", "⌁"],
+      ["Priority intake", "Explain ordering across priority classes…", "≡"],
+      ["Queue metrics", "Include age and depth indicators…", "⌁"],
+      ["Shutdown drain", "Clarify which tasks finish during shutdown…", "↓"],
+    ];
+    const focusableSelector = "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    const params = new URLSearchParams(location.search);
+    const state = {
+      variant: variants[params.get("variant")] ? params.get("variant") : "B",
+      draftCount: ["0", "3", "12"].includes(params.get("drafts")) ? Number(params.get("drafts")) : 3,
+      warningOpen: false,
+      submitting: false,
+      sent: 0,
+      failNext: false,
+      largeText: params.get("scale") === "large",
+      lastOutcome: "ready",
+      returnFocus: null,
+    };
+
+    const byId = (id) => document.getElementById(id);
+    const sendButton = byId("send");
+    const warning = byId("warning");
+    const scrim = byId("scrim");
+
+    function syncUrl() {
+      const next = new URL(location.href);
+      next.searchParams.set("variant", state.variant);
+      next.searchParams.set("drafts", String(state.draftCount));
+      if (state.largeText) next.searchParams.set("scale", "large"); else next.searchParams.delete("scale");
+      history.replaceState(null, "", next);
+    }
+
+    function draftListMarkup() {
+      return draftFixtures.slice(0, state.draftCount).map(([title, note, icon]) => `
+        <li><span class="node-mini" aria-hidden="true">${icon}</span><div><strong>${title}</strong><span>${note}</span></div></li>
+      `).join("");
+    }
+
+    function warningMarkup() {
+      const countText = `${state.draftCount} unconfirmed ${state.draftCount === 1 ? "draft" : "drafts"}`;
+      const intro = `
+        <div class="warning-kicker"><i aria-hidden="true">!</i> Drafts will be omitted</div>
+        <h2 id="warningTitle">Send without these node annotations?</h2>
+        <p class="warning-copy" id="warningCopy">Your message and confirmed context will be sent. These drafts stay saved so you can confirm or use them later.</p>`;
+      const list = `<p class="draft-count" id="draftCount">${countText}</p><ul class="draft-list" tabindex="0" aria-label="${countText}">${draftListMarkup()}</ul>`;
+      const actions = `<div class="warning-actions"><button class="go-back" data-warning-action="back">Go back</button><button class="override" data-warning-action="send">Send without drafts</button></div>`;
+      if (state.variant === "C") return `<div>${intro}${actions}</div><div>${list}</div>`;
+      return `${intro}${list}${actions}`;
+    }
+
+    function render() {
+      document.body.dataset.variant = state.variant;
+      document.body.classList.toggle("large-text", state.largeText);
+      warning.className = `warning variant-${state.variant.toLowerCase()}${state.warningOpen ? "" : " hidden"}`;
+      scrim.classList.toggle("hidden", !state.warningOpen);
+      warning.innerHTML = state.warningOpen ? warningMarkup() : "";
+      sendButton.disabled = state.submitting;
+      byId("variantLabel").textContent = `${state.variant} · ${variants[state.variant]}`;
+      byId("draftScenario").value = String(state.draftCount);
+      byId("largeText").setAttribute("aria-pressed", String(state.largeText));
+      byId("failNext").setAttribute("aria-pressed", String(state.failNext));
+      byId("stateText").textContent = `variant=${state.variant} drafts=${state.draftCount} warning=${state.warningOpen ? "open" : "closed"} submitting=${state.submitting} sent=${state.sent} outcome=${state.lastOutcome}`;
+      syncUrl();
+    }
+
+    function openWarning() {
+      if (state.warningOpen || state.submitting) return;
+      state.returnFocus = document.activeElement;
+      state.warningOpen = true;
+      state.lastOutcome = "awaiting explicit override";
+      render();
+      warning.querySelector('[data-warning-action="back"]').focus();
+    }
+
+    function closeWarning(outcome) {
+      state.warningOpen = false;
+      state.lastOutcome = outcome;
+      render();
+      (state.returnFocus ?? sendButton).focus();
+    }
+
+    function showToast(message, isError = false) {
+      const toast = byId("toast");
+      toast.textContent = message;
+      toast.classList.toggle("error", isError);
+      toast.classList.remove("hidden");
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => toast.classList.add("hidden"), 2600);
+    }
+
+    async function submit({ overridden }) {
+      if (state.submitting) return;
+      state.warningOpen = false;
+      state.submitting = true;
+      state.lastOutcome = overridden ? "sending without drafts" : "sending directly";
+      render();
+      await new Promise((resolve) => setTimeout(resolve, 650));
+      state.submitting = false;
+      if (state.failNext) {
+        state.failNext = false;
+        state.lastOutcome = "send failed; drafts preserved";
+        showToast("Send failed. All unconfirmed drafts are still saved.", true);
+      } else {
+        state.sent += 1;
+        state.lastOutcome = overridden ? "sent; drafts preserved" : "sent directly";
+        showToast(overridden ? `Message sent. ${state.draftCount} drafts preserved.` : "Message sent directly.");
+      }
+      render();
+      sendButton.focus();
+    }
+
+    sendButton.addEventListener("click", () => state.draftCount > 0 ? openWarning() : submit({ overridden: false }));
+    byId("message").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        sendButton.click();
+      }
+    });
+    warning.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-warning-action]")?.dataset.warningAction;
+      if (action === "back") closeWarning("returned to editing; drafts preserved");
+      if (action === "send") submit({ overridden: true });
+    });
+    document.addEventListener("keydown", (event) => {
+      if (state.warningOpen) {
+        if (event.key === "Escape") { event.preventDefault(); closeWarning("returned to editing; drafts preserved"); return; }
+        if (event.key === "Tab") {
+          const focusable = [...warning.querySelectorAll(focusableSelector)];
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        }
+        return;
+      }
+      if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !event.target.matches("input, textarea, select, [contenteditable]")) {
+        event.preventDefault();
+        cycleVariant(event.key === "ArrowRight" ? 1 : -1);
+      }
+    });
+
+    function cycleVariant(direction) {
+      const keys = Object.keys(variants);
+      const index = (keys.indexOf(state.variant) + direction + keys.length) % keys.length;
+      state.variant = keys[index];
+      state.lastOutcome = `viewing ${variants[state.variant]}`;
+      if (!state.warningOpen && state.draftCount > 0) {
+        openWarning();
+        return;
+      }
+      render();
+      if (state.warningOpen) warning.querySelector('[data-warning-action="back"]').focus();
+    }
+    byId("previousVariant").addEventListener("click", () => cycleVariant(-1));
+    byId("nextVariant").addEventListener("click", () => cycleVariant(1));
+    byId("draftScenario").addEventListener("change", (event) => {
+      state.draftCount = Number(event.target.value);
+      state.lastOutcome = `loaded ${state.draftCount}-draft scenario`;
+      if (state.draftCount === 0 && state.warningOpen) closeWarning("no drafts; warning no longer needed"); else render();
+    });
+    byId("largeText").addEventListener("click", () => { state.largeText = !state.largeText; render(); });
+    byId("failNext").addEventListener("click", () => { state.failNext = !state.failNext; state.lastOutcome = state.failNext ? "next send will fail" : "failure simulation off"; render(); });
+
+    render();
+  </script>
+</body>
+</html>
