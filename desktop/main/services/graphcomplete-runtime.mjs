@@ -81,7 +81,9 @@ function validatedExecutionAccess(resolved, definition, descriptor) {
       || !stringRecord(resolved.fields)) {
       throw new Error("Provider adapter returned invalid secret execution access.");
     }
-    const runtime = validatedManagedRuntime(resolved.runtime);
+    const runtime = resolved.runtime === undefined
+      ? undefined
+      : validatedManagedRuntime(resolved.runtime);
     return Object.freeze({
       kind: "secret",
       contract: definition.accessContract,
@@ -90,14 +92,22 @@ function validatedExecutionAccess(resolved, definition, descriptor) {
       adapterImplementationVersion: descriptor.implementationVersion,
       endpoint: resolved.endpoint,
       fields: Object.freeze({ ...resolved.fields }),
-      runtime,
+      ...(runtime === undefined ? {} : { runtime }),
     });
   }
   if (definition.accessContract === "managed-runtime@1") {
-    if (resolved?.kind !== "managed-runtime") {
+    if (resolved?.kind !== "managed-runtime" || !stringRecord(resolved.environment)) {
       throw new Error("Provider adapter returned invalid managed-runtime execution access.");
     }
-    const runtime = validatedManagedRuntime(resolved);
+    const hasRuntimeDescriptor = [
+      resolved.runtimeId,
+      resolved.version,
+      resolved.executable,
+      resolved.moduleUrl,
+    ].some((value) => value !== undefined);
+    const runtime = hasRuntimeDescriptor
+      ? validatedManagedRuntime(resolved)
+      : Object.freeze({ environment: Object.freeze({ ...resolved.environment }) });
     return Object.freeze({
       kind: "managed-runtime",
       contract: definition.accessContract,
