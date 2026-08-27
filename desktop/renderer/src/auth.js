@@ -52,6 +52,11 @@ function setBusy(busy) {
   );
 }
 
+function setConnectionCancellationAvailable(available) {
+  const cancel = $("#cancelProviderConnection");
+  if (cancel) cancel.disabled = !available;
+}
+
 function currentFormValues() {
   const values = connectionValues ?? { label: selectedDescriptor.label, endpoint: selectedDescriptor.defaultEndpoint, fields: {} };
   for (const input of $$("[data-provider-field]", $("#providerSetupFields"))) {
@@ -63,6 +68,7 @@ function currentFormValues() {
 }
 
 function showProviderOptions() {
+  setConnectionCancellationAvailable(true);
   selectedDescriptor = null;
   connectionValues = null;
   $("#providerSetupOptions").classList.remove("hidden");
@@ -86,6 +92,7 @@ function showProviderOptions() {
 }
 
 function showProviderForm(adapterId, { showErrors = false } = {}) {
+  setConnectionCancellationAvailable(true);
   selectedDescriptor = normalizeProviderDescriptor(
     providerStatus.adapters.find((descriptor) => descriptor.adapterId === adapterId),
   );
@@ -248,6 +255,9 @@ async function connectSelectedProvider(event) {
     }
     if (result.status !== "connected") return;
     pendingConnectionId = null;
+    // Provider state has committed. Cancel no longer has a reversible operation
+    // to target, so do not accept it while defaults and product state refresh.
+    setConnectionCancellationAvailable(false);
     connectedDefinition = result.providerDefinition;
     providerStatus = await desktop.providers.status();
     await prepareFamilyStep(connectedDefinition);

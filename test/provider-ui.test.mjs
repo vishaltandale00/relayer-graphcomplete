@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -22,6 +23,18 @@ const openAi = normalizeProviderDescriptor({
 });
 
 describe("provider and harness renderer markup", () => {
+  it("stops accepting Cancel once provider commit precedes deferred default setup", async () => {
+    const source = await readFile(new URL("../desktop/renderer/src/auth.js", import.meta.url), "utf8");
+    const committed = source.indexOf('if (result.status !== "connected") return;');
+    const disableCancel = source.indexOf("setConnectionCancellationAvailable(false);", committed);
+    const refreshStatus = source.indexOf("providerStatus = await desktop.providers.status();", committed);
+    const prepareDefaults = source.indexOf("await prepareFamilyStep(connectedDefinition);", committed);
+    expect(committed).toBeGreaterThan(-1);
+    expect(disableCancel).toBeGreaterThan(committed);
+    expect(disableCancel).toBeLessThan(refreshStatus);
+    expect(disableCancel).toBeLessThan(prepareDefaults);
+  });
+
   it("renders branded marks for packaged adapters and a generic fallback", () => {
     expect(providerLogoMarkup("claude-subscription")).toContain('data-provider-logo="claude"');
     expect(providerLogoMarkup("codex-subscription")).toContain('data-provider-logo="codex"');

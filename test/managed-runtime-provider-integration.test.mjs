@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createProviderAdapterRegistry } from "../desktop/main/providers/provider-adapter-contract.mjs";
 import { ProviderDefinitionService } from "../desktop/main/providers/provider-definition-service.mjs";
 import { productionProviderAdapterRegistry } from "../desktop/main/providers/provider-adapter-registry.mjs";
+import { createProviderExecutionAccessBroker } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { CodexBasicHarness } from "../packages/harness-host/src/implementations/codex-basic.ts";
 import { createNoopHarnessTraceSink } from "../packages/harness-host/src/trace.ts";
 
@@ -65,15 +66,27 @@ function fixture({ prepareRuntime = async () => ({ runtimeId: "codex" }), discov
 describe("managed runtime provider Connect boundary", () => {
   it("carries API provider runtime access through the broker shape into Codex", async () => {
     let submitted;
-    const adapter = productionProviderAdapterRegistry.create({
+    const definition = {
       id: "openai-work", adapterId: "openai-api", label: "OpenAI Work",
       endpoint: "https://api.openai.test/v1", accessContract: "secret@1", credentialReference: "provider:openai-work",
       lifecycleState: "active", removedAt: null,
-    }, {
+    };
+    const adapter = productionProviderAdapterRegistry.create(definition, {
       fetch: vi.fn(), secrets: { "api-key": "secret" },
       managedRuntime: { runtimeId: "codex", version: "0.150.1", executable: "/managed/codex" },
       environment: { CODEX_HOME: "/isolated/codex", RELAYER_CODEX_BINARY: "/managed/codex" },
     });
+    const broker = createProviderExecutionAccessBroker(async () => ({
+      definition,
+      descriptor: productionProviderAdapterRegistry.get("openai-api"),
+      runtime: adapter,
+      release: async () => {},
+    }));
+    const acquired = await broker.acquire(
+      { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-test" },
+      ["secret@1"],
+      new AbortController().signal,
+    );
     const harness = new CodexBasicHarness({
       threadId: 1, permissionProfileId: "auto", workingDirectory: process.cwd(),
       permissionBinding: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
@@ -93,10 +106,7 @@ describe("managed runtime provider Connect boundary", () => {
     await harness.complete({
       inputGraph, interactionInput: { interaction: inputGraph, contexts: [] },
       model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-test" },
-      access: {
-        ...adapter.executionAccess(), contract: "secret@1", providerId: "openai-work",
-        adapterId: "openai-api", adapterImplementationVersion: "1",
-      },
+      access: acquired.access,
       graph: { interactionNodeId: 1, acquireCapability: () => ({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 }) },
       approvals: { request: async () => { throw new Error("unused"); } },
       trace: createNoopHarnessTraceSink(),
@@ -104,6 +114,7 @@ describe("managed runtime provider Connect boundary", () => {
 
     expect(submitted.codexPathOverride).toBe("/managed/codex");
     expect(submitted.environment.CODEX_HOME).toBe("/isolated/codex");
+    await acquired.release();
   });
 
   it("finishes managed runtime preparation before provider authentication or discovery", async () => {
