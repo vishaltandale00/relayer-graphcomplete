@@ -13,6 +13,7 @@ import { EvalService } from "./eval-service.mjs";
 import { loadAtomicAnnotationSnapshots } from "./annotation-snapshot-loader.mjs";
 import { loadJudgeScreenshotArtifact } from "./judge-screenshot-loader.mjs";
 import { ReviewSession } from "./review-session.mjs";
+import { loadReadyReviewWorkspace } from "./review-workspace-readiness.mjs";
 import {
   createLocalSimulatedUserJudgeRunner,
   resolveLocalSimulatedUserAutorun,
@@ -142,7 +143,18 @@ async function createReviewWindow(executionId) {
     if (manualReviewWindows.get(executionId) === window) manualReviewWindows.delete(executionId);
     if (reviewSessions.get(executionId) === reviewSession) reviewSessions.delete(executionId);
   });
-  await window.loadURL(`${productOrigin}/?threadId=${encodeURIComponent(threadId)}&review=1`);
+  const navigationToken = randomBytes(16).toString("hex");
+  await loadReadyReviewWorkspace({
+    window,
+    ipc: ipcMain,
+    url: `${productOrigin}/?threadId=${encodeURIComponent(threadId)}`
+      + `&review=1&reviewSession=${encodeURIComponent(navigationToken)}`,
+    expected: {
+      executionId,
+      threadId,
+      navigationToken,
+    },
+  });
   reviewSession = new ReviewSession({
     executionId,
     readOnly: context.readOnly,
@@ -321,10 +333,20 @@ async function openAutomatedReviewSession({
       }
     });
   }
-  await entry.window.loadURL(
-    `${entry.productOrigin}/?threadId=${encodeURIComponent(threadId)}`
-      + `&interactionId=${encodeURIComponent(turnId)}&review=1`,
-  );
+  const navigationToken = randomBytes(16).toString("hex");
+  await loadReadyReviewWorkspace({
+    window: entry.window,
+    ipc: ipcMain,
+    url: `${entry.productOrigin}/?threadId=${encodeURIComponent(threadId)}`
+      + `&interactionId=${encodeURIComponent(turnId)}&review=1`
+      + `&reviewSession=${encodeURIComponent(navigationToken)}`,
+    expected: {
+      executionId,
+      threadId,
+      turnId,
+      navigationToken,
+    },
+  });
   const session = new ReviewSession({
     executionId,
     readOnly: context.readOnly,

@@ -101,7 +101,6 @@ export class ReviewSession {
     artifactDirectory,
     ipc,
     commandTimeoutMs = 5_000,
-    readyTimeoutMs = 5_000,
   }) {
     if (!executionId) throw new Error("ReviewSession requires an execution ID.");
     if (readOnly !== true) throw new Error("ReviewSession requires server-enforced read-only authority.");
@@ -115,7 +114,6 @@ export class ReviewSession {
     this.artifactDirectory = artifactDirectory;
     this.ipc = ipc;
     this.commandTimeoutMs = commandTimeoutMs;
-    this.readyTimeoutMs = readyTimeoutMs;
     this.opened = false;
     this.interactionTrace = [];
     this.artifacts = new Map();
@@ -130,16 +128,7 @@ export class ReviewSession {
     ) {
       throw new Error("ReviewSession requires the local production review workspace.");
     }
-    const deadline = Date.now() + this.readyTimeoutMs;
-    let state;
-    while (!state) {
-      try {
-        state = validateState(this.executionId, await this.#rendererCommand("snapshot"));
-      } catch (error) {
-        if (Date.now() >= deadline || !String(error.message).includes("not ready")) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-    }
+    const state = validateState(this.executionId, await this.#rendererCommand("snapshot"));
     this.opened = true;
     this.interactionTrace.push({ type: "session-opened", at: new Date().toISOString(), state: structuredClone(state) });
     return structuredClone(state);
