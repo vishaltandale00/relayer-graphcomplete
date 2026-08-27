@@ -4,7 +4,9 @@ import { join } from "node:path";
 import {
   DEFAULT_SIMULATED_USER_RUBRIC,
   IncrementalReviewStore,
+  RecursivePresentationReviewStore,
   createScreenshotEvidenceValidator,
+  createRecursiveScreenshotEvidenceValidator,
   inventoryReviewSubjects,
   runSimulatedUserJudge,
 } from "@relayer/eval-runner";
@@ -145,9 +147,11 @@ export async function buildAcceptedReviewTopology({ turnId, rootLayerId, loadLay
       if (action.kind !== "invoke") throw new Error(`Unknown accepted action kind: ${action.kind}`);
       return base;
     });
+    const nodes = resolved.nodes.map((node) => ({ id: String(node.id), title: node.title, detail: node.detail }));
     layers.push({
       id: layerId,
       nodeIds: resolvedNodeIds,
+      ...(nodes.some((node) => typeof node.title === "string" || typeof node.detail === "string") ? { nodes } : {}),
       edgeIds: resolvedEdgeIds,
       actions,
     });
@@ -271,31 +275,40 @@ export function createLocalSimulatedUserJudgeRunner({
         rootLayerId,
       });
       const controller = createReviewSessionController(opened.session, screenshots);
-      const store = new IncrementalReviewStore({
+      const recursiveContract = ["graph-presentation-rubric-v4", "graph-presentation-rubric-v5"]
+        .includes(context.rubric?.rubricVersion);
+      const evidenceOptions = {
+        executionId: String(context.execution.id),
+        threadId: String(context.thread.id),
+        turnId: String(context.turn.id),
+        comparisonTurnIds: (context.request.comparisonTurnIds ?? []).map(String),
+        screenshots,
+      };
+      const store = recursiveContract ? new RecursivePresentationReviewStore({
         inventory,
-        validateEvidence: createScreenshotEvidenceValidator({
-          executionId: String(context.execution.id),
-          threadId: String(context.thread.id),
-          turnId: String(context.turn.id),
-          comparisonTurnIds: (context.request.comparisonTurnIds ?? []).map(String),
-          screenshots,
-        }),
+        validateEvidence: createRecursiveScreenshotEvidenceValidator(evidenceOptions),
+      }) : new IncrementalReviewStore({
+        inventory,
+        validateEvidence: createScreenshotEvidenceValidator(evidenceOptions),
       });
       let record;
       try {
         record = await runJudge({
           executionId: String(context.execution.id),
           originalRequest: context.request.text,
-          configuration: selectedConfiguration,
+          configuration: { ...selectedConfiguration, rubric: context.rubric },
           controller,
           reviewStore: store,
-          workingDirectory: context.artifactDirectory,
+          artifact: context.artifact,
+          workingDirectory: context.artifact?.workingDirectory || context.artifactDirectory,
+          artifactEvidence: context.artifactEvidence,
+          additionalDirectories: [],
         });
       } catch (error) {
         return persistJudgeArtifacts({
           context,
           configuration: selectedConfiguration,
-          rubric: DEFAULT_SIMULATED_USER_RUBRIC,
+          rubric: context.rubric ?? DEFAULT_SIMULATED_USER_RUBRIC,
           screenshots,
           sessionTrace: opened.session.trace(),
           toolTrace: [],
@@ -387,7 +400,6 @@ async function persistJudgeArtifacts({
   );
   return {
     status,
-    passed: status === "completed",
     rubricRef: artifacts.rubric,
     configurationRef: artifacts.configuration,
     interactionTraceRef: artifacts.interactionTrace,

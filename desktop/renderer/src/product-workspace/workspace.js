@@ -652,6 +652,13 @@ export function composerDisabledForState(status, canCompose = true, restoredDraf
   return !canCompose || (PENDING_COMPLETION_STATUSES.has(status) && !restoredDraft);
 }
 
+export function applyComposerCapabilities({ composer, prompt, send, readOnlyMessage }, canCompose) {
+  composer.classList.toggle("disabled-composer", !canCompose);
+  prompt.classList.toggle("hidden", !canCompose);
+  send.classList.toggle("hidden", !canCompose);
+  readOnlyMessage.classList.toggle("hidden", canCompose);
+}
+
 export function composerStatusForThread(state, thread) {
   return workspaceTurns(state, thread).at(-1)?.completionStatus || state.status || "idle";
 }
@@ -1956,10 +1963,12 @@ export function createProductWorkspace({
     threadView.dataset.canCompose = String(capabilities.canCompose);
     threadView.dataset.canInvokeMutatingActions = String(capabilities.canInvokeMutatingActions);
     threadView.dataset.canExportConversation = String(capabilities.canExportConversation);
-    $("#threadComposer").classList.toggle("disabled-composer", !capabilities.canCompose);
-    prompt.classList.toggle("hidden", !capabilities.canCompose);
-    send.classList.toggle("hidden", !capabilities.canCompose);
-    if (!capabilities.canCompose) $("#threadComposer").textContent = "Read-only evaluation result";
+    applyComposerCapabilities({
+      composer: $("#threadComposer"),
+      prompt,
+      send,
+      readOnlyMessage: $("#readOnlyComposerMessage"),
+    }, capabilities.canCompose);
   }
 
   function renderHistoryNavigation() {

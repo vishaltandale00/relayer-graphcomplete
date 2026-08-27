@@ -1,4 +1,5 @@
 import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -42,9 +43,9 @@ describe("pinned h3 project case", () => {
       },
     });
     expect(h3ProjectEvalCase.threads.map((thread) => [thread.id, thread.permissionProfileId, thread.mutationPolicy, thread.prompts.length])).toEqual([
-      ["architecture", "ask", "read-only", 2],
+      ["architecture", "auto", "read-only", 2],
       ["diagnosis", "auto", "read-only", 2],
-      ["implementation", "full", "writable", 2],
+      ["implementation", "auto", "writable", 2],
     ]);
     expect(h3ProjectEvalCase.threads.flatMap((thread) => thread.prompts)).toHaveLength(6);
     expect(h3ProjectEvalCase.threads[0]!.prompts[1]).toContain("Think deeper");
@@ -76,6 +77,7 @@ describe("pinned h3 project case", () => {
     const calls: string[] = [];
     const runCommand: CommandRunner = async (command, args, options) => {
       calls.push(`${command} ${args.join(" ")}`);
+      if (command === "corepack") return { exitCode: 0, stdout: "installed", stderr: "" };
       if (command === "git" && args[0] === "clone") {
         await cp(cacheDirectory, workspaceDirectory, { recursive: true });
       }
@@ -154,10 +156,22 @@ describe("h3 deterministic workspace grading", () => {
       "sanitizeStatusCode(599)",
       'sanitizeStatusCode("599")',
       "sanitizeStatusCode(200.5)",
-      'sanitizeStatusCode("200.5")',
+      'sanitizeStatusCode("404.1")',
+      'sanitizeStatusCode("599.5", 418)',
     ].join("\n"));
-    const runCommand: CommandRunner = async (command, args) => {
-      if (command === "node" || command === "corepack") return { exitCode: 0, stdout: "ok", stderr: "" };
+    const verifierCommandDirectories: string[] = [];
+    const runCommand: CommandRunner = async (command, args, options) => {
+      if (command === "corepack") return { exitCode: 0, stdout: "installed", stderr: "" };
+      if (command === "node" || command.includes("/node_modules/.bin/")) {
+        verifierCommandDirectories.push(options.cwd);
+        return { exitCode: 0, stdout: "ok", stderr: "" };
+      }
+      if (command === "git" && args[0] === "clone") {
+        await cp(root, args.at(-1)!, { recursive: true });
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      if (command === "git" && (args[0] === "checkout" || args[0] === "apply")) return { exitCode: 0, stdout: "", stderr: "" };
+      if (command === "git" && args[0] === "diff" && args[1] === "--binary") return { exitCode: 0, stdout: "", stderr: "" };
       if (command === "git" && args[0] === "status") return { exitCode: 0, stdout: "", stderr: "" };
       if (command === "git" && args[0] === "rev-list") return { exitCode: 0, stdout: "commit-one\ncommit-two\n", stderr: "" };
       if (command === "git" && args[0] === "diff" && args[1] === "--name-only") {
@@ -173,12 +187,163 @@ describe("h3 deterministic workspace grading", () => {
     expect(checks.map((check) => check.name)).toEqual([
       "workspace:implementation-build",
       "workspace:implementation-typecheck",
-      "workspace:implementation-hidden-decimal-check",
+      "workspace:implementation-focused-tests",
+      "workspace:behavior-lower-boundary",
+      "workspace:behavior-upper-boundary",
+      "workspace:behavior-decimal-number",
+      "workspace:behavior-integer-numeric-string",
+      "workspace:behavior-decimal-numeric-string",
+      "workspace:behavior-custom-fallback",
       "workspace:implementation-focused-files",
-      "workspace:implementation-validation-boundary",
       "workspace:implementation-two-meaningful-commits",
       "workspace:implementation-clean",
     ]);
     expect(checks.every((check) => check.passed)).toBe(true);
+    expect(verifierCommandDirectories).not.toContain(root);
+    expect(new Set(verifierCommandDirectories)).toHaveLength(1);
+
+    const autonomousRunCommand: CommandRunner = async (command, args) => {
+      if (command === "corepack") return { exitCode: 0, stdout: "installed", stderr: "" };
+      if (command === "node" || command.includes("/node_modules/.bin/")) return { exitCode: 0, stdout: "ok", stderr: "" };
+      if (command === "git" && args[0] === "clone") {
+        await cp(root, args.at(-1)!, { recursive: true });
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      if (command === "git" && (args[0] === "checkout" || args[0] === "apply")) return { exitCode: 0, stdout: "", stderr: "" };
+      if (command === "git" && args[0] === "diff" && args[1] === "--binary") return { exitCode: 0, stdout: "", stderr: "" };
+      if (command === "git" && args[0] === "status") return { exitCode: 0, stdout: "", stderr: "" };
+      if (command === "git" && args[0] === "rev-list") return { exitCode: 0, stdout: "one-autonomous-commit\n", stderr: "" };
+      if (command === "git" && args[0] === "diff" && args[1] === "--name-only") {
+        return { exitCode: 0, stdout: `${H3_SEED_PATH}\n${H3_TEST_PATH}\n`, stderr: "" };
+      }
+      if (command === "git" && args[0] === "diff-tree") {
+        return { exitCode: 0, stdout: `${H3_SEED_PATH}\n${H3_TEST_PATH}\n`, stderr: "" };
+      }
+      throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+    };
+    const autonomousChecks = await gradeH3Workspace({
+      workspaceDirectory: root,
+      grade: "autonomous-implementation",
+      runCommand: autonomousRunCommand,
+    });
+    expect(autonomousChecks.find((check) => check.name === "workspace:implementation-meaningful-commit")?.passed).toBe(true);
+    expect(autonomousChecks.every((check) => check.passed)).toBe(true);
+  });
+
+  it("accepts different valid implementation shapes and is deterministic across repeated grading", async () => {
+    const implementations = [
+      `export function sanitizeStatusCode(input?: string | number, fallback = 200) {
+        const normalized = Number(input);
+        return Number.isSafeInteger(normalized) && normalized >= 100 && normalized <= 599 ? normalized : fallback;
+      }`,
+      `export function sanitizeStatusCode(input?: string | number, fallback = 200) {
+        const normalized = Number(input);
+        const whole = Number.isFinite(normalized) && Math.trunc(normalized) === normalized;
+        return whole && normalized >= 100 && normalized <= 599 ? normalized : fallback;
+      }`,
+      `export function sanitizeStatusCode(input?: string | number, fallback = 200) {
+        if (!/^\\d+$/.test(String(input))) return fallback;
+        const normalized = Number(input);
+        return normalized >= 100 && normalized <= 599 ? normalized : fallback;
+      }`,
+    ];
+    for (const source of implementations) {
+      const root = await createBehaviorWorkspace(source, 'sanitizeStatusCode("404.1")\nsanitizeStatusCode("599.5", 418)\n');
+      const verdicts: string[][] = [];
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const checks = await gradeH3Workspace({
+          workspaceDirectory: root,
+          grade: "autonomous-implementation",
+          runCommand: behaviorWorkspaceRunner(root),
+        });
+        expect(checks.filter((check) => check.name.startsWith("workspace:behavior-")).every((check) => check.passed)).toBe(true);
+        expect(checks.some((check) => check.name.includes("validation-boundary"))).toBe(false);
+        verdicts.push(checks.map((check) => `${check.name}:${check.passed}`));
+      }
+      expect(new Set(verdicts.map((verdict) => JSON.stringify(verdict)))).toHaveLength(1);
+    }
+  });
+
+  it("attributes a decimal-string-only near miss to the exact behavioral requirement", async () => {
+    const root = await createBehaviorWorkspace(`
+      export function sanitizeStatusCode(input?: string | number, fallback = 200) {
+        const normalized = Number(input);
+        if (typeof input === "number" && !Number.isInteger(normalized)) return fallback;
+        return Number.isFinite(normalized) && normalized >= 100 && normalized <= 599 ? normalized : fallback;
+      }
+    `, "candidate tests are not verifier evidence\n");
+    const checks = await gradeH3Workspace({
+      workspaceDirectory: root,
+      grade: "autonomous-implementation",
+      runCommand: behaviorWorkspaceRunner(root),
+    });
+    const behavior = Object.fromEntries(checks.filter((check) => check.name.startsWith("workspace:behavior-")).map((check) => [check.name, check]));
+
+    expect(behavior["workspace:behavior-decimal-number"]?.passed).toBe(true);
+    expect(behavior["workspace:behavior-decimal-numeric-string"]?.passed).toBe(false);
+    expect(behavior["workspace:behavior-decimal-numeric-string"]?.detail).toContain('"404.1"');
+  });
+
+  it("keeps the seeded finite-only validation red on both decimal requirements", async () => {
+    const root = await createBehaviorWorkspace(`
+      export function sanitizeStatusCode(input?: string | number, fallback = 200) {
+        const normalized = Number(input);
+        return Number.isFinite(normalized) && normalized >= 100 && normalized <= 599 ? normalized : fallback;
+      }
+    `, "");
+    const checks = await gradeH3Workspace({
+      workspaceDirectory: root,
+      grade: "autonomous-implementation",
+      runCommand: behaviorWorkspaceRunner(root),
+    });
+    const behavior = Object.fromEntries(checks.filter((check) => check.name.startsWith("workspace:behavior-")).map((check) => [check.name, check.passed]));
+
+    expect(behavior["workspace:behavior-decimal-number"]).toBe(false);
+    expect(behavior["workspace:behavior-decimal-numeric-string"]).toBe(false);
+    expect(behavior["workspace:behavior-lower-boundary"]).toBe(true);
+    expect(behavior["workspace:behavior-upper-boundary"]).toBe(true);
   });
 });
+
+async function createBehaviorWorkspace(source: string, tests: string): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "relayer-h3-behavior-test-"));
+  directories.push(root);
+  await mkdir(join(root, "src", "utils"), { recursive: true });
+  await mkdir(join(root, "test", "unit"), { recursive: true });
+  await writeFile(join(root, H3_SEED_PATH), source);
+  await writeFile(join(root, H3_TEST_PATH), tests);
+  return root;
+}
+
+function behaviorWorkspaceRunner(root: string): CommandRunner {
+  return async (command, args, options) => {
+    if (command === "corepack") return { exitCode: 0, stdout: "installed", stderr: "" };
+    if (command === "node") return execute(command, args, options.cwd);
+    if (command.includes("/node_modules/.bin/")) return { exitCode: 0, stdout: "ok", stderr: "" };
+    if (command === "git" && args[0] === "clone") {
+      await cp(root, args.at(-1)!, { recursive: true });
+      return { exitCode: 0, stdout: "", stderr: "" };
+    }
+    if (command === "git" && (args[0] === "checkout" || args[0] === "apply")) return { exitCode: 0, stdout: "", stderr: "" };
+    if (command === "git" && args[0] === "diff" && args[1] === "--binary") return { exitCode: 0, stdout: "", stderr: "" };
+    if (command === "git" && args[0] === "status") return { exitCode: 0, stdout: "", stderr: "" };
+    if (command === "git" && args[0] === "rev-list") return { exitCode: 0, stdout: "candidate-commit\n", stderr: "" };
+    if (command === "git" && args[0] === "diff" && args[1] === "--name-only") {
+      return { exitCode: 0, stdout: `${H3_SEED_PATH}\n${H3_TEST_PATH}\n`, stderr: "" };
+    }
+    if (command === "git" && args[0] === "diff-tree") return { exitCode: 0, stdout: `${H3_SEED_PATH}\n${H3_TEST_PATH}\n`, stderr: "" };
+    throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+  };
+}
+
+function execute(command: string, args: readonly string[], cwd: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
+  });
+}

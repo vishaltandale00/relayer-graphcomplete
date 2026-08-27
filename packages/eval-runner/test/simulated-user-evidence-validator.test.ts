@@ -94,6 +94,14 @@ function rootNodeReview(destination: string): NodeReview {
       summary: "The action reaches useful detail.",
       findings: [],
     }],
+    structure: {
+      rating: 4,
+      expansion: { need: "helpful", result: "works" },
+      references: { need: "none", result: "absent" },
+      invoke: { need: "none", result: "absent" },
+      reason: "The child supplies useful detail.",
+      evidence: ["shot-root-detail"],
+    },
     summary: "Useful root node.",
     findings: [],
   };
@@ -111,6 +119,14 @@ const childNodeReview: NodeReview = {
   },
   nullRatingJustifications: {},
   actions: [],
+  structure: {
+    rating: 4,
+    expansion: { need: "none", result: "absent" },
+    references: { need: "none", result: "absent" },
+    invoke: { need: "none", result: "absent" },
+    reason: "The node is complete without another action.",
+    evidence: ["shot-child-detail"],
+  },
   summary: "Useful child node.",
   findings: [],
 };
@@ -133,6 +149,11 @@ const turnReview: TurnReview = {
     expansion: { need: "helpful", result: "works" },
     references: { need: "none", result: "absent" },
     reason: "The useful child detail keeps the root concise.",
+    evidence: ["shot-root", "shot-child"],
+  },
+  scoreCeiling: {
+    maximum: 4,
+    reason: "No critical comprehension gap exists.",
     evidence: ["shot-root", "shot-child"],
   },
 };
@@ -278,12 +299,14 @@ describe("screenshot evidence validation", () => {
       nodeId: "node-root",
       layerId: "layer-root",
       evidence: { context: ["shot-root"], detail: ["shot-root-detail"] },
+      structure: { ...childNodeReview.structure, evidence: ["shot-root-detail"] },
     });
 
     const result = store.submitReview({
       ...turnReview,
       evidence: { representative: ["shot-root", "shot-previous-turn"] },
       structure: { ...turnReview.structure, evidence: ["shot-root"] },
+      scoreCeiling: { ...turnReview.scoreCeiling, evidence: ["shot-root"] },
       findings: [{
         type: "strength",
         text: "The follow-up improves on the prior turn.",

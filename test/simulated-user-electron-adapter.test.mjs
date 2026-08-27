@@ -250,6 +250,11 @@ describe("local Electron simulated-user judge adapter", () => {
           reason: "The child layer adds useful detail.",
           evidence: ["shot-root-context", "shot-child-context"],
         },
+        scoreCeiling: {
+          maximum: 4,
+          reason: "No critical comprehension gap exists.",
+          evidence: ["shot-root-context", "shot-child-context"],
+        },
       });
       return {
         rubric: DEFAULT_SIMULATED_USER_RUBRIC,
@@ -263,6 +268,11 @@ describe("local Electron simulated-user judge adapter", () => {
     const result = await runner({
       artifactDirectory,
       execution: { id: "execution-1" },
+      artifact: {
+        kind: "git_workspace",
+        workingDirectory: artifactDirectory,
+        baseRevision: "base-commit",
+      },
       thread: { id: "7" },
       turn: { id: "41", rootLayerId: "10" },
       request: {
@@ -282,13 +292,17 @@ describe("local Electron simulated-user judge adapter", () => {
       artifactDirectory: screenshotDirectory,
     }));
     expect(runJudge).toHaveBeenCalledTimes(1);
+    expect(runJudge).toHaveBeenCalledWith(expect.objectContaining({
+      workingDirectory: artifactDirectory,
+      additionalDirectories: [],
+      artifactEvidence: undefined,
+    }));
     expect(session.screenshot).toHaveBeenCalledTimes(5);
     expect(session.interact).toHaveBeenCalledTimes(1);
     expect(session.history).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledWith({ close: true });
     expect(result).toMatchObject({
       status: "completed",
-      passed: true,
       rubricRef: "rubric.json",
       configurationRef: "judge-configuration.json",
       interactionTraceRef: "interaction-trace.json",
@@ -339,6 +353,46 @@ describe("local Electron simulated-user judge adapter", () => {
     })).rejects.toThrow("exact accepted turn and root layer");
     expect(runJudge).not.toHaveBeenCalled();
     expect(release).toHaveBeenCalledWith({ close: true });
+  });
+
+  it("selects the missing-action-aware recursive review store for rubric v5 and forwards artifact evidence", async () => {
+    const artifactDirectory = await temporaryDirectory();
+    const evidence = {
+      schemaVersion: 1,
+      source: "bounded_host_packet",
+      summary: "One verifier fact.",
+      facts: ["PASS workspace:focused-tests"],
+    };
+    const runJudge = vi.fn(async ({ reviewStore, artifactEvidence }) => {
+      expect(reviewStore.snapshot()).toMatchObject({
+        schemaVersion: 3,
+        contractId: "recursive-presentation-judge-v3",
+      });
+      expect(artifactEvidence).toEqual(evidence);
+      throw new Error("fixture stops before paid inference");
+    });
+    const runner = createLocalSimulatedUserJudgeRunner({
+      loadLayer: async ({ layerId }) => acceptedLayers().get(String(layerId)),
+      openReviewSession: async () => ({
+        session: fakeReviewSession(join(artifactDirectory, "screenshots")),
+        state: { executionId: "execution-1", threadId: "7", turnId: "41", layerId: "10" },
+        release: vi.fn(async () => {}),
+      }),
+      runJudge,
+    });
+
+    const result = await runner({
+      artifactDirectory,
+      execution: { id: "execution-1" },
+      thread: { id: "7" },
+      turn: { id: "41", rootLayerId: "10" },
+      request: { text: "Explain." },
+      rubric: { rubricVersion: "graph-presentation-rubric-v5" },
+      artifactEvidence: evidence,
+      reviewSequence: { index: 0, count: 1 },
+    });
+
+    expect(result).toMatchObject({ status: "partial", review: { schemaVersion: 3 }, error: "fixture stops before paid inference" });
   });
 });
 
@@ -476,6 +530,14 @@ function nodeReview({ layerId, nodeId, context, detail, actions }) {
       detail_presentation: 4,
     },
     actions,
+    structure: {
+      rating: 4,
+      expansion: { need: actions.some((action) => action.kind === "navigate") ? "helpful" : "none", result: actions.some((action) => action.kind === "navigate") ? "works" : "absent" },
+      references: { need: "none", result: "absent" },
+      invoke: { need: actions.some((action) => action.kind === "invoke") ? "helpful" : "none", result: actions.some((action) => action.kind === "invoke") ? "works" : "absent" },
+      reason: "The node's recursive affordances were assessed.",
+      evidence: [detail],
+    },
     summary: "Useful node.",
     findings: [],
   };

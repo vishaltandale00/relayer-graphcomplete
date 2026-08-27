@@ -1,23 +1,37 @@
 import { createHash, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { link, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { cp, link, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { promisify } from "node:util";
 
 import {
   basicEvalCaseId,
   basicEvalFollowUpPrompt,
   basicEvalPrompt,
+  buildGraphPresentationGrade,
+  buildRecursiveGraphPresentationGrade,
+  buildTaskOutcomeGrade,
+  canonicalJson,
   checkNodeNavigation,
   checkBasicOutput,
-  DEFAULT_SIMULATED_USER_RUBRIC,
+  GRAPH_PRESENTATION_RUBRIC_V5,
   expandTestRun,
   gradeH3Workspace,
+  gradeFrontierProjectWorkspace,
+  H3_AUTONOMOUS_FIX_CASE_ID,
+  H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
   H3_PROJECT_CASE_ID,
   H3_UPSTREAM_COMMIT,
   h3ProjectEvalCase,
+  h3AutonomousCases,
+  frontierAutonomousCases,
+  frontierAutonomousCaseIds,
+  materializeFrontierProjectFixture,
   materializeH3ProjectFixture,
+  projectDeterministicChecksToOutcome,
   selectStandalonePermissionProfile,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
@@ -49,7 +63,24 @@ export const evalCases = Object.freeze([
     requiredChecks: Object.freeze(["node-navigation"]),
   }),
   h3ProjectEvalCase,
+  ...h3AutonomousCases.map((entry) => Object.freeze({
+    ...entry.definition,
+    caseSnapshot: entry.catalogSnapshot,
+    caseSnapshotDigest: entry.snapshotDigest,
+  })),
+  ...frontierAutonomousCases.map((entry) => Object.freeze({
+    ...entry.definition,
+    caseSnapshot: entry.catalogSnapshot,
+    caseSnapshotDigest: entry.snapshotDigest,
+  })),
 ]);
+
+const h3CaseIds = new Set([
+  H3_PROJECT_CASE_ID,
+  H3_AUTONOMOUS_FIX_CASE_ID,
+  H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
+]);
+const projectCaseIds = new Set([...h3CaseIds, ...frontierAutonomousCaseIds]);
 
 export const evalJudges = Object.freeze([
   Object.freeze({ id: "deterministic-graph-contract", name: "Deterministic graph contract" }),
@@ -63,23 +94,299 @@ const simulatedUserJudgeIds = new Set([simulatedUserJudgeId, "simulated-user-sol
 const MAX_CONVERSATION_IMPORT_BYTES = 256 * 1024 * 1024;
 const ANNOTATION_EXPORT_EXECUTION_STATUSES = new Set(["passed", "failed", "imported"]);
 const ANNOTATION_EXPORT_TURN_STATUSES = new Set(["accepted", "failed", "stopped"]);
+const execFileAsync = promisify(execFile);
 
 function copy(value) {
   return structuredClone(value);
 }
 
-function canonicalJson(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalJson(item === undefined ? null : item)).join(",")}]`;
+function outcomeGradeFromChecks(checks, caseSnapshot = null) {
+  const criteria = caseSnapshot?.artifacts?.outcomeRubric?.criteria || [];
+  const criterionGrades = criteria.map((criterion) => ({
+      criterionId: criterion.id,
+      rating: null,
+      weight: criterion.weight,
+      rationale: "No lead outcome-judge rating has been recorded; mandatory verifier evidence remains available independently.",
+      evidenceRefs: [],
+    }));
+  const declarations = caseSnapshot?.artifacts?.verifier?.mandatoryGates;
+  if (!Array.isArray(declarations)) {
+    const grade = projectDeterministicChecksToOutcome(checks);
+    return { ...grade, criteria: criterionGrades };
   }
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value)
-      .filter((key) => value[key] !== undefined)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
-      .join(",")}}`;
+  const mandatoryGates = declarations.map((gate) => mandatoryGateReceipt(gate, checks));
+  return {
+    ...buildTaskOutcomeGrade({
+    status: criterionGrades.length > 0 ? "partial" : "completed",
+    mandatoryGates,
+    criteria: criterionGrades,
+    }),
+    evidenceRefs: [...new Set(mandatoryGates.flatMap((gate) => gate.evidenceRefs))],
+    verifierId: caseSnapshot.artifacts.verifier.verifierId,
+    verifierDigest: caseSnapshot.artifacts.verifier.contentDigest,
+    rubricVersion: caseSnapshot.artifacts.outcomeRubric.rubricVersion,
+  };
+}
+
+function mandatoryGateReceipt(gate, checks) {
+  const patterns = {
+    "functional-behavior": ["behavior-lower-boundary", "behavior-upper-boundary", "behavior-decimal-number", "behavior-integer-numeric-string", "behavior-decimal-numeric-string", "behavior-custom-fallback"],
+    "regression-safety": ["implementation-build", "implementation-typecheck", "implementation-focused-tests"],
+    "scoped-clean-commit": ["focused-files", "meaningful-commit", "implementation-clean"],
+    "read-only-workspace": ["baseline-head", "zero-diff"],
+    "independent-reproduction": ["diagnosis-reproduces-seeded-failure"],
+    "hidden-behavior": ["validation-build", "hidden-behavior"],
+    "scoped-delivery": ["required-delivery-files", "delivery-commit", "delivery-clean"],
+  }[gate.id];
+  const matched = Array.isArray(patterns)
+    ? checks.filter((check) => patterns.some((pattern) => check.name.includes(pattern)))
+    : [];
+  if (matched.length === 0 || patterns.some((pattern) => !matched.some((check) => check.name.includes(pattern)))) {
+    return {
+      schemaVersion: 1,
+      gateId: gate.id,
+      name: gate.label,
+      mandatory: true,
+      status: "failed",
+      passed: null,
+      detail: `Verifier ${gate.id} did not emit every required check.`,
+      evidenceRefs: matched.map((check) => `deterministic-check:${check.name}`),
+    };
   }
-  return JSON.stringify(value);
+  return {
+    schemaVersion: 1,
+    gateId: gate.id,
+    name: gate.label,
+    mandatory: true,
+    status: "completed",
+    passed: matched.every((check) => check.passed),
+    detail: matched.map((check) => `${check.name}: ${check.detail}`).join("\n"),
+    evidenceRefs: matched.map((check) => `deterministic-check:${check.name}`),
+  };
+}
+
+function presentationGradeFromTurns(turns, requested) {
+  if (!requested) {
+    return buildGraphPresentationGrade({ status: "unjudged" });
+  }
+  const results = turns.flatMap((turn) => turn.judgeResults || []);
+  const completed = results.filter((result) => result.status === "completed");
+  const failed = results.filter((result) => result.status === "failed");
+  const terminalWithoutReview = turns.filter((turn) => (
+    ["accepted", "failed", "stopped"].includes(turn.status)
+    && (turn.judgeResults || []).length === 0
+  ));
+  const status = results.length === 0
+    ? terminalWithoutReview.length > 0 ? "failed" : "unjudged"
+    : completed.length === results.length && terminalWithoutReview.length === 0 ? "completed"
+      : failed.length === results.length ? "failed" : "partial";
+  const recursive = completed.length > 0 && completed.every((result) => (
+    [2, 3].includes(result.review?.schemaVersion)
+    && ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3"].includes(result.review?.contractId)
+  ));
+  if (recursive) {
+    return buildRecursiveGraphPresentationGrade({
+      status,
+      layers: presentationLayers(completed),
+      presentationRatings: completed.map((result) => result.review?.turn?.ratings?.presentation_quality ?? null),
+      comprehensionRatings: completed.map((result) => result.review?.turn?.ratings?.answer_quality ?? null),
+      scoreCeilings: completed.flatMap((result) => {
+        const maximum = result.review?.turn?.scoreCeiling?.maximum;
+        return [1, 2, 3, 4].includes(maximum) ? [maximum] : [];
+      }),
+      rootLayerResultIds: completed.flatMap((result) => {
+        const layerId = result.review?.rootLayerResult?.layerId;
+        return typeof layerId === "string" && layerId ? [layerId] : [];
+      }),
+    });
+  }
+  return buildGraphPresentationGrade({
+    status,
+    layers: presentationLayers(completed),
+    depthDecay: 0.5,
+    comprehensionRatings: completed.map((result) => result.review?.turn?.ratings?.answer_quality ?? null),
+    scoreCeilings: completed.flatMap((result) => {
+      const maximum = result.review?.turn?.scoreCeiling?.maximum;
+      return [1, 2, 3, 4].includes(maximum) ? [maximum] : [];
+    }),
+  });
+}
+
+function presentationLayers(results) {
+  return results.flatMap((result) => {
+    const inventory = result.review?.inventory?.layers || [];
+    const records = result.review?.layers || [];
+    const nodeRecords = result.review?.nodes || [];
+    return records.map((record, index) => {
+      const current = record?.history?.current || record?.review || record;
+      const layerId = String(record?.subject?.layerId ?? current?.layerId ?? `layer-${index + 1}`);
+      const inventoryLayer = inventory.find((candidate) => String(candidate.layerId) === layerId);
+      const findings = current?.findings || [];
+      const nodes = nodeRecords.flatMap((nodeRecord) => {
+        const node = nodeRecord?.history?.current || nodeRecord?.review || nodeRecord;
+        const nodeLayerId = String(nodeRecord?.subject?.layerId ?? node?.layerId ?? "");
+        if (nodeLayerId !== layerId) return [];
+        return [{
+          nodeId: String(nodeRecord?.subject?.nodeId ?? node?.nodeId ?? ""),
+          ratings: node?.score
+            ? copy(Object.fromEntries(Object.entries(node.score).filter(([key]) => key !== "nodeId")))
+            : {
+                ...copy(node?.ratings || {}),
+                recursive_disclosure: [1, 2, 3, 4].includes(node?.structure?.rating)
+                  ? node.structure.rating
+                  : null,
+              },
+          summary: typeof node?.summary === "string"
+            ? node.summary
+            : typeof node?.semantic?.effectOnLayer === "string" ? node.semantic.effectOnLayer : "",
+          evidenceRefs: [...new Set([
+            ...(node?.evidence?.context || []),
+            ...(node?.evidence?.detail || []),
+            ...(node?.structure?.evidence || []),
+            ...(node?.semantic?.evidence || []),
+            ...(node?.allocationSteps || []).flatMap((step) => step?.evidence || []),
+            ...(node?.missingActionOpportunities || []).flatMap((opportunity) => opportunity?.evidence || []),
+            ...(node?.actions || []).flatMap((action) => action?.evidence || []),
+            ...(node?.findings || []).flatMap((finding) => finding?.evidence || []),
+          ])],
+        }];
+      });
+      return {
+        layerId,
+        depth: Number.isInteger(inventoryLayer?.depth) ? inventoryLayer.depth : Number(record?.subject?.depth ?? index),
+        ratings: copy(current?.layerRatings || current?.ratings || {}),
+        summary: typeof current?.layerSummary === "string"
+          ? current.layerSummary
+          : typeof current?.summary === "string" ? current.summary : "",
+        materiallyMisleading: current?.materiallyMisleading === true
+          || findings.some((finding) => finding?.severity === "critical")
+          || nodeRecords.some((nodeRecord) => {
+            const node = nodeRecord?.history?.current || nodeRecord?.review || nodeRecord;
+            const nodeLayerId = String(nodeRecord?.subject?.layerId ?? node?.layerId ?? "");
+            return nodeLayerId === layerId
+              && (node?.findings || []).some((finding) => finding?.severity === "critical");
+          }),
+        nodes,
+        evidenceRefs: [...new Set([
+          ...(Array.isArray(current?.evidence) ? current.evidence : current?.evidence?.viewport || []),
+          ...findings.flatMap((finding) => finding?.evidence || []),
+        ])],
+      };
+    });
+  });
+}
+
+function failedOutcomeGrade(error) {
+  return { schemaVersion: 1, kind: "task_outcome_grade", status: "failed", qualified: null, score: null, mandatoryGates: [], criteria: [], error };
+}
+
+function failedPresentationGrade(error) {
+  return { ...buildGraphPresentationGrade({ status: "failed" }), error };
+}
+
+function completeExecutionLifecycle(execution, status = "complete") {
+  const completedAt = new Date().toISOString();
+  const startedAt = execution.lifecycle?.startedAt || completedAt;
+  execution.lifecycle = {
+    status,
+    startedAt,
+    completedAt,
+    durationMs: Math.max(0, Date.parse(completedAt) - Date.parse(startedAt)),
+  };
+}
+
+function validateFixtureAgainstCaseSnapshot(execution, fixture) {
+  const workspace = execution.caseSnapshot?.artifacts?.workspace;
+  if (!workspace) return;
+  const actualRevision = fixture.seededTree ? `git-tree:${fixture.seededTree}` : null;
+  if (workspace.source !== fixture.repositoryUrl || workspace.revision !== actualRevision) {
+    throw new Error(
+      `Materialized fixture identity does not match case ${execution.testCaseId}: `
+      + `${fixture.repositoryUrl || "<missing>"}/${actualRevision || "<missing>"}.`,
+    );
+  }
+}
+
+export function judgeArtifactForExecution(execution, turn = null) {
+  if (turn?.artifact?.kind === "git_workspace") return copy(turn.artifact);
+  const fixture = execution?.fixture;
+  if (typeof fixture?.workspaceDirectory !== "string" || fixture.workspaceDirectory.length === 0) return undefined;
+  const baseRevision = fixture.seededCommit ?? fixture.upstreamCommit;
+  return {
+    kind: "git_workspace",
+    workingDirectory: fixture.workspaceDirectory,
+    ...(typeof baseRevision === "string" && baseRevision.length > 0 ? { baseRevision } : {}),
+  };
+}
+
+async function captureTurnArtifactSnapshot(execution, workspaceDirectory, interactionId) {
+  const snapshotDirectory = join(
+    dirname(execution.fixture?.workspaceDirectory || workspaceDirectory),
+    "turn-artifacts",
+    encodeURIComponent(String(interactionId)),
+    "workspace",
+  );
+  await mkdir(dirname(snapshotDirectory), { recursive: true, mode: 0o700 });
+  await rm(snapshotDirectory, { recursive: true, force: true });
+  let headOutput;
+  try {
+    ({ stdout: headOutput } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: workspaceDirectory, encoding: "utf8" }));
+  } catch {
+    await cp(workspaceDirectory, snapshotDirectory, { recursive: true });
+    return {
+      kind: "filesystem_artifact",
+      workingDirectory: snapshotDirectory,
+      contentDigest: sha256(`filesystem-snapshot:${interactionId}`),
+    };
+  }
+  const headRevision = headOutput.trim();
+  await execFileAsync("git", ["clone", "--local", "--no-hardlinks", "--no-checkout", workspaceDirectory, snapshotDirectory]);
+  await execFileAsync("git", ["checkout", "--detach", headRevision], { cwd: snapshotDirectory });
+  const { stdout: patch } = await execFileAsync("git", ["diff", "--binary", "HEAD", "--"], { cwd: workspaceDirectory, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+  if (patch.length > 0) {
+    const patchPath = join(dirname(snapshotDirectory), "working-tree.patch");
+    await writeFile(patchPath, patch, "utf8");
+    await execFileAsync("git", ["apply", "--whitespace=nowarn", patchPath], { cwd: snapshotDirectory });
+  }
+  const { stdout: untrackedOutput } = await execFileAsync("git", ["ls-files", "--others", "--exclude-standard", "-z"], { cwd: workspaceDirectory, encoding: "utf8" });
+  const untrackedDigests = [];
+  for (const relativePath of untrackedOutput.split("\0").filter(Boolean)) {
+    await mkdir(dirname(join(snapshotDirectory, relativePath)), { recursive: true });
+    await cp(join(workspaceDirectory, relativePath), join(snapshotDirectory, relativePath), { recursive: true });
+    const { stdout: objectDigest } = await execFileAsync("git", ["hash-object", "--no-filters", "--", relativePath], { cwd: workspaceDirectory, encoding: "utf8" });
+    untrackedDigests.push(`${relativePath}:${objectDigest.trim()}`);
+  }
+  return {
+    kind: "git_workspace",
+    workingDirectory: snapshotDirectory,
+    baseRevision: execution.fixture?.seededCommit ?? execution.fixture?.upstreamCommit,
+    headRevision,
+    contentDigest: sha256(`${headRevision}\n${patch}\n${untrackedDigests.join("\n")}`),
+  };
+}
+
+export function judgeArtifactEvidenceForExecution(execution, turn = null) {
+  const outcome = execution?.outcomeGrade || {};
+  const checks = Array.isArray(turn?.deterministicChecks)
+    ? turn.deterministicChecks
+    : Array.isArray(execution?.checks) ? execution.checks : [];
+  const mandatoryFacts = (turn === null && Array.isArray(outcome.mandatoryGates) ? outcome.mandatoryGates : []).map(
+      (gate) => `${gate.passed ? "PASS" : "FAIL"} mandatory gate ${gate.name}: ${gate.detail}`,
+    );
+  const criterionFacts = (turn === null && Array.isArray(outcome.criteria) ? outcome.criteria : []).map(
+      (criterion) => `Outcome criterion ${criterion.criterionId}: ${criterion.rationale}`,
+    );
+  const checkFacts = checks.map((check) => `${check.passed ? "PASS" : "FAIL"} ${check.name}: ${check.detail}`);
+  const allFacts = [...mandatoryFacts, ...criterionFacts, ...checkFacts];
+  const facts = allFacts.slice(0, 64).map((fact) => String(fact).slice(0, 2_000));
+  return {
+    schemaVersion: 1,
+    source: "bounded_host_packet",
+    summary: facts.length
+      ? `Host-authored task evidence contains ${facts.length} of ${allFacts.length} verifier and outcome facts.`
+      : "No deterministic verifier or outcome facts were available for this turn.",
+    facts,
+  };
 }
 
 function sha256(value) {
@@ -105,7 +412,7 @@ function finalizedAnnotationCoverage(execution) {
 
 function summarize(run) {
   if (run.kind === "imported-conversation") {
-    const finished = run.executions.filter((execution) => ["passed", "failed", "error"].includes(execution.status));
+    const finished = run.executions.filter((execution) => ["passed", "failed", "error", "imported"].includes(execution.status));
     const passed = run.executions.filter((execution) => execution.status === "passed").length;
     return {
       passed,
@@ -117,7 +424,18 @@ function summarize(run) {
     const executions = run.executions.filter((execution) => execution.harnessConfigurationName === name);
     const finished = executions.filter((execution) => ["passed", "failed", "error"].includes(execution.status));
     const passed = executions.filter((execution) => execution.status === "passed").length;
-    return { name, passed, total: executions.length, finished: finished.length };
+    return {
+      name,
+      passed,
+      total: executions.length,
+      finished: finished.length,
+      completed: executions.filter((execution) => execution.lifecycle
+        ? execution.lifecycle.status === "complete"
+        : ["passed", "failed", "imported"].includes(execution.status)).length,
+      outcomeQualified: executions.filter((execution) => execution.outcomeGrade?.qualified === true).length,
+      outcomeJudged: executions.filter((execution) => execution.outcomeGrade?.status === "completed").length,
+      presentationJudged: executions.filter((execution) => execution.presentationGrade?.status === "completed").length,
+    };
   });
   const passed = run.executions.filter((execution) => execution.status === "passed").length;
   return { passed, total: run.executions.length, byHarness };
@@ -132,6 +450,8 @@ export class EvalService {
     simulatedUserJudgeRunner = null,
     projectFixtureMaterializer = materializeH3ProjectFixture,
     workspaceGrader = gradeH3Workspace,
+    frontierProjectFixtureMaterializer = materializeFrontierProjectFixture,
+    frontierWorkspaceGrader = gradeFrontierProjectWorkspace,
     acceptedTopologyBuilder = buildAcceptedReviewTopology,
     acceptedTopologyGrader = gradeAcceptedReviewTopology,
     candidateTraceExporter = null,
@@ -148,6 +468,8 @@ export class EvalService {
     this.simulatedUserJudgeRunner = simulatedUserJudgeRunner;
     this.projectFixtureMaterializer = projectFixtureMaterializer;
     this.workspaceGrader = workspaceGrader;
+    this.frontierProjectFixtureMaterializer = frontierProjectFixtureMaterializer;
+    this.frontierWorkspaceGrader = frontierWorkspaceGrader;
     this.acceptedTopologyBuilder = acceptedTopologyBuilder;
     this.acceptedTopologyGrader = acceptedTopologyGrader;
     this.candidateTraceExporter = candidateTraceExporter;
@@ -184,7 +506,10 @@ export class EvalService {
       if (run.status === "running" || run.status === "queued") {
         run.status = "interrupted";
         for (const execution of run.executions) {
-          if (execution.status === "running" || execution.status === "queued") execution.status = "interrupted";
+          if (execution.status === "running" || execution.status === "queued") {
+            execution.status = "interrupted";
+            completeExecutionLifecycle(execution, "failed");
+          }
         }
       }
       for (const execution of run.executions || []) {
@@ -313,8 +638,8 @@ export class EvalService {
     if (!Array.isArray(testCaseIds) || testCaseIds.some((id) => !evalCases.some((item) => item.id === id))) {
       throw new Error("Test run contains an unknown test case.");
     }
-    if (testCaseIds.includes(H3_PROJECT_CASE_ID) && this.platform !== "darwin") {
-      throw new Error("The pinned h3 project case is local Mac only.");
+    if (testCaseIds.some((id) => projectCaseIds.has(id)) && this.platform !== "darwin") {
+      throw new Error("Pinned project cases are local Mac only.");
     }
     if (simulatedUserJudgeIds.has(judgeConfigurationName) && this.simulatedUserJudgeRunner === null) {
       throw new Error("Simulated-user judge is not available in this EvalService.");
@@ -340,23 +665,44 @@ export class EvalService {
       testCaseIds: [...testCaseIds],
       harnessConfigurationNames: [...harnessConfigurationNames],
       judgeConfigurationName,
-      executions: plans.map((plan) => ({
+      executions: plans.map((plan) => {
+        const definition = evalCases.find((candidate) => candidate.id === plan.testCaseId);
+        return {
         id: randomUUID(),
         testRunId: id,
         testCaseId: plan.testCaseId,
         harnessConfigurationName: plan.harnessConfigurationName,
         harnessConfiguration: plan.harnessConfiguration,
         harnessConfigurationDigest: plan.harnessConfigurationDigest,
+        caseSnapshot: copy(definition?.caseSnapshot || null),
+        caseSnapshotDigest: definition?.caseSnapshotDigest || null,
         judgeConfiguration: plan.judgeConfiguration,
         status: "queued",
+        lifecycle: {
+          status: "queued",
+          startedAt: null,
+          completedAt: null,
+          durationMs: null,
+        },
         threadIds: [],
         turns: [],
         candidateTraceCaptures: {},
         checks: [],
+        outcomeGrade: {
+          schemaVersion: 1,
+          kind: "task_outcome_grade",
+          status: "pending",
+          qualified: null,
+          score: null,
+          mandatoryGates: [],
+          criteria: [],
+        },
+        presentationGrade: buildGraphPresentationGrade({ status: "pending" }),
         passed: null,
         promotable: true,
         error: null,
-      })),
+        };
+      }),
     };
     this.runs.unshift(run);
     await this.#changed();
@@ -644,6 +990,10 @@ export class EvalService {
         }
         if (eligible.length === 0) passed = false;
       }
+      execution.presentationGrade = presentationGradeFromTurns(
+        execution.turns,
+        simulatedUserJudgeIds.has(judgeConfigurationName),
+      );
       execution.passed = passed;
       execution.status = passed ? "passed" : "failed";
       run.status = execution.status;
@@ -801,16 +1151,22 @@ export class EvalService {
 
   async #execute(execution) {
     execution.status = "running";
+    execution.lifecycle = {
+      status: "running",
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      durationMs: null,
+    };
     execution.error = null;
     await this.#changed();
     const definition = evalCases.find((candidate) => candidate.id === execution.testCaseId);
     try {
       if (!definition) throw new Error(`Unknown test case: ${execution.testCaseId}`);
-      const executedThreads = definition.id === H3_PROJECT_CASE_ID
-        ? await this.#executeH3ProjectCase(execution, definition)
+      const executedThreads = projectCaseIds.has(definition.id)
+        ? await this.#executeProjectCase(execution, definition)
         : [await this.#executeStandaloneCase(execution, definition)];
       execution.threadIds = executedThreads.map(({ thread }) => thread.id);
-      const interactions = executedThreads.flatMap(({ thread, threadDefinition, permissionResolution, detail, workspaceChecks }) => (
+      const interactions = executedThreads.flatMap(({ thread, threadDefinition, permissionResolution, detail, workspaceChecks, workspaceArtifacts }) => (
         detail.interactions.map((interaction, threadTurnIndex) => ({
           thread,
           threadDefinition,
@@ -818,9 +1174,10 @@ export class EvalService {
           interaction,
           threadTurnIndex,
           workspaceChecks: workspaceChecks.get(String(interaction.id)) || [],
+          artifact: workspaceArtifacts?.get(String(interaction.id)) || null,
         }))
       ));
-      execution.turns = interactions.map(({ thread, threadDefinition, permissionResolution, interaction, threadTurnIndex }, turnIndex) => ({
+      execution.turns = interactions.map(({ thread, threadDefinition, permissionResolution, interaction, threadTurnIndex, artifact }, turnIndex) => ({
         threadId: thread.id,
         threadDefinitionId: threadDefinition?.id || null,
         interactionId: interaction.id,
@@ -841,6 +1198,7 @@ export class EvalService {
         deterministicPassed: false,
         judgeResults: [],
         candidateTrace: copy(execution.candidateTraceCaptures?.[String(interaction.id)] || disabledCandidateTrace()),
+        ...(artifact === null ? {} : { artifact: copy(artifact) }),
       }));
       delete execution.candidateTraceCaptures;
       execution.promotable = execution.turns.every((turn) => !this.candidateTraceRequired || turn.candidateTrace.status === "complete");
@@ -869,7 +1227,7 @@ export class EvalService {
               name: `${checkPrefix}:${check.name}`,
             })));
           }
-          if (definition.id === H3_PROJECT_CASE_ID) {
+          if (projectCaseIds.has(definition.id)) {
             try {
               const topology = await this.acceptedTopologyBuilder({
                 turnId: interaction.id,
@@ -894,7 +1252,7 @@ export class EvalService {
             }
           }
         }
-        if (definition.id === H3_PROJECT_CASE_ID) {
+        if (projectCaseIds.has(definition.id)) {
           const permissionResolution = executedTurn.permissionResolution;
           const expectedProfileId = permissionResolution.effectiveProfileId;
           turnChecks.push({
@@ -932,14 +1290,17 @@ export class EvalService {
       }
       execution.checks = checks;
       const deterministicPassed = checks.length > 0 && checks.every((check) => check.passed);
-      let simulatedUserPassed = true;
+      const outcomeChecks = execution.caseSnapshot
+        ? checks.filter((check) => check.name.includes(":workspace:"))
+        : checks;
+      execution.outcomeGrade = outcomeGradeFromChecks(outcomeChecks, execution.caseSnapshot);
+      let simulatedUserCompleted = true;
       if (simulatedUserJudgeIds.has(execution.judgeConfiguration.name)) {
         const eligibleTurns = interactions
           .map(({ thread, interaction }, turnIndex) => ({ thread, interaction, turn: execution.turns[turnIndex] }))
-          .filter(({ interaction, turn }) => (
+          .filter(({ interaction }) => (
             interaction.completionStatus === "accepted"
             && interaction.completionOutput
-            && turn.deterministicPassed
           ));
         for (const [index, { thread, interaction, turn }] of eligibleTurns.entries()) {
           const result = await this.#judgeAcceptedTurn({
@@ -949,16 +1310,24 @@ export class EvalService {
             turn,
             reviewSequence: { index, count: eligibleTurns.length },
           });
-          if (result.status !== "completed" || result.passed === false) simulatedUserPassed = false;
+          if (result.status !== "completed") simulatedUserCompleted = false;
         }
-        if (eligibleTurns.length === 0) simulatedUserPassed = false;
+        if (eligibleTurns.length === 0) simulatedUserCompleted = false;
       }
-      execution.passed = deterministicPassed && simulatedUserPassed;
+      execution.presentationGrade = presentationGradeFromTurns(
+        execution.turns,
+        simulatedUserJudgeIds.has(execution.judgeConfiguration.name),
+      );
+      execution.passed = deterministicPassed && simulatedUserCompleted;
       execution.status = execution.passed ? "passed" : "failed";
+      completeExecutionLifecycle(execution);
     } catch (error) {
       execution.status = "error";
       execution.passed = false;
       execution.error = error instanceof Error ? error.message : String(error);
+      execution.outcomeGrade = failedOutcomeGrade(execution.error);
+      execution.presentationGrade = failedPresentationGrade(execution.error);
+      completeExecutionLifecycle(execution, "failed");
     }
   }
 
@@ -973,7 +1342,7 @@ export class EvalService {
     return { thread, threadDefinition: null, detail, workspaceChecks: new Map() };
   }
 
-  async #executeH3ProjectCase(execution, definition) {
+  async #executeProjectCase(execution, definition) {
     const executionDirectory = join(
       dirname(this.stateFile),
       "runs",
@@ -982,15 +1351,24 @@ export class EvalService {
       encodeURIComponent(execution.id),
     );
     const workspaceDirectory = join(executionDirectory, "workspace");
-    const fixture = await this.projectFixtureMaterializer({
-      cacheDirectory: join(dirname(this.stateFile), "fixtures", `h3-${H3_UPSTREAM_COMMIT}`),
-      workspaceDirectory,
-      platform: this.platform,
-    });
+    const isH3 = h3CaseIds.has(definition.id);
+    const fixture = isH3
+      ? await this.projectFixtureMaterializer({
+        cacheDirectory: join(dirname(this.stateFile), "fixtures", `h3-${H3_UPSTREAM_COMMIT}`),
+        workspaceDirectory,
+        platform: this.platform,
+      })
+      : await this.frontierProjectFixtureMaterializer({
+        caseId: definition.id,
+        cacheDirectory: join(dirname(this.stateFile), "fixtures", `${definition.id}-${definition.fixture.upstreamCommit}`),
+        workspaceDirectory,
+        platform: this.platform,
+      });
+    validateFixtureAgainstCaseSnapshot(execution, fixture);
     const project = await this.#productRequest("/api/projects", {
       method: "POST",
       body: {
-        name: `h3 eval · ${execution.id.slice(0, 8)}`,
+        name: `${definition.name} · ${execution.id.slice(0, 8)}`,
         path: workspaceDirectory,
       },
     });
@@ -1003,6 +1381,7 @@ export class EvalService {
     const executedThreads = [];
     for (const [threadIndex, threadDefinition] of definition.threads.entries()) {
       const workspaceChecks = new Map();
+      const workspaceArtifacts = new Map();
       const permissionResolution = execution.permissionProfileResolutions[threadIndex];
       const thread = await this.#createAndRunThread({
         execution,
@@ -1011,16 +1390,20 @@ export class EvalService {
         projectId: project.id,
         permissionProfileId: permissionResolution.effectiveProfileId,
         afterTurn: async (interactionId, promptIndex) => {
+          workspaceArtifacts.set(String(interactionId), await captureTurnArtifactSnapshot(
+            execution,
+            workspaceDirectory,
+            interactionId,
+          ));
           if (threadDefinition.mutationPolicy === "read-only" || promptIndex === threadDefinition.prompts.length - 1) {
-            workspaceChecks.set(String(interactionId), await this.workspaceGrader({
-              workspaceDirectory,
-              grade: threadDefinition.workspaceGrade,
-            }));
+            workspaceChecks.set(String(interactionId), isH3
+              ? await this.workspaceGrader({ workspaceDirectory, grade: threadDefinition.workspaceGrade })
+              : await this.frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory }));
           }
         },
       });
       const detail = await this.#productRequest(`/api/threads/${thread.id}`);
-      executedThreads.push({ thread, threadDefinition, permissionResolution, detail, workspaceChecks });
+      executedThreads.push({ thread, threadDefinition, permissionResolution, detail, workspaceChecks, workspaceArtifacts });
     }
     return executedThreads;
   }
@@ -1082,7 +1465,7 @@ export class EvalService {
       completedAt: null,
       artifactDirectory,
       artifactAuthority: "references",
-      rubricVersion: DEFAULT_SIMULATED_USER_RUBRIC.rubricVersion,
+      rubricVersion: GRAPH_PRESENTATION_RUBRIC_V5.rubricVersion,
       judgeConfiguration: copy(execution.judgeConfiguration),
       references: emptyJudgeReferences(),
       review: null,
@@ -1121,7 +1504,9 @@ export class EvalService {
           previousTurnIds,
           comparisonTurnIds: previousTurnIds.slice(-1),
         },
-        rubric: copy(DEFAULT_SIMULATED_USER_RUBRIC),
+        artifact: judgeArtifactForExecution(execution, turn),
+        artifactEvidence: judgeArtifactEvidenceForExecution(execution, turn),
+        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V5),
         judgeConfiguration: copy(execution.judgeConfiguration),
         ...(provenance === null ? {} : { provenance: copy(provenance) }),
       };
@@ -1129,7 +1514,7 @@ export class EvalService {
       Object.assign(judgeResult, normalizeJudgeOutput(output, judgeResult));
     } catch (error) {
       judgeResult.status = "failed";
-      judgeResult.passed = false;
+      judgeResult.passed = null;
       judgeResult.error = error instanceof Error ? error.message : String(error);
     }
     judgeResult.completedAt = new Date().toISOString();
@@ -1456,11 +1841,12 @@ function candidateModel(configuration) {
 }
 
 function validateEvalPermissionProfiles(execution) {
-  if (execution.testCaseId !== H3_PROJECT_CASE_ID) {
+  if (!projectCaseIds.has(execution.testCaseId)) {
     selectStandalonePermissionProfile(execution.harnessConfiguration);
     return;
   }
-  for (const thread of h3ProjectEvalCase.threads) {
+  const definition = evalCases.find((candidate) => candidate.id === execution.testCaseId);
+  for (const thread of definition.threads) {
     resolveH3PermissionProfile(execution.harnessConfiguration, thread.permissionProfileId);
   }
 }
@@ -1475,7 +1861,7 @@ export function resolveH3PermissionProfile(configuration, requestedProfileId) {
       reason: null,
     };
   }
-  if (profiles.length === 1 && profiles[0] === "full") {
+  if (requestedProfileId === "ask" && profiles.length === 1 && profiles[0] === "full") {
     return {
       requestedProfileId,
       effectiveProfileId: "full",
@@ -1484,7 +1870,7 @@ export function resolveH3PermissionProfile(configuration, requestedProfileId) {
     };
   }
   throw new Error(
-    `Eval case ${H3_PROJECT_CASE_ID} requests permission profile ${requestedProfileId}, which is not supported by ${configuration.name}. Only an explicit sole Full access binding may override an H3 case profile.`,
+    `Eval case ${H3_PROJECT_CASE_ID} requests permission profile ${requestedProfileId}, which is not supported by ${configuration.name}. Only an Ask-profile case may explicitly fall back to a sole Full access binding; evaluator-owned verifier cases require confined authority.`,
   );
 }
 
@@ -1498,7 +1884,7 @@ function normalizeJudgeOutput(output, initial) {
   if (!output || !["completed", "partial", "failed"].includes(output.status)) {
     return {
       status: "failed",
-      passed: false,
+      passed: null,
       error: "Simulated-user judge returned an invalid status.",
     };
   }
@@ -1528,7 +1914,8 @@ function normalizeJudgeOutput(output, initial) {
     : null;
   return {
     status,
-    passed: status === "completed" ? output.passed !== false : false,
+    // Completion is lifecycle state, not a hidden presentation-quality pass.
+    passed: null,
     rubricVersion: initial.rubricVersion,
     judgeConfiguration: copy(initial.judgeConfiguration),
     references,

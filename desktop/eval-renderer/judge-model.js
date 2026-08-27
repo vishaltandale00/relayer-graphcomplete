@@ -8,6 +8,37 @@ function current(record) {
   return record?.history?.current ?? record?.review ?? null;
 }
 
+function presentationReview(review, kind) {
+  if (!review || typeof review !== "object") return review;
+  if (kind === "layer" && review.layerRatings) {
+    return {
+      ...review,
+      ratings: review.layerRatings,
+      summary: review.layerSummary,
+      evidence: { viewport: asArray(review.evidence) },
+      findings: asArray(review.findings),
+    };
+  }
+  if (kind === "node" && review.score) {
+    const { nodeId: _nodeId, ...ratings } = review.score;
+    return {
+      ...review,
+      ratings,
+      summary: review.semantic?.effectOnLayer || review.semantic?.delivered || "",
+      findings: asArray(review.findings),
+    };
+  }
+  if (kind === "action" && review.kind && "allocationStep" in review) {
+    return {
+      ...review,
+      ratings: {},
+      summary: [review.labelAndPlacement, review.delivery, review.recursiveContribution].filter(Boolean).join(" "),
+      findings: [],
+    };
+  }
+  return review;
+}
+
 function recordKey(layerId, nodeId) {
   return `${id(layerId)}:${id(nodeId)}`;
 }
@@ -39,7 +70,12 @@ export function evidenceIdsForReview(review) {
   if (!review || typeof review !== "object") return [];
   const evidence = collectEvidence(review.evidence);
   for (const finding of asArray(review.findings)) collectEvidence(finding?.evidence, evidence);
+  for (const opportunity of asArray(review.missingActionOpportunities)) collectEvidence(opportunity?.evidence, evidence);
   collectEvidence(review.structure?.evidence, evidence);
+  collectEvidence(review.semantic?.evidence, evidence);
+  for (const step of asArray(review.allocationSteps)) collectEvidence(step?.evidence, evidence);
+  for (const action of asArray(review.actions)) collectEvidence(action?.evidence, evidence);
+  collectEvidence(review.scoreCeiling?.evidence, evidence);
   return [...evidence];
 }
 
@@ -127,15 +163,17 @@ function normalizeTurn(turn, position, judgeConfigurationName) {
 
   const layers = rawLayers.map((subject, layerIndex) => {
     const layerId = id(subject.layerId);
-    const layerReview = current(layerRecords.get(layerId));
+    const layerReview = presentationReview(current(layerRecords.get(layerId)), "layer");
     const nodes = rawNodes.filter((node) => id(node.layerId) === layerId).map((node, nodeIndex) => {
       const nodeId = id(node.nodeId);
-      const nodeReview = current(nodeRecords.get(recordKey(layerId, nodeId)));
+      const rawNodeReview = current(nodeRecords.get(recordKey(layerId, nodeId)));
+      const nodeReview = presentationReview(rawNodeReview, "node");
       const actions = actionSubjects
         .filter((action) => id(action.layerId) === layerId && id(action.nodeId) === nodeId)
         .map((action, actionIndex) => {
           const actionId = id(action.actionId);
-          const actionReview = asArray(nodeReview?.actions).find((candidate) => id(candidate.actionId) === actionId) ?? null;
+          const rawActionReview = asArray(rawNodeReview?.actions).find((candidate) => id(candidate.actionId) === actionId) ?? null;
+          const actionReview = presentationReview(rawActionReview, "action");
           return {
             kind: "action",
             actionId,
@@ -185,6 +223,9 @@ function normalizeTurn(turn, position, judgeConfigurationName) {
     ]),
   ];
 
+  const recursive = [2, 3].includes(review?.schemaVersion)
+    || ["recursive-presentation-judge-v2", "recursive-presentation-judge-v3"].includes(review?.contractId);
+  if (recursive) layers.sort((left, right) => right.depth - left.depth || left.position - right.position);
   return {
     kind: "turn",
     position,
@@ -207,6 +248,7 @@ function normalizeTurn(turn, position, judgeConfigurationName) {
     evidenceIds: evidenceIdsForReview(review?.turn),
     allEvidenceIds: [...new Set(referencedScreenshots.length ? referencedScreenshots : reviewedEvidence)],
     layers,
+    recursive,
     coverage: result?.coverage ?? review?.coverage ?? null,
   };
 }

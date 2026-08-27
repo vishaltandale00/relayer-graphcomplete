@@ -1,0 +1,31 @@
+diff --git a/src/sqlFormatter.ts b/src/sqlFormatter.ts
+index d65159b..428af43 100644
+--- a/src/sqlFormatter.ts
++++ b/src/sqlFormatter.ts
+@@ -5,7 +5,8 @@ import { createDialect, DialectOptions } from './dialect.js';
+ import Formatter from './formatter/Formatter.js';
+ import { ConfigError, validateConfig } from './validateConfig.js';
+ 
+-const dialectNameMap: Record<keyof typeof allDialects | 'tsql', keyof typeof allDialects> = {
++const dialectNameMap: Record<keyof typeof allDialects | 'ansi' | 'tsql', keyof typeof allDialects> = {
++  ansi: 'sql',
+   bigquery: 'bigquery',
+   clickhouse: 'clickhouse',
+   db2: 'db2',
+diff --git a/test/sqlFormatter.test.ts b/test/sqlFormatter.test.ts
+index 87e9cca..609e034 100644
+--- a/test/sqlFormatter.test.ts
++++ b/test/sqlFormatter.test.ts
+@@ -3,6 +3,12 @@ import dedent from 'dedent-js';
+ import { format, formatDialect, SqlLanguage, sqlite, DialectOptions } from '../src/index.js';
+ 
+ describe('sqlFormatter', () => {
++  it('supports ansi as an alias for the generic sql dialect', () => {
++    expect(format('select 1', { language: 'ansi', keywordCase: 'upper' })).toBe(
++      format('select 1', { language: 'sql', keywordCase: 'upper' })
++    );
++  });
++
+   it('throws error when unsupported language parameter specified', () => {
+     expect(() => {
+       format('SELECT *', { language: 'blah' as SqlLanguage });

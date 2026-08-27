@@ -131,4 +131,77 @@ describe("judge analysis view model", () => {
     selected = buildJudgeAnalysis(run, "execution-1").turns[0];
     expect(selected.result.id).toBe("judge-1");
   });
+
+  it("projects recursive score and semantic vectors while keeping historical reviews readable", () => {
+    const run = fixture();
+    const turn = run.executions[0].turns.find((candidate) => candidate.interactionId === 11);
+    turn.judgeResults = [{
+      id: "recursive-judge",
+      status: "completed",
+      review: {
+        schemaVersion: 2,
+        contractId: "recursive-presentation-judge-v2",
+        inventory: {
+          turn: { turnId: "11" },
+          layers: [{ layerId: "root", depth: 0 }, { layerId: "child", depth: 1 }],
+          nodes: [{ layerId: "root", nodeId: "root-node" }, { layerId: "child", nodeId: "child-node" }],
+          actions: [{ layerId: "root", nodeId: "root-node", actionId: "expand", actionKind: "navigate", relation: "expand", targetLayerId: "child" }],
+        },
+        layers: [
+          { subject: { layerId: "root" }, history: { current: {
+            layerId: "root",
+            depth: 0,
+            nodeScores: [{ nodeId: "root-node", content: 4, actionAllocation: 3, actionDelivery: 4, recursiveQuality: 3 }, null, null, null, null, null, null, null],
+            nodeSemantics: [{ nodeId: "root-node", delivered: "Delivered the root.", effectOnLayer: "Compressed the child." }, null, null, null, null, null, null, null],
+            layerRatings: { coverage: 3 },
+            layerSummary: "Root compression.",
+            evidence: ["shot-root"],
+          } } },
+          { subject: { layerId: "child" }, history: { current: { layerId: "child", depth: 1, layerRatings: { coverage: 4 }, layerSummary: "Child result.", evidence: ["shot-child"] } } },
+        ],
+        nodes: [{ subject: { layerId: "root", nodeId: "root-node" }, history: { current: {
+          layerId: "root",
+          nodeId: "root-node",
+          score: { nodeId: "root-node", content: 4, actionAllocation: 3, actionDelivery: 4, recursiveQuality: 3 },
+          semantic: { delivered: "Delivered the root.", effectOnLayer: "Compressed the child.", evidence: ["shot-root", "shot-child"] },
+          evidence: { context: ["shot-root"], detail: ["shot-root"] },
+          allocationSteps: [],
+          missingActionOpportunities: [{
+            allocationStep: 1,
+            preferredChoice: "expand",
+            importance: "material",
+            unansweredQuestion: "How does the repair work?",
+            expectedContribution: "Explain the causal mechanism.",
+            artifactEvidence: ["src/change.ts"],
+            evidence: ["shot-missing-action"],
+          }],
+          actions: [{ actionId: "expand", kind: "expand", allocationStep: 0, labelAndPlacement: "Clear.", delivery: "Delivered.", recursiveContribution: "Useful.", targetLayerId: "child", reusedLayerId: null, evidence: ["shot-root", "shot-child"] }],
+          findings: [],
+        } } }],
+        turn: {
+          rootLayerResult: { layerId: "root", layerSummary: "Root compression." },
+          ratings: { presentation_quality: 3 }, summary: "Recursive result.", evidence: { representative: ["shot-root"] }, findings: [],
+        },
+        coverage: { complete: true },
+      },
+    }];
+
+    const recursive = buildJudgeAnalysis(run, "execution-1").turns[0];
+    expect(recursive.recursive).toBe(true);
+    expect(recursive.layers.map((layer) => layer.layerId)).toEqual(["child", "root"]);
+    expect(recursive.layers[1].review).toMatchObject({ ratings: { coverage: 3 }, summary: "Root compression." });
+    expect(recursive.layers[1].review.nodeScores).toHaveLength(8);
+    expect(recursive.layers[1].review.nodeSemantics[0].effectOnLayer).toBe("Compressed the child.");
+    expect(recursive.review.rootLayerResult.layerId).toBe("root");
+    expect(recursive.layers[1].nodes[0].review).toMatchObject({
+      ratings: { content: 4, actionAllocation: 3, actionDelivery: 4, recursiveQuality: 3 },
+      summary: "Compressed the child.",
+    });
+    expect(recursive.layers[1].nodes[0].actions[0].review.summary).toContain("Delivered.");
+    expect(recursive.layers[1].nodes[0].review.missingActionOpportunities[0]).toMatchObject({
+      importance: "material",
+      unansweredQuestion: "How does the repair work?",
+    });
+    expect(recursive.layers[1].nodes[0].evidenceIds).toContain("shot-missing-action");
+  });
 });

@@ -126,7 +126,12 @@ export interface RubricSubjectDefinition<CriterionKey extends string> {
 
 export interface SimulatedUserRubricManifest {
   readonly schemaVersion: 1;
-  readonly rubricVersion: "simulated-user-rubric-v1";
+  readonly rubricVersion:
+    | "simulated-user-rubric-v1"
+    | "graph-presentation-rubric-v2"
+    | "graph-presentation-rubric-v3"
+    | "graph-presentation-rubric-v4"
+    | "graph-presentation-rubric-v5";
   readonly ratingScale: Readonly<Record<1 | 2 | 3 | 4, string>>;
   readonly nullRating: {
     readonly meaning: string;
@@ -145,6 +150,17 @@ export interface SimulatedUserRubricManifest {
     readonly navigate_action: RubricSubjectDefinition<NavigateActionCriterionKey>;
     readonly invoke_action: RubricSubjectDefinition<InvokeActionCriterionKey>;
     readonly turn: RubricSubjectDefinition<TurnCriterionKey>;
+  };
+  readonly recursiveJudgment?: {
+    readonly contractId: string;
+    readonly fixedNodeCapacity: 8;
+    readonly allocationChoices: readonly ["expand", "reference", "invoke", "stop"];
+    readonly allocationMargins: readonly ["close", "clearly_better", "necessary"];
+    readonly bottomUpExpansion: true;
+    readonly referenceRegrade: false;
+    readonly invokeExecution: false;
+    readonly arithmeticCompression: false;
+    readonly finalTurnInput: readonly ["original_request", "artifact_evidence", "root_layer_result"];
   };
 }
 
@@ -193,6 +209,152 @@ export const SIMULATED_USER_RUBRIC_V1 = {
 } as const satisfies SimulatedUserRubricManifest;
 
 export const DEFAULT_SIMULATED_USER_RUBRIC: SimulatedUserRubricManifest = SIMULATED_USER_RUBRIC_V1;
+
+/** Presentation-only rubric for the graph grade; correctness belongs to the separate outcome grade. */
+export const GRAPH_PRESENTATION_RUBRIC_V2 = {
+  ...SIMULATED_USER_RUBRIC_V1,
+  rubricVersion: "graph-presentation-rubric-v2",
+  subjects: {
+    ...SIMULATED_USER_RUBRIC_V1.subjects,
+    node: {
+      ...SIMULATED_USER_RUBRIC_V1.subjects.node,
+      criteria: {
+        ...SIMULATED_USER_RUBRIC_V1.subjects.node.criteria,
+        substance: {
+          label: "Visible information density",
+          description: "The node presents an appropriate amount of information for its visual role without looking empty, cramped, or needlessly repetitive. Do not judge factual correctness here.",
+        },
+      },
+    },
+    turn: {
+      ...SIMULATED_USER_RUBRIC_V1.subjects.turn,
+      criteria: {
+        ...SIMULATED_USER_RUBRIC_V1.subjects.turn.criteria,
+        answer_quality: {
+          label: "Response usability",
+          description: "The completed graph is visually usable and appropriately organized for the request. Do not judge factual or task-outcome correctness here.",
+        },
+      },
+    },
+  },
+} as const satisfies SimulatedUserRubricManifest;
+
+/**
+ * Artifact-grounded presentation rubric. The judge independently inspects the
+ * candidate artifact, then uses screenshots as the authority for what the
+ * graph actually communicates. Task outcome correctness remains a separate
+ * grade.
+ */
+export const GRAPH_PRESENTATION_RUBRIC_V3 = {
+  ...SIMULATED_USER_RUBRIC_V1,
+  rubricVersion: "graph-presentation-rubric-v3",
+  ratingScale: {
+    1: "The user cannot reconstruct a meaningful handoff, or the presentation materially contradicts the artifact.",
+    2: "The result is partly understandable, but a material part of the problem, work, evidence, or limits is missing.",
+    3: "The user can understand the core problem, work, result, and evidence with only minor weaknesses.",
+    4: "The graph is a strong, concise, artifact-grounded handoff with no material comprehension gaps.",
+  },
+  subjects: {
+    ...SIMULATED_USER_RUBRIC_V1.subjects,
+    layer: {
+      ...SIMULATED_USER_RUBRIC_V1.subjects.layer,
+      criteria: {
+        ...SIMULATED_USER_RUBRIC_V1.subjects.layer.criteria,
+        coverage: {
+          label: "Contribution to the handoff",
+          description: "The layer covers the task-relevant information it should contribute, based on artifact evidence, including detail that should have been disclosed from its parent.",
+        },
+      },
+    },
+    node: {
+      ...SIMULATED_USER_RUBRIC_V1.subjects.node,
+      criteria: {
+        ...SIMULATED_USER_RUBRIC_V1.subjects.node.criteria,
+        substance: {
+          label: "Explanatory value",
+          description: "The node helps the user understand the problem, material work, result, evidence, or limitations. A status card is not substantive merely because it is dense or polished.",
+        },
+      },
+    },
+    turn: {
+      ...SIMULATED_USER_RUBRIC_V1.subjects.turn,
+      criteria: {
+        ...SIMULATED_USER_RUBRIC_V1.subjects.turn.criteria,
+        answer_quality: {
+          label: "Task-grounded handoff comprehension",
+          description: "Judge whether the graph lets the user understand the task or problem, the material work and reasoning, the result, and its evidence or limitations. Give material work the greatest importance. Inspect the artifact to learn what matters, but credit communication only when it is visible in the graph.",
+        },
+        recursive_coherence: {
+          label: "Recursive progressive disclosure",
+          description: "At every node, decide whether more detail or an action is none, helpful, or required. Penalize missing needed disclosure at its parent; recursively grade every expansion that exists.",
+        },
+      },
+    },
+  },
+} as const satisfies SimulatedUserRubricManifest;
+
+/** Bottom-up semantic graph-presentation rubric. Historical v1-v3 artifacts remain readable unchanged. */
+export const GRAPH_PRESENTATION_RUBRIC_V4 = {
+  ...GRAPH_PRESENTATION_RUBRIC_V3,
+  rubricVersion: "graph-presentation-rubric-v4",
+  recursiveJudgment: {
+    contractId: "recursive-presentation-judge-v2",
+    fixedNodeCapacity: 8,
+    allocationChoices: ["expand", "reference", "invoke", "stop"],
+    allocationMargins: ["close", "clearly_better", "necessary"],
+    bottomUpExpansion: true,
+    referenceRegrade: false,
+    invokeExecution: false,
+    arithmeticCompression: false,
+    finalTurnInput: ["original_request", "artifact_evidence", "root_layer_result"],
+  },
+  subjects: {
+    ...GRAPH_PRESENTATION_RUBRIC_V3.subjects,
+    layer: {
+      ...GRAPH_PRESENTATION_RUBRIC_V3.subjects.layer,
+      criteria: {
+        ...GRAPH_PRESENTATION_RUBRIC_V3.subjects.layer.criteria,
+        coverage: {
+          label: "Semantic contribution",
+          description: "Judge the layer's fixed score/semantic vector as one contribution to its parent. Preserve meaningful weaknesses and evidence without mechanically averaging node scores.",
+        },
+      },
+    },
+    turn: {
+      ...GRAPH_PRESENTATION_RUBRIC_V3.subjects.turn,
+      criteria: {
+        ...GRAPH_PRESENTATION_RUBRIC_V3.subjects.turn.criteria,
+        recursive_coherence: {
+          label: "Recursive semantic allocation",
+          description: "Judge bottom-up whether each node chose well among expand, reference, invoke, and stop; whether authored destinations delivered; and whether child findings were compressed into the parent at the right semantic importance.",
+        },
+      },
+    },
+  },
+} as const satisfies SimulatedUserRubricManifest;
+
+/** Missing-action-aware recursive rubric. Historical v1-v4 artifacts remain readable unchanged. */
+export const GRAPH_PRESENTATION_RUBRIC_V5 = {
+  ...GRAPH_PRESENTATION_RUBRIC_V4,
+  rubricVersion: "graph-presentation-rubric-v5",
+  recursiveJudgment: {
+    ...GRAPH_PRESENTATION_RUBRIC_V4.recursiveJudgment,
+    contractId: "recursive-presentation-judge-v3",
+  },
+  subjects: {
+    ...GRAPH_PRESENTATION_RUBRIC_V4.subjects,
+    turn: {
+      ...GRAPH_PRESENTATION_RUBRIC_V4.subjects.turn,
+      criteria: {
+        ...GRAPH_PRESENTATION_RUBRIC_V4.subjects.turn.criteria,
+        recursive_coherence: {
+          label: "Recursive semantic allocation",
+          description: "Judge every authored action and every implicit stop. Record a first-class missing-action opportunity when a distinct artifact-grounded user question materially needs absent expansion, reference, or invocation.",
+        },
+      },
+    },
+  },
+} as const satisfies SimulatedUserRubricManifest;
 
 export interface RubricRatingValidationIssue {
   readonly code: "missing_rubric_key" | "unknown_rubric_key" | "invalid_rating";
