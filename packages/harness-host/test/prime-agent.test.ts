@@ -300,6 +300,13 @@ describe("PrimeAgentHarness", () => {
     expect(prompts[0]!.text).toContain("await graph.submit(11)");
     expect(prompts[0]!.text).toContain("exactly one NodePlacementObject(node, x, y) per member node");
     expect(prompts[0]!.text).toContain("Place a one-node layer at (0.5, 0.5)");
+    expect(prompts[0]!.text).toContain("Each layer should explain its scope as a coherent whole");
+    expect(prompts[0]!.text).toContain('Choose "expand" when another layer should deepen one part');
+    expect(prompts[0]!.text).toContain('Choose "reference" for supporting evidence or reusable context');
+    expect(prompts[0]!.text).toContain('Choose "invoke" when the useful next step requires a new agent interaction');
+    expect(prompts[0]!.text).toContain('choosing "stop" means leaving the node without a further action');
+    expect(prompts[0]!.text).toContain("It is not GraphComplete's stopped lifecycle state");
+    expect(prompts[0]!.text).toContain("add_navigate_action(node, \"View evidence\"");
     expect(prompts[0]!.text).toContain("explicit descriptive client_key");
     expect(prompts[0]!.text).toContain("rerun the same authoring code with the same client_key values");
     expect(prompts[0]!.text).toContain("Do not add fake navigation");
@@ -566,6 +573,9 @@ describe("PrimeAgentHarness", () => {
 
     expect(prompt).toContain('relation="expand"');
     expect(prompt).toContain('relation="reference"');
+    expect(prompt).toContain("Each layer should explain its scope as a coherent whole");
+    expect(prompt).toContain('choosing "stop" means leaving the node without a further action');
+    expect(prompt).toContain("It is not GraphComplete's stopped lifecycle state");
     expect(prompt).toContain("A flat answer is valid");
     expect(prompt).toContain("Author in whatever order fits the task");
     expect(prompt).toContain("final graph call must be await graph.submit(11)");

@@ -19,6 +19,7 @@ import type {
   HarnessTraceSupport,
   JsonObject,
 } from "../types.js";
+import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
 
 export const PRIME_AGENT_KEY = "prime.agent";
 
@@ -426,7 +427,9 @@ graph = await GraphSession.current()
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. Never rely on generated client keys in authored code.
 
-Author nodes, edges, layers, and useful navigate or invoke actions. The visible response layer must contain 1 to 8 connected nodes. Finish the root execution only by calling:
+${GRAPH_PRESENTATION_GUIDANCE}
+
+Author nodes, edges, layers, and useful expand, reference, or invoke actions. For supporting evidence or reusable context, use await graph.add_navigate_action(node, "View evidence", evidence_layer, relation="reference", source_layer=response_layer, client_key="node-evidence") after submitting the referenced layer. The visible response layer must contain 1 to 8 connected nodes. Finish the root execution only by calling:
 
 Import NodePlacementObject and LayerLayoutObject from relayer_graph. Every new layer requires a version-1 LayerLayoutObject with exactly one NodePlacementObject(node, x, y) per member node. Coordinates are normalized numbers from 0 through 1 and express semantic relative position independently of the viewport. Place a one-node layer at (0.5, 0.5). Keep flow or time moving consistently, anchor hierarchy with a parent or summary, group related nodes, align comparisons, and avoid accidental overlap or edge crossings. Do not derive coordinates from pixels, window size, or inspector state.
 
@@ -457,6 +460,8 @@ The current interaction may carry an invoke lease created by the product. Before
 Navigation has two meanings:
 - relation="expand" continues the explanation with a more detailed layer. Expansion must not point back to an expansion ancestor.
 - relation="reference" opens supporting evidence or context. References may reuse an accepted layer, may point to other reference layers, and may revisit a layer.
+
+${GRAPH_PRESENTATION_GUIDANCE}
 
 The interaction node must have one root navigate action with relation="expand" and no source_layer. Every action on a response node must include source_layer: the LayerObject in which you are authoring that action. Expansion layers may author expand, reference, or invoke actions. A layer reached as a reference may author only reference actions. Do not create both expand and reference actions to the same new target layer.
 
