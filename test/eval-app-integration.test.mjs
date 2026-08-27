@@ -94,9 +94,14 @@ describe("Relayer Eval application service", () => {
           return [
             "implementation-build",
             "implementation-typecheck",
-            "implementation-hidden-decimal-check",
+            "implementation-focused-tests",
+            "behavior-lower-boundary",
+            "behavior-upper-boundary",
+            "behavior-decimal-number",
+            "behavior-integer-numeric-string",
+            "behavior-decimal-numeric-string",
+            "behavior-custom-fallback",
             "implementation-focused-files",
-            "implementation-validation-boundary",
             "implementation-meaningful-commit",
             "implementation-clean",
           ].map((name) => ({ name: `workspace:${name}`, passed: true, detail: `${name} passed.` }));
@@ -278,7 +283,7 @@ describe("Relayer Eval application service", () => {
     expect(autonomousCompleted.executions.map((execution) => execution.outcomeGrade.qualified)).toEqual([true, true]);
     expect(autonomousCompleted.executions.every((execution) => execution.outcomeGrade.score === null)).toBe(true);
     expect(autonomousCompleted.executions.map((execution) => execution.outcomeGrade.mandatoryGates.map((gate) => gate.gateId))).toEqual([
-      ["hidden-decimal-behavior", "focused-regression-suite", "scoped-clean-commit"],
+      ["functional-behavior", "regression-safety", "scoped-clean-commit"],
       ["read-only-workspace", "independent-reproduction"],
     ]);
     expect(autonomousCompleted.executions.every((execution) => execution.presentationGrade.status === "unjudged")).toBe(true);

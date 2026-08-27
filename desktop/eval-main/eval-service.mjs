@@ -127,8 +127,8 @@ function outcomeGradeFromChecks(checks, caseSnapshot = null) {
 
 function mandatoryGateReceipt(gate, checks) {
   const patterns = {
-    "hidden-decimal-behavior": ["hidden-decimal-check"],
-    "focused-regression-suite": ["implementation-build", "implementation-typecheck", "validation-boundary"],
+    "functional-behavior": ["behavior-lower-boundary", "behavior-upper-boundary", "behavior-decimal-number", "behavior-integer-numeric-string", "behavior-decimal-numeric-string", "behavior-custom-fallback"],
+    "regression-safety": ["implementation-build", "implementation-typecheck", "implementation-focused-tests"],
     "scoped-clean-commit": ["focused-files", "meaningful-commit", "implementation-clean"],
     "read-only-workspace": ["baseline-head", "zero-diff"],
     "independent-reproduction": ["diagnosis-reproduces-seeded-failure"],

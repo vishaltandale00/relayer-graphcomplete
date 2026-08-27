@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
 
 import type { EvalCheck } from "../runtime-basic.js";
 
@@ -344,9 +345,12 @@ async function gradeReadOnly(directory: string, runCommand: CommandRunner, grade
 }
 
 async function gradeImplementation(directory: string, runCommand: CommandRunner, minimumCommits: 1 | 2): Promise<readonly EvalCheck[]> {
-  const hidden = await runHiddenStatusCheck(directory, runCommand);
-  const build = await runCommand("corepack", [H3_PACKAGE_MANAGER, "run", "build"], { cwd: directory });
-  const typecheck = await runCommand("corepack", [H3_PACKAGE_MANAGER, "run", "typecheck"], { cwd: directory });
+  const verifierResults = await withPatchedVerifierWorkspace(directory, runCommand, async (verifierDirectory) => ({
+    build: await runCommand(localBinary(verifierDirectory, "obuild"), [], { cwd: verifierDirectory }),
+    typecheck: await runCommand(localBinary(verifierDirectory, "tsc"), ["--noEmit"], { cwd: verifierDirectory }),
+    focusedTests: await runCommand(localBinary(verifierDirectory, "vitest"), ["run", H3_TEST_PATH], { cwd: verifierDirectory }),
+    behavior: await runStatusBehaviorChecks(verifierDirectory, runCommand),
+  }));
   const status = (await required(runCommand, "git", ["status", "--porcelain=v1", "--untracked-files=all"], directory)).stdout.trim();
   const commits = lines((await required(runCommand, "git", ["rev-list", "--reverse", `${H3_SEEDED_COMMIT}..HEAD`], directory)).stdout);
   const changedFiles = lines((await required(runCommand, "git", ["diff", "--name-only", `${H3_SEEDED_COMMIT}..HEAD`, "--"], directory)).stdout);
@@ -354,28 +358,15 @@ async function gradeImplementation(directory: string, runCommand: CommandRunner,
     (await required(runCommand, "git", ["diff-tree", "--no-commit-id", "--name-only", "-r", commit], directory)).stdout,
   )));
   const allowedFiles = new Set([H3_SEED_PATH, H3_TEST_PATH]);
-  const source = await readFile(join(directory, H3_SEED_PATH), "utf8");
-  const tests = await readFile(join(directory, H3_TEST_PATH), "utf8");
-  const boundaryCoverage = [
-    "sanitizeStatusCode(100)",
-    "sanitizeStatusCode(599)",
-    'sanitizeStatusCode("599")',
-    "sanitizeStatusCode(200.5)",
-    'sanitizeStatusCode("200.5")',
-  ].every((snippet) => tests.includes(snippet));
   return [
-    { name: "workspace:implementation-build", passed: build.exitCode === 0, detail: commandDetail("h3 build", build) },
-    { name: "workspace:implementation-typecheck", passed: typecheck.exitCode === 0, detail: commandDetail("h3 typecheck", typecheck) },
-    { name: "workspace:implementation-hidden-decimal-check", passed: hidden.exitCode === 0, detail: commandDetail("hidden decimal-status check", hidden) },
+    { name: "workspace:implementation-build", passed: verifierResults.build.exitCode === 0, detail: commandDetail("h3 build", verifierResults.build) },
+    { name: "workspace:implementation-typecheck", passed: verifierResults.typecheck.exitCode === 0, detail: commandDetail("h3 typecheck", verifierResults.typecheck) },
+    { name: "workspace:implementation-focused-tests", passed: verifierResults.focusedTests.exitCode === 0, detail: commandDetail("focused sanitizer tests", verifierResults.focusedTests) },
+    ...verifierResults.behavior,
     {
       name: "workspace:implementation-focused-files",
       passed: changedFiles.length > 0 && changedFiles.every((file) => allowedFiles.has(file)),
       detail: `Changed files: ${changedFiles.join(", ") || "none"}.`,
-    },
-    {
-      name: "workspace:implementation-validation-boundary",
-      passed: source.includes(GOOD_VALIDATION) && !source.includes(SEEDED_VALIDATION) && boundaryCoverage,
-      detail: "The sanitizer uses integer validation and focused tests cover number and numeric-string boundaries.",
     },
     {
       name: `workspace:implementation-${minimumCommits === 1 ? "meaningful-commit" : "two-meaningful-commits"}`,
@@ -391,6 +382,68 @@ async function gradeImplementation(directory: string, runCommand: CommandRunner,
       detail: status === "" ? "The implementation workspace is clean." : `Uncommitted changes remain: ${status}`,
     },
   ];
+}
+
+function localBinary(directory: string, name: string): string {
+  return join(directory, "node_modules", ".bin", name);
+}
+
+async function withPatchedVerifierWorkspace<T>(
+  candidateDirectory: string,
+  runCommand: CommandRunner,
+  verify: (directory: string) => Promise<T>,
+): Promise<T> {
+  const temporary = await mkdtemp(join(tmpdir(), "relayer-h3-verifier-"));
+  const verifierDirectory = join(temporary, "workspace");
+  const patchPath = join(temporary, "model.patch");
+  try {
+    const patch = await required(runCommand, "git", ["diff", "--binary", `${H3_SEEDED_COMMIT}..HEAD`, "--"], candidateDirectory);
+    await writeFile(patchPath, patch.stdout, "utf8");
+    await required(runCommand, "git", ["clone", "--local", "--no-hardlinks", "--no-checkout", candidateDirectory, verifierDirectory], temporary);
+    await required(runCommand, "git", ["checkout", "--detach", H3_SEEDED_COMMIT], verifierDirectory);
+    if (patch.stdout.length > 0) await required(runCommand, "git", ["apply", "--whitespace=nowarn", patchPath], verifierDirectory);
+    try {
+      await access(join(candidateDirectory, "node_modules"));
+      await symlink(join(candidateDirectory, "node_modules"), join(verifierDirectory, "node_modules"), "dir");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    return await verify(verifierDirectory);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
+
+const H3_BEHAVIOR_REQUIREMENTS = Object.freeze([
+  Object.freeze({ id: "lower-boundary", cases: [[99, 418], [100, 100], [101, 101]] as const }),
+  Object.freeze({ id: "upper-boundary", cases: [[598, 598], [599, 599], [600, 418]] as const }),
+  Object.freeze({ id: "decimal-number", cases: [[100.1, 418], [200.5, 418], [599.5, 418]] as const }),
+  Object.freeze({ id: "integer-numeric-string", cases: [["100", 100], ["301", 301], ["599", 599]] as const }),
+  Object.freeze({ id: "decimal-numeric-string", cases: [["100.1", 418], ["404.1", 418], ["599.5", 418]] as const }),
+  Object.freeze({ id: "custom-fallback", cases: [[99, 451], [200.5, 451], ["404.1", 451], [600, 451]] as const, fallback: 451 }),
+]);
+
+async function runStatusBehaviorChecks(directory: string, runCommand: CommandRunner): Promise<readonly EvalCheck[]> {
+  return Promise.all(H3_BEHAVIOR_REQUIREMENTS.map(async (requirement) => {
+    const fallback = "fallback" in requirement ? requirement.fallback : 418;
+    const script = [
+      'import { sanitizeStatusCode } from "./src/utils/sanitize.ts";',
+      `const cases = ${JSON.stringify(requirement.cases)};`,
+      `const fallback = ${fallback};`,
+      "const failures = [];",
+      "for (const [input, expected] of cases) {",
+      "  const actual = sanitizeStatusCode(input, fallback);",
+      "  if (actual !== expected) failures.push({ input, expected, actual });",
+      "}",
+      "if (failures.length) { console.error(JSON.stringify(failures)); process.exitCode = 1; }",
+    ].join("\n");
+    const result = await runCommand("node", ["--experimental-strip-types", "--input-type=module", "--eval", script], { cwd: directory });
+    return {
+      name: `workspace:behavior-${requirement.id}`,
+      passed: result.exitCode === 0,
+      detail: commandDetail(`behavior ${requirement.id}`, result),
+    };
+  }));
 }
 
 async function runHiddenStatusCheck(directory: string, runCommand: CommandRunner): Promise<CommandResult> {

@@ -41,13 +41,13 @@ export const h3AutonomousFixCase = bindAutonomousCaseSnapshot(
       },
       verifier: {
         kind: "sealed-verifier",
-        artifactId: "h3-status-code-verifier-v1",
-        verifierId: "h3-status-code-v1",
-        contentDigest: digest("b2e0ad8652c141496f8b80969b7bde3dec2eedf6fa1d316b291e6454b0f30573"),
+        artifactId: "h3-status-code-verifier-v2",
+        verifierId: "h3-status-code-v2",
+        contentDigest: digest("72f96da01ca08164fb1570c7ab7f1833dd9ccc72f2335d67ceefb53fb522e68d"),
         sealedPath: "eval-cases/h3-sanitize-status-code/verifier/README.md",
         mandatoryGates: [
-          { id: "hidden-decimal-behavior", label: "Decimal behavior", description: "Hidden checks reject numeric and string decimal status values." },
-          { id: "focused-regression-suite", label: "Focused regression suite", description: "The sanitizer regression suite passes." },
+          { id: "functional-behavior", label: "Functional behavior", description: "Evaluator-owned checks cover boundaries, numbers, numeric strings, decimals, and custom fallbacks." },
+          { id: "regression-safety", label: "Regression safety", description: "The focused sanitizer suite, build, and typecheck pass in the pristine verifier workspace." },
           { id: "scoped-clean-commit", label: "Scoped clean commit", description: "The repair is committed, focused, and leaves a clean tree." },
         ],
       },
