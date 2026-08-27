@@ -110,6 +110,9 @@ interface LegacyPersistedHarnessSessionDescriptor {
   readonly state?: HarnessSessionState;
 }
 
+const CURRENT_HOST_STATE_SCHEMA_VERSION = 5;
+const SUPPORTED_HOST_STATE_SCHEMA_VERSIONS = "3, 4, or 5";
+
 export interface HarnessHostOptions {
   readonly implementations: HarnessImplementationMap;
   readonly stateFile: string;
@@ -176,11 +179,11 @@ export class HarnessHost {
       if (this.closed) throw new Error("Harness host is closed");
       const parsed = JSON.parse(serialized) as unknown;
       if (!isRecord(parsed) || !Array.isArray(parsed.sessions)) {
-        throw new Error("Unsupported harness host state; expected schema version 3 or 4");
+        throw new Error(`Unsupported harness host state; expected schema version ${SUPPORTED_HOST_STATE_SCHEMA_VERSIONS}`);
       }
       if (parsed.schemaVersion === 3) {
         if (this.closed) throw new Error("Harness host is closed");
-        await this.backupLegacyState(serialized);
+        await this.backupState(serialized, "v3");
         if (this.closed) throw new Error("Harness host is closed");
         this.legacySaved = readLegacySessions(parsed.sessions);
         await this.persist();
@@ -188,8 +191,23 @@ export class HarnessHost {
         this.initialized = true;
         return;
       }
-      if (parsed.schemaVersion !== 4) {
-        throw new Error("Unsupported harness host state; expected schema version 3 or 4");
+      if (parsed.schemaVersion === 4) {
+        if (this.closed) throw new Error("Harness host is closed");
+        await this.backupState(serialized, "v4");
+        if (this.closed) throw new Error("Harness host is closed");
+        const sessions = uniqueSessions(parsed.sessions.flatMap(migrateSchemaV4Session));
+        this.saved = new Map(sessions.map((session) => [session.threadId, session]));
+        if (parsed.legacySessions !== undefined && !Array.isArray(parsed.legacySessions)) {
+          throw new Error("Harness state contains invalid legacy sessions");
+        }
+        this.legacySaved = readLegacySessions(parsed.legacySessions ?? []);
+        await this.persist();
+        if (this.closed) throw new Error("Harness host is closed");
+        this.initialized = true;
+        return;
+      }
+      if (parsed.schemaVersion !== CURRENT_HOST_STATE_SCHEMA_VERSION) {
+        throw new Error(`Unsupported harness host state; expected schema version ${SUPPORTED_HOST_STATE_SCHEMA_VERSIONS}`);
       }
       const sessions = uniqueSessions(parsed.sessions.map(readPersistedSession));
       this.saved = new Map(sessions.map((session) => [session.threadId, session]));
@@ -780,7 +798,7 @@ export class HarnessHost {
   private persist(): Promise<void> {
     const legacySessions = [...this.legacySaved.values()];
     const serialized = `${JSON.stringify({
-      schemaVersion: 4,
+      schemaVersion: CURRENT_HOST_STATE_SCHEMA_VERSION,
       sessions: [...this.saved.values()],
       ...(legacySessions.length === 0 ? {} : { legacySessions }),
     }, null, 2)}\n`;
@@ -801,11 +819,11 @@ export class HarnessHost {
     }
   }
 
-  private async backupLegacyState(serialized: string): Promise<void> {
+  private async backupState(serialized: string, version: "v3" | "v4"): Promise<void> {
     const stateFile = resolve(this.options.stateFile);
     await mkdir(dirname(stateFile), { recursive: true });
     try {
-      await writeFile(`${stateFile}.v3.backup`, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      await writeFile(`${stateFile}.${version}.backup`, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
@@ -1103,6 +1121,47 @@ function readPersistedSession(value: unknown): PersistedHarnessSessionDescriptor
     workingDirectory,
     ...(state === undefined ? {} : { state }),
   };
+}
+
+function migrateSchemaV4Session(value: unknown): readonly PersistedHarnessSessionDescriptor[] {
+  try {
+    return [readPersistedSession(value)];
+  } catch (error) {
+    const threadId = preAccessContractThreadId(value);
+    if (threadId === undefined) throw error;
+    // Schema v4 predates execution-scoped provider access. Its opaque provider
+    // state may have been created through ambient credentials, so preserve the
+    // original file in the migration backup but never resume that authority.
+    console.warn(`Discarding pre-access-contract provider state for harness thread ${threadId} during schema v4 migration`);
+    return [];
+  }
+}
+
+function preAccessContractThreadId(value: unknown): number | undefined {
+  if (!isRecord(value) || !isRecord(value.configuration)) return undefined;
+  const descriptorFields = new Set(["threadId", "configuration", "permissionProfileId", "workingDirectory", "state"]);
+  if (Object.keys(value).some((key) => !descriptorFields.has(key))) return undefined;
+  const { threadId, permissionProfileId, workingDirectory } = value;
+  if (typeof threadId !== "number" || !Number.isSafeInteger(threadId) || threadId < 1
+    || typeof permissionProfileId !== "string" || !/^[a-z0-9][a-z0-9._-]*$/i.test(permissionProfileId)
+    || typeof workingDirectory !== "string") return undefined;
+  const configurationFields = new Set([
+    "schemaVersion", "name", "implementation", "implementationVersion",
+    "permissionBindings", "modelCompatibility", "settings",
+  ]);
+  if (Object.keys(value.configuration).some((key) => !configurationFields.has(key))
+    || value.configuration.modelCompatibility === undefined) return undefined;
+  try {
+    const configuration = parseHarnessConfiguration({
+      ...value.configuration,
+      executionAccessContracts: ["pre-access-contract-migration@1"],
+    });
+    permissionBinding(configuration, permissionProfileId);
+    readHarnessState(value.state);
+    return threadId;
+  } catch {
+    return undefined;
+  }
 }
 
 function readLegacyPersistedSession(value: unknown): LegacyPersistedHarnessSessionDescriptor {
