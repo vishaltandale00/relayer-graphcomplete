@@ -103,7 +103,7 @@ export class ModelCatalogService {
       let snapshot;
       try {
         snapshot = sanitizeModelCatalogSnapshot(await withProviderRetry(
-          ({ signal }) => adapter.discover({ signal }),
+          ({ signal }) => adapter.discover({ signal, reason }),
           { ...this.retry, signal: operationSignal },
         ));
       } catch (error) {

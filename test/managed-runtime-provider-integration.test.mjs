@@ -175,6 +175,60 @@ describe("managed runtime provider Connect boundary", () => {
     expect(subject.create).not.toHaveBeenCalled();
   });
 
+  it("admits exactly one winner when same-label connections begin together", async () => {
+    const installation = deferred();
+    const subject = fixture({ prepareRuntime: () => installation.promise });
+    const first = subject.service.connect({
+      connectionId: "same-label-first",
+      adapterId: "fake-api",
+      label: "Shared name",
+      fields: { "api-key": "first" },
+    });
+    const second = subject.service.connect({
+      connectionId: "same-label-second",
+      adapterId: "fake-api",
+      label: "Shared name",
+      fields: { "api-key": "second" },
+    });
+
+    await vi.waitFor(() => expect(subject.order).toEqual(["ensure-runtime"]));
+    installation.resolve({ runtimeId: "codex" });
+
+    await expect(first).resolves.toMatchObject({
+      status: "connected",
+      providerDefinition: { id: "same-label-first" },
+    });
+    await expect(second).rejects.toThrow(/preparing provider connection|already uses that name/);
+    expect(new Set(subject.definitions.map(({ id }) => id))).toEqual(new Set(["same-label-first"]));
+  });
+
+  it("cancels and drains a runtime preparation before service close completes", async () => {
+    const installation = deferred();
+    const subject = fixture({ prepareRuntime: () => installation.promise });
+    const connection = subject.service.connect({
+      connectionId: "close-during-prepare",
+      adapterId: "fake-api",
+      label: "Closing",
+      fields: { "api-key": "secret" },
+    });
+    await vi.waitFor(() => expect(subject.order).toEqual(["ensure-runtime"]));
+
+    let closed = false;
+    const closing = subject.service.close().then(() => { closed = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(closed).toBe(false);
+    installation.resolve({ runtimeId: "codex" });
+
+    await expect(connection).rejects.toThrow("Provider connection was cancelled");
+    await closing;
+    expect(subject.create).not.toHaveBeenCalled();
+    await expect(subject.service.connect({
+      connectionId: "after-close",
+      adapterId: "fake-api",
+      label: "After close",
+    })).rejects.toThrow("shutting down");
+  });
+
   it("closes managed login and does not publish it when onboarding is cancelled while login starts", async () => {
     const loginStarted = deferred();
     const close = vi.fn(async () => {});

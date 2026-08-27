@@ -23,7 +23,8 @@ export function createProviderComposition({
     publishSnapshot: publishCatalog,
     ...modelCatalogOptions,
   });
-  const providerDefinitions = new ProviderDefinitionService({
+  let providerDefinitions;
+  providerDefinitions = new ProviderDefinitionService({
     registry,
     definitionStore,
     credentialStore,
@@ -43,10 +44,23 @@ export function createProviderComposition({
       modelCatalog.unregister(definition.id);
       modelCatalog.register({
         providerId: definition.id,
-        discover: async () => unavailableModelCatalogSnapshot({
-          providerId: definition.id,
-          providerLabel: definition.label,
-        }, "The provider could not be activated."),
+        discover: async ({ signal, reason } = {}) => {
+          if (reason !== "explicit") {
+            return unavailableModelCatalogSnapshot({
+              providerId: definition.id,
+              providerLabel: definition.label,
+            }, "The provider could not be activated.");
+          }
+          try {
+            return await providerDefinitions.recoverUnavailable(definition.id, { signal });
+          } catch (error) {
+            if (signal?.aborted) throw error;
+            return unavailableModelCatalogSnapshot({
+              providerId: definition.id,
+              providerLabel: definition.label,
+            }, "The provider could not be activated.");
+          }
+        },
       });
     },
   });

@@ -104,7 +104,9 @@ describe("authoritative provider adapter registry", () => {
       });
       expect(dependencies.managedRuntime).toEqual(managedRuntime);
       expect(dependencies.environment).toMatchObject({
-        PATH: "/safe/bin", HOME: "/Users/tester", USERPROFILE: "C:\\Users\\tester",
+        PATH: managedRuntime.runtimeId === "codex" ? "/codex-path:/safe/bin" : "/safe/bin",
+        HOME: "/Users/tester",
+        USERPROFILE: "C:\\Users\\tester",
       });
       expect(dependencies.environment).not.toHaveProperty("OPENAI_API_KEY");
       expect(dependencies.environment).not.toHaveProperty("ANTHROPIC_API_KEY");
@@ -326,6 +328,7 @@ describe("managed subscription isolation", () => {
         systemFamily: { id: definition.id, label: definition.label, modelIds: [] },
       })),
     };
+    const prepareRuntime = vi.fn(async () => {});
     const service = new ProviderDefinitionService({
       registry: createProviderAdapterRegistry([{
         adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
@@ -337,6 +340,7 @@ describe("managed subscription isolation", () => {
       },
       credentialStore: {},
       initialRuntimes: new Map([[definition.id, runtime]]),
+      prepareRuntime,
       publishCatalog: async (snapshot) => { published.push(snapshot); },
     });
 
@@ -346,6 +350,10 @@ describe("managed subscription isolation", () => {
       providerDefinition: { id: definition.id },
     });
     expect(pending.login.authUrl).toBe("https://login.example.test/work");
+    expect(prepareRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      adapterId: "fake-managed",
+      providerDefinition: expect.objectContaining({ id: definition.id }),
+    }));
     await expect(service.completeConnection(definition.id)).resolves.toMatchObject({ status: "pending" });
     accountStatus = "connected";
     await expect(service.completeConnection(definition.id)).resolves.toMatchObject({
@@ -353,6 +361,40 @@ describe("managed subscription isolation", () => {
     });
     expect(published).toHaveLength(1);
     await expect(service.list()).resolves.toEqual([expect.objectContaining({ id: definition.id })]);
+  });
+
+  it("cancels and drains reconnect runtime preparation before service close completes", async () => {
+    const definition = {
+      id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,
+      accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
+    };
+    let finishPreparation;
+    const preparation = new Promise((resolve) => { finishPreparation = resolve; });
+    const login = vi.fn(async () => ({ authUrl: "https://login.example.test/work" }));
+    const closeRuntime = vi.fn(async () => {});
+    const service = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([{
+        adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
+        defaultEndpoint: null, connection: { mode: "managed-login", fields: [] }, create: () => { throw new Error("unused"); },
+      }]),
+      definitionStore: { async load() { return [definition]; } },
+      credentialStore: {},
+      initialRuntimes: new Map([[definition.id, { credentials: { login }, close: closeRuntime }]]),
+      prepareRuntime: () => preparation,
+    });
+
+    const reconnecting = service.reconnect(definition.id);
+    await new Promise((resolve) => setImmediate(resolve));
+    let closed = false;
+    const closing = service.close().then(() => { closed = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(closed).toBe(false);
+    finishPreparation();
+
+    await expect(reconnecting).rejects.toThrow("shutting down");
+    await closing;
+    expect(login).not.toHaveBeenCalled();
+    expect(closeRuntime).toHaveBeenCalledOnce();
   });
 
   it("cleans a terminal reconnect account failure so the same definition can reconnect again", async () => {
