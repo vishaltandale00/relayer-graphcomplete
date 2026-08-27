@@ -28,6 +28,12 @@ import {
 } from "./contracts.js";
 import { MissingReviewSubjectsError } from "./coverage.js";
 import { ScreenshotEvidenceValidationError } from "./evidence-validator.js";
+import {
+  RecursivePresentationReviewStore,
+  type RecursiveLayerResult,
+  type RecursiveNodeReview,
+  type RecursiveTurnReview,
+} from "./recursive-review.js";
 
 export const SIMULATED_USER_MCP_SERVER_NAME = "simulated_user_review" as const;
 export const SIMULATED_USER_MCP_TOKEN_ENV = "RELAYER_SIMULATED_USER_MCP_TOKEN" as const;
@@ -67,7 +73,7 @@ export interface McpToolTraceEntry {
 
 export interface SimulatedUserMcpServerOptions {
   readonly controller: ReviewSessionController;
-  readonly reviewStore: SimulatedUserReviewStore;
+  readonly reviewStore: SimulatedUserReviewStore | RecursivePresentationReviewStore;
   readonly port?: number;
   readonly bearerToken?: string;
   readonly now?: () => Date;
@@ -215,6 +221,81 @@ const turnReviewSchema = z.object({
   }).strict(),
 }).strict();
 
+const scoreValueSchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
+const recursiveScoreSchema = z.object({
+  nodeId: z.string().min(1),
+  content: scoreValueSchema,
+  actionAllocation: scoreValueSchema,
+  actionDelivery: scoreValueSchema.nullable(),
+  recursiveQuality: scoreValueSchema.nullable(),
+}).strict();
+const recursiveSemanticSchema = z.object({
+  nodeId: z.string().min(1),
+  meaning: z.string().min(1),
+  delivered: z.string().min(1),
+  limitations: z.string().min(1),
+  effectOnLayer: z.string().min(1),
+  evidence: z.array(screenshotReferenceSchema).min(1),
+}).strict();
+const allocationChoiceSchema = z.enum(["expand", "reference", "invoke", "stop"]);
+const allocationStepSchema = z.object({
+  step: z.number().int().nonnegative(),
+  ranking: z.array(z.object({ choice: allocationChoiceSchema, rank: scoreValueSchema }).strict()).length(4),
+  preferredChoice: allocationChoiceSchema,
+  authoredChoice: allocationChoiceSchema,
+  authoredActionId: z.string().min(1).nullable(),
+  margin: z.enum(["close", "clearly_better", "necessary"]),
+  selectionFinding: z.string().min(1),
+  evidence: z.array(screenshotReferenceSchema).min(1),
+}).strict();
+const recursiveActionSchema = z.object({
+  actionId: z.string().min(1),
+  kind: z.enum(["expand", "reference", "invoke"]),
+  allocationStep: z.number().int().nonnegative(),
+  labelAndPlacement: z.string().min(1),
+  delivery: z.string().min(1).nullable(),
+  recursiveContribution: z.string().min(1).nullable(),
+  targetLayerId: z.string().min(1).nullable(),
+  reusedLayerId: z.string().min(1).nullable(),
+  evidence: z.array(screenshotReferenceSchema).min(1),
+}).strict();
+const recursiveNodeReviewSchema = z.object({
+  layerId: z.string().min(1),
+  nodeId: z.string().min(1),
+  evidence: z.object({
+    context: z.array(screenshotReferenceSchema).min(1),
+    detail: z.array(screenshotReferenceSchema).min(1),
+  }).strict(),
+  score: recursiveScoreSchema,
+  semantic: recursiveSemanticSchema,
+  allocationSteps: z.array(allocationStepSchema).min(1),
+  actions: z.array(recursiveActionSchema),
+  findings: z.array(findingSchema),
+}).strict();
+const recursiveLayerResultSchema = z.object({
+  layerId: z.string().min(1),
+  depth: z.number().int().nonnegative(),
+  nodeScores: z.array(recursiveScoreSchema.nullable()).length(8),
+  nodeSemantics: z.array(recursiveSemanticSchema.nullable()).length(8),
+  layerRatings: layerRatingsSchema,
+  layerSummary: z.string().min(1),
+  evidence: z.array(screenshotReferenceSchema).min(1),
+}).strict();
+const recursiveTurnReviewSchema = z.object({
+  turnId: z.string().min(1),
+  rootLayerResult: recursiveLayerResultSchema,
+  evidence: z.object({ representative: z.array(screenshotReferenceSchema).min(1) }).strict(),
+  ratings: turnRatingsSchema,
+  nullRatingJustifications: optionalJustifications(turnRatingsSchema.shape),
+  summary: z.string().min(1),
+  findings: z.array(findingSchema),
+  scoreCeiling: z.object({
+    maximum: scoreValueSchema,
+    reason: z.string().min(1),
+    evidence: z.array(screenshotReferenceSchema).min(1),
+  }).strict(),
+}).strict();
+
 export async function startSimulatedUserReviewMcpServer(
   options: SimulatedUserMcpServerOptions,
 ): Promise<SimulatedUserMcpServerHandle> {
@@ -239,7 +320,8 @@ export async function startSimulatedUserReviewMcpServer(
         return sendStatus(response, 405, "Method not allowed");
       }
 
-      const mcpServer = createMcpServer(options.controller, options.reviewStore, trace, now);
+      const contract = options.reviewStore instanceof RecursivePresentationReviewStore ? "recursive" : "legacy";
+      const mcpServer = createMcpServer(options.controller, options.reviewStore, trace, now, contract);
       const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
       const connection = { server: mcpServer, transport };
       activeConnections.add(connection);
@@ -284,9 +366,10 @@ export async function startSimulatedUserReviewMcpServer(
 
 function createMcpServer(
   controller: ReviewSessionController,
-  reviewStore: SimulatedUserReviewStore,
+  reviewStore: SimulatedUserReviewStore | RecursivePresentationReviewStore,
   trace: McpToolTraceEntry[],
   now: () => Date,
+  contract: "legacy" | "recursive",
 ): McpServer {
   const server = new McpServer({ name: SIMULATED_USER_MCP_SERVER_NAME, version: "1.0.0" });
 
@@ -340,6 +423,12 @@ function createMcpServer(
     }
   }));
 
+  if (contract === "recursive") {
+    registerRecursiveReviewTools(server, reviewStore as RecursivePresentationReviewStore, trace, now);
+    return server;
+  }
+
+  const legacyStore = reviewStore as SimulatedUserReviewStore;
   server.registerTool("reviewLayer", {
     description: "Create or revise the screenshot-grounded assessment for one reachable layer.",
     inputSchema: z.object({ review: layerReviewSchema }).strict(),
@@ -348,7 +437,7 @@ function createMcpServer(
     const typedReview = review as LayerReview;
     try {
       assertNullRatingsJustified(review.ratings, review.nullRatingJustifications, ["review", "ratings"]);
-      const revision = reviewStore.reviewLayer(typedReview);
+      const revision = legacyStore.reviewLayer(typedReview);
       return mcpResult<ReviewLayerToolOutput>({
         ok: true,
         disposition: revision.revision === 1 ? "created" : "revised",
@@ -374,7 +463,7 @@ function createMcpServer(
           ["review", "actions", index, "ratings"],
         );
       }
-      const revision = reviewStore.reviewNode(typedReview);
+      const revision = legacyStore.reviewNode(typedReview);
       return mcpResult<ReviewNodeToolOutput>({
         ok: true,
         disposition: revision.revision === 1 ? "created" : "revised",
@@ -393,7 +482,7 @@ function createMcpServer(
     const typedReview = review as TurnReview;
     try {
       assertNullRatingsJustified(review.ratings, review.nullRatingJustifications, ["review", "ratings"]);
-      reviewStore.submitReview(typedReview);
+      legacyStore.submitReview(typedReview);
       return mcpResult<SubmitReviewToolOutput>({ ok: true, finalized: true, turnId: typedReview.turnId });
     } catch (error) {
       return mcpResult<SubmitReviewToolOutput>(reviewFailure("submitReview", error));
@@ -401,6 +490,65 @@ function createMcpServer(
   }));
 
   return server;
+}
+
+function registerRecursiveReviewTools(
+  server: McpServer,
+  store: RecursivePresentationReviewStore,
+  trace: McpToolTraceEntry[],
+  now: () => Date,
+): void {
+  server.registerTool("reviewNode", {
+    description: "Write or revise one node result after all expansion and reused-reference LayerResults it consumes are finalized. Rank expand, reference, invoke, and stop at every allocation step, and review every authored action.",
+    inputSchema: z.object({ review: recursiveNodeReviewSchema }).strict(),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async ({ review }) => traced(trace, now, "reviewNode", { review }, async () => {
+    try {
+      const typed = review as RecursiveNodeReview;
+      const revision = store.reviewNode(typed);
+      return mcpResult({
+        ok: true,
+        disposition: revision.revision === 1 ? "created" : "revised",
+        nodeId: typed.nodeId,
+      });
+    } catch (error) {
+      return mcpResult(reviewFailure("reviewNode", error));
+    }
+  }));
+
+  server.registerTool("reviewLayer", {
+    description: "Finalize or revise one bottom-up LayerResult. Supply exactly eight aligned score and semantic slots; occupied slots must preserve the current node results and unused slots must be null.",
+    inputSchema: z.object({ review: recursiveLayerResultSchema }).strict(),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async ({ review }) => traced(trace, now, "reviewLayer", { review }, async () => {
+    try {
+      const typed = review as unknown as RecursiveLayerResult;
+      const revision = store.reviewLayer(typed);
+      return mcpResult({
+        ok: true,
+        disposition: revision.revision === 1 ? "created" : "revised",
+        layerId: typed.layerId,
+        layerResult: typed,
+      });
+    } catch (error) {
+      return mcpResult(reviewFailure("reviewLayer", error));
+    }
+  }));
+
+  server.registerTool("submitReview", {
+    description: "Finalize the graph-presentation turn judgment using the original request, bounded artifact evidence, and the current root LayerResult only.",
+    inputSchema: z.object({ review: recursiveTurnReviewSchema }).strict(),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async ({ review }) => traced(trace, now, "submitReview", { review }, async () => {
+    try {
+      const typed = review as unknown as RecursiveTurnReview;
+      assertNullRatingsJustified(typed.ratings, typed.nullRatingJustifications, ["review", "ratings"]);
+      store.submitReview(typed);
+      return mcpResult({ ok: true, finalized: true, turnId: typed.turnId });
+    } catch (error) {
+      return mcpResult(reviewFailure("submitReview", error));
+    }
+  }));
 }
 
 async function traced(

@@ -14,6 +14,7 @@ import {
 
 import {
   EvalService,
+  judgeArtifactEvidenceForExecution,
   judgeArtifactForExecution,
   resolveH3PermissionProfile,
 } from "../desktop/eval-main/eval-service.mjs";
@@ -29,6 +30,20 @@ afterEach(async () => {
 });
 
 describe("EvalService simulated-user result persistence", () => {
+  it("bounds the host-authored artifact evidence packet", () => {
+    const evidence = judgeArtifactEvidenceForExecution({
+      checks: Array.from({ length: 70 }, (_, index) => ({
+        passed: true,
+        name: `check-${index}`,
+        detail: "x".repeat(3_000),
+      })),
+    });
+
+    expect(evidence.facts).toHaveLength(64);
+    expect(evidence.facts.every((fact) => fact.length <= 2_000)).toBe(true);
+    expect(evidence.summary).toContain("64 of 70");
+  });
+
   it("grounds a project judge in the candidate workspace and seeded task base", () => {
     expect(judgeArtifactForExecution({ fixture: {
       workspaceDirectory: "/immutable/execution/workspace",
@@ -103,7 +118,7 @@ describe("EvalService simulated-user result persistence", () => {
         status: "accepted",
       },
       request: { followUp: false },
-      rubric: { rubricVersion: "graph-presentation-rubric-v3" },
+      rubric: { rubricVersion: "graph-presentation-rubric-v4" },
       judgeConfiguration: { name: "simulated-user" },
     });
     expect(calls[0].request.text).toContain("incoming queue");
@@ -117,7 +132,7 @@ describe("EvalService simulated-user result persistence", () => {
         judge: "simulated-user",
         status: "completed",
         passed: null,
-        rubricVersion: "graph-presentation-rubric-v3",
+        rubricVersion: "graph-presentation-rubric-v4",
         judgeConfiguration: { name: "simulated-user" },
         artifactAuthority: "references",
         references: {

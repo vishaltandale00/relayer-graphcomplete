@@ -129,7 +129,8 @@ export interface SimulatedUserRubricManifest {
   readonly rubricVersion:
     | "simulated-user-rubric-v1"
     | "graph-presentation-rubric-v2"
-    | "graph-presentation-rubric-v3";
+    | "graph-presentation-rubric-v3"
+    | "graph-presentation-rubric-v4";
   readonly ratingScale: Readonly<Record<1 | 2 | 3 | 4, string>>;
   readonly nullRating: {
     readonly meaning: string;
@@ -148,6 +149,17 @@ export interface SimulatedUserRubricManifest {
     readonly navigate_action: RubricSubjectDefinition<NavigateActionCriterionKey>;
     readonly invoke_action: RubricSubjectDefinition<InvokeActionCriterionKey>;
     readonly turn: RubricSubjectDefinition<TurnCriterionKey>;
+  };
+  readonly recursiveJudgment?: {
+    readonly contractId: string;
+    readonly fixedNodeCapacity: 8;
+    readonly allocationChoices: readonly ["expand", "reference", "invoke", "stop"];
+    readonly allocationMargins: readonly ["close", "clearly_better", "necessary"];
+    readonly bottomUpExpansion: true;
+    readonly referenceRegrade: false;
+    readonly invokeExecution: false;
+    readonly arithmeticCompression: false;
+    readonly finalTurnInput: readonly ["original_request", "artifact_evidence", "root_layer_result"];
   };
 }
 
@@ -274,6 +286,46 @@ export const GRAPH_PRESENTATION_RUBRIC_V3 = {
         recursive_coherence: {
           label: "Recursive progressive disclosure",
           description: "At every node, decide whether more detail or an action is none, helpful, or required. Penalize missing needed disclosure at its parent; recursively grade every expansion that exists.",
+        },
+      },
+    },
+  },
+} as const satisfies SimulatedUserRubricManifest;
+
+/** Bottom-up semantic graph-presentation rubric. Historical v1-v3 artifacts remain readable unchanged. */
+export const GRAPH_PRESENTATION_RUBRIC_V4 = {
+  ...GRAPH_PRESENTATION_RUBRIC_V3,
+  rubricVersion: "graph-presentation-rubric-v4",
+  recursiveJudgment: {
+    contractId: "recursive-presentation-judge-v2",
+    fixedNodeCapacity: 8,
+    allocationChoices: ["expand", "reference", "invoke", "stop"],
+    allocationMargins: ["close", "clearly_better", "necessary"],
+    bottomUpExpansion: true,
+    referenceRegrade: false,
+    invokeExecution: false,
+    arithmeticCompression: false,
+    finalTurnInput: ["original_request", "artifact_evidence", "root_layer_result"],
+  },
+  subjects: {
+    ...GRAPH_PRESENTATION_RUBRIC_V3.subjects,
+    layer: {
+      ...GRAPH_PRESENTATION_RUBRIC_V3.subjects.layer,
+      criteria: {
+        ...GRAPH_PRESENTATION_RUBRIC_V3.subjects.layer.criteria,
+        coverage: {
+          label: "Semantic contribution",
+          description: "Judge the layer's fixed score/semantic vector as one contribution to its parent. Preserve meaningful weaknesses and evidence without mechanically averaging node scores.",
+        },
+      },
+    },
+    turn: {
+      ...GRAPH_PRESENTATION_RUBRIC_V3.subjects.turn,
+      criteria: {
+        ...GRAPH_PRESENTATION_RUBRIC_V3.subjects.turn.criteria,
+        recursive_coherence: {
+          label: "Recursive semantic allocation",
+          description: "Judge bottom-up whether each node chose well among expand, reference, invoke, and stop; whether authored destinations delivered; and whether child findings were compressed into the parent at the right semantic importance.",
         },
       },
     },

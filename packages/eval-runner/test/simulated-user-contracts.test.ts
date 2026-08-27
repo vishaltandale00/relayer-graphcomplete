@@ -8,6 +8,7 @@ import {
 import {
   DEFAULT_SIMULATED_USER_RUBRIC,
   GRAPH_PRESENTATION_RUBRIC_V3,
+  GRAPH_PRESENTATION_RUBRIC_V4,
   SIMULATED_USER_RUBRIC_V1,
   getRubricCriterionKeys,
   validateRubricRatings,
@@ -160,6 +161,16 @@ describe("recursive simulated-user rubric", () => {
       .toContain("Inspect the artifact");
     expect(GRAPH_PRESENTATION_RUBRIC_V3.subjects.turn.criteria.recursive_coherence.description)
       .toContain("At every node");
+  });
+
+  it("versions the bottom-up semantic LayerResult contract independently", () => {
+    expect(GRAPH_PRESENTATION_RUBRIC_V4.rubricVersion).toBe("graph-presentation-rubric-v4");
+    expect(GRAPH_PRESENTATION_RUBRIC_V4.recursiveJudgment).toMatchObject({
+      contractId: "recursive-presentation-judge-v2",
+      fixedNodeCapacity: 8,
+      finalTurnInput: ["original_request", "artifact_evidence", "root_layer_result"],
+      arithmeticCompression: false,
+    });
   });
 
   it("reports missing, unknown, and invalid rating keys without inference", () => {

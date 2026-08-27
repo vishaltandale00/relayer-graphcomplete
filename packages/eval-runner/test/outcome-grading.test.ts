@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregatePresentationLayers,
   buildGraphPresentationGrade,
+  buildRecursiveGraphPresentationGrade,
   buildTaskOutcomeGrade,
   projectDeterministicChecksToOutcome,
   type PresentationLayerGrade,
@@ -177,6 +178,29 @@ describe("graph-presentation grading", () => {
       layers: [{ ...layer("root", 0, [4, 4, 4, 4]), nodes: [node("handoff", [4, 4, 4, 4])] }],
     });
     expect(conciseComplete.score).toBe(4);
+  });
+
+  it("uses the LLM-authored final turn rating without reaggregating descendant vectors", () => {
+    const result = buildRecursiveGraphPresentationGrade({
+      status: "completed",
+      presentationRatings: [3],
+      comprehensionRatings: [4],
+      scoreCeilings: [3],
+      rootLayerResultIds: ["root"],
+      layers: [layer("root", 0, [1]), layer("deep", 4, [1])],
+    });
+
+    expect(result).toMatchObject({
+      score: 3,
+      rawScore: 3,
+      comprehensionScore: 4,
+      renderedScore: null,
+      scoreCeiling: 3,
+      aggregationMethod: "recursive_semantic_root",
+      rootLayerResultIds: ["root"],
+      aggregation: [],
+      worstLayer: null,
+    });
   });
 });
 

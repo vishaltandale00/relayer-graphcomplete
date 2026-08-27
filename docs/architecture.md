@@ -144,19 +144,25 @@ The default and opt-in live evals start from an empty temporary folder and run t
 1. deterministic graph-contract checks; and
 2. a fresh structured Codex judge that scores six declared task-system facts plus graph and detail usefulness.
 
-Project-case presentation judging runs in the candidate workspace under a read-only,
-network-disabled sandbox. The judge receives the original request and immutable
-artifact coordinates, including the task's base Git revision, and may inspect the
-workspace with ordinary read-only shell and Git commands. Its rubric remains the
-investigation contract: artifact evidence establishes what work matters, while
-captured production-workspace screenshots are the sole evidence for what the graph
-communicates. Every reachable expansion layer is reviewed recursively. Each parent
-node records whether expansion, reference, or invoke affordances were absent,
-helpful, or required so missing disclosure is penalized at the parent rather than
-escaping review because no child exists. Presentation scoring combines whole-turn
-handoff comprehension with depth-decayed layer and node experience; explicit
-critical-omission ceilings are applied afterward. Judge lifecycle completion is
-recorded independently from both task-outcome qualification and presentation score.
+Project-case presentation judging runs in a read-only, network-disabled workspace
+with shell, filesystem, and non-review MCP capabilities disabled. The host supplies
+the original request plus a size-bounded packet of verifier and task-outcome facts;
+candidate workspace paths and source access are not judge capabilities. Artifact
+evidence establishes what work matters, while captured production-workspace
+screenshots are the sole evidence for what the graph communicates.
+
+The presentation judge builds a recursive semantic result tree bottom-up. Expansion
+actions consume finalized child `LayerResult`s; references reuse results without
+starting another recursive pass; invoke actions are never executed. At every node,
+the judge compares expansion, reference, invoke, and stop sequentially, while keeping
+allocation quality separate from destination delivery. Each layer preserves aligned
+node score and semantic-summary vectors. A parent semantically compresses child
+findings and applies qualitative depth decay without a numeric propagation formula.
+The final turn judgment consumes the current root `LayerResult`; descendants remain
+inspectable evidence and are not arithmetically reaggregated. Explicit critical-
+omission ceilings apply to that model-authored root judgment. Judge lifecycle
+completion remains independent from both task-outcome qualification and graph-
+presentation score, and historical rubric records retain their legacy projection.
 
 The Eval application's deterministic graph-contract judge scores only durable graph structure; it does not use phrase matching as a semantic proxy. A separate hierarchical-overview case checks for a useful node-level navigate action so navigation capability is measured without requiring artificial child layers in every answer.
 

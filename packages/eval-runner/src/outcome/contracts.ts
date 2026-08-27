@@ -93,4 +93,6 @@ export interface GraphPresentationGrade {
   readonly aggregation: readonly PresentationLayerAggregation[];
   readonly worstLayer: WorstPresentationLayer | null;
   readonly hasMateriallyMisleadingLayer: boolean;
+  readonly aggregationMethod?: "legacy_depth_weighted" | "recursive_semantic_root";
+  readonly rootLayerResultIds?: readonly string[];
 }

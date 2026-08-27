@@ -198,6 +198,7 @@ export function projectExecutionDossier(run, execution) {
         : Number.isFinite(presentation.decay) ? presentation.decay : null,
       layers: asArray(presentation.layers),
       aggregation: presentation.aggregation ?? null,
+      aggregationMethod: presentation.aggregationMethod ?? null,
       worstLayer: presentation.worstLayer ?? null,
       hasMateriallyMisleadingLayer: typeof presentation.hasMateriallyMisleadingLayer === "boolean"
         ? presentation.hasMateriallyMisleadingLayer

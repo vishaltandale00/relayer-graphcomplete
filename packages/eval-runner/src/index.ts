@@ -16,4 +16,6 @@ export * from "./simulated-user/inventory.js";
 export * from "./simulated-user/judge-runner.js";
 export * from "./simulated-user/mcp-server.js";
 export * from "./simulated-user/review-store.js";
+export * from "./simulated-user/recursive-review.js";
+export * from "./simulated-user/recursive-evidence-validator.js";
 export * from "./simulated-user/rubric.js";

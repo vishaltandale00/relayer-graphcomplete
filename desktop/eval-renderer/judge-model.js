@@ -8,6 +8,37 @@ function current(record) {
   return record?.history?.current ?? record?.review ?? null;
 }
 
+function presentationReview(review, kind) {
+  if (!review || typeof review !== "object") return review;
+  if (kind === "layer" && review.layerRatings) {
+    return {
+      ...review,
+      ratings: review.layerRatings,
+      summary: review.layerSummary,
+      evidence: { viewport: asArray(review.evidence) },
+      findings: asArray(review.findings),
+    };
+  }
+  if (kind === "node" && review.score) {
+    const { nodeId: _nodeId, ...ratings } = review.score;
+    return {
+      ...review,
+      ratings,
+      summary: review.semantic?.effectOnLayer || review.semantic?.delivered || "",
+      findings: asArray(review.findings),
+    };
+  }
+  if (kind === "action" && review.kind && "allocationStep" in review) {
+    return {
+      ...review,
+      ratings: {},
+      summary: [review.labelAndPlacement, review.delivery, review.recursiveContribution].filter(Boolean).join(" "),
+      findings: [],
+    };
+  }
+  return review;
+}
+
 function recordKey(layerId, nodeId) {
   return `${id(layerId)}:${id(nodeId)}`;
 }
@@ -127,15 +158,17 @@ function normalizeTurn(turn, position, judgeConfigurationName) {
 
   const layers = rawLayers.map((subject, layerIndex) => {
     const layerId = id(subject.layerId);
-    const layerReview = current(layerRecords.get(layerId));
+    const layerReview = presentationReview(current(layerRecords.get(layerId)), "layer");
     const nodes = rawNodes.filter((node) => id(node.layerId) === layerId).map((node, nodeIndex) => {
       const nodeId = id(node.nodeId);
-      const nodeReview = current(nodeRecords.get(recordKey(layerId, nodeId)));
+      const rawNodeReview = current(nodeRecords.get(recordKey(layerId, nodeId)));
+      const nodeReview = presentationReview(rawNodeReview, "node");
       const actions = actionSubjects
         .filter((action) => id(action.layerId) === layerId && id(action.nodeId) === nodeId)
         .map((action, actionIndex) => {
           const actionId = id(action.actionId);
-          const actionReview = asArray(nodeReview?.actions).find((candidate) => id(candidate.actionId) === actionId) ?? null;
+          const rawActionReview = asArray(rawNodeReview?.actions).find((candidate) => id(candidate.actionId) === actionId) ?? null;
+          const actionReview = presentationReview(rawActionReview, "action");
           return {
             kind: "action",
             actionId,
@@ -185,6 +218,8 @@ function normalizeTurn(turn, position, judgeConfigurationName) {
     ]),
   ];
 
+  const recursive = review?.schemaVersion === 2 || review?.contractId === "recursive-presentation-judge-v2";
+  if (recursive) layers.sort((left, right) => right.depth - left.depth || left.position - right.position);
   return {
     kind: "turn",
     position,
@@ -207,6 +242,7 @@ function normalizeTurn(turn, position, judgeConfigurationName) {
     evidenceIds: evidenceIdsForReview(review?.turn),
     allEvidenceIds: [...new Set(referencedScreenshots.length ? referencedScreenshots : reviewedEvidence)],
     layers,
+    recursive,
     coverage: result?.coverage ?? review?.coverage ?? null,
   };
 }

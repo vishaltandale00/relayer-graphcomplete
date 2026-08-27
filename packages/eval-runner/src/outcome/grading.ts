@@ -124,6 +124,53 @@ export function buildGraphPresentationGrade(
     aggregation,
     worstLayer,
     hasMateriallyMisleadingLayer: layers.some((layer) => layer.materiallyMisleading),
+    aggregationMethod: "legacy_depth_weighted" as const,
+  });
+}
+
+export interface BuildRecursiveGraphPresentationGradeOptions {
+  readonly status: PresentationGradingStatus;
+  readonly layers?: readonly PresentationLayerGrade[];
+  readonly presentationRatings?: readonly PresentationRating[];
+  readonly comprehensionRatings?: readonly PresentationRating[];
+  readonly scoreCeilings?: readonly (1 | 2 | 3 | 4)[];
+  readonly rootLayerResultIds?: readonly string[];
+}
+
+/**
+ * Projects finalized recursive turn judgments without recomputing their
+ * semantic compression. Descendant vectors remain inspectable evidence; the
+ * final model-authored presentation rating is the score source.
+ */
+export function buildRecursiveGraphPresentationGrade(
+  options: BuildRecursiveGraphPresentationGradeOptions,
+): GraphPresentationGrade {
+  const layers = [...(options.layers ?? [])];
+  validatePresentationLayers(layers);
+  const presentation = options.status === "completed" ? meanRatings(options.presentationRatings ?? []) : null;
+  const comprehension = options.status === "completed" ? meanRatings(options.comprehensionRatings ?? []) : null;
+  const ceiling = options.scoreCeilings?.length
+    ? Math.min(...options.scoreCeilings) as 1 | 2 | 3 | 4
+    : null;
+  const score = presentation === null ? null : rounded(ceiling === null ? presentation : Math.min(presentation, ceiling));
+  const rootLayerResultIds = [...(options.rootLayerResultIds ?? [])];
+  validateUniqueIds(rootLayerResultIds, "root LayerResult");
+  return immutable({
+    schemaVersion: 1,
+    kind: "graph_presentation_grade",
+    status: options.status,
+    score,
+    comprehensionScore: comprehension,
+    renderedScore: null,
+    rawScore: presentation,
+    scoreCeiling: ceiling,
+    depthDecay: 1,
+    layers,
+    aggregation: [],
+    worstLayer: null,
+    hasMateriallyMisleadingLayer: layers.some((layer) => layer.materiallyMisleading),
+    aggregationMethod: "recursive_semantic_root" as const,
+    rootLayerResultIds,
   });
 }
 

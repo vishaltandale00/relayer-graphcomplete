@@ -10,11 +10,12 @@ import {
   basicEvalFollowUpPrompt,
   basicEvalPrompt,
   buildGraphPresentationGrade,
+  buildRecursiveGraphPresentationGrade,
   buildTaskOutcomeGrade,
   canonicalJson,
   checkNodeNavigation,
   checkBasicOutput,
-  GRAPH_PRESENTATION_RUBRIC_V3,
+  GRAPH_PRESENTATION_RUBRIC_V4,
   expandTestRun,
   gradeH3Workspace,
   gradeFrontierProjectWorkspace,
@@ -172,6 +173,26 @@ function presentationGradeFromTurns(turns, requested) {
     ? "unjudged"
     : completed.length === results.length ? "completed"
       : failed.length === results.length ? "failed" : "partial";
+  const recursive = completed.length > 0 && completed.every((result) => (
+    result.review?.schemaVersion === 2
+    && result.review?.contractId === "recursive-presentation-judge-v2"
+  ));
+  if (recursive) {
+    return buildRecursiveGraphPresentationGrade({
+      status,
+      layers: presentationLayers(completed),
+      presentationRatings: completed.map((result) => result.review?.turn?.ratings?.presentation_quality ?? null),
+      comprehensionRatings: completed.map((result) => result.review?.turn?.ratings?.answer_quality ?? null),
+      scoreCeilings: completed.flatMap((result) => {
+        const maximum = result.review?.turn?.scoreCeiling?.maximum;
+        return [1, 2, 3, 4].includes(maximum) ? [maximum] : [];
+      }),
+      rootLayerResultIds: completed.flatMap((result) => {
+        const layerId = result.review?.rootLayerResult?.layerId;
+        return typeof layerId === "string" && layerId ? [layerId] : [];
+      }),
+    });
+  }
   return buildGraphPresentationGrade({
     status,
     layers: presentationLayers(completed),
@@ -200,17 +221,24 @@ function presentationLayers(results) {
         if (nodeLayerId !== layerId) return [];
         return [{
           nodeId: String(nodeRecord?.subject?.nodeId ?? node?.nodeId ?? ""),
-          ratings: {
-            ...copy(node?.ratings || {}),
-            recursive_disclosure: [1, 2, 3, 4].includes(node?.structure?.rating)
-              ? node.structure.rating
-              : null,
-          },
-          summary: typeof node?.summary === "string" ? node.summary : "",
+          ratings: node?.score
+            ? copy(Object.fromEntries(Object.entries(node.score).filter(([key]) => key !== "nodeId")))
+            : {
+                ...copy(node?.ratings || {}),
+                recursive_disclosure: [1, 2, 3, 4].includes(node?.structure?.rating)
+                  ? node.structure.rating
+                  : null,
+              },
+          summary: typeof node?.summary === "string"
+            ? node.summary
+            : typeof node?.semantic?.effectOnLayer === "string" ? node.semantic.effectOnLayer : "",
           evidenceRefs: [...new Set([
             ...(node?.evidence?.context || []),
             ...(node?.evidence?.detail || []),
             ...(node?.structure?.evidence || []),
+            ...(node?.semantic?.evidence || []),
+            ...(node?.allocationSteps || []).flatMap((step) => step?.evidence || []),
+            ...(node?.actions || []).flatMap((action) => action?.evidence || []),
             ...(node?.findings || []).flatMap((finding) => finding?.evidence || []),
           ])],
         }];
@@ -218,12 +246,14 @@ function presentationLayers(results) {
       return {
         layerId,
         depth: Number.isInteger(inventoryLayer?.depth) ? inventoryLayer.depth : Number(record?.subject?.depth ?? index),
-        ratings: copy(current?.ratings || {}),
-        summary: typeof current?.summary === "string" ? current.summary : "",
+        ratings: copy(current?.layerRatings || current?.ratings || {}),
+        summary: typeof current?.layerSummary === "string"
+          ? current.layerSummary
+          : typeof current?.summary === "string" ? current.summary : "",
         materiallyMisleading: current?.materiallyMisleading === true,
         nodes,
         evidenceRefs: [...new Set([
-          ...(current?.evidence?.viewport || []),
+          ...(Array.isArray(current?.evidence) ? current.evidence : current?.evidence?.viewport || []),
           ...findings.flatMap((finding) => finding?.evidence || []),
         ])],
       };
@@ -270,6 +300,29 @@ export function judgeArtifactForExecution(execution) {
     kind: "git_workspace",
     workingDirectory: fixture.workspaceDirectory,
     ...(typeof baseRevision === "string" && baseRevision.length > 0 ? { baseRevision } : {}),
+  };
+}
+
+export function judgeArtifactEvidenceForExecution(execution) {
+  const outcome = execution?.outcomeGrade || {};
+  const checks = Array.isArray(execution?.checks) ? execution.checks : [];
+  const allFacts = [
+    ...checks.map((check) => `${check.passed ? "PASS" : "FAIL"} ${check.name}: ${check.detail}`),
+    ...(Array.isArray(outcome.mandatoryGates) ? outcome.mandatoryGates : []).map(
+      (gate) => `${gate.passed ? "PASS" : "FAIL"} mandatory gate ${gate.name}: ${gate.detail}`,
+    ),
+    ...(Array.isArray(outcome.criteria) ? outcome.criteria : []).map(
+      (criterion) => `Outcome criterion ${criterion.criterionId}: ${criterion.rationale}`,
+    ),
+  ];
+  const facts = allFacts.slice(0, 64).map((fact) => String(fact).slice(0, 2_000));
+  return {
+    schemaVersion: 1,
+    source: "bounded_host_packet",
+    summary: facts.length
+      ? `Host-authored task evidence contains ${facts.length} of ${allFacts.length} verifier and outcome facts.`
+      : "No deterministic verifier or outcome facts were available for this turn.",
+    facts,
   };
 }
 
@@ -1334,7 +1387,7 @@ export class EvalService {
       completedAt: null,
       artifactDirectory,
       artifactAuthority: "references",
-      rubricVersion: GRAPH_PRESENTATION_RUBRIC_V3.rubricVersion,
+      rubricVersion: GRAPH_PRESENTATION_RUBRIC_V4.rubricVersion,
       judgeConfiguration: copy(execution.judgeConfiguration),
       references: emptyJudgeReferences(),
       review: null,
@@ -1374,7 +1427,8 @@ export class EvalService {
           comparisonTurnIds: previousTurnIds.slice(-1),
         },
         artifact: judgeArtifactForExecution(execution),
-        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V3),
+        artifactEvidence: judgeArtifactEvidenceForExecution(execution),
+        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V4),
         judgeConfiguration: copy(execution.judgeConfiguration),
         ...(provenance === null ? {} : { provenance: copy(provenance) }),
       };

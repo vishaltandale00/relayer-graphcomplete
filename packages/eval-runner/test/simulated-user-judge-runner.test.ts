@@ -60,6 +60,12 @@ describe("simulated-user Codex judge runner", () => {
         workingDirectory: process.cwd(),
         baseRevision: "base-commit",
       },
+      artifactEvidence: {
+        schemaVersion: 1,
+        source: "bounded_host_packet",
+        summary: "Changed src/file.ts and verified the focused suite.",
+        facts: ["src/file.ts changed", "focused tests passed"],
+      },
       threadFactory: factory,
       mcpServer: { bearerToken: "test-token-with-at-least-24-characters" },
     });
@@ -81,6 +87,16 @@ describe("simulated-user Codex judge runner", () => {
     expect(startRequest?.codexOptions.env).not.toHaveProperty("OPENAI_API_KEY");
     expect(startRequest?.codexOptions.env).not.toHaveProperty("RELAYER_GRAPH_TOKEN");
     expect(startRequest?.codexOptions.config).toMatchObject({
+      features: {
+        apps: false,
+        browser_use: false,
+        computer_use: false,
+        image_generation: false,
+        shell_tool: false,
+        skill_search: false,
+        unified_exec: false,
+        view_image: false,
+      },
       mcp_servers: {
         [SIMULATED_USER_MCP_SERVER_NAME]: {
           url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/),
@@ -93,7 +109,7 @@ describe("simulated-user Codex judge runner", () => {
       schemaVersion: 1,
       executionId: "execution-1",
       judge: { model: "gpt-test", modelReasoningEffort: "high" },
-      prompt: { version: "simulated-user-judge-prompt-v2" },
+      prompt: { version: "simulated-user-judge-prompt-v3" },
       rubric: { rubricVersion: "simulated-user-rubric-v1" },
       codexThreadId: "codex-thread-1",
       finalResponse: "Review submitted.",
@@ -110,8 +126,9 @@ describe("simulated-user Codex judge runner", () => {
     expect(result.prompt.text).toContain("root and expansion layers have no different rules");
     expect(result.prompt.text).toContain("Do not regrade the reference destination node by node");
     expect(result.prompt.text).toContain("Need is independent of execution");
-    expect(result.prompt.text).toContain("read-only shell and filesystem commands");
-    expect(result.prompt.text).toContain('"baseRevision": "base-commit"');
+    expect(result.prompt.text).not.toContain(process.cwd());
+    expect(result.prompt.text).not.toContain('"baseRevision": "base-commit"');
+    expect(result.prompt.text).toContain("Changed src/file.ts and verified the focused suite.");
     expect(result.prompt.text).toContain("The rubric is the contract");
     expect(result.codexTrace).toEqual([{ id: "message-1", type: "agent_message", text: "Review submitted." }]);
     expect(Object.isFrozen(result)).toBe(true);
@@ -120,7 +137,7 @@ describe("simulated-user Codex judge runner", () => {
     expect(Object.isFrozen(result.review)).toBe(true);
   });
 
-  it("allows read-only shell evidence but rejects file, web, and non-review MCP activity", () => {
+  it("rejects shell, file, web, and non-review MCP activity", () => {
     const forbidden: ThreadItem[] = [
       { id: "file", type: "file_change", changes: [{ path: "x", kind: "add" }], status: "completed" },
       { id: "web", type: "web_search", query: "anything" },
@@ -135,7 +152,7 @@ describe("simulated-user Codex judge runner", () => {
       aggregated_output: "src/file.ts | 2 ++",
       exit_code: 0,
       status: "completed",
-    }])).not.toThrow();
+    }])).toThrow(/command execution/i);
 
     expect(() => assertReviewOnlyCodexTrace([{
       id: "allowed",

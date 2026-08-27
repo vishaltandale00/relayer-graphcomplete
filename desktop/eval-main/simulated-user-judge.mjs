@@ -4,7 +4,9 @@ import { join } from "node:path";
 import {
   DEFAULT_SIMULATED_USER_RUBRIC,
   IncrementalReviewStore,
+  RecursivePresentationReviewStore,
   createScreenshotEvidenceValidator,
+  createRecursiveScreenshotEvidenceValidator,
   inventoryReviewSubjects,
   runSimulatedUserJudge,
 } from "@relayer/eval-runner";
@@ -273,15 +275,20 @@ export function createLocalSimulatedUserJudgeRunner({
         rootLayerId,
       });
       const controller = createReviewSessionController(opened.session, screenshots);
-      const store = new IncrementalReviewStore({
+      const recursiveContract = context.rubric?.rubricVersion === "graph-presentation-rubric-v4";
+      const evidenceOptions = {
+        executionId: String(context.execution.id),
+        threadId: String(context.thread.id),
+        turnId: String(context.turn.id),
+        comparisonTurnIds: (context.request.comparisonTurnIds ?? []).map(String),
+        screenshots,
+      };
+      const store = recursiveContract ? new RecursivePresentationReviewStore({
         inventory,
-        validateEvidence: createScreenshotEvidenceValidator({
-          executionId: String(context.execution.id),
-          threadId: String(context.thread.id),
-          turnId: String(context.turn.id),
-          comparisonTurnIds: (context.request.comparisonTurnIds ?? []).map(String),
-          screenshots,
-        }),
+        validateEvidence: createRecursiveScreenshotEvidenceValidator(evidenceOptions),
+      }) : new IncrementalReviewStore({
+        inventory,
+        validateEvidence: createScreenshotEvidenceValidator(evidenceOptions),
       });
       let record;
       try {
@@ -291,11 +298,9 @@ export function createLocalSimulatedUserJudgeRunner({
           configuration: { ...selectedConfiguration, rubric: context.rubric },
           controller,
           reviewStore: store,
-          workingDirectory: context.artifact?.workingDirectory ?? context.artifactDirectory,
-          artifact: context.artifact,
-          additionalDirectories: context.artifact?.workingDirectory === context.artifactDirectory
-            ? []
-            : [context.artifactDirectory],
+          workingDirectory: context.artifactDirectory,
+          artifactEvidence: context.artifactEvidence,
+          additionalDirectories: [],
         });
       } catch (error) {
         return persistJudgeArtifacts({

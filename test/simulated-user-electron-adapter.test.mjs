@@ -294,7 +294,8 @@ describe("local Electron simulated-user judge adapter", () => {
     expect(runJudge).toHaveBeenCalledTimes(1);
     expect(runJudge).toHaveBeenCalledWith(expect.objectContaining({
       workingDirectory: artifactDirectory,
-      artifact: expect.objectContaining({ kind: "git_workspace", baseRevision: "base-commit" }),
+      additionalDirectories: [],
+      artifactEvidence: undefined,
     }));
     expect(session.screenshot).toHaveBeenCalledTimes(5);
     expect(session.interact).toHaveBeenCalledTimes(1);
@@ -352,6 +353,46 @@ describe("local Electron simulated-user judge adapter", () => {
     })).rejects.toThrow("exact accepted turn and root layer");
     expect(runJudge).not.toHaveBeenCalled();
     expect(release).toHaveBeenCalledWith({ close: true });
+  });
+
+  it("selects the recursive review store only for rubric v4 and forwards bounded artifact evidence", async () => {
+    const artifactDirectory = await temporaryDirectory();
+    const evidence = {
+      schemaVersion: 1,
+      source: "bounded_host_packet",
+      summary: "One verifier fact.",
+      facts: ["PASS workspace:focused-tests"],
+    };
+    const runJudge = vi.fn(async ({ reviewStore, artifactEvidence }) => {
+      expect(reviewStore.snapshot()).toMatchObject({
+        schemaVersion: 2,
+        contractId: "recursive-presentation-judge-v2",
+      });
+      expect(artifactEvidence).toEqual(evidence);
+      throw new Error("fixture stops before paid inference");
+    });
+    const runner = createLocalSimulatedUserJudgeRunner({
+      loadLayer: async ({ layerId }) => acceptedLayers().get(String(layerId)),
+      openReviewSession: async () => ({
+        session: fakeReviewSession(join(artifactDirectory, "screenshots")),
+        state: { executionId: "execution-1", threadId: "7", turnId: "41", layerId: "10" },
+        release: vi.fn(async () => {}),
+      }),
+      runJudge,
+    });
+
+    const result = await runner({
+      artifactDirectory,
+      execution: { id: "execution-1" },
+      thread: { id: "7" },
+      turn: { id: "41", rootLayerId: "10" },
+      request: { text: "Explain." },
+      rubric: { rubricVersion: "graph-presentation-rubric-v4" },
+      artifactEvidence: evidence,
+      reviewSequence: { index: 0, count: 1 },
+    });
+
+    expect(result).toMatchObject({ status: "partial", review: { schemaVersion: 2 }, error: "fixture stops before paid inference" });
   });
 });
 
