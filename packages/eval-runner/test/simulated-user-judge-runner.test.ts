@@ -37,6 +37,8 @@ describe("simulated-user Codex judge runner", () => {
     expect(prompt).toContain("distinct unanswered user question");
     expect(prompt).toContain("Generic requests for more detail");
     expect(prompt).toContain("caps final recursive_coherence at 3");
+    expect(prompt).toContain("Read-only shell and filesystem inspection are available");
+    expect(prompt).not.toContain("Shell, filesystem, web, network, graph mutation, and invoke execution are unavailable");
   });
 
   it("starts a locked-down injected Codex thread and records an immutable audit artifact", async () => {
@@ -132,7 +134,7 @@ describe("simulated-user Codex judge runner", () => {
       schemaVersion: 1,
       executionId: "execution-1",
       judge: { model: "gpt-test", modelReasoningEffort: "high" },
-      prompt: { version: "simulated-user-judge-prompt-v4" },
+      prompt: { version: "simulated-user-judge-prompt-v5" },
       rubric: { rubricVersion: "simulated-user-rubric-v1" },
       codexThreadId: "codex-thread-1",
       finalResponse: "Review submitted.",

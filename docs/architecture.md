@@ -148,12 +148,14 @@ The default and opt-in live evals start from an empty temporary folder and run t
 1. deterministic graph-contract checks; and
 2. a fresh structured Codex judge that scores six declared task-system facts plus graph and detail usefulness.
 
-Project-case presentation judging runs in a read-only, network-disabled workspace
-with shell, filesystem, and non-review MCP capabilities disabled. The host supplies
-the original request plus a size-bounded packet of verifier and task-outcome facts;
-candidate workspace paths and source access are not judge capabilities. Artifact
-evidence establishes what work matters, while captured production-workspace
-screenshots are the sole evidence for what the graph communicates.
+Project-case presentation judging runs in an immutable, network-disabled artifact
+snapshot with read-only shell and filesystem inspection enabled. The judge may use
+non-mutating Git, search, and file-reading commands to discover what work matters;
+file mutation, graph mutation, invoke execution, and non-review MCP capabilities
+remain disabled. The host supplies the original request and may include a compact,
+size-bounded receipt of verifier and task-outcome facts as a starting point rather
+than a substitute for artifact investigation. Captured production-workspace
+screenshots remain the sole evidence for what the graph communicates.
 
 The presentation judge builds a recursive semantic result tree bottom-up. Expansion
 actions consume finalized child `LayerResult`s; references reuse results without
