@@ -32,7 +32,7 @@ describe("harness configuration", () => {
       name: "codex-basic",
       implementation: "codex.basic",
       implementationVersion: 1,
-      revision: 1,
+      revision: 2,
       permissionBindings: {
         ask: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user", networkAccessEnabled: true },
         auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
@@ -49,7 +49,7 @@ describe("harness configuration", () => {
         deny: [],
       },
       executionAccessContracts: ["managed-runtime@1", "secret@1"],
-      modelDefaults: { familyPolicy: { id: "codex-default-family", version: 1 } },
+      modelDefaults: { familyPolicy: { id: "codex-default-family", version: 2 } },
       settings: {
         modelReasoningEffort: "medium",
         skipGitRepoCheck: true,
