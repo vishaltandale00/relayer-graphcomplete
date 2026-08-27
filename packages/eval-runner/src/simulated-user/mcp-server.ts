@@ -499,7 +499,7 @@ function registerRecursiveReviewTools(
   now: () => Date,
 ): void {
   server.registerTool("reviewNode", {
-    description: "Write or revise one node result after all expansion and reused-reference LayerResults it consumes are finalized. Rank expand, reference, invoke, and stop at every allocation step, and review every authored action.",
+    description: "Write or revise one node result after all expansion LayerResults and any reference targets present in the recursive inventory are finalized. A reference-only target absent from inventory is delivery-graded from screenshots with reusedLayerId null. Rank expand, reference, invoke, and stop at every allocation step, and review every authored action.",
     inputSchema: z.object({ review: recursiveNodeReviewSchema }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ review }) => traced(trace, now, "reviewNode", { review }, async () => {

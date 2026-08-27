@@ -217,7 +217,7 @@ export class RecursivePresentationReviewStore {
       throw new Error(`Layer ${review.layerId} is already finalized; revise its nodes before finalizing the LayerResult`);
     }
     const actionSubjects = this.#actionSubjects.get(key)!;
-    validateNodeReview(review, actionSubjects, this.#layers);
+    validateNodeReview(review, actionSubjects, this.#layers, new Set(this.#layerSubjects.keys()));
     const saved = immutable(review);
     this.#validateEvidence?.({ kind: "node", subject, actionSubjects, review: saved });
     const revision = appendRevision(this.#nodes, key, saved);
@@ -333,6 +333,7 @@ function validateNodeReview(
   review: RecursiveNodeReview,
   subjects: readonly ActionReviewSubject[],
   layers: ReadonlyMap<string, RecursiveReviewHistory<RecursiveLayerResult>>,
+  reviewableLayerIds: ReadonlySet<string>,
 ): void {
   if (review.score.nodeId !== review.nodeId || review.semantic.nodeId !== review.nodeId) {
     throw new Error(`Node ${review.nodeId} score and semantic IDs must match the reviewed node`);
@@ -381,11 +382,16 @@ function validateNodeReview(
         if (action.reusedLayerId !== null) throw new Error(`Expansion ${action.actionId} cannot reuse a reference result`);
       } else {
         if (action.recursiveContribution !== null) throw new Error(`Reference ${action.actionId} cannot create recursive contribution`);
-        if (action.reusedLayerId !== action.targetLayerId) {
-          throw new Error(`Reference ${action.actionId} must reuse finalized LayerResult ${action.targetLayerId}`);
-        }
-        if (layers.get(action.reusedLayerId!)?.current === undefined) {
-          throw new Error(`Reference ${action.actionId} requires existing finalized LayerResult ${action.reusedLayerId}`);
+        const reusableResult = layers.get(action.targetLayerId!)?.current;
+        if (reviewableLayerIds.has(action.targetLayerId!)) {
+          if (action.reusedLayerId !== action.targetLayerId) {
+            throw new Error(`Reference ${action.actionId} must reuse finalized LayerResult ${action.targetLayerId}`);
+          }
+          if (reusableResult === undefined) {
+            throw new Error(`Reference ${action.actionId} requires existing finalized LayerResult ${action.reusedLayerId}`);
+          }
+        } else if (action.reusedLayerId !== null) {
+          throw new Error(`Reference-only destination ${action.targetLayerId} has no recursive LayerResult to reuse`);
         }
       }
     }

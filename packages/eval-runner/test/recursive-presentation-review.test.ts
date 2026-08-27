@@ -304,8 +304,6 @@ describe("recursive semantic presentation review", () => {
 
     const store = new RecursivePresentationReviewStore({ inventory: referenceInventory });
     const shared = { ...leafNodeReview(), layerId: "shared", nodeId: "shared-node", score: score("shared-node"), semantic: semantic("shared-node") };
-    store.reviewNode(shared);
-    store.reviewLayer(layerResult("shared", 1, shared));
     const base = rootNodeReview();
     const root = {
       ...base,
@@ -333,9 +331,79 @@ describe("recursive semantic presentation review", () => {
         },
       ],
     };
+    expect(() => store.reviewNode(root)).toThrow("requires finalized expansion child layer shared");
+    store.reviewNode(shared);
+    store.reviewLayer(layerResult("shared", 1, shared));
     expect(store.reviewNode(root).review.actions[1]).toMatchObject({
       kind: "reference",
       reusedLayerId: "shared",
+    });
+  });
+
+  it("grades a reference-only destination without inventing a recursive LayerResult", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-ref-only",
+      rootLayerId: "root",
+      layers: [
+        {
+          id: "root",
+          nodeIds: ["root-node"],
+          actions: [
+            { id: "reference-a", sourceNodeId: "root-node", kind: "navigate", relation: "reference", targetLayerId: "prior" },
+          ],
+        },
+        { id: "prior", nodeIds: ["prior-node"], actions: [] },
+      ],
+    });
+    expect(inventory.layers.map(({ layerId }) => layerId)).toEqual(["root"]);
+
+    const store = new RecursivePresentationReviewStore({ inventory });
+    const review: RecursiveNodeReview = {
+      layerId: "root",
+      nodeId: "root-node",
+      evidence: { context: ["shot-root"], detail: ["shot-root", "shot-prior"] },
+      score: score("root-node", { actionDelivery: 4 }),
+      semantic: semantic("root-node", ["shot-root", "shot-prior"]),
+      allocationSteps: [
+        {
+          step: 0,
+          ranking: ranking("reference"),
+          preferredChoice: "reference",
+          authoredChoice: "reference",
+          authoredActionId: "reference-a",
+          margin: "clearly_better",
+          selectionFinding: "The prior result provides useful supporting evidence.",
+          evidence: ["shot-root", "shot-prior"],
+        },
+        {
+          step: 1,
+          ranking: ranking("stop"),
+          preferredChoice: "stop",
+          authoredChoice: "stop",
+          authoredActionId: null,
+          margin: "close",
+          selectionFinding: "No further allocation is useful.",
+          evidence: ["shot-root"],
+        },
+      ],
+      actions: [{
+        actionId: "reference-a",
+        kind: "reference",
+        allocationStep: 0,
+        labelAndPlacement: "The reference is clearly placed.",
+        delivery: "The traversed prior layer delivers the promised evidence.",
+        recursiveContribution: null,
+        targetLayerId: "prior",
+        reusedLayerId: null,
+        evidence: ["shot-root", "shot-prior"],
+      }],
+      findings: [],
+    };
+
+    expect(store.reviewNode(review).review.actions[0]).toMatchObject({
+      kind: "reference",
+      targetLayerId: "prior",
+      reusedLayerId: null,
     });
   });
 
