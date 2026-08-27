@@ -1,5 +1,18 @@
-export async function terminateChildProcess(child, { gracePeriodMs = 2_000 } = {}) {
+function childShutdownDeadlineError() {
+  const error = new Error("Child process did not stop before shutdown deadline.");
+  error.code = "RELAYER_CHILD_SHUTDOWN_TIMEOUT";
+  return error;
+}
+
+export async function terminateChildProcess(child, { gracePeriodMs = 2_000, deadlineMs } = {}) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const boundedByDeadline = Number.isFinite(deadlineMs);
+  const remainingMs = boundedByDeadline ? Math.max(0, deadlineMs - Date.now()) : gracePeriodMs * 2;
+  if (remainingMs === 0) {
+    child.kill("SIGKILL");
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    throw childShutdownDeadlineError();
+  }
   await new Promise((resolve, reject) => {
     let settled = false;
     let forceTimer;
@@ -19,17 +32,24 @@ export async function terminateChildProcess(child, { gracePeriodMs = 2_000 } = {
     const onStopped = () => finish(resolve);
     child.once("exit", onStopped);
     child.once("close", onStopped);
-    forceTimer = setTimeout(() => {
+    const forceAfterMs = boundedByDeadline
+      ? Math.min(gracePeriodMs, Math.floor(remainingMs / 2))
+      : gracePeriodMs;
+    const force = () => {
       if (child.exitCode !== null || child.signalCode !== null) return onStopped();
       try {
         child.kill("SIGKILL");
       } catch (error) {
         finish(() => reject(error));
       }
-    }, gracePeriodMs);
+    };
+    forceTimer = setTimeout(force, forceAfterMs);
     failureTimer = setTimeout(() => {
-      finish(() => reject(new Error("Child process did not stop after SIGKILL.")));
-    }, gracePeriodMs * 2);
+      force();
+      finish(() => reject(boundedByDeadline
+        ? childShutdownDeadlineError()
+        : new Error("Child process did not stop after SIGKILL.")));
+    }, remainingMs);
     try {
       child.kill("SIGTERM");
     } catch (error) {

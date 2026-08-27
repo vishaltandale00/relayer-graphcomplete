@@ -1,8 +1,12 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import {
+  codexForceTerminationSignal,
+  forceTerminateCodexProcessTree,
   runCodexAppServerTurn,
   type CodexAppServerSpawn,
   type CodexAppServerTurnOptions,
@@ -10,6 +14,65 @@ import {
 import type { HarnessApprovalChannel } from "../src/approval-coordinator.js";
 
 describe("Codex app-server transport", () => {
+  it("uses only platform-supported generic force signals", () => {
+    expect(codexForceTerminationSignal("darwin")).toBe("SIGUSR2");
+    expect(codexForceTerminationSignal("win32")).toBe("SIGKILL");
+    expect(codexForceTerminationSignal("linux")).toBe("SIGKILL");
+  });
+
+  it("uses taskkill to terminate the complete Codex process tree on Windows", () => {
+    const child = { pid: 4321, kill: vi.fn() };
+    const killer = new EventEmitter();
+    const spawnTreeKiller = vi.fn(() => killer);
+
+    forceTerminateCodexProcessTree(child as never, "win32", spawnTreeKiller as never, "C:\\Windows");
+
+    expect(spawnTreeKiller).toHaveBeenCalledWith("C:\\Windows\\System32\\taskkill.exe", ["/pid", "4321", "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("signals the complete Codex process group on POSIX", () => {
+    const child = { pid: 4321, kill: vi.fn() };
+    const killProcessGroup = vi.fn();
+
+    forceTerminateCodexProcessTree(child as never, "linux", spawn, undefined, killProcessGroup);
+
+    expect(killProcessGroup).toHaveBeenCalledWith(-4321, "SIGKILL");
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("falls back to direct POSIX termination when the process group is unavailable", () => {
+    const child = { pid: 4321, kill: vi.fn() };
+    const killProcessGroup = vi.fn(() => { throw new Error("missing process group"); });
+
+    forceTerminateCodexProcessTree(child as never, "darwin", spawn, undefined, killProcessGroup);
+
+    expect(killProcessGroup).toHaveBeenCalledWith(-4321, "SIGUSR2");
+    expect(child.kill).toHaveBeenCalledWith("SIGUSR2");
+  });
+
+  it("falls back to direct termination if Windows taskkill cannot start", () => {
+    const child = { pid: 4321, kill: vi.fn() };
+    const killer = new EventEmitter();
+
+    forceTerminateCodexProcessTree(child as never, "win32", vi.fn(() => killer) as never);
+    killer.emit("error", new Error("missing taskkill"));
+
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+  });
+
+  it("falls back to direct termination if Windows taskkill exits unsuccessfully", () => {
+    const child = { pid: 4321, kill: vi.fn() };
+    const killer = new EventEmitter();
+
+    forceTerminateCodexProcessTree(child as never, "win32", vi.fn(() => killer) as never);
+    killer.emit("exit", 1);
+
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+  });
   it.each([
     [undefined, "thread/start"],
     ["thread-existing", "thread/resume"],
@@ -49,10 +112,12 @@ describe("Codex app-server transport", () => {
       input: [{ type: "text", text: "Build the graph" }],
     });
     expect(fake.spawn).toEqual({ command: process.execPath, args: ["app-server", "--listen", "stdio://"] });
+    expect(fake.spawnOptions?.detached).toBe(process.platform !== "win32");
     expect(fake.killed).toBe(true);
   });
 
   it("bridges a server command approval and never sends acceptForSession", async () => {
+    const onServerRequest = vi.fn();
     const request = vi.fn(async () => ({
       requestId: "request-1",
       decision: "approve_always" as const,
@@ -87,9 +152,14 @@ describe("Codex app-server transport", () => {
       }
     });
 
-    await runCodexAppServerTurn(options(fake, { approvals: { request } }));
+    await runCodexAppServerTurn(options(fake, { approvals: { request }, onServerRequest }));
 
     expect(request).toHaveBeenCalledOnce();
+    expect(onServerRequest).toHaveBeenCalledWith("item/commandExecution/requestApproval", expect.objectContaining({
+      itemId: "item-1",
+      command: "npm test",
+      cwd: "/workspace",
+    }));
     const providerResponse = fake.messages.find(({ id }) => id === "provider-1" && "result" in (fake.messages.find(({ id }) => id === "provider-1") ?? {}));
     expect(providerResponse).toEqual({ id: "provider-1", result: { decision: "accept" } });
     expect(JSON.stringify(fake.messages)).not.toContain("acceptForSession");
@@ -251,6 +321,163 @@ describe("Codex app-server transport", () => {
     });
   });
 
+  it("force-terminates a stuck app-server process without waiting for turn interruption", async () => {
+    const force = new AbortController();
+    const fake = new FakeCodexProcess((message) => {
+      handshake(fake, message);
+      if (message.method === "turn/start") {
+        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+        queueMicrotask(() => force.abort(new Error("force shutdown")));
+      }
+    });
+
+    await expect(runCodexAppServerTurn(options(fake, { forceSignal: force.signal }))).rejects.toThrow("force-closed");
+    expect(fake.signalCode).toBe(codexForceTerminationSignal());
+    expect(fake.messages.some(({ method }) => method === "turn/interrupt")).toBe(false);
+  });
+
+  it("contains hard-kill errors raised from an AbortSignal listener", async () => {
+    const force = new AbortController();
+    const fake = new FakeCodexProcess((message) => {
+      handshake(fake, message);
+      if (message.method === "turn/start") {
+        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+        queueMicrotask(() => force.abort(new Error("force shutdown")));
+      }
+    });
+    fake.kill = vi.fn(function kill(this: FakeCodexProcess, signal: NodeJS.Signals = "SIGTERM") {
+      if (signal === codexForceTerminationSignal()) throw new Error("hard kill unavailable");
+      this.exit(null, signal);
+      return true;
+    });
+
+    await expect(runCodexAppServerTurn(options(fake, { forceSignal: force.signal }))).rejects.toThrow("force-closed");
+    expect(fake.signalCode).toBe("SIGTERM");
+  });
+
+  it("retains force ownership after the turn settles and graceful transport close starts", async () => {
+    const force = new AbortController();
+    const signals: NodeJS.Signals[] = [];
+    const fake = new FakeCodexProcess((message) => {
+      handshake(fake, message);
+      if (message.method === "turn/start") {
+        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+        queueMicrotask(() => completeTurn(fake));
+      }
+    });
+    fake.kill = vi.fn(function kill(this: FakeCodexProcess, signal: NodeJS.Signals = "SIGTERM") {
+      signals.push(signal);
+      if (signal === "SIGTERM") queueMicrotask(() => force.abort(new Error("force during close")));
+      if (signal === codexForceTerminationSignal()) this.exit(null, signal);
+      return true;
+    });
+
+    await expect(runCodexAppServerTurn(options(fake, {
+      forceSignal: force.signal,
+      shutdownGraceMs: 20,
+    }))).resolves.toMatchObject({ status: "completed" });
+
+    expect(signals).toEqual(["SIGTERM", codexForceTerminationSignal()]);
+    expect(fake.signalCode).toBe(codexForceTerminationSignal());
+  });
+
+  it("escalates a fatal transport exactly once when the child ignores SIGTERM", async () => {
+    const signals: NodeJS.Signals[] = [];
+    const fake = new FakeCodexProcess((message) => {
+      handshake(fake, message);
+      if (message.method === "turn/start") {
+        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+        queueMicrotask(() => fake.stdout.write("not-json\n"));
+      }
+    });
+    fake.kill = vi.fn(function kill(this: FakeCodexProcess, signal: NodeJS.Signals = "SIGTERM") {
+      signals.push(signal);
+      if (signal === codexForceTerminationSignal()) this.exit(null, signal);
+      return true;
+    });
+
+    await expect(runCodexAppServerTurn(options(fake, { shutdownGraceMs: 10 }))).rejects.toThrow("malformed JSON");
+
+    expect(signals).toEqual(["SIGTERM", codexForceTerminationSignal()]);
+    expect(fake.signalCode).toBe(codexForceTerminationSignal());
+  });
+
+  it("does not treat a child error as process exit and exhausts bounded escalation", async () => {
+    const signals: NodeJS.Signals[] = [];
+    const fake = new FakeCodexProcess((message) => {
+      handshake(fake, message);
+      if (message.method === "turn/start") {
+        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+        queueMicrotask(() => fake.emit("error", new Error("transport failed while process stayed alive")));
+      }
+    });
+    fake.kill = vi.fn((signal: NodeJS.Signals = "SIGTERM") => {
+      signals.push(signal);
+      return true;
+    });
+
+    await expect(runCodexAppServerTurn(options(fake, { shutdownGraceMs: 5 })))
+      .rejects.toThrow("process did not exit after forced termination");
+
+    expect(signals).toEqual(["SIGTERM", codexForceTerminationSignal(), "SIGKILL"]);
+    expect(fake.exitCode).toBeNull();
+    expect(fake.signalCode).toBeNull();
+  });
+
+  it("settles the exit fence only when the errored child actually exits", async () => {
+    const signals: NodeJS.Signals[] = [];
+    const fake = new FakeCodexProcess((message) => {
+      handshake(fake, message);
+      if (message.method === "turn/start") {
+        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+        queueMicrotask(() => fake.emit("error", new Error("transport failed before exit")));
+      }
+    });
+    fake.kill = vi.fn(function kill(this: FakeCodexProcess, signal: NodeJS.Signals = "SIGTERM") {
+      signals.push(signal);
+      if (signal === codexForceTerminationSignal()) this.exit(null, signal);
+      return true;
+    });
+
+    await expect(runCodexAppServerTurn(options(fake, { shutdownGraceMs: 5 })))
+      .rejects.toThrow("Codex app-server failed: transport failed before exit");
+
+    expect(signals).toEqual(["SIGTERM", codexForceTerminationSignal()]);
+    expect(fake.signalCode).toBe(codexForceTerminationSignal());
+  });
+
+  it("settles the termination fence on close after an unsuccessful spawn without force escalation", async () => {
+    const signals: NodeJS.Signals[] = [];
+    const fake = new FakeCodexProcess(() => undefined);
+    fake.kill = vi.fn((signal: NodeJS.Signals = "SIGTERM") => {
+      signals.push(signal);
+      return false;
+    });
+    const running = runCodexAppServerTurn(options(fake, { shutdownGraceMs: 5 }));
+
+    fake.emit("error", Object.assign(new Error("spawn missing"), { code: "ENOENT" }));
+    queueMicrotask(() => fake.emit("close", -2, null));
+
+    await expect(running).rejects.toMatchObject({
+      message: expect.stringContaining("spawn missing"),
+      cause: expect.objectContaining({ code: "ENOENT" }),
+    });
+    expect(signals).toEqual(["SIGTERM"]);
+  });
+
+  it("preserves a real unsuccessful-spawn ENOENT instead of replacing it with a close timeout", async () => {
+    const missingExecutable = join(tmpdir(), `relayer-missing-codex-${process.pid}-${Date.now()}`);
+    const spawnMissing: CodexAppServerSpawn = () => spawn(missingExecutable, [], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const fake = new FakeCodexProcess(() => undefined);
+
+    await expect(runCodexAppServerTurn(options(fake, {
+      spawnProcess: spawnMissing,
+      shutdownGraceMs: 20,
+    }))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("fails on malformed JSON and terminates the child", async () => {
     const fake = new FakeCodexProcess((message) => {
       handshake(fake, message);
@@ -314,6 +541,7 @@ class FakeCodexProcess extends EventEmitter {
   killed = false;
   messages: Record<string, any>[] = [];
   spawn: { command: string; args: readonly string[] } | undefined;
+  spawnOptions: Parameters<CodexAppServerSpawn>[2] | undefined;
   private buffer = "";
 
   constructor(private readonly onMessage: (message: Record<string, any>) => void) {
@@ -332,8 +560,9 @@ class FakeCodexProcess extends EventEmitter {
     });
   }
 
-  readonly spawnProcess: CodexAppServerSpawn = (command, args) => {
+  readonly spawnProcess: CodexAppServerSpawn = (command, args, spawnOptions) => {
     this.spawn = { command, args };
+    this.spawnOptions = spawnOptions;
     return this as unknown as ChildProcessWithoutNullStreams;
   };
 
@@ -375,6 +604,10 @@ function options(fake: FakeCodexProcess, overrides: Partial<CodexAppServerTurnOp
     sandboxPolicy: { type: "workspaceWrite", writableRoots: ["/workspace"], networkAccess: true },
     onThreadId: () => undefined,
     spawnProcess: fake.spawnProcess,
+    killProcessGroup: (_pid, signal): true => {
+      fake.kill(signal as NodeJS.Signals | undefined);
+      return true;
+    },
     ...overrides,
   };
 }

@@ -4,7 +4,7 @@ import {
   HarnessApprovalRequestTerminatedError,
   type HarnessApprovalChannel,
 } from "../src/approval-coordinator.js";
-import { answerCodexServerRequest } from "../src/implementations/codex-approvals.js";
+import { answerCodexServerRequest, isExactGraphAuthoringLauncherCommand } from "../src/implementations/codex-approvals.js";
 import type { HarnessApprovalDecision, HarnessApprovalRequestInput } from "../src/approval.js";
 import type { JsonObject } from "../src/types.js";
 
@@ -55,6 +55,235 @@ describe("Codex approval bridge", () => {
     }));
     cancelled.items.set("item-1", commandItem());
     await expect(answerCodexServerRequest(v2Command(), cancelled.context)).resolves.toEqual({ decision: "cancel" });
+  });
+
+  it("maps user denial to the advertised non-grant command decision", async () => {
+    const fixture = bridgeFixture("deny");
+    fixture.items.set("item-1", commandItem());
+
+    await expect(answerCodexServerRequest(v2Command({
+      availableDecisions: [
+        "accept",
+        { acceptWithExecpolicyAmendment: { execpolicy_amendment: ["npm", "test"] } },
+        "cancel",
+      ],
+    }), fixture.context)).resolves.toEqual({ decision: "cancel" });
+    expect(fixture.request).toHaveBeenCalledOnce();
+  });
+
+  it("accepts only the exact pinned internal graph launcher without creating a product approval", async () => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", { ...commandItem(), command, commandActions: [{ command }] });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd: "/workspace/project",
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+
+    expect(isExactGraphAuthoringLauncherCommand(command, launcher)).toBe(true);
+    expect(isExactGraphAuthoringLauncherCommand(
+      `${launcher} <<'RELAYER_GRAPH_PROGRAM'\nconsole.log("graph");\nRELAYER_GRAPH_PROGRAM`,
+      launcher,
+    )).toBe(true);
+    expect(isExactGraphAuthoringLauncherCommand(
+      `"${launcher}" <<'RELAYER_GRAPH_PROGRAM'\nconsole.log("graph");\nRELAYER_GRAPH_PROGRAM`,
+      launcher,
+    )).toBe(true);
+    expect(isExactGraphAuthoringLauncherCommand(
+      `"${launcher}" <<'RELAYER_GRAPH_PROGRAM'\nconsole.log("graph");\n`,
+      launcher,
+    )).toBe(true);
+    expect(isExactGraphAuthoringLauncherCommand(`"${launcher}" <<'EOF'\n`, launcher)).toBe(false);
+    expect(isExactGraphAuthoringLauncherCommand(`${command}\necho escaped\nEOF`, launcher)).toBe(false);
+    expect(isExactGraphAuthoringLauncherCommand(
+      `"${launcher}" <<'RELAYER_GRAPH_PROGRAM'\nconsole.log("graph");\nRELAYER_GRAPH_PROGRAM\necho escaped\nRELAYER_GRAPH_PROGRAM`,
+      launcher,
+    )).toBe(false);
+    expect(isExactGraphAuthoringLauncherCommand(`"${launcher}" --flag <<'EOF'\ngraph\nEOF`, launcher)).toBe(false);
+  });
+
+  it.each([
+    { label: "request command", requestOverrides: { command: "echo escaped" } },
+    { label: "request command action", requestOverrides: { commandActions: [{ command: "echo escaped" }] } },
+    { label: "item command action", requestOverrides: {}, itemActions: [{ command: "echo escaped" }] },
+  ])("rejects a trusted launcher when the supplied $label conflicts", async ({ requestOverrides, itemActions }) => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", {
+      ...commandItem(),
+      command,
+      commandActions: itemActions ?? [{ command }],
+    });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      command,
+      cwd: "/workspace/project",
+      ...requestOverrides,
+    }), context)).resolves.toEqual({ decision: "decline" });
+  });
+
+  it("accepts semantically equivalent trusted launcher representations", async () => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const quoted = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const unquoted = `${launcher} <<'GRAPH'\nconsole.log("graph");\nGRAPH`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", {
+      ...commandItem(),
+      command: `/bin/zsh -lc ${JSON.stringify(quoted)}`,
+      commandActions: [{ command: unquoted }],
+    });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      command: quoted,
+      cwd: "/workspace/project",
+      commandActions: [{ command: unquoted }],
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+  });
+
+  it("routes a pinned launcher from a different working directory through the product approval channel", async () => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    const cwd = "/workspace/other";
+    fixture.items.set("item-1", { ...commandItem(), command, commandActions: [{ command }], cwd });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd,
+    }), context)).resolves.toEqual({ decision: "decline" });
+    expect(fixture.request).toHaveBeenCalledOnce();
+  });
+
+  it("accepts a schema-valid outer overlay only for the exact pinned launcher", async () => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", { ...commandItem(), command, commandActions: [{ command }] });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd: "/workspace/project",
+      additionalPermissions: {
+        fileSystem: { read: [launcher], write: ["/workspace/other"] },
+        network: { enabled: true },
+      },
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["unified exec startup", { source: "unifiedExecStartup" }, {}],
+    ["unified exec interaction", { source: "unifiedExecInteraction" }, {}],
+    ["PTY transport", {}, { tty: true }],
+  ])("accepts the exact pinned launcher over %s without creating reusable command authority", async (_label, itemOverrides, requestOverrides) => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", { ...commandItem(), ...itemOverrides, command, commandActions: [{ command }] });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd: "/workspace/project", ...requestOverrides,
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+  });
+
+  it("recognizes the exact pinned launcher before an incomplete Codex network classification", async () => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", {
+      ...commandItem(),
+      command: `/bin/zsh -lc ${JSON.stringify(command)}`,
+      commandActions: [{ command }],
+    });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command, cwd: "/workspace/project",
+      networkApprovalContext: { host: "127.0.0.1", protocol: "http" },
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+
+    fixture.items.set("item-1", {
+      ...commandItem(),
+      command: `/bin/zsh -lc ${JSON.stringify(command)}`,
+      commandActions: [{ command }, { command: "echo escaped" }],
+    });
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", cwd: "/workspace/project",
+      networkApprovalContext: { host: "127.0.0.1", protocol: "http" },
+    }), context)).resolves.toEqual({ decision: "decline" });
+  });
+
+  it.each(["-c", "-lc"])("recognizes the exact pinned launcher from Codex's sole zsh %s display wrapper before command actions arrive", async (flag) => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", {
+      ...commandItem(),
+      command: `/bin/zsh ${flag} ${JSON.stringify(command)}`,
+    });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", cwd: "/workspace/project",
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+
+    fixture.items.set("item-1", {
+      ...commandItem(),
+      command: `/bin/zsh ${flag} ${JSON.stringify(command)}; echo escaped`,
+    });
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", cwd: "/workspace/project",
+    }), context)).resolves.toEqual({ decision: "decline" });
+  });
+
+  it("recognizes the exact pinned launcher from the approval request's sole command action", async () => {
+    const fixture = bridgeFixture("deny");
+    const launcher = "/immutable/runtime/graph-authoring-launcher";
+    const command = `"${launcher}" <<'EOF'\nconsole.log("graph");\nEOF`;
+    const context = { ...fixture.context, trustedGraphAuthoringLauncher: launcher };
+    fixture.items.set("item-1", { ...commandItem(), command: "/bin/zsh -c <redacted>" });
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", cwd: "/workspace/project",
+      commandActions: [{ type: "unknown", command }],
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      cwd: "/workspace/project",
+      commandActions: [{ type: "unknown", command }],
+      availableDecisions: [
+        "accept",
+        { acceptWithExecpolicyAmendment: { execpolicy_amendment: ["/bin/zsh", "-c", command] } },
+        "cancel",
+      ],
+    }), context)).resolves.toEqual({ decision: "accept" });
+    expect(fixture.request).not.toHaveBeenCalled();
+
+    await expect(answerCodexServerRequest(serverRequest("item/commandExecution/requestApproval", {
+      threadId: "thread-1", turnId: "turn-1", itemId: "item-1", cwd: "/workspace/project",
+      commandActions: [{ type: "unknown", command }, { type: "unknown", command: "echo escaped" }],
+    }), context)).resolves.toEqual({ decision: "decline" });
   });
 
   it("derives one exact key per proposed file path and change kind", async () => {
@@ -487,7 +716,7 @@ function commandItem(): JsonObject {
   return { type: "commandExecution", id: "item-1", command: "npm test", cwd: "/workspace/project", source: "agent" };
 }
 
-function v2Command() {
+function v2Command(overrides: Readonly<Record<string, unknown>> = {}) {
   return serverRequest("item/commandExecution/requestApproval", {
     threadId: "thread-1",
     turnId: "turn-1",
@@ -495,5 +724,6 @@ function v2Command() {
     environmentId: "local",
     command: "npm test",
     cwd: "/workspace/project",
+    ...overrides,
   });
 }

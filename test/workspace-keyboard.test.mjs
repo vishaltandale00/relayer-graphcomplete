@@ -463,6 +463,7 @@ describe("product workspace keyboard behavior", () => {
     expect(markup).toContain('id="approveOnce"');
     expect(markup).toContain('id="approveAlways"');
     expect(markup).toContain('<small>this session</small>');
+    expect(markup).toContain('id="approvalHistoryList" tabindex="0" aria-label="Resolved approval requests"');
     expect(markup).toContain('id="inspector"');
     expect(markup).not.toContain("right-chat");
 
@@ -472,6 +473,10 @@ describe("product workspace keyboard behavior", () => {
     expect(styles).toContain(".approval-always small{font-size:8px");
     expect(styles).not.toContain(".approval-dock{position:absolute");
     expect(styles).toContain(".approval-dock.history-only{padding-block:9px}");
+    expect(styles).toContain(".approval-history ol{height:64px;");
+    expect(styles).toContain("overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable");
+    expect(styles).toContain(".approval-history ol:focus-visible{outline:1px solid var(--blue)");
+    expect(styles).toContain(".approval-history ol::-webkit-scrollbar{width:8px}");
   });
 
   it("defers same-thread composer focus until completion is no longer running", () => {

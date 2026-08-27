@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStd
 import { createRequire } from "node:module";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import { statSync } from "node:fs";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, join, win32 } from "node:path";
 import {
   answerCodexServerRequest,
   type CodexApprovalBridgeContext,
@@ -27,16 +27,60 @@ export interface CodexAppServerTurnOptions {
   readonly approvals: HarnessApprovalChannel;
   readonly workingDirectory: string;
   readonly sandboxPolicy: JsonObject;
+  readonly trustedGraphAuthoringLauncher?: string;
   readonly signal?: AbortSignal;
+  readonly forceSignal?: AbortSignal;
+  readonly shutdownGraceMs?: number;
   readonly spawnProcess?: CodexAppServerSpawn;
+  readonly killProcessGroup?: typeof process.kill;
   readonly onThreadId: (threadId: string) => void;
   readonly onNotification?: (method: string, params: unknown) => void;
+  readonly onServerRequest?: (method: string, params: unknown) => void;
 }
 
 export interface CodexAppServerTurnResult {
   readonly threadId: string;
   readonly turnId: string;
   readonly status: "completed" | "interrupted";
+}
+
+export function codexForceTerminationSignal(platform = process.platform): NodeJS.Signals {
+  return platform === "darwin" ? "SIGUSR2" : "SIGKILL";
+}
+
+export function forceTerminateCodexProcessTree(
+  child: Pick<ChildProcessWithoutNullStreams, "pid" | "kill">,
+  platform = process.platform,
+  spawnTreeKiller: typeof spawn = spawn,
+  systemRoot = process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows",
+  killProcessGroup: typeof process.kill = process.kill,
+  signal = codexForceTerminationSignal(platform),
+): void {
+  if (child.pid === undefined) {
+    child.kill(signal);
+    return;
+  }
+  if (platform !== "win32") {
+    try {
+      killProcessGroup(-child.pid, signal);
+    } catch {
+      child.kill(signal);
+    }
+    return;
+  }
+  const fallback = () => {
+    try { child.kill("SIGKILL"); } catch {}
+  };
+  try {
+    const killer = spawnTreeKiller(win32.join(systemRoot, "System32", "taskkill.exe"), ["/pid", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    killer.once("error", fallback);
+    killer.once("exit", (code) => { if (code !== 0) fallback(); });
+  } catch {
+    fallback();
+  }
 }
 
 /** Run one isolated stdio app-server process for one GraphComplete call. */
@@ -50,6 +94,7 @@ export async function runCodexAppServerTurn(options: CodexAppServerTurnOptions):
     ].join(delimiter);
   }
   const child = (options.spawnProcess ?? spawn)(executable.path, ["app-server", "--listen", "stdio://"], {
+    detached: process.platform !== "win32",
     env: environment,
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -93,8 +138,13 @@ class CodexAppServerConnection {
   private fatalError: Error | undefined;
   private started = false;
   private closing = false;
+  private closePromise: Promise<void> | undefined;
+  private readonly childExited: Promise<void>;
+  private gracefulTerminationSent = false;
+  private forceTerminationSent = false;
   private interruptSent = false;
   private detachAbort: () => void = () => undefined;
+  private detachForceAbort: () => void = () => undefined;
 
   constructor(
     private readonly child: ChildProcessWithoutNullStreams,
@@ -105,9 +155,22 @@ class CodexAppServerConnection {
     this.lines = createInterface({ input: child.stdout });
     this.lines.on("line", (line) => this.handleLine(line));
     child.once("error", (error) => this.fail(new Error(`Codex app-server failed: ${error.message}`, { cause: error })));
+    this.childExited = new Promise((resolveExit) => {
+      const terminated = () => {
+        child.off("exit", terminated);
+        child.off("close", terminated);
+        resolveExit();
+      };
+      child.once("exit", terminated);
+      child.once("close", terminated);
+    });
     child.once("exit", (code, signal) => {
       if (!this.closing) this.fail(new Error(`Codex app-server stopped (${signal ?? code ?? "unknown"})`));
     });
+    const forceClose = () => this.forceClose(new Error("Codex app-server was force-closed."));
+    if (options.forceSignal?.aborted) forceClose();
+    else options.forceSignal?.addEventListener("abort", forceClose, { once: true });
+    this.detachForceAbort = () => options.forceSignal?.removeEventListener("abort", forceClose);
   }
 
   async start(): Promise<void> {
@@ -171,13 +234,34 @@ class CodexAppServerConnection {
   }
 
   async close(): Promise<void> {
-    if (this.closing) return;
+    if (this.closePromise) return this.closePromise;
+    this.closePromise = this.closeTransport();
+    return this.closePromise;
+  }
+
+  private async closeTransport(): Promise<void> {
     this.closing = true;
     this.detachAbort();
     this.abortServerRequests("Codex app-server transport closed.");
     this.lines.close();
     this.child.stdin.end();
-    if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGTERM");
+    this.terminateGracefully();
+    const graceMs = this.options.shutdownGraceMs ?? 250;
+    if (!await this.waitForChildExit(graceMs)) this.forceTerminate();
+    if (!await this.waitForChildExit(graceMs)) {
+      if (this.child.exitCode === null && this.child.signalCode === null) {
+        forceTerminateCodexProcessTree(
+          this.child,
+          process.platform,
+          spawn,
+          process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows",
+          this.options.killProcessGroup ?? process.kill,
+          "SIGKILL",
+        );
+      }
+      if (!await this.waitForChildExit(graceMs)) throw new Error("Codex app-server process did not exit after forced termination.");
+    }
+    this.detachForceAbort();
   }
 
   private request(method: string, params: unknown): Promise<unknown> {
@@ -263,6 +347,7 @@ class CodexAppServerConnection {
       this.fail(new Error(`Codex app-server repeated server request ID: ${String(request.id)}`));
       return;
     }
+    this.options.onServerRequest?.(request.method, request.params);
     const active = this.activeTurn;
     if (active === undefined) {
       this.write({ id: request.id, error: { code: -32600, message: "No active Codex turn" } });
@@ -274,6 +359,9 @@ class CodexAppServerConnection {
       approvals: this.options.approvals,
       workingDirectory: this.options.workingDirectory,
       sandboxPolicy: this.options.sandboxPolicy,
+      ...(this.options.trustedGraphAuthoringLauncher === undefined
+        ? {}
+        : { trustedGraphAuthoringLauncher: this.options.trustedGraphAuthoringLauncher }),
       threadId: active.threadId,
       turnId: active.turnId,
       items: this.items,
@@ -383,7 +471,56 @@ class CodexAppServerConnection {
     this.activeTurn?.reject(error);
     this.activeTurn = undefined;
     this.abortServerRequests(error.message);
-    if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGTERM");
+    this.terminateGracefully();
+  }
+
+  private forceClose(error: Error): void {
+    if (this.fatalError === undefined && !this.closing) {
+      this.fatalError = error;
+      for (const pending of this.pending.values()) pending.reject(error);
+      this.pending.clear();
+      this.activeTurn?.reject(error);
+      this.activeTurn = undefined;
+      this.abortServerRequests(error.message);
+    }
+    this.forceTerminate();
+  }
+
+  private forceTerminate(): void {
+    if (this.forceTerminationSent || this.child.exitCode !== null || this.child.signalCode !== null) return;
+    this.forceTerminationSent = true;
+    try {
+      forceTerminateCodexProcessTree(
+        this.child,
+        process.platform,
+        spawn,
+        process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows",
+        this.options.killProcessGroup ?? process.kill,
+      );
+    } catch {
+      // AbortSignal listeners must never surface process-kill errors. Bounded close
+      // observes the missing exit and reports it after exhausting escalation.
+    }
+  }
+
+  private terminateGracefully(): void {
+    if (this.gracefulTerminationSent || this.child.exitCode !== null || this.child.signalCode !== null) return;
+    this.gracefulTerminationSent = true;
+    this.child.kill("SIGTERM");
+  }
+
+  private async waitForChildExit(timeoutMs: number): Promise<boolean> {
+    let timeout;
+    try {
+      return await Promise.race([
+        this.childExited.then(() => true),
+        new Promise<boolean>((resolveTimeout) => {
+          timeout = setTimeout(() => resolveTimeout(false), timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
 

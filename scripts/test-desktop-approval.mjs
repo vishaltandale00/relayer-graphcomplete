@@ -30,6 +30,16 @@ function registerTestIpc() {
     account: { email: "zero-inference@relayer.test", planType: "Fixture" },
   }));
   ipcMain.handle("relayer:appearance-read", () => ({ appearance: "dark" }));
+  ipcMain.handle("relayer:provider-status", () => ({
+    adapters: [],
+    definitions: [],
+    hasCompletedOnboarding: true,
+  }));
+  ipcMain.handle("relayer:tutorial-read", () => ({ status: "never-shown", automaticEligible: false }));
+  ipcMain.handle("relayer:tutorial-begin-automatic", () => ({ started: false }));
+  ipcMain.handle("relayer:tutorial-begin-manual", () => ({ started: false }));
+  ipcMain.handle("relayer:tutorial-dismiss", () => ({ status: "dismissed" }));
+  ipcMain.handle("relayer:tutorial-complete", () => ({ status: "completed" }));
   ipcMain.handle("relayer:update-status", () => ({
     phase: "development",
     channel: "stable",
@@ -41,7 +51,17 @@ function registerTestIpc() {
 }
 
 function unregisterTestIpc() {
-  for (const channel of ["relayer:account-read", "relayer:appearance-read", "relayer:update-status"]) {
+  for (const channel of [
+    "relayer:account-read",
+    "relayer:appearance-read",
+    "relayer:provider-status",
+    "relayer:tutorial-read",
+    "relayer:tutorial-begin-automatic",
+    "relayer:tutorial-begin-manual",
+    "relayer:tutorial-dismiss",
+    "relayer:tutorial-complete",
+    "relayer:update-status",
+  ]) {
     ipcMain.removeHandler(channel);
   }
 }
@@ -84,11 +104,22 @@ async function waitForThread(session, threadId, check, label) {
 
 async function openThread(productSession, threadId) {
   await window.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(threadId)}`);
-  await waitFor("the ordinary product workspace", () => window.webContents.executeJavaScript(`(() => (
-    !document.querySelector("#threadView")?.classList.contains("hidden")
-    && Boolean(document.querySelector("#threadComposer"))
-    && Boolean(document.querySelector("#turnPickerButton"))
-  ))()`));
+  try {
+    await waitFor("the ordinary product workspace", () => window.webContents.executeJavaScript(`(() => (
+      !document.querySelector("#threadView")?.classList.contains("hidden")
+      && Boolean(document.querySelector("#threadComposer"))
+      && Boolean(document.querySelector("#turnPickerButton"))
+    ))()`));
+  } catch (error) {
+    const state = await window.webContents.executeJavaScript(`(() => ({
+      appHidden: document.querySelector("#appShell")?.classList.contains("hidden"),
+      authHidden: document.querySelector("#authScreen")?.classList.contains("hidden"),
+      threadHidden: document.querySelector("#threadView")?.classList.contains("hidden"),
+      threadHtml: document.querySelector("#threadView")?.innerHTML,
+      toast: document.querySelector("#toast")?.textContent,
+    }))()`);
+    throw new Error(`${error.message} state=${JSON.stringify(state)}`);
+  }
 }
 
 async function approvalDockState() {
@@ -105,7 +136,7 @@ async function approvalDockState() {
       queueLive: document.querySelector("#approvalQueuePosition")?.getAttribute("aria-live"),
       settingsLabel: document.querySelector("#conversationSettingsButton")?.getAttribute("aria-label"),
       runStateRemoved: !document.querySelector("#runState"),
-      composerHidden: document.querySelector("#threadComposer")?.classList.contains("hidden"),
+      composerHidden: document.querySelector("#threadComposerShell")?.classList.contains("hidden"),
       buttons: ["denyApproval", "approveOnce", "approveAlways"].map((id) => ({
         id,
         text: document.getElementById(id)?.textContent?.replace(/\\s+/g, " ").trim(),
@@ -187,6 +218,9 @@ async function run() {
     updater: { status: () => ({ phase: "development" }) },
   });
   window = await createWindow(productSession);
+  window.webContents.on("console-message", (_event, level, message) => {
+    if (level >= 2) console.error(`Renderer console: ${message}`);
+  });
   window.show();
 
   const created = await productRequest(productSession, "/api/threads", {
@@ -266,8 +300,9 @@ async function run() {
       const dock = document.querySelector("#approvalDock");
       const composer = document.querySelector("#threadComposer");
       const history = [...document.querySelectorAll("#approvalHistoryList > li")].map((item) => item.textContent);
-      return dock?.classList.contains("history-only") && !composer?.classList.contains("hidden") && history.length >= 2
-        ? { history, focus: document.activeElement?.id }
+      const historyElement = document.querySelector("#approvalHistory");
+      return dock?.classList.contains("history-only") && !composer?.classList.contains("hidden") && historyElement?.open && history.length >= 2
+        ? { history, historyOpen: historyElement.open, focus: document.activeElement?.id }
         : false;
     })()`)
   ));
@@ -323,6 +358,25 @@ async function run() {
   if (futureReceipt?.resolution?.actor !== "session_grant" || futureReceipt.resolution.decision !== "approve_once") {
     throw new Error(`The later completion did not consume the live-session grant: ${JSON.stringify(futureReceipt)}`);
   }
+  await openThread(productSession, threadId);
+  const scrollableHistory = await waitFor("fixed scrollable approval history", () => (
+    window.webContents.executeJavaScript(`(() => {
+      const list = document.querySelector("#approvalHistoryList");
+      const history = document.querySelector("#approvalHistory");
+      const dock = document.querySelector("#approvalDock");
+      const initialHeight = list?.clientHeight;
+      const initialDockRect = dock?.getBoundingClientRect();
+      if (!history?.open || initialHeight !== 64 || list.scrollHeight <= initialHeight || getComputedStyle(list).overflowY !== "auto" || !initialDockRect) return false;
+      list.scrollTop = list.scrollHeight;
+      const scrolledDockRect = dock.getBoundingClientRect();
+      return list.scrollTop > 0
+        && list.clientHeight === initialHeight
+        && scrolledDockRect.top === initialDockRect.top
+        && scrolledDockRect.height === initialDockRect.height
+        ? { clientHeight: list.clientHeight, scrollHeight: list.scrollHeight, scrollTop: list.scrollTop, dockTop: scrolledDockRect.top, dockHeight: scrolledDockRect.height }
+        : false;
+    })()`)
+  ));
 
   const expectedObservations = [
     [2, "once-first", "approve_once", "user", true],
@@ -353,6 +407,8 @@ async function run() {
     queue: queuedDock.queue,
     unmatchedAction: nearDock.action,
     resolvedReceipts: resolvedPresentation.history.length,
+    approvalHistoryOpen: resolvedPresentation.historyOpen,
+    approvalHistoryViewport: scrollableHistory,
     finalStatus: futureAccepted.interactions.at(-1)?.completionStatus,
     observations: observed,
     approvalCount: onceAccepted.approvals.length,
@@ -372,6 +428,7 @@ async function shutdown() {
     }
   }
   await rm(dataDirectory, { recursive: true, force: true });
+  process.exitCode = exitCode;
   app.exit(exitCode);
 }
 

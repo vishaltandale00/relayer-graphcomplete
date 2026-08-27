@@ -675,29 +675,41 @@ export async function decideApproval(requestId, decision) {
   }
   const requestKey = String(requestId);
   if (appState.pendingApprovalDecisions.some((id) => String(id) === requestKey)) return;
+  const renderDecisionState = () => {
+    try {
+      renderThread();
+    } catch (error) {
+      console.error("Approval presentation refresh failed:", error);
+    }
+  };
   appState.pendingApprovalDecisions.push(requestKey);
-  renderThread();
+  renderDecisionState();
   try {
-    await request(
-      `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(receipt.request.correlation.interactionId)}/approvals/${encodeURIComponent(requestId)}/decision`,
-      {
-        method: "POST",
-        body: JSON.stringify({ decision }),
-      },
-    );
-    if (String(viewState.currentThreadId) === String(threadId)) {
-      await refreshState(threadId);
+    try {
+      await request(
+        `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(receipt.request.correlation.interactionId)}/approvals/${encodeURIComponent(requestId)}/decision`,
+        {
+          method: "POST",
+          body: JSON.stringify({ decision }),
+        },
+      );
+    } catch (error) {
+      if (String(viewState.currentThreadId) === String(threadId)) {
+        await refreshState(threadId).catch(() => {});
+      }
+      throw error;
     }
-  } catch (error) {
     if (String(viewState.currentThreadId) === String(threadId)) {
-      await refreshState(threadId).catch(() => {});
+      await refreshState(threadId).catch((error) => {
+        console.error("Approval decision was recorded, but its presentation refresh failed:", error);
+        schedulePendingRefresh(threadId, { force: true });
+      });
     }
-    throw error;
   } finally {
     appState.pendingApprovalDecisions = appState.pendingApprovalDecisions.filter((id) => (
       String(id) !== requestKey
     ));
-    if (String(viewState.currentThreadId) === String(threadId)) renderThread();
+    if (String(viewState.currentThreadId) === String(threadId)) renderDecisionState();
   }
 }
 

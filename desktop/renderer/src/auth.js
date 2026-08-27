@@ -249,9 +249,12 @@ export async function refreshAccount() {
       const account = await desktop.account?.read?.().catch(() => null);
       if (account?.status === "connected") {
         const label = account.account?.email || "Codex connected";
-        $("#settingsAccount").textContent = account.account?.planType
-          ? `${label} · ${account.account.planType}`
-          : label;
+        const settingsAccount = $("#settingsAccount");
+        if (settingsAccount) {
+          settingsAccount.textContent = account.account?.planType
+            ? `${label} · ${account.account.planType}`
+            : label;
+        }
       }
       return { status: "connected", providerStatus, account: account?.account };
     }
@@ -263,9 +266,12 @@ export async function refreshAccount() {
   if (result.status === "connected") {
     showApplication();
     const label = result.account?.email || "Codex connected";
-    $("#settingsAccount").textContent = result.account?.planType
-      ? `${label} · ${result.account.planType}`
-      : label;
+    const settingsAccount = $("#settingsAccount");
+    if (settingsAccount) {
+      settingsAccount.textContent = result.account?.planType
+        ? `${label} · ${result.account.planType}`
+        : label;
+    }
     return result;
   }
   showAuth(result.error || "Provider setup is unavailable.");

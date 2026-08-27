@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { InteractionInput } from "@relayer/graph-client";
-import { HarnessExecutionFailure, HarnessHost, startHarnessHost } from "../src/host.js";
-import type { HarnessConfiguration, HarnessFactoryContext, HarnessSessionState } from "../src/types.js";
+import { HarnessHost, startHarnessHost } from "../src/host.js";
+import { PrimeAgentHarness } from "../src/implementations/prime-agent.js";
+import { HarnessExecutionFailure } from "../src/host.js";
+import type { Harness, HarnessConfiguration, HarnessFactoryContext, HarnessSessionState } from "../src/types.js";
 
 const completion = {
   nodeId: 1,
@@ -674,7 +676,6 @@ describe("HarnessHost", () => {
     const blockedTraceDirectory = join(directory, "blocked-trace-path");
     let accepted = false;
     let completionCalls = 0;
-    await writeFile(blockedTraceDirectory, "not a directory");
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url.endsWith("/output")) {
         return accepted
@@ -698,6 +699,8 @@ describe("HarnessHost", () => {
       });
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+      await rm(blockedTraceDirectory, { recursive: true, force: true });
+      await writeFile(blockedTraceDirectory, "not a directory");
 
       await expect(host.complete(1, 1, graph(), undefined, undefined, { productInteractionId: 11 })).resolves.toMatchObject({
         output: completion,
@@ -1648,6 +1651,356 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("does not report host readiness before trace spool startup cleanup succeeds", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-trace-readiness-"));
+    const spool = join(directory, "spool");
+    try {
+      await writeFile(spool, "not a directory\n");
+      await expect(startHarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: {},
+        trace: {
+          directory: spool,
+          policy: {
+            mode: "required",
+            requiredFeatures: {},
+            includeNativeArtifacts: false,
+            maxBytesPerTurn: 1_000,
+            maxEventsPerTurn: 10,
+          },
+        },
+      })).rejects.toThrow("spool must be a real directory");
+      await expect(readFile(spool, "utf8")).resolves.toBe("not a directory\n");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("makes concurrent initialization and close terminal before trace cleanup can mutate again", async () => {
+    for (const force of [false, true]) {
+      const directory = await mkdtemp(join(tmpdir(), `relayer-harness-trace-${force ? "force" : "close"}-race-`));
+      const spool = join(directory, "spool");
+      const abandoned = join(spool, "abandoned.txt");
+      try {
+        await mkdir(spool, { mode: 0o700 });
+        await writeFile(abandoned, "cleanup-owned\n");
+        const host = new HarnessHost({
+          stateFile: join(directory, "sessions.json"),
+          controlToken: "control",
+          implementations: {},
+          trace: {
+            directory: spool,
+            policy: {
+              mode: "required",
+              requiredFeatures: {},
+              includeNativeArtifacts: false,
+              maxBytesPerTurn: 1_000,
+              maxEventsPerTurn: 10,
+            },
+          },
+        });
+
+        const initializing = host.initialize();
+        expect(host.initialize()).toBe(initializing);
+        const closing = force ? host.forceClose() : host.close();
+        expect(force ? host.forceClose() : host.close()).toBe(closing);
+        await expect(initializing).rejects.toThrow("closed");
+        await closing;
+        await expect(readFile(abandoned, "utf8")).rejects.toThrow();
+        const sentinel = join(spool, "post-close-sentinel.txt");
+        await writeFile(sentinel, "survives\n");
+        await Promise.resolve();
+        await expect(readFile(sentinel, "utf8")).resolves.toBe("survives\n");
+        await expect(host.createSession({
+          threadId: 1,
+          permissionProfileId: "auto",
+          configuration: testConfiguration,
+          workingDirectory: directory,
+        })).rejects.toThrow("closed");
+        await expect(host.complete(1, 1, graph())).rejects.toThrow("closed");
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("does not migrate legacy state after concurrent close wins initialization", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-close-migration-race-"));
+    const stateFile = join(directory, "sessions.json");
+    const serialized = `${JSON.stringify({ schemaVersion: 3, sessions: [] }, null, 2)}\n`;
+    try {
+      await writeFile(stateFile, serialized, { mode: 0o600 });
+      const host = new HarnessHost({ stateFile, controlToken: "control", implementations: {} });
+      const initializing = host.initialize();
+      const closing = host.close();
+      await expect(initializing).rejects.toThrow("closed");
+      await closing;
+      await expect(readFile(`${stateFile}.v3.backup`, "utf8")).rejects.toThrow();
+      await expect(readFile(stateFile, "utf8")).resolves.toBe(serialized);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("publishes the canonical force promise before synchronous provider reentry", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-force-reentry-"));
+    let host!: HarnessHost;
+    let reentered: Promise<void> | undefined;
+    let markDisposed!: () => void;
+    const disposed = new Promise<void>((resolve) => { markDisposed = resolve; });
+    const dispose = vi.fn(() => { markDisposed(); });
+    try {
+      host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          async complete() {},
+          state: emptyState,
+          forceShutdown() { reentered = host.forceClose(); },
+          dispose,
+        }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+
+      const forcing = host.forceClose();
+      expect(reentered).toBe(forcing);
+      expect(host.forceClose()).toBe(forcing);
+      await forcing;
+      await disposed;
+      expect(dispose).toHaveBeenCalledOnce();
+      await expect(host.createSession({
+        threadId: 2,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      })).rejects.toThrow("closed");
+    } finally {
+      await host?.forceClose().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("force-disposes a harness whose pending registration resolves after force close", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-pending-force-close-"));
+    let resolveHarness!: (harness: Harness) => void;
+    let markFactoryStarted!: () => void;
+    const factoryStarted = new Promise<void>((resolve) => { markFactoryStarted = resolve; });
+    const forceShutdown = vi.fn();
+    const pendingHarness = new Promise<Harness>((resolve) => { resolveHarness = resolve; });
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => { markFactoryStarted(); return pendingHarness; } },
+    });
+    try {
+      await host.initialize();
+      const registering = host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+
+      await factoryStarted;
+      await host.forceClose();
+      resolveHarness({ async complete() {}, state: emptyState, forceShutdown });
+
+      await expect(registering).rejects.toThrow("force-closed while the session was starting");
+      expect(forceShutdown).toHaveBeenCalledOnce();
+    } finally {
+      resolveHarness?.({ async complete() {}, state: emptyState, forceShutdown });
+      await host.forceClose().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("contains a late force-dispose throw and performs bounded fallback cleanup", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-late-force-throw-"));
+    let resolveHarness!: (harness: Harness) => void;
+    let markFactoryStarted!: () => void;
+    const factoryStarted = new Promise<void>((resolve) => { markFactoryStarted = resolve; });
+    const pendingHarness = new Promise<Harness>((resolve) => { resolveHarness = resolve; });
+    const forceShutdown = vi.fn(() => { throw new Error("late force cleanup failed"); });
+    const dispose = vi.fn(() => new Promise<void>(() => {}));
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => { markFactoryStarted(); return pendingHarness; } },
+    });
+    try {
+      await host.initialize();
+      const registering = host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      await factoryStarted;
+      await host.forceClose();
+
+      resolveHarness({ async complete() {}, state: emptyState, forceShutdown, dispose });
+
+      await expect(registering).rejects.toThrow("Harness host force-closed while the session was starting");
+      expect(forceShutdown).toHaveBeenCalledOnce();
+      expect(dispose).toHaveBeenCalledOnce();
+      await expect(host.forceClose()).resolves.toBeUndefined();
+    } finally {
+      resolveHarness?.({ async complete() {}, state: emptyState, forceShutdown, dispose });
+      await host.forceClose().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("lets a late Prime harness complete graceful fallback after forced native disposal throws", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-late-prime-force-throw-"));
+    let resolveHarness!: (harness: Harness) => void;
+    let markFactoryStarted!: () => void;
+    let markFallbackFinished!: () => void;
+    const factoryStarted = new Promise<void>((resolve) => { markFactoryStarted = resolve; });
+    const fallbackFinished = new Promise<void>((resolve) => { markFallbackFinished = resolve; });
+    const pendingHarness = new Promise<Harness>((resolve) => { resolveHarness = resolve; });
+    let nativeAttempts = 0;
+    const nativeDispose = vi.fn(() => {
+      nativeAttempts += 1;
+      if (nativeAttempts === 1) throw new Error("late Prime native cleanup failed");
+    });
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: nativeDispose,
+      disposeAsync: vi.fn(async () => {
+        session.dispose();
+        markFallbackFinished();
+      }),
+    };
+    const harness = await PrimeAgentHarness.create({
+      threadId: 1,
+      workingDirectory: directory,
+      permissionProfileId: "full",
+      permissionBinding: {},
+      configuration: {
+        schemaVersion: 1,
+        name: "prime-agent-test",
+        implementation: "prime.agent",
+        implementationVersion: 1,
+        permissionBindings: { full: {} },
+        settings: {},
+      },
+    }, { loadModule: async () => ({
+      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionFromServices: vi.fn(async () => ({ session })),
+    }) as never });
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => { markFactoryStarted(); return pendingHarness; } },
+    });
+    try {
+      await host.initialize();
+      const registering = host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      await factoryStarted;
+      await host.forceClose();
+
+      resolveHarness(harness);
+
+      await expect(registering).rejects.toThrow("Harness host force-closed while the session was starting");
+      await fallbackFinished;
+      expect(session.abort).toHaveBeenCalledOnce();
+      expect(session.disposeAsync).toHaveBeenCalledOnce();
+      expect(nativeDispose).toHaveBeenCalledTimes(2);
+    } finally {
+      resolveHarness?.(harness);
+      await host.forceClose().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to bounded disposal when a late harness has no force disposer", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-pending-force-fallback-"));
+    let resolveHarness!: (harness: Harness) => void;
+    let markFactoryStarted!: () => void;
+    const factoryStarted = new Promise<void>((resolve) => { markFactoryStarted = resolve; });
+    const pendingHarness = new Promise<Harness>((resolve) => { resolveHarness = resolve; });
+    const dispose = vi.fn(() => new Promise<void>(() => {}));
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => { markFactoryStarted(); return pendingHarness; } },
+    });
+    try {
+      await host.initialize();
+      const registering = host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      await factoryStarted;
+      await host.forceClose();
+
+      resolveHarness({ async complete() {}, state: emptyState, dispose });
+
+      await expect(registering).rejects.toThrow("force-closed while the session was starting");
+      expect(dispose).toHaveBeenCalledOnce();
+    } finally {
+      resolveHarness?.({ async complete() {}, state: emptyState, dispose });
+      await host.forceClose().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a late graceful disposal reachable by force close until it drains", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-late-grace-force-"));
+    let resolveHarness!: (harness: Harness) => void;
+    let markFactoryStarted!: () => void;
+    let markDisposeStarted!: () => void;
+    let releaseDispose!: () => void;
+    const factoryStarted = new Promise<void>((resolve) => { markFactoryStarted = resolve; });
+    const disposeStarted = new Promise<void>((resolve) => { markDisposeStarted = resolve; });
+    const disposeGate = new Promise<void>((resolve) => { releaseDispose = resolve; });
+    const pendingHarness = new Promise<Harness>((resolve) => { resolveHarness = resolve; });
+    const forceShutdown = vi.fn(() => releaseDispose());
+    const dispose = vi.fn(async () => { markDisposeStarted(); await disposeGate; });
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => { markFactoryStarted(); return pendingHarness; } },
+    });
+    try {
+      await host.initialize();
+      const registering = host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      await factoryStarted;
+      await host.close();
+      resolveHarness({ async complete() {}, state: emptyState, dispose, forceShutdown });
+      await disposeStarted;
+
+      await host.forceClose();
+      await expect(registering).rejects.toThrow("closed while the session was starting");
+
+      expect(dispose).toHaveBeenCalledOnce();
+      expect(forceShutdown).toHaveBeenCalledOnce();
+    } finally {
+      releaseDispose?.();
+      resolveHarness?.({ async complete() {}, state: emptyState, dispose, forceShutdown });
+      await host.forceClose().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("force-closes the listener and active sockets while graceful harness disposal is stalled", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-force-close-"));
     let running: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
@@ -1655,6 +2008,11 @@ describe("HarnessHost", () => {
     let markDisposeStarted!: () => void;
     const disposeStarted = new Promise<void>((resolveStarted) => { markDisposeStarted = resolveStarted; });
     const disposeGate = new Promise<void>((resolveDispose) => { releaseDispose = resolveDispose; });
+    const forceShutdown = vi.fn();
+    const dispose = vi.fn(async () => {
+      markDisposeStarted();
+      await disposeGate;
+    });
     try {
       running = await startHarnessHost({
         stateFile: join(directory, "sessions.json"),
@@ -1662,10 +2020,8 @@ describe("HarnessHost", () => {
         implementations: { test: () => ({
           async complete() {},
           state: emptyState,
-          async dispose() {
-            markDisposeStarted();
-            await disposeGate;
-          },
+          dispose,
+          forceShutdown,
         }) },
       });
       await running.host.createSession({
@@ -1685,14 +2041,19 @@ describe("HarnessHost", () => {
 
       const closing = running.close();
       await disposeStarted;
-      running.forceClose();
+      const forced = running.forceClose();
+      const forcedAgain = running.forceClose();
+      expect(forceShutdown).toHaveBeenCalledOnce();
       await socketClosed;
       await expect(fetch(`${running.url}/sessions`, { method: "POST" })).rejects.toThrow();
       releaseDispose();
+      await Promise.all([forced, forcedAgain]);
       await closing;
+      expect(dispose).toHaveBeenCalledOnce();
+      expect(forceShutdown).toHaveBeenCalledOnce();
     } finally {
       releaseDispose?.();
-      running?.forceClose();
+      await running?.forceClose();
       await rm(directory, { recursive: true, force: true });
     }
   });

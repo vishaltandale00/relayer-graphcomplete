@@ -4,14 +4,28 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
-import {
-  digestHarnessConfiguration,
-  createCodexBasicFactory,
-  loadHarnessConfigurations,
-  productHarnessImplementations,
-  startHarnessHost,
-} from "@relayer/harness-host";
 import { terminateChildProcess } from "./child-process.mjs";
+
+const RUNTIME_CLOSING_ERROR = "RELAYER_RUNTIME_CLOSING";
+
+function runtimeClosingError(cause) {
+  if (cause?.code === RUNTIME_CLOSING_ERROR) return cause;
+  const error = new Error("GraphComplete runtime is shutting down.", cause === undefined ? undefined : { cause });
+  error.code = RUNTIME_CLOSING_ERROR;
+  return error;
+}
+
+function startupCleanupTimeoutError(timeoutMs) {
+  const error = new Error(`GraphComplete runtime startup cleanup exceeded its ${timeoutMs}ms shutdown deadline.`);
+  error.code = "RELAYER_RUNTIME_STARTUP_CLEANUP_TIMEOUT";
+  return error;
+}
+
+function harnessCloseTimeoutError(timeoutMs) {
+  const error = new Error(`GraphComplete runtime harness host close exceeded its ${timeoutMs}ms shutdown deadline.`);
+  error.code = "RELAYER_RUNTIME_HARNESS_CLOSE_TIMEOUT";
+  return error;
+}
 
 function validateGraphReady(message) {
   if (message?.ready !== true) return null;
@@ -34,7 +48,9 @@ export class GraphCompleteRuntimeService {
     configurationPaths,
     additionalImplementations = {},
     codexBasicClientModuleUrl,
+    graphAuthoringLauncherPath,
     codexPathOverride,
+    harnessHostModuleUrl,
     candidateTrace,
     acquireProviderExecution,
     spawnProcess = spawn,
@@ -47,7 +63,9 @@ export class GraphCompleteRuntimeService {
     this.configurationPaths = configurationPaths;
     this.additionalImplementations = additionalImplementations;
     this.codexBasicClientModuleUrl = codexBasicClientModuleUrl;
+    this.graphAuthoringLauncherPath = graphAuthoringLauncherPath;
     this.codexPathOverride = codexPathOverride;
+    this.harnessHostModuleUrl = harnessHostModuleUrl;
     this.candidateTrace = candidateTrace;
     this.acquireProviderExecution = acquireProviderExecution;
     this.spawnProcess = spawnProcess;
@@ -58,44 +76,70 @@ export class GraphCompleteRuntimeService {
     this.harnessHost = null;
     this.session = null;
     this.closing = false;
+    this.startupPromise = null;
+    this.closePromise = null;
+    this.closeSignal = new Promise((resolve) => {
+      this.resolveCloseSignal = resolve;
+    });
+    this.startupCleanupFences = new Set();
+    this.deferredCleanupFences = new Set();
   }
 
   async start() {
     if (this.session) return this.session;
-    if (this.closing) throw new Error("GraphComplete runtime is shutting down.");
-    const runtimeDirectory = join(this.userDataDirectory, "graphcomplete-runtime");
-    await mkdir(runtimeDirectory, { recursive: true });
-    await chmod(runtimeDirectory, 0o700);
-    const configurations = await loadHarnessConfigurations(this.configurationPaths);
-    const catalogPath = join(runtimeDirectory, "harness-configurations.json");
-    await writeFile(catalogPath, `${JSON.stringify({
-      schemaVersion: 1,
-      configurations: [...configurations.values()].map((configuration) => ({
-        configuration,
-        digest: digestHarnessConfiguration(configuration),
-      })),
-    }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-
-    const graphControlToken = randomBytes(32).toString("hex");
-    const harnessControlToken = randomBytes(32).toString("hex");
-    const graphProcess = this.spawnProcess(this.graphServerBinary, [
-      "--database", join(runtimeDirectory, "graph.sqlite3"),
-      "--port", "0",
-    ], { stdio: ["pipe", "pipe", "pipe"] });
-    this.graphProcess = graphProcess;
+    if (this.closing) throw runtimeClosingError();
+    if (this.startupPromise) return this.startupPromise;
+    const startupPromise = this.#start();
+    this.startupPromise = startupPromise;
     try {
+      return await startupPromise;
+    } finally {
+      if (this.startupPromise === startupPromise) this.startupPromise = null;
+    }
+  }
+
+  async #start() {
+    try {
+      const {
+        digestHarnessConfiguration,
+        createCodexBasicFactory,
+        loadHarnessConfigurations,
+        productHarnessImplementations,
+        startHarnessHost,
+      } = await this.#awaitStartupOperation(import(this.harnessHostModuleUrl ?? "@relayer/harness-host"));
+      const runtimeDirectory = join(this.userDataDirectory, "graphcomplete-runtime");
+      await this.#awaitStartupOperation(mkdir(runtimeDirectory, { recursive: true }));
+      await this.#awaitStartupOperation(chmod(runtimeDirectory, 0o700));
+      const configurations = await this.#awaitStartupOperation(loadHarnessConfigurations(this.configurationPaths));
+      const catalogPath = join(runtimeDirectory, "harness-configurations.json");
+      await this.#awaitStartupOperation(writeFile(catalogPath, `${JSON.stringify({
+        schemaVersion: 1,
+        configurations: [...configurations.values()].map((configuration) => ({
+          configuration,
+          digest: digestHarnessConfiguration(configuration),
+        })),
+      }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 }));
+
+      const graphControlToken = randomBytes(32).toString("hex");
+      const harnessControlToken = randomBytes(32).toString("hex");
+      const graphProcess = this.spawnProcess(this.graphServerBinary, [
+        "--database", join(runtimeDirectory, "graph.sqlite3"),
+        "--port", "0",
+      ], { stdio: ["pipe", "pipe", "pipe"] });
+      this.graphProcess = graphProcess;
       graphProcess.stdin?.on("error", () => {});
       graphProcess.stdin?.write(`${graphControlToken}\n`);
-      const graphUrl = await this.#waitForGraph(graphProcess);
+      const graphUrl = await this.#awaitStartupOperation(this.#waitForGraph(graphProcess));
       this.#superviseGraph(graphProcess);
       if (graphProcess.exitCode !== null || graphProcess.signalCode !== null) {
         throw new Error(`Relayer graph server stopped after readiness (${graphProcess.signalCode || graphProcess.exitCode || "unknown"}).`);
       }
-      this.harnessHost = await startHarnessHost({
+      const harnessHost = await this.#awaitStartupOperation(startHarnessHost({
         implementations: productHarnessImplementations({
-          ...(this.codexBasicClientModuleUrl || this.codexPathOverride ? {
+          ...(this.codexBasicClientModuleUrl || this.graphAuthoringLauncherPath || this.codexPathOverride ? {
             "codex.basic": createCodexBasicFactory({
               ...(this.codexBasicClientModuleUrl ? { clientModuleUrl: this.codexBasicClientModuleUrl } : {}),
+              ...(this.graphAuthoringLauncherPath ? { graphAuthoringLauncherPath: this.graphAuthoringLauncherPath } : {}),
               ...(this.codexPathOverride ? { codexPathOverride: this.codexPathOverride } : {}),
             }),
           } : {}),
@@ -132,10 +176,13 @@ export class GraphCompleteRuntimeService {
             },
           },
         } : {}),
-      });
+      }), async (lateHarnessHost) => {
+        await lateHarnessHost.close();
+      }, (lateHarnessHost) => lateHarnessHost.forceClose());
+      this.harnessHost = harnessHost;
       this.session = Object.freeze({
         graphUrl,
-        harnessUrl: this.harnessHost.url,
+        harnessUrl: harnessHost.url,
         graphControlToken,
         harnessControlToken,
         catalogPath,
@@ -143,7 +190,15 @@ export class GraphCompleteRuntimeService {
       });
       return this.session;
     } catch (error) {
-      await this.close();
+      const cancellationRequested = this.closing;
+      this.closing = true;
+      this.resolveCloseSignal();
+      try {
+        await this.#closeResources(Date.now() + this.shutdownTimeoutMs);
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], "GraphComplete runtime startup and cleanup failed.");
+      }
+      if (cancellationRequested) throw runtimeClosingError(error);
       throw error;
     }
   }
@@ -153,23 +208,247 @@ export class GraphCompleteRuntimeService {
     return this.harnessHost.host.exportCandidateTrace(productInteractionId, targetDirectory, correlation);
   }
 
-  async close() {
+  close() {
     this.closing = true;
+    this.resolveCloseSignal();
+    if (this.closePromise) return this.closePromise;
+    this.closePromise = this.#close();
+    return this.closePromise;
+  }
+
+  async #close() {
+    const cleanupDeadline = Date.now() + this.shutdownTimeoutMs;
     const errors = [];
-    if (this.harnessHost) {
-      try { await this.harnessHost.close(); } catch (error) { errors.push(error); }
+    try {
+      await this.#closeResources(cleanupDeadline);
+    } catch (error) {
+      errors.push(error);
     }
-    this.harnessHost = null;
-    if (this.graphProcess) {
+    const startupPromise = this.startupPromise;
+    if (startupPromise) {
       try {
-        await terminateChildProcess(this.graphProcess, { gracePeriodMs: this.shutdownTimeoutMs });
+        await startupPromise;
+      } catch (error) {
+        if (error?.code !== RUNTIME_CLOSING_ERROR) errors.push(error);
+      }
+    }
+    errors.push(...await this.#settleStartupCleanups(cleanupDeadline));
+    try {
+      await this.#closeResources(cleanupDeadline);
+    } catch (error) {
+      errors.push(error);
+    }
+    if (errors.length) throw new AggregateError(errors, "GraphComplete runtime did not close cleanly.");
+  }
+
+  #assertStarting() {
+    if (this.closing) throw runtimeClosingError();
+  }
+
+  async #awaitStartupOperation(operation, onLateFulfilled, onLateDeadline) {
+    const outcomePromise = Promise.resolve(operation).then(
+      (value) => ({ status: "fulfilled", value }),
+      (error) => ({ status: "rejected", error }),
+    );
+    const outcome = await Promise.race([
+      outcomePromise,
+      this.closeSignal.then(() => ({ status: "closing" })),
+    ]);
+    if (outcome.status === "closing") {
+      if (onLateFulfilled) this.#trackLateStartupOutcome(outcomePromise, onLateFulfilled, onLateDeadline);
+      throw runtimeClosingError();
+    }
+    if (outcome.status === "rejected") throw outcome.error;
+    if (this.closing) {
+      if (onLateFulfilled) this.#trackLateStartupResource(outcome.value, onLateFulfilled, onLateDeadline);
+      throw runtimeClosingError();
+    }
+    return outcome.value;
+  }
+
+  #trackLateStartupResource(resource, dispose, force) {
+    this.#trackLateStartupOutcome(Promise.resolve({ status: "fulfilled", value: resource }), dispose, force);
+  }
+
+  #trackLateStartupOutcome(outcome, dispose, force) {
+    let resource;
+    let forceRequested = false;
+    let forceInvoked = false;
+    let forcePromise;
+    const invokeForce = () => {
+      forceRequested = true;
+      if (resource === undefined || force === undefined) return Promise.resolve();
+      if (forceInvoked) return forcePromise;
+      forceInvoked = true;
+      forcePromise = Promise.resolve().then(() => force(resource));
+      return forcePromise;
+    };
+    const cleanup = outcome.then(async (lateOutcome) => {
+      if (lateOutcome.status !== "fulfilled") return;
+      resource = lateOutcome.value;
+      let graceful;
+      try {
+        graceful = Promise.resolve(dispose(resource));
+      } catch (error) {
+        graceful = Promise.reject(error);
+      }
+      let forceError;
+      if (forceRequested) {
+        try { await invokeForce(); } catch (error) { forceError = error; }
+      }
+      const gracefulOutcome = await graceful.then(
+        () => ({ status: "fulfilled" }),
+        (error) => ({ status: "rejected", error }),
+      );
+      if (forceError !== undefined && gracefulOutcome.status === "rejected") {
+        throw new AggregateError([gracefulOutcome.error, forceError], "Late harness host did not close cleanly.");
+      }
+      if (forceError !== undefined) throw forceError;
+      if (gracefulOutcome.status === "rejected") throw gracefulOutcome.error;
+    }).then(
+      () => ({ status: "fulfilled" }),
+      (error) => ({ status: "rejected", error }),
+    );
+    this.startupCleanupFences.add({ cleanup, force: invokeForce });
+  }
+
+  async #settleStartupCleanups(deadline) {
+    const errors = [];
+    while (this.startupCleanupFences.size > 0) {
+      const entries = [...this.startupCleanupFences];
+      const cleanups = entries.map((entry) => entry.cleanup);
+      const remainingMs = Math.max(0, deadline - Date.now());
+      let timeout;
+      const outcomes = await Promise.race([
+        Promise.all(cleanups),
+        new Promise((resolve) => {
+          timeout = setTimeout(() => resolve(null), remainingMs);
+        }),
+      ]);
+      clearTimeout(timeout);
+      if (outcomes === null) {
+        errors.push(startupCleanupTimeoutError(this.shutdownTimeoutMs));
+        for (const entry of entries) {
+          const forcing = Promise.resolve().then(() => entry.force());
+          this.#retainDeferredCleanup(this.#combineCleanups(entry.cleanup, forcing));
+          this.startupCleanupFences.delete(entry);
+        }
+        break;
+      }
+      for (const entry of entries) this.startupCleanupFences.delete(entry);
+      for (const [index, outcome] of outcomes.entries()) {
+        if (outcome.status !== "rejected") continue;
+        errors.push(outcome.error);
+        errors.push(...await this.#forceStartupCleanupUntil(entries[index], deadline));
+      }
+    }
+    return errors;
+  }
+
+  async #forceStartupCleanupUntil(entry, deadline) {
+    const forcing = Promise.resolve().then(() => entry.force());
+    const combined = this.#combineCleanups(entry.cleanup, forcing);
+    const remainingMs = Math.max(0, deadline - Date.now());
+    let timeout;
+    const outcome = await Promise.race([
+      combined.then(() => ({ status: "fulfilled" }), (error) => ({ status: "rejected", error })),
+      forcing.then(() => new Promise(() => {}), (error) => ({ status: "force-rejected", error })),
+      new Promise((resolve) => { timeout = setTimeout(() => resolve({ status: "timed-out" }), remainingMs); }),
+    ]);
+    clearTimeout(timeout);
+    if (outcome.status === "force-rejected") {
+      this.#retainDeferredCleanup(combined);
+      return [outcome.error];
+    }
+    if (outcome.status === "rejected") return [outcome.error];
+    if (outcome.status === "fulfilled") return [];
+    this.#retainDeferredCleanup(combined);
+    return [startupCleanupTimeoutError(this.shutdownTimeoutMs)];
+  }
+
+  #retainDeferredCleanup(cleanup) {
+    const observed = Promise.resolve(cleanup).then(
+      () => ({ status: "fulfilled" }),
+      (error) => ({ status: "rejected", error }),
+    );
+    this.deferredCleanupFences.add(observed);
+    void observed.finally(() => this.deferredCleanupFences.delete(observed));
+  }
+
+  async #combineCleanups(...cleanups) {
+    const outcomes = await Promise.allSettled(cleanups);
+    const errors = outcomes.filter((outcome) => outcome.status === "rejected").map((outcome) => outcome.reason);
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, "Deferred runtime cleanup failed.");
+  }
+
+  async #closeResources(deadline = Date.now() + this.shutdownTimeoutMs) {
+    const harnessHost = this.harnessHost;
+    const graphProcess = this.graphProcess;
+    this.harnessHost = null;
+    this.graphProcess = null;
+    this.session = null;
+    const errors = [];
+    if (harnessHost) {
+      errors.push(...await this.#closeHarnessHost(harnessHost, deadline));
+    }
+    if (graphProcess) {
+      try {
+        await terminateChildProcess(graphProcess, {
+          gracePeriodMs: this.shutdownTimeoutMs,
+          deadlineMs: deadline,
+        });
       } catch (error) {
         errors.push(error);
       }
     }
-    this.graphProcess = null;
-    this.session = null;
-    if (errors.length) throw new AggregateError(errors, "GraphComplete runtime did not close cleanly.");
+    if (errors.length) throw new AggregateError(errors, "GraphComplete runtime resources did not close cleanly.");
+  }
+
+  async #closeHarnessHost(harnessHost, deadline) {
+    const graceful = Promise.resolve().then(() => harnessHost.close()).then(
+      () => ({ status: "fulfilled" }),
+      (error) => ({ status: "rejected", error }),
+    );
+    const remainingMs = Math.max(0, deadline - Date.now());
+    let timeout;
+    const outcome = await Promise.race([
+      graceful,
+      new Promise((resolve) => {
+        timeout = setTimeout(() => resolve({ status: "timed-out" }), remainingMs);
+      }),
+    ]);
+    clearTimeout(timeout);
+    if (outcome.status === "fulfilled") return [];
+    if (outcome.status === "rejected") {
+      const errors = [outcome.error];
+      errors.push(...await this.#forceHarnessHostUntil(harnessHost, graceful, deadline));
+      return errors;
+    }
+    const errors = [harnessCloseTimeoutError(this.shutdownTimeoutMs)];
+    errors.push(...await this.#forceHarnessHostUntil(harnessHost, graceful, deadline, true));
+    return errors;
+  }
+
+  async #forceHarnessHostUntil(harnessHost, graceful, deadline, timeoutAlreadyReported = false) {
+    const forcing = Promise.resolve().then(() => harnessHost.forceClose());
+    const combined = this.#combineCleanups(graceful, forcing);
+    const remainingMs = Math.max(0, deadline - Date.now());
+    let timeout;
+    const outcome = await Promise.race([
+      combined.then(() => ({ status: "fulfilled" }), (error) => ({ status: "rejected", error })),
+      forcing.then(() => new Promise(() => {}), (error) => ({ status: "force-rejected", error })),
+      new Promise((resolve) => { timeout = setTimeout(() => resolve({ status: "timed-out" }), remainingMs); }),
+    ]);
+    clearTimeout(timeout);
+    if (outcome.status === "force-rejected") {
+      this.#retainDeferredCleanup(combined);
+      return [outcome.error];
+    }
+    if (outcome.status === "rejected") return [outcome.error];
+    if (outcome.status === "fulfilled") return [];
+    this.#retainDeferredCleanup(combined);
+    return timeoutAlreadyReported ? [] : [harnessCloseTimeoutError(this.shutdownTimeoutMs)];
   }
 
   #waitForGraph(child) {

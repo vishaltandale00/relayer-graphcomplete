@@ -1,5 +1,6 @@
 import type { ApprovalMode, ModelReasoningEffort, SandboxMode, WebSearchMode } from "@openai/codex-sdk";
 import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relayer/graph-client";
+import { createHash } from "node:crypto";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import { redactTraceData } from "../trace.js";
 import {
@@ -35,6 +36,7 @@ export interface CodexBasicDependencies {
   readonly runAppServerTurn?: (options: CodexAppServerTurnOptions) => ReturnType<typeof runCodexAppServerTurn>;
   readonly spawnProcess?: CodexAppServerSpawn;
   readonly clientModuleUrl?: string;
+  readonly graphAuthoringLauncherPath?: string;
   readonly codexPathOverride?: string;
 }
 
@@ -83,6 +85,7 @@ export class CodexBasicHarness implements Harness {
   private readonly clientModuleUrl: string;
   private readonly resolved: ResolvedCodexConfiguration;
   private codexThreadId: string | undefined;
+  private readonly activeForceShutdowns = new Set<AbortController>();
 
   constructor(private readonly context: HarnessFactoryContext, private readonly dependencies: CodexBasicDependencies = {}) {
     const resolved = parseCodexBasicConfiguration(context);
@@ -104,6 +107,8 @@ export class CodexBasicHarness implements Harness {
     const prompt = this.prompt(context);
     context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
     const traceState: CodexTraceState = { collaborationSpans: new Map() };
+    const forceShutdown = new AbortController();
+    this.activeForceShutdowns.add(forceShutdown);
     const codexPathOverride = this.codexExecutable(context.access);
     try {
       await run({
@@ -116,12 +121,18 @@ export class CodexBasicHarness implements Harness {
         approvals: context.approvals,
         workingDirectory: this.context.workingDirectory,
         sandboxPolicy,
+        ...(this.dependencies.graphAuthoringLauncherPath === undefined
+          ? {}
+          : { trustedGraphAuthoringLauncher: this.dependencies.graphAuthoringLauncherPath }),
         ...(signal === undefined ? {} : { signal }),
+        forceSignal: forceShutdown.signal,
         ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
         onThreadId: (threadId) => { this.codexThreadId = threadId; },
         onNotification: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
+        onServerRequest: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
       });
     } finally {
+      this.activeForceShutdowns.delete(forceShutdown);
       closeIncompleteCollaborationSpans(traceState);
     }
   }
@@ -143,6 +154,10 @@ export class CodexBasicHarness implements Harness {
     return this.codexThreadId === undefined ? {} : { codexThreadId: this.codexThreadId };
   }
 
+  forceShutdown(): void {
+    for (const shutdown of this.activeForceShutdowns) shutdown.abort(new Error("Codex harness force-disposed"));
+  }
+
   private graphEnvironment(graph: GraphCapability, access: HarnessExecutionAccess | undefined): Record<string, string> {
     const ambient = Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined);
     const environment = Object.fromEntries(access === undefined
@@ -162,6 +177,10 @@ export class CodexBasicHarness implements Harness {
       environment.OPENAI_API_KEY = apiKey;
       environment.OPENAI_BASE_URL = access.endpoint;
     }
+    // Older Relayer builds exposed the raw Node executable through this name.
+    // Never let a stale parent environment silently restore that broader
+    // authoring path now that graph execution uses the zero-argument launcher.
+    delete environment.RELAYER_GRAPH_AUTHORING_NODE;
     environment.RELAYER_GRAPH_URL = graph.url;
     environment.RELAYER_GRAPH_TOKEN = graph.token;
     environment.RELAYER_NODE_ID = String(graph.nodeId);
@@ -235,6 +254,10 @@ export class CodexBasicHarness implements Harness {
 
 Codex native subagents are available when useful. Subagents may directly author, revise, and submit graph objects using the available graph capability. Use the configured model family as appropriate; coordination remains native to Codex.`;
     }
+    const launcher = this.graphAuthoringCommand();
+    const launcherClause = this.dependencies.graphAuthoringLauncherPath ? " do not resolve the launcher or Node.js from PATH," : "";
+    const launcherArgumentsClause = this.dependencies.graphAuthoringLauncherPath ? " with no arguments" : "";
+    const pinnedExecutionClause = this.pinnedExecutionClause();
     return `You are the basic Relayer graph harness. Answer the current user interaction by authoring and accepting a useful graph layer.
 
 Current interaction node: ${interactionNode.id}
@@ -243,8 +266,9 @@ ${renderInteractionInput(context.interactionInput)}
 
 ${INTERACTION_INPUT_GUIDANCE} In JavaScript, call graph.getInteractionInput() to re-read it.
 
-Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a small .mjs file in the system temporary directory, not in the project checkout, and run it with Node.js. Import from:
+Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Run exactly ${launcher}${launcherArgumentsClause}, including the displayed double quotes, and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM;${launcherClause} never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. ${this.dependencies.graphAuthoringLauncherPath ? "Request Codex sandbox escalation for this exact launcher command; Relayer preauthorizes only this pinned internal launcher, which applies its own narrower graph sandbox." : ""} The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:
 ${this.clientModuleUrl}
+${pinnedExecutionClause}
 
 The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Give every persisted node, edge, layer, and action an explicit descriptive clientKey that is unique within this interaction and stable across edits and reruns. For example, use new NodeObject("info", "Summary", "...", "concept", "summary-node"), new EdgeObject([summaryNode, detailNode], "summary-detail-edge"), and new LayerObject(nodes, edges, layout, "response-layer"). Never rely on the constructors' generated client keys in an authored program.
 
@@ -282,19 +306,31 @@ If a graph call rejects an object or graph.submit reports a repairable issue, ed
   }
 
   private layeredNavigationPrompt(context: HarnessRunContext): string {
-    return buildLayeredNavigationPrompt(context, this.clientModuleUrl);
+    return buildLayeredNavigationPrompt(context, this.clientModuleUrl, this.dependencies.graphAuthoringLauncherPath);
+  }
+
+  private graphAuthoringCommand(): string {
+    return graphAuthoringCommand(this.dependencies.graphAuthoringLauncherPath);
+  }
+
+  private pinnedExecutionClause(): string {
+    return pinnedExecutionClause(this.dependencies.graphAuthoringLauncherPath);
   }
 }
 
 export function buildLayeredNavigationPrompt(
   input: HarnessRunContext | GraphNode,
   clientModuleUrl: string,
+  graphAuthoringLauncherPath?: string,
 ): string {
   const context = "inputGraph" in input ? input as HarnessRunContext : undefined;
   const interactionNode = context ? context.inputGraph : input as GraphNode;
   const normalizedInput = context
     ? renderInteractionInput(context.interactionInput)
     : `Interaction:\n- id: ${interactionNode.id}\n- title: ${interactionNode.title}\n- detail: ${interactionNode.detail}`;
+  const authoringInstructions = graphAuthoringLauncherPath === undefined
+    ? `Write a temporary .mjs file outside the project checkout and run it with Node.js. Import RelayerGraphClient, NodeObject, EdgeObject, and LayerObject from ${clientModuleUrl}, then use RelayerGraphClient.fromEnv(). Author in whatever order fits the task. Keep each object's generated clientKey stable when retrying the same rejected submit; create a new object only for a genuinely new graph record. Submit each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.`
+    : `Run exactly ${graphAuthoringCommand(graphAuthoringLauncherPath)} with no arguments, including the displayed double quotes, and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM; do not resolve the launcher or Node.js from PATH, never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. Request Codex sandbox escalation for this exact launcher command; Relayer preauthorizes only this pinned internal launcher, which applies its own narrower graph sandbox. The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:\n${clientModuleUrl}\n${pinnedExecutionClause(graphAuthoringLauncherPath)}`;
   return `You are the Relayer layered-navigation harness. Your task is to answer the current user interaction with a useful graph. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 Current interaction node: ${interactionNode.id}
@@ -303,7 +339,7 @@ ${normalizedInput}
 
 ${INTERACTION_INPUT_GUIDANCE} In JavaScript, call graph.getInteractionInput() to re-read it.
 
-Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Write a temporary .mjs file outside the project checkout and run it with Node.js. Import RelayerGraphClient, NodeObject, EdgeObject, and LayerObject from ${clientModuleUrl}, then use RelayerGraphClient.fromEnv(). Author in whatever order fits the task. Keep each object's generated clientKey stable when retrying the same rejected submit; create a new object only for a genuinely new graph record. Submit each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.
+Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. ${authoringInstructions}
 
 The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Give every persisted node, edge, layer, and action an explicit descriptive clientKey that is unique within this interaction and stable across edits and reruns. For example, use new NodeObject("info", "Summary", "...", "concept", "summary-node"), new EdgeObject([summaryNode, detailNode], "summary-detail-edge"), and new LayerObject(nodes, edges, layout, "response-layer"). Never rely on the constructors' generated client keys in an authored program. Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.
 
@@ -330,11 +366,24 @@ ${RELAYER_ICON_NAMES.join(", ")}
 
 Action variants are "chip", "pill", "wide", or "card". A card requires description; other variants do not accept one. Do not author HTML, CSS, colors, dimensions, or style fields.
 
-The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue, edit the same program, and rerun it with the same clientKey values; stable keys make the whole-program rerun update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. A model turn ending is not completion. The task is complete only when the final graph.submit call succeeds.`;
+The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue, edit the same program and rerun it with the same clientKey values; stable keys make the whole-program rerun update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. A model turn ending is not completion. The task is complete only when the final graph.submit call succeeds.`;
+}
+
+function graphAuthoringCommand(launcher: string | undefined): string {
+  if (launcher === undefined) return "node --input-type=module";
+  if (!/^\/[A-Za-z0-9._/@+-]+$/.test(launcher)) {
+    throw new Error("The graph-authoring launcher must be a shell-safe absolute path.");
+  }
+  return JSON.stringify(launcher);
+}
+
+function pinnedExecutionClause(launcher: string | undefined): string {
+  if (launcher === undefined) return "";
+  return `In this pinned mode, the launcher heredoc is the only permitted shell action. Do not run sed, rg, cat, find, or any other inspection command. If the authored program fails, repair it only from the returned error and rerun the same launcher heredoc. LayerLayoutObject accepts exactly one argument: the placements array, for example new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)]). Its version is already fixed at 1; never pass a version argument and never assign layout.version.`;
 }
 
 function traceCodexAppServerNotification(context: HarnessRunContext, method: string, params: unknown, state: CodexTraceState): void {
-  const redactedParams = redactTraceData(params);
+  const redactedParams = attachCommandExecutableAuthority(redactTraceData(params), params);
   const data = isRecord(redactedParams) ? redactedParams : {};
   const item = isRecord(data.item) ? data.item : undefined;
   const providerEventId = optionalNonemptyString(item?.id);
@@ -373,6 +422,104 @@ function traceCodexAppServerNotification(context: HarnessRunContext, method: str
   } else if (item.type === "reasoning" && typeof item.text === "string") {
     context.trace.emit({ type: "reasoning.summary", data: { text: item.text } });
   }
+}
+
+function attachCommandExecutableAuthority(redactedParams: JsonValue, rawParams: unknown): JsonValue {
+  if (!isRecord(redactedParams) || !isRecord(rawParams)) return redactedParams;
+  const redactedItem = isRecord(redactedParams.item) ? redactedParams.item : undefined;
+  const rawItem = isRecord(rawParams.item) ? rawParams.item : undefined;
+  if (redactedItem?.type !== "commandExecution" || rawItem?.type !== "commandExecution") return redactedParams;
+  const redactedActions = Array.isArray(redactedItem.commandActions) ? redactedItem.commandActions : undefined;
+  const rawActions = Array.isArray(rawItem.commandActions) ? rawItem.commandActions : undefined;
+  if (redactedActions === undefined || rawActions === undefined || redactedActions.length !== rawActions.length) return redactedParams;
+  const commandActions = redactedActions.map((redactedAction, index) => {
+    if (!isRecord(redactedAction) || !isRecord(rawActions[index])) return redactedAction;
+    const {
+      relayerExecutableAuthoritySha256: _untrustedExecutable,
+      relayerCommandWordAuthoritySha256: _untrustedWords,
+      relayerGraphAuthoringLauncherSha256: _untrustedGraphLauncher,
+      ...safeAction
+    } = redactedAction;
+    const graphAuthoringLauncher = pinnedGraphAuthoringLauncher(rawActions[index].command);
+    const words = shellCommandWords(rawActions[index].command);
+    if (words === undefined) {
+      return graphAuthoringLauncher === undefined ? safeAction : {
+        ...safeAction,
+        relayerGraphAuthoringLauncherSha256: createHash("sha256").update(graphAuthoringLauncher).digest("hex"),
+      };
+    }
+    return {
+      ...safeAction,
+      ...(words[0]?.startsWith("/") ? {
+        relayerExecutableAuthoritySha256: createHash("sha256").update(words[0]).digest("hex"),
+      } : {}),
+      relayerCommandWordAuthoritySha256: words.map((word) => (
+        word.startsWith("/") ? createHash("sha256").update(word).digest("hex") : null
+      )),
+    };
+  });
+  return { ...redactedParams, item: { ...redactedItem, commandActions } };
+}
+
+function pinnedGraphAuthoringLauncher(command: unknown): string | undefined {
+  if (typeof command !== "string") return undefined;
+  const match = /^("[^"\r\n]+"|\/[A-Za-z0-9._/@+-]+) <<'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\r?\n/.exec(command.trim());
+  if (!match) return undefined;
+  try {
+    const encodedLauncher = match[1] ?? "";
+    const launcher = encodedLauncher.startsWith('"') ? JSON.parse(encodedLauncher) : encodedLauncher;
+    return typeof launcher === "string" && /^\/[A-Za-z0-9._/@+-]+$/.test(launcher) ? launcher : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function shellCommandWords(command: unknown): string[] | undefined {
+  if (typeof command !== "string" || /[\r\n\0]/.test(command)) return undefined;
+  const input = command.trim();
+  const words: string[] = [];
+  let word = "";
+  let quote: "'" | '"' | undefined;
+  let started = false;
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index];
+    if (character === undefined) return undefined;
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined;
+      else if (character === "\\" && quote === '"') {
+        index += 1;
+        if (index >= input.length) return undefined;
+        word += input[index];
+      } else {
+        word += character;
+      }
+      started = true;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      started = true;
+    } else if (/\s/.test(character)) {
+      if (started) {
+        words.push(word);
+        word = "";
+        started = false;
+      }
+    } else if (character === "\\") {
+      index += 1;
+      if (index >= input.length) return undefined;
+      word += input[index];
+      started = true;
+    } else if (/[;|&<>(){}!$`*?\[\]#]/.test(character)) {
+      return undefined;
+    } else {
+      word += character;
+      started = true;
+    }
+  }
+  if (quote !== undefined) return undefined;
+  if (started) words.push(word);
+  return words.length > 0 ? words : undefined;
 }
 
 function traceCodexCollaborationItem(

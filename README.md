@@ -99,6 +99,30 @@ The live command is not part of `npm run check` and is the only part of this
 case that invokes inference; its evidence parser and grader run in the default
 deterministic test suite.
 
+The opt-in Ask-profile desktop proof intentionally bypasses npm so inherited
+`NODE_OPTIONS` cannot execute before its trust boundary. Invoke the fixed system
+shell by its repository path with an explicit, operator-trusted absolute path
+to the installed Node executable, for example on an Apple Silicon Homebrew install:
+
+```sh
+RELAYER_CAPTURE_ASK_PROFILE_EVIDENCE=1 /bin/sh "$PWD/scripts/launch-ask-profile-evidence.sh" \
+  /opt/homebrew/opt/node/bin/node
+```
+
+The command is intentionally macOS-only: the fixed system shell removes inherited
+Node, Electron, OpenSSL, and dynamic-loader overrides before the first capture
+process starts, executes the launcher from already-open committed bytes after
+unlinking its snapshot pathname, authenticates the remaining private-snapshot controls,
+and rejects an Electron executable that changes after macOS code-signature and
+byte authentication. The explicitly supplied Node installation, the
+checked-out shell file, and the installed Electron package are the documented
+pre-invocation trust roots; none of their paths is read from the environment or
+discovered through `PATH`. The installed Electron package and the absence of a
+concurrent same-user mutation between its final authentication and spawn are
+pre-invocation trust assumptions; the launcher detects ordinary identity or byte
+changes but does not claim an immutable pathname across that interval.
+Unsupported platforms fail before Electron or paid inference runs.
+
 The CLI resolves configuration files before case execution. Every saved execution records its `(testRunId, testCaseId, harnessConfigurationName)` identity, exact resolved configuration snapshot, and stable digest. Live inference is deliberately excluded from `npm test` and `npm run check`. Its saved HTML remains a lower-level debugging artifact; product-faithful review belongs to Relayer Eval.
 
 ## Relayer Desktop

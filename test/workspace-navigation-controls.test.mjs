@@ -7,6 +7,9 @@ import { controlActivationCompletionFor } from "../desktop/renderer/src/control-
 import { shouldPollThreadInteractions } from "../desktop/renderer/src/product-workspace/model.js";
 import {
   activateHistoryControl,
+  approvalHistoryRenderIdentity,
+  approvalHistoryRenderTransition,
+  approvalHistoryReceiptIdentity,
   graphNodeIdentitySet,
   focusedTurnIdForRerender,
   historyNavigationPresentation,
@@ -17,6 +20,74 @@ import {
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 describe("product workspace navigation controls", () => {
+  it("resets approval history disclosure across thread and dock-mode identities", () => {
+    const historyIdentity = approvalHistoryRenderIdentity("interactive", 10, "history");
+    expect(approvalHistoryRenderTransition({
+      previousIdentity: approvalHistoryRenderIdentity("interactive", 9, "history"),
+      identity: historyIdentity,
+      previousReceiptIdentity: "same-receipts",
+      receiptIdentity: "same-receipts",
+      dockMode: "history",
+      wasHidden: false,
+      wasHistoryOnly: true,
+      open: false,
+      scrollTop: 42,
+    })).toEqual({ open: true, scrollTop: 0 });
+
+    expect(approvalHistoryRenderTransition({
+      previousIdentity: approvalHistoryRenderIdentity("interactive", 10, "pending"),
+      identity: historyIdentity,
+      previousReceiptIdentity: "same-receipts",
+      receiptIdentity: "same-receipts",
+      dockMode: "history",
+      wasHidden: false,
+      wasHistoryOnly: false,
+      open: false,
+      scrollTop: 42,
+    })).toEqual({ open: true, scrollTop: 0 });
+
+    expect(approvalHistoryRenderIdentity("review", 10, "history"))
+      .not.toBe(historyIdentity);
+  });
+
+  it("preserves a same-thread history collapse and scroll except when a receipt changes", () => {
+    const identity = approvalHistoryRenderIdentity("interactive", 10, "history");
+    const receipts = [{
+      request: { requestId: "request-1" },
+      resolution: { resolvedAt: "2026-08-26T12:00:00Z", outcome: "approved" },
+    }];
+    const receiptIdentity = approvalHistoryReceiptIdentity(receipts);
+    expect(approvalHistoryRenderTransition({
+      previousIdentity: identity,
+      identity,
+      previousReceiptIdentity: receiptIdentity,
+      receiptIdentity,
+      dockMode: "history",
+      wasHidden: false,
+      wasHistoryOnly: true,
+      open: false,
+      scrollTop: 42,
+    })).toEqual({ open: false, scrollTop: 42 });
+
+    expect(approvalHistoryRenderTransition({
+      previousIdentity: identity,
+      identity,
+      previousReceiptIdentity: receiptIdentity,
+      receiptIdentity: approvalHistoryReceiptIdentity([
+        {
+          request: { requestId: "request-2" },
+          resolution: { resolvedAt: "2026-08-26T12:01:00Z", outcome: "denied" },
+        },
+        ...receipts,
+      ]),
+      dockMode: "history",
+      wasHidden: false,
+      wasHistoryOnly: true,
+      open: false,
+      scrollTop: 42,
+    })).toEqual({ open: false, scrollTop: 0 });
+  });
+
   it("exposes the exact Product history completion promise on the clicked control", async () => {
     const button = {};
     const completion = Promise.resolve("committed");

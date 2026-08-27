@@ -11,6 +11,7 @@ export interface CodexApprovalBridgeContext {
   readonly approvals: HarnessApprovalChannel;
   readonly workingDirectory: string;
   readonly sandboxPolicy: JsonObject;
+  readonly trustedGraphAuthoringLauncher?: string;
   readonly threadId: string;
   readonly turnId: string;
   readonly items: ReadonlyMap<string, JsonObject>;
@@ -330,6 +331,34 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
   const item = itemId === undefined ? undefined : context.items.get(itemId);
   if (item?.type !== "commandExecution") return { decision: "decline" };
 
+  const trustedCommand = trustedGraphAuthoringCommand(
+    item,
+    optionalString(params.command),
+    params.commandActions,
+    context.trustedGraphAuthoringLauncher,
+  );
+  const trustedCwd = optionalString(params.cwd) ?? string(item.cwd);
+  const trustedAbsoluteCwd = validAbsolutePath(trustedCwd);
+  const trustedAdditionalPermissions = params.additionalPermissions === undefined
+    ? null
+    : jsonValue(params.additionalPermissions);
+  const trustedFieldsMatch = !(optionalString(params.cwd) !== undefined
+      && string(item.cwd) !== undefined
+      && params.cwd !== item.cwd);
+  // Codex may classify the fixed launcher as unified exec, PTY, or a network
+  // request because its inner sandbox connects to the graph server. Recognize
+  // the exact launcher before those transport-specific generic branches. Its
+  // zero-argument script replaces the environment and narrows network access
+  // to the pinned graph endpoint before authored stdin runs.
+  if (trustedCommand !== undefined
+    && trustedAbsoluteCwd === resolve(context.workingDirectory)
+    && trustedFieldsMatch
+    && supportsAcceptDecision(params.availableDecisions)
+    && (params.additionalPermissions === undefined || trustedAdditionalPermissions !== undefined)
+    && context.trustedGraphAuthoringLauncher !== undefined) {
+    return { decision: "accept" };
+  }
+
   const network = optionalRecord(params.networkApprovalContext);
   if (network !== undefined) {
     const host = string(network.host);
@@ -360,12 +389,6 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
     return answerV2Decision(input, context);
   }
 
-  const source = string(item.source);
-  // Unified exec can be PTY-backed, but this approval shape carries no tty bit.
-  // Reusing it would silently broaden authority across terminal modes.
-  if (source === undefined || source === "unifiedExecStartup" || source === "unifiedExecInteraction" || params.tty === true) {
-    return { decision: "decline" };
-  }
   const command = optionalString(params.command) ?? string(item.command);
   const cwd = optionalString(params.cwd) ?? string(item.cwd);
   const absoluteCwd = validAbsolutePath(cwd);
@@ -376,11 +399,18 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
   if (optionalString(params.cwd) !== undefined && string(item.cwd) !== undefined && params.cwd !== item.cwd) {
     return { decision: "decline" };
   }
-  if (!supportsOneRequestDecision(params.availableDecisions)) return { decision: "decline" };
+  const advertisedDecisions = commandDecisionCapabilities(params.availableDecisions);
+  if (advertisedDecisions === undefined) return { decision: "decline" };
   const additionalPermissions = params.additionalPermissions === undefined
     ? null
     : jsonValue(params.additionalPermissions);
   if (params.additionalPermissions !== undefined && additionalPermissions === undefined) return { decision: "decline" };
+  const source = string(item.source);
+  // Unified exec can be PTY-backed, but this approval shape carries no tty bit.
+  // Reusing ordinary command authority would silently broaden it across modes.
+  if (source === undefined || source === "unifiedExecStartup" || source === "unifiedExecInteraction" || params.tty === true) {
+    return { decision: "decline" };
+  }
   const input: HarnessApprovalRequestInput = {
     providerItemId: providerItemId(request, itemId),
     title: "Run command",
@@ -397,7 +427,86 @@ async function answerV2Command(request: CodexServerRequest, context: CodexApprov
     } satisfies JsonObject)],
     scopeDescription: `Run ${command} in ${absoluteCwd} with the displayed Codex sandbox authority for this session.`,
   };
-  return answerV2Decision(input, context);
+  return answerV2Decision(input, context, advertisedDecisions.reject);
+}
+
+export function isExactGraphAuthoringLauncherCommand(command: string, launcherPath: string): boolean {
+  return canonicalGraphAuthoringProgram(command, launcherPath) !== undefined;
+}
+
+function canonicalGraphAuthoringProgram(command: string, launcherPath: string): string | undefined {
+  if (!isAbsolute(launcherPath) || launcherPath.includes("\0") || launcherPath.includes("\n") || launcherPath.includes("\r")) {
+    return undefined;
+  }
+  const prefix = [JSON.stringify(launcherPath), launcherPath]
+    .map((candidate) => `${candidate} `)
+    .find((candidate) => command.startsWith(candidate));
+  if (prefix === undefined) return undefined;
+  const opening = command.slice(prefix.length).match(/^<<'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\r?\n/);
+  if (opening === null) return undefined;
+  const delimiter = opening[1]!;
+  const bodyAndClose = command.slice(prefix.length + opening[0].length).replaceAll("\r\n", "\n");
+  const lines = bodyAndClose.split("\n");
+  const closingLine = lines.pop();
+  const hasNonemptyBody = lines.some((line) => line.length > 0)
+    || (closingLine !== undefined && closingLine !== "" && closingLine !== delimiter);
+  if (!hasNonemptyBody || lines.some((line) => line === delimiter)) return undefined;
+  // POSIX shells accept end-of-input as the heredoc terminator. With this
+  // fixed zero-argument launcher, every remaining byte is still stdin rather
+  // than a second shell action.
+  if (closingLine === delimiter) return `${lines.join("\n")}\n`;
+  return bodyAndClose.split("\n").some((line) => line === delimiter) ? undefined : bodyAndClose;
+}
+
+function trustedGraphAuthoringCommand(
+  item: JsonObject,
+  requestCommand: string | undefined,
+  requestActionsValue: unknown,
+  launcherPath: string | undefined,
+): string | undefined {
+  if (launcherPath === undefined) return undefined;
+  const itemCommand = string(item.command);
+  const wrappedCommand = itemCommand === undefined ? undefined : exactZshLoginCommand(itemCommand);
+  const actions = Array.isArray(item.commandActions) ? item.commandActions : undefined;
+  if (actions !== undefined && actions.length !== 1) return undefined;
+  const requestActions = requestActionsValue === null || requestActionsValue === undefined
+    ? undefined
+    : Array.isArray(requestActionsValue) ? requestActionsValue : null;
+  if (requestActions === null || (requestActions !== undefined && requestActions.length !== 1)) return undefined;
+  const action = actions?.length === 1 ? record(actions[0]) : undefined;
+  const actionCommand = action === undefined ? undefined : string(action.command);
+  const requestAction = requestActions?.length === 1 ? record(requestActions[0]) : undefined;
+  const requestActionCommand = requestAction === undefined ? undefined : string(requestAction.command);
+  if ((action !== undefined && actionCommand === undefined) || (requestAction !== undefined && requestActionCommand === undefined)) {
+    return undefined;
+  }
+  const itemRepresentation = wrappedCommand
+    ?? (isOpaqueRedactedCommand(itemCommand) && (actionCommand !== undefined || requestActionCommand !== undefined)
+      ? undefined
+      : itemCommand);
+  const representations = [requestActionCommand, requestCommand, actionCommand, itemRepresentation]
+    .filter((command): command is string => command !== undefined);
+  if (representations.length === 0) return undefined;
+  const programs = representations.map((command) => canonicalGraphAuthoringProgram(command, launcherPath));
+  if (programs.some((program) => program === undefined)) return undefined;
+  const authenticatedProgram = programs[0]!;
+  if (programs.some((program) => program !== authenticatedProgram)) return undefined;
+  return representations[0];
+}
+
+function isOpaqueRedactedCommand(command: string | undefined): boolean {
+  return command === "/bin/zsh -c <redacted>" || command === "/bin/zsh -lc <redacted>";
+}
+
+function exactZshLoginCommand(command: string): string | undefined {
+  const prefix = ["/bin/zsh -c ", "/bin/zsh -lc "].find((candidate) => command.startsWith(candidate));
+  if (prefix === undefined) return undefined;
+  try {
+    const inner = JSON.parse(command.slice(prefix.length));
+    return typeof inner === "string" ? inner : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function answerV2FileChange(request: CodexServerRequest, context: CodexApprovalBridgeContext): Promise<unknown> {
@@ -522,10 +631,14 @@ async function answerToolUserInput(request: CodexServerRequest, context: CodexAp
   }
 }
 
-async function answerV2Decision(input: HarnessApprovalRequestInput, context: CodexApprovalBridgeContext): Promise<unknown> {
+async function answerV2Decision(
+  input: HarnessApprovalRequestInput,
+  context: CodexApprovalBridgeContext,
+  reject: "decline" | "cancel" = "decline",
+): Promise<unknown> {
   try {
     const decision = await requestApproval(input, context);
-    return { decision: decision.decision === "deny" ? "decline" : "accept" };
+    return { decision: decision.decision === "deny" ? reject : "accept" };
   } catch (error) {
     if (error instanceof HarnessApprovalRequestTerminatedError) return { decision: "cancel" };
     throw error;
@@ -613,10 +726,16 @@ function approvalOptionLabels(value: unknown): { readonly accept: string; readon
   return accept === undefined || decline === undefined ? undefined : { accept, decline, ...(cancel === undefined ? {} : { cancel }) };
 }
 
-function supportsOneRequestDecision(value: unknown): boolean {
+function supportsAcceptDecision(value: unknown): boolean {
   if (value === undefined || value === null) return true;
-  if (!Array.isArray(value)) return false;
-  return value.includes("accept") && value.includes("decline");
+  return Array.isArray(value) && value.includes("accept");
+}
+
+function commandDecisionCapabilities(value: unknown): { readonly reject: "decline" | "cancel" } | undefined {
+  if (value === undefined || value === null) return { reject: "decline" };
+  if (!Array.isArray(value) || !value.includes("accept")) return undefined;
+  if (value.includes("decline")) return { reject: "decline" };
+  return value.includes("cancel") ? { reject: "cancel" } : undefined;
 }
 
 function sameTurn(params: Record<string, unknown>, context: CodexApprovalBridgeContext): boolean {
