@@ -6,9 +6,11 @@ import {
   loadProviderOnboardingProjection,
 } from "./model-settings-api.js";
 import { defaultFamilySelectionForProvider } from "./model-picker-model.js";
+import { resetNewThreadModelPicker } from "./composer-model-picker.js";
+import { refreshModelFamilySettings } from "./model-family-settings.js";
 import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload } from "./provider-ui-model.js";
 import { bindRovingRadioGroup, providerConnectionFormMarkup, providerOptionsMarkup } from "./provider-ui.js";
-import { desktop, productApiAvailable } from "./state.js";
+import { appState, desktop, productApiAvailable } from "./state.js";
 import { $, $$, escapeHtml, escapeHtmlAttribute } from "./ui.js";
 
 let providerStatus;
@@ -82,8 +84,9 @@ function showProviderForm(adapterId, { showErrors = false } = {}) {
 
 async function completeOnboarding() {
   if (productApiAvailable) {
-    const settings = await loadModelSettings();
-    await loadDefaultModelSelection(settings.defaults.harnessId);
+    await refreshModelFamilySettings();
+    resetNewThreadModelPicker();
+    await loadDefaultModelSelection(appState.modelSettings.defaults.harnessId);
   }
   await desktop.providers.completeOnboarding();
   showApplication();

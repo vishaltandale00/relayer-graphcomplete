@@ -270,6 +270,24 @@ async function recordBrowserFlow(url, directory, profile) {
       await click('[data-onboarding-model="gpt-5.2-mini"]');
       await click("#finishProviderSetup");
       await waitFor("!document.querySelector('#appShell').classList.contains('hidden')", "desktop application");
+      await click('[data-model-picker="new"] [data-model-picker-trigger]');
+      await waitFor(`(() => {
+        const picker = document.querySelector('[data-model-picker="new"]');
+        return picker?.querySelector('[data-model-family]')?.value === '21'
+          && picker.querySelector('[data-model-option][data-provider-id="openai-work"][data-model-id="gpt-5.2-mini"]')?.getAttribute('aria-checked') === 'true';
+      })()`, "onboarded family available in chat before opening Settings", 8_000, `(() => {
+        const picker = document.querySelector('[data-model-picker="new"]');
+        return {
+          label: picker?.querySelector('[data-model-picker-label]')?.textContent,
+          family: picker?.querySelector('[data-model-family]')?.value,
+          options: [...(picker?.querySelectorAll('[data-model-option]') ?? [])].map((option) => ({
+            providerId: option.dataset.providerId,
+            modelId: option.dataset.modelId,
+            checked: option.getAttribute('aria-checked'),
+          })),
+        };
+      })()`);
+      await click('[data-model-picker="new"] [data-model-picker-trigger]');
 
       await caption("3 · Add and sign out a managed subscription");
       await click("#settingsButton");
@@ -372,6 +390,7 @@ const adapters = [
 
 const flowState = {
   defaults: { harnessId: "codex-basic", providerId: null, familyId: null },
+  family: null,
   retrySubmitted: false,
   retryRequest: null,
 };
@@ -411,6 +430,7 @@ const modelSettings = (scene) => ({
     },
   ],
   families: [
+    ...(scene === "flow" && flowState.family ? [flowState.family] : []),
     {
       id: 11,
       name: "Work coding",
@@ -578,7 +598,7 @@ const server = createServer(async (request, response) => {
         name: input.familyName,
         kind: "custom",
         enabled: true,
-        position: 0,
+        position: 2,
         revision: 1,
         members: [{ providerId: input.providerId, modelId: input.modelId, position: 0 }],
       };
@@ -588,6 +608,7 @@ const server = createServer(async (request, response) => {
           providerId: input.providerId,
           familyId: family.id,
         };
+        flowState.family = family;
       }
       return json(response, {
         defaults: { ...flowState.defaults },
