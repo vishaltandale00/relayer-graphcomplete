@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Throwaway prototype: portable verification evidence</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#61708a; --line:#d9e0ea; --paper:#fff; --wash:#f4f7fb; --accent:#315efb; --good:#177a52; --bad:#b3283d; --warn:#9a6500; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--wash); color:var(--ink); font:15px/1.45 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:1180px; margin:0 auto; padding:36px 22px 64px; }
+    h1,h2,h3,p { margin-top:0; }
+    h1 { font-size:30px; letter-spacing:-.03em; margin-bottom:8px; }
+    h2 { font-size:18px; margin-bottom:14px; }
+    h3 { font-size:14px; margin-bottom:8px; }
+    .eyebrow { color:var(--accent); font-weight:750; letter-spacing:.08em; text-transform:uppercase; font-size:12px; }
+    .intro { max-width:880px; font-size:17px; }
+    .notice { border-left:4px solid var(--warn); background:#fff9e9; padding:14px 16px; margin:20px 0 24px; }
+    .grid { display:grid; grid-template-columns:1.08fr .92fr; gap:18px; align-items:start; }
+    .card { background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:18px; box-shadow:0 5px 18px rgba(28,43,71,.05); }
+    .stack { display:grid; gap:18px; }
+    .fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .field { background:var(--wash); border-radius:8px; padding:10px 12px; min-height:62px; }
+    .field span { display:block; color:var(--muted); font-size:12px; margin-bottom:3px; }
+    .field strong { overflow-wrap:anywhere; }
+    .status { display:inline-flex; align-items:center; padding:3px 8px; border-radius:999px; font-weight:750; font-size:12px; background:#e9eef7; }
+    .status.good { color:var(--good); background:#e7f6ef; }
+    .status.bad { color:var(--bad); background:#fdecef; }
+    .status.warn { color:var(--warn); background:#fff3d5; }
+    button,select { font:inherit; }
+    button { border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:8px; padding:9px 11px; cursor:pointer; text-align:left; }
+    button:hover { border-color:var(--accent); }
+    button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    button.danger { color:var(--bad); }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    select { width:100%; border:1px solid var(--line); border-radius:8px; padding:9px; background:#fff; }
+    .controls { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .controls .wide { grid-column:1/-1; }
+    .event-list,.observation-list,.attempt-list { display:grid; gap:8px; }
+    .event,.observation,.attempt { border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+    .event small,.observation small,.attempt small { color:var(--muted); display:block; }
+    .empty { color:var(--muted); font-style:italic; }
+    .error { color:var(--bad); background:#fdecef; border:1px solid #fac8d0; border-radius:8px; padding:10px 12px; }
+    .tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+    .tabs button[aria-selected="true"] { background:var(--ink); border-color:var(--ink); color:#fff; }
+    .steps { display:flex; flex-wrap:wrap; gap:8px; }
+    .steps button.done { color:var(--good); border-color:#9bd3bb; background:#eef9f4; }
+    .steps button.current { border-color:var(--accent); box-shadow:0 0 0 2px rgba(49,94,251,.12); }
+    .legend { display:flex; flex-wrap:wrap; gap:12px; color:var(--muted); font-size:13px; }
+    code { background:#edf1f7; padding:2px 5px; border-radius:4px; }
+    @media (max-width:850px) { .grid { grid-template-columns:1fr; } }
+    @media (max-width:520px) { .fields,.controls { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Throwaway logic prototype</div>
+  <h1>Can every native runner produce the same trustworthy evidence?</h1>
+  <p class="intro">This demo tests a portable adapter contract without standardizing how Cargo, Vitest, Python, Electron, platform canaries, model evaluation, or human review actually run. Every adapter emits only four canonical events: attempt started, test point observed, artifact referenced, and attempt completed.</p>
+  <div class="notice"><strong>Candidate rule being tested:</strong> when an attempt completes without observing every active test point, the canonicalizer seals explicit <code>not observed</code> entries instead of losing the attempt. Whether that should happen for every completion disposition is the next decision.</div>
+
+  <div class="grid">
+    <section class="stack">
+      <div class="card">
+        <h2>Current portable state</h2>
+        <div id="summary" class="fields"></div>
+        <h3 style="margin-top:16px">Observations</h3>
+        <div id="observations" class="observation-list"></div>
+        <h3 style="margin-top:16px">Canonical event journal</h3>
+        <div id="events" class="event-list"></div>
+        <div id="error" style="margin-top:10px"></div>
+      </div>
+      <div class="card">
+        <h2>Sealed attempts and independently derived slices</h2>
+        <div id="attempts" class="attempt-list"></div>
+      </div>
+    </section>
+
+    <section class="stack">
+      <div class="card">
+        <h2>Free play</h2>
+        <p>Choose a native runner, then emit adapter events in any order. Illegal sequences stay visible as rejected actions.</p>
+        <label for="runner">Native runner</label>
+        <select id="runner">
+          <option value="cargo">Cargo test</option>
+          <option value="vitest">Vitest</option>
+          <option value="python">Python unittest</option>
+          <option value="process">Deterministic process</option>
+          <option value="electron">Electron desktop</option>
+          <option value="canary">Packaged platform canary</option>
+          <option value="model">Live model evaluation</option>
+          <option value="human">Human evidence review</option>
+        </select>
+        <div class="controls" style="margin-top:12px">
+          <button class="primary wide" data-action="start">Attempt started</button>
+          <button data-action="observe-login-pass">Observe “workspace opened” — pass</button>
+          <button class="danger" data-action="observe-login-fail">Observe “workspace opened” — fail</button>
+          <button data-action="observe-receipt-pass">Observe “receipt recorded” — pass</button>
+          <button data-action="artifact">Reference native report or screenshot</button>
+          <button data-action="complete-pass">Attempt completed normally</button>
+          <button class="danger" data-action="complete-infra">Attempt ended with infrastructure failure</button>
+          <button class="wide" data-action="reset">Reset all prototype state</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Guided walkthroughs</h2>
+        <div id="tabs" class="tabs"></div>
+        <div id="walkthrough"></div>
+      </div>
+
+      <div class="card">
+        <h2>What this deliberately does not standardize</h2>
+        <div class="legend">
+          <span>Runner command</span><span>framework report schema</span><span>file path identity</span><span>process orchestration</span><span>human-review UI</span><span>native logs</span>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- Pure portable logic module. It has no DOM or browser dependencies. -->
+<script>
+const PortableEvidence = (() => {
+  const binding = Object.freeze({
+    id: "verification/binding/019-portable-demo",
+    revision: 7,
+    closureDigest: "sha256:definition-7",
+    environmentContract: "verification/environment/desktop-macos",
+    testPoints: [
+      { id: "verification/test-point/workspace-opened", revision: 3, slices: ["prd/slice/baseline", "prd/slice/ask-profile"], checkpoint: "workspace is visibly ready" },
+      { id: "verification/test-point/receipt-recorded", revision: 2, slices: ["prd/slice/ask-profile"], checkpoint: "approval receipt is durable" },
+    ],
+  });
+
+  const initial = () => ({
+    binding,
+    sequence: 0,
+    nextAttempt: 1,
+    current: null,
+    sealed: [],
+    rejected: null,
+  });
+
+  function reject(state, message) { return { ...state, rejected: message }; }
+  function event(state, type, data) {
+    const sequence = state.sequence + 1;
+    return { sequence, type, data: structuredClone(data) };
+  }
+  function withCurrent(state, current, emitted) {
+    return { ...state, sequence: emitted.sequence, current: { ...current, events: [...current.events, emitted] }, rejected: null };
+  }
+
+  function start(state, runner) {
+    if (state.current) return reject(state, "An attempt is already running. Complete it before starting another.");
+    const attemptId = `attempt-${state.nextAttempt}`;
+    const current = { attemptId, runner, status: "running", observations: {}, artifacts: [], events: [] };
+    const emitted = event(state, "attempt_started", {
+      attemptId,
+      bindingId: binding.id,
+      bindingRevision: binding.revision,
+      definitionClosureDigest: binding.closureDigest,
+      environmentContractId: binding.environmentContract,
+      sourceState: "commit:demo-current",
+      runnerAdapter: `${runner}.adapter/v1`,
+    });
+    return { ...withCurrent(state, current, emitted), nextAttempt: state.nextAttempt + 1 };
+  }
+
+  function observe(state, testPointId, result) {
+    if (!state.current) return reject(state, "A test-point observation cannot exist before an attempt starts.");
+    if (state.current.observations[testPointId]) return reject(state, "This test point already has its one terminal observation for the attempt.");
+    const testPoint = binding.testPoints.find((candidate) => candidate.id === testPointId);
+    if (!testPoint) return reject(state, "The adapter cannot invent a test point outside the executed binding revision.");
+    const observation = { testPointId, testPointRevision: testPoint.revision, result, slices: testPoint.slices, checkpoint: testPoint.checkpoint, origin: "explicit_adapter_event" };
+    const emitted = event(state, "test_point_observed", observation);
+    const current = { ...state.current, observations: { ...state.current.observations, [testPointId]: observation } };
+    return withCurrent(state, current, emitted);
+  }
+
+  function artifact(state) {
+    if (!state.current) return reject(state, "An artifact reference must belong to a started attempt.");
+    const reference = { digest: `sha256:native-artifact-${state.current.artifacts.length + 1}`, mediaType: "application/octet-stream", role: "native_runner_report" };
+    const emitted = event(state, "artifact_referenced", reference);
+    const current = { ...state.current, artifacts: [...state.current.artifacts, reference] };
+    return withCurrent(state, current, emitted);
+  }
+
+  function complete(state, disposition) {
+    if (!state.current) return reject(state, "There is no running attempt to complete.");
+    const observations = { ...state.current.observations };
+    for (const point of binding.testPoints) {
+      if (!observations[point.id]) observations[point.id] = {
+        testPointId: point.id,
+        testPointRevision: point.revision,
+        result: "not_observed",
+        slices: point.slices,
+        checkpoint: point.checkpoint,
+        origin: "materialized_at_completion",
+      };
+    }
+    const values = Object.values(observations);
+    const verdict = disposition !== "completed" ? "indeterminate" : values.some((item) => item.result === "failed") ? "failed" : values.some((item) => item.result === "not_observed") ? "indeterminate" : "passed";
+    const emitted = event(state, "attempt_completed", { attemptId: state.current.attemptId, disposition, verdict });
+    const sealed = { ...state.current, status: "sealed", disposition, verdict, observations, events: [...state.current.events, emitted] };
+    return { ...state, sequence: emitted.sequence, current: null, sealed: [...state.sealed, sealed], rejected: null };
+  }
+
+  function deriveSlices(state) {
+    const latest = state.sealed.at(-1);
+    const sliceIds = [...new Set(binding.testPoints.flatMap((point) => point.slices))];
+    return sliceIds.map((sliceId) => {
+      if (!latest) return { sliceId, adequacy: "uncertified", reasons: ["qualifying_attestation_missing"] };
+      const observations = Object.values(latest.observations).filter((item) => item.slices.includes(sliceId));
+      if (observations.some((item) => item.result === "failed")) return { sliceId, adequacy: "inadequate", reasons: ["observation_failed"] };
+      if (observations.some((item) => item.result !== "passed")) return { sliceId, adequacy: "indeterminate", reasons: ["observation_not_observed", "current_source_uncertified"] };
+      return { sliceId, adequacy: "adequate", reasons: [] };
+    });
+  }
+
+  function reduce(state, action) {
+    switch (action.type) {
+      case "reset": return initial();
+      case "start": return start(state, action.runner);
+      case "observe": return observe(state, action.testPointId, action.result);
+      case "artifact": return artifact(state);
+      case "complete": return complete(state, action.disposition);
+      default: return reject(state, `Unknown prototype action: ${action.type}`);
+    }
+  }
+  return Object.freeze({ initial, reduce, deriveSlices });
+})();
+</script>
+
+<!-- Throwaway page shell. -->
+<script>
+const pointWorkspace = "verification/test-point/workspace-opened";
+const pointReceipt = "verification/test-point/receipt-recorded";
+let state = PortableEvidence.initial();
+let selectedWalkthrough = "happy";
+let walkthroughStep = 0;
+
+const scenarios = {
+  happy: {
+    label: "Native happy path",
+    description: "Cargo keeps its own command and report, but the adapter emits the same portable facts as every other runner.",
+    runner: "cargo",
+    steps: [
+      ["Start Cargo attempt", { type:"start", runner:"cargo" }],
+      ["Observe workspace opened", { type:"observe", testPointId:pointWorkspace, result:"passed" }],
+      ["Observe receipt recorded", { type:"observe", testPointId:pointReceipt, result:"passed" }],
+      ["Link native report", { type:"artifact" }],
+      ["Complete normally", { type:"complete", disposition:"completed" }],
+    ],
+  },
+  partial: {
+    label: "Shared run fails midway",
+    description: "Electron observes the shared baseline checkpoint, then infrastructure fails before the profile-specific receipt. Watch the slices derive different outcomes.",
+    runner: "electron",
+    steps: [
+      ["Start Electron attempt", { type:"start", runner:"electron" }],
+      ["Observe workspace opened", { type:"observe", testPointId:pointWorkspace, result:"passed" }],
+      ["Link screenshot", { type:"artifact" }],
+      ["Seal infrastructure failure", { type:"complete", disposition:"infrastructure_failed" }],
+    ],
+  },
+  missing: {
+    label: "Normal exit, missing proof",
+    description: "A process exits normally after only one required observation. The candidate rule materializes the missing observation and makes the profile slice indeterminate.",
+    runner: "process",
+    steps: [
+      ["Start process attempt", { type:"start", runner:"process" }],
+      ["Observe workspace opened", { type:"observe", testPointId:pointWorkspace, result:"passed" }],
+      ["Complete normally", { type:"complete", disposition:"completed" }],
+    ],
+  },
+  illegal: {
+    label: "Illegal event order",
+    description: "Try to report an observation before an attempt exists. The portable journal rejects it without relying on runner-specific behavior.",
+    runner: "vitest",
+    steps: [
+      ["Observe before start", { type:"observe", testPointId:pointWorkspace, result:"passed" }],
+      ["Start Vitest attempt", { type:"start", runner:"vitest" }],
+      ["Observe once", { type:"observe", testPointId:pointWorkspace, result:"passed" }],
+      ["Try duplicate observation", { type:"observe", testPointId:pointWorkspace, result:"failed" }],
+    ],
+  },
+};
+
+function dispatch(action) { state = PortableEvidence.reduce(state, action); render(); }
+function esc(value) { return String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char])); }
+function statusClass(value) { return ["passed","adequate","sealed","completed"].includes(value) ? "good" : ["failed","inadequate"].includes(value) ? "bad" : "warn"; }
+
+function render() {
+  const current = state.current;
+  const latest = state.sealed.at(-1);
+  const derived = PortableEvidence.deriveSlices(state);
+  document.querySelector("#summary").innerHTML = [
+    ["Binding", `${state.binding.id} @ r${state.binding.revision}`],
+    ["Runner", current?.runner ?? latest?.runner ?? "none"],
+    ["Attempt", current?.attemptId ?? latest?.attemptId ?? "not started"],
+    ["Lifecycle", current?.status ?? latest?.status ?? "idle"],
+    ["Environment", state.binding.environmentContract],
+    ["Latest verdict", latest?.verdict ?? "none"],
+  ].map(([label,value]) => `<div class="field"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("");
+
+  const visibleObservations = current ? Object.values(current.observations) : latest ? Object.values(latest.observations) : [];
+  document.querySelector("#observations").innerHTML = visibleObservations.length ? visibleObservations.map((item) => `<div class="observation"><span class="status ${statusClass(item.result)}">${esc(item.result.replaceAll("_"," "))}</span> <strong>${esc(item.checkpoint)}</strong><small>${esc(item.testPointId)} · ${esc(item.origin)}</small><small>Explicitly maps: ${item.slices.map(esc).join(", ")}</small></div>`).join("") : `<div class="empty">No test points observed yet.</div>`;
+
+  const visibleEvents = current?.events ?? latest?.events ?? [];
+  document.querySelector("#events").innerHTML = visibleEvents.length ? visibleEvents.map((item) => `<div class="event"><strong>${item.sequence}. ${esc(item.type.replaceAll("_"," "))}</strong><small>${esc(Object.entries(item.data).map(([key,value]) => `${key}=${Array.isArray(value) ? value.join("|") : value}`).join(" · "))}</small></div>`).join("") : `<div class="empty">The canonical journal is empty.</div>`;
+  document.querySelector("#error").innerHTML = state.rejected ? `<div class="error"><strong>Rejected action</strong><br>${esc(state.rejected)}</div>` : "";
+
+  document.querySelector("#attempts").innerHTML = state.sealed.length ? state.sealed.map((attempt, index) => {
+    const sliceText = index === state.sealed.length - 1 ? derived.map((slice) => `<div><span class="status ${statusClass(slice.adequacy)}">${esc(slice.adequacy)}</span> ${esc(slice.sliceId)}${slice.reasons.length ? `<small>${slice.reasons.map(esc).join(", ")}</small>` : ""}</div>`).join("") : "";
+    return `<div class="attempt"><strong>${esc(attempt.attemptId)} · ${esc(attempt.runner)}</strong> <span class="status ${statusClass(attempt.verdict)}">${esc(attempt.verdict)}</span><small>${esc(attempt.disposition)} · ${Object.keys(attempt.observations).length} terminal observations · ${attempt.artifacts.length} linked artifacts</small>${sliceText}</div>`;
+  }).join("") : `<div class="empty">No sealed terminal attestation yet.</div>`;
+
+  renderWalkthrough();
+}
+
+function renderWalkthrough() {
+  document.querySelector("#tabs").innerHTML = Object.entries(scenarios).map(([id,scenario]) => `<button aria-selected="${id === selectedWalkthrough}" data-tab="${id}">${esc(scenario.label)}</button>`).join("");
+  const scenario = scenarios[selectedWalkthrough];
+  document.querySelector("#walkthrough").innerHTML = `<p>${esc(scenario.description)}</p><button class="primary" data-begin>Start this walkthrough</button><div class="steps" style="margin-top:12px">${scenario.steps.map(([label],index) => `<button data-step="${index}" class="${index < walkthroughStep ? "done" : index === walkthroughStep ? "current" : ""}" ${index !== walkthroughStep ? "disabled" : ""}>${index + 1}. ${esc(label)}</button>`).join("")}</div>`;
+}
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  if (button.dataset.tab) { selectedWalkthrough = button.dataset.tab; walkthroughStep = 0; render(); return; }
+  if (button.hasAttribute("data-begin")) { state = PortableEvidence.initial(); walkthroughStep = 0; document.querySelector("#runner").value = scenarios[selectedWalkthrough].runner; render(); return; }
+  if (button.dataset.step !== undefined) { const step = Number(button.dataset.step); if (step === walkthroughStep) { dispatch(scenarios[selectedWalkthrough].steps[step][1]); walkthroughStep += 1; render(); } return; }
+  const runner = document.querySelector("#runner").value;
+  const actions = {
+    start:{type:"start",runner},
+    "observe-login-pass":{type:"observe",testPointId:pointWorkspace,result:"passed"},
+    "observe-login-fail":{type:"observe",testPointId:pointWorkspace,result:"failed"},
+    "observe-receipt-pass":{type:"observe",testPointId:pointReceipt,result:"passed"},
+    artifact:{type:"artifact"},
+    "complete-pass":{type:"complete",disposition:"completed"},
+    "complete-infra":{type:"complete",disposition:"infrastructure_failed"},
+    reset:{type:"reset"},
+  };
+  if (actions[button.dataset.action]) dispatch(actions[button.dataset.action]);
+});
+
+render();
+</script>
+</body>
+</html>
