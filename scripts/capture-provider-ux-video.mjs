@@ -567,6 +567,10 @@ const server = createServer(async (request, response) => {
         }],
       });
     }
+    if (url.pathname === "/api/provider-onboarding/default" && request.method === "POST") {
+      await requestJson(request);
+      return json(response, null);
+    }
     if (url.pathname === "/api/provider-onboarding" && request.method === "POST") {
       const input = await requestJson(request);
       const family = {

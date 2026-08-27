@@ -22,4 +22,8 @@ modelRules:
       modelIdRegex: "^claude-"
   deny: []
 executionAccessContracts: [managed-runtime@1, secret@1]
+modelDefaults:
+  familyPolicy:
+    id: claude-default-family
+    version: 1
 settings: {}

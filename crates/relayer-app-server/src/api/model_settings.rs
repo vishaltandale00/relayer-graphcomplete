@@ -95,6 +95,12 @@ pub(super) struct CompleteOnboardingRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct CompleteDefaultOnboardingRequest {
+    provider_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct HarnessRulesRequest {
     expected_revision: u32,
     #[serde(default)]
@@ -140,6 +146,20 @@ pub(super) async fn complete_onboarding(
                 family_name: request.family_name,
                 model_id: request.model_id,
             })
+            .await?,
+    ))
+}
+
+pub(super) async fn complete_default_onboarding(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Json(request): Json<CompleteDefaultOnboardingRequest>,
+) -> Result<Json<Option<ProviderOnboardingCompletion>>, ApiError> {
+    authorize_write(&state, &headers)?;
+    Ok(Json(
+        state
+            .product
+            .complete_default_provider_onboarding(ProviderId::parse(request.provider_id)?)
             .await?,
     ))
 }

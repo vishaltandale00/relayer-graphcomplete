@@ -15,6 +15,13 @@ export function completeProviderOnboarding(input) {
   });
 }
 
+export function completeDefaultProviderOnboarding(providerId) {
+  return request("/api/provider-onboarding/default", {
+    method: "POST",
+    body: JSON.stringify({ providerId }),
+  });
+}
+
 export function saveModelDefaults(defaults) {
   return request("/api/model-settings/defaults", {
     method: "PUT",

@@ -833,6 +833,81 @@ impl SqliteProductStore {
         Ok((defaults, family))
     }
 
+    pub(crate) async fn complete_managed_provider_onboarding(
+        &self,
+        expected_defaults: &ModelSettingsDefaults,
+        snapshot: &ProviderCatalogSnapshot,
+        system_family: &SystemFamilySnapshot,
+        policy: &FamilyPolicyReference,
+        harness_id: &str,
+        selected_model_id: &str,
+    ) -> Result<Option<(ModelSettingsDefaults, ModelFamily)>, StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let current_models = sqlx::query_as::<_, (String, i64, bool, bool, bool)>(
+            "SELECT model_id,provider_order,visible,available,provider_default FROM provider_models WHERE provider_id=?1 ORDER BY provider_order,model_id",
+        )
+        .bind(snapshot.provider_id.as_str())
+        .fetch_all(&mut *transaction)
+        .await?;
+        let expected_models = snapshot
+            .models
+            .iter()
+            .map(|model| {
+                (
+                    model.id.clone(),
+                    model.order as i64,
+                    model.visible,
+                    model.available,
+                    model.provider_default,
+                )
+            })
+            .collect::<Vec<_>>();
+        let current_policy = sqlx::query_as::<_, (Option<String>, Option<i64>)>(
+            "SELECT family_policy_id,family_policy_version FROM product_harnesses WHERE configuration_name=?1 AND product_visible=1 AND available=1",
+        )
+        .bind(harness_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let current_defaults = load_defaults(&mut transaction).await?;
+        if current_models != expected_models
+            || current_policy != Some((Some(policy.id.clone()), Some(policy.version as i64)))
+            || current_defaults != *expected_defaults
+        {
+            transaction.rollback().await?;
+            return Ok(None);
+        }
+        validate_onboarding_model_on(
+            &mut transaction,
+            harness_id,
+            &snapshot.provider_id,
+            selected_model_id,
+        )
+        .await?;
+        replace_system_family(&mut transaction, snapshot, system_family, policy).await?;
+        let family_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM model_families WHERE managed_provider_id=?1 AND policy_id=?2 AND policy_version=?3 AND lifecycle_state='active'",
+        )
+        .bind(snapshot.provider_id.as_str())
+        .bind(&policy.id)
+        .bind(policy.version)
+        .fetch_one(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE product_model_preferences SET default_harness_configuration_name=?1,default_provider_id=?2,default_family_id=?3,defaults_modified=1 WHERE singleton=1",
+        )
+        .bind(harness_id)
+        .bind(snapshot.provider_id.as_str())
+        .bind(family_id)
+        .execute(&mut *transaction)
+        .await?;
+        let defaults = load_defaults(&mut transaction).await?;
+        let family = load_family(&mut transaction, ModelFamilyId::from_database(family_id))
+            .await?
+            .ok_or(sqlx::Error::RowNotFound)?;
+        transaction.commit().await?;
+        Ok(Some((defaults, family)))
+    }
+
     pub(crate) async fn validate_execution_model_selection(
         &self,
         harness_id: &str,
@@ -1215,7 +1290,7 @@ async fn load_defaults(
     connection: &mut SqliteConnection,
 ) -> Result<ModelSettingsDefaults, StorageError> {
     let row = sqlx::query(
-        "SELECT default_harness_configuration_name,default_provider_id,default_family_id FROM product_model_preferences WHERE singleton=1",
+        "SELECT default_harness_configuration_name,default_provider_id,default_family_id,defaults_modified FROM product_model_preferences WHERE singleton=1",
     )
     .fetch_one(connection)
     .await?;
@@ -1225,6 +1300,7 @@ async fn load_defaults(
         family_id: row
             .try_get::<Option<i64>, _>(2)?
             .map(ModelFamilyId::from_database),
+        modified: row.try_get(3)?,
     })
 }
 
@@ -1841,6 +1917,113 @@ mod provider_definition_tests {
                 model_ids: vec!["model-one".into()],
             }),
         }
+    }
+
+    #[tokio::test]
+    async fn managed_onboarding_rejects_stale_defaults_before_retrying_fresh_state() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-managed-onboarding-guard-{}-{}.sqlite3",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let policy = FamilyPolicyReference {
+            id: "codex-default-family".into(),
+            version: 1,
+        };
+        store
+            .initialize_model_catalog(
+                "codex-basic",
+                &[RuntimeProductHarness {
+                    id: "codex-basic".into(),
+                    configuration_digest: "sha256:managed-onboarding-guard".into(),
+                    model_compatibility: Vec::new(),
+                    configuration_revision: 1,
+                    model_rules: Some(HarnessModelRules {
+                        allow: vec![HarnessModelRule {
+                            adapter_id: "openai-api".into(),
+                            model_id_exact: Some("model-one".into()),
+                            model_id_regex: None,
+                        }],
+                        deny: Vec::new(),
+                    }),
+                    execution_access_contracts: vec!["secret@1".into()],
+                    family_policy: Some(policy.clone()),
+                }],
+            )
+            .await
+            .unwrap();
+        let provider = definition("guard-openai");
+        let snapshot = catalog_snapshot("guard-openai", "Guard OpenAI");
+        store
+            .create_provider_with_catalog(&provider, &snapshot, Some(&policy), "1")
+            .await
+            .unwrap();
+        let stale_defaults = store.load_model_settings().await.unwrap().defaults;
+        let family_id = store
+            .load_model_settings()
+            .await
+            .unwrap()
+            .families
+            .into_iter()
+            .find(|family| {
+                family
+                    .managed_policy
+                    .as_ref()
+                    .is_some_and(|managed| managed.provider_id == provider.id)
+            })
+            .unwrap()
+            .id;
+        store
+            .update_model_settings_defaults(&UpdateModelSettingsDefaultsCommand {
+                harness_id: Some("codex-basic".into()),
+                provider_id: Some(provider.id.clone()),
+                family_id: Some(family_id),
+            })
+            .await
+            .unwrap();
+        let fresh_defaults = store.load_model_settings().await.unwrap().defaults;
+        assert_ne!(stale_defaults, fresh_defaults);
+
+        let system_family = snapshot.system_family.as_ref().unwrap();
+        assert!(
+            store
+                .complete_managed_provider_onboarding(
+                    &stale_defaults,
+                    &snapshot,
+                    system_family,
+                    &policy,
+                    "codex-basic",
+                    "model-one",
+                )
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            store.load_model_settings().await.unwrap().defaults,
+            fresh_defaults
+        );
+        assert!(
+            store
+                .complete_managed_provider_onboarding(
+                    &fresh_defaults,
+                    &snapshot,
+                    system_family,
+                    &policy,
+                    "codex-basic",
+                    "model-one",
+                )
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        drop(store);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[tokio::test]

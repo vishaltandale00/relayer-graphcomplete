@@ -1,4 +1,5 @@
 import {
+  completeDefaultProviderOnboarding,
   completeProviderOnboarding,
   loadDefaultModelSelection,
   loadModelSettings,
@@ -94,6 +95,8 @@ async function prepareFamilyStep(definition) {
   if (defaultFamilySelectionForProvider(settings, settings.defaults.harnessId, definition.id)) {
     return completeOnboarding();
   }
+  const declaredDefault = await completeDefaultProviderOnboarding(definition.id);
+  if (declaredDefault) return completeOnboarding();
   const provider = settings.providers.find((item) => String(item.id) === String(definition.id));
   onboardingProjection = await loadProviderOnboardingProjection(definition.id);
   const appDefault = onboardingProjection.harnesses.find((harness) => harness.isAppDefault);

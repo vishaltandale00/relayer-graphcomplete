@@ -456,6 +456,117 @@ impl ProductService {
         })
     }
 
+    pub(crate) async fn complete_default_provider_onboarding(
+        &self,
+        provider_id: ProviderId,
+    ) -> Result<Option<super::ProviderOnboardingCompletion>, ProductError> {
+        for _attempt in 0..2 {
+            let settings = self.storage.load_model_settings().await?;
+            let provider = settings
+                .providers
+                .iter()
+                .find(|provider| provider.id == provider_id)
+                .ok_or_else(|| {
+                    ProductError::NotFound(format!("provider {}", provider_id.as_str()))
+                })?;
+            if !provider.connected {
+                return Err(super::CatalogError::invalid(
+                    "provider_disconnected",
+                    "The selected provider is not connected.",
+                )
+                .into());
+            }
+            let Some(default) = super::model_policy::resolve_default_onboarding_policy(
+                &settings.harnesses,
+                &settings.defaults.harness_id,
+                &provider.adapter_id,
+            ) else {
+                return Ok(None);
+            };
+            let snapshot = ProviderCatalogSnapshot {
+                provider_id: provider.id.clone(),
+                label: provider.label.clone(),
+                connected: provider.connected,
+                unavailable_reason: provider.unavailable_reason.clone(),
+                models: provider
+                    .models
+                    .iter()
+                    .enumerate()
+                    .map(|(order, model)| super::catalog::CatalogModelSnapshot {
+                        id: model.id.clone(),
+                        label: model.label.clone(),
+                        order,
+                        visible: model.visible,
+                        available: model.available,
+                        unavailable_reason: model.unavailable_reason.clone(),
+                        provider_default: model.provider_default,
+                        replacement_model_id: model.replacement_model_id.clone(),
+                        metadata: serde_json::json!({}),
+                    })
+                    .collect(),
+                system_family: None,
+            };
+            let members =
+                super::model_policy::derive_managed_family_members(&default.policy, &snapshot)?;
+            let mut selected_model_id = None;
+            for member in &members {
+                let executable = provider
+                    .models
+                    .iter()
+                    .any(|model| model.id == member.model_id && model.available);
+                if executable
+                    && self
+                        .storage
+                        .provider_onboarding_model_compatible(
+                            &default.harness_id,
+                            &provider_id,
+                            &member.model_id,
+                        )
+                        .await?
+                {
+                    selected_model_id = Some(member.model_id.clone());
+                    break;
+                }
+            }
+            let Some(selected_model_id) = selected_model_id else {
+                return Ok(None);
+            };
+            let system_family = SystemFamilySnapshot {
+                key: format!("{}@{}", default.policy.id, default.policy.version),
+                name: format!("{} defaults", provider.label),
+                model_ids: members
+                    .iter()
+                    .map(|member| member.model_id.clone())
+                    .collect(),
+            };
+            let Some((defaults, family)) = self
+                .storage
+                .complete_managed_provider_onboarding(
+                    &settings.defaults,
+                    &snapshot,
+                    &system_family,
+                    &default.policy,
+                    &default.harness_id,
+                    &selected_model_id,
+                )
+                .await?
+            else {
+                continue;
+            };
+            return Ok(Some(super::ProviderOnboardingCompletion {
+                defaults,
+                selection: super::ModelSelection {
+                    harness_id: default.harness_id,
+                    family_id: family.id,
+                    provider_id,
+                    model_id: selected_model_id,
+                },
+                family,
+            }));
+        }
+        Ok(None)
+    }
+
     pub(crate) async fn complete_provider_onboarding(
         &self,
         mut command: super::CompleteProviderOnboardingCommand,
@@ -1981,7 +2092,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn onboarding_requires_an_explicit_compatible_alternate_harness() {
+    async fn onboarding_projects_a_declared_default_for_a_compatible_alternate_harness() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -2005,7 +2116,10 @@ mod tests {
                 deny: vec![],
             }),
             execution_access_contracts: vec!["managed-runtime@1".into()],
-            family_policy: None,
+            family_policy: (adapter_id == "claude-subscription").then(|| FamilyPolicyReference {
+                id: super::super::model_policy::CLAUDE_DEFAULT_FAMILY_POLICY_ID.into(),
+                version: 1,
+            }),
         };
         storage
             .initialize_model_catalog(
@@ -2013,6 +2127,7 @@ mod tests {
                 &[
                     harness("codex-basic", "codex-subscription"),
                     harness("claude-basic", "claude-subscription"),
+                    harness("claude-basic-high", "claude-subscription"),
                 ],
             )
             .await
@@ -2026,6 +2141,13 @@ mod tests {
         snapshot.provider_id = provider_id.clone();
         snapshot.label = "Claude Work".into();
         snapshot.system_family = None;
+        snapshot.models[1].provider_default = true;
+        snapshot.models[0].available = false;
+        snapshot.models[0].unavailable_reason = Some(UnavailableReason {
+            code: "model_unavailable".into(),
+            message: "Default alias is temporarily unavailable.".into(),
+        });
+        let mut refreshed_snapshot = snapshot.clone();
         service
             .create_provider_with_catalog(definition, snapshot)
             .await
@@ -2036,21 +2158,55 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(projection.app_default_harness_id, "codex-basic");
-        assert_eq!(projection.harnesses.len(), 1);
+        assert_eq!(projection.harnesses.len(), 2);
         assert_eq!(projection.harnesses[0].id, "claude-basic");
         assert!(!projection.harnesses[0].is_app_default);
 
         let completed = service
-            .complete_provider_onboarding(CompleteProviderOnboardingCommand {
-                provider_id: provider_id.clone(),
-                harness_id: "claude-basic".into(),
-                family_name: "Claude Work default".into(),
-                model_id: "default".into(),
-            })
+            .complete_default_provider_onboarding(provider_id.clone())
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(completed.defaults.harness_id, "claude-basic");
-        assert_eq!(completed.selection.model_id, "default");
+        assert_eq!(completed.selection.model_id, "second");
+        assert_eq!(completed.family.kind, ModelFamilyKind::System);
+        assert_eq!(
+            completed
+                .family
+                .members
+                .iter()
+                .map(|member| member.model_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["default", "second"]
+        );
+        assert_eq!(
+            completed
+                .family
+                .managed_policy
+                .as_ref()
+                .map(|policy| (policy.policy_id.as_str(), policy.policy_version)),
+            Some(("claude-default-family", 1))
+        );
+        refreshed_snapshot.models[0].provider_default = false;
+        service
+            .publish_provider_catalog(refreshed_snapshot)
+            .await
+            .unwrap();
+        let refreshed = service.model_settings().await.unwrap();
+        let refreshed_family = refreshed
+            .families
+            .iter()
+            .find(|family| family.id == completed.family.id)
+            .unwrap();
+        assert_eq!(
+            refreshed_family
+                .members
+                .iter()
+                .map(|member| member.model_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["second"]
+        );
+        assert_eq!(refreshed.defaults.family_id, Some(completed.family.id));
         let harness_error = service
             .update_model_settings_defaults(UpdateModelSettingsDefaultsCommand {
                 harness_id: Some("codex-basic".into()),
@@ -2074,7 +2230,39 @@ mod tests {
             .delete_model_family(completed.family.id)
             .await
             .unwrap_err();
-        assert!(delete_error.to_string().contains("before removing"));
+        assert!(delete_error.to_string().contains("cannot be deleted"));
+
+        let (mut unavailable_definition, mut unavailable_snapshot) = staged_codex_catalog();
+        let unavailable_provider_id = ProviderId::parse("claude-unavailable").unwrap();
+        unavailable_definition.id = unavailable_provider_id.clone();
+        unavailable_definition.adapter_id = "claude-subscription".into();
+        unavailable_definition.label = "Claude Unavailable".into();
+        unavailable_snapshot.provider_id = unavailable_provider_id.clone();
+        unavailable_snapshot.label = "Claude Unavailable".into();
+        unavailable_snapshot.system_family = None;
+        for model in &mut unavailable_snapshot.models {
+            model.provider_default = true;
+            model.available = false;
+            model.unavailable_reason = Some(UnavailableReason {
+                code: "model_unavailable".into(),
+                message: "The model is temporarily unavailable.".into(),
+            });
+        }
+        service
+            .create_provider_with_catalog(unavailable_definition, unavailable_snapshot)
+            .await
+            .unwrap();
+        let before_unavailable = service.model_settings().await.unwrap();
+        assert!(
+            service
+                .complete_default_provider_onboarding(unavailable_provider_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let after_unavailable = service.model_settings().await.unwrap();
+        assert_eq!(after_unavailable.defaults, before_unavailable.defaults);
+        assert_eq!(after_unavailable.families, before_unavailable.families);
 
         drop(service);
         drop(storage);

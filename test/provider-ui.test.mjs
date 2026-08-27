@@ -29,6 +29,8 @@ describe("provider and harness renderer markup", () => {
     expect(html).toContain('id="providerFamilyBack">← Connect another provider</button>');
     expect(auth).toContain('$("#providerFamilyBack").onclick');
     expect(auth).toContain("loadProviderOnboardingProjection");
+    expect(auth).toContain("completeDefaultProviderOnboarding(definition.id)");
+    expect(auth).toContain("if (declaredDefault) return completeOnboarding()");
     expect(auth).toContain('data-onboarding-harness=');
     expect(auth).toContain("Relayer will not choose a model for you.");
     expect(auth).toContain("const harnessTabStopId = onboardingHarness ?? onboardingProjection.harnesses[0]?.id");

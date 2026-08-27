@@ -1,8 +1,60 @@
-use super::{CatalogError, FamilyPolicyReference, ModelFamilyMember, ProviderCatalogSnapshot};
+use super::{
+    CatalogError, FamilyPolicyReference, ModelFamilyMember, ProductHarness, ProviderCatalogSnapshot,
+};
 
 pub(crate) const CODEX_DEFAULT_FAMILY_POLICY_ID: &str = "codex-default-family";
+pub(crate) const CLAUDE_DEFAULT_FAMILY_POLICY_ID: &str = "claude-default-family";
 pub(crate) fn applies_to_adapter(policy: &FamilyPolicyReference, adapter_id: &str) -> bool {
-    policy.id == CODEX_DEFAULT_FAMILY_POLICY_ID && adapter_id == "codex-subscription"
+    matches!(
+        (policy.id.as_str(), adapter_id),
+        (CODEX_DEFAULT_FAMILY_POLICY_ID, "codex-subscription")
+            | (CLAUDE_DEFAULT_FAMILY_POLICY_ID, "claude-subscription")
+    )
+}
+
+fn supported_policy(policy: &FamilyPolicyReference) -> bool {
+    matches!(
+        (policy.id.as_str(), policy.version),
+        (CODEX_DEFAULT_FAMILY_POLICY_ID, 1 | 2) | (CLAUDE_DEFAULT_FAMILY_POLICY_ID, 1)
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DefaultOnboardingPolicy {
+    pub(crate) harness_id: String,
+    pub(crate) policy: FamilyPolicyReference,
+}
+
+pub(crate) fn resolve_default_onboarding_policy(
+    harnesses: &[ProductHarness],
+    app_default_harness_id: &str,
+    adapter_id: &str,
+) -> Option<DefaultOnboardingPolicy> {
+    let mut candidates = harnesses
+        .iter()
+        .filter(|harness| harness.available)
+        .filter_map(|harness| {
+            harness
+                .family_policy
+                .as_ref()
+                .filter(|policy| applies_to_adapter(policy, adapter_id) && supported_policy(policy))
+                .map(|policy| (harness, policy))
+        })
+        .collect::<Vec<_>>();
+    let (_, policy) = *candidates.first()?;
+    if candidates.iter().any(|(_, candidate)| *candidate != policy) {
+        return None;
+    }
+    candidates.sort_by(|(left, _), (right, _)| left.id.cmp(&right.id));
+    let (harness, policy) = candidates
+        .iter()
+        .copied()
+        .find(|(harness, _)| harness.id == app_default_harness_id)
+        .unwrap_or(candidates[0]);
+    Some(DefaultOnboardingPolicy {
+        harness_id: harness.id.clone(),
+        policy: policy.clone(),
+    })
 }
 
 /// Product-owned managed-family policy registry. Provider adapters normalize
@@ -12,7 +64,7 @@ pub(crate) fn derive_managed_family_members(
     snapshot: &ProviderCatalogSnapshot,
 ) -> Result<Vec<ModelFamilyMember>, CatalogError> {
     match (policy.id.as_str(), policy.version) {
-        (CODEX_DEFAULT_FAMILY_POLICY_ID, 1 | 2) => {
+        (CODEX_DEFAULT_FAMILY_POLICY_ID, 1 | 2) | (CLAUDE_DEFAULT_FAMILY_POLICY_ID, 1) => {
             let mut models = snapshot
                 .models
                 .iter()
@@ -100,6 +152,40 @@ mod tests {
         );
         assert_eq!(members[0].position, 0);
         assert_eq!(members[1].position, 1);
+    }
+
+    #[test]
+    fn claude_policy_applies_only_to_the_claude_subscription_adapter() {
+        let policy = FamilyPolicyReference {
+            id: CLAUDE_DEFAULT_FAMILY_POLICY_ID.into(),
+            version: 1,
+        };
+
+        assert!(applies_to_adapter(&policy, "claude-subscription"));
+        assert!(!applies_to_adapter(&policy, "anthropic-api"));
+        assert!(!applies_to_adapter(&policy, "codex-subscription"));
+        assert!(applies_to_adapter(
+            &FamilyPolicyReference {
+                id: CLAUDE_DEFAULT_FAMILY_POLICY_ID.into(),
+                version: 2,
+            },
+            "claude-subscription"
+        ));
+        assert_eq!(
+            derive_managed_family_members(
+                &policy,
+                &snapshot(vec![
+                    model("opus", 1, true, false),
+                    model("sonnet", 0, true, true),
+                    model("hidden", 2, false, true),
+                ]),
+            )
+            .unwrap()
+            .iter()
+            .map(|member| member.model_id.as_str())
+            .collect::<Vec<_>>(),
+            vec!["sonnet"]
+        );
     }
 
     #[test]
