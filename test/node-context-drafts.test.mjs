@@ -160,6 +160,32 @@ describe("node-context draft renderer state", () => {
     expect(controller.draftForNode("alpha", 7)).toBeNull();
   });
 
+  it("coalesces concurrent confirms while the initial save is pending", async () => {
+    let resolveSave;
+    const api = {
+      list: vi.fn(),
+      save: vi.fn(() => new Promise((resolve) => { resolveSave = resolve; })),
+      confirm: vi.fn(async () => ({ draftId: "draft-a", target, targetNode, annotation: "FIFO" })),
+    };
+    const controller = createNodeContextDraftController({
+      api,
+      createId: () => "draft-a",
+      schedule: () => 1,
+      cancel: vi.fn(),
+    });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "FIFO");
+
+    const first = controller.confirm("alpha", 7);
+    const duplicate = controller.confirm("alpha", 7);
+    resolveSave({ id: "draft-a", threadId: 1, target, targetNode, text: "FIFO", revision: 1 });
+
+    await expect(first).resolves.toMatchObject({ draftId: "draft-a" });
+    await expect(duplicate).resolves.toBeNull();
+    expect(api.confirm).toHaveBeenCalledTimes(1);
+    expect(controller.draftForNode("alpha", 7)).toBeNull();
+  });
+
   it("resolves an uncertain first save before discarding the durable draft", async () => {
     const api = {
       list: vi.fn(),
@@ -182,6 +208,36 @@ describe("node-context draft renderer state", () => {
     await controller.discard("alpha", 7);
 
     expect(api.save).toHaveBeenCalledTimes(2);
+    expect(api.discard).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({ id: "draft-a", revision: 1 }),
+    );
+    expect(controller.draftForNode("alpha", 7)).toBeNull();
+  });
+
+  it("waits for an in-flight successful save before discarding", async () => {
+    let resolveSave;
+    const api = {
+      list: vi.fn(),
+      save: vi.fn(() => new Promise((resolve) => { resolveSave = resolve; })),
+      discard: vi.fn(async () => null),
+    };
+    const controller = createNodeContextDraftController({
+      api,
+      createId: () => "draft-a",
+      schedule: () => 1,
+      cancel: vi.fn(),
+    });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "FIFO");
+    const save = controller.flush("alpha", 7);
+
+    const discard = controller.discard("alpha", 7);
+    expect(api.discard).not.toHaveBeenCalled();
+    resolveSave({ id: "draft-a", threadId: 1, target, targetNode, text: "FIFO", revision: 1 });
+    await save;
+    await discard;
+
     expect(api.discard).toHaveBeenCalledWith(
       "alpha",
       expect.objectContaining({ id: "draft-a", revision: 1 }),

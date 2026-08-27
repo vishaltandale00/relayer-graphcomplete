@@ -168,17 +168,19 @@ export function createNodeContextDraftController({
       const draft = controller.draftForNode(threadId, nodeId);
       if (!draft) return null;
       if (draft.confirming) return null;
-      if (draft.status !== "saved") await controller.flush(threadId, nodeId);
-      const current = controller.draftForNode(threadId, nodeId);
-      if (!current || current.status !== "saved" || current.revision == null) return null;
-      const confirmationPromise = api.confirm(threadId, current);
-      current.confirming = confirmationPromise;
-      changed();
-      try {
-        const confirmation = await confirmationPromise;
+      const confirmationPromise = (async () => {
+        if (draft.status !== "saved") await controller.flush(threadId, nodeId);
+        const current = controller.draftForNode(threadId, nodeId);
+        if (!current || current.status !== "saved" || current.revision == null) return null;
+        const confirmation = await api.confirm(threadId, current);
         threadDrafts(threadId).delete(nodeKey(nodeId));
         changed();
         return confirmation;
+      })();
+      draft.confirming = confirmationPromise;
+      changed();
+      try {
+        return await confirmationPromise;
       } catch (error) {
         const unresolved = controller.draftForNode(threadId, nodeId);
         if (unresolved?.confirming === confirmationPromise) unresolved.confirming = null;

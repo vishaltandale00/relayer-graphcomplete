@@ -5,6 +5,15 @@ use crate::{
 };
 use sqlx::{Row, sqlite::SqliteRow};
 
+macro_rules! draft_select {
+    ($tail:literal) => {
+        concat!(
+            "SELECT id,thread_id,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,revision,created_at,updated_at FROM node_context_drafts ",
+            $tail
+        )
+    };
+}
+
 impl SqliteProductStore {
     pub(crate) async fn save_node_context_draft(
         &self,
@@ -36,13 +45,11 @@ impl SqliteProductStore {
                 "This stable node-context draft identity has already been resolved.",
             ));
         }
-        let existing = sqlx::query(
-            "SELECT id,thread_id,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,revision,created_at,updated_at FROM node_context_drafts WHERE id=?1 AND thread_id=?2",
-        )
-        .bind(draft.id)
-        .bind(thread_id.value())
-        .fetch_optional(&mut *tx)
-        .await?;
+        let existing = sqlx::query(draft_select!("WHERE id=?1 AND thread_id=?2"))
+            .bind(draft.id)
+            .bind(thread_id.value())
+            .fetch_optional(&mut *tx)
+            .await?;
         if let Some(row) = existing {
             let existing = node_context_draft_from_row(&row)?;
             let target_matches =
@@ -77,13 +84,11 @@ impl SqliteProductStore {
             .bind(existing.revision)
             .execute(&mut *tx)
             .await?;
-            let row = sqlx::query(
-                "SELECT id,thread_id,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,revision,created_at,updated_at FROM node_context_drafts WHERE id=?1 AND thread_id=?2",
-            )
-            .bind(draft.id)
-            .bind(thread_id.value())
-            .fetch_one(&mut *tx)
-            .await?;
+            let row = sqlx::query(draft_select!("WHERE id=?1 AND thread_id=?2"))
+                .bind(draft.id)
+                .bind(thread_id.value())
+                .fetch_one(&mut *tx)
+                .await?;
             let result = node_context_draft_from_row(&row)?;
             tx.commit().await?;
             return Ok(result);
@@ -121,13 +126,11 @@ impl SqliteProductStore {
         .bind(&timestamp)
         .execute(&mut *tx)
         .await?;
-        let row = sqlx::query(
-            "SELECT id,thread_id,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,revision,created_at,updated_at FROM node_context_drafts WHERE id=?1 AND thread_id=?2",
-        )
-        .bind(draft.id)
-        .bind(thread_id.value())
-        .fetch_one(&mut *tx)
-        .await?;
+        let row = sqlx::query(draft_select!("WHERE id=?1 AND thread_id=?2"))
+            .bind(draft.id)
+            .bind(thread_id.value())
+            .fetch_one(&mut *tx)
+            .await?;
         let result = node_context_draft_from_row(&row)?;
         tx.commit().await?;
         Ok(result)
@@ -137,12 +140,10 @@ impl SqliteProductStore {
         &self,
         thread_id: ThreadId,
     ) -> Result<Vec<NodeContextDraft>, StorageError> {
-        let rows = sqlx::query(
-            "SELECT id,thread_id,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,revision,created_at,updated_at FROM node_context_drafts WHERE thread_id=?1 ORDER BY created_at,id",
-        )
-        .bind(thread_id.value())
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query(draft_select!("WHERE thread_id=?1 ORDER BY created_at,id"))
+            .bind(thread_id.value())
+            .fetch_all(&self.pool)
+            .await?;
         rows.iter().map(node_context_draft_from_row).collect()
     }
 
@@ -151,13 +152,11 @@ impl SqliteProductStore {
         thread_id: ThreadId,
         draft_id: &str,
     ) -> Result<Option<NodeContextDraft>, StorageError> {
-        let row = sqlx::query(
-            "SELECT id,thread_id,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,revision,created_at,updated_at FROM node_context_drafts WHERE id=?1 AND thread_id=?2",
-        )
-        .bind(draft_id)
-        .bind(thread_id.value())
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query(draft_select!("WHERE id=?1 AND thread_id=?2"))
+            .bind(draft_id)
+            .bind(thread_id.value())
+            .fetch_optional(&self.pool)
+            .await?;
         row.as_ref().map(node_context_draft_from_row).transpose()
     }
 
@@ -224,17 +223,17 @@ impl SqliteProductStore {
             tx.commit().await?;
             return Ok(confirmation);
         }
-        let row = sqlx::query(
-            "SELECT id,thread_id,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,revision,created_at,updated_at FROM node_context_drafts WHERE id=?1 AND thread_id=?2",
-        )
-        .bind(draft_id)
-        .bind(thread_id.value())
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| context_draft_conflict(
-            "context_draft_revision_conflict",
-            "This node-context draft no longer exists. Reload drafts before confirming.",
-        ))?;
+        let row = sqlx::query(draft_select!("WHERE id=?1 AND thread_id=?2"))
+            .bind(draft_id)
+            .bind(thread_id.value())
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| {
+                context_draft_conflict(
+                    "context_draft_revision_conflict",
+                    "This node-context draft no longer exists. Reload drafts before confirming.",
+                )
+            })?;
         let draft = node_context_draft_from_row(&row)?;
         if draft.revision != expected_revision {
             return Err(context_draft_conflict(
@@ -289,13 +288,11 @@ impl SqliteProductStore {
         expected_revision: i64,
     ) -> Result<bool, StorageError> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let row = sqlx::query(
-            "SELECT id,thread_id,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,revision,created_at,updated_at FROM node_context_drafts WHERE id=?1 AND thread_id=?2",
-        )
-        .bind(draft_id)
-        .bind(thread_id.value())
-        .fetch_optional(&mut *tx)
-        .await?;
+        let row = sqlx::query(draft_select!("WHERE id=?1 AND thread_id=?2"))
+            .bind(draft_id)
+            .bind(thread_id.value())
+            .fetch_optional(&mut *tx)
+            .await?;
         let Some(row) = row else {
             let resolution: Option<String> = sqlx::query_scalar(
                 "SELECT outcome FROM node_context_draft_resolutions WHERE draft_id=?1 AND thread_id=?2",
