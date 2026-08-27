@@ -240,6 +240,13 @@ function validateReceiptArtifacts(receipt, runtimeId) {
   }
 }
 
+function compatibleProbeVersion({ runtimeId, packageVersion, probedVersion, minimumVersion, expectedRuntimeVersion }) {
+  if (!semver.gte(packageVersion, minimumVersion) || !semver.gte(probedVersion, minimumVersion)) return false;
+  if (runtimeId === "codex" && !semver.eq(probedVersion, packageVersion)) return false;
+  if (expectedRuntimeVersion && !semver.eq(probedVersion, expectedRuntimeVersion)) return false;
+  return true;
+}
+
 function confinedInstallationPath(installationRoot, value, label) {
   const path = requiredString(value, label);
   if (path.includes("\0") || isAbsolute(path)) throw new Error(`${label} is invalid.`);
@@ -307,7 +314,13 @@ export function createManagedRuntimeInstaller({
     if (result.modulePath) await regularFile(result.modulePath, "Managed runtime module");
     const probe = await effectiveProbes[runtimeId]({ ...result, signal: undefined });
     const probedVersion = validateVersion(probe?.version, `${runtimeId} probe version`);
-    if (!semver.eq(probedVersion, version) || !semver.gte(probedVersion, required)) {
+    if (!compatibleProbeVersion({
+      runtimeId,
+      packageVersion: version,
+      probedVersion,
+      minimumVersion: required,
+      expectedRuntimeVersion: receipt.runtimeVersion,
+    })) {
       throw new Error(`${runtimeId} probe reported an incompatible version.`);
     }
     return result;
@@ -360,7 +373,12 @@ export function createManagedRuntimeInstaller({
         signal,
       });
       const probedVersion = validateVersion(probe?.version, `${runtimeId} probe version`);
-      if (!semver.eq(probedVersion, resolved.version) || !semver.gte(probedVersion, operation.minimumVersion)) {
+      if (!compatibleProbeVersion({
+        runtimeId,
+        packageVersion: resolved.version,
+        probedVersion,
+        minimumVersion: operation.minimumVersion,
+      })) {
         throw new Error(`${runtimeId} probe reported an incompatible version.`);
       }
       signal.throwIfAborted();
@@ -371,6 +389,7 @@ export function createManagedRuntimeInstaller({
         schemaVersion: 1,
         runtimeId,
         version: resolved.version,
+        runtimeVersion: probedVersion,
         target: target.key,
         installation,
         executableRelativePath: resolved.executableRelativePath,
@@ -424,7 +443,13 @@ export function createManagedRuntimeInstaller({
     if (result.modulePath) await regularFile(result.modulePath, "Managed runtime module");
     const probe = await effectiveProbes[receipt.runtimeId]({ ...result, signal });
     const version = validateVersion(probe?.version, `${receipt.runtimeId} probe version`);
-    if (!semver.eq(version, receipt.version) || !semver.gte(version, minimumVersion)) {
+    if (!compatibleProbeVersion({
+      runtimeId: receipt.runtimeId,
+      packageVersion: receipt.version,
+      probedVersion: version,
+      minimumVersion,
+      expectedRuntimeVersion: receipt.runtimeVersion,
+    })) {
       throw new Error(`${receipt.runtimeId} probe reported an incompatible version.`);
     }
     return result;
@@ -503,7 +528,12 @@ export function createManagedRuntimeInstaller({
         signal,
       });
       const probedVersion = validateVersion(probe?.version, `${runtimeId} probe version`);
-      if (!semver.eq(probedVersion, resolved.version) || !semver.gte(probedVersion, operation.minimumVersion)) {
+      if (!compatibleProbeVersion({
+        runtimeId,
+        packageVersion: resolved.version,
+        probedVersion,
+        minimumVersion: operation.minimumVersion,
+      })) {
         throw new Error(`${runtimeId} probe reported an incompatible version.`);
       }
       signal.throwIfAborted();
@@ -517,6 +547,7 @@ export function createManagedRuntimeInstaller({
         pendingOwnsInstallation: true,
         runtimeId,
         version: resolved.version,
+        runtimeVersion: probedVersion,
         target: target.key,
         installation,
         executableRelativePath: resolved.executableRelativePath,

@@ -155,7 +155,8 @@ describe("managed runtime installer", () => {
     ]));
     const probe = vi.fn(async ({ executable, version }) => {
       expect(await readFile(executable, "utf8")).toBe("managed claude");
-      return { version };
+      expect(version).toBe("0.3.247");
+      return { version: "2.1.247" };
     });
 
     try {
@@ -180,8 +181,15 @@ describe("managed runtime installer", () => {
       expect(probe).toHaveBeenCalledOnce();
       expect(installer.activeOperations()).toEqual([]);
       const receipt = JSON.parse(await readFile(join(root, "claude", "macos-arm64", "active.json"), "utf8"));
-      expect(receipt).toMatchObject({ schemaVersion: 1, runtimeId: "claude", version: "0.3.247", target: "macos-arm64" });
+      expect(receipt).toMatchObject({
+        schemaVersion: 1,
+        runtimeId: "claude",
+        version: "0.3.247",
+        runtimeVersion: "2.1.247",
+        target: "macos-arm64",
+      });
       expect(receipt.artifacts).toHaveLength(2);
+      await expect(installer.installed("claude", "0.3.200")).resolves.toMatchObject({ version: "0.3.247" });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
