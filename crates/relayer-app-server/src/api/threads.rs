@@ -12,8 +12,8 @@ use crate::{
     product::{
         CreateThreadCommand, Interaction, InteractionContextIntent, InteractionId,
         InteractionModelSelection, InvokeActionOutcome, ModelFamilyId, PreparedInteractionBinding,
-        ProjectId, ProviderId, RECONCILIATION_PENDING_PREFIX, Thread, ThreadId, ThreadView,
-        record_background_failure, validate_decision_resolution,
+        ProjectId, ProviderId, RECONCILIATION_PENDING_PREFIX, RetryInteractionCommand, Thread,
+        ThreadId, ThreadView, record_background_failure, validate_decision_resolution,
     },
     runtime::{CompleteInteraction, PreparedInteraction, PreparedInvocation, RuntimeError},
 };
@@ -54,6 +54,9 @@ pub(super) struct CreateInteractionRequest {
 pub(super) struct RetryInteractionRequest {
     attempt_id: i64,
     text: String,
+    input_id: String,
+    #[serde(default)]
+    contexts: Vec<InteractionContextIntent>,
     model_selection: ModelSelectionRequest,
 }
 
@@ -539,6 +542,74 @@ pub(super) async fn create_interaction(
     Ok((StatusCode::CREATED, Json(interaction.into())))
 }
 
+pub(super) async fn retry_interaction(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, interaction_id)): Path<(i64, i64)>,
+    Json(request): Json<RetryInteractionRequest>,
+) -> Result<Json<InteractionResponse>, ApiError> {
+    authorize_write(&state, &headers)?;
+    if request.attempt_id <= 0 {
+        return Err(ApiError::invalid("attemptId must be a positive integer"));
+    }
+    if state.runtime.is_none() {
+        return Err(ApiError::invalid("GraphComplete runtime is unavailable"));
+    }
+    let thread_id = ThreadId::try_from(thread_id)?;
+    let interaction_id = InteractionId::try_from(interaction_id)?;
+    let thread = state.product.get_thread(thread_id).await?.thread;
+    let existing = state.product.get_interaction(interaction_id).await?;
+    if existing.thread_id != thread_id {
+        return Err(ApiError::invalid(
+            "interaction does not belong to this thread",
+        ));
+    }
+    let model_selection = InteractionModelSelection::try_from(request.model_selection)?;
+    let claimed = state
+        .product
+        .claim_interaction_retry(
+            interaction_id,
+            RetryInteractionCommand {
+                expected_attempt_id: request.attempt_id,
+                text: &request.text,
+                input_identity: &request.input_id,
+                contexts: &request.contexts,
+                model_selection: &model_selection,
+                harness_configuration_name: &thread.harness_configuration_name,
+            },
+        )
+        .await?;
+    let interaction = state.product.get_interaction(interaction_id).await?;
+    if claimed {
+        let state = state.clone();
+        let thread = thread.clone();
+        let execution = interaction.clone();
+        tokio::spawn(async move {
+            match prepare_and_claim_interaction(&state, &thread, &execution, true).await {
+                Ok(Some(prepared)) => {
+                    state
+                        .interaction_execution
+                        .as_ref()
+                        .expect("runtime-backed interaction execution service")
+                        .execute_prepared_interaction(thread, execution, prepared)
+                        .await;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    record_background_failure(
+                        &state.product,
+                        &thread,
+                        &execution,
+                        error.message().to_owned(),
+                    )
+                    .await;
+                }
+            }
+        });
+    }
+    Ok(Json(interaction.into()))
+}
+
 pub(crate) async fn resume_recovered_identified_interactions(state: ApiState) {
     let interactions = match state.product.interrupted_interactions().await {
         Ok(interactions) => interactions,
@@ -583,70 +654,6 @@ pub(crate) async fn resume_recovered_identified_interactions(state: ApiState) {
             );
         }
     }
-}
-
-pub(super) async fn retry_interaction(
-    State(state): State<ApiState>,
-    headers: HeaderMap,
-    Path((thread_id, interaction_id)): Path<(i64, i64)>,
-    Json(request): Json<RetryInteractionRequest>,
-) -> Result<Json<InteractionResponse>, ApiError> {
-    authorize_write(&state, &headers)?;
-    if request.attempt_id <= 0 {
-        return Err(ApiError::invalid("attemptId must be a positive integer"));
-    }
-    if state.runtime.is_none() {
-        return Err(ApiError::invalid("GraphComplete runtime is unavailable"));
-    }
-    let thread_id = ThreadId::try_from(thread_id)?;
-    let interaction_id = InteractionId::try_from(interaction_id)?;
-    let thread = state.product.get_thread(thread_id).await?.thread;
-    let existing = state.product.get_interaction(interaction_id).await?;
-    if existing.thread_id != thread_id {
-        return Err(ApiError::invalid(
-            "interaction does not belong to this thread",
-        ));
-    }
-    let model_selection = InteractionModelSelection::try_from(request.model_selection)?;
-    let claimed = state
-        .product
-        .claim_interaction_retry(
-            interaction_id,
-            request.attempt_id,
-            &request.text,
-            &model_selection,
-            &thread.harness_configuration_name,
-        )
-        .await?;
-    let interaction = state.product.get_interaction(interaction_id).await?;
-    if claimed {
-        let state = state.clone();
-        let thread = thread.clone();
-        let execution = interaction.clone();
-        tokio::spawn(async move {
-            match prepare_and_claim_interaction(&state, &thread, &execution, true).await {
-                Ok(Some(prepared)) => {
-                    state
-                        .interaction_execution
-                        .as_ref()
-                        .expect("runtime-backed interaction execution service")
-                        .execute_prepared_interaction(thread, execution, prepared)
-                        .await;
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    record_background_failure(
-                        &state.product,
-                        &thread,
-                        &execution,
-                        error.message().to_owned(),
-                    )
-                    .await;
-                }
-            }
-        });
-    }
-    Ok(Json(interaction.into()))
 }
 
 pub(super) async fn get_layer(
@@ -1299,68 +1306,27 @@ async fn prepare_and_claim_interaction(
             }
         }
     }
-    let execution_model_selection = if let Some(model_selection) =
-        interaction.model_selection.as_ref()
-    {
-        match state
-            .product
-            .validate_execution_model_selection(&thread.harness_configuration_name, model_selection)
-            .await
-        {
-            Ok(selection) => Some(selection),
-            Err(error) => {
+    let execution_model_selection =
+        if let Some(model_selection) = interaction.model_selection.as_ref() {
+            Some(
                 state
                     .product
-                    .record_pre_execution_model_failure(crate::product::PreExecutionModelFailure {
-                        interaction_id: interaction.id,
-                        harness_name: &thread.harness_configuration_name,
-                        selection: model_selection,
-                        route: None,
-                        policy: None,
-                        adapter_version: None,
-                        failure_category: "model_unavailable",
-                    })
-                    .await?;
-                eprintln!(
-                    "interaction {} model selection became invalid before graph preparation; restored the sent turn with a failed attempt receipt: {error}",
-                    interaction.id
-                );
-                return Ok(None);
-            }
-        }
-    } else {
-        None
-    };
-    let harness_policy = if let Some(selection) = execution_model_selection.as_ref() {
-        match state
-            .product
-            .execution_harness_policy(&thread.harness_configuration_name)
-            .await
-        {
-            Ok(policy) => Some(policy),
-            Err(error) => {
-                state
-                    .product
-                    .record_pre_execution_model_failure(crate::product::PreExecutionModelFailure {
-                        interaction_id: interaction.id,
-                        harness_name: &thread.harness_configuration_name,
-                        selection: interaction
-                            .model_selection
-                            .as_ref()
-                            .expect("execution route requires a selected model"),
-                        route: Some(selection),
-                        policy: None,
-                        adapter_version: None,
-                        failure_category: "model_unavailable",
-                    })
-                    .await?;
-                eprintln!(
-                    "interaction {} harness policy became invalid before graph preparation; restored the sent turn with a failed attempt receipt: {error}",
-                    interaction.id
-                );
-                return Ok(None);
-            }
-        }
+                    .validate_execution_model_selection(
+                        &thread.harness_configuration_name,
+                        model_selection,
+                    )
+                    .await?,
+            )
+        } else {
+            None
+        };
+    let harness_policy = if execution_model_selection.is_some() {
+        Some(
+            state
+                .product
+                .execution_harness_policy(&thread.harness_configuration_name)
+                .await?,
+        )
     } else {
         None
     };
@@ -1406,6 +1372,8 @@ async fn prepare_and_claim_interaction(
         harness_configuration_name: &thread.harness_configuration_name,
         permission_profile,
         model_selection: execution_model_selection.as_ref(),
+        model_plan: None,
+        attempt_admission_id: None,
         execution_lease_id: None,
         harness_policy: harness_policy.as_ref(),
         invocation,

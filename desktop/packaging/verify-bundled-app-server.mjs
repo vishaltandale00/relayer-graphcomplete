@@ -1,28 +1,54 @@
 import { execFile } from "node:child_process";
-import { listPackage } from "@electron/asar";
-import { access } from "node:fs/promises";
-import { join } from "node:path";
+import { extractFile, listPackage } from "@electron/asar";
+import { access, readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import * as tar from "tar";
 
 import { desktopTargetFromEnvironment } from "../shared/target.mjs";
+import { PACKAGED_PROVIDER_MODULES } from "../main/providers/provider-adapter-registry.mjs";
+import { validatePrimeAgentManifest } from "../main/services/prime-agent-runtime.mjs";
+import {
+  digestFileEntries,
+  digestFilesystemTree,
+  dependencyInstallCandidates,
+  primeRuntimeSourcePathIsPackaged,
+  runtimeDependencyRequirements,
+  runtimeDependencyFileIsPackaged,
+  runtimePackageMetadataDigest,
+  sha256,
+} from "../shared/prime-runtime-integrity.mjs";
 
 const execFileAsync = promisify(execFile);
+
+function normalizeAsarEntry(entry) {
+  return String(entry).replaceAll("\\", "/").replace(/^\/+/, "");
+}
+
+export function asarEntryPath(entry, platform = process.platform) {
+  const normalized = normalizeAsarEntry(entry);
+  return platform === "win32" ? normalized.replaceAll("/", "\\") : normalized;
+}
 
 export async function verifyBundledAppServer(
   appPath,
   {
     execute = execFileAsync,
+    platform = "darwin",
     expectedArchitecture = process.arch === "x64" ? "x86_64" : process.arch,
     listPackageEntries = listPackage,
+    verifyPrimeAgent = verifyPackagedPrimeAgent,
+    primeAgentTargetKey = `${platform}-${expectedArchitecture === "x86_64" ? "x64" : expectedArchitecture}`,
   } = {},
 ) {
-  const resourcesPath = join(appPath, "Contents", "Resources");
-  const binaryPath = join(appPath, "Contents", "Resources", "bin", "relayer-app-server");
-  const graphBinaryPath = join(appPath, "Contents", "Resources", "bin", "relayer-graph-server");
-  const graphClientPath = join(appPath, "Contents", "Resources", "graph-client", "index.js");
+  const resourcesPath = platform === "darwin" ? join(appPath, "Contents", "Resources") : join(appPath, "resources");
+  const binarySuffix = platform === "win32" ? ".exe" : "";
+  const binaryPath = join(resourcesPath, "bin", `relayer-app-server${binarySuffix}`);
+  const graphBinaryPath = join(resourcesPath, "bin", `relayer-graph-server${binarySuffix}`);
+  const graphClientPath = join(resourcesPath, "graph-client", "index.js");
   const markedPath = join(resourcesPath, "renderer", "vendor", "marked.umd.js");
   await Promise.all([access(binaryPath), access(graphBinaryPath), access(graphClientPath), access(markedPath)]);
-  const packagedEntries = new Set(listPackageEntries(join(resourcesPath, "app.asar")).map((entry) => String(entry).replace(/^\//, "")));
+  const packagedEntries = new Set(listPackageEntries(join(resourcesPath, "app.asar")).map(normalizeAsarEntry));
   for (const entry of [
     "main/single-instance.mjs",
     "node_modules/@relayer/graph-client/dist/index.js",
@@ -31,17 +57,183 @@ export async function verifyBundledAppServer(
   ]) {
     if (!packagedEntries.has(entry)) throw new Error(`Bundled Relayer runtime is missing ${entry}.`);
   }
-  let architectures;
-  for (const [label, executable] of [["app server", binaryPath], ["graph server", graphBinaryPath]]) {
-    const result = await execute("/usr/bin/lipo", ["-archs", executable]);
-    architectures = String(result.stdout || "").trim();
-    if (architectures !== expectedArchitecture) {
-      throw new Error(
-        `Bundled Relayer ${label} must contain only ${expectedArchitecture} executable code; found ${architectures || "unknown"}.`,
-      );
+  await verifyPrimeAgent(resourcesPath, packagedEntries, { targetKey: primeAgentTargetKey });
+  let architectures = null;
+  if (platform === "darwin") {
+    for (const [label, executable] of [["app server", binaryPath], ["graph server", graphBinaryPath]]) {
+      const result = await execute("/usr/bin/lipo", ["-archs", executable]);
+      architectures = String(result.stdout || "").trim();
+      if (architectures !== expectedArchitecture) {
+        throw new Error(
+          `Bundled Relayer ${label} must contain only ${expectedArchitecture} executable code; found ${architectures || "unknown"}.`,
+        );
+      }
     }
   }
   return { binaryPath, architecture: architectures };
+}
+
+export async function verifyPackagedPrimeAgent(
+  resourcesPath,
+  packagedEntries = new Set(listPackage(join(resourcesPath, "app.asar")).map(normalizeAsarEntry)),
+  {
+    extractPackageFile = (archivePath, entry) => extractFile(archivePath, asarEntryPath(entry)),
+    vendorDirectory = resolve(import.meta.dirname, "../../vendor/prime-agent"),
+    verifyDependencyClosure = digestAsarDependencyClosure,
+    targetKey = `${process.platform}-${process.arch}`,
+  } = {},
+) {
+  const manifest = JSON.parse(await readFile(join(resourcesPath, "prime-agent", "manifest.json"), "utf8"));
+  validatePrimeAgentManifest(manifest);
+  const requiredResources = [
+    ...manifest.harnessConfigurations.map((name) => join(resourcesPath, "harnesses", name)),
+    join(resourcesPath, "python", "relayer-graph", "src", manifest.pythonPackage, "__init__.py"),
+  ];
+  await Promise.all(requiredResources.map((path) => access(path)));
+  for (const name of manifest.harnessConfigurations) {
+    const digest = sha256(await readFile(join(resourcesPath, "harnesses", name)));
+    if (digest !== manifest.assets.harnessConfigurations[name]) {
+      throw new Error(`Bundled Prime Agent harness integrity mismatch for ${name}.`);
+    }
+  }
+  const pythonPackageRoot = join(resourcesPath, "python", "relayer-graph", "src", manifest.pythonPackage);
+  const pythonDigest = await digestFilesystemTree(pythonPackageRoot, (path) => path.endsWith(".py"));
+  if (pythonDigest !== manifest.assets.pythonPackageTreeSha256) {
+    throw new Error("Bundled Prime Agent Python client integrity mismatch.");
+  }
+  const asarPath = join(resourcesPath, "app.asar");
+  const directoryEntries = new Set();
+  for (const path of packagedEntries) {
+    const segments = path.split("/");
+    for (let index = 1; index < segments.length; index += 1) {
+      directoryEntries.add(segments.slice(0, index).join("/"));
+    }
+  }
+  const packagedFileEntries = [...packagedEntries].filter((path) => !directoryEntries.has(path));
+  for (const entry of manifest.packages) {
+    const prefix = `node_modules/${entry.name}`;
+    const packageJsonPath = `${prefix}/package.json`;
+    if (!packagedEntries.has(packageJsonPath)) throw new Error(`Bundled Prime Agent runtime is missing ${packageJsonPath}.`);
+    const installed = JSON.parse(extractPackageFile(asarPath, packageJsonPath).toString("utf8"));
+    if (installed.name !== entry.name || installed.version !== entry.version) {
+      throw new Error(`Bundled Prime Agent package mismatch for ${entry.name}.`);
+    }
+    const archivePath = join(vendorDirectory, entry.file);
+    if (sha256(await readFile(archivePath)) !== entry.sha256) {
+      throw new Error(`Vendored Prime Agent archive hash mismatch for ${entry.name}.`);
+    }
+    const archive = await digestPrimeArchive(archivePath);
+    if (archive.treeDigest !== entry.treeSha256) {
+      throw new Error(`Vendored Prime Agent archive tree mismatch for ${entry.name}.`);
+    }
+    if (runtimePackageMetadataDigest(installed) !== archive.metadataDigest) {
+      throw new Error(`Bundled Prime Agent package metadata mismatch for ${entry.name}.`);
+    }
+    const subtreeEntries = packagedFileEntries
+      .filter((path) => path.startsWith(`${prefix}/`))
+      .map((path) => ({ absolutePath: path, path: path.slice(prefix.length + 1) }))
+      .filter(({ path }) => primeRuntimeSourcePathIsPackaged(path))
+      .map(({ absolutePath, path }) => ({ path, bytes: extractPackageFile(asarPath, absolutePath) }));
+    if (digestFileEntries(subtreeEntries) !== entry.treeSha256) {
+      throw new Error(`Bundled Prime Agent package bytes mismatch for ${entry.name}.`);
+    }
+  }
+  const dependencyClosureDigest = verifyDependencyClosure(
+    asarPath,
+    manifest.packages.map((entry) => `node_modules/${entry.name}`),
+    packagedFileEntries,
+    packagedEntries,
+    extractPackageFile,
+  );
+  const expectedClosureDigest = manifest.dependencyClosureSha256ByTarget[targetKey];
+  if (!expectedClosureDigest || dependencyClosureDigest !== expectedClosureDigest) {
+    throw new Error("Bundled Prime Agent dependency closure mismatch.");
+  }
+  const requiredEntries = [
+    "node_modules/@earendil-works/pi-coding-agent/dist/index.js",
+    "node_modules/@earendil-works/pi-coding-agent/dist/core/run-model-scope.js",
+    "node_modules/@earendil-works/pi-coding-agent/dist/core/run-tool-authority.js",
+    "node_modules/@earendil-works/pi-coding-agent/dist/core/run-kernel-boundary.js",
+    "node_modules/@earendil-works/pi-coding-agent/skills/agent-message/SKILL.md",
+    "node_modules/@earendil-works/pi-ai/dist/providers/anthropic.js",
+    "node_modules/@earendil-works/pi-ai/dist/providers/openai-completions.js",
+    "node_modules/@earendil-works/pi-ai/dist/providers/openai-responses.js",
+    ...PACKAGED_PROVIDER_MODULES.map((modulePath) => `main/${modulePath}`),
+  ];
+  for (const entry of requiredEntries) {
+    if (!packagedEntries.has(entry)) throw new Error(`Bundled Prime Agent runtime is missing ${entry}.`);
+  }
+  const forbidden = [...packagedEntries].filter((entry) => (
+    /^node_modules\/@earendil-works\/.*\/(?:docs|examples|test|tests|__fixtures__|__tests__)\//.test(entry)
+      || /^node_modules\/@earendil-works\/.*\/(?:README|CHANGELOG)\.md$/.test(entry)
+      || /^node_modules\/@earendil-works\/.*\.(?:d\.ts|map)$/.test(entry)
+      || entry.endsWith("/postinstall.cjs")
+      || entry.startsWith("node_modules/@earendil-works/pi-ai/dist/providers/faux.")
+  ));
+  if (forbidden.length > 0) throw new Error(`Bundled Prime Agent contains development artifacts: ${forbidden[0]}.`);
+  return { sourceCommit: manifest.source.commit, packages: manifest.packages.length };
+}
+
+export function digestAsarDependencyClosure(asarPath, rootInstallPaths, fileEntries, allEntries, extractPackageFile) {
+  const queue = [...rootInstallPaths];
+  const visited = new Set();
+  const digestEntries = [];
+  while (queue.length > 0) {
+    const installPath = queue.shift();
+    if (visited.has(installPath)) continue;
+    visited.add(installPath);
+    const packageJsonPath = `${installPath}/package.json`;
+    if (!allEntries.has(packageJsonPath)) throw new Error(`Bundled Prime dependency is missing ${packageJsonPath}.`);
+    const metadata = JSON.parse(extractPackageFile(asarPath, packageJsonPath).toString("utf8"));
+    for (const { name: dependencyName, required } of runtimeDependencyRequirements(metadata)) {
+      const resolved = dependencyInstallCandidates(installPath, dependencyName)
+        .find((candidate) => allEntries.has(`${candidate}/package.json`));
+      if (!resolved && required) {
+        throw new Error(`Bundled Prime dependency ${dependencyName} is unresolved from ${installPath}.`);
+      }
+      if (!resolved) continue;
+      queue.push(resolved);
+    }
+    for (const absolutePath of fileEntries.filter((path) => path.startsWith(`${installPath}/`))) {
+      const path = absolutePath.slice(installPath.length + 1);
+      if (!runtimeDependencyFileIsPackaged(path)) continue;
+      digestEntries.push({ path: absolutePath, bytes: extractPackageFile(asarPath, absolutePath) });
+    }
+  }
+  return digestFileEntries(digestEntries);
+}
+
+async function digestPrimeArchive(path) {
+  const entries = [];
+  let metadataDigest;
+  await tar.t({
+    file: path,
+    onentry(entry) {
+      if (entry.type !== "File") {
+        entry.resume();
+        return;
+      }
+      const archivePath = entry.path.replace(/^package\//, "");
+      if (archivePath === "package.json") {
+        const chunks = [];
+        entry.on("data", (chunk) => chunks.push(chunk));
+        entry.on("end", () => {
+          const metadata = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          metadataDigest = runtimePackageMetadataDigest(metadata);
+        });
+        return;
+      }
+      if (!primeRuntimeSourcePathIsPackaged(archivePath)) {
+        entry.resume();
+        return;
+      }
+      const chunks = [];
+      entry.on("data", (chunk) => chunks.push(chunk));
+      entry.on("end", () => entries.push({ path: archivePath, bytes: Buffer.concat(chunks) }));
+    },
+  });
+  if (!metadataDigest) throw new Error(`Vendored Prime Agent archive is missing package.json: ${path}`);
+  return { treeDigest: digestFileEntries(entries), metadataDigest };
 }
 
 export default async function verifyElectronBuilderBundledAppServer(context) {
@@ -52,5 +244,6 @@ export default async function verifyElectronBuilderBundledAppServer(context) {
   }
   const target = desktopTargetFromEnvironment(process.env);
   const expectedArchitecture = target.architecture === "x64" ? "x86_64" : target.architecture;
-  return verifyBundledAppServer(join(appOutDir, `${productFilename}.app`), { expectedArchitecture });
+  const appPath = target.platform === "darwin" ? join(appOutDir, `${productFilename}.app`) : appOutDir;
+  return verifyBundledAppServer(appPath, { platform: target.platform, expectedArchitecture });
 }

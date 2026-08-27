@@ -96,6 +96,11 @@ const INTERACTION_ATTEMPT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("outcome", "TEXT", true, 0),
     ("failure_category", "TEXT", false, 0),
     ("effect_boundary", "TEXT", true, 0),
+    ("attempt_admission_id", "TEXT", false, 0),
+    ("admitted_plan_json", "TEXT", false, 0),
+    ("admitted_plan_digest", "TEXT", false, 0),
+    ("execution_lease_id", "TEXT", false, 0),
+    ("execution_lease_reconciled_at", "TEXT", false, 0),
 ];
 const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("source_interaction_id", "INTEGER", true, 1),

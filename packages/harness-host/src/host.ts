@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
@@ -36,11 +36,36 @@ import type {
   HarnessSessionRegistration,
   HarnessSessionState,
   HarnessCompletionTraceContext,
+  HarnessExecutionAccess,
   HarnessExecutionAccessBroker,
+  HarnessExecutionAccessBundle,
   HarnessExecutionAccessLease,
+  HarnessModelPlan,
+  HarnessAdmittedModelPlan,
+  HarnessModelRoute,
   HarnessTraceDescriptor,
   HarnessTraceSink,
 } from "./types.js";
+
+interface HeldExecutionAccessLease {
+  readonly lease: HarnessExecutionAccessLease;
+  released: boolean;
+}
+
+interface PendingExecutionAccess {
+  readonly threadId: number;
+  readonly interactionId?: number;
+  readonly attemptAdmissionId?: string;
+  readonly model: InteractionModelSelection;
+  readonly modelPlan?: HarnessModelPlan;
+  readonly admittedPlan?: HarnessAdmittedModelPlan;
+  readonly accessBundle?: HarnessExecutionAccessBundle;
+  readonly policyIdentity?: string;
+  readonly heldLeases: readonly HeldExecutionAccessLease[];
+  timeout: NodeJS.Timeout | undefined;
+  releasePromise: Promise<void> | undefined;
+  state: "admitted" | "claimed" | "awaiting-terminal";
+}
 
 interface LiveSession {
   descriptor: HarnessSessionDescriptor;
@@ -61,10 +86,12 @@ interface HarnessExecutionPolicy {
   readonly configurationRevision: number;
   readonly configurationDigest: string;
   readonly modelRules?: HarnessConfiguration["modelRules"];
+  readonly executionAccessContracts?: readonly string[];
 }
 
 const EXECUTION_ADMISSION_TIMEOUT_MS = 30_000;
 const EXECUTION_TERMINAL_ACK_TIMEOUT_MS = 30_000;
+const HARNESS_CLOSE_SESSION_TIMEOUT_MS = 5_000;
 
 export type HarnessEffectBoundary = "none" | "partial_output" | "graph_write" | "tool_effect" | "unknown";
 
@@ -138,15 +165,7 @@ export class HarnessHost {
   private legacySaved = new Map<number, LegacyPersistedHarnessSessionDescriptor>();
   private persistTail: Promise<void> = Promise.resolve();
   private initialized = false;
-  private readonly pendingExecutionAccess = new Map<string, {
-    readonly threadId: number;
-    readonly model: InteractionModelSelection;
-    readonly policyIdentity?: string;
-    readonly lease: HarnessExecutionAccessLease;
-    timeout: NodeJS.Timeout | undefined;
-    releasePromise: Promise<void> | undefined;
-    state: "admitted" | "claimed" | "awaiting-terminal";
-  }>();
+  private readonly pendingExecutionAccess = new Map<string, PendingExecutionAccess>();
   private closed = false;
   private closeAbandoned = false;
   private initializePromise: Promise<void> | undefined;
@@ -330,6 +349,8 @@ export class HarnessHost {
     traceContext?: HarnessCompletionTraceContext,
     executionLeaseId?: string,
     harnessPolicy?: HarnessExecutionPolicy,
+    modelPlan?: HarnessModelPlan,
+    attemptAdmissionId?: string,
   ): Promise<HarnessCompleteResult>;
   async complete(
     threadId: number,
@@ -340,12 +361,19 @@ export class HarnessHost {
     traceContext?: HarnessCompletionTraceContext,
     executionLeaseId?: string,
     harnessPolicy?: HarnessExecutionPolicy,
+    inputPlan?: HarnessModelPlan,
+    attemptAdmissionId?: string,
   ): Promise<HarnessCompleteResult> {
     if (this.closed) throw new Error("Harness host is closed");
     if (!Number.isSafeInteger(interactionId) || interactionId < 1) throw new Error("Harness interactionId must be a positive integer");
     validateGraphCapability(capability);
-    const model = isAbortSignal(modelOrSignal) ? undefined : modelOrSignal;
+    const suppliedModel = isAbortSignal(modelOrSignal) ? undefined : modelOrSignal;
     const signal = isAbortSignal(modelOrSignal) ? modelOrSignal : trailingSignal;
+    const modelPlan = inputPlan === undefined ? undefined : normalizeModelPlan(inputPlan);
+    const model = modelPlan?.orchestrator ?? suppliedModel;
+    if (modelPlan !== undefined && suppliedModel !== undefined && !sameModelRoute(modelPlan.orchestrator, suppliedModel)) {
+      throw new Error("Harness completion model must match the family-plan orchestrator");
+    }
     if (model !== undefined) validateInteractionModelSelection(model);
     const session = this.liveSession(threadId);
     const effectiveConfiguration = executionConfiguration(session, harnessPolicy);
@@ -369,6 +397,7 @@ export class HarnessHost {
         controller.signal.throwIfAborted();
         result = await this.executeCompletion(
           threadId,
+          interactionId,
           session,
           capability,
           model,
@@ -377,6 +406,8 @@ export class HarnessHost {
           traceContext,
           executionLeaseId,
           harnessPolicy,
+          modelPlan,
+          attemptAdmissionId,
         );
       } catch (error) {
         operationError = error;
@@ -423,15 +454,11 @@ export class HarnessHost {
     }
     const lease = await this.options.accessBroker.acquire(model, acceptedContracts, signal);
     try {
-      if (!acceptedContracts.includes(lease.access.contract)
-        || lease.access.providerId !== model.providerId
-        || lease.access.adapterId !== model.adapterId) {
-        throw new Error("Harness execution access does not match the selected provider or contract");
-      }
+      validateExecutionAccess(lease, model, acceptedContracts);
       const executionLeaseId = randomUUID();
       const timeout = this.releaseAfter(executionLeaseId, EXECUTION_ADMISSION_TIMEOUT_MS);
       this.pendingExecutionAccess.set(executionLeaseId, {
-        threadId, model, lease, timeout, releasePromise: undefined, state: "admitted",
+        threadId, model, heldLeases: [{ lease, released: false }], timeout, releasePromise: undefined, state: "admitted",
         ...(harnessPolicy === undefined ? {} : { policyIdentity: executionPolicyIdentity(harnessPolicy) }),
       });
       return { executionLeaseId, adapterImplementationVersion: lease.access.adapterImplementationVersion };
@@ -441,12 +468,94 @@ export class HarnessHost {
     }
   }
 
+  async admitModelPlanExecution(
+    threadId: number,
+    interactionId: number,
+    attemptAdmissionId: string,
+    inputPlan: HarnessModelPlan,
+    signal: AbortSignal,
+    harnessPolicy: HarnessExecutionPolicy,
+  ): Promise<{
+    executionLeaseId: string;
+    admittedPlan: HarnessAdmittedModelPlan;
+    /** Selected-orchestrator compatibility alias for existing attempt readers. */
+    adapterImplementationVersion: string;
+  }> {
+    if (this.closed) throw new Error("Harness host is closed");
+    if (!Number.isSafeInteger(interactionId) || interactionId < 1) {
+      throw new Error("Family execution admission requires a positive interactionId");
+    }
+    validateAttemptAdmissionId(attemptAdmissionId);
+    const session = this.liveSession(threadId);
+    const acceptedContracts = session.descriptor.configuration.executionAccessContracts;
+    if (acceptedContracts === undefined || this.options.accessBroker === undefined) {
+      throw new HarnessExecutionFailure("Harness execution access is unavailable", "configuration", "none");
+    }
+    validateFamilyPolicyAccessContracts(harnessPolicy, acceptedContracts);
+    const configuration = executionConfiguration(session, harnessPolicy);
+    const modelPlan = normalizeModelPlan(inputPlan);
+    validateConfiguredModelPlan(configuration, modelPlan);
+    for (const route of modelPlan.roster) {
+      if (!acceptedContracts.includes(route.accessContract)) {
+        throw new HarnessExecutionFailure(
+          `Harness does not accept execution access contract ${route.accessContract}`,
+          "configuration",
+          "none",
+        );
+      }
+    }
+
+    const heldLeases: HeldExecutionAccessLease[] = [];
+    const byProviderId: Record<string, HarnessExecutionAccessBundle["byProviderId"][string]> = Object.create(null) as Record<string, HarnessExecutionAccessBundle["byProviderId"][string]>;
+    try {
+      for (const route of uniqueProviderRoutes(modelPlan.roster)) {
+        signal.throwIfAborted();
+        const lease = await this.options.accessBroker.acquire(route, acceptedContracts, signal);
+        const held = { lease, released: false };
+        heldLeases.push(held);
+        validateExecutionAccess(lease, route, acceptedContracts);
+        byProviderId[route.providerId] = lease.access;
+      }
+      const accessBundle = freezeAccessBundle(byProviderId);
+      const policyIdentity = executionPolicyIdentity(harnessPolicy);
+      const admittedPlan = admitModelPlan(modelPlan, accessBundle, policyIdentity);
+      const executionLeaseId = randomUUID();
+      const timeout = this.releaseAfter(executionLeaseId, EXECUTION_ADMISSION_TIMEOUT_MS);
+      this.pendingExecutionAccess.set(executionLeaseId, {
+        threadId,
+        interactionId,
+        attemptAdmissionId,
+        model: modelPlan.orchestrator,
+        modelPlan,
+        admittedPlan,
+        accessBundle,
+        policyIdentity,
+        heldLeases,
+        timeout,
+        releasePromise: undefined,
+        state: "admitted",
+      });
+      return {
+        executionLeaseId,
+        admittedPlan,
+        adapterImplementationVersion: admittedPlan.orchestrator.adapterImplementationVersion,
+      };
+    } catch (error) {
+      try {
+        await releaseHeldExecutionAccess(heldLeases);
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], "Family execution admission and rollback failed");
+      }
+      throw error;
+    }
+  }
+
   async releaseProviderExecution(executionLeaseId: string): Promise<boolean> {
     const pending = this.pendingExecutionAccess.get(executionLeaseId);
     if (pending === undefined) return false;
     if (pending.timeout !== undefined) clearTimeout(pending.timeout);
     pending.timeout = undefined;
-    pending.releasePromise ??= Promise.resolve(pending.lease.release()).then(() => {
+    pending.releasePromise ??= releaseHeldExecutionAccess(pending.heldLeases).then(() => {
       this.pendingExecutionAccess.delete(executionLeaseId);
     });
     try {
@@ -472,11 +581,14 @@ export class HarnessHost {
     const pending = this.pendingExecutionAccess.get(executionLeaseId);
     if (pending?.state !== "claimed") return;
     pending.state = "awaiting-terminal";
-    pending.timeout = this.releaseAfter(executionLeaseId, EXECUTION_TERMINAL_ACK_TIMEOUT_MS);
+    // Failure, cancellation, and elapsed time are not durable terminal acknowledgement.
+    // The trusted caller must explicitly release the lease after persisting terminal state.
+    pending.timeout = undefined;
   }
 
   private async executeCompletion(
     threadId: number,
+    productInteractionId: number,
     session: LiveSession,
     capability: GraphCapability,
     model: InteractionModelSelection | undefined,
@@ -485,6 +597,8 @@ export class HarnessHost {
     traceContext?: HarnessCompletionTraceContext,
     executionLeaseId?: string,
     harnessPolicy?: HarnessExecutionPolicy,
+    modelPlan?: HarnessModelPlan,
+    attemptAdmissionId?: string,
   ): Promise<HarnessCompleteResult> {
     const graph = new RelayerGraphClient(capability);
     const interactionNodeId = capability.nodeId;
@@ -512,6 +626,9 @@ export class HarnessHost {
     const observedTrace = new EffectObservingTraceSink(traceSink);
     let completionError: HarnessExecutionFailure | undefined;
     let accessLease: HarnessExecutionAccessLease | undefined;
+    let selectedAccess: HarnessExecutionAccess | undefined;
+    let admittedModelPlan: HarnessAdmittedModelPlan | undefined;
+    let accessBundle: HarnessExecutionAccessBundle | undefined;
     let releaseAccessAfterCompletion = false;
     let harnessStarted = false;
     try {
@@ -521,13 +638,21 @@ export class HarnessHost {
         if (pending === undefined || pending.state !== "admitted" || pending.threadId !== threadId || model === undefined
           || pending.model.providerId !== model.providerId || pending.model.adapterId !== model.adapterId
           || pending.model.modelId !== model.modelId
+          || pending.interactionId !== (modelPlan === undefined ? undefined : productInteractionId)
+          || pending.attemptAdmissionId !== attemptAdmissionId
+          || (pending.modelPlan === undefined) !== (modelPlan === undefined)
+          || (pending.modelPlan !== undefined && modelPlan !== undefined
+            && modelPlanIdentity(pending.modelPlan) !== modelPlanIdentity(modelPlan))
           || pending.policyIdentity !== (harnessPolicy === undefined ? undefined : executionPolicyIdentity(harnessPolicy))) {
           throw new HarnessExecutionFailure("Execution access admission is invalid or expired", "configuration", "none");
         }
         pending.state = "claimed";
         if (pending.timeout !== undefined) clearTimeout(pending.timeout);
         pending.timeout = undefined;
-        accessLease = pending.lease;
+        accessLease = pending.heldLeases[0]?.lease;
+        admittedModelPlan = pending.admittedPlan;
+        accessBundle = pending.accessBundle;
+        selectedAccess = pending.accessBundle?.byProviderId[pending.model.providerId] ?? accessLease?.access;
       } else if (model !== undefined && acceptedContracts === undefined) {
         throw new HarnessExecutionFailure(
           "A model-using harness must declare execution access contracts",
@@ -536,6 +661,13 @@ export class HarnessHost {
         );
       }
       if (executionLeaseId === undefined && acceptedContracts !== undefined && model !== undefined) {
+        if (modelPlan !== undefined) {
+          throw new HarnessExecutionFailure(
+            "Family execution requires prior admission",
+            "configuration",
+            "none",
+          );
+        }
         if (this.options.accessBroker === undefined) throw new Error("Harness execution access broker is unavailable");
         accessLease = await this.options.accessBroker.acquire(model, acceptedContracts, signal);
         releaseAccessAfterCompletion = true;
@@ -544,6 +676,7 @@ export class HarnessHost {
           || accessLease.access.adapterId !== model.adapterId) {
           throw new Error("Harness execution access does not match the selected provider or contract");
         }
+        selectedAccess = accessLease.access;
       }
       harnessStarted = true;
       await session.harness.complete({
@@ -552,8 +685,10 @@ export class HarnessHost {
         graph: scope,
         approvals,
         trace: observedTrace,
+        ...(admittedModelPlan === undefined ? {} : { modelPlan: admittedModelPlan }),
         ...(model === undefined ? {} : { model }),
-        ...(accessLease === undefined ? {} : { access: accessLease.access }),
+        ...(accessBundle === undefined ? {} : { accessBundle }),
+        ...(selectedAccess === undefined ? {} : { access: selectedAccess }),
       }, signal);
     } catch (error) {
       completionError = normalizeHarnessFailure(error, harnessStarted, observedTrace.effectBoundary());
@@ -672,7 +807,6 @@ export class HarnessHost {
   }
 
   private async closeInternal(): Promise<void> {
-    await Promise.all([...this.pendingExecutionAccess.keys()].map((id) => this.releaseProviderExecution(id)));
     for (const session of this.sessions.values()) {
       session.approvals.close("Harness host closed before the approval was resolved.");
       session.activeCompletion?.controller.abort(new Error("Harness host closed"));
@@ -684,7 +818,11 @@ export class HarnessHost {
       if (!(error instanceof Error && error.message === "Harness host is closed")) errors.push(error);
     }
     await Promise.all([...this.sessions.entries()].map(async ([threadId, session]) => {
-      await session.tail;
+      try {
+        await waitForHarnessSessionClose(session.tail, HARNESS_CLOSE_SESSION_TIMEOUT_MS);
+      } catch (error) {
+        errors.push(error);
+      }
       try {
         session.descriptor = { ...session.descriptor, state: captureHarnessState(session.harness) };
         this.saved.set(threadId, persistedDescriptor(session.descriptor));
@@ -697,6 +835,15 @@ export class HarnessHost {
         errors.push(error);
       }
     }));
+    await Promise.all([...this.pendingExecutionAccess.entries()]
+      .filter(([, pending]) => pending.state === "admitted")
+      .map(async ([id]) => {
+        try {
+          await this.releaseProviderExecution(id);
+        } catch (error) {
+          errors.push(error);
+        }
+      }));
     this.sessions.clear();
     if (!this.closeAbandoned && this.initialized) {
       try {
@@ -957,6 +1104,7 @@ export async function startHarnessHost(options: HarnessHostOptions): Promise<Run
       if (runningForceClosePromise !== undefined) return runningForceClosePromise;
       if (runningClosePromise !== undefined) return runningClosePromise;
       const closingServer = close(server);
+      server.closeIdleConnections();
       runningClosePromise = host.close().finally(() => closingServer);
       return runningClosePromise;
     },
@@ -977,14 +1125,28 @@ async function route(host: HarnessHost, token: string, request: IncomingMessage,
       if (!Number.isSafeInteger(threadId) || threadId < 1) return reply(response, 400, { error: "invalid_thread_id" });
       if (request.method === "POST" && leaseMatch[2] === undefined) {
         const input = await body(request);
+        const modelPlan = readHarnessModelPlan(input);
         const model = readInteractionModelSelection(input);
-        if (model === undefined) return reply(response, 400, { error: "model_selection_required" });
+        if (modelPlan === undefined && model === undefined) return reply(response, 400, { error: "model_selection_required" });
+        if (modelPlan !== undefined && model !== undefined && !sameModelRoute(modelPlan.orchestrator, model)) {
+          throw new Error("Harness execution admission model must match the family-plan orchestrator");
+        }
         const controller = new AbortController();
         const abort = () => controller.abort(new Error("Execution admission request disconnected"));
         request.once("aborted", abort);
         try {
+          if (modelPlan !== undefined) {
+            return reply(response, 201, await host.admitModelPlanExecution(
+              threadId,
+              readPositiveInteractionId(input),
+              readAttemptAdmissionId(input, true)!,
+              modelPlan,
+              controller.signal,
+              requireHarnessExecutionPolicy(input),
+            ));
+          }
           return reply(response, 201, await host.admitProviderExecution(
-            threadId, model, controller.signal, readHarnessExecutionPolicy(input),
+            threadId, model!, controller.signal, readHarnessExecutionPolicy(input),
           ));
         } finally {
           request.off("aborted", abort);
@@ -1037,6 +1199,8 @@ async function route(host: HarnessHost, token: string, request: IncomingMessage,
           input.traceContext,
           readExecutionLeaseId(input),
           readHarnessExecutionPolicy(input),
+          input.modelPlan,
+          input.attemptAdmissionId,
         );
         return reply(response, 200, completed);
       } finally {
@@ -1248,19 +1412,26 @@ function readCompleteInput(value: unknown): {
   readonly interactionId: number;
   readonly graph: GraphCapability;
   readonly model?: InteractionModelSelection;
+  readonly modelPlan?: HarnessModelPlan;
+  readonly attemptAdmissionId?: string;
   readonly traceContext?: HarnessCompletionTraceContext;
   readonly executionLeaseId?: string;
   readonly harnessPolicy?: HarnessExecutionPolicy;
 } {
   if (!isRecord(value)) throw new Error("Harness completion input must be an object");
   const unknown = Object.keys(value).filter((key) => ![
-    "interactionId", "graph", "model", "traceContext", "executionLeaseId", "harnessPolicy",
+    "interactionId", "graph", "model", "modelPlan", "attemptAdmissionId", "traceContext", "executionLeaseId", "harnessPolicy",
   ].includes(key));
   if (unknown.length > 0) throw new Error(`Harness completion contains unsupported fields: ${unknown.join(", ")}`);
   if (!Number.isSafeInteger(value.interactionId) || (value.interactionId as number) < 1) {
     throw new Error("Harness completion requires a positive interactionId");
   }
   const model = readInteractionModelSelection(value);
+  const modelPlan = readHarnessModelPlan(value);
+  const attemptAdmissionId = readAttemptAdmissionId(value, modelPlan !== undefined);
+  if (modelPlan !== undefined && model !== undefined && !sameModelRoute(modelPlan.orchestrator, model)) {
+    throw new Error("Harness completion model must match the family-plan orchestrator");
+  }
   const traceContext = readTraceContext(value);
   const executionLeaseId = readExecutionLeaseId(value);
   const harnessPolicy = readHarnessExecutionPolicy(value);
@@ -1268,6 +1439,8 @@ function readCompleteInput(value: unknown): {
     interactionId: value.interactionId as number,
     graph: readGraphCapability(value),
     ...(model === undefined ? {} : { model }),
+    ...(modelPlan === undefined ? {} : { modelPlan }),
+    ...(attemptAdmissionId === undefined ? {} : { attemptAdmissionId }),
     ...(traceContext === undefined ? {} : { traceContext }),
     ...(executionLeaseId === undefined ? {} : { executionLeaseId }),
     ...(harnessPolicy === undefined ? {} : { harnessPolicy }),
@@ -1292,6 +1465,85 @@ function readInteractionModelSelection(value: unknown): InteractionModelSelectio
   const selection = { providerId, ...(adapterId === undefined ? {} : { adapterId }), modelId };
   validateInteractionModelSelection(selection);
   return selection;
+}
+
+function readHarnessModelPlan(value: unknown): HarnessModelPlan | undefined {
+  if (!isRecord(value) || value.modelPlan === undefined) return undefined;
+  return normalizeModelPlan(value.modelPlan);
+}
+
+function normalizeModelPlan(value: unknown): HarnessModelPlan {
+  if (!isRecord(value)
+    || !Number.isSafeInteger(value.familyId) || (value.familyId as number) < 1
+    || !Number.isSafeInteger(value.familyRevision) || (value.familyRevision as number) < 1
+    || !Array.isArray(value.roster) || value.roster.length < 1 || value.roster.length > 100) {
+    throw new Error("Harness modelPlan is invalid");
+  }
+  const orchestrator = normalizeModelRoute(value.orchestrator);
+  const roster = Object.freeze(value.roster.map(normalizeModelRoute));
+  const identities = new Set<string>();
+  const providerAdapters = new Map<string, string>();
+  const providerContracts = new Map<string, string>();
+  for (const route of roster) {
+    const identity = modelRouteIdentity(route);
+    if (identities.has(identity)) throw new Error("Harness modelPlan contains a duplicate model route");
+    identities.add(identity);
+    const adapter = providerAdapters.get(route.providerId);
+    if (adapter !== undefined && adapter !== route.adapterId) {
+      throw new Error("Harness modelPlan maps one provider definition to multiple adapters");
+    }
+    providerAdapters.set(route.providerId, route.adapterId);
+    const contract = providerContracts.get(route.providerId);
+    if (contract !== undefined && contract !== route.accessContract) {
+      throw new Error("Harness modelPlan maps one provider definition to multiple access contracts");
+    }
+    providerContracts.set(route.providerId, route.accessContract);
+  }
+  if (!identities.has(modelRouteIdentity(orchestrator))) {
+    throw new Error("Harness modelPlan orchestrator must belong to its roster");
+  }
+  return Object.freeze({
+    familyId: value.familyId as number,
+    familyRevision: value.familyRevision as number,
+    orchestrator,
+    roster,
+  });
+}
+
+function normalizeModelRoute(value: unknown): HarnessModelRoute {
+  if (!isRecord(value)
+    || !isStableId(value.providerId)
+    || !isStableId(value.adapterId)
+    || !isVersionedIdentifier(value.accessContract)
+    || !isStableId(value.modelId)) {
+    throw new Error("Harness modelPlan contains an invalid model route");
+  }
+  return Object.freeze({
+    providerId: value.providerId,
+    adapterId: value.adapterId,
+    accessContract: value.accessContract,
+    modelId: value.modelId,
+  });
+}
+
+function readPositiveInteractionId(value: unknown): number {
+  if (!isRecord(value) || !Number.isSafeInteger(value.interactionId) || (value.interactionId as number) < 1) {
+    throw new Error("Family execution admission requires a positive interactionId");
+  }
+  return value.interactionId as number;
+}
+
+function readAttemptAdmissionId(value: unknown, required: boolean): string | undefined {
+  if (!isRecord(value) || value.attemptAdmissionId === undefined) {
+    if (required) throw new Error("Family execution requires an attemptAdmissionId");
+    return undefined;
+  }
+  validateAttemptAdmissionId(value.attemptAdmissionId);
+  return value.attemptAdmissionId;
+}
+
+function validateAttemptAdmissionId(value: unknown): asserts value is string {
+  if (!isStableId(value)) throw new Error("Family execution attemptAdmissionId is invalid");
 }
 
 function validateInteractionModelSelection(value: unknown): asserts value is InteractionModelSelection {
@@ -1321,6 +1573,113 @@ function validateConfiguredModelSelection(
   }
   if (!harnessAllowsModel(configuration.modelRules, selection)) {
     throw new Error("Harness completion model is not compatible with this configuration");
+  }
+}
+
+function validateConfiguredModelPlan(configuration: HarnessConfiguration, plan: HarnessModelPlan): void {
+  for (const route of plan.roster) validateConfiguredModelSelection(configuration, route);
+}
+
+function sameModelRoute(left: InteractionModelSelection, right: InteractionModelSelection): boolean {
+  return left.providerId === right.providerId && left.adapterId === right.adapterId && left.modelId === right.modelId;
+}
+
+function modelRouteIdentity(route: HarnessModelRoute): string {
+  return JSON.stringify([route.providerId, route.adapterId, route.accessContract, route.modelId]);
+}
+
+function modelPlanIdentity(plan: HarnessModelPlan): string {
+  return JSON.stringify(plan);
+}
+
+function uniqueProviderRoutes(roster: readonly HarnessModelRoute[]): readonly HarnessModelRoute[] {
+  const seen = new Set<string>();
+  return roster.filter((route) => {
+    if (seen.has(route.providerId)) return false;
+    seen.add(route.providerId);
+    return true;
+  });
+}
+
+function validateExecutionAccess(
+  lease: HarnessExecutionAccessLease,
+  route: InteractionModelSelection | HarnessModelRoute,
+  acceptedContracts: readonly string[],
+): void {
+  const expectedContract = "accessContract" in route ? route.accessContract : undefined;
+  if (!acceptedContracts.includes(lease.access.contract)
+    || (expectedContract !== undefined && lease.access.contract !== expectedContract)
+    || lease.access.providerId !== route.providerId
+    || lease.access.adapterId !== route.adapterId) {
+    throw new Error("Harness execution access does not match the selected provider or contract");
+  }
+}
+
+function freezeExecutionAccess(access: HarnessExecutionAccess): HarnessExecutionAccess {
+  if (access.kind === "secret") {
+    return Object.freeze({ ...access, fields: Object.freeze({ ...access.fields }) });
+  }
+  return Object.freeze({ ...access, environment: Object.freeze({ ...access.environment }) });
+}
+
+function freezeAccessBundle(byProviderId: Readonly<Record<string, HarnessExecutionAccess>>): HarnessExecutionAccessBundle {
+  const frozen: Record<string, HarnessExecutionAccess> = Object.create(null) as Record<string, HarnessExecutionAccess>;
+  for (const [providerId, access] of Object.entries(byProviderId)) frozen[providerId] = freezeExecutionAccess(access);
+  return Object.freeze({ byProviderId: Object.freeze(frozen) });
+}
+
+function admitModelPlan(
+  plan: HarnessModelPlan,
+  accessBundle: HarnessExecutionAccessBundle,
+  policyIdentity: string,
+): HarnessAdmittedModelPlan {
+  const versioned = (route: HarnessModelRoute) => Object.freeze({
+    ...route,
+    adapterImplementationVersion: accessBundle.byProviderId[route.providerId]!.adapterImplementationVersion,
+  });
+  const withoutDigest = Object.freeze({
+    familyId: plan.familyId,
+    familyRevision: plan.familyRevision,
+    orchestrator: versioned(plan.orchestrator),
+    roster: Object.freeze(plan.roster.map(versioned)),
+    harnessPolicyDigest: semanticDigest("relayer.harness-policy.v1", policyIdentity),
+  });
+  return Object.freeze({
+    ...withoutDigest,
+    digest: semanticDigest("relayer.harness-model-plan.v1", JSON.stringify(withoutDigest)),
+  });
+}
+
+function semanticDigest(domain: string, value: string): string {
+  return `sha256:${createHash("sha256").update(domain).update("\0").update(value).digest("hex")}`;
+}
+
+async function releaseHeldExecutionAccess(heldLeases: readonly HeldExecutionAccessLease[]): Promise<void> {
+  const errors: unknown[] = [];
+  for (const held of [...heldLeases].reverse()) {
+    if (held.released) continue;
+    try {
+      await held.lease.release();
+      held.released = true;
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, "Provider execution access release failed");
+}
+
+async function waitForHarnessSessionClose(tail: Promise<void>, timeoutMs: number): Promise<void> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      tail,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("Harness session did not stop before the close deadline")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 
@@ -1355,17 +1714,32 @@ function executionConfiguration(
 }
 
 function executionPolicyIdentity(policy: HarnessExecutionPolicy): string {
-  return JSON.stringify(policy);
+  return stableJson(policy);
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  return `{${Object.entries(value)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`)
+    .join(",")}}`;
 }
 
 function readHarnessExecutionPolicy(value: unknown): HarnessExecutionPolicy | undefined {
   if (!isRecord(value) || value.harnessPolicy === undefined) return undefined;
   const policy = value.harnessPolicy;
   if (!isRecord(policy)) throw new Error("Harness execution policy is invalid");
-  const { configurationRevision, configurationDigest, modelRules } = policy;
+  const { configurationRevision, configurationDigest, modelRules, executionAccessContracts } = policy;
   if (typeof configurationRevision !== "number" || !Number.isSafeInteger(configurationRevision) || configurationRevision < 1
     || typeof configurationDigest !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(configurationDigest)
-    || (modelRules !== undefined && modelRules !== null && !isRecord(modelRules))) {
+    || (modelRules !== undefined && modelRules !== null && !isRecord(modelRules))
+    || (executionAccessContracts !== undefined
+      && (!Array.isArray(executionAccessContracts)
+        || executionAccessContracts.length < 1
+        || executionAccessContracts.some((contract) => !isVersionedIdentifier(contract))
+        || new Set(executionAccessContracts).size !== executionAccessContracts.length))) {
     throw new Error("Harness execution policy is invalid");
   }
   return {
@@ -1374,7 +1748,30 @@ function readHarnessExecutionPolicy(value: unknown): HarnessExecutionPolicy | un
     ...(modelRules === undefined || modelRules === null
       ? {}
       : { modelRules: modelRules as unknown as HarnessConfiguration["modelRules"] }),
+    ...(executionAccessContracts === undefined
+      ? {}
+      : { executionAccessContracts: Object.freeze([...(executionAccessContracts as string[])]) }),
   };
+}
+
+function validateFamilyPolicyAccessContracts(
+  policy: HarnessExecutionPolicy,
+  configuredContracts: readonly string[],
+): void {
+  const policyContracts = policy.executionAccessContracts;
+  if (policyContracts === undefined) {
+    throw new Error("Family execution harnessPolicy requires executionAccessContracts");
+  }
+  if (policyContracts.length !== configuredContracts.length
+    || policyContracts.some((contract, index) => contract !== configuredContracts[index])) {
+    throw new Error("Family execution harnessPolicy access contracts do not match the pinned harness configuration");
+  }
+}
+
+function requireHarnessExecutionPolicy(value: unknown): HarnessExecutionPolicy {
+  const policy = readHarnessExecutionPolicy(value);
+  if (policy === undefined) throw new Error("Family execution requires a harnessPolicy");
+  return policy;
 }
 
 function isStableId(value: unknown): value is string {
@@ -1386,6 +1783,10 @@ function isStableId(value: unknown): value is string {
     && !/\p{White_Space}/u.test(characters.at(-1)!)
     && !characters.some((character) => character.length === 1 && /[\uD800-\uDFFF]/u.test(character))
     && !characters.some((character) => /\p{Cc}/u.test(character));
+}
+
+function isVersionedIdentifier(value: unknown): value is string {
+  return isStableId(value) && /^[^@\s]+@[1-9][0-9]*$/u.test(value);
 }
 
 function isAbortSignal(value: unknown): value is AbortSignal {

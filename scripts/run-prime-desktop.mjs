@@ -1,12 +1,13 @@
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import electron from "electron";
 
 import { resolveDesktopHarnessConfiguration } from "../desktop/main/services/desktop-harness-configuration.mjs";
+import { inspectPrimeAgentRuntime, requirePrimeAgentRuntime } from "../desktop/main/services/prime-agent-runtime.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const checkOnly = process.argv.includes("--check");
@@ -26,16 +27,20 @@ if (!configurationName.startsWith("prime-agent-")) {
 
 const configurationPath = join(repositoryRoot, "harnesses", `${configurationName}.yaml`);
 await access(configurationPath);
-await verifyPrimeAgentPackage();
-
 const pythonClientPath = join(repositoryRoot, "python", "relayer-graph", "src");
+requirePrimeAgentRuntime(await inspectPrimeAgentRuntime({
+  appPath: repositoryRoot,
+  harnessDirectory: join(repositoryRoot, "harnesses"),
+  manifestPath: join(repositoryRoot, "vendor", "prime-agent", "manifest.json"),
+  pythonClientRoot: pythonClientPath,
+}));
 const environment = {
   ...process.env,
   RELAYER_DESKTOP_HARNESS_CONFIGURATION: configurationName,
+  RELAYER_PRIME_PYTHON_CLIENT_ROOT: pythonClientPath,
   RELAYER_DESKTOP_USER_DATA_DIR:
     process.env.RELAYER_DESKTOP_USER_DATA_DIR || join(repositoryRoot, ".relayer", `desktop-${configurationName}`),
   RELAYER_CODEX_HOME: process.env.RELAYER_CODEX_HOME || join(homedir(), ".codex"),
-  PYTHONPATH: [pythonClientPath, process.env.PYTHONPATH].filter(Boolean).join(delimiter),
 };
 delete environment.ELECTRON_RUN_AS_NODE;
 
@@ -71,22 +76,4 @@ function readOption(name) {
   const value = process.argv[index + 1];
   if (!value || value.startsWith("--")) throw new Error(`${name} requires a value.`);
   return value;
-}
-
-async function verifyPrimeAgentPackage() {
-  let primeAgent;
-  try {
-    primeAgent = await import("@earendil-works/pi-coding-agent");
-  } catch (error) {
-    throw new Error(
-      "Prime Agent is not linked. Build the Prime Agent PR branch, then run " +
-      "`npm install --no-save /path/to/prime-agent/packages/coding-agent` in this repository.",
-      { cause: error },
-    );
-  }
-  for (const name of ["createHostRequestHandler", "createAgentSessionServices", "createAgentSessionFromServices"]) {
-    if (typeof primeAgent[name] !== "function") {
-      throw new Error("The linked Prime Agent package does not include run-scoped host context support.");
-    }
-  }
 }

@@ -7,9 +7,9 @@ use crate::product::{
     CompleteProviderOnboardingCommand, CreateModelFamilyCommand, HarnessModelRule,
     HarnessModelRules, ModelFamily, ModelFamilyId, ModelFamilyMember, ModelSelection,
     ModelSettings, ModelSettingsDefaults, ProviderCatalogSnapshot, ProviderDefinition, ProviderId,
-    ProviderOnboardingCompletion, ProviderOnboardingProjection, ReorderModelFamiliesCommand,
-    UpdateHarnessModelRulesCommand, UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand,
-    ValidateModelSelectionCommand,
+    ProviderOnboardingCompletion, ProviderOnboardingFamilyIntent, ProviderOnboardingProjection,
+    ProviderOnboardingStatus, ReorderModelFamiliesCommand, UpdateHarnessModelRulesCommand,
+    UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand, ValidateModelSelectionCommand,
 };
 use axum::{
     Json,
@@ -17,6 +17,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use serde::Deserialize;
+use std::collections::HashSet;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,27 +81,47 @@ pub(super) struct StagedProviderRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct OnboardingProjectionQuery {
-    provider_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct CompleteOnboardingRequest {
-    provider_id: String,
-    harness_id: String,
-    family_name: String,
-    model_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub(super) struct HarnessRulesRequest {
     expected_revision: u32,
     #[serde(default)]
     allow: Vec<HarnessModelRule>,
     #[serde(default)]
     deny: Vec<HarnessModelRule>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ProviderOnboardingProjectionQuery {
+    provider_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CompleteProviderOnboardingRequest {
+    provider_id: String,
+    harness_id: String,
+    expected_projection_revision: String,
+    family: ProviderOnboardingFamilyRequest,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum ProviderOnboardingFamilyRequest {
+    Existing {
+        family_id: i64,
+    },
+    Managed {
+        policy_id: String,
+        policy_version: u32,
+    },
+    Create {
+        name: String,
+        members: Vec<MemberRequest>,
+    },
 }
 
 pub(super) async fn get(
@@ -111,35 +132,80 @@ pub(super) async fn get(
     Ok(Json(state.product.model_settings().await?))
 }
 
-pub(super) async fn onboarding_projection(
+pub(super) async fn provider_onboarding_projection(
     State(state): State<ApiState>,
     headers: HeaderMap,
-    Query(query): Query<OnboardingProjectionQuery>,
+    Query(query): Query<ProviderOnboardingProjectionQuery>,
 ) -> Result<Json<ProviderOnboardingProjection>, ApiError> {
-    authorize_write(&state, &headers)?;
+    authorize_read(&state, &headers)?;
+    let permission_available = permission_available_harnesses(&state).await?;
     Ok(Json(
         state
             .product
-            .provider_onboarding_projection(ProviderId::parse(query.provider_id)?)
+            .provider_onboarding_projection(
+                &ProviderId::parse(query.provider_id)?,
+                &state.default_harness_configuration,
+                &permission_available,
+            )
             .await?,
     ))
 }
 
-pub(super) async fn complete_onboarding(
+pub(super) async fn complete_provider_onboarding(
     State(state): State<ApiState>,
     headers: HeaderMap,
-    Json(request): Json<CompleteOnboardingRequest>,
+    Json(request): Json<CompleteProviderOnboardingRequest>,
 ) -> Result<Json<ProviderOnboardingCompletion>, ApiError> {
     authorize_write(&state, &headers)?;
+    let family = match request.family {
+        ProviderOnboardingFamilyRequest::Existing { family_id } => {
+            ProviderOnboardingFamilyIntent::Existing {
+                family_id: ModelFamilyId::try_from_value(family_id)?,
+            }
+        }
+        ProviderOnboardingFamilyRequest::Managed {
+            policy_id,
+            policy_version,
+        } => ProviderOnboardingFamilyIntent::Managed {
+            policy_id,
+            policy_version,
+        },
+        ProviderOnboardingFamilyRequest::Create {
+            name,
+            members: requested_members,
+        } => ProviderOnboardingFamilyIntent::Create {
+            name,
+            members: members(requested_members)?,
+        },
+    };
+    let permission_available = permission_available_harnesses(&state).await?;
     Ok(Json(
         state
             .product
-            .complete_provider_onboarding(CompleteProviderOnboardingCommand {
-                provider_id: ProviderId::parse(request.provider_id)?,
-                harness_id: request.harness_id,
-                family_name: request.family_name,
-                model_id: request.model_id,
-            })
+            .complete_provider_onboarding(
+                &CompleteProviderOnboardingCommand {
+                    provider_id: ProviderId::parse(request.provider_id)?,
+                    harness_id: request.harness_id,
+                    expected_projection_revision: request.expected_projection_revision,
+                    family,
+                },
+                &state.default_harness_configuration,
+                &permission_available,
+            )
+            .await?,
+    ))
+}
+
+pub(super) async fn provider_onboarding_status(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Result<Json<ProviderOnboardingStatus>, ApiError> {
+    authorize_read(&state, &headers)?;
+    let permission_available = permission_available_harnesses(&state).await?;
+    Ok(Json(
+        state
+            .product
+            .provider_onboarding_status(&permission_available)
             .await?,
     ))
 }
@@ -350,4 +416,78 @@ fn members(requests: Vec<MemberRequest>) -> Result<Vec<ModelFamilyMember>, ApiEr
 
 fn enabled_by_default() -> bool {
     true
+}
+
+async fn permission_available_harnesses(state: &ApiState) -> Result<HashSet<String>, ApiError> {
+    let settings = state.product.model_settings().await?;
+    let Some(runtime) = state.runtime.as_ref() else {
+        return Ok(HashSet::new());
+    };
+    Ok(settings
+        .harnesses
+        .iter()
+        .filter(|harness| runtime.has_configuration(&harness.id))
+        .filter(|harness| {
+            runtime
+                .permission_bindings(&harness.id)
+                .ok()
+                .is_some_and(|bindings| {
+                    state
+                        .permission_catalog
+                        .availability(Some(bindings))
+                        .iter()
+                        .any(|profile| profile.available)
+                })
+        })
+        .map(|harness| harness.id.clone())
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn onboarding_completion_request_requires_exact_tagged_family_intent() {
+        let existing: CompleteProviderOnboardingRequest =
+            serde_json::from_value(serde_json::json!({
+                "providerId": "anthropic-work",
+                "harnessId": "claude-basic",
+                "expectedProjectionRevision": "sha256:preview",
+                "family": { "kind": "existing", "familyId": 12 }
+            }))
+            .unwrap();
+        assert!(matches!(
+            existing.family,
+            ProviderOnboardingFamilyRequest::Existing { family_id: 12 }
+        ));
+
+        let create: CompleteProviderOnboardingRequest = serde_json::from_value(serde_json::json!({
+            "providerId": "anthropic-work",
+            "harnessId": "claude-basic",
+            "expectedProjectionRevision": "sha256:preview",
+            "family": {
+                "kind": "create",
+                "name": "Anthropic Work default",
+                "members": [{ "providerId": "anthropic-work", "modelId": "claude-sonnet-4" }]
+            }
+        }))
+        .unwrap();
+        assert!(matches!(
+            create.family,
+            ProviderOnboardingFamilyRequest::Create { members, .. }
+                if members.len() == 1
+                    && members[0].provider_id == "anthropic-work"
+                    && members[0].model_id == "claude-sonnet-4"
+        ));
+
+        assert!(
+            serde_json::from_value::<CompleteProviderOnboardingRequest>(serde_json::json!({
+                "providerId": "anthropic-work",
+                "harnessId": "claude-basic",
+                "family": { "kind": "existing", "familyId": 12 }
+            }))
+            .is_err()
+        );
+    }
 }

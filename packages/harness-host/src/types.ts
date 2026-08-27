@@ -194,7 +194,11 @@ export interface HarnessRunContext {
   readonly interactionInput: InteractionInput;
   readonly graph: HarnessGraphScope;
   readonly approvals: HarnessApprovalChannel;
+  /** Immutable admitted family plan. Its orchestrator is also exposed through model. */
+  readonly modelPlan?: HarnessAdmittedModelPlan;
   readonly model?: InteractionModelSelection;
+  /** Complete execution-scoped provider access. The orchestrator entry is also exposed through access. */
+  readonly accessBundle?: HarnessExecutionAccessBundle;
   /** Execution-scoped and never persisted in harness session state or receipts. */
   readonly access?: HarnessExecutionAccess;
   readonly trace: HarnessTraceSink;
@@ -223,6 +227,42 @@ export type HarnessExecutionAccess =
 export interface HarnessExecutionAccessLease {
   readonly access: HarnessExecutionAccess;
   release(): void | Promise<void>;
+}
+
+/** One currently resolvable model-family member. Array order is family order. */
+export interface HarnessModelRoute {
+  /** Exact user-owned provider definition. */
+  readonly providerId: string;
+  readonly adapterId: string;
+  readonly accessContract: string;
+  readonly modelId: string;
+}
+
+/** Non-secret product-resolved input to execution admission. */
+export interface HarnessModelPlan {
+  readonly familyId: number;
+  readonly familyRevision: number;
+  readonly orchestrator: HarnessModelRoute;
+  readonly roster: readonly HarnessModelRoute[];
+}
+
+export interface HarnessAdmittedModelRoute extends HarnessModelRoute {
+  readonly adapterImplementationVersion: string;
+}
+
+/** Immutable plan returned by admission and passed to the selected harness. */
+export interface HarnessAdmittedModelPlan {
+  readonly familyId: number;
+  readonly familyRevision: number;
+  readonly orchestrator: HarnessAdmittedModelRoute;
+  readonly roster: readonly HarnessAdmittedModelRoute[];
+  readonly harnessPolicyDigest: string;
+  readonly digest: string;
+}
+
+/** Execution-scoped access keyed by exact provider-definition ID. */
+export interface HarnessExecutionAccessBundle {
+  readonly byProviderId: Readonly<Record<string, HarnessExecutionAccess>>;
 }
 
 export interface HarnessExecutionAccessBroker {

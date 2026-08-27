@@ -130,6 +130,8 @@ fn receipt(status: ExportCompletionStatus) -> ExportCompletionReceipt {
             disclosure: None,
         }),
         error: None,
+        attempt_admission_id: None,
+        admitted_model_plan: None,
     }
 }
 
@@ -642,4 +644,115 @@ fn incremental_validation_matches_batch_for_stream_order_and_cross_turn_semantic
     let mut trailing = valid.clone();
     trailing.push(trailing[2].clone());
     assert_rejected_with_parity(&trailing, "turn_inventory_mismatch");
+}
+
+#[test]
+fn admitted_model_plan_is_an_immutable_non_secret_export_snapshot() {
+    let mut fixture = records();
+    let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    turn.completion.attempt_admission_id = Some("admission-1".into());
+    let mut plan = ExportAdmittedExecutionModelPlan {
+        family_id: 1,
+        family_revision: 4,
+        orchestrator: ExportAdmittedExecutionModelRoute {
+            provider_id: "codex".into(),
+            adapter_id: "openai-api".into(),
+            access_contract: "secret@1".into(),
+            model_id: "gpt-test".into(),
+            adapter_implementation_version: "7".into(),
+        },
+        roster: vec![ExportAdmittedExecutionModelRoute {
+            provider_id: "codex".into(),
+            adapter_id: "openai-api".into(),
+            access_contract: "secret@1".into(),
+            model_id: "gpt-test".into(),
+            adapter_implementation_version: "7".into(),
+        }],
+        harness_policy_digest: format!("sha256:{}", "c".repeat(64)),
+        digest: String::new(),
+    };
+    plan.digest = admitted_model_plan_digest(&plan).unwrap();
+    turn.completion.admitted_model_plan = Some(plan);
+    validate_export_records(&fixture).unwrap();
+    let mut jsonl = Vec::new();
+    for record in &fixture {
+        serde_json::to_writer(&mut jsonl, record).unwrap();
+        jsonl.push(b'\n');
+    }
+    let decoded = decode_export_jsonl(&jsonl).unwrap();
+    assert_eq!(decoded, fixture);
+    let encoded = String::from_utf8(jsonl).unwrap();
+    assert!(encoded.contains("\"attemptAdmissionId\":\"admission-1\""));
+    assert!(encoded.contains("\"accessContract\":\"secret@1\""));
+    assert!(!encoded.contains("api-key"));
+}
+
+#[test]
+fn admitted_model_plan_requires_its_selected_family_and_orchestrator() {
+    let mut fixture = records();
+    let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    turn.completion.attempt_admission_id = Some("admission-1".into());
+    let route = ExportAdmittedExecutionModelRoute {
+        provider_id: "codex".into(),
+        adapter_id: "openai-api".into(),
+        access_contract: "secret@1".into(),
+        model_id: "gpt-test".into(),
+        adapter_implementation_version: "7".into(),
+    };
+    let mut plan = ExportAdmittedExecutionModelPlan {
+        family_id: 1,
+        family_revision: 4,
+        orchestrator: route.clone(),
+        roster: vec![route],
+        harness_policy_digest: format!("sha256:{}", "c".repeat(64)),
+        digest: String::new(),
+    };
+    plan.digest = admitted_model_plan_digest(&plan).unwrap();
+    turn.completion.admitted_model_plan = Some(plan);
+
+    turn.completion.model_selection = None;
+    assert_rejected_with_parity(&fixture, "admitted_model_selection_missing");
+
+    for selection in [
+        ExportModelSelection {
+            provider_id: "other-provider".into(),
+            model_id: "gpt-test".into(),
+            model_family_id: 1,
+        },
+        ExportModelSelection {
+            provider_id: "codex".into(),
+            model_id: "other-model".into(),
+            model_family_id: 1,
+        },
+        ExportModelSelection {
+            provider_id: "codex".into(),
+            model_id: "gpt-test".into(),
+            model_family_id: 2,
+        },
+    ] {
+        let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+            unreachable!()
+        };
+        turn.completion.model_selection = Some(selection);
+        assert_rejected_with_parity(&fixture, "admitted_model_selection_mismatch");
+    }
+
+    let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    turn.completion.model_selection = Some(ExportModelSelection {
+        provider_id: "codex".into(),
+        model_id: "gpt-test".into(),
+        model_family_id: 1,
+    });
+    turn.completion
+        .admitted_model_plan
+        .as_mut()
+        .unwrap()
+        .family_revision += 1;
+    assert_rejected_with_parity(&fixture, "admitted_model_plan_digest_mismatch");
 }

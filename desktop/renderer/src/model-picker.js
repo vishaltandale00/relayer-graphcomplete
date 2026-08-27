@@ -1,6 +1,7 @@
 import {
   availablePickerFamilies,
   harnessUsesConfigurationModel,
+  modelPickerContextCandidate,
   pickerSelectionIsAvailable,
   reconcilePickerSelection,
   resolveUnsentModelIntent,
@@ -438,12 +439,15 @@ export function createModelPicker({
       validatingHarness = false;
       currentSettings = nextSettings;
       currentPinnedHarnessId = nextPinnedHarnessId;
-      const harnessId = mode === "ongoing"
-        ? currentPinnedHarnessId
-        : nextSelection?.harnessId ?? currentSelection?.harnessId ?? currentSettings?.defaults?.harnessId;
-      const candidate = replaceSelection ? nextSelection : currentSelection ?? nextSelection;
       currentSelection = currentSettings
-        ? reconcilePickerSelection(currentSettings, { ...candidate, harnessId })
+        ? reconcilePickerSelection(currentSettings, modelPickerContextCandidate({
+          settings: currentSettings,
+          mode,
+          pinnedHarnessId: currentPinnedHarnessId,
+          currentSelection,
+          nextSelection,
+          replaceSelection,
+        }))
         : null;
       error = null;
       render();

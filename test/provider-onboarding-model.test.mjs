@@ -1,0 +1,128 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  providerOnboardingCompletionIntent,
+  reconcileProviderOnboardingState,
+  resumableProviderDefinitions,
+  setProviderOnboardingControlsBusy,
+} from "../desktop/renderer/src/provider-onboarding-model.js";
+
+const projection = {
+  projectionRevision: "sha256:projection",
+  initialHarnessId: null,
+  harnesses: [
+    { id: "packaged-default", selectable: false },
+    { id: "compatible", selectable: true },
+  ],
+};
+
+describe("provider onboarding renderer state", () => {
+  it("does not silently choose an alternate harness when the app default is incompatible", () => {
+    expect(reconcileProviderOnboardingState(projection)).toEqual({ harnessId: null, family: null });
+  });
+
+  it("uses only the authoritative initial harness and preserves an explicit compatible choice on refresh", () => {
+    const initiallyCompatible = {
+      ...projection,
+      initialHarnessId: "compatible",
+      harnesses: projection.harnesses.map((harness) => harness.id === "compatible" ? {
+        ...harness,
+        existingCustomFamilies: [{ id: 12 }],
+      } : harness),
+    };
+    expect(reconcileProviderOnboardingState(initiallyCompatible)).toEqual({
+      harnessId: "compatible",
+      family: null,
+    });
+    const family = { kind: "existing", familyId: 12 };
+    expect(reconcileProviderOnboardingState(initiallyCompatible, { harnessId: "compatible", family })).toEqual({
+      harnessId: "compatible",
+      family,
+    });
+  });
+
+  it("reconciles preserved family intent against the refreshed authoritative choices", () => {
+    const withChoices = {
+      ...projection,
+      harnesses: projection.harnesses.map((harness) => harness.id === "compatible" ? {
+        ...harness,
+        existingCustomFamilies: [{ id: 12 }],
+        existingManagedFamilies: [],
+        managedFamilyCandidate: { policyId: "managed", policyVersion: 3 },
+        eligibleModels: [{ providerId: "work", modelId: "large" }],
+      } : harness),
+    };
+    expect(reconcileProviderOnboardingState(withChoices, {
+      harnessId: "compatible",
+      family: { kind: "existing", familyId: 99 },
+    }).family).toBeNull();
+    expect(reconcileProviderOnboardingState(withChoices, {
+      harnessId: "compatible",
+      family: { kind: "managed", policyId: "managed", policyVersion: 2 },
+    }).family).toBeNull();
+    expect(reconcileProviderOnboardingState(withChoices, {
+      harnessId: "compatible",
+      family: {
+        kind: "create",
+        name: "Work",
+        members: [
+          { providerId: "work", modelId: "large" },
+          { providerId: "work", modelId: "removed" },
+        ],
+      },
+    }).family).toEqual({
+      kind: "create",
+      name: "Work",
+      members: [{ providerId: "work", modelId: "large" }],
+    });
+  });
+
+  it("offers every persisted connected definition for interrupted onboarding", () => {
+    expect(resumableProviderDefinitions({ definitions: [
+      { id: "work", connected: true, lifecycleState: "active" },
+      { id: "signed-out", connected: false, lifecycleState: "active" },
+      { id: "draining", connected: true, lifecycleState: "removal_pending" },
+      { id: "removed", connected: true, lifecycleState: "tombstoned" },
+    ] })).toEqual([{ id: "work", connected: true, lifecycleState: "active" }]);
+  });
+
+  it("clears family intent when a refreshed projection makes its harness unavailable", () => {
+    expect(reconcileProviderOnboardingState({
+      ...projection,
+      harnesses: projection.harnesses.map((harness) => ({ ...harness, selectable: false })),
+    }, { harnessId: "compatible", family: { kind: "existing", familyId: 12 } })).toEqual({
+      harnessId: null,
+      family: null,
+    });
+  });
+
+  it("requires explicit custom members and preserves the optimistic projection revision", () => {
+    const base = { providerId: "work", projection, harnessId: "compatible" };
+    expect(providerOnboardingCompletionIntent({
+      ...base,
+      family: { kind: "create", name: "Work", members: [] },
+    })).toBeNull();
+    expect(providerOnboardingCompletionIntent({
+      ...base,
+      family: { kind: "create", name: "  Work choices  ", members: [{ providerId: "work", modelId: "large" }] },
+    })).toEqual({
+      providerId: "work",
+      harnessId: "compatible",
+      expectedProjectionRevision: "sha256:projection",
+      family: { kind: "create", name: "Work choices", members: [{ providerId: "work", modelId: "large" }] },
+    });
+  });
+
+  it("disables every edit control while busy and restores prior disabled states", () => {
+    const controls = [
+      { disabled: false, dataset: {} },
+      { disabled: true, dataset: {} },
+      { disabled: false, dataset: {} },
+    ];
+    setProviderOnboardingControlsBusy(controls, true);
+    expect(controls.map(({ disabled }) => disabled)).toEqual([true, true, true]);
+    setProviderOnboardingControlsBusy(controls, false);
+    expect(controls.map(({ disabled }) => disabled)).toEqual([false, true, false]);
+    expect(controls.every(({ dataset }) => dataset.onboardingDisabledBeforeBusy === undefined)).toBe(true);
+  });
+});

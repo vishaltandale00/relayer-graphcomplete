@@ -252,11 +252,13 @@ mod tests {
         conversation_export::{
             ConversationExportHeader, ConversationExportRecord, ConversationExportTurn,
             EXPORT_VERSION_V1, ExportAcceptedView, ExportAction, ExportActionKind,
-            ExportActionVariant, ExportCompletionReceipt, ExportCompletionStatus,
+            ExportActionVariant, ExportAdmittedExecutionModelPlan,
+            ExportAdmittedExecutionModelRoute, ExportCompletionReceipt, ExportCompletionStatus,
             ExportContextSource, ExportContextTargetSnapshot, ExportConversation,
-            ExportInteractionContext, ExportLayer, ExportNavigateRelation, ExportNode,
-            ExportProducer, ExportRecordState, ExportResolvedLayer, ExportTurnManifestEntry,
-            ExportTurnOrigin, MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES, decode_export_jsonl,
+            ExportInteractionContext, ExportLayer, ExportModelSelection, ExportNavigateRelation,
+            ExportNode, ExportProducer, ExportRecordState, ExportResolvedLayer,
+            ExportTurnManifestEntry, ExportTurnOrigin, MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES,
+            admitted_model_plan_digest, decode_export_jsonl,
         },
         product::ProductService,
         runtime::RuntimeClient,
@@ -303,6 +305,8 @@ mod tests {
                     effective_execution_digest: None,
                     effective_permission_receipt: None,
                     error: None,
+                    attempt_admission_id: None,
+                    admitted_model_plan: None,
                 },
                 contexts: vec![],
                 accepted_view: None,
@@ -320,15 +324,37 @@ mod tests {
     }
 
     fn accepted_receipt() -> ExportCompletionReceipt {
+        let route = ExportAdmittedExecutionModelRoute {
+            provider_id: "codex".into(),
+            adapter_id: "codex-subscription".into(),
+            access_contract: "managed-runtime@1".into(),
+            model_id: "gpt-test".into(),
+            adapter_implementation_version: "7".into(),
+        };
+        let mut admitted_plan = ExportAdmittedExecutionModelPlan {
+            family_id: 1,
+            family_revision: 4,
+            orchestrator: route.clone(),
+            roster: vec![route],
+            harness_policy_digest: format!("sha256:{}", "c".repeat(64)),
+            digest: String::new(),
+        };
+        admitted_plan.digest = admitted_model_plan_digest(&admitted_plan).unwrap();
         ExportCompletionReceipt {
             status: ExportCompletionStatus::Accepted,
             harness_configuration_name: Some("codex-basic".into()),
             harness_configuration_digest: None,
-            model_selection: None,
+            model_selection: Some(ExportModelSelection {
+                provider_id: "codex".into(),
+                model_id: "gpt-test".into(),
+                model_family_id: 1,
+            }),
             permission_profile_id: "auto".into(),
             effective_execution_digest: None,
             effective_permission_receipt: None,
             error: None,
+            attempt_admission_id: Some("admission-imported".into()),
+            admitted_model_plan: Some(admitted_plan),
         }
     }
 
@@ -575,6 +601,7 @@ mod tests {
             ("write-token".into(), Some("read-token".into())),
             directory.path().to_path_buf(),
             crate::api::ApiRuntime {
+                execution_lease_reconciler: None,
                 runtime: Some(runtime),
                 permission_catalog,
                 default_harness_configuration: "codex-basic".into(),
@@ -862,6 +889,14 @@ mod tests {
         let ConversationExportRecord::Turn(reexported_destination) = &reexported_records[2] else {
             unreachable!()
         };
+        assert_eq!(
+            reexported_source.completion.attempt_admission_id,
+            source_turn.completion.attempt_admission_id
+        );
+        assert_eq!(
+            reexported_source.completion.admitted_model_plan,
+            source_turn.completion.admitted_model_plan
+        );
         assert_eq!(reexported_invoke.id, "action:invoke");
         assert_eq!(reexported_invoke.target_layer_id, None);
         assert_eq!(
@@ -994,6 +1029,8 @@ mod tests {
                         effective_execution_digest: None,
                         effective_permission_receipt: None,
                         error: Some(format!("{suffix} completion")),
+                        attempt_admission_id: None,
+                        admitted_model_plan: None,
                     },
                     contexts: vec![context(&format!("action:context-{suffix}"), &["Preserved"])],
                     accepted_view: None,
@@ -1147,6 +1184,8 @@ mod tests {
                     effective_execution_digest: None,
                     effective_permission_receipt: None,
                     error: None,
+                    attempt_admission_id: None,
+                    admitted_model_plan: None,
                 },
                 contexts: vec![],
                 accepted_view: None,

@@ -158,6 +158,57 @@ pub struct ExportCompletionReceipt {
     pub effective_permission_receipt: Option<ExportPermissionReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_admission_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admitted_model_plan: Option<ExportAdmittedExecutionModelPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportAdmittedExecutionModelRoute {
+    pub provider_id: String,
+    pub adapter_id: String,
+    pub access_contract: String,
+    pub model_id: String,
+    pub adapter_implementation_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportAdmittedExecutionModelPlan {
+    pub family_id: i64,
+    pub family_revision: i64,
+    pub orchestrator: ExportAdmittedExecutionModelRoute,
+    pub roster: Vec<ExportAdmittedExecutionModelRoute>,
+    pub harness_policy_digest: String,
+    pub digest: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnsignedExportAdmittedExecutionModelPlan<'a> {
+    family_id: i64,
+    family_revision: i64,
+    orchestrator: &'a ExportAdmittedExecutionModelRoute,
+    roster: &'a [ExportAdmittedExecutionModelRoute],
+    harness_policy_digest: &'a str,
+}
+
+pub fn admitted_model_plan_digest(
+    plan: &ExportAdmittedExecutionModelPlan,
+) -> Result<String, serde_json::Error> {
+    let unsigned = UnsignedExportAdmittedExecutionModelPlan {
+        family_id: plan.family_id,
+        family_revision: plan.family_revision,
+        orchestrator: &plan.orchestrator,
+        roster: &plan.roster,
+        harness_policy_digest: &plan.harness_policy_digest,
+    };
+    let mut hasher = Sha256::new();
+    hasher.update(b"relayer.harness-model-plan.v1\0");
+    hasher.update(serde_json::to_vec(&unsigned)?);
+    Ok(format!("sha256:{:x}", hasher.finalize()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -790,6 +841,99 @@ fn validate_turn(
                 "model_family_id_invalid",
                 format!("{path}.completion.modelSelection.modelFamilyId"),
                 "Model family ID must be a positive producer-local identifier.",
+            ));
+        }
+    }
+    if turn.completion.attempt_admission_id.is_some()
+        != turn.completion.admitted_model_plan.is_some()
+    {
+        return Err(ExportValidationError::new(
+            "admitted_model_plan_pair_invalid",
+            format!("{path}.completion.admittedModelPlan"),
+            "Attempt admission identity and admitted model plan must appear together.",
+        ));
+    }
+    if let Some(admission_id) = &turn.completion.attempt_admission_id {
+        require_string(
+            admission_id,
+            format!("{path}.completion.attemptAdmissionId"),
+        )?;
+    }
+    if let Some(plan) = &turn.completion.admitted_model_plan {
+        if plan.family_id <= 0 || plan.family_revision <= 0 || plan.roster.is_empty() {
+            return Err(ExportValidationError::new(
+                "admitted_model_plan_invalid",
+                format!("{path}.completion.admittedModelPlan"),
+                "An admitted model plan requires positive family identity and a non-empty roster.",
+            ));
+        }
+        for (route_path, route) in std::iter::once((
+            format!("{path}.completion.admittedModelPlan.orchestrator"),
+            &plan.orchestrator,
+        ))
+        .chain(plan.roster.iter().enumerate().map(|(index, route)| {
+            (
+                format!("{path}.completion.admittedModelPlan.roster[{index}]"),
+                route,
+            )
+        })) {
+            for (field, value) in [
+                ("providerId", &route.provider_id),
+                ("adapterId", &route.adapter_id),
+                ("accessContract", &route.access_contract),
+                ("modelId", &route.model_id),
+                (
+                    "adapterImplementationVersion",
+                    &route.adapter_implementation_version,
+                ),
+            ] {
+                require_string(value, format!("{route_path}.{field}"))?;
+            }
+        }
+        require_string(
+            &plan.harness_policy_digest,
+            format!("{path}.completion.admittedModelPlan.harnessPolicyDigest"),
+        )?;
+        require_string(
+            &plan.digest,
+            format!("{path}.completion.admittedModelPlan.digest"),
+        )?;
+        let expected_digest = admitted_model_plan_digest(plan).map_err(|error| {
+            ExportValidationError::new(
+                "admitted_model_plan_digest_invalid",
+                format!("{path}.completion.admittedModelPlan.digest"),
+                error.to_string(),
+            )
+        })?;
+        if plan.digest != expected_digest {
+            return Err(ExportValidationError::new(
+                "admitted_model_plan_digest_mismatch",
+                format!("{path}.completion.admittedModelPlan.digest"),
+                "Admitted model plan digest does not match its immutable snapshot.",
+            ));
+        }
+        if !plan.roster.contains(&plan.orchestrator) {
+            return Err(ExportValidationError::new(
+                "admitted_orchestrator_missing",
+                format!("{path}.completion.admittedModelPlan.orchestrator"),
+                "The admitted orchestrator must be present in the admitted roster.",
+            ));
+        }
+        let Some(selection) = &turn.completion.model_selection else {
+            return Err(ExportValidationError::new(
+                "admitted_model_selection_missing",
+                format!("{path}.completion.modelSelection"),
+                "An admitted model plan requires the model selection it admitted.",
+            ));
+        };
+        if selection.model_family_id != plan.family_id
+            || selection.provider_id != plan.orchestrator.provider_id
+            || selection.model_id != plan.orchestrator.model_id
+        {
+            return Err(ExportValidationError::new(
+                "admitted_model_selection_mismatch",
+                format!("{path}.completion.modelSelection"),
+                "Model selection must match the admitted family and orchestrator route.",
             ));
         }
     }

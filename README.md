@@ -55,12 +55,15 @@ atomically fills that accepted `invoke` action's target with the accepted result
 root exactly once. Derived neighbor reads expose the source node without an
 authored edge, and pre-lease invocations are not backfilled.
 
-The `prime.agent` adapter targets the run-context API in
-[Prime Agent PR #1538](https://github.com/PrimeIntellect-ai/prime-agent/pull/1538).
-Its inference-free adapter tests run in this repository. A clean live install
-still needs that forked package exposed under its canonical
-`@earendil-works/pi-coding-agent` package name; the PR branch is a monorepo, not
-an installable npm subdirectory.
+The `prime.agent` adapter uses the exact reviewed Prime Agent build recorded in
+`vendor/prime-agent/manifest.json`. Its four content-addressed package archives,
+runtime API contract, production configurations, and Python graph client are
+installed and packaged by the ordinary repository build. Prime configurations
+are omitted from the runtime catalog unless that complete contract passes the
+desktop preflight. An unavailable packaged runtime remains visible with a stable,
+actionable reason in Harness Settings, but is omitted from onboarding and model
+selection. Prime Ask and Auto currently require the macOS boundary; Windows
+therefore records both packaged Prime configurations as unavailable.
 
 Prime Agent is one optional recursive harness implementation, not the product runtime. See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/architecture.md), [ADR 0006](docs/decisions/0006-harness-provider-agnostic-product-boundary.md), and the adapter-specific [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
 
@@ -136,29 +139,35 @@ npm run desktop:dev
 
 Ask a question in the composer to open the thread immediately while the default `codex-basic` harness builds its graph in the background. Follow-up turns reuse the same harness/provider session while receiving a fresh graph capability. The accepted layer owns semantic node placement in normalized coordinates. The graph workspace projects it into a stable world plane while fit, pan, zoom, resizing, and the details inspector change only the camera. Dragging a node is an ephemeral local view override. Historical coordinate-free layers use a deterministic viewport-independent fallback without rewriting accepted history. Product and read-only Eval use this same renderer path.
 
-To try the Prime Agent harness in the real Relayer chat, first build the Prime Agent
-[run-context branch](https://github.com/vishaltandale00/prime-agent/tree/codex/run-scoped-kernel-context)
-and expose its coding-agent workspace under the package's canonical name:
+To try the Prime Agent harness in the real Relayer chat, install the repository
+dependencies and use the checked-in runtime:
 
 ```sh
-cd /path/to/prime-agent
-npm install
-npm run build
-
 cd /path/to/relayer-graphcomplete
 npm install
-npm install --no-save /path/to/prime-agent/packages/coding-agent
 npm run desktop:dev:prime
 ```
 
-The Prime launcher selects `prime-agent-basic`, adds the local Python graph client
-to every IPython kernel, and uses a separate ignored desktop profile. Prime Agent
-reads its normal local provider credentials. Use
+The Prime launcher verifies the vendored manifest, installed package versions,
+required API surface, production configuration files, and trusted Python graph
+client before selecting `prime-agent-basic`. It uses a separate ignored desktop
+profile. Use
 `npm run desktop:dev:prime -- --configuration prime-agent-deep` to try the deeper
-configuration. Packaged builds expose only configurations whose implementations
-and provider adapters are included and available; they omit the unpublished Prime Agent options.
+configuration. Packaged builds carry `prime-agent-basic` and `prime-agent-deep`;
+the development-only layered Luna configuration is not packaged.
 
 Every thread pins a product permission profile before execution. New Thread loads the available Ask for approval, Approve for me, and Full access choices from Rust product policy, selects the product default, and sends that choice through ordinary thread creation. The saved thread shows its pinned profile. The public contract is `ask`, `auto`, or `full`; raw provider sandbox and approval flags remain harness implementation details. Full access is intentionally unrestricted and is not a hard filesystem or network boundary. See [ADR 0004](docs/decisions/0004-product-permission-profiles.md).
+
+Prime Agent binds the same three IDs when the installed Prime runtime exposes
+both version-1 run-scoped authority APIs and the host can initialize its process
+boundary. On macOS, Ask and Auto run the IPython kernel tree inside an attested
+Seatbelt workspace-write boundary with network access enabled. Ask uses the
+ordinary desktop approval lifecycle; Auto deterministically permits only the
+recognized IPython cell after boundary attestation. Full passes no bounded
+authority and retains unrestricted subprocess support and the unrestricted
+disclosure. The bounded modes preserve loopback TCP for Jupyter but deny
+subprocesses, launchd jobs, Unix-domain outbound sockets, AppleEvents, and Mach
+service access. Unsupported bounded runtimes fail before inference.
 
 ## Relayer Eval
 
@@ -168,7 +177,7 @@ Relayer Eval is a separate internal application and profile. Its dashboard confi
 npm run eval-app:dev
 ```
 
-The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. When the local Prime Agent package is linked as described above, the development picker also exposes `prime-agent-basic` and `prime-agent-deep` and supplies the Python graph client to their IPython kernels. Packaged Eval builds omit those unpublished development-only options. Build the unsigned internal application with `npm run eval-app:pack`.
+The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Packaged Eval builds still omit those internal options. Build the unsigned internal application with `npm run eval-app:pack`.
 
 The public Relayer and internal Relayer Eval builds use distinct application identifiers, entry points, data profiles, and dashboard assets. They share the graph runtime, harness host, app server, product records, API contracts, and production workspace. See [ADR 0003](docs/decisions/0003-shared-product-eval-workspace.md).
 

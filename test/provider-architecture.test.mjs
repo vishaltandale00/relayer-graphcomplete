@@ -87,4 +87,9 @@ describe("provider adapter architecture", () => {
       new Set(),
     )).toBe(true);
   });
+
+  it("does not read the legacy Codex account after generic provider onboarding", async () => {
+    const auth = await readFile(resolve("desktop/renderer/src/auth.js"), "utf8");
+    expect(auth).not.toContain("desktop.account?.read?.()");
+  });
 });
