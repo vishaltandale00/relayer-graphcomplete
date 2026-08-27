@@ -27,6 +27,10 @@ import { createSettingsStore } from "./services/settings-store.mjs";
 import { createTutorialLifecycle } from "./services/tutorial-lifecycle.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
 import { createManagedRuntimeInstaller } from "./managed-runtimes/installer.mjs";
+import {
+  bootstrapLegacyManagedRuntimes,
+  createManagedRuntimeResolver,
+} from "./managed-runtimes/resolver.mjs";
 import { confirmManagedRuntimeQuit } from "./managed-runtimes/quit-guard.mjs";
 import { claimPrimaryDesktopInstance } from "./single-instance.mjs";
 import { createWindowFactory } from "./window.mjs";
@@ -59,6 +63,7 @@ const providerRuntimeRoot = join(userDataPath, "provider-runtimes");
 const managedRuntimeInstaller = createManagedRuntimeInstaller({
   root: join(userDataPath, "managed-runtimes"),
 });
+const managedRuntimeResolver = createManagedRuntimeResolver(managedRuntimeInstaller);
 const legacyCodexHome = resolveLegacyCodexHome(userDataPath, process.env);
 const updateBaseUrl = packagedRelease?.updateBaseUrl || (
   app.isPackaged ? null : process.env.RELAYER_DESKTOP_UPDATE_BASE_URL || DESKTOP_UPDATE_BASE_URL
@@ -116,6 +121,11 @@ if (primaryInstance) {
   let appearance = "dark";
   const settings = createSettingsStore(userDataPath);
   const tutorial = createTutorialLifecycle({ settings });
+  let fatalShutdownRequested = false;
+  const requestFatalShutdown = () => {
+    fatalShutdownRequested = true;
+    app.quit();
+  };
   const graphRuntime = new GraphCompleteRuntimeService({
     userDataDirectory: userDataPath,
     graphServerBinary: relayerGraphServerBinary,
@@ -141,7 +151,7 @@ if (primaryInstance) {
         "Relayer graph service stopped",
         "Relayer needs to close because its local graph service stopped. Reopen the app to continue.",
       );
-      app.quit();
+      requestFatalShutdown();
     },
   });
   let productServer;
@@ -204,10 +214,12 @@ if (primaryInstance) {
   let shutdownComplete = false;
   let quitFlowPromise;
 
-  const confirmQuit = () => confirmManagedRuntimeQuit({
+  const confirmQuit = ({ fatal = false } = {}) => confirmManagedRuntimeQuit({
     installer: managedRuntimeInstaller,
     dialog,
     parent: mainWindow,
+    fatal,
+    ...(fatal ? { reason: new Error("Relayer is closing after a fatal service failure.") } : {}),
   });
 
   async function shutdownServices() {
@@ -272,7 +284,7 @@ if (primaryInstance) {
           "Relayer app server stopped",
           "Relayer needs to close because its local product service stopped. Reopen the app to continue.",
         );
-        app.quit();
+        requestFatalShutdown();
       },
     });
     const productSession = await productServer.start();
@@ -297,7 +309,7 @@ if (primaryInstance) {
         const requirement = managedRuntimeRequirementForHarness(
           compatibleHarnessImplementationForAdapter(definition.adapterId),
         );
-        const managedRuntime = managedRuntimeDescriptor(await managedRuntimeInstaller.installed(
+        const managedRuntime = managedRuntimeDescriptor(await managedRuntimeResolver.get(
           requirement.runtimeId,
           requirement.minimumVersion,
         ));
@@ -312,11 +324,21 @@ if (primaryInstance) {
         const requirement = managedRuntimeRequirementForHarness(
           compatibleHarnessImplementationForAdapter(adapterId),
         );
-        await managedRuntimeInstaller.ensure(requirement.runtimeId, requirement.minimumVersion);
+        await managedRuntimeResolver.prepare(requirement.runtimeId, requirement.minimumVersion);
       },
       publishCatalog,
     });
     ({ modelCatalog, providerDefinitions: providerSetup } = providerComposition);
+    if (app.isPackaged && saved.providerOnboardingComplete === true && saved.managedRuntimeMigrationVersion !== 1) {
+      await bootstrapLegacyManagedRuntimes({
+        definitions: await providerSetup.list(),
+        resolver: managedRuntimeResolver,
+        requirementForAdapter: (adapterId) => managedRuntimeRequirementForHarness(
+          compatibleHarnessImplementationForAdapter(adapterId),
+        ),
+      });
+      await settings.update((current) => ({ ...current, managedRuntimeMigrationVersion: 1 }));
+    }
     await providerComposition.start();
     const conversationExporter = createConversationExportService({
       dialog,
@@ -373,7 +395,7 @@ if (primaryInstance) {
     event.preventDefault();
     if (quitFlowPromise) return;
     quitFlowPromise = (async () => {
-      if (!await confirmQuit()) return;
+      if (!await confirmQuit({ fatal: fatalShutdownRequested })) return;
       try {
         await shutdownServices();
       } catch (error) {

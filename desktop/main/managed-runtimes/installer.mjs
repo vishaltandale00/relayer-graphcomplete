@@ -659,7 +659,7 @@ export function createManagedRuntimeInstaller({
     return Object.freeze({ appVersion, staged: Object.freeze(staged), failures: Object.freeze(failures) });
   }
 
-  async function activatePendingRuntime(appVersion, runtimeId, signal) {
+  async function activatePendingRuntime(appVersion, runtimeId, signal, { retainPrevious = false } = {}) {
     const path = pendingPath(appVersion, runtimeId);
     const receipt = await readPending(appVersion, runtimeId);
     if (!receipt) throw new Error(`${runtimeId} pending runtime receipt is invalid.`);
@@ -671,6 +671,9 @@ export function createManagedRuntimeInstaller({
     validateReceiptArtifacts(receipt, runtimeId);
     const base = join(root, runtimeId, target.key);
     const previous = await readActive(base);
+    if (previous?.version && semver.valid(previous.version) && semver.gt(previous.version, version)) {
+      throw new Error(`${runtimeId} pending ${version} would downgrade active ${previous.version}.`);
+    }
     const result = await probeReceipt(base, receipt, minimumVersion, signal);
     const {
       appVersion: _appVersion,
@@ -681,7 +684,7 @@ export function createManagedRuntimeInstaller({
     signal?.throwIfAborted();
     await atomicWriteJson(join(base, "active.json"), activeReceipt);
     await rm(path, { force: true });
-    if (previous?.installation && previous.installation !== receipt.installation) {
+    if (!retainPrevious && previous?.installation && previous.installation !== receipt.installation) {
       await rm(join(base, "installations", previous.installation), { recursive: true, force: true });
     }
     return Object.freeze({ ...result, receipt: Object.freeze({ ...activeReceipt }) });
@@ -726,7 +729,6 @@ export function createManagedRuntimeInstaller({
         activated.push(await activatePendingRuntime(appVersion, runtimeId, operation.controller.signal));
       } catch (error) {
         failures.push(Object.freeze({ runtimeId, error }));
-        await discardFailedPending(appVersion, runtimeId).catch(() => undefined);
       }
     }
     await rm(directory, { recursive: false }).catch(() => undefined);
@@ -845,7 +847,7 @@ export function createManagedRuntimeInstaller({
         if (!semver.gte(result.version, required)) {
           throw new Error(`${runtimeId} runtime is below required ${required}.`);
         }
-        return activatePendingRuntime(appVersion, runtimeId, stagedOperation.controller.signal);
+        return activatePendingRuntime(appVersion, runtimeId, stagedOperation.controller.signal, { retainPrevious: true });
       }).finally(() => {
         if (operations.get(runtimeId) === operation) operations.delete(runtimeId);
       });

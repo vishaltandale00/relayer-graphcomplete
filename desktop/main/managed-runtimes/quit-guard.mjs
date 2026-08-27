@@ -2,10 +2,15 @@ export async function confirmManagedRuntimeQuit({
   installer,
   dialog,
   parent,
+  fatal = false,
   reason = new DOMException("Relayer quit during managed runtime installation.", "AbortError"),
 } = {}) {
   const active = installer.activeOperations();
   if (active.length === 0) return true;
+  if (fatal) {
+    await installer.cancelAll(reason);
+    return true;
+  }
   const options = {
     type: "warning",
     title: "Runtime download in progress",

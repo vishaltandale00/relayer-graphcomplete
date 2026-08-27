@@ -132,6 +132,72 @@ describe("managed runtime installer", () => {
     expect(serverChild.exitCode).toBe(0);
   });
 
+  it("validates that the managed Claude SDK module exports query", async () => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.exitCode = null;
+    child.signalCode = null;
+    child.kill = vi.fn();
+    const spawnProcess = vi.fn(() => {
+      queueMicrotask(() => {
+        child.stdout.end("claude 0.3.247\n");
+        child.exitCode = 0;
+        child.emit("exit", 0, null);
+      });
+      return child;
+    });
+    const importModule = vi.fn(async () => ({ query: () => {} }));
+
+    await expect(createDefaultRuntimeProbes({ spawnProcess, importModule }).claude({
+      executable: "/runtime/claude",
+      modulePath: "/runtime/sdk.mjs",
+    })).resolves.toEqual({ version: "0.3.247" });
+
+    expect(importModule).toHaveBeenCalledWith("file:///runtime/sdk.mjs");
+  });
+
+  it("rejects a managed Claude SDK module without the query boundary", async () => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.exitCode = null;
+    child.signalCode = null;
+    child.kill = vi.fn();
+    const spawnProcess = () => {
+      queueMicrotask(() => {
+        child.stdout.end("claude 0.3.247\n");
+        child.exitCode = 0;
+        child.emit("exit", 0, null);
+      });
+      return child;
+    };
+
+    await expect(createDefaultRuntimeProbes({
+      spawnProcess,
+      importModule: async () => ({}),
+    }).claude({ executable: "/runtime/claude", modulePath: "/runtime/sdk.mjs" }))
+      .rejects.toThrow("does not export query");
+  });
+
+  it("bounds a managed executable version probe and terminates a hung child", async () => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.exitCode = null;
+    child.signalCode = null;
+    child.kill = vi.fn(() => true);
+    const probe = createDefaultRuntimeProbes({
+      spawnProcess: () => child,
+      importModule: async () => ({ query: () => {} }),
+      timeoutMs: 5,
+    });
+
+    await expect(probe.claude({ executable: "/runtime/claude", modulePath: "/runtime/sdk.mjs" }))
+      .rejects.toThrow("version probe timed out");
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
   it("installs and activates the latest matching Claude SDK runtime", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
     const sdkBytes = Buffer.from("sdk archive");
@@ -726,6 +792,64 @@ describe("managed runtime installer", () => {
       await expect(activation).resolves.toMatchObject({ failures: [expect.objectContaining({ runtimeId: "claude" })] });
       await expect(access(join(root, "claude", "macos-arm64", "active.json")))
         .rejects.toMatchObject({ code: "ENOENT" });
+      await expect(access(join(root, ".pending-app-updates", "0.2.15", "claude-macos-arm64.json")))
+        .resolves.toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to activate a pending runtime older than the active generation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+    try {
+      const fixture = await createInstalledClaude(root);
+      fixture.fetch.mockImplementation(registryFixture(latestClaudeRoutes("0.3.248", "active-newer")));
+      const active = await fixture.installer.ensure("claude", "0.3.200");
+      fixture.fetch.mockImplementation(registryFixture(latestClaudeRoutes("0.3.247", "pending-older")));
+      await fixture.installer.stageForAppUpdate("2.0.0", [
+        { runtimeId: "claude", minimumVersion: "0.3.200" },
+      ]);
+
+      const activation = await fixture.installer.activatePendingAppUpdate("2.0.0");
+
+      expect(activation.activated).toEqual([]);
+      expect(activation.failures).toEqual([
+        expect.objectContaining({ runtimeId: "claude", error: expect.objectContaining({ message: expect.stringContaining("would downgrade") }) }),
+      ]);
+      await expect(fixture.installer.installed("claude", "0.3.200"))
+        .resolves.toMatchObject({ version: "0.3.248", receipt: { installation: active.receipt.installation } });
+      await expect(access(join(root, ".pending-app-updates", "2.0.0", "claude-macos-arm64.json")))
+        .resolves.toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("retains the prior active generation when Connect coalesces with an app-update activation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+    try {
+      const fixture = await createInstalledClaude(root);
+      const priorExecutable = fixture.result.executable;
+      const registry = registryFixture(latestClaudeRoutes("0.3.248", "coalesced-upgrade"));
+      const gate = deferred();
+      let held = false;
+      fixture.fetch.mockImplementation(async (url) => {
+        if (!held) {
+          held = true;
+          await gate.promise;
+        }
+        return registry(url);
+      });
+      const staging = fixture.installer.stageForAppUpdate("2.0.0", [
+        { runtimeId: "claude", minimumVersion: "0.3.200" },
+      ]);
+      await vi.waitFor(() => expect(fixture.fetch).toHaveBeenCalled());
+      const connecting = fixture.installer.ensure("claude", "0.3.200");
+      gate.resolve();
+
+      await expect(staging).resolves.toMatchObject({ failures: [] });
+      await expect(connecting).resolves.toMatchObject({ version: "0.3.248" });
+      await expect(access(priorExecutable)).resolves.toBeUndefined();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -42,4 +42,20 @@ describe("managed runtime quit guard", () => {
     })).resolves.toBe(true);
     expect(showMessageBox).not.toHaveBeenCalled();
   });
+
+  it("bypasses the user prompt and cancels downloads for a fatal service shutdown", async () => {
+    const cancelAll = vi.fn(async () => {});
+    const showMessageBox = vi.fn();
+    const reason = new Error("fatal service failure");
+
+    await expect(confirmManagedRuntimeQuit({
+      installer: { activeOperations: () => ["codex"], cancelAll },
+      dialog: { showMessageBox },
+      fatal: true,
+      reason,
+    })).resolves.toBe(true);
+
+    expect(showMessageBox).not.toHaveBeenCalled();
+    expect(cancelAll).toHaveBeenCalledWith(reason);
+  });
 });

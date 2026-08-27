@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
 
 function abortReason(signal) {
@@ -7,7 +8,7 @@ function abortReason(signal) {
     : new DOMException("The operation was aborted.", "AbortError");
 }
 
-function waitForExit(child, signal) {
+function waitForExit(child, signal, timeoutMs) {
   if (signal?.aborted) {
     child.kill("SIGTERM");
     return Promise.reject(abortReason(signal));
@@ -16,17 +17,26 @@ function waitForExit(child, signal) {
     return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
   }
   return new Promise((resolve, reject) => {
+    const finish = (callback, value) => {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      child.off("error", onError);
+      child.off("exit", onExit);
+      callback(value);
+    };
     const onAbort = () => {
       child.kill("SIGTERM");
-      reject(abortReason(signal));
+      finish(reject, abortReason(signal));
     };
+    const onError = (error) => finish(reject, error);
+    const onExit = (code, exitSignal) => finish(resolve, { code, signal: exitSignal });
+    const timer = timeoutMs === undefined ? null : setTimeout(() => {
+      child.kill("SIGTERM");
+      finish(reject, new Error("Managed runtime version probe timed out."));
+    }, timeoutMs);
     signal?.addEventListener("abort", onAbort, { once: true });
-    child.once("error", reject);
-    child.once("exit", (code, exitSignal) => {
-      signal?.removeEventListener("abort", onAbort);
-      if (signal?.aborted) reject(abortReason(signal));
-      else resolve({ code, signal: exitSignal });
-    });
+    child.once("error", onError);
+    child.once("exit", onExit);
   });
 }
 
@@ -67,13 +77,13 @@ async function closeCodexAppServer(child, signal) {
   }
 }
 
-async function executableVersion(executable, { signal, spawnProcess = spawn } = {}) {
+async function executableVersion(executable, { signal, spawnProcess = spawn, timeoutMs = 10_000 } = {}) {
   const child = spawnProcess(executable, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "";
   let stderr = "";
   child.stdout?.on("data", (chunk) => { stdout += String(chunk); });
   child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
-  const result = await waitForExit(child, signal);
+  const result = await waitForExit(child, signal, timeoutMs);
   if (result.code !== 0) throw new Error("Managed runtime version probe failed.");
   const match = `${stdout}\n${stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/);
   if (!match) throw new Error("Managed runtime reported an invalid version.");
@@ -127,14 +137,41 @@ async function codexInitialize(executable, { signal, spawnProcess = spawn, timeo
   }
 }
 
-export function createDefaultRuntimeProbes({ spawnProcess = spawn } = {}) {
+async function probeClaudeSdk(modulePath, { importModule, timeoutMs }) {
+  const moduleUrl = pathToFileURL(modulePath).href;
+  let timer;
+  try {
+    const loaded = await Promise.race([
+      importModule(moduleUrl),
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("Claude Agent SDK module probe timed out.")), timeoutMs);
+      }),
+    ]);
+    if (!loaded || typeof loaded !== "object" || typeof loaded.query !== "function") {
+      throw new Error("Managed Claude Agent SDK module does not export query().");
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function createDefaultRuntimeProbes({
+  spawnProcess = spawn,
+  importModule = (moduleUrl) => import(moduleUrl),
+  timeoutMs = 10_000,
+} = {}) {
   return Object.freeze({
-    claude: async ({ executable, signal }) => ({
-      version: await executableVersion(executable, { signal, spawnProcess }),
-    }),
+    claude: async ({ executable, modulePath, signal }) => {
+      const version = await executableVersion(executable, { signal, spawnProcess, timeoutMs });
+      if (typeof modulePath !== "string" || modulePath.trim() === "") {
+        throw new Error("Managed Claude Agent SDK module is missing.");
+      }
+      await probeClaudeSdk(modulePath, { importModule, timeoutMs });
+      return { version };
+    },
     codex: async ({ executable, signal }) => {
-      const version = await executableVersion(executable, { signal, spawnProcess });
-      await codexInitialize(executable, { signal, spawnProcess });
+      const version = await executableVersion(executable, { signal, spawnProcess, timeoutMs });
+      await codexInitialize(executable, { signal, spawnProcess, timeoutMs });
       return { version };
     },
   });
