@@ -81,6 +81,10 @@ describe("Eval harness configuration availability", () => {
 
     expect(DEFAULT_DESKTOP_HARNESS_CONFIGURATION).toBe("codex-basic");
     expect(evalPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses"), to: "harnesses", filter: ["*.yaml"] }');
+    expect(evalPackaging).toContain('"main/managed-runtimes/**/*"');
+    expect(evalPackaging).toContain('"shared/codex-runtime-environment.mjs"');
+    expect(evalPackaging).toContain('"shared/managed-runtime-requirements.mjs"');
+    expect(evalPackaging).toContain('"shared/target.mjs"');
     expect(productPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses/codex-basic.yaml"), to: "harnesses/codex-basic.yaml" }');
     expect(productPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses/codex-basic-high.yaml"), to: "harnesses/codex-basic-high.yaml" }');
     expect(productPackaging).not.toContain("codex-multi-agent-layered-navigation.yaml");

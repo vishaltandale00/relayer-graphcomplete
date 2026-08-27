@@ -3,6 +3,7 @@
 import { createProviderAdapterRegistry } from "./provider-adapter-contract.mjs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { withManagedCodexPath } from "../../shared/codex-runtime-environment.mjs";
 import { anthropicApiDescriptor } from "./implementations/anthropic-api.mjs";
 import { claudeSubscriptionDescriptor } from "./implementations/claude-subscription.mjs";
 import { codexSubscriptionDescriptor } from "./implementations/codex-subscription.mjs";
@@ -64,11 +65,11 @@ const PRODUCTION_RUNTIME_DEPENDENCIES = Object.freeze({
     return {
       managedRuntime,
       executable: managedRuntime.executable,
-      environment: {
+      environment: withManagedCodexPath({
         ...managedRuntimeEnvironment(context.environment),
         CODEX_HOME: codexHome,
         RELAYER_CODEX_BINARY: managedRuntime.executable,
-      },
+      }, managedRuntime.executable),
     };
   },
   claude: async (definition, context, managedRuntime) => {
@@ -88,7 +89,7 @@ const PRODUCTION_RUNTIME_DEPENDENCIES = Object.freeze({
 });
 
 const SAFE_MANAGED_RUNTIME_ENVIRONMENT = Object.freeze([
-  "PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC",
+  "PATH", "Path", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC",
   "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SHELL",
   // Native credential stores resolve through the real OS user home. Provider
   // state remains isolated by CODEX_HOME and CLAUDE_CONFIG_DIR below.

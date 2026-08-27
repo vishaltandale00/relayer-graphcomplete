@@ -44,7 +44,10 @@ export interface CodexBasicDependencies {
   readonly clientModuleUrl?: string;
   readonly graphAuthoringLauncherPath?: string;
   readonly codexPathOverride?: string;
-  readonly resolveCodexPath?: () => Promise<string>;
+  readonly resolveCodexRuntime?: () => Promise<{
+    readonly executable: string;
+    readonly environment: Readonly<Record<string, string>>;
+  }>;
 }
 
 interface CodexBasicConfiguration {
@@ -108,7 +111,8 @@ export class CodexBasicHarness implements Harness {
       throw new Error("codex.basic requires execution-scoped access for the selected provider");
     }
     const capability = context.graph.acquireCapability();
-    const environment = this.graphEnvironment(capability, context.access);
+    const resolvedRuntime = await this.codexRuntime(context.access);
+    const environment = this.graphEnvironment(capability, context.access, resolvedRuntime.environment);
     const sandboxPolicy = this.sandboxPolicy();
     const run = this.dependencies.runAppServerTurn ?? runCodexAppServerTurn;
     const prompt = this.prompt(context);
@@ -117,10 +121,9 @@ export class CodexBasicHarness implements Harness {
     const forceShutdown = new AbortController();
     this.activeForceShutdowns.add(forceShutdown);
     try {
-      const codexPathOverride = await this.codexExecutable(context.access);
       await run({
         environment,
-        codexPathOverride,
+        codexPathOverride: resolvedRuntime.executable,
         ...(this.codexThreadId === undefined ? {} : { savedThreadId: this.codexThreadId }),
         threadParams: this.threadParams(model),
         turnParams: this.turnParams(sandboxPolicy, model),
@@ -165,7 +168,11 @@ export class CodexBasicHarness implements Harness {
     for (const shutdown of this.activeForceShutdowns) shutdown.abort(new Error("Codex harness force-disposed"));
   }
 
-  private graphEnvironment(graph: GraphCapability, access: HarnessExecutionAccess | undefined): Record<string, string> {
+  private graphEnvironment(
+    graph: GraphCapability,
+    access: HarnessExecutionAccess | undefined,
+    resolvedRuntimeEnvironment: Readonly<Record<string, string>>,
+  ): Record<string, string> {
     const ambient = Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined);
     const environment = Object.fromEntries(access === undefined
       ? ambient
@@ -189,6 +196,10 @@ export class CodexBasicHarness implements Harness {
       ))));
       environment.OPENAI_API_KEY = apiKey;
       environment.OPENAI_BASE_URL = access.endpoint;
+    } else {
+      Object.assign(environment, Object.fromEntries(Object.entries(resolvedRuntimeEnvironment).filter(([key]) => (
+        CODEX_MANAGED_RUNTIME_ENVIRONMENT.has(key)
+      ))));
     }
     // Older Relayer builds exposed the raw Node executable through this name.
     // Never let a stale parent environment silently restore that broader
@@ -200,19 +211,30 @@ export class CodexBasicHarness implements Harness {
     return environment;
   }
 
-  private async codexExecutable(access: HarnessExecutionAccess | undefined): Promise<string> {
+  private async codexRuntime(access: HarnessExecutionAccess | undefined): Promise<{
+    executable: string;
+    environment: Readonly<Record<string, string>>;
+  }> {
     let executable = access?.kind === "managed-runtime"
       ? access.executable ?? this.dependencies.codexPathOverride
       : access?.kind === "secret"
         ? access.runtime?.executable ?? this.dependencies.codexPathOverride
         : this.dependencies.codexPathOverride;
-    if ((executable === undefined || executable.trim() === "") && this.dependencies.resolveCodexPath) {
-      executable = await this.dependencies.resolveCodexPath();
+    const accessEnvironment = access?.kind === "managed-runtime"
+      ? access.environment
+      : access?.kind === "secret"
+        ? access.runtime?.environment ?? {}
+        : {};
+    if ((executable === undefined || executable.trim() === "") && this.dependencies.resolveCodexRuntime) {
+      const runtime = await this.dependencies.resolveCodexRuntime();
+      executable = runtime.executable;
+      if (executable.trim() === "") throw new Error("codex.basic requires an explicit managed Codex executable");
+      return { executable, environment: runtime.environment };
     }
     if (executable === undefined || executable.trim() === "") {
       throw new Error("codex.basic requires an explicit managed Codex executable");
     }
-    return executable;
+    return { executable, environment: accessEnvironment };
   }
 
   private selectedModel(context: HarnessRunContext): string | undefined {

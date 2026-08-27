@@ -45,23 +45,29 @@ describe("CodexBasicHarness", () => {
     expect(runAppServerTurn).not.toHaveBeenCalled();
   });
 
-  it("can resolve an explicit managed executable lazily for internal Eval", async () => {
+  it("can resolve an explicit managed runtime lazily for internal Eval", async () => {
     const runAppServerTurn = vi.fn(async (options: CodexAppServerTurnOptions) => {
       options.onThreadId("eval-thread");
       return { threadId: "eval-thread", turnId: "turn-1", status: "completed" as const };
     });
-    const resolveCodexPath = vi.fn(async () => "/managed/eval/codex");
-    const harness = new CodexBasicHarness(context("auto"), { runAppServerTurn, resolveCodexPath });
+    const resolveCodexRuntime = vi.fn(async () => ({
+      executable: "/managed/eval/codex",
+      environment: { PATH: "/managed/eval/codex-path:/usr/bin" },
+    }));
+    const harness = new CodexBasicHarness(context("auto"), { runAppServerTurn, resolveCodexRuntime });
 
     await harness.complete(runContext(1, "token"));
 
-    expect(resolveCodexPath).toHaveBeenCalledOnce();
-    expect(runAppServerTurn).toHaveBeenCalledWith(expect.objectContaining({ codexPathOverride: "/managed/eval/codex" }));
+    expect(resolveCodexRuntime).toHaveBeenCalledOnce();
+    expect(runAppServerTurn).toHaveBeenCalledWith(expect.objectContaining({
+      codexPathOverride: "/managed/eval/codex",
+      environment: expect.objectContaining({ PATH: "/managed/eval/codex-path:/usr/bin" }),
+    }));
   });
 
   it("does not retain a force-shutdown controller when lazy executable resolution fails", async () => {
     const harness = new CodexBasicHarness(context("auto"), {
-      resolveCodexPath: async () => { throw new Error("managed runtime unavailable"); },
+      resolveCodexRuntime: async () => { throw new Error("managed runtime unavailable"); },
     });
 
     await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("managed runtime unavailable");

@@ -18,8 +18,12 @@ export default {
   files: [
     "package.json",
     "eval-main/**/*",
+    "main/managed-runtimes/**/*",
     "main/services/**/*",
     "main/single-instance.mjs",
+    "shared/codex-runtime-environment.mjs",
+    "shared/managed-runtime-requirements.mjs",
+    "shared/target.mjs",
     "preload/eval-*.cjs",
     "node_modules/**/*",
     "!node_modules/@openai/codex/package.json",

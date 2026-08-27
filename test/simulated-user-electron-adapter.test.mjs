@@ -18,6 +18,10 @@ import {
 
 const directories = [];
 const digest = `sha256:${"a".repeat(64)}`;
+const codexRuntime = Object.freeze({
+  executable: "/managed/codex",
+  environment: Object.freeze({ PATH: "/managed/codex-path:/usr/bin" }),
+});
 
 afterEach(async () => {
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
@@ -263,7 +267,8 @@ describe("local Electron simulated-user judge adapter", () => {
         review,
       };
     });
-    const runner = createLocalSimulatedUserJudgeRunner({ loadLayer, openReviewSession, runJudge });
+    const resolveCodexRuntime = vi.fn(async () => codexRuntime);
+    const runner = createLocalSimulatedUserJudgeRunner({ loadLayer, openReviewSession, resolveCodexRuntime, runJudge });
 
     const result = await runner({
       artifactDirectory,
@@ -296,7 +301,10 @@ describe("local Electron simulated-user judge adapter", () => {
       workingDirectory: artifactDirectory,
       additionalDirectories: [],
       artifactEvidence: undefined,
+      codexPathOverride: "/managed/codex",
+      environment: { PATH: "/managed/codex-path:/usr/bin" },
     }));
+    expect(resolveCodexRuntime).toHaveBeenCalledOnce();
     expect(session.screenshot).toHaveBeenCalledTimes(5);
     expect(session.interact).toHaveBeenCalledTimes(1);
     expect(session.history).toHaveBeenCalledTimes(1);
@@ -340,6 +348,7 @@ describe("local Electron simulated-user judge adapter", () => {
         state: { executionId: "execution-1", threadId: "7", turnId: "wrong", layerId: "10" },
         release,
       }),
+      resolveCodexRuntime: async () => codexRuntime,
       runJudge,
     });
 
@@ -378,6 +387,7 @@ describe("local Electron simulated-user judge adapter", () => {
         state: { executionId: "execution-1", threadId: "7", turnId: "41", layerId: "10" },
         release: vi.fn(async () => {}),
       }),
+      resolveCodexRuntime: async () => codexRuntime,
       runJudge,
     });
 
