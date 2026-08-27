@@ -6,6 +6,7 @@ import {
 import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload } from "./provider-ui-model.js";
 import {
   providerOnboardingCompletionIntent,
+  createProviderConnectionCancellationState,
   reconcileProviderOnboardingState,
   resumableProviderDefinitions,
   setProviderOnboardingControlsBusy,
@@ -28,7 +29,7 @@ let onboardingHarness;
 let onboardingFamilyIntent;
 let onboardingProjection;
 let bound = false;
-let pendingConnectionId = null;
+const connectionCancellation = createProviderConnectionCancellationState();
 let refreshProductAfterOnboarding = async () => {};
 
 export function setProviderOnboardingCompletionHandler(handler) {
@@ -238,23 +239,23 @@ async function connectSelectedProvider(event) {
   setBusy(true);
   setStatus(`Preparing ${selectedDescriptor.label} runtime and connecting…`);
   const connectionId = crypto.randomUUID().toLowerCase();
-  pendingConnectionId = connectionId;
+  connectionCancellation.begin(connectionId);
   try {
     let result = await desktop.providers.connect(providerCreationPayload(
       selectedDescriptor,
       connectionValues,
       { connectionId },
     ));
-    if (pendingConnectionId !== connectionId) return;
-    pendingConnectionId = result.status === "pending" ? result.connectionId : null;
-    while (result.status === "pending" && pendingConnectionId === result.connectionId) {
+    if (!connectionCancellation.matches(connectionId)) return;
+    if (result.status === "pending") connectionCancellation.begin(result.connectionId);
+    while (result.status === "pending" && connectionCancellation.matches(result.connectionId)) {
       setStatus("Complete sign-in in your browser. Relayer will continue automatically.");
       await new Promise((resolve) => setTimeout(resolve, 750));
-      if (pendingConnectionId !== result.connectionId) return;
+      if (!connectionCancellation.matches(result.connectionId)) return;
       result = await desktop.providers.completeConnection(result.connectionId);
     }
     if (result.status !== "connected") return;
-    pendingConnectionId = null;
+    connectionCancellation.complete();
     // Provider state has committed. Cancel no longer has a reversible operation
     // to target, so do not accept it while defaults and product state refresh.
     setConnectionCancellationAvailable(false);
@@ -262,8 +263,8 @@ async function connectSelectedProvider(event) {
     providerStatus = await desktop.providers.status();
     await prepareFamilyStep(connectedDefinition);
   } catch (error) {
-    if (pendingConnectionId !== connectionId && error.message === "Provider connection was cancelled.") return;
-    pendingConnectionId = null;
+    if (!connectionCancellation.matches(connectionId) && error.message === "Provider connection was cancelled.") return;
+    connectionCancellation.complete();
     setStatus(error.message, "error");
     showProviderForm(selectedDescriptor.adapterId);
   } finally {
@@ -278,9 +279,23 @@ function bindProviderSetup() {
   $("#providerSetupBack").onclick = showProviderOptions;
   $("#providerFamilyBack").onclick = showProviderOptions;
   $("#cancelProviderConnection").onclick = async () => {
-    const connectionId = pendingConnectionId;
-    pendingConnectionId = null;
-    if (connectionId) await desktop.providers.cancelConnection(connectionId).catch(() => {});
+    if (!connectionCancellation.current()) {
+      setBusy(false);
+      showProviderOptions();
+      return;
+    }
+    const result = await connectionCancellation.cancel((connectionId) => (
+      desktop.providers.cancelConnection(connectionId)
+    ));
+    if (result.error) {
+      setStatus("Relayer could not confirm cancellation. The provider connection is still running.", "error");
+      return;
+    }
+    if (!result.cancelled) {
+      setConnectionCancellationAvailable(false);
+      setStatus("Provider connection is finishing and can no longer be cancelled.");
+      return;
+    }
     setBusy(false);
     showProviderOptions();
   };

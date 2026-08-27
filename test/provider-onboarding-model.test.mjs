@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createProviderConnectionCancellationState,
   providerOnboardingCompletionIntent,
   reconcileProviderOnboardingState,
   resumableProviderDefinitions,
@@ -124,5 +125,29 @@ describe("provider onboarding renderer state", () => {
     setProviderOnboardingControlsBusy(controls, false);
     expect(controls.map(({ disabled }) => disabled)).toEqual([false, true, false]);
     expect(controls.every(({ dataset }) => dataset.onboardingDisabledBeforeBusy === undefined)).toBe(true);
+  });
+
+  it("keeps the original connection live when Cancel reaches the provider after commit begins", async () => {
+    let finishConnection;
+    const connection = new Promise((resolve) => { finishConnection = resolve; });
+    const state = createProviderConnectionCancellationState();
+    state.begin("connection-1");
+    let onboardingContinued = false;
+    const connecting = connection.then(() => {
+      if (!state.matches("connection-1")) return;
+      state.complete("connection-1");
+      onboardingContinued = true;
+    });
+
+    await expect(state.cancel(async () => ({ cancelled: false }))).resolves.toEqual({
+      cancelled: false,
+      connectionId: "connection-1",
+    });
+    expect(state.current()).toBe("connection-1");
+    finishConnection();
+    await connecting;
+
+    expect(onboardingContinued).toBe(true);
+    expect(state.current()).toBeNull();
   });
 });

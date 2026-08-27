@@ -363,6 +363,69 @@ describe("managed subscription isolation", () => {
     await expect(service.list()).resolves.toEqual([expect.objectContaining({ id: definition.id })]);
   });
 
+  it.each(["reconnect", "recoverUnavailable"])(
+    "%s leaves unrelated provider leases available while runtime preparation is deferred",
+    async (operationName) => {
+      const definitions = [
+        {
+          id: "managed-repair", adapterId: "fake-managed", label: "Repair", endpoint: null,
+          accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
+        },
+        {
+          id: "managed-ready", adapterId: "fake-managed", label: "Ready", endpoint: null,
+          accessContract: "managed-runtime@1", credentialReference: null, lifecycleState: "active",
+        },
+      ];
+      let finishPreparation;
+      let markPreparationStarted;
+      const preparation = new Promise((resolve) => { finishPreparation = resolve; });
+      const preparationStarted = new Promise((resolve) => { markPreparationStarted = resolve; });
+      const repairRuntime = {
+        credentials: { login: vi.fn(async () => ({ authUrl: "https://login.example.test/repair" })) },
+        discover: vi.fn(async () => ({ models: [{ visible: true }] })),
+      };
+      const readyRuntime = {};
+      const service = new ProviderDefinitionService({
+        registry: createProviderAdapterRegistry([{
+          adapterId: "fake-managed", implementationVersion: "1", label: "Managed", accessContract: "managed-runtime@1",
+          defaultEndpoint: null, connection: { mode: "managed-login", fields: [] }, create: () => repairRuntime,
+        }]),
+        definitionStore: { async load() { return definitions; } },
+        credentialStore: {},
+        initialRuntimes: new Map([
+          ["managed-repair", repairRuntime],
+          ["managed-ready", readyRuntime],
+        ]),
+        prepareRuntime: () => {
+          markPreparationStarted();
+          return preparation;
+        },
+      });
+
+      const repairing = service[operationName]("managed-repair");
+      await preparationStarted;
+      const acquisition = service.acquireExecution("managed-ready").then((lease) => ({ kind: "lease", lease }));
+      const first = await Promise.race([
+        acquisition,
+        new Promise((resolve) => setImmediate(() => resolve({ kind: "blocked" }))),
+      ]);
+      expect(first.kind).toBe("lease");
+      await first.lease.release();
+
+      const targetLease = operationName === "reconnect"
+        ? await service.acquireExecution("managed-repair")
+        : null;
+      finishPreparation();
+      if (targetLease) {
+        await expect(repairing).rejects.toThrow("interactions are running");
+        await targetLease.release();
+      } else {
+        await expect(repairing).resolves.toBeDefined();
+      }
+      await service.close();
+    },
+  );
+
   it("cancels and drains reconnect runtime preparation before service close completes", async () => {
     const definition = {
       id: "managed-work", adapterId: "fake-managed", label: "Work", endpoint: null,

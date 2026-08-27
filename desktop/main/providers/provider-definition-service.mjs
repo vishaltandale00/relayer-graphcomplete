@@ -104,6 +104,25 @@ export class ProviderDefinitionService {
     return result;
   }
 
+  #activeDefinition(id) {
+    const definition = this.definitions.find((item) => item.id === id);
+    if (!definition || definition.lifecycleState !== "active") {
+      throw new Error("Unknown active provider definition.");
+    }
+    return definition;
+  }
+
+  #reconnectableDefinition(id) {
+    const definition = this.#activeDefinition(id);
+    const descriptor = this.registry.get(definition.adapterId);
+    if (descriptor.connection.mode === "secret-fields") throw new Error("API provider definitions do not support reconnect.");
+    if (this.activeExecutions.has(id)) {
+      throw new Error("Provider cannot reconnect while interactions are running.");
+    }
+    if (this.pendingConnections.has(id)) throw new Error("Provider reconnect is already pending.");
+    return definition;
+  }
+
   #assertUniqueLabel(label, exceptId = null, preparationOrder = null) {
     const normalized = label.trim().toLowerCase();
     if (this.definitions.some((definition) => definition.id !== exceptId
@@ -424,26 +443,24 @@ export class ProviderDefinitionService {
   }
 
   async #reconnect(id, { signal } = {}) {
+    const preparedDefinition = await this.#serialized(async () => {
+      await this.#initialize();
+      signal?.throwIfAborted();
+      if (this.closing) throw new Error("Provider setup is shutting down.");
+      return publicDefinition(this.#reconnectableDefinition(id));
+    });
+    await this.prepareRuntime(Object.freeze({
+      harnessId: null,
+      adapterId: preparedDefinition.adapterId,
+      providerDefinition: preparedDefinition,
+    }));
+    signal?.throwIfAborted();
+    if (this.closing) throw new Error("Provider setup is shutting down.");
     return this.#serialized(async () => {
       await this.#initialize();
       signal?.throwIfAborted();
       if (this.closing) throw new Error("Provider setup is shutting down.");
-      const definition = this.definitions.find((item) => item.id === id);
-      if (!definition || definition.lifecycleState !== "active") throw new Error("Unknown active provider definition.");
-      const descriptor = this.registry.get(definition.adapterId);
-      if (descriptor.connection.mode === "secret-fields") throw new Error("API provider definitions do not support reconnect.");
-      if (this.activeExecutions.has(id)) {
-        throw new Error("Provider cannot reconnect while interactions are running.");
-      }
-      if (this.pendingConnections.has(id)) throw new Error("Provider reconnect is already pending.");
-
-      await this.prepareRuntime(Object.freeze({
-        harnessId: null,
-        adapterId: definition.adapterId,
-        providerDefinition: publicDefinition(definition),
-      }));
-      signal?.throwIfAborted();
-      if (this.closing) throw new Error("Provider setup is shutting down.");
+      const definition = this.#reconnectableDefinition(id);
       let runtime = this.runtimes.get(id);
       const createdRuntime = !runtime;
       if (!runtime) {
@@ -538,21 +555,24 @@ export class ProviderDefinitionService {
   }
 
   async #recoverUnavailable(id, { signal } = {}) {
+    const preparedDefinition = await this.#serialized(async () => {
+      await this.#initialize();
+      signal?.throwIfAborted();
+      if (this.closing) throw new Error("Provider setup is shutting down.");
+      return publicDefinition(this.#activeDefinition(id));
+    });
+    await this.prepareRuntime(Object.freeze({
+      harnessId: null,
+      adapterId: preparedDefinition.adapterId,
+      providerDefinition: preparedDefinition,
+    }));
+    signal?.throwIfAborted();
+    if (this.closing) throw new Error("Provider setup is shutting down.");
     return this.#serialized(async () => {
       await this.#initialize();
       signal?.throwIfAborted();
       if (this.closing) throw new Error("Provider setup is shutting down.");
-      const definition = this.definitions.find((item) => item.id === id);
-      if (!definition || definition.lifecycleState !== "active") {
-        throw new Error("Unknown active provider definition.");
-      }
-      await this.prepareRuntime(Object.freeze({
-        harnessId: null,
-        adapterId: definition.adapterId,
-        providerDefinition: publicDefinition(definition),
-      }));
-      signal?.throwIfAborted();
-      if (this.closing) throw new Error("Provider setup is shutting down.");
+      const definition = this.#activeDefinition(id);
       const runtime = await this.#runtimeFor(definition);
       return this.#discover(runtime, signal);
     });

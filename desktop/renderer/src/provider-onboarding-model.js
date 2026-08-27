@@ -67,3 +67,33 @@ export function setProviderOnboardingControlsBusy(controls, busy) {
     }
   }
 }
+
+export function createProviderConnectionCancellationState() {
+  let connectionId = null;
+  return Object.freeze({
+    begin(value) {
+      connectionId = String(value || "");
+    },
+    current() {
+      return connectionId;
+    },
+    matches(value) {
+      return connectionId !== null && connectionId === value;
+    },
+    complete(value) {
+      if (value === undefined || connectionId === value) connectionId = null;
+    },
+    async cancel(cancelConnection) {
+      const attemptedConnectionId = connectionId;
+      if (!attemptedConnectionId) return Object.freeze({ cancelled: false, connectionId: null });
+      try {
+        const result = await cancelConnection(attemptedConnectionId);
+        const cancelled = result?.cancelled === true;
+        if (cancelled && connectionId === attemptedConnectionId) connectionId = null;
+        return Object.freeze({ cancelled, connectionId: attemptedConnectionId });
+      } catch (error) {
+        return Object.freeze({ cancelled: false, connectionId: attemptedConnectionId, error });
+      }
+    },
+  });
+}
