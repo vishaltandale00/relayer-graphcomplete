@@ -75,6 +75,7 @@ describe("CodexBasicHarness", () => {
     expect(submitted?.prompt).toContain("Each layer should explain its scope as a coherent whole");
     expect(submitted?.prompt).toContain('Choose "expand" when another layer should deepen one part');
     expect(submitted?.prompt).toContain('Choose "reference" for supporting evidence or reusable context');
+    expect(submitted?.prompt).toContain("A layer reached as a reference may author only further reference actions");
     expect(submitted?.prompt).toContain('Choose "invoke" when the useful next step requires a new agent interaction');
     expect(submitted?.prompt).toContain('choosing "stop" means leaving the node without a further action');
     expect(submitted?.prompt).toContain("It is not GraphComplete's stopped lifecycle state");
