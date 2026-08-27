@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ClaudeBasicHarness, claudePermissionMode } from "../src/implementations/claude-basic.js";
 import { createNoopHarnessTraceSink } from "../src/trace.js";
 import type { HarnessFactoryContext, HarnessRunContext } from "../src/types.js";
+import { expectGraphPresentationGuidance } from "./graph-presentation-guidance-assertions.js";
 
 function factoryContext(approvalMode: string, savedState = {}): HarnessFactoryContext {
   return {
@@ -114,12 +115,7 @@ describe("ClaudeBasicHarness", () => {
       expect(args).not.toContain("--dangerously-skip-permissions");
       expect(args.join(" ")).toContain("sourceLayer");
       expect(args.join(" ")).toContain("clientKey");
-      expect(args.join(" ")).toContain("Each layer should explain its scope as a coherent whole");
-      expect(args.join(" ")).toContain('Choose "expand" when another layer should deepen one part');
-      expect(args.join(" ")).toContain('Choose "reference" for supporting evidence or reusable context');
-      expect(args.join(" ")).toContain('Choose "invoke" when the useful next step requires a new agent interaction');
-      expect(args.join(" ")).toContain('choosing "stop" means leaving the node without a further action');
-      expect(args.join(" ")).toContain("It is not GraphComplete's stopped lifecycle state");
+      expectGraphPresentationGuidance(args.join(" "));
       expect(options.env.ANTHROPIC_API_KEY).toBe("secret");
       expect(options.env.ANTHROPIC_BASE_URL).toBe("https://gateway.test/anthropic");
       expect(options.env).not.toHaveProperty("OPENAI_API_KEY");
