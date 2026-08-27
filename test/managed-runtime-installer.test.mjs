@@ -784,7 +784,7 @@ describe("managed runtime installer", () => {
       },
     });
     try {
-      await installer.stageForAppUpdate("0.2.15", [{ runtimeId: "claude", minimumVersion: "0.3.200" }]);
+      const staged = await installer.stageForAppUpdate("0.2.15", [{ runtimeId: "claude", minimumVersion: "0.3.200" }]);
       const activation = installer.activatePendingAppUpdate("0.2.15");
       await vi.waitFor(() => expect(installer.activeOperations()).toContain("claude"));
 
@@ -793,17 +793,14 @@ describe("managed runtime installer", () => {
       await expect(access(join(root, "claude", "macos-arm64", "active.json")))
         .rejects.toMatchObject({ code: "ENOENT" });
       await expect(access(join(root, ".pending-app-updates", "0.2.15", "claude-macos-arm64.json")))
-        .resolves.toBeUndefined();
-      await expect(JSON.parse(await readFile(
-        join(root, ".pending-app-updates", "0.2.15", "claude-macos-arm64.json"),
-        "utf8",
-      ))).toMatchObject({ automaticAttempted: true });
+        .rejects.toMatchObject({ code: "ENOENT" });
+      await expect(access(staged.staged[0].executable)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("consumes a failed automatic activation and retries it only through the explicit recovery entry point", async () => {
+  it("cleans a failed automatic activation and recovers only through a fresh ensure", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
     let probeCalls = 0;
     const installer = createManagedRuntimeInstaller({
@@ -822,7 +819,7 @@ describe("managed runtime installer", () => {
       },
     });
     try {
-      await installer.stageForAppUpdate("2.0.0", [
+      const staged = await installer.stageForAppUpdate("2.0.0", [
         { runtimeId: "claude", minimumVersion: "0.3.200" },
       ]);
 
@@ -830,6 +827,7 @@ describe("managed runtime installer", () => {
         failures: [expect.objectContaining({ runtimeId: "claude" })],
       });
       expect(probeCalls).toBe(2);
+      await expect(access(staged.staged[0].executable)).rejects.toMatchObject({ code: "ENOENT" });
       await expect(installer.activatePendingAppUpdate("2.0.0")).resolves.toEqual({
         appVersion: "2.0.0",
         activated: [],
@@ -837,9 +835,9 @@ describe("managed runtime installer", () => {
       });
       expect(probeCalls).toBe(2);
 
-      await expect(installer.retryPendingAppUpdate("2.0.0")).resolves.toMatchObject({
-        activated: [expect.objectContaining({ runtimeId: "claude" })],
-        failures: [],
+      await expect(installer.ensure("claude", "0.3.200")).resolves.toMatchObject({
+        runtimeId: "claude",
+        version: "0.3.247",
       });
       expect(probeCalls).toBe(3);
     } finally {
@@ -854,7 +852,7 @@ describe("managed runtime installer", () => {
       fixture.fetch.mockImplementation(registryFixture(latestClaudeRoutes("0.3.248", "active-newer")));
       const active = await fixture.installer.ensure("claude", "0.3.200");
       fixture.fetch.mockImplementation(registryFixture(latestClaudeRoutes("0.3.247", "pending-older")));
-      await fixture.installer.stageForAppUpdate("2.0.0", [
+      const staged = await fixture.installer.stageForAppUpdate("2.0.0", [
         { runtimeId: "claude", minimumVersion: "0.3.200" },
       ]);
 
@@ -867,7 +865,8 @@ describe("managed runtime installer", () => {
       await expect(fixture.installer.installed("claude", "0.3.200"))
         .resolves.toMatchObject({ version: "0.3.248", receipt: { installation: active.receipt.installation } });
       await expect(access(join(root, ".pending-app-updates", "2.0.0", "claude-macos-arm64.json")))
-        .resolves.toBeUndefined();
+        .rejects.toMatchObject({ code: "ENOENT" });
+      await expect(access(staged.staged[0].executable)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
