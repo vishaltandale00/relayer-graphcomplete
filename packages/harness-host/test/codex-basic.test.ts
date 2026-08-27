@@ -366,8 +366,8 @@ describe("CodexBasicHarness", () => {
     expect(prompt).not.toContain("sourceLayerId");
   });
 
-  it("uses the picker-selected root model with the actual multi-agent configuration", async () => {
-    const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-multi-agent-layered-navigation.yaml"));
+  it("uses the picker-selected root model and native delegation in the product configuration", async () => {
+    const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-basic.yaml"));
     let submitted: CodexAppServerTurnOptions | undefined;
     const harness = new CodexBasicHarness({
       threadId: 1,
@@ -389,6 +389,7 @@ describe("CodexBasicHarness", () => {
 
     expect(submitted?.threadParams).toMatchObject({ model: "gpt-picker-selected" });
     expect(submitted?.turnParams).toMatchObject({ model: "gpt-picker-selected", effort: "medium" });
+    expect(submitted?.prompt).toContain("Codex native subagents are available when useful");
     expect(configuration.settings).not.toHaveProperty("model");
     expect(configuration.modelCompatibility?.[0]).not.toHaveProperty("preferredModelId");
   });

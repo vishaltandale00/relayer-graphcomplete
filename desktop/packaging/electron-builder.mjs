@@ -72,7 +72,6 @@ export function createDesktopBuilderConfig(
       { from: resolve(repositoryRoot, `target/${serverTarget}/release/relayer-app-server${target.platform === "win32" ? ".exe" : ""}`), to: `bin/relayer-app-server${target.platform === "win32" ? ".exe" : ""}` },
       { from: resolve(repositoryRoot, `target/${serverTarget}/release/relayer-graph-server${target.platform === "win32" ? ".exe" : ""}`), to: `bin/relayer-graph-server${target.platform === "win32" ? ".exe" : ""}` },
       { from: resolve(repositoryRoot, "harnesses/codex-basic.yaml"), to: "harnesses/codex-basic.yaml" },
-      { from: resolve(repositoryRoot, "harnesses/codex-basic-high.yaml"), to: "harnesses/codex-basic-high.yaml" },
       { from: resolve(repositoryRoot, "harnesses/claude-basic.yaml"), to: "harnesses/claude-basic.yaml" },
       { from: resolve(repositoryRoot, "harnesses/prime-agent-basic.yaml"), to: "harnesses/prime-agent-basic.yaml" },
       { from: resolve(repositoryRoot, "harnesses/prime-agent-deep.yaml"), to: "harnesses/prime-agent-deep.yaml" },

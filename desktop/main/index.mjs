@@ -129,7 +129,6 @@ if (primaryInstance) {
     configurationPaths: [...new Set([
       defaultHarnessConfiguration,
       "codex-basic",
-      "codex-basic-high",
       "claude-basic",
       ...(primeAgentRuntime.available ? primeAgentRuntime.configurationNames : []),
     ])].map((name) => join(harnessDirectory, `${name}.yaml`)),

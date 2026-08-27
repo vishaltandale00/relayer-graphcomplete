@@ -2,7 +2,7 @@ schemaVersion: 1
 name: codex-basic
 implementation: codex.basic
 implementationVersion: 1
-revision: 2
+revision: 3
 permissionBindings:
   ask:
     sandboxMode: workspace-write
@@ -37,4 +37,5 @@ modelDefaults:
     version: 2
 settings:
   modelReasoningEffort: medium
+  promptProfile: layered-navigation-multi-agent-v1
   skipGitRepoCheck: true

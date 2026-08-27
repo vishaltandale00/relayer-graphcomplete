@@ -27,15 +27,15 @@ describe("harness configuration", () => {
   });
 
   it.each([
-    ["codex-basic", "medium"],
-    ["codex-basic-high", "high"],
-  ])("loads the production %s configuration", async (name, modelReasoningEffort) => {
+    ["codex-basic", "medium", 3, "layered-navigation-multi-agent-v1"],
+    ["codex-basic-high", "high", 2, undefined],
+  ])("loads the checked-in %s configuration", async (name, modelReasoningEffort, revision, promptProfile) => {
     await expect(loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`))).resolves.toEqual({
       schemaVersion: 1,
       name,
       implementation: "codex.basic",
       implementationVersion: 1,
-      revision: 2,
+      revision,
       permissionBindings: {
         ask: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user", networkAccessEnabled: true },
         auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
@@ -55,6 +55,7 @@ describe("harness configuration", () => {
       modelDefaults: { familyPolicy: { id: "codex-default-family", version: 2 } },
       settings: {
         modelReasoningEffort,
+        ...(promptProfile === undefined ? {} : { promptProfile }),
         skipGitRepoCheck: true,
       },
     });

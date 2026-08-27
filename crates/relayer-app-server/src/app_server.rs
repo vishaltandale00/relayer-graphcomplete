@@ -421,6 +421,37 @@ impl RelayerAppServer {
             ),
             None => None,
         };
+        let default_harness_configuration = config
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.default_harness_configuration.clone())
+            .unwrap_or_else(|| "codex-basic".into());
+        if let Some(runtime) = &runtime
+            && !runtime.has_configuration(&default_harness_configuration)
+        {
+            anyhow::bail!(
+                "default harness configuration is unavailable: {default_harness_configuration}"
+            );
+        }
+        if let Some(runtime) = &runtime {
+            let bindings = runtime.permission_bindings(&default_harness_configuration)?;
+            if !permission_catalog
+                .availability(Some(bindings))
+                .iter()
+                .any(|profile| profile.available)
+            {
+                anyhow::bail!(
+                    "default harness configuration has no enabled permission profile: {default_harness_configuration}"
+                );
+            }
+        }
+        let runtime_harnesses = runtime
+            .as_ref()
+            .map(RuntimeClient::product_harnesses)
+            .unwrap_or_default();
+        storage
+            .initialize_model_catalog(&default_harness_configuration, &runtime_harnesses)
+            .await?;
         if config.allow_conversation_import {
             let runtime = runtime.as_ref().ok_or_else(|| {
                 anyhow::anyhow!("conversation import requires the GraphComplete runtime")
@@ -519,11 +550,6 @@ impl RelayerAppServer {
                 "marked {interrupted} interrupted ordinary interaction(s) failed during backend startup"
             );
         }
-        let default_harness_configuration = config
-            .runtime
-            .as_ref()
-            .map(|runtime| runtime.default_harness_configuration.clone())
-            .unwrap_or_else(|| "codex-basic".into());
         let allow_harness_override = config
             .runtime
             .as_ref()
@@ -533,32 +559,6 @@ impl RelayerAppServer {
             .as_ref()
             .map(|runtime| runtime.standalone_workspaces_directory.clone())
             .unwrap_or_else(|| config.database_path.with_file_name("workspaces"));
-        if let Some(runtime) = &runtime
-            && !runtime.has_configuration(&default_harness_configuration)
-        {
-            anyhow::bail!(
-                "default harness configuration is unavailable: {default_harness_configuration}"
-            );
-        }
-        if let Some(runtime) = &runtime {
-            let bindings = runtime.permission_bindings(&default_harness_configuration)?;
-            if !permission_catalog
-                .availability(Some(bindings))
-                .iter()
-                .any(|profile| profile.available)
-            {
-                anyhow::bail!(
-                    "default harness configuration has no enabled permission profile: {default_harness_configuration}"
-                );
-            }
-        }
-        let runtime_harnesses = runtime
-            .as_ref()
-            .map(RuntimeClient::product_harnesses)
-            .unwrap_or_default();
-        storage
-            .initialize_model_catalog(&default_harness_configuration, &runtime_harnesses)
-            .await?;
         let product = ProductService::new(storage, runtime.is_some());
         let execution_lease_reconciler = runtime.clone().map(|runtime| {
             let reconciler = ExecutionLeaseReconciler::start(product.clone(), runtime);

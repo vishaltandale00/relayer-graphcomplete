@@ -118,6 +118,10 @@ describe("desktop skeleton", () => {
     })).toBe(DEFAULT_DESKTOP_HARNESS_CONFIGURATION);
     expect(() => resolveDesktopHarnessConfiguration({
       isPackaged: false,
+      environment: { RELAYER_DESKTOP_HARNESS_CONFIGURATION: "codex-basic-high" },
+    })).toThrow("codex-basic-high is internal-only and cannot be loaded by Relayer Desktop");
+    expect(() => resolveDesktopHarnessConfiguration({
+      isPackaged: false,
       environment: { RELAYER_DESKTOP_HARNESS_CONFIGURATION: "../other" },
     })).toThrow("must be a harness configuration name");
   });

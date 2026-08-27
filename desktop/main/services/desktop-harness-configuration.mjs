@@ -1,4 +1,5 @@
 export const DEFAULT_DESKTOP_HARNESS_CONFIGURATION = "codex-basic";
+const INTERNAL_ONLY_HARNESS_CONFIGURATIONS = new Set(["codex-basic-high"]);
 
 export function resolveDesktopHarnessConfiguration({
   isPackaged,
@@ -9,6 +10,9 @@ export function resolveDesktopHarnessConfiguration({
   if (!requested) return DEFAULT_DESKTOP_HARNESS_CONFIGURATION;
   if (!/^[a-z0-9][a-z0-9._-]*$/i.test(requested)) {
     throw new Error("RELAYER_DESKTOP_HARNESS_CONFIGURATION must be a harness configuration name.");
+  }
+  if (INTERNAL_ONLY_HARNESS_CONFIGURATIONS.has(requested)) {
+    throw new Error(`${requested} is internal-only and cannot be loaded by Relayer Desktop.`);
   }
   return requested;
 }
