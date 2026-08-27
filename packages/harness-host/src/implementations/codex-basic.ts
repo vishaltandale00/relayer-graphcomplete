@@ -3,6 +3,7 @@ import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relay
 import { createHash } from "node:crypto";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import { redactTraceData } from "../trace.js";
+import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
 import {
   runCodexAppServerTurn,
   type CodexAppServerSpawn,
@@ -23,13 +24,6 @@ import type {
 } from "../types.js";
 
 export const CODEX_BASIC_KEY = "codex.basic";
-
-const GRAPH_PRESENTATION_GUIDANCE = `Graph presentation guidance:
-- Each layer should explain its scope as a coherent whole. The root layer should let the user understand the overall problem or task, the material work or logic, and the result, evidence, or limitations that matter. A child layer should do the same for the narrower scope it owns.
-- Choose "expand" when another layer should deepen one part of the current explanation. Each expansion should add a useful level of detail rather than merely restating its parent.
-- Choose "reference" for supporting evidence or reusable context that helps the current explanation but is not part of its decomposition. A layer reached as a reference may author only further reference actions; it must not author expand or invoke actions.
-- Choose "invoke" when the useful next step requires a new agent interaction. Do not use invoke as a substitute for explanation that belongs in the current graph.
-- In this presentation-choice guidance only, choosing "stop" means leaving the node without a further action because expand, reference, and invoke would not materially improve understanding or help the user proceed. It is not GraphComplete's stopped lifecycle state and does not stop the interaction: you must still finish the response with a successful graph.submit call.`;
 
 const SAFE_SUBPROCESS_ENVIRONMENT = new Set([
   "PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC",

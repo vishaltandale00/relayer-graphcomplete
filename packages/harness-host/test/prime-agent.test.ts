@@ -6,6 +6,7 @@ import { MAX_HARNESS_APPROVAL_TEXT_LENGTH, parseHarnessApprovalRequestInput } fr
 import { PrimeAgentHarness } from "../src/implementations/prime-agent.js";
 import { createNoopHarnessTraceSink, HarnessTraceStore } from "../src/trace.js";
 import type { HarnessConfiguration, HarnessRunContext, HarnessTraceEventInput, HarnessTraceSink } from "../src/types.js";
+import { expectGraphPresentationGuidance } from "./graph-presentation-guidance-assertions.js";
 
 const configuration: HarnessConfiguration = {
   schemaVersion: 1,
@@ -300,6 +301,8 @@ describe("PrimeAgentHarness", () => {
     expect(prompts[0]!.text).toContain("await graph.submit(11)");
     expect(prompts[0]!.text).toContain("exactly one NodePlacementObject(node, x, y) per member node");
     expect(prompts[0]!.text).toContain("Place a one-node layer at (0.5, 0.5)");
+    expectGraphPresentationGuidance(prompts[0]!.text);
+    expect(prompts[0]!.text).toContain("add_navigate_action(node, \"View evidence\"");
     expect(prompts[0]!.text).toContain("explicit descriptive client_key");
     expect(prompts[0]!.text).toContain("rerun the same authoring code with the same client_key values");
     expect(prompts[0]!.text).toContain("Do not add fake navigation");
@@ -566,6 +569,7 @@ describe("PrimeAgentHarness", () => {
 
     expect(prompt).toContain('relation="expand"');
     expect(prompt).toContain('relation="reference"');
+    expectGraphPresentationGuidance(prompt);
     expect(prompt).toContain("A flat answer is valid");
     expect(prompt).toContain("Author in whatever order fits the task");
     expect(prompt).toContain("final graph call must be await graph.submit(11)");
