@@ -37,11 +37,19 @@ describe("EvalService simulated-user result persistence", () => {
         name: `check-${index}`,
         detail: "x".repeat(3_000),
       })),
+      outcomeGrade: {
+        mandatoryGates: [{ passed: false, name: "Critical gate", detail: "Current mandatory failure" }],
+        criteria: [{ criterionId: "quality", rationale: "Semantic review is pending" }],
+      },
     });
 
     expect(evidence.facts).toHaveLength(64);
     expect(evidence.facts.every((fact) => fact.length <= 2_000)).toBe(true);
-    expect(evidence.summary).toContain("64 of 70");
+    expect(evidence.summary).toContain("64 of 72");
+    expect(evidence.facts.slice(0, 2)).toEqual([
+      "FAIL mandatory gate Critical gate: Current mandatory failure",
+      "Outcome criterion quality: Semantic review is pending",
+    ]);
   });
 
   it("grounds a project judge in the candidate workspace and seeded task base", () => {
@@ -324,6 +332,7 @@ describe("EvalService simulated-user result persistence", () => {
     const restored = service.getRun("run-interrupted");
     expect(restored.status).toBe("interrupted");
     expect(restored.executions[0].status).toBe("interrupted");
+    expect(restored.executions[0].lifecycle).toMatchObject({ status: "failed" });
     expect(restored.executions[0].turns[0].judgeResults[0]).toMatchObject({
       status: "partial",
       error: "Simulated-user review was interrupted before finalization.",
@@ -369,7 +378,7 @@ describe("EvalService simulated-user result persistence", () => {
     expect(() => resolveH3PermissionProfile({
       name: "ambiguous",
       permissionBindings: { ask: {}, full: {} },
-    }, "auto")).toThrow("Only an explicit sole Full access binding may override");
+    }, "auto")).toThrow("evaluator-owned verifier cases require confined authority");
   });
 });
 

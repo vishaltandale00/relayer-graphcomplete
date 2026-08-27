@@ -113,9 +113,9 @@ describe("simulated-user Codex judge runner", () => {
         browser_use: false,
         computer_use: false,
         image_generation: false,
-        shell_tool: false,
+        shell_tool: true,
         skill_search: false,
-        unified_exec: false,
+        unified_exec: true,
         view_image: false,
       },
       mcp_servers: {
@@ -141,6 +141,7 @@ describe("simulated-user Codex judge runner", () => {
         networkAccessEnabled: false,
         webSearchMode: "disabled",
         allowedMcpServer: SIMULATED_USER_MCP_SERVER_NAME,
+        shellAccess: true,
       },
     });
     expect(result.prompt.text).toContain("Original user request:\nExplain the architecture.");
@@ -158,7 +159,7 @@ describe("simulated-user Codex judge runner", () => {
     expect(Object.isFrozen(result.review)).toBe(true);
   });
 
-  it("rejects shell, file, web, and non-review MCP activity", () => {
+  it("allows read-only shell evidence while rejecting file, web, and non-review MCP activity", () => {
     const forbidden: ThreadItem[] = [
       { id: "file", type: "file_change", changes: [{ path: "x", kind: "add" }], status: "completed" },
       { id: "web", type: "web_search", query: "anything" },
@@ -173,7 +174,7 @@ describe("simulated-user Codex judge runner", () => {
       aggregated_output: "src/file.ts | 2 ++",
       exit_code: 0,
       status: "completed",
-    }])).toThrow(/command execution/i);
+    }])).not.toThrow();
 
     expect(() => assertReviewOnlyCodexTrace([{
       id: "allowed",

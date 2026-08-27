@@ -72,6 +72,10 @@ export function evidenceIdsForReview(review) {
   for (const finding of asArray(review.findings)) collectEvidence(finding?.evidence, evidence);
   for (const opportunity of asArray(review.missingActionOpportunities)) collectEvidence(opportunity?.evidence, evidence);
   collectEvidence(review.structure?.evidence, evidence);
+  collectEvidence(review.semantic?.evidence, evidence);
+  for (const step of asArray(review.allocationSteps)) collectEvidence(step?.evidence, evidence);
+  for (const action of asArray(review.actions)) collectEvidence(action?.evidence, evidence);
+  collectEvidence(review.scoreCeiling?.evidence, evidence);
   return [...evidence];
 }
 

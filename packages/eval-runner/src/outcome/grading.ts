@@ -32,7 +32,10 @@ export function buildTaskOutcomeGrade(options: BuildTaskOutcomeGradeOptions): Ta
   for (const gate of mandatoryGates) validateGate(gate);
   for (const criterion of criteria) validateCriterion(criterion);
 
-  const qualified = ["completed", "partial"].includes(options.status) && mandatoryGates.length > 0
+  // Mandatory gates are necessary but not sufficient for semantic qualification.
+  // A partial grade still has unresolved rubric judgment, so exposing it as
+  // qualified makes structural receipts masquerade as an outcome verdict.
+  const qualified = options.status === "completed" && mandatoryGates.length > 0
     ? mandatoryGates.every((gate) => gate.status === "completed" && gate.passed === true)
     : null;
 

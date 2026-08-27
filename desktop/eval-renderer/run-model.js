@@ -114,7 +114,8 @@ export function projectExecutionCell(run, execution) {
   const outcomeScore = finiteScore(execution.outcomeGrade?.score);
   const qualified = typeof execution.outcomeGrade?.qualified === "boolean"
     ? execution.outcomeGrade.qualified
-    : typeof execution.passed === "boolean" ? execution.passed
+    : run?.kind === "imported-conversation"
+      ? null
       : checks.length ? checks.every((check) => check.passed) : null;
   const legacyCheckLabel = checks.length
     ? `${checks.filter((check) => check.passed).length}/${checks.length} checks`

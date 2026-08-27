@@ -3,6 +3,7 @@ import { createAutonomousCaseSnapshot } from "../cases/contracts.js";
 import {
   H3_REPOSITORY_URL,
   H3_SEEDED_TREE,
+  h3VerifierDigest,
   h3AutonomousFixEvalCase,
   h3AutonomousInvestigationEvalCase,
 } from "./h3.js";
@@ -43,8 +44,8 @@ export const h3AutonomousFixCase = bindAutonomousCaseSnapshot(
         kind: "sealed-verifier",
         artifactId: "h3-status-code-verifier-v2",
         verifierId: "h3-status-code-v2",
-        contentDigest: digest("72f96da01ca08164fb1570c7ab7f1833dd9ccc72f2335d67ceefb53fb522e68d"),
-        sealedPath: "eval-cases/h3-sanitize-status-code/verifier/README.md",
+        contentDigest: h3VerifierDigest(),
+        sealedPath: "packages/eval-runner/src/project-cases/h3.ts",
         mandatoryGates: [
           { id: "functional-behavior", label: "Functional behavior", description: "Evaluator-owned checks cover boundaries, numbers, numeric strings, decimals, and custom fallbacks." },
           { id: "regression-safety", label: "Regression safety", description: "The focused sanitizer suite, build, and typecheck pass in the pristine verifier workspace." },
@@ -90,8 +91,8 @@ export const h3AutonomousInvestigationCase = bindAutonomousCaseSnapshot(
         kind: "sealed-verifier",
         artifactId: "h3-investigation-verifier-v1",
         verifierId: "h3-status-code-investigation-v1",
-        contentDigest: digest("eea7086f3bbd830f401fd0258939be5b30bf655b2f2c33999e26446f1e5f52af"),
-        sealedPath: "eval-cases/h3-investigate-status-code/verifier/README.md",
+        contentDigest: h3VerifierDigest(),
+        sealedPath: "packages/eval-runner/src/project-cases/h3.ts",
         mandatoryGates: [
           { id: "read-only-workspace", label: "Read-only workspace", description: "The investigation does not alter the frozen checkout." },
           { id: "independent-reproduction", label: "Independent reproduction", description: "The sealed verifier reproduces the seeded failure independently of the candidate explanation." },

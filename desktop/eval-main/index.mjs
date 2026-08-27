@@ -266,49 +266,55 @@ async function createReadOnlyReviewWindow(executionId, { annotations = false } =
   });
   reviewWindows.add(window);
   window.on("closed", () => reviewWindows.delete(window));
-  windowSecurity(window, productOrigin);
-  await window.webContents.session.cookies.set({
-    url: productSession.origin,
-    name: productSession.readOnlyCookie.name,
-    value: productSession.readOnlyCookie.value,
-    httpOnly: true,
-    sameSite: "strict",
-    secure: false,
-  });
-  if (annotations) {
-    const annotationSessionToken = randomBytes(32).toString("hex");
-    const context = evalService.reviewContext(executionId);
-    const annotationThreadIds = [...new Set(
-      context.cases.flatMap((item) => item.threadIds || []),
-    )];
-    const displayName = String(process.env.RELAYER_EVAL_ANNOTATOR_NAME || userInfo().username).trim();
-    const response = await fetch(new URL("/api/internal/annotation-sessions", productSession.origin), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`,
-      },
-      body: JSON.stringify({
-        token: annotationSessionToken,
-        threadIds: annotationThreadIds,
-        authorId: `local:${userInfo().username}`,
-        authorDisplayName: displayName,
-      }),
-    });
-    if (!response.ok) {
-      const value = await response.json().catch(() => ({}));
-      throw new Error(value?.error || `Annotation session registration failed (${response.status}).`);
-    }
+  try {
+    windowSecurity(window, productOrigin);
     await window.webContents.session.cookies.set({
       url: productSession.origin,
-      name: "relayer_annotation",
-      value: annotationSessionToken,
+      name: productSession.readOnlyCookie.name,
+      value: productSession.readOnlyCookie.value,
       httpOnly: true,
       sameSite: "strict",
       secure: false,
     });
+    if (annotations) {
+      const annotationSessionToken = randomBytes(32).toString("hex");
+      const context = evalService.reviewContext(executionId);
+      const annotationThreadIds = [...new Set(
+        context.cases.flatMap((item) => item.threadIds || []),
+      )];
+      const displayName = String(process.env.RELAYER_EVAL_ANNOTATOR_NAME || userInfo().username).trim();
+      const response = await fetch(new URL("/api/internal/annotation-sessions", productSession.origin), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`,
+        },
+        body: JSON.stringify({
+          token: annotationSessionToken,
+          threadIds: annotationThreadIds,
+          authorId: `local:${userInfo().username}`,
+          authorDisplayName: displayName,
+        }),
+      });
+      if (!response.ok) {
+        const value = await response.json().catch(() => ({}));
+        throw new Error(value?.error || `Annotation session registration failed (${response.status}).`);
+      }
+      await window.webContents.session.cookies.set({
+        url: productSession.origin,
+        name: "relayer_annotation",
+        value: annotationSessionToken,
+        httpOnly: true,
+        sameSite: "strict",
+        secure: false,
+      });
+    }
+    return { window, productOrigin };
+  } catch (error) {
+    reviewWindows.delete(window);
+    if (!window.isDestroyed()) window.destroy();
+    throw error;
   }
-  return { window, productOrigin };
 }
 
 async function openAutomatedReviewSession({

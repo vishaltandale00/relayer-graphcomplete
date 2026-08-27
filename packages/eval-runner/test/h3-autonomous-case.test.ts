@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { h3AutonomousCases } from "../src/index.js";
+import { h3AutonomousCases, h3VerifierDigest } from "../src/index.js";
 
 describe("h3 autonomous seed cases", () => {
   it("binds one concise autonomous prompt to each frozen case", () => {
@@ -21,10 +21,10 @@ describe("h3 autonomous seed cases", () => {
   it("pins the sealed reference and verifier descriptors to the checked-in artifacts", async () => {
     const repositoryRoot = resolve(import.meta.dirname, "../../..");
     for (const entry of h3AutonomousCases) {
-      for (const artifact of [entry.snapshot.artifacts.reference, entry.snapshot.artifacts.verifier]) {
-        const contents = await readFile(resolve(repositoryRoot, artifact.sealedPath));
-        expect(`sha256:${createHash("sha256").update(contents).digest("hex")}`).toBe(artifact.contentDigest);
-      }
+      const reference = entry.snapshot.artifacts.reference;
+      const contents = await readFile(resolve(repositoryRoot, reference.sealedPath));
+      expect(`sha256:${createHash("sha256").update(contents).digest("hex")}`).toBe(reference.contentDigest);
+      expect(entry.snapshot.artifacts.verifier.contentDigest).toBe(h3VerifierDigest());
     }
   });
 });

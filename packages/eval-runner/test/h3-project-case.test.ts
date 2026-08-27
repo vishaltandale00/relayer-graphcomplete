@@ -45,7 +45,7 @@ describe("pinned h3 project case", () => {
     expect(h3ProjectEvalCase.threads.map((thread) => [thread.id, thread.permissionProfileId, thread.mutationPolicy, thread.prompts.length])).toEqual([
       ["architecture", "auto", "read-only", 2],
       ["diagnosis", "auto", "read-only", 2],
-      ["implementation", "full", "writable", 2],
+      ["implementation", "auto", "writable", 2],
     ]);
     expect(h3ProjectEvalCase.threads.flatMap((thread) => thread.prompts)).toHaveLength(6);
     expect(h3ProjectEvalCase.threads[0]!.prompts[1]).toContain("Think deeper");
@@ -77,6 +77,7 @@ describe("pinned h3 project case", () => {
     const calls: string[] = [];
     const runCommand: CommandRunner = async (command, args, options) => {
       calls.push(`${command} ${args.join(" ")}`);
+      if (command === "corepack") return { exitCode: 0, stdout: "installed", stderr: "" };
       if (command === "git" && args[0] === "clone") {
         await cp(cacheDirectory, workspaceDirectory, { recursive: true });
       }
@@ -160,6 +161,7 @@ describe("h3 deterministic workspace grading", () => {
     ].join("\n"));
     const verifierCommandDirectories: string[] = [];
     const runCommand: CommandRunner = async (command, args, options) => {
+      if (command === "corepack") return { exitCode: 0, stdout: "installed", stderr: "" };
       if (command === "node" || command.includes("/node_modules/.bin/")) {
         verifierCommandDirectories.push(options.cwd);
         return { exitCode: 0, stdout: "ok", stderr: "" };
@@ -201,6 +203,7 @@ describe("h3 deterministic workspace grading", () => {
     expect(new Set(verifierCommandDirectories)).toHaveLength(1);
 
     const autonomousRunCommand: CommandRunner = async (command, args) => {
+      if (command === "corepack") return { exitCode: 0, stdout: "installed", stderr: "" };
       if (command === "node" || command.includes("/node_modules/.bin/")) return { exitCode: 0, stdout: "ok", stderr: "" };
       if (command === "git" && args[0] === "clone") {
         await cp(root, args.at(-1)!, { recursive: true });
@@ -314,6 +317,7 @@ async function createBehaviorWorkspace(source: string, tests: string): Promise<s
 
 function behaviorWorkspaceRunner(root: string): CommandRunner {
   return async (command, args, options) => {
+    if (command === "corepack") return { exitCode: 0, stdout: "installed", stderr: "" };
     if (command === "node") return execute(command, args, options.cwd);
     if (command.includes("/node_modules/.bin/")) return { exitCode: 0, stdout: "ok", stderr: "" };
     if (command === "git" && args[0] === "clone") {

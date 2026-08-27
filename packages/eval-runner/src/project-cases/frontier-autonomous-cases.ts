@@ -79,7 +79,7 @@ function thread(options: {
   return Object.freeze({
     id: options.id,
     name: options.name,
-    permissionProfileId: options.mutationPolicy === "writable" ? "full" : "auto",
+    permissionProfileId: "auto",
     mutationPolicy: options.mutationPolicy,
     workspaceGrade: options.workspaceGrade,
     prompts: Object.freeze([options.prompt]),
@@ -167,12 +167,23 @@ const definitions: readonly FrontierCaseDefinition[] = Object.freeze([
 
 const digest = (value: string) => `sha256:${value}` as const;
 const hash = (value: string) => digest(createHash("sha256").update(value).digest("hex"));
-const sealedDigests: Readonly<Record<FrontierCaseId, { reference: string; verifier: string }>> = Object.freeze({
-  [OFETCH_RETRY_METHODS_CASE_ID]: { reference: "d83c22ccc316b61e3954b5ba948bc597f71e0f1684798cfc308f08c3134e31d8", verifier: "f2ee474e135bd15f91a32aa35a4b3878788d6d39c6fe43d6b9c588c677580b53" },
-  [TRUE_MYTH_INSPECT_BOTH_CASE_ID]: { reference: "2e31b8bb7cc2085d3c5d36e9eb947bd9fff75bc820dc0d405d2eb1f758445a78", verifier: "5ef504edc5a59db10d23bafe0ed5231cc3045dd642d5ab755be540a89bd9093b" },
-  [SQL_FORMATTER_ANSI_ALIAS_CASE_ID]: { reference: "48840ed942aa3f68cf570dda95fa7c9d51a02d661fc2d34f6d1fa9bc1c46cc2e", verifier: "e8f4a1c3520e5e31d4a7039eb4f0df17a6f5273e86a6cfbae9b65ce47369add8" },
-  [HTTPX_PROXY_AUTH_REPORT_CASE_ID]: { reference: "d345087428c811ee98ac044a720c716e33810c7c1250dcf96fd3c1376a23ed32", verifier: "8dc9d0c788a325e548f1646f24f42a91639ac82b9fa0f8dbbb6a57efca373e85" },
+const sealedDigests: Readonly<Record<FrontierCaseId, { reference: string }>> = Object.freeze({
+  [OFETCH_RETRY_METHODS_CASE_ID]: { reference: "d83c22ccc316b61e3954b5ba948bc597f71e0f1684798cfc308f08c3134e31d8" },
+  [TRUE_MYTH_INSPECT_BOTH_CASE_ID]: { reference: "2e31b8bb7cc2085d3c5d36e9eb947bd9fff75bc820dc0d405d2eb1f758445a78" },
+  [SQL_FORMATTER_ANSI_ALIAS_CASE_ID]: { reference: "48840ed942aa3f68cf570dda95fa7c9d51a02d661fc2d34f6d1fa9bc1c46cc2e" },
+  [HTTPX_PROXY_AUTH_REPORT_CASE_ID]: { reference: "d345087428c811ee98ac044a720c716e33810c7c1250dcf96fd3c1376a23ed32" },
 });
+
+function frontierVerifierDigest(caseId: FrontierCaseId): `sha256:${string}` {
+  return hash([
+    caseId,
+    runValidationBuild.toString(),
+    runHidden.toString(),
+    allowedFiles.toString(),
+    requiredChangedFiles.toString(),
+    parseNameStatus.toString(),
+  ].join("\n"));
+}
 
 function bind(definition: FrontierCaseDefinition) {
   const fixture = definition.fixture;
@@ -208,8 +219,8 @@ function bind(definition: FrontierCaseDefinition) {
         kind: "sealed-verifier",
         artifactId: `${slug}-verifier-v1`,
         verifierId: `${slug}-v1`,
-        contentDigest: digest(sealedDigests[definition.id].verifier),
-        sealedPath: `eval-cases/${slug}/verifier/README.md`,
+        contentDigest: frontierVerifierDigest(definition.id),
+        sealedPath: "packages/eval-runner/src/project-cases/frontier-autonomous-cases.ts",
         mandatoryGates: [
           { id: "hidden-behavior", label: isWork ? "Report artifact integrity" : "Hidden behavior", description: isWork ? "The requested report artifact exists and contains content." : "Evaluator-owned behavioral checks pass." },
           { id: "scoped-delivery", label: "Scoped delivery", description: isWork ? "Only the requested report is added." : "The implementation is committed, focused, and clean." },
@@ -269,20 +280,27 @@ export async function gradeFrontierProjectWorkspace(options: {
   const build = await runValidationBuild(options.caseId, options.workspaceDirectory, runCommand);
   const hidden = await runHidden(options.caseId, options.workspaceDirectory, runCommand);
   const status = (await required(runCommand, "git", ["status", "--porcelain=v1", "--untracked-files=all"], options.workspaceDirectory)).stdout.trim();
-  const changed = lines((await required(runCommand, "git", ["diff", "--name-only", fixture.upstreamCommit, "--"], options.workspaceDirectory)).stdout);
+  const changes = parseNameStatus((await required(
+    runCommand,
+    "git",
+    ["diff", "--name-status", "--find-renames", fixture.upstreamCommit, "--"],
+    options.workspaceDirectory,
+  )).stdout);
+  const changed = changes.map(({ path }) => path);
   const requiredFiles = requiredChangedFiles(options.caseId);
-  const requiredFilesPresent = [...requiredFiles].every((file) => changed.includes(file));
+  const requiredFilesPresent = [...requiredFiles].every((file) => (
+    changes.some((change) => change.path === file && change.status !== "D")
+  ));
   const additional = changed.filter((file) => !allowedFiles(options.caseId).has(file));
-  const exactScopeRequired = options.caseId === HTTPX_PROXY_AUTH_REPORT_CASE_ID;
   const commits = lines((await required(runCommand, "git", ["rev-list", `${fixture.upstreamCommit}..HEAD`], options.workspaceDirectory)).stdout);
   return [
     { name: "workspace:validation-build", passed: build.exitCode === 0, detail: commandDetail("repository validation build", build) },
     { name: "workspace:hidden-behavior", passed: hidden.exitCode === 0, detail: commandDetail("sealed verifier", hidden) },
     {
       name: "workspace:required-delivery-files",
-      passed: requiredFilesPresent && (!exactScopeRequired || additional.length === 0),
-      detail: `Changed files: ${changed.join(", ") || "none"}. Required: ${[...requiredFiles].join(", ")}.`
-        + (additional.length === 0 ? "" : ` Additional files for quality review: ${additional.join(", ")}.`),
+      passed: requiredFilesPresent && additional.length === 0,
+      detail: `Changed files: ${changes.map(({ status: changeStatus, path }) => `${changeStatus} ${path}`).join(", ") || "none"}. Required present files: ${[...requiredFiles].join(", ")}.`
+        + (additional.length === 0 ? "" : ` Out-of-scope files: ${additional.join(", ")}.`),
     },
     { name: "workspace:delivery-commit", passed: commits.length >= 1, detail: `${commits.length} post-fixture commit(s).` },
     { name: "workspace:delivery-clean", passed: status === "", detail: status === "" ? "The workspace is clean." : `Uncommitted changes remain: ${status}` },
@@ -319,12 +337,33 @@ function requiredChangedFiles(caseId: FrontierCaseId): ReadonlySet<string> {
 
 async function runHidden(caseId: FrontierCaseId, cwd: string, runCommand: CommandRunner): Promise<CommandResult> {
   if (caseId === OFETCH_RETRY_METHODS_CASE_ID) {
-    const script = `import { createFetch } from './dist/index.mjs';\nlet calls=0; const fetch=createFetch({fetch:async()=>{calls++; return new Response('x',{status:calls<2?500:200})}});\nawait fetch.raw('https://example.test',{method:'post',retryMethods:['POST'],retry:1}); if(calls!==2) throw Error('POST allowlist did not retry');\ncalls=0; try{await fetch.raw('https://example.test',{method:'GET',retryMethods:['post'],retry:1})}catch{} if(calls!==1) throw Error('method matching or deny behavior is wrong');`;
+    const script = `import { createFetch } from './dist/index.mjs';
+const retryCount=async(options)=>{let calls=0;const fetch=createFetch({fetch:async()=>{calls++;return new Response('x',{status:calls<2?500:200})}});try{await fetch.raw('https://example.test',{retry:1,...options})}catch{}return calls};
+if(await retryCount({method:'post',retryMethods:['POST']})!==2)throw Error('case-insensitive explicit allowlist');
+if(await retryCount({method:'GET',retryMethods:['post']})!==1)throw Error('explicit deny behavior');
+if(await retryCount({method:'GET'})!==2)throw Error('omitted option changed default GET retry');
+if(await retryCount({method:'POST'})!==1)throw Error('omitted option changed default POST behavior');`;
     return runCommand("node", ["--input-type=module", "--eval", script], { cwd });
   }
   if (caseId === TRUE_MYTH_INSPECT_BOTH_CASE_ID) {
-    const script = `import Result, { inspectBoth } from './dist/result.js'; let seen=[]; const ok=Result.ok(3); const returned=ok.inspectBoth({Ok:v=>seen.push('o'+v),Err:e=>seen.push('e'+e)}); if(returned!==ok||seen.join()!=='o3') throw Error('method contract'); seen=[]; const err=Result.err('bad'); const returned2=inspectBoth({Ok:v=>seen.push('o'+v),Err:e=>seen.push('e'+e)})(err); if(returned2!==err||seen.join()!=='ebad') throw Error('helper contract');`;
-    return runCommand("node", ["--input-type=module", "--eval", script], { cwd });
+    const consumerPath = join(cwd, ".relayer-inspect-both-consumer.ts");
+    await writeFile(consumerPath, `import Result, { inspectBoth } from './src/result.js';
+const ok = Result.ok<number, string>(3);
+const sameOk: Result<number, string> = ok.inspectBoth({ Ok: (value: number) => void value, Err: (error: string) => void error });
+const err = Result.err<number, string>('bad');
+const sameErr: Result<number, string> = inspectBoth<number, string>({ Ok: (value: number) => void value, Err: (error: string) => void error })(err);
+void sameOk; void sameErr;
+`, "utf8");
+    try {
+      const typecheck = await runCommand("corepack", ["pnpm@10.20.0", "exec", "tsc", "--noEmit", "--strict", "--skipLibCheck", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--target", "ES2022", ".relayer-inspect-both-consumer.ts"], { cwd });
+      if (typecheck.exitCode !== 0) return typecheck;
+    const script = `import Result, { inspectBoth } from './dist/result.js';
+const verify=(label,result,call)=>{const seen=[];const returned=call({Ok:v=>seen.push('o'+v),Err:e=>seen.push('e'+e)});const expected=result.isOk?'o3':'ebad';if(returned!==result||seen.join()!==expected)throw Error(label)};
+const ok=Result.ok(3),err=Result.err('bad');verify('Ok method',ok,c=>ok.inspectBoth(c));verify('Err method',err,c=>err.inspectBoth(c));verify('Ok helper',ok,c=>inspectBoth(c)(ok));verify('Err helper',err,c=>inspectBoth(c)(err));`;
+      return runCommand("node", ["--input-type=module", "--eval", script], { cwd });
+    } finally {
+      await rm(consumerPath, { force: true });
+    }
   }
   if (caseId === SQL_FORMATTER_ANSI_ALIAS_CASE_ID) {
     const hiddenPath = join(cwd, "test", ".relayer-ansi-alias.test.ts");
@@ -336,8 +375,19 @@ async function runHidden(caseId: FrontierCaseId, cwd: string, runCommand: Comman
     }
   }
   const report = await readFile(join(cwd, "proxy-auth-flow.md"), "utf8").catch(() => "");
-  const hasContent = report.trim().length > 0;
-  return { exitCode: hasContent ? 0 : 1, stdout: "", stderr: hasContent ? "" : "The report artifact is empty or missing." };
+  const requirements = [
+    ["credential extraction", /(?:userinfo|username|password|url)/i],
+    ["authorization encoding", /(?:proxy-authorization|basic|base64)/i],
+    ["transport handoff", /(?:transport|proxy|connection|request)/i],
+    ["representation redaction", /(?:redact|repr|password|credential)/i],
+    ["source citations", /(?:\.py(?::\d+)?|`[^`]+`)/],
+  ] as const;
+  const missing = requirements.filter(([, pattern]) => !pattern.test(report)).map(([label]) => label);
+  return {
+    exitCode: missing.length === 0 ? 0 : 1,
+    stdout: "",
+    stderr: missing.length === 0 ? "" : `Report lacks evidence for: ${missing.join(", ")}.`,
+  };
 }
 
 async function ensureCache(directory: string, fixture: FrontierFixture, runCommand: CommandRunner): Promise<void> {
@@ -357,7 +407,12 @@ async function ensureCache(directory: string, fixture: FrontierFixture, runComma
     await required(runCommand, "git", ["fetch", "--quiet", "--depth", "1", "origin", fixture.upstreamCommit], temporary);
     await required(runCommand, "git", ["checkout", "--quiet", "--detach", "FETCH_HEAD"], temporary);
     await verifySource(temporary, fixture, runCommand);
-    await rename(temporary, directory);
+    try {
+      await rename(temporary, directory);
+    } catch (error) {
+      if (!(new Set(["EEXIST", "ENOTEMPTY"])).has((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      await verifySource(directory, fixture, runCommand);
+    }
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
@@ -381,14 +436,24 @@ async function requireMissing(path: string): Promise<void> {
 }
 
 function lines(value: string): string[] { return value.split("\n").map((line) => line.trim()).filter(Boolean); }
+function parseNameStatus(value: string): { readonly status: string; readonly path: string }[] {
+  return lines(value).map((line) => {
+    const [status = "", first = "", second] = line.split("\t");
+    return { status: status[0] ?? status, path: second || first };
+  }).filter(({ path }) => path.length > 0);
+}
 function commandDetail(label: string, result: CommandResult): string { return result.exitCode === 0 ? `${label} passed.` : `${label} failed (${result.exitCode}): ${(result.stderr || result.stdout).trim().slice(-1_000) || "no output"}`; }
 
 const run: CommandRunner = (command, args, options) => new Promise((resolve, reject) => {
   const child = spawn(command, [...args], { cwd: options.cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+  const timeout = setTimeout(() => child.kill("SIGKILL"), 10 * 60_000);
   let stdout = ""; let stderr = "";
   child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => { stdout = `${stdout}${chunk}`.slice(-64_000); });
   child.stderr.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-64_000); });
-  child.once("error", reject);
-  child.once("exit", (code, signal) => resolve({ exitCode: code ?? (signal ? 1 : 0), stdout, stderr: signal ? `${stderr}\nProcess stopped by ${signal}.` : stderr }));
+  child.once("error", (error) => { clearTimeout(timeout); reject(error); });
+  child.once("exit", (code, signal) => {
+    clearTimeout(timeout);
+    resolve({ exitCode: code ?? (signal ? 1 : 0), stdout, stderr: signal ? `${stderr}\nProcess stopped by ${signal}.` : stderr });
+  });
 });

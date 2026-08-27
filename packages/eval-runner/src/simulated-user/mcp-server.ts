@@ -288,6 +288,8 @@ const recursiveLayerResultSchema = z.object({
   nodeScores: z.array(recursiveScoreSchema.nullable()).length(8),
   nodeSemantics: z.array(recursiveSemanticSchema.nullable()).length(8),
   layerRatings: layerRatingsSchema,
+  nullRatingJustifications: optionalJustifications(layerRatingsSchema.shape),
+  materiallyMisleading: z.boolean(),
   layerSummary: z.string().min(1),
   evidence: z.array(screenshotReferenceSchema).min(1),
 }).strict();
@@ -509,7 +511,7 @@ function registerRecursiveReviewTools(
   now: () => Date,
 ): void {
   server.registerTool("reviewNode", {
-    description: "Write or revise one node result after all expansion LayerResults and any reference targets present in the recursive inventory are finalized. A reference-only target absent from inventory is delivery-graded from screenshots with reusedLayerId null. Rank expand, reference, invoke, and stop at every allocation step, and review every authored action.",
+    description: "Write or revise one node result after expansion children are finalized. A reference to an unfinished ancestor or a reference-only target is delivery-graded from screenshots with reusedLayerId null; other reviewable references reuse their finalized LayerResult. Rank expand, reference, invoke, and stop at every allocation step, and review every authored action.",
     inputSchema: z.object({ review: recursiveNodeReviewSchema }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ review }) => traced(trace, now, "reviewNode", { review }, async () => {
@@ -533,6 +535,7 @@ function registerRecursiveReviewTools(
   }, async ({ review }) => traced(trace, now, "reviewLayer", { review }, async () => {
     try {
       const typed = review as unknown as RecursiveLayerResult;
+      assertNullRatingsJustified(typed.layerRatings, typed.nullRatingJustifications, ["review", "layerRatings"]);
       const revision = store.reviewLayer(typed);
       return mcpResult({
         ok: true,

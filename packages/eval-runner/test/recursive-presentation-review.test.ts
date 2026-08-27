@@ -116,6 +116,7 @@ function layerResult(layerId: string, depth: number, nodeReview: RecursiveNodeRe
     nodeScores: [nodeReview.score, null, null, null, null, null, null, null],
     nodeSemantics: [nodeReview.semantic, null, null, null, null, null, null, null],
     layerRatings: ratings,
+    materiallyMisleading: false,
     layerSummary: `${layerId} summary`,
     evidence: [...nodeReview.evidence.context],
   };
@@ -406,6 +407,61 @@ describe("recursive semantic presentation review", () => {
       targetLayerId: "prior",
       reusedLayerId: null,
     });
+  });
+
+  it("allows a child back-reference without waiting for its unfinished ancestor LayerResult", () => {
+    const inventory = inventoryReviewSubjects({
+      turnId: "turn-cycle",
+      rootLayerId: "root",
+      layers: [
+        { id: "root", nodeIds: ["root-node"], actions: [
+          { id: "expand-child", sourceNodeId: "root-node", kind: "navigate", relation: "expand", targetLayerId: "child" },
+        ] },
+        { id: "child", nodeIds: ["child-node"], actions: [
+          { id: "reference-root", sourceNodeId: "child-node", kind: "navigate", relation: "reference", targetLayerId: "root" },
+        ] },
+      ],
+    });
+    const store = new RecursivePresentationReviewStore({ inventory });
+    const child: RecursiveNodeReview = {
+      layerId: "child",
+      nodeId: "child-node",
+      evidence: { context: ["shot-child"], detail: ["shot-child"] },
+      score: score("child-node", { actionDelivery: 4 }),
+      semantic: semantic("child-node", ["shot-child"]),
+      allocationSteps: [
+        { step: 0, ranking: ranking("reference"), preferredChoice: "reference", authoredChoice: "reference", authoredActionId: "reference-root", margin: "close", selectionFinding: "The root remains useful context.", evidence: ["shot-child"] },
+        { step: 1, ranking: ranking("stop"), preferredChoice: "stop", authoredChoice: "stop", authoredActionId: null, margin: "close", selectionFinding: "Stop after the back-reference.", evidence: ["shot-child"] },
+      ],
+      actions: [{
+        actionId: "reference-root",
+        kind: "reference",
+        allocationStep: 0,
+        labelAndPlacement: "Clear return to overview.",
+        delivery: "The root restores the overview.",
+        recursiveContribution: null,
+        targetLayerId: "root",
+        reusedLayerId: null,
+        evidence: ["shot-child", "shot-root"],
+      }],
+      findings: [],
+    };
+    expect(store.reviewNode(child).review.actions[0]?.reusedLayerId).toBeNull();
+    expect(store.reviewLayer(layerResult("child", 1, child)).review.layerId).toBe("child");
+  });
+
+  it("requires a justification for each null recursive layer rating", () => {
+    const store = new RecursivePresentationReviewStore({ inventory: inventoryReviewSubjects({
+      turnId: "flat-turn",
+      rootLayerId: "flat-layer",
+      layers: [{ id: "flat-layer", nodeIds: ["flat-node"], actions: [] }],
+    }) });
+    const node = { ...leafNodeReview(), layerId: "flat-layer", nodeId: "flat-node", score: score("flat-node"), semantic: semantic("flat-node", ["shot-flat"]), evidence: { context: ["shot-flat"], detail: ["shot-flat"] }, allocationSteps: [{ ...leafNodeReview().allocationSteps[0]!, evidence: ["shot-flat"] }] };
+    store.reviewNode(node);
+    const result = layerResult("flat-layer", 0, node);
+    const nullable = { ...result, layerRatings: { ...ratings, coverage: null } } as RecursiveLayerResult;
+    expect(() => store.reviewLayer(nullable)).toThrow("null coverage rating requires justification");
+    expect(store.reviewLayer({ ...nullable, nullRatingJustifications: { coverage: "No coverage claim is visible." } }).review.layerId).toBe("flat-layer");
   });
 
   it("rejects misaligned vectors and final turn judgments that do not consume the current root result", () => {

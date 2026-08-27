@@ -74,6 +74,21 @@ function nodeReview(
 }
 
 describe("recursive simulated-user review state", () => {
+  it("requires disclosure results to agree with the authored action inventory", () => {
+    const store = new IncrementalReviewStore<TestLayerReview, TestNodeReview, TestTurnReview>({
+      inventory: inventoryReviewSubjects(topology),
+    });
+    expect(() => store.reviewNode({
+      ...nodeReview("layer-root", "node-a", [{ actionId: "action-child", kind: "navigate" }]),
+      structure: {
+        rating: 3,
+        expansion: { need: "helpful", result: "absent" },
+        references: { need: "none", result: "absent" },
+        invoke: { need: "none", result: "absent" },
+      },
+    })).toThrow("expansion disclosure exists in inventory and cannot be rated absent");
+  });
+
   it("forces required missing disclosure to lower both its parent and whole-turn ceiling", () => {
     const inventory = inventoryReviewSubjects({
       turnId: "turn-required",

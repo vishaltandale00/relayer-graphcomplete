@@ -105,6 +105,8 @@ export interface RecursiveLayerResult {
   readonly nodeScores: EightSlots<RecursiveNodeScore>;
   readonly nodeSemantics: EightSlots<RecursiveNodeSemanticSummary>;
   readonly layerRatings: LayerRatings;
+  readonly nullRatingJustifications?: Readonly<Partial<Record<keyof LayerRatings, string>>>;
+  readonly materiallyMisleading: boolean;
   readonly layerSummary: string;
   readonly evidence: readonly ScreenshotEvidenceRef[];
 }
@@ -232,7 +234,7 @@ export class RecursivePresentationReviewStore {
       throw new Error(`Layer ${normalizedReview.layerId} is already finalized; revise its nodes before finalizing the LayerResult`);
     }
     const actionSubjects = this.#actionSubjects.get(key)!;
-    validateNodeReview(normalizedReview, actionSubjects, this.#layers, new Set(this.#layerSubjects.keys()));
+    validateNodeReview(normalizedReview, actionSubjects, this.#layers, this.#layerSubjects);
     const saved = immutable(normalizedReview);
     this.#validateEvidence?.({ kind: "node", subject, actionSubjects, review: saved });
     const revision = appendRevision(this.#nodes, key, saved);
@@ -375,7 +377,7 @@ function validateNodeReview(
   review: RecursiveNodeReview,
   subjects: readonly ActionReviewSubject[],
   layers: ReadonlyMap<string, RecursiveReviewHistory<RecursiveLayerResult>>,
-  reviewableLayerIds: ReadonlySet<string>,
+  reviewableLayers: ReadonlyMap<string, LayerReviewSubject>,
 ): void {
   if (review.score.nodeId !== review.nodeId || review.semantic.nodeId !== review.nodeId) {
     throw new Error(`Node ${review.nodeId} score and semantic IDs must match the reviewed node`);
@@ -425,12 +427,21 @@ function validateNodeReview(
       } else {
         if (action.recursiveContribution !== null) throw new Error(`Reference ${action.actionId} cannot create recursive contribution`);
         const reusableResult = layers.get(action.targetLayerId!)?.current;
-        if (reviewableLayerIds.has(action.targetLayerId!)) {
-          if (action.reusedLayerId !== action.targetLayerId) {
-            throw new Error(`Reference ${action.actionId} must reuse finalized LayerResult ${action.targetLayerId}`);
-          }
-          if (reusableResult === undefined) {
-            throw new Error(`Reference ${action.actionId} requires existing finalized LayerResult ${action.reusedLayerId}`);
+        if (reviewableLayers.has(action.targetLayerId!)) {
+          const sourceDepth = reviewableLayers.get(review.layerId)!.depth;
+          const targetDepth = reviewableLayers.get(action.targetLayerId!)!.depth;
+          const backReference = reusableResult === undefined && targetDepth <= sourceDepth;
+          if (backReference) {
+            if (action.reusedLayerId !== null) {
+              throw new Error(`Back-reference ${action.actionId} cannot consume an unfinished ancestor LayerResult`);
+            }
+          } else {
+            if (action.reusedLayerId !== action.targetLayerId) {
+              throw new Error(`Reference ${action.actionId} must reuse finalized LayerResult ${action.targetLayerId}`);
+            }
+            if (reusableResult === undefined) {
+              throw new Error(`Reference ${action.actionId} requires existing finalized LayerResult ${action.reusedLayerId}`);
+            }
           }
         } else if (action.reusedLayerId !== null) {
           throw new Error(`Reference-only destination ${action.targetLayerId} has no recursive LayerResult to reuse`);
@@ -553,6 +564,19 @@ function validateLayerResult(
   }
   requireText(review.layerSummary, `Layer ${review.layerId} summary`);
   requireEvidence(review.evidence, `Layer ${review.layerId} evidence`);
+  requireNullRatingJustifications(review.layerRatings, review.nullRatingJustifications, `Layer ${review.layerId}`);
+}
+
+function requireNullRatingJustifications(
+  ratings: Readonly<Record<string, unknown>>,
+  justifications: Readonly<Record<string, string | undefined>> | undefined,
+  label: string,
+): void {
+  for (const [criterion, rating] of Object.entries(ratings)) {
+    if (rating === null && !justifications?.[criterion]?.trim()) {
+      throw new Error(`${label} null ${criterion} rating requires justification`);
+    }
+  }
 }
 
 function validateRanking(step: AllocationStepReview, nodeId: string): void {

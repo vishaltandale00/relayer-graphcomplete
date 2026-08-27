@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -103,7 +103,7 @@ export const h3ProjectEvalCase: ProjectEvalCaseDefinition = Object.freeze({
     Object.freeze({
       id: "implementation",
       name: "Implement and commit the repair",
-      permissionProfileId: "full",
+      permissionProfileId: "auto",
       mutationPolicy: "writable",
       workspaceGrade: "implementation",
       prompts: Object.freeze([
@@ -131,7 +131,7 @@ export const h3AutonomousFixEvalCase: ProjectEvalCaseDefinition = Object.freeze(
     Object.freeze({
       id: "implementation",
       name: "Repair decimal status validation",
-      permissionProfileId: "full",
+      permissionProfileId: "auto",
       mutationPolicy: "writable",
       workspaceGrade: "autonomous-implementation",
       prompts: Object.freeze([
@@ -177,6 +177,19 @@ export type CommandRunner = (
   args: readonly string[],
   options: { readonly cwd: string; readonly env?: Readonly<Record<string, string>> },
 ) => Promise<CommandResult>;
+
+export function h3VerifierDigest(): `sha256:${string}` {
+  const source = [
+    gradeH3Workspace.toString(),
+    gradeReadOnly.toString(),
+    gradeImplementation.toString(),
+    withPatchedVerifierWorkspace.toString(),
+    runStatusBehaviorChecks.toString(),
+    runHiddenStatusCheck.toString(),
+    JSON.stringify(H3_BEHAVIOR_REQUIREMENTS),
+  ].join("\n");
+  return `sha256:${createHash("sha256").update(source).digest("hex")}`;
+}
 
 export interface H3FixtureReceipt {
   readonly schemaVersion: 1;
@@ -402,12 +415,11 @@ async function withPatchedVerifierWorkspace<T>(
     await required(runCommand, "git", ["clone", "--local", "--no-hardlinks", "--no-checkout", candidateDirectory, verifierDirectory], temporary);
     await required(runCommand, "git", ["checkout", "--detach", H3_SEEDED_COMMIT], verifierDirectory);
     if (patch.stdout.length > 0) await required(runCommand, "git", ["apply", "--whitespace=nowarn", patchPath], verifierDirectory);
-    try {
-      await access(join(candidateDirectory, "node_modules"));
-      await symlink(join(candidateDirectory, "node_modules"), join(verifierDirectory, "node_modules"), "dir");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
+    // Candidate dependencies and candidate-edited upstream tests are not
+    // verifier authority. Restore the pinned test and install dependencies in
+    // the disposable verifier checkout before applying evaluator-owned probes.
+    await required(runCommand, "git", ["checkout", H3_SEEDED_COMMIT, "--", H3_TEST_PATH], verifierDirectory);
+    await required(runCommand, "corepack", [H3_PACKAGE_MANAGER, "install", "--frozen-lockfile", "--ignore-scripts"], verifierDirectory);
     return await verify(verifierDirectory);
   } finally {
     await rm(temporary, { recursive: true, force: true });
@@ -516,16 +528,20 @@ const run: CommandRunner = (command, args, options) => new Promise((resolve, rej
     env: options.env === undefined ? process.env : { ...options.env },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  const timeout = setTimeout(() => child.kill("SIGKILL"), 10 * 60_000);
   let stdout = "";
   let stderr = "";
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => { stdout = `${stdout}${chunk}`.slice(-64_000); });
   child.stderr.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-64_000); });
-  child.once("error", reject);
-  child.once("exit", (code, signal) => resolve({
-    exitCode: code ?? (signal ? 1 : 0),
-    stdout,
-    stderr: signal ? `${stderr}\nProcess stopped by ${signal}.` : stderr,
-  }));
+  child.once("error", (error) => { clearTimeout(timeout); reject(error); });
+  child.once("exit", (code, signal) => {
+    clearTimeout(timeout);
+    resolve({
+      exitCode: code ?? (signal ? 1 : 0),
+      stdout,
+      stderr: signal ? `${stderr}\nProcess stopped by ${signal}.` : stderr,
+    });
+  });
 });

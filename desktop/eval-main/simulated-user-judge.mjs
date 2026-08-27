@@ -299,7 +299,8 @@ export function createLocalSimulatedUserJudgeRunner({
           configuration: { ...selectedConfiguration, rubric: context.rubric },
           controller,
           reviewStore: store,
-          workingDirectory: context.artifactDirectory,
+          artifact: context.artifact,
+          workingDirectory: context.artifact?.workingDirectory || context.artifactDirectory,
           artifactEvidence: context.artifactEvidence,
           additionalDirectories: [],
         });

@@ -113,6 +113,7 @@ export function createRecursiveScreenshotEvidenceValidator(
           ...node.allocationSteps.flatMap((step) => step.evidence),
           ...(node.missingActionOpportunities ?? []).flatMap((opportunity) => opportunity.evidence),
           ...node.actions.flatMap((action) => action.evidence),
+          ...node.findings.flatMap((finding) => finding.evidence),
         ]),
       ]);
       const isLower = (shot: ScreenshotMetadata): boolean => lowerEvidence.has(shot.screenshotId);

@@ -52,7 +52,7 @@ describe("task-outcome grading", () => {
     });
   });
 
-  it("preserves gate qualification while semantic rubric grading is partial", () => {
+  it("leaves qualification undetermined while semantic rubric grading is partial", () => {
     const result = buildTaskOutcomeGrade({
       status: "partial",
       mandatoryGates: [{
@@ -74,7 +74,7 @@ describe("task-outcome grading", () => {
       }],
     });
 
-    expect(result).toMatchObject({ status: "partial", qualified: true, score: null });
+    expect(result).toMatchObject({ status: "partial", qualified: null, score: null });
   });
 
   it("does not confuse verifier infrastructure failure with a failed candidate gate", () => {

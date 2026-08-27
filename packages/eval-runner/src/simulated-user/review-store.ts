@@ -189,7 +189,7 @@ export class IncrementalReviewStore<
     }
     const actionSubjects = this.#actionSubjects.get(key)!;
     validateNestedActionReviews(review.actions, actionSubjects);
-    validateRecursiveDisclosure(review);
+    validateRecursiveDisclosure(review, actionSubjects);
     const savedReview = immutableClone(review);
     this.#validateEvidence?.({ kind: "node", subject, actionSubjects, review: savedReview });
     const revision = appendRevision(this.#nodes, key, savedReview);
@@ -290,8 +290,21 @@ function validateNestedActionReviews(
   }
 }
 
-function validateRecursiveDisclosure(review: NodeReviewRecord): void {
+function validateRecursiveDisclosure(
+  review: NodeReviewRecord,
+  subjects: readonly ActionReviewSubject[],
+): void {
   if (review.structure === undefined) return;
+  const availability = {
+    expansion: subjects.some((subject) => subject.actionKind === "navigate" && subject.relation === "expand"),
+    references: subjects.some((subject) => subject.actionKind === "navigate" && subject.relation === "reference"),
+    invoke: subjects.some((subject) => subject.actionKind === "invoke"),
+  };
+  for (const [dimension, present] of Object.entries(availability)) {
+    const result = review.structure[dimension as keyof typeof availability].result;
+    if (present && result === "absent") throw new Error(`${dimension} disclosure exists in inventory and cannot be rated absent`);
+    if (!present && result !== "absent") throw new Error(`${dimension} disclosure is absent from inventory and cannot be rated ${result}`);
+  }
   const dimensions = [review.structure.expansion, review.structure.references, review.structure.invoke];
   if (dimensions.some((dimension) => dimension.need === "required" && ["absent", "fails"].includes(dimension.result))) {
     if (review.structure.rating > 2) {

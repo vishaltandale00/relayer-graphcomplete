@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { link, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { cp, link, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { promisify } from "node:util";
 
 import {
   basicEvalCaseId,
@@ -92,6 +94,7 @@ const simulatedUserJudgeIds = new Set([simulatedUserJudgeId, "simulated-user-sol
 const MAX_CONVERSATION_IMPORT_BYTES = 256 * 1024 * 1024;
 const ANNOTATION_EXPORT_EXECUTION_STATUSES = new Set(["passed", "failed", "imported"]);
 const ANNOTATION_EXPORT_TURN_STATUSES = new Set(["accepted", "failed", "stopped"]);
+const execFileAsync = promisify(execFile);
 
 function copy(value) {
   return structuredClone(value);
@@ -169,9 +172,13 @@ function presentationGradeFromTurns(turns, requested) {
   const results = turns.flatMap((turn) => turn.judgeResults || []);
   const completed = results.filter((result) => result.status === "completed");
   const failed = results.filter((result) => result.status === "failed");
+  const terminalWithoutReview = turns.filter((turn) => (
+    ["accepted", "failed", "stopped"].includes(turn.status)
+    && (turn.judgeResults || []).length === 0
+  ));
   const status = results.length === 0
-    ? "unjudged"
-    : completed.length === results.length ? "completed"
+    ? terminalWithoutReview.length > 0 ? "failed" : "unjudged"
+    : completed.length === results.length && terminalWithoutReview.length === 0 ? "completed"
       : failed.length === results.length ? "failed" : "partial";
   const recursive = completed.length > 0 && completed.every((result) => (
     [2, 3].includes(result.review?.schemaVersion)
@@ -251,7 +258,14 @@ function presentationLayers(results) {
         summary: typeof current?.layerSummary === "string"
           ? current.layerSummary
           : typeof current?.summary === "string" ? current.summary : "",
-        materiallyMisleading: current?.materiallyMisleading === true,
+        materiallyMisleading: current?.materiallyMisleading === true
+          || findings.some((finding) => finding?.severity === "critical")
+          || nodeRecords.some((nodeRecord) => {
+            const node = nodeRecord?.history?.current || nodeRecord?.review || nodeRecord;
+            const nodeLayerId = String(nodeRecord?.subject?.layerId ?? node?.layerId ?? "");
+            return nodeLayerId === layerId
+              && (node?.findings || []).some((finding) => finding?.severity === "critical");
+          }),
         nodes,
         evidenceRefs: [...new Set([
           ...(Array.isArray(current?.evidence) ? current.evidence : current?.evidence?.viewport || []),
@@ -293,7 +307,8 @@ function validateFixtureAgainstCaseSnapshot(execution, fixture) {
   }
 }
 
-export function judgeArtifactForExecution(execution) {
+export function judgeArtifactForExecution(execution, turn = null) {
+  if (turn?.artifact?.kind === "git_workspace") return copy(turn.artifact);
   const fixture = execution?.fixture;
   if (typeof fixture?.workspaceDirectory !== "string" || fixture.workspaceDirectory.length === 0) return undefined;
   const baseRevision = fixture.seededCommit ?? fixture.upstreamCommit;
@@ -304,18 +319,65 @@ export function judgeArtifactForExecution(execution) {
   };
 }
 
-export function judgeArtifactEvidenceForExecution(execution) {
+async function captureTurnArtifactSnapshot(execution, workspaceDirectory, interactionId) {
+  const snapshotDirectory = join(
+    dirname(execution.fixture?.workspaceDirectory || workspaceDirectory),
+    "turn-artifacts",
+    encodeURIComponent(String(interactionId)),
+    "workspace",
+  );
+  await mkdir(dirname(snapshotDirectory), { recursive: true, mode: 0o700 });
+  await rm(snapshotDirectory, { recursive: true, force: true });
+  let headOutput;
+  try {
+    ({ stdout: headOutput } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: workspaceDirectory, encoding: "utf8" }));
+  } catch {
+    await cp(workspaceDirectory, snapshotDirectory, { recursive: true });
+    return {
+      kind: "filesystem_artifact",
+      workingDirectory: snapshotDirectory,
+      contentDigest: sha256(`filesystem-snapshot:${interactionId}`),
+    };
+  }
+  const headRevision = headOutput.trim();
+  await execFileAsync("git", ["clone", "--local", "--no-hardlinks", "--no-checkout", workspaceDirectory, snapshotDirectory]);
+  await execFileAsync("git", ["checkout", "--detach", headRevision], { cwd: snapshotDirectory });
+  const { stdout: patch } = await execFileAsync("git", ["diff", "--binary", "HEAD", "--"], { cwd: workspaceDirectory, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+  if (patch.length > 0) {
+    const patchPath = join(dirname(snapshotDirectory), "working-tree.patch");
+    await writeFile(patchPath, patch, "utf8");
+    await execFileAsync("git", ["apply", "--whitespace=nowarn", patchPath], { cwd: snapshotDirectory });
+  }
+  const { stdout: untrackedOutput } = await execFileAsync("git", ["ls-files", "--others", "--exclude-standard", "-z"], { cwd: workspaceDirectory, encoding: "utf8" });
+  const untrackedDigests = [];
+  for (const relativePath of untrackedOutput.split("\0").filter(Boolean)) {
+    await mkdir(dirname(join(snapshotDirectory, relativePath)), { recursive: true });
+    await cp(join(workspaceDirectory, relativePath), join(snapshotDirectory, relativePath), { recursive: true });
+    const { stdout: objectDigest } = await execFileAsync("git", ["hash-object", "--no-filters", "--", relativePath], { cwd: workspaceDirectory, encoding: "utf8" });
+    untrackedDigests.push(`${relativePath}:${objectDigest.trim()}`);
+  }
+  return {
+    kind: "git_workspace",
+    workingDirectory: snapshotDirectory,
+    baseRevision: execution.fixture?.seededCommit ?? execution.fixture?.upstreamCommit,
+    headRevision,
+    contentDigest: sha256(`${headRevision}\n${patch}\n${untrackedDigests.join("\n")}`),
+  };
+}
+
+export function judgeArtifactEvidenceForExecution(execution, turn = null) {
   const outcome = execution?.outcomeGrade || {};
-  const checks = Array.isArray(execution?.checks) ? execution.checks : [];
-  const allFacts = [
-    ...checks.map((check) => `${check.passed ? "PASS" : "FAIL"} ${check.name}: ${check.detail}`),
-    ...(Array.isArray(outcome.mandatoryGates) ? outcome.mandatoryGates : []).map(
+  const checks = Array.isArray(turn?.deterministicChecks)
+    ? turn.deterministicChecks
+    : Array.isArray(execution?.checks) ? execution.checks : [];
+  const mandatoryFacts = (turn === null && Array.isArray(outcome.mandatoryGates) ? outcome.mandatoryGates : []).map(
       (gate) => `${gate.passed ? "PASS" : "FAIL"} mandatory gate ${gate.name}: ${gate.detail}`,
-    ),
-    ...(Array.isArray(outcome.criteria) ? outcome.criteria : []).map(
+    );
+  const criterionFacts = (turn === null && Array.isArray(outcome.criteria) ? outcome.criteria : []).map(
       (criterion) => `Outcome criterion ${criterion.criterionId}: ${criterion.rationale}`,
-    ),
-  ];
+    );
+  const checkFacts = checks.map((check) => `${check.passed ? "PASS" : "FAIL"} ${check.name}: ${check.detail}`);
+  const allFacts = [...mandatoryFacts, ...criterionFacts, ...checkFacts];
   const facts = allFacts.slice(0, 64).map((fact) => String(fact).slice(0, 2_000));
   return {
     schemaVersion: 1,
@@ -350,7 +412,7 @@ function finalizedAnnotationCoverage(execution) {
 
 function summarize(run) {
   if (run.kind === "imported-conversation") {
-    const finished = run.executions.filter((execution) => ["passed", "failed", "error"].includes(execution.status));
+    const finished = run.executions.filter((execution) => ["passed", "failed", "error", "imported"].includes(execution.status));
     const passed = run.executions.filter((execution) => execution.status === "passed").length;
     return {
       passed,
@@ -444,7 +506,10 @@ export class EvalService {
       if (run.status === "running" || run.status === "queued") {
         run.status = "interrupted";
         for (const execution of run.executions) {
-          if (execution.status === "running" || execution.status === "queued") execution.status = "interrupted";
+          if (execution.status === "running" || execution.status === "queued") {
+            execution.status = "interrupted";
+            completeExecutionLifecycle(execution, "failed");
+          }
         }
       }
       for (const execution of run.executions || []) {
@@ -925,6 +990,10 @@ export class EvalService {
         }
         if (eligible.length === 0) passed = false;
       }
+      execution.presentationGrade = presentationGradeFromTurns(
+        execution.turns,
+        simulatedUserJudgeIds.has(judgeConfigurationName),
+      );
       execution.passed = passed;
       execution.status = passed ? "passed" : "failed";
       run.status = execution.status;
@@ -1097,7 +1166,7 @@ export class EvalService {
         ? await this.#executeProjectCase(execution, definition)
         : [await this.#executeStandaloneCase(execution, definition)];
       execution.threadIds = executedThreads.map(({ thread }) => thread.id);
-      const interactions = executedThreads.flatMap(({ thread, threadDefinition, permissionResolution, detail, workspaceChecks }) => (
+      const interactions = executedThreads.flatMap(({ thread, threadDefinition, permissionResolution, detail, workspaceChecks, workspaceArtifacts }) => (
         detail.interactions.map((interaction, threadTurnIndex) => ({
           thread,
           threadDefinition,
@@ -1105,9 +1174,10 @@ export class EvalService {
           interaction,
           threadTurnIndex,
           workspaceChecks: workspaceChecks.get(String(interaction.id)) || [],
+          artifact: workspaceArtifacts?.get(String(interaction.id)) || null,
         }))
       ));
-      execution.turns = interactions.map(({ thread, threadDefinition, permissionResolution, interaction, threadTurnIndex }, turnIndex) => ({
+      execution.turns = interactions.map(({ thread, threadDefinition, permissionResolution, interaction, threadTurnIndex, artifact }, turnIndex) => ({
         threadId: thread.id,
         threadDefinitionId: threadDefinition?.id || null,
         interactionId: interaction.id,
@@ -1128,6 +1198,7 @@ export class EvalService {
         deterministicPassed: false,
         judgeResults: [],
         candidateTrace: copy(execution.candidateTraceCaptures?.[String(interaction.id)] || disabledCandidateTrace()),
+        ...(artifact === null ? {} : { artifact: copy(artifact) }),
       }));
       delete execution.candidateTraceCaptures;
       execution.promotable = execution.turns.every((turn) => !this.candidateTraceRequired || turn.candidateTrace.status === "complete");
@@ -1310,6 +1381,7 @@ export class EvalService {
     const executedThreads = [];
     for (const [threadIndex, threadDefinition] of definition.threads.entries()) {
       const workspaceChecks = new Map();
+      const workspaceArtifacts = new Map();
       const permissionResolution = execution.permissionProfileResolutions[threadIndex];
       const thread = await this.#createAndRunThread({
         execution,
@@ -1318,6 +1390,11 @@ export class EvalService {
         projectId: project.id,
         permissionProfileId: permissionResolution.effectiveProfileId,
         afterTurn: async (interactionId, promptIndex) => {
+          workspaceArtifacts.set(String(interactionId), await captureTurnArtifactSnapshot(
+            execution,
+            workspaceDirectory,
+            interactionId,
+          ));
           if (threadDefinition.mutationPolicy === "read-only" || promptIndex === threadDefinition.prompts.length - 1) {
             workspaceChecks.set(String(interactionId), isH3
               ? await this.workspaceGrader({ workspaceDirectory, grade: threadDefinition.workspaceGrade })
@@ -1326,7 +1403,7 @@ export class EvalService {
         },
       });
       const detail = await this.#productRequest(`/api/threads/${thread.id}`);
-      executedThreads.push({ thread, threadDefinition, permissionResolution, detail, workspaceChecks });
+      executedThreads.push({ thread, threadDefinition, permissionResolution, detail, workspaceChecks, workspaceArtifacts });
     }
     return executedThreads;
   }
@@ -1427,8 +1504,8 @@ export class EvalService {
           previousTurnIds,
           comparisonTurnIds: previousTurnIds.slice(-1),
         },
-        artifact: judgeArtifactForExecution(execution),
-        artifactEvidence: judgeArtifactEvidenceForExecution(execution),
+        artifact: judgeArtifactForExecution(execution, turn),
+        artifactEvidence: judgeArtifactEvidenceForExecution(execution, turn),
         rubric: copy(GRAPH_PRESENTATION_RUBRIC_V5),
         judgeConfiguration: copy(execution.judgeConfiguration),
         ...(provenance === null ? {} : { provenance: copy(provenance) }),
@@ -1784,7 +1861,7 @@ export function resolveH3PermissionProfile(configuration, requestedProfileId) {
       reason: null,
     };
   }
-  if (profiles.length === 1 && profiles[0] === "full") {
+  if (requestedProfileId === "ask" && profiles.length === 1 && profiles[0] === "full") {
     return {
       requestedProfileId,
       effectiveProfileId: "full",
@@ -1793,7 +1870,7 @@ export function resolveH3PermissionProfile(configuration, requestedProfileId) {
     };
   }
   throw new Error(
-    `Eval case ${H3_PROJECT_CASE_ID} requests permission profile ${requestedProfileId}, which is not supported by ${configuration.name}. Only an explicit sole Full access binding may override an H3 case profile.`,
+    `Eval case ${H3_PROJECT_CASE_ID} requests permission profile ${requestedProfileId}, which is not supported by ${configuration.name}. Only an Ask-profile case may explicitly fall back to a sole Full access binding; evaluator-owned verifier cases require confined authority.`,
   );
 }
 
