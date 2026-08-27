@@ -4,10 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { InteractionInput } from "@relayer/graph-client";
-import { HarnessHost, startHarnessHost } from "../src/host.js";
+import { HarnessExecutionFailure, HarnessHost, startHarnessHost } from "../src/host.js";
 import { PrimeAgentHarness } from "../src/implementations/prime-agent.js";
-import { HarnessExecutionFailure } from "../src/host.js";
-import type { Harness, HarnessConfiguration, HarnessFactoryContext, HarnessSessionState } from "../src/types.js";
+import type {
+  Harness,
+  HarnessConfiguration,
+  HarnessFactoryContext,
+  HarnessModelPlan,
+  HarnessRunContext,
+  HarnessSessionState,
+} from "../src/types.js";
 
 const completion = {
   nodeId: 1,
@@ -1136,7 +1142,240 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("does not expire a claimed lease during a long execution and bounds the terminal acknowledgement", async () => {
+  it("admits the complete ordered family, deduplicates access by provider definition, and aliases orchestrator access", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-family-admission-"));
+    const releases: string[] = [];
+    const acquired: string[] = [];
+    let accepted = false;
+    let observedContext: HarnessRunContext | undefined;
+    const plan: HarnessModelPlan = {
+      familyId: 17,
+      familyRevision: 3,
+      orchestrator: { providerId: "anthropic-work", adapterId: "anthropic-api", accessContract: "secret@1", modelId: "claude-opus" },
+      roster: [
+        { providerId: "openai-work", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt-large" },
+        { providerId: "openai-work", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt-small" },
+        { providerId: "anthropic-work", adapterId: "anthropic-api", accessContract: "secret@1", modelId: "claude-opus" },
+      ],
+    };
+    const policy = {
+      configurationRevision: 2,
+      configurationDigest: `sha256:${"a".repeat(64)}`,
+      executionAccessContracts: ["secret@1"],
+      modelRules: { allow: [{ adapterId: "openai-api", modelIdRegex: ".*" }, { adapterId: "anthropic-api", modelIdRegex: ".*" }], deny: [] },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? accepted
+        ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : graphReadResponse(url)));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control",
+        accessBroker: { async acquire(route) {
+          acquired.push(route.providerId);
+          const version = route.providerId === "openai-work" ? "openai-adapter@7" : "anthropic-adapter@4";
+          return {
+            access: {
+              kind: "secret", contract: "secret@1", providerId: route.providerId, adapterId: route.adapterId!,
+              adapterImplementationVersion: version, endpoint: `https://${route.providerId}.test`, fields: { "api-key": route.providerId },
+            },
+            release() { releases.push(route.providerId); },
+          };
+        } },
+        implementations: { test: () => ({ async complete(context) {
+          observedContext = context;
+          expect(context.model).toEqual(plan.orchestrator);
+          expect(context.access?.providerId).toBe("anthropic-work");
+          expect(context.accessBundle?.byProviderId["openai-work"]?.providerId).toBe("openai-work");
+          expect(context.accessBundle?.byProviderId["anthropic-work"]?.providerId).toBe("anthropic-work");
+          expect(Object.isFrozen(context.modelPlan)).toBe(true);
+          expect(Object.isFrozen(context.modelPlan?.roster)).toBe(true);
+          expect(Object.isFrozen(context.accessBundle?.byProviderId)).toBe(true);
+          accepted = true;
+        }, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({
+        threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: {
+          ...testConfiguration,
+          revision: 1,
+          modelRules: policy.modelRules,
+          executionAccessContracts: ["secret@1"],
+        },
+      });
+
+      const admission = await host.admitModelPlanExecution(
+        1, 29, "attempt-family-29", plan, new AbortController().signal, policy,
+      );
+      expect(acquired).toEqual(["openai-work", "anthropic-work"]);
+      expect(admission.admittedPlan.roster.map((route) => route.adapterImplementationVersion)).toEqual([
+        "openai-adapter@7", "openai-adapter@7", "anthropic-adapter@4",
+      ]);
+      expect(admission.admittedPlan.orchestrator.adapterImplementationVersion).toBe("anthropic-adapter@4");
+      expect(admission.admittedPlan.harnessPolicyDigest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+      expect(admission.admittedPlan.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+      expect(await readFile(join(directory, "sessions.json"), "utf8")).not.toContain("api-key");
+      expect(releases).toEqual([]);
+
+      await expect(host.complete(
+        1, 29, graph(), plan.orchestrator, undefined, undefined,
+        admission.executionLeaseId, policy, plan, "attempt-family-29",
+      )).resolves.toMatchObject({ output: completion });
+      expect(observedContext?.modelPlan).toEqual(admission.admittedPlan);
+      expect(releases).toEqual([]);
+      accepted = false;
+      await expect(host.complete(
+        1, 29, graph(), plan.orchestrator, undefined, undefined,
+        admission.executionLeaseId, policy, plan, "attempt-family-29",
+      )).rejects.toThrow("invalid or expired");
+      expect(await host.releaseProviderExecution(admission.executionLeaseId)).toBe(true);
+      expect(releases).toEqual(["anthropic-work", "openai-work"]);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rolls back already-acquired family access when a later provider cannot be acquired", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-family-rollback-"));
+    const release = vi.fn();
+    const plan: HarnessModelPlan = {
+      familyId: 1,
+      familyRevision: 1,
+      orchestrator: { providerId: "provider-a", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt" },
+      roster: [
+        { providerId: "provider-a", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt" },
+        { providerId: "provider-b", adapterId: "anthropic-api", accessContract: "secret@1", modelId: "claude" },
+      ],
+    };
+    const policy = {
+      configurationRevision: 2,
+      configurationDigest: `sha256:${"b".repeat(64)}`,
+      executionAccessContracts: ["secret@1"],
+      modelRules: { allow: [{ adapterId: "openai-api", modelIdRegex: ".*" }, { adapterId: "anthropic-api", modelIdRegex: ".*" }], deny: [] },
+    };
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control",
+        accessBroker: { async acquire(route) {
+          if (route.providerId === "provider-b") throw new Error("provider-b unavailable");
+          return {
+            access: {
+              kind: "secret", contract: "secret@1", providerId: route.providerId, adapterId: route.adapterId!,
+              adapterImplementationVersion: "1", endpoint: "https://provider-a.test", fields: { "api-key": "secret" },
+            },
+            release,
+          };
+        } },
+        implementations: { test: () => ({ async complete() {}, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({
+        threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: { ...testConfiguration, revision: 1, modelRules: policy.modelRules, executionAccessContracts: ["secret@1"] },
+      });
+      await expect(host.admitModelPlanExecution(
+        1, 1, "attempt-rollback", plan, new AbortController().signal, policy,
+      )).rejects.toThrow("provider-b unavailable");
+      expect(release).toHaveBeenCalledOnce();
+      await host.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("binds a family admission to its interaction, attempt, plan, and harness policy", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-family-binding-"));
+    const release = vi.fn();
+    const plan: HarnessModelPlan = {
+      familyId: 1,
+      familyRevision: 1,
+      orchestrator: { providerId: "provider-a", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt" },
+      roster: [{ providerId: "provider-a", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt" }],
+    };
+    const policy = {
+      configurationRevision: 2,
+      configurationDigest: `sha256:${"c".repeat(64)}`,
+      executionAccessContracts: ["secret@1"],
+      modelRules: { allow: [{ adapterId: "openai-api", modelIdRegex: ".*" }], deny: [] },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : graphReadResponse(url)));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control",
+        accessBroker: { async acquire(route) {
+          return {
+            access: {
+              kind: "secret", contract: "secret@1", providerId: route.providerId, adapterId: route.adapterId!,
+              adapterImplementationVersion: "1", endpoint: "https://provider-a.test", fields: { "api-key": "secret" },
+            },
+            release,
+          };
+        } },
+        implementations: { test: () => ({ async complete() {}, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({
+        threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: { ...testConfiguration, revision: 1, modelRules: policy.modelRules, executionAccessContracts: ["secret@1"] },
+      });
+      await expect(host.admitModelPlanExecution(
+        1, 44, "attempt-missing-contracts", plan, new AbortController().signal,
+        { configurationRevision: 2, configurationDigest: policy.configurationDigest, modelRules: policy.modelRules },
+      )).rejects.toThrow("requires executionAccessContracts");
+      await expect(host.admitModelPlanExecution(
+        1, 44, "attempt-mismatched-contracts", plan, new AbortController().signal,
+        { ...policy, executionAccessContracts: ["managed-runtime@1"] },
+      )).rejects.toThrow("do not match the pinned harness configuration");
+      const admission = await host.admitModelPlanExecution(
+        1, 44, "attempt-bound", plan, new AbortController().signal, policy,
+      );
+      await host.createSession({
+        threadId: 2, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: {
+          ...testConfiguration,
+          revision: 1,
+          modelRules: policy.modelRules,
+          executionAccessContracts: ["secret@1", "managed-runtime@1"],
+        },
+      });
+      const expandedPolicyAdmission = await host.admitModelPlanExecution(
+        2, 44, "attempt-expanded-contracts", plan, new AbortController().signal,
+        { ...policy, executionAccessContracts: ["secret@1", "managed-runtime@1"] },
+      );
+      expect(expandedPolicyAdmission.admittedPlan.harnessPolicyDigest)
+        .not.toBe(admission.admittedPlan.harnessPolicyDigest);
+      expect(await host.releaseProviderExecution(expandedPolicyAdmission.executionLeaseId)).toBe(true);
+      await expect(host.complete(
+        1, 44, graph(), plan.orchestrator, undefined, undefined,
+        admission.executionLeaseId, policy, plan, "attempt-other",
+      )).rejects.toThrow("invalid or expired");
+      await expect(host.complete(
+        1, 45, graph(), plan.orchestrator, undefined, undefined,
+        admission.executionLeaseId, policy, plan, "attempt-bound",
+      )).rejects.toThrow("invalid or expired");
+      await expect(host.complete(
+        1, 44, graph(), plan.orchestrator, undefined, undefined,
+        admission.executionLeaseId, policy, { ...plan, familyRevision: 2 }, "attempt-bound",
+      )).rejects.toThrow("invalid or expired");
+      await expect(host.complete(
+        1, 44, graph(), plan.orchestrator, undefined, undefined,
+        admission.executionLeaseId, { ...policy, configurationDigest: `sha256:${"d".repeat(64)}` }, plan, "attempt-bound",
+      )).rejects.toThrow(/stale or conflicts|invalid or expired/u);
+      expect(release).toHaveBeenCalledOnce();
+      expect(await host.releaseProviderExecution(admission.executionLeaseId)).toBe(true);
+      expect(release).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not release a claimed lease on execution or terminal-ack timeouts", async () => {
     vi.useFakeTimers();
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-lease-timeouts-"));
     const release = vi.fn();
@@ -1188,10 +1427,77 @@ describe("HarnessHost", () => {
       await running;
       await vi.advanceTimersByTimeAsync(29_999);
       expect(release).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(60_001);
+      expect(release).not.toHaveBeenCalled();
+      expect(await host.releaseProviderExecution(admission.executionLeaseId)).toBe(true);
       expect(release).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("aborts and settles an active family completion on close without releasing before durable acknowledgement", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-family-close-"));
+    const release = vi.fn();
+    let harnessStarted!: () => void;
+    const started = new Promise<void>((resolve) => { harnessStarted = resolve; });
+    const plan = {
+      familyId: 1,
+      familyRevision: 1,
+      orchestrator: { providerId: "provider-a", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt" },
+      roster: [{ providerId: "provider-a", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt" }],
+    };
+    const policy = {
+      configurationRevision: 2,
+      configurationDigest: `sha256:${"e".repeat(64)}`,
+      executionAccessContracts: ["secret@1"],
+      modelRules: { allow: [{ adapterId: "openai-api", modelIdExact: "gpt" }], deny: [] },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : graphReadResponse(url)));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control",
+        accessBroker: { async acquire() {
+          return {
+            access: {
+              kind: "secret", contract: "secret@1", providerId: "provider-a", adapterId: "openai-api",
+              adapterImplementationVersion: "1", endpoint: "https://provider-a.test", fields: { "api-key": "opaque" },
+            },
+            release,
+          };
+        } },
+        implementations: { test: () => ({ async complete(_context, signal) {
+          harnessStarted();
+          await new Promise<never>((_resolve, reject) => {
+            const abort = () => reject(signal?.reason ?? new Error("aborted"));
+            signal?.addEventListener("abort", abort, { once: true });
+            if (signal?.aborted) abort();
+          });
+        }, state: emptyState }) },
+      });
+      await host.initialize();
+      await host.createSession({
+        threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: { ...testConfiguration, revision: 1, modelRules: policy.modelRules, executionAccessContracts: ["secret@1"] },
+      });
+      const admission = await host.admitModelPlanExecution(
+        1, 9, "attempt-close", plan, new AbortController().signal, policy,
+      );
+      const completionRun = host.complete(
+        1, 9, graph(), plan.orchestrator, undefined, undefined,
+        admission.executionLeaseId, policy, plan, "attempt-close",
+      ).then(() => undefined, (error: unknown) => error);
+      await started;
+      await host.close();
+      expect(await completionRun).toBeInstanceOf(Error);
+      expect(release).not.toHaveBeenCalled();
+      expect(await host.releaseProviderExecution(admission.executionLeaseId)).toBe(true);
+      expect(release).toHaveBeenCalledOnce();
+    } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
     }
@@ -1965,6 +2271,7 @@ describe("HarnessHost", () => {
     });
     const session = {
       promptAndWait: vi.fn(async () => undefined),
+      waitForRlmQuiescence: vi.fn(async () => undefined),
       abort: vi.fn(async () => undefined),
       dispose: nativeDispose,
       disposeAsync: vi.fn(async () => {

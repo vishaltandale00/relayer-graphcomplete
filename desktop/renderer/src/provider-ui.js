@@ -69,11 +69,17 @@ export function rovingRadioIndex(key, currentIndex, count) {
   return null;
 }
 
-export function bindRovingRadioGroup(group, { onMove } = {}) {
+export function bindRovingRadioGroup(group, { onMove, onActivate } = {}) {
   if (!group) return;
   group.onkeydown = (event) => {
     const radios = [...group.querySelectorAll('[role="radio"]:not(:disabled)')];
     const currentIndex = radios.indexOf(event.target.closest?.('[role="radio"]'));
+    if (["Enter", " "].includes(event.key) && currentIndex >= 0) {
+      event.preventDefault();
+      onActivate ? onActivate(radios[currentIndex]) : radios[currentIndex].click?.();
+      radios[currentIndex].focus();
+      return;
+    }
     const nextIndex = rovingRadioIndex(event.key, currentIndex, radios.length);
     if (nextIndex === null) return;
     event.preventDefault();
@@ -85,6 +91,80 @@ export function bindRovingRadioGroup(group, { onMove } = {}) {
     radios[nextIndex].focus();
     onMove?.(radios[nextIndex]);
   };
+}
+
+function onboardingReason(reason) {
+  return reason?.message ? `<small class="onboarding-choice-reason">${escapeHtml(reason.message)}</small>` : "";
+}
+
+export function onboardingHarnessOptionsMarkup(projection, selectedHarnessId) {
+  const harnesses = projection?.harnesses ?? [];
+  let firstSelectable = true;
+  return `<div class="onboarding-choice-group" role="radiogroup" aria-label="Compatible harness">${harnesses.map((harness) => {
+    const selected = harness.selectable && harness.id === selectedHarnessId;
+    const tabStop = harness.selectable && (selected || (selectedHarnessId == null && firstSelectable));
+    if (harness.selectable && firstSelectable) firstSelectable = false;
+    const reasonId = harness.incompatibilityReason ? `onboardingHarnessReason-${escapeHtmlAttribute(harness.id)}` : null;
+    return `<button type="button" class="onboarding-choice" role="radio" aria-checked="${selected}" tabindex="${tabStop ? 0 : -1}" data-onboarding-harness="${escapeHtmlAttribute(harness.id)}" ${harness.selectable ? "" : "disabled"} ${reasonId ? `aria-describedby="${reasonId}"` : ""}>
+      <span><strong>${escapeHtml(harness.label)}</strong><small>${harness.id === projection.appDefaultHarnessId ? "App default" : "Harness"}${harness.matchingAccessContract ? ` · ${escapeHtml(harness.matchingAccessContract)}` : ""}</small>${reasonId ? `<small id="${reasonId}" class="onboarding-choice-reason">${escapeHtml(harness.incompatibilityReason.message)}</small>` : ""}</span>
+      <i aria-hidden="true">${selected ? "✓" : ""}</i>
+    </button>`;
+  }).join("")}</div>`;
+}
+
+function familyChoice({ kind, id = "", name, summary, selected }) {
+  return `<button type="button" class="onboarding-choice" role="radio" aria-checked="${selected}" tabindex="${selected ? 0 : -1}" data-onboarding-family-kind="${escapeHtmlAttribute(kind)}" ${id === "" ? "" : `data-onboarding-family-id="${escapeHtmlAttribute(id)}"`}>
+    <span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(summary)}</small></span><i aria-hidden="true">${selected ? "✓" : ""}</i>
+  </button>`;
+}
+
+export function onboardingFamilyOptionsMarkup(harness, intent = {}) {
+  const customFamilies = harness?.existingCustomFamilies ?? [];
+  const managedFamilies = harness?.existingManagedFamilies ?? [];
+  const managed = harness?.managedFamilyCandidate;
+  const eligibleModels = harness?.eligibleModels ?? [];
+  const selectedMembers = new Set((intent.members ?? []).map(({ providerId, modelId }) => `${providerId}\0${modelId}`));
+  const existingChoice = (family, typeLabel) => familyChoice({
+    kind: "existing",
+    id: family.id,
+    name: family.name,
+    summary: `${typeLabel} · ${(family.members ?? []).length} model${(family.members ?? []).length === 1 ? "" : "s"}`,
+    selected: intent.kind === "existing" && String(intent.familyId) === String(family.id),
+  });
+  const groups = [
+    { label: "Existing custom families", choices: customFamilies.map((family) => existingChoice(family, "Custom family")) },
+    { label: "Existing managed families", choices: managedFamilies.map((family) => existingChoice(family, "Managed family")) },
+    { label: "Managed family candidate", choices: managed ? [familyChoice({
+      kind: "managed",
+      name: managed.name,
+      summary: `Managed by ${harness.label} · ${(managed.members ?? []).length} model${(managed.members ?? []).length === 1 ? "" : "s"}`,
+      selected: intent.kind === "managed",
+    })] : [] },
+    { label: "New custom family", choices: eligibleModels.length ? [familyChoice({
+      kind: "create",
+      name: "Create a custom family",
+      summary: "Choose every model explicitly",
+      selected: intent.kind === "create",
+    })] : [] },
+  ];
+  const hasSelected = groups.some(({ choices }) => choices.some((choice) => choice.includes('aria-checked="true"')));
+  let assignedTabStop = hasSelected;
+  const groupedChoices = groups.map(({ label, choices }) => {
+    const normalized = choices.map((choice) => {
+      if (assignedTabStop) return choice;
+      assignedTabStop = true;
+      return choice.replace('tabindex="-1"', 'tabindex="0"');
+    });
+    return normalized.length ? `<section class="onboarding-family-choice-section"><h4>${escapeHtml(label)}</h4>${normalized.join("")}</section>` : "";
+  }).join("");
+  const createFields = intent.kind === "create" ? `<div class="onboarding-custom-family" data-onboarding-custom-family>
+    <label class="provider-form-field"><span>Family name</span><input id="onboardingFamilyName" value="${escapeHtmlAttribute(intent.name ?? "")}" autocomplete="off" /></label>
+    <fieldset class="onboarding-model-members"><legend>Models in this family</legend>${eligibleModels.map((model) => {
+      const key = `${model.providerId}\0${model.modelId}`;
+      return `<label><input type="checkbox" data-onboarding-member-provider="${escapeHtmlAttribute(model.providerId)}" data-onboarding-member-model="${escapeHtmlAttribute(model.modelId)}" ${selectedMembers.has(key) ? "checked" : ""} /><span><strong>${escapeHtml(model.label)}</strong><small>${escapeHtml(model.modelId)}</small></span></label>`;
+    }).join("")}</fieldset>
+  </div>` : "";
+  return `<div class="onboarding-choice-group" role="radiogroup" aria-label="Default model family">${groupedChoices}</div>${createFields}${onboardingReason(harness?.blockingReason)}`;
 }
 
 export function providerConnectionFormMarkup(descriptor, values = {}, definitions = [], showErrors = false) {
@@ -134,11 +214,12 @@ export function harnessConfigurationsMarkup(harnesses) {
   if (!harnesses.length) return `<div class="family-empty">No harness configurations available.</div>`;
   return harnesses.map((harness) => `<article class="harness-configuration-card" data-harness-configuration="${escapeHtmlAttribute(harness.id)}">
     <div class="provider-definition-heading"><div><h3>${escapeHtml(harness.label)}</h3><span>${escapeHtml(harness.id)}</span></div><span class="provider-status ${harness.available === false ? "unavailable" : "connected"}">${harness.available === false ? "Unavailable" : "Available"}</span></div>
+    ${harness.available === false && harness.unavailableReason ? `<p class="provider-removal-help">${escapeHtml(harness.unavailableReason.message)}</p>` : ""}
     <dl><div><dt>Execution access</dt><dd>${escapeHtml((harness.executionAccessContracts ?? []).join(", ") || "Configuration managed")}</dd></div><div><dt>Revision</dt><dd>${escapeHtml(harness.configurationRevision ?? harness.revision ?? "Current")}</dd></div></dl>
     <div class="harness-rule-groups">
       <section><h4>Allow</h4>${(harness.modelRules?.allow ?? []).length ? `<ul>${harness.modelRules.allow.map((rule) => `<li>${escapeHtml(ruleLabel(rule))}</li>`).join("")}</ul>` : `<p>All models not denied</p>`}</section>
       <section><h4>Deny</h4>${(harness.modelRules?.deny ?? []).length ? `<ul>${harness.modelRules.deny.map((rule) => `<li>${escapeHtml(ruleLabel(rule))}</li>`).join("")}</ul>` : `<p>No deny rules</p>`}</section>
     </div>
-    <div class="provider-definition-actions"><span class="push"></span><button type="button" class="secondary" data-harness-rules-edit="${escapeHtmlAttribute(harness.id)}">Edit model rules</button></div>
+    <div class="provider-definition-actions"><span class="push"></span><button type="button" class="secondary" data-harness-rules-edit="${escapeHtmlAttribute(harness.id)}"${harness.available === false ? " disabled" : ""}>Edit model rules</button></div>
   </article>`).join("");
 }

@@ -153,11 +153,15 @@ describe("composer provider lifecycle", () => {
       latestInteraction,
       "Review this repository carefully",
       { familyId: 12, providerId: "openai-personal", modelId: "gpt-5.2" },
+      "retry-input-2",
+      [{ target: { nodeId: 8, sourceInteractionNodeId: 3, sourceLayerId: 4 }, annotations: ["new context"] }],
     )).toEqual({
       path: "/api/threads/7/interactions/91/retry",
       body: {
         attemptId: 44,
         text: "Review this repository carefully",
+        inputId: "retry-input-2",
+        contexts: [{ target: { nodeId: 8, sourceInteractionNodeId: 3, sourceLayerId: 4 }, annotations: ["new context"] }],
         modelSelection: { familyId: 12, providerId: "openai-personal", modelId: "gpt-5.2" },
       },
     });

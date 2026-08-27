@@ -1396,7 +1396,7 @@ export function createPinnedGraphAuthoringLauncherScript({
     "  RELAYER_GRAPH_TOKEN=\"$RELAYER_GRAPH_TOKEN\" \\",
     "  RELAYER_NODE_ID=\"$RELAYER_NODE_ID\" \\",
     `  ${sandboxExecPath} -D "GRAPH_ENDPOINT=localhost:$graph_port" -f ${networkProfilePath} \\`,
-    `  ${nodePath} --permission --allow-fs-read=${graphClientRoot} --allow-net --input-type=module`,
+    `  ${nodePath} --permission --allow-fs-read=${graphClientRoot} --input-type=module`,
     "",
   ].join("\n");
 }

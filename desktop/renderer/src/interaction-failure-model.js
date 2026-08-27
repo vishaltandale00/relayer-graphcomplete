@@ -14,7 +14,7 @@ export function restoredDraftForInteraction(interaction) {
   };
 }
 
-export function interactionSubmissionTarget(threadId, latestInteraction, text, modelSelection) {
+export function interactionSubmissionTarget(threadId, latestInteraction, text, modelSelection, inputId, contexts = []) {
   const restoredDraft = restoredDraftForInteraction(latestInteraction);
   if (!restoredDraft) {
     return {
@@ -27,6 +27,8 @@ export function interactionSubmissionTarget(threadId, latestInteraction, text, m
     body: {
       attemptId: restoredDraft.retryAttemptId,
       text,
+      inputId,
+      contexts,
       modelSelection,
     },
   };

@@ -2,8 +2,29 @@ schemaVersion: 1
 name: prime-agent-deep
 implementation: prime.agent
 implementationVersion: 1
+revision: 1
 permissionBindings:
+  ask:
+    boundary: workspace-write@1
+    reviewer: user
+    networkAccessEnabled: true
+  auto:
+    boundary: workspace-write@1
+    reviewer: automatic
+    networkAccessEnabled: true
   full: {}
+modelRules:
+  allow:
+    - adapterId: openai-api
+      modelIdRegex: ".*"
+    - adapterId: anthropic-api
+      modelIdRegex: ".*"
+    - adapterId: openrouter
+      modelIdRegex: ".*"
+    - adapterId: vercel-ai-router
+      modelIdRegex: ".*"
+  deny: []
+executionAccessContracts: [secret@1]
 settings:
   thinkingLevel: high
   rlmMaxDepth: 4

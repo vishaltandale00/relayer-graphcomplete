@@ -186,6 +186,7 @@ async fn model_catalog_families_defaults_and_selection_are_typed_and_durable() {
     .await;
     assert_eq!(settings["defaults"]["harnessId"], "codex-basic");
     assert_eq!(settings["defaults"]["providerId"], "codex");
+    assert_eq!(settings["providers"][0]["adapterId"], "codex-subscription");
     assert_eq!(
         settings["providers"][0]["models"].as_array().unwrap().len(),
         6

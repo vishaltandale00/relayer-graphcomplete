@@ -229,23 +229,13 @@ export class RelayerAppServerService {
 
   async validateProviderOnboarding({ signal } = {}) {
     const session = await this.start();
-    const settingsResponse = await fetch(new URL("/api/model-settings", session.origin), {
-      headers: { Cookie: `${session.cookie.name}=${session.cookie.value}` },
-      signal,
-    });
-    if (!settingsResponse.ok) return false;
-    const settings = await settingsResponse.json();
-    const harnessId = settings?.defaults?.harnessId;
-    if (!harnessId) return false;
-    const url = new URL("/api/model-selection/default", session.origin);
-    url.searchParams.set("harnessId", harnessId);
-    const response = await fetch(url, {
+    const response = await fetch(new URL("/api/provider-onboarding/status", session.origin), {
       headers: { Cookie: `${session.cookie.name}=${session.cookie.value}` },
       signal,
     });
     if (!response.ok) return false;
-    const selection = await response.json();
-    return Boolean(selection?.providerId && selection?.modelId && selection?.familyId);
+    const status = await response.json();
+    return status?.complete === true;
   }
 
   async providerStatuses({ signal } = {}) {

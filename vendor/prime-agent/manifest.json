@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "https://github.com/vishaltandale00/prime-agent",
+    "commit": "2f4977eceb39e228b78241bd8084eb82b43efe6b"
+  },
+  "packages": [
+    {
+      "name": "@earendil-works/pi-agent-core",
+      "version": "0.8.1",
+      "file": "earendil-works-pi-agent-core-0.8.1-sha256-56d1bc00321a310c9e75c0ca33a6241fec0f559c514a046acc1d68d1c7be4f08.tgz",
+      "sha256": "56d1bc00321a310c9e75c0ca33a6241fec0f559c514a046acc1d68d1c7be4f08",
+      "treeSha256": "16223dfa60386a61d143c4cbdd4dcfe0316c2962844219e432426151ef4b8954"
+    },
+    {
+      "name": "@earendil-works/pi-ai",
+      "version": "0.8.1",
+      "file": "earendil-works-pi-ai-0.8.1-sha256-7560b021e023be9b39f376ba497cf64b9e54b2adb8be3d73b031f0033c4dd700.tgz",
+      "sha256": "7560b021e023be9b39f376ba497cf64b9e54b2adb8be3d73b031f0033c4dd700",
+      "treeSha256": "2bbbd8b3207c9d5c21bfc274023dab7a9fd2755ac6c05c6a9be6d8c19f635704"
+    },
+    {
+      "name": "@earendil-works/pi-coding-agent",
+      "version": "0.8.1",
+      "file": "earendil-works-pi-coding-agent-0.8.1-sha256-e30030498033239f32a58f51a5716c6bb3cbd71ae630b85fa875d27065c29b19.tgz",
+      "sha256": "e30030498033239f32a58f51a5716c6bb3cbd71ae630b85fa875d27065c29b19",
+      "treeSha256": "4e996fa724e6f97f6fc7e93c9ac33db273f492df00d810aa6e87bc692e6d7b57"
+    },
+    {
+      "name": "@earendil-works/pi-tui",
+      "version": "0.8.1",
+      "file": "earendil-works-pi-tui-0.8.1-sha256-40517b0d5600557a31e395a0c344dbb9af7d3f8c000bea65561ef81b83142507.tgz",
+      "sha256": "40517b0d5600557a31e395a0c344dbb9af7d3f8c000bea65561ef81b83142507",
+      "treeSha256": "f86a8ab553edaf05e1fc4f4d6cb48c313e5a93f2f3490f74e510661c52d74447"
+    }
+  ],
+  "runtimeContract": {
+    "package": "@earendil-works/pi-coding-agent",
+    "modelScopeAccess": "upfront-request-access@1",
+    "constants": {
+      "AGENT_RUN_MODEL_SCOPE_VERSION": 1,
+      "AGENT_RUN_TOOL_AUTHORITY_SCOPE_VERSION": 1,
+      "AGENT_RUN_KERNEL_BOUNDARY_SCOPE_VERSION": 1
+    },
+    "functions": [
+      "createAgentRunModelScope",
+      "createAgentRunToolAuthorityScope",
+      "createAgentRunKernelBoundaryScope",
+      "createHostRequestHandler",
+      "createAgentSessionServices",
+      "createAgentSessionFromServices"
+    ],
+    "sessionFunctions": ["waitForRlmQuiescence"]
+  },
+  "assets": {
+    "harnessConfigurations": {
+      "prime-agent-basic.yaml": "55e720e4628a3cab25e149a80325b804f247830b0bc00e5c472400d382fb9775",
+      "prime-agent-deep.yaml": "b91e705d99197419deecd5455ce4715b05246f8cc927dc5ba88c1eb4b50acad7"
+    },
+    "pythonPackageTreeSha256": "f70f003aa45414121ed7ec7f759f945369cbf4ea120a754e651a340bb8f8f0e4"
+  },
+  "dependencyClosureSha256ByTarget": {
+    "darwin-arm64": "3afe87b82aef9f6876473ae9781be92c7b0685008412d25b4086f0d14d281961",
+    "darwin-x64": "29346ee054f873dda0ec5c15c5b3a39003c61fb8d2705117cbe762d65a994904",
+    "win32-x64": "477a0bbb7e8ad3b1a5645575aaca0bd9813b7a11f326b1d4dbcc2c4253bdbe7e"
+  },
+  "harnessConfigurations": ["prime-agent-basic.yaml", "prime-agent-deep.yaml"],
+  "pythonPackage": "relayer_graph"
+}

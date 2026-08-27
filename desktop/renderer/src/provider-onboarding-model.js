@@ -1,0 +1,69 @@
+function sameModel(left, right) {
+  return left.providerId === right.providerId && left.modelId === right.modelId;
+}
+
+function reconcileFamily(harness, family) {
+  if (!family) return null;
+  if (family.kind === "existing") {
+    const choices = [...(harness.existingCustomFamilies ?? []), ...(harness.existingManagedFamilies ?? [])];
+    return choices.some(({ id }) => String(id) === String(family.familyId)) ? family : null;
+  }
+  if (family.kind === "managed") {
+    const candidate = harness.managedFamilyCandidate;
+    return candidate
+      && candidate.policyId === family.policyId
+      && candidate.policyVersion === family.policyVersion
+      ? family
+      : null;
+  }
+  if (family.kind === "create") {
+    const eligible = harness.eligibleModels ?? [];
+    return {
+      ...family,
+      members: (family.members ?? []).filter((member) => eligible.some((model) => sameModel(member, model))),
+    };
+  }
+  return null;
+}
+
+export function reconcileProviderOnboardingState(projection, previous = null) {
+  const priorHarness = previous?.harnessId;
+  const priorStillSelectable = projection.harnesses.some(({ id, selectable }) => (
+    id === priorHarness && selectable
+  ));
+  const harnessId = priorStillSelectable ? priorHarness : projection.initialHarnessId;
+  const harness = projection.harnesses.find(({ id }) => id === harnessId);
+  return Object.freeze({
+    harnessId,
+    family: harnessId === priorHarness && harness ? reconcileFamily(harness, previous.family) : null,
+  });
+}
+
+export function resumableProviderDefinitions(providerStatus) {
+  return (providerStatus?.definitions ?? []).filter((definition) => (
+    definition.connected === true && definition.lifecycleState === "active"
+  ));
+}
+
+export function providerOnboardingCompletionIntent({ providerId, projection, harnessId, family }) {
+  if (!providerId || !projection?.projectionRevision || !harnessId || !family) return null;
+  if (family.kind === "create" && (!family.name?.trim() || !family.members?.length)) return null;
+  return {
+    providerId,
+    harnessId,
+    expectedProjectionRevision: projection.projectionRevision,
+    family: family.kind === "create" ? { ...family, name: family.name.trim() } : family,
+  };
+}
+
+export function setProviderOnboardingControlsBusy(controls, busy) {
+  for (const control of controls) {
+    if (busy) {
+      control.dataset.onboardingDisabledBeforeBusy = String(control.disabled);
+      control.disabled = true;
+    } else if (control.dataset.onboardingDisabledBeforeBusy !== undefined) {
+      control.disabled = control.dataset.onboardingDisabledBeforeBusy === "true";
+      delete control.dataset.onboardingDisabledBeforeBusy;
+    }
+  }
+}

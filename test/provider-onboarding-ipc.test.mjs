@@ -81,29 +81,42 @@ describe("provider onboarding IPC hard gate", () => {
     expect(writes).toEqual([]);
   });
 
-  it("treats an authoritative null default selection as an incomplete first run", async () => {
+  it("treats an authoritative incomplete saved-default status as an incomplete first run", async () => {
     const service = new RelayerAppServerService({
       userDataDirectory: "/tmp/unused", binaryPath: "/tmp/unused", webDirectory: "/tmp/unused",
       permissionCatalogPath: "/tmp/unused",
     });
-    service.start = async () => ({
-      origin: "http://127.0.0.1:43123",
-      cookie: { name: "relayer_control", value: "token" },
-    });
-    const fetch = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        defaults: { harnessId: "saved-alternate" },
-      }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response("null", {
-        status: 200, headers: { "Content-Type": "application/json" },
-      }));
+    service.start = async () => ({ origin: "http://127.0.0.1:43123", cookie: { name: "relayer_control", value: "token" } });
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+      complete: false,
+      defaults: { providerId: "codex", harnessId: "codex-basic", familyId: null },
+      blockingReason: { code: "default_family_required", message: "Choose a family." },
+    }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
     await expect(service.validateProviderOnboarding()).resolves.toBe(false);
-    expect(fetch).toHaveBeenNthCalledWith(1, new URL("http://127.0.0.1:43123/api/model-settings"), {
-      headers: { Cookie: "relayer_control=token" }, signal: undefined,
+    expect(fetch.mock.calls[0][0].pathname).toBe("/api/provider-onboarding/status");
+    expect(fetch.mock.calls[0][0].search).toBe("");
+    expect(fetch.mock.calls[0][1]).toMatchObject({
+      headers: { Cookie: "relayer_control=token" },
     });
-    expect(fetch).toHaveBeenNthCalledWith(2, new URL("http://127.0.0.1:43123/api/model-selection/default?harnessId=saved-alternate"), {
-      headers: { Cookie: "relayer_control=token" }, signal: undefined,
+    fetch.mockRestore();
+  });
+
+  it("accepts saved alternate-harness defaults after restart without consulting the boot harness", async () => {
+    const service = new RelayerAppServerService({
+      userDataDirectory: "/tmp/unused", binaryPath: "/tmp/unused", webDirectory: "/tmp/unused",
+      permissionCatalogPath: "/tmp/unused", defaultHarnessConfiguration: "packaged-default",
     });
+    service.start = async () => ({ origin: "http://127.0.0.1:43123", cookie: { name: "relayer_control", value: "token" } });
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+      complete: true,
+      defaults: { providerId: "anthropic-work", harnessId: "claude-basic", familyId: 12 },
+      resolution: { familyId: 12, familyRevision: 3, resolvableMembers: [{ providerId: "anthropic-work", modelId: "claude-sonnet", position: 0 }] },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    await expect(service.validateProviderOnboarding()).resolves.toBe(true);
+    expect(fetch.mock.calls[0][0].pathname).toBe("/api/provider-onboarding/status");
+    expect(fetch.mock.calls[0][0].searchParams.has("harnessId")).toBe(false);
     fetch.mockRestore();
   });
 
@@ -112,10 +125,7 @@ describe("provider onboarding IPC hard gate", () => {
       userDataDirectory: "/tmp/unused", binaryPath: "/tmp/unused", webDirectory: "/tmp/unused",
       permissionCatalogPath: "/tmp/unused",
     });
-    service.start = async () => ({
-      origin: "http://127.0.0.1:43123",
-      cookie: { name: "relayer_control", value: "token" },
-    });
+    service.start = async () => ({ origin: "http://127.0.0.1:43123", cookie: { name: "relayer_control", value: "token" } });
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
       providers: [{
         id: "work-api", connected: false,

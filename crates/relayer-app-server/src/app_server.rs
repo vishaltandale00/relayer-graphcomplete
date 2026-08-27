@@ -6,7 +6,9 @@ use crate::{
     storage::SqliteProductStore,
 };
 use axum::Router;
-use std::path::PathBuf;
+use std::time::Duration;
+use std::{path::PathBuf, sync::Arc};
+use tokio::sync::Notify;
 
 #[derive(Debug, thiserror::Error)]
 enum StartupReconciliationError {
@@ -128,6 +130,8 @@ async fn reconcile_interrupted_interaction(
                 harness_configuration_name: &thread.harness_configuration_name,
                 permission_profile: permission,
                 model_selection: execution_model_selection.as_ref(),
+                model_plan: None,
+                attempt_admission_id: None,
                 execution_lease_id: None,
                 harness_policy: harness_policy.as_ref(),
                 invocation: prepared_invocation,
@@ -272,6 +276,129 @@ pub struct RelayerAppServer {
     allow_conversation_import: bool,
     standalone_workspaces_directory: PathBuf,
     export_producer: crate::conversation_export::ExportProducer,
+    execution_lease_reconciler: Option<ExecutionLeaseReconciler>,
+}
+
+pub(crate) async fn reconcile_terminal_execution_lease(
+    product: &ProductService,
+    runtime: &RuntimeClient,
+    attempt_id: i64,
+) -> bool {
+    let debt = match product.execution_lease_debt(attempt_id).await {
+        Ok(Some(debt)) => debt,
+        Ok(None) => return true,
+        Err(error) => {
+            eprintln!("could not read execution lease debt for attempt {attempt_id}: {error}");
+            return false;
+        }
+    };
+    if let Err(error) = runtime
+        .release_provider_execution(debt.thread_id.value(), &debt.execution_lease_id)
+        .await
+    {
+        eprintln!(
+            "could not release terminal execution lease for attempt {}: {error}",
+            debt.attempt_id
+        );
+        return false;
+    }
+    match product
+        .acknowledge_execution_lease_reconciled(debt.attempt_id, &debt.execution_lease_id)
+        .await
+    {
+        Ok(true) => true,
+        Ok(false) => product
+            .execution_lease_debt(debt.attempt_id)
+            .await
+            .is_ok_and(|remaining| remaining.is_none()),
+        Err(error) => {
+            eprintln!(
+                "released execution lease but could not persist reconciliation for attempt {}: {error}",
+                debt.attempt_id
+            );
+            false
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct ExecutionLeaseReconciler {
+    worker: CoalescedWorker,
+}
+
+#[derive(Clone)]
+struct CoalescedWorker {
+    wake: Arc<Notify>,
+}
+
+impl CoalescedWorker {
+    fn start<F, Fut>(run: F) -> Self
+    where
+        F: FnOnce(Arc<Notify>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let wake = Arc::new(Notify::new());
+        tokio::spawn(run(wake.clone()));
+        Self { wake }
+    }
+
+    fn schedule(&self) {
+        self.wake.notify_one();
+    }
+}
+
+impl ExecutionLeaseReconciler {
+    fn start(product: ProductService, runtime: RuntimeClient) -> Self {
+        let worker = CoalescedWorker::start(move |worker_wake| async move {
+            loop {
+                worker_wake.notified().await;
+                reconcile_execution_lease_debt(&product, &runtime, &worker_wake).await;
+            }
+        });
+        Self { worker }
+    }
+
+    pub(crate) fn schedule(&self) {
+        self.worker.schedule();
+    }
+}
+
+async fn reconcile_execution_lease_debt(
+    product: &ProductService,
+    runtime: &RuntimeClient,
+    wake: &Notify,
+) {
+    let mut retry_delay = Duration::from_millis(100);
+    loop {
+        let debts = match product.unreconciled_execution_lease_debts().await {
+            Ok(debts) => debts,
+            Err(error) => {
+                eprintln!("could not enumerate unreconciled execution leases: {error}");
+                tokio::select! {
+                    _ = tokio::time::sleep(retry_delay) => {}
+                    _ = wake.notified() => {}
+                }
+                retry_delay = (retry_delay * 2).min(Duration::from_secs(30));
+                continue;
+            }
+        };
+        if debts.is_empty() {
+            return;
+        }
+        let mut unresolved = false;
+        for debt in debts {
+            unresolved |=
+                !reconcile_terminal_execution_lease(product, runtime, debt.attempt_id).await;
+        }
+        if !unresolved {
+            return;
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(retry_delay) => {}
+            _ = wake.notified() => {}
+        }
+        retry_delay = (retry_delay * 2).min(Duration::from_secs(30));
+    }
 }
 
 impl RelayerAppServer {
@@ -432,8 +559,14 @@ impl RelayerAppServer {
         storage
             .initialize_model_catalog(&default_harness_configuration, &runtime_harnesses)
             .await?;
+        let product = ProductService::new(storage, runtime.is_some());
+        let execution_lease_reconciler = runtime.clone().map(|runtime| {
+            let reconciler = ExecutionLeaseReconciler::start(product.clone(), runtime);
+            reconciler.schedule();
+            reconciler
+        });
         Ok(Self {
-            product: ProductService::new(storage, runtime.is_some()),
+            product,
             web_directory: config.web_directory,
             control_token: config.control_token,
             read_only_control_token: config.read_only_control_token,
@@ -444,6 +577,7 @@ impl RelayerAppServer {
             allow_conversation_import: config.allow_conversation_import,
             standalone_workspaces_directory,
             export_producer: config.export_producer,
+            execution_lease_reconciler,
         })
     }
 
@@ -463,6 +597,7 @@ impl RelayerAppServer {
                 allow_conversation_import: self.allow_conversation_import,
                 standalone_workspaces_directory: self.standalone_workspaces_directory.clone(),
                 export_producer: self.export_producer.clone(),
+                execution_lease_reconciler: self.execution_lease_reconciler.clone(),
             },
         )
     }
@@ -474,4 +609,83 @@ fn startup_timestamp() -> String {
         .expect("system time is before unix epoch")
         .as_millis()
         .to_string()
+}
+
+#[cfg(test)]
+mod execution_lease_reconciler_tests {
+    use super::CoalescedWorker;
+    use std::{
+        collections::VecDeque,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        },
+        time::Duration,
+    };
+    use tokio::sync::Notify;
+
+    #[tokio::test]
+    async fn concurrent_outage_wakes_share_one_worker_and_later_debt_is_processed() {
+        let debts = Arc::new(Mutex::new(VecDeque::from([1_u64])));
+        let outage = Arc::new(AtomicBool::new(true));
+        let worker_starts = Arc::new(AtomicUsize::new(0));
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let releases = Arc::new(Mutex::new(Vec::new()));
+        let completed = Arc::new(Notify::new());
+
+        let worker = CoalescedWorker::start({
+            let debts = debts.clone();
+            let outage = outage.clone();
+            let worker_starts = worker_starts.clone();
+            let active = active.clone();
+            let max_active = max_active.clone();
+            let releases = releases.clone();
+            let completed = completed.clone();
+            move |wake| async move {
+                worker_starts.fetch_add(1, Ordering::SeqCst);
+                loop {
+                    wake.notified().await;
+                    let Some(debt) = debts.lock().expect("debt lock").front().copied() else {
+                        continue;
+                    };
+                    let now_active = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_active.fetch_max(now_active, Ordering::SeqCst);
+                    releases.lock().expect("release lock").push(debt);
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    if !outage.load(Ordering::SeqCst) {
+                        debts.lock().expect("debt lock").pop_front();
+                        completed.notify_one();
+                    }
+                }
+            }
+        });
+
+        let schedules = (0..32).map(|_| {
+            let worker = worker.clone();
+            tokio::spawn(async move { worker.schedule() })
+        });
+        for schedule in schedules {
+            schedule.await.expect("schedule task");
+        }
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(worker_starts.load(Ordering::SeqCst), 1);
+        assert_eq!(max_active.load(Ordering::SeqCst), 1);
+
+        outage.store(false, Ordering::SeqCst);
+        worker.schedule();
+        tokio::time::timeout(Duration::from_secs(1), completed.notified())
+            .await
+            .expect("first debt completion");
+        debts.lock().expect("debt lock").push_back(2);
+        worker.schedule();
+        tokio::time::timeout(Duration::from_secs(1), completed.notified())
+            .await
+            .expect("later debt completion");
+
+        assert_eq!(max_active.load(Ordering::SeqCst), 1);
+        assert!(releases.lock().expect("release lock").contains(&2));
+        assert!(debts.lock().expect("debt lock").is_empty());
+    }
 }

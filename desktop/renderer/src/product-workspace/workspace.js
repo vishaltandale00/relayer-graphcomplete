@@ -644,8 +644,23 @@ export function transitionComposerDraftScope(state, {
   };
 }
 
-export function contextStagingDisabledFor(status, canCompose = true, requestDisabled = false) {
-  return requestDisabled || composerDisabledForState(status, canCompose);
+export function clearSubmittedComposerDraft(state, submittedScopeKey, submittedPromptValue, currentPromptValue) {
+  const retainedPromptValue = state.activeScopeKey === submittedScopeKey
+    ? currentPromptValue
+    : state.drafts.get(submittedScopeKey)?.promptValue;
+  if (retainedPromptValue !== submittedPromptValue) return state;
+  const drafts = new Map(state.drafts);
+  drafts.delete(submittedScopeKey);
+  return { activeScopeKey: state.activeScopeKey, drafts };
+}
+
+export function contextStagingDisabledFor(
+  status,
+  canCompose = true,
+  requestDisabled = false,
+  restoredDraft = false,
+) {
+  return requestDisabled || composerDisabledForState(status, canCompose, restoredDraft);
 }
 
 export function composerDisabledForState(status, canCompose = true, restoredDraft = false) {
@@ -1518,7 +1533,12 @@ export function createProductWorkspace({
   ));
   const contextStagingDisabled = () => {
     const status = composerStatusForThread(getState(), getThread());
-    return contextStagingDisabledFor(status, capabilities.canCompose, prompt.disabled);
+    return contextStagingDisabledFor(
+      status,
+      capabilities.canCompose,
+      prompt.disabled,
+      restoredDraftActive,
+    );
   };
   const closeContextEditor = () => {
     contextEditor = null;
@@ -1534,7 +1554,7 @@ export function createProductWorkspace({
     );
     const status = composerStatusForThread(getState(), getThread());
     const available = capabilities.canCompose
-      && !composerDisabledForState(status, true)
+      && !composerDisabledForState(status, true, restoredDraftActive)
       && !prompt.disabled
       && Boolean(node);
     button.classList.toggle("hidden", !available);
@@ -1865,6 +1885,12 @@ export function createProductWorkspace({
     try {
       const modelSelection = pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection;
       await onSubmitInteraction(text, modelSelection, interactionContextPayload(submittedContexts));
+      composerDraftScopeState = clearSubmittedComposerDraft(
+        composerDraftScopeState,
+        submittedDraftScopeKey,
+        submittedPromptValue,
+        prompt.value,
+      );
       if (composerDraftMatchesSubmission({
         currentThreadId: getThread()?.id,
         submittedThreadId,

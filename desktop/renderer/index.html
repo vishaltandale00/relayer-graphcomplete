@@ -25,13 +25,16 @@
         </div>
       </form>
       <section class="provider-family-step hidden" id="providerFamilyStep" aria-labelledby="providerFamilyTitle">
-        <button type="button" class="provider-setup-back" id="providerFamilyBack">← Connect another provider</button>
+        <button type="button" class="provider-setup-back" id="providerFamilyBack">← All providers</button>
         <h2 id="providerFamilyTitle">Choose your default model family</h2>
-        <p>The default harness needs at least one available model before you can continue.</p>
+        <p>Confirm a compatible harness, then choose an existing family or create one with models you select.</p>
+        <h3>Harness</h3>
+        <div id="onboardingHarnessOptions"></div>
+        <h3>Model family</h3>
         <div id="onboardingFamilyOptions"></div>
         <button type="button" class="primary wide" id="finishProviderSetup">Continue to Relayer</button>
       </section>
-      <div class="auth-status" id="authStatus" role="status" aria-live="polite">Checking providers…</div>
+      <div class="auth-status" id="authStatus" role="status" aria-live="polite" tabindex="-1">Checking providers…</div>
     </div>
   </section>
 

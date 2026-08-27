@@ -16,7 +16,9 @@ use relayer_graph_core::{
     ThreadId as GraphThreadId,
 };
 use relayer_graph_server::ServerState as GraphServerState;
+use serde::Serialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{
     collections::HashMap,
@@ -1839,11 +1841,12 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         )
         .route(
             "/sessions/{id}/execution-leases",
-            axum::routing::post(|| async {
-                (StatusCode::CREATED, axum::Json(json!({
-                    "executionLeaseId": "00000000-0000-0000-0000-000000000007",
-                    "adapterImplementationVersion": "7"
-                })))
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                (StatusCode::CREATED, axum::Json(test_execution_admission(
+                    &body,
+                    "00000000-0000-0000-0000-000000000007",
+                    "7",
+                )))
             }),
         )
         .route(
@@ -2351,7 +2354,9 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
                     let node_id = next_graph_node_id.fetch_add(1, Ordering::SeqCst);
                     axum::Json(json!({
                         "node": { "id": node_id },
-                        "graphToken": ""
+                        "graphToken": "",
+                        "inputIdentity": body["inputIdentity"],
+                        "inputDigest": body["inputDigest"]
                     }))
                     .into_response()
                 }
@@ -2401,11 +2406,12 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         )
         .route(
             "/sessions/{id}/execution-leases",
-            axum::routing::post(|| async {
-                (StatusCode::CREATED, axum::Json(json!({
-                    "executionLeaseId": "00000000-0000-0000-0000-000000000007",
-                    "adapterImplementationVersion": "7"
-                })))
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                (StatusCode::CREATED, axum::Json(test_execution_admission(
+                    &body,
+                    "00000000-0000-0000-0000-000000000007",
+                    "7",
+                )))
             }),
         )
         .route(
@@ -2739,6 +2745,15 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         interactions[2]["effectiveExecutionDigest"]
     );
     assert_eq!(output_reads.load(Ordering::SeqCst), 2);
+    let pool = sqlite_pool(&database).await;
+    let unreconciled_terminal_leases: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM interaction_attempts WHERE execution_lease_id IS NOT NULL AND execution_lease_reconciled_at IS NULL AND outcome!='running'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    assert_eq!(unreconciled_terminal_leases, 0);
     assert_eq!(
         observed_models.lock().unwrap().as_slice(),
         [
@@ -2803,6 +2818,8 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
     let retry_body = json!({
         "attemptId": attempt_id,
         "text": "Edited but still the same draft",
+        "inputId": "retry-input-edited-draft",
+        "contexts": [],
         "modelSelection": model_selection(family_id, "second-model")
     });
     let pool = sqlite_pool(&database).await;
@@ -3428,6 +3445,8 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
     let graph_output = canonical.clone();
     let recovery_output_reads = Arc::new(AtomicUsize::new(0));
     let observed_recovery_output_reads = recovery_output_reads.clone();
+    let concurrent_recovery_barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let observed_recovery_barrier = concurrent_recovery_barrier.clone();
     let approval_metadata_reads = Arc::new(AtomicUsize::new(0));
     let observed_approval_metadata_reads = approval_metadata_reads.clone();
     let invalidations = Arc::new(AtomicUsize::new(0));
@@ -3529,6 +3548,7 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
             axum::routing::get(move || {
                 let graph_output = graph_output.clone();
                 let observed_recovery_output_reads = observed_recovery_output_reads.clone();
+                let observed_recovery_barrier = observed_recovery_barrier.clone();
                 async move {
                     if observed_recovery_output_reads.fetch_add(1, Ordering::SeqCst) == 0 {
                         return (
@@ -3536,6 +3556,7 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
                             axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
                         );
                     }
+                    observed_recovery_barrier.wait().await;
                     (StatusCode::OK, axum::Json(graph_output))
                 }
             }),
@@ -3674,9 +3695,8 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .unwrap();
     assert_eq!(first_strict_resolution["resolution"]["outcome"], "aborted");
     drop(first_reopened);
-    // Simulate a live reconciliation write that became uncertain after graph acceptance. The
-    // next startup must include this quarantined row and promote both interaction and attempt
-    // receipt from canonical graph authority before serving state.
+    // Live reconciliation can still quarantine an uncertain result. Preserve the concurrent
+    // compare-and-swap promotion regression independently of startup's strict-lease policy.
     let pool = sqlite_pool(&database).await;
     sqlx::query("UPDATE interactions SET completion_status='failed',completion_error='Canonical reconciliation pending: simulated live uncertainty' WHERE id=?1")
         .bind(result_id)
@@ -4392,7 +4412,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 17);
+    assert_eq!(applied_migrations, 19);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -4520,6 +4540,7 @@ async fn invalid_context_provenance_is_generic_and_leaves_no_product_intent_or_t
     .await;
     let thread_id = thread["id"].as_i64().unwrap();
     drop(offline);
+    seed_explicit_test_model_default(&database, thread_id).await;
     let pool = sqlite_pool(&database).await;
     let original_timestamp: String =
         sqlx::query_scalar("SELECT updated_at FROM threads WHERE id=?1")
@@ -4552,6 +4573,8 @@ async fn invalid_context_provenance_is_generic_and_leaves_no_product_intent_or_t
             "configurations":[{"configuration":{
                 "schemaVersion":1,"name":"codex-basic","implementation":"test",
                 "implementationVersion":1,"permissionBindings":{"auto":{}},
+                "modelCompatibility":[{"providerId":"codex"}],
+                "executionAccessContracts":["managed-runtime@1"],
                 "settings":{"model":"test-model"}
             },"digest":"sha256:test"}]
         })
@@ -4718,6 +4741,8 @@ async fn retryable_startup_reconciliation_submits_identified_interactions_before
             "schemaVersion":1,"configurations":[{"configuration":{
                 "schemaVersion":1,"name":"codex-basic","implementation":"test",
                 "implementationVersion":1,"permissionBindings":{"auto":{}},
+                "modelCompatibility":[{"providerId":"codex"}],
+                "executionAccessContracts":["managed-runtime@1"],
                 "settings":{"model":"test-model"}
             },"digest":"sha256:test"}]
         })
@@ -4838,6 +4863,7 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
     .await;
     let thread_id = thread["id"].as_i64().unwrap();
     drop(offline);
+    seed_explicit_test_model_default(&database, thread_id).await;
     let catalog = root.join("catalog.json");
     fs::write(
         &catalog,
@@ -4845,6 +4871,8 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
             "schemaVersion":1,"configurations":[{"configuration":{
                 "schemaVersion":1,"name":"codex-basic","implementation":"test",
                 "implementationVersion":1,"permissionBindings":{"auto":{}},
+                "modelCompatibility":[{"providerId":"codex"}],
+                "executionAccessContracts":["managed-runtime@1"],
                 "settings":{"model":"test-model"}
             },"digest":"sha256:test"}]
         })
@@ -4977,6 +5005,16 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
         }).delete(|| async { axum::Json(json!({"revoked":true})) }));
     let harness = Router::new()
         .route("/sessions", axum::routing::post(|| async { (StatusCode::CREATED, axum::Json(json!({}))) }))
+        .route("/sessions/{id}/execution-leases", axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+            (StatusCode::CREATED, axum::Json(test_execution_admission(
+                &body,
+                "00000000-0000-0000-0000-000000000077",
+                "1",
+            )))
+        }))
+        .route("/sessions/{id}/execution-leases/{lease}", axum::routing::delete(|| async {
+            axum::Json(json!({"released":true}))
+        }))
         .route(&format!("/sessions/{thread_id}/complete"), axum::routing::post(|| async {
             axum::Json(json!({"output":{"nodeId":77,"rootLayer":{"id":1,"nodes":[],"edges":[],"actions":[]}}}))
         }));
@@ -5128,6 +5166,40 @@ async fn sqlite_pool(database: &Path) -> sqlx::SqlitePool {
         )
         .await
         .unwrap()
+}
+
+async fn seed_explicit_test_model_default(database: &Path, thread_id: i64) {
+    let pool = sqlite_pool(database).await;
+    sqlx::query("UPDATE model_providers SET connected=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL,refreshed_at='1',lifecycle_state='active',removed_at=NULL WHERE id='codex'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,unavailable_reason_code,unavailable_reason_message,provider_default,replacement_model_id,metadata_json) VALUES ('codex','test-model','Test model',0,1,1,NULL,NULL,1,NULL,'{}')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let family_id = sqlx::query("INSERT INTO model_families(name,kind,system_key,enabled,position) VALUES ('Test default','custom',NULL,1,0)")
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (?1,0,'codex','test-model')")
+        .bind(family_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE product_model_preferences SET default_provider_id='codex',default_family_id=?1 WHERE singleton=1")
+        .bind(family_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE interactions SET completion_status='accepted',model_provider_id='codex',provider_model_id='test-model',model_family_id=?1 WHERE thread_id=?2")
+        .bind(family_id)
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
 }
 
 async fn response_json(response: Response<Body>) -> Value {
@@ -5407,5 +5479,62 @@ fn test_provider_snapshot() -> Value {
             "name": "Codex",
             "modelIds": ["test-model", "second-model", "broken-model"]
         }
+    })
+}
+
+fn test_execution_admission(body: &Value, lease_id: &str, version: &str) -> Value {
+    let policy_bytes = serde_json::to_vec(&body["harnessPolicy"]).unwrap();
+    let mut policy_hasher = Sha256::new();
+    policy_hasher.update(b"relayer.harness-policy.v1\0");
+    policy_hasher.update(policy_bytes);
+    let harness_policy_digest = format!("sha256:{:x}", policy_hasher.finalize());
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Route {
+        provider_id: Value,
+        adapter_id: Value,
+        access_contract: Value,
+        model_id: Value,
+        adapter_implementation_version: String,
+    }
+    let versioned = |route: &Value| Route {
+        provider_id: route["providerId"].clone(),
+        adapter_id: route["adapterId"].clone(),
+        access_contract: route["accessContract"].clone(),
+        model_id: route["modelId"].clone(),
+        adapter_implementation_version: version.into(),
+    };
+    let plan = &body["modelPlan"];
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Unsigned<'a> {
+        family_id: &'a Value,
+        family_revision: &'a Value,
+        orchestrator: Route,
+        roster: Vec<Route>,
+        harness_policy_digest: &'a str,
+    }
+    let unsigned = Unsigned {
+        family_id: &plan["familyId"],
+        family_revision: &plan["familyRevision"],
+        orchestrator: versioned(&plan["orchestrator"]),
+        roster: plan["roster"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(versioned)
+            .collect(),
+        harness_policy_digest: &harness_policy_digest,
+    };
+    let mut plan_hasher = Sha256::new();
+    plan_hasher.update(b"relayer.harness-model-plan.v1\0");
+    plan_hasher.update(serde_json::to_vec(&unsigned).unwrap());
+    let digest = format!("sha256:{:x}", plan_hasher.finalize());
+    let mut admitted_plan = serde_json::to_value(&unsigned).unwrap();
+    admitted_plan["digest"] = Value::String(digest);
+    json!({
+        "executionLeaseId": lease_id,
+        "adapterImplementationVersion": version,
+        "admittedPlan": admitted_plan,
     })
 }

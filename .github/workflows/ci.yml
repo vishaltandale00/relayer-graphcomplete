@@ -21,3 +21,28 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
+
+  prime-runtime-package:
+    name: Prime runtime package (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            runner: macos-15
+          - target: macos-x64
+            runner: macos-15-intel
+          - target: windows-x64
+            runner: windows-2025
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build and inspect the actual target ASAR
+        run: npm run desktop:pack
+        env:
+          RELAYER_DESKTOP_TARGET: ${{ matrix.target }}

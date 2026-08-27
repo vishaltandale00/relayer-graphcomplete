@@ -9,6 +9,7 @@ use crate::{
     conversation_export::{
         ConversationExportHeader, ConversationExportRecord, ConversationExportTurn,
         EXPORT_VERSION_V1, ExportAcceptedView, ExportAction, ExportActionKind, ExportActionVariant,
+        ExportAdmittedExecutionModelPlan, ExportAdmittedExecutionModelRoute,
         ExportCompletionReceipt, ExportCompletionStatus, ExportContextSource,
         ExportContextTargetSnapshot, ExportConversation, ExportEdge, ExportInteractionContext,
         ExportLayer, ExportLayerLayout, ExportModelSelection, ExportNavigateRelation, ExportNode,
@@ -375,6 +376,11 @@ fn export_turn(
         receipt.reviewer = redactor.text(&receipt.reviewer);
         receipt.disclosure = redactor.optional(receipt.disclosure.as_deref());
     }
+    let imported_completion = interaction
+        .latest_attempt
+        .is_none()
+        .then(|| imported.turn.map(|record| &record.turn.completion))
+        .flatten();
     Ok(ConversationExportTurn {
         id: turn_id(interaction.sequence),
         sequence: sequence(interaction.sequence)?,
@@ -386,13 +392,17 @@ fn export_turn(
             status,
             harness_configuration_name: interaction.harness_configuration_name.clone(),
             harness_configuration_digest: interaction.harness_configuration_digest.clone(),
-            model_selection: interaction.model_selection.as_ref().map(|selection| {
-                ExportModelSelection {
+            model_selection: interaction
+                .model_selection
+                .as_ref()
+                .map(|selection| ExportModelSelection {
                     provider_id: selection.provider_id.as_str().into(),
                     model_id: selection.model_id.clone(),
                     model_family_id: selection.family_id.value(),
-                }
-            }),
+                })
+                .or_else(|| {
+                    imported_completion.and_then(|completion| completion.model_selection.clone())
+                }),
             permission_profile_id: interaction.permission_profile_id.clone(),
             effective_execution_digest: interaction.effective_execution_digest.clone(),
             effective_permission_receipt,
@@ -400,6 +410,55 @@ fn export_turn(
                 .completion_error
                 .as_deref()
                 .map(|error| redactor.text(error)),
+            attempt_admission_id: interaction
+                .latest_attempt
+                .as_ref()
+                .and_then(|attempt| attempt.attempt_admission_id.clone())
+                .or_else(|| {
+                    imported_completion
+                        .and_then(|completion| completion.attempt_admission_id.clone())
+                }),
+            admitted_model_plan: interaction
+                .latest_attempt
+                .as_ref()
+                .and_then(|attempt| {
+                    attempt
+                        .admitted_plan
+                        .as_ref()
+                        .map(|plan| ExportAdmittedExecutionModelPlan {
+                            family_id: plan.family_id.value(),
+                            family_revision: plan.family_revision,
+                            orchestrator: ExportAdmittedExecutionModelRoute {
+                                provider_id: plan.orchestrator.provider_id.as_str().into(),
+                                adapter_id: plan.orchestrator.adapter_id.clone(),
+                                access_contract: plan.orchestrator.access_contract.clone(),
+                                model_id: plan.orchestrator.model_id.clone(),
+                                adapter_implementation_version: plan
+                                    .orchestrator
+                                    .adapter_implementation_version
+                                    .clone(),
+                            },
+                            roster: plan
+                                .roster
+                                .iter()
+                                .map(|route| ExportAdmittedExecutionModelRoute {
+                                    provider_id: route.provider_id.as_str().into(),
+                                    adapter_id: route.adapter_id.clone(),
+                                    access_contract: route.access_contract.clone(),
+                                    model_id: route.model_id.clone(),
+                                    adapter_implementation_version: route
+                                        .adapter_implementation_version
+                                        .clone(),
+                                })
+                                .collect(),
+                            harness_policy_digest: plan.harness_policy_digest.clone(),
+                            digest: plan.digest.clone(),
+                        })
+                })
+                .or_else(|| {
+                    imported_completion
+                        .and_then(|completion| completion.admitted_model_plan.clone())
+                }),
         },
         contexts,
         accepted_view,

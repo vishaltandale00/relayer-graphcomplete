@@ -3,7 +3,7 @@ use crate::product::{
     AcceptedInteractionCompletion, Interaction, InteractionId, InteractionModelSelection,
     ModelFamilyId, PreparedInteractionBinding, ProviderId, ThreadId, ValidateModelSelectionCommand,
 };
-use crate::storage::StorageError;
+use crate::storage::{NewInteractionInput, StorageError};
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -13,7 +13,7 @@ impl SqliteProductStore {
         graph_node_id: i64,
     ) -> Result<Option<Interaction>, StorageError> {
         let row = sqlx::query(
-            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.graph_node_id=?1",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.graph_node_id=?1",
         )
         .bind(graph_node_id)
         .fetch_optional(&self.pool)
@@ -36,20 +36,12 @@ impl SqliteProductStore {
             .expect("system time is before unix epoch")
             .as_millis()
             .to_string();
-        // A prior process can have committed graph-backed interaction acceptance before
-        // committing the attempt receipt (including databases written by older versions).
-        // Graph authority wins: normalize those receipts before closing genuinely interrupted
-        // attempts so restart can never turn an accepted result into a failed attempt.
-        sqlx::query("UPDATE interaction_attempts SET finished_at=?1,outcome='accepted',failure_category=NULL,effect_boundary='graph_write' WHERE outcome='running' AND interaction_id IN (SELECT id FROM interactions WHERE completion_status='accepted')")
-            .bind(&finished_at)
-            .execute(&mut *transaction)
-            .await?;
         sqlx::query("UPDATE interaction_attempts SET finished_at=?1,outcome='execution_failed',failure_category='application_restart',effect_boundary='unknown' WHERE outcome='running'")
             .bind(finished_at)
             .execute(&mut *transaction)
             .await?;
         let result = sqlx::query(
-            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('not_started','running','submitted') AND (?2=0 OR input_identity IS NULL) AND NOT (completion_status='not_started' AND EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=interactions.id AND a.outcome='model_failed')) AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1) AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('running','submitted') AND (?2=0 OR input_identity IS NULL) AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1) AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
         )
         .bind(error)
         .bind(preserve_identified)
@@ -65,7 +57,7 @@ impl SqliteProductStore {
     ) -> Result<Option<Interaction>, StorageError> {
         let mut connection = self.pool.acquire().await?;
         sqlx::query(
-            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary FROM interactions i JOIN threads t ON t.id=i.thread_id LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.id=?1 AND (t.conversation_import_id IS NULL OR EXISTS(SELECT 1 FROM conversation_imports ci WHERE ci.id=t.conversation_import_id AND ci.state='published'))",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest FROM interactions i JOIN threads t ON t.id=i.thread_id LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.id=?1 AND (t.conversation_import_id IS NULL OR EXISTS(SELECT 1 FROM conversation_imports ci WHERE ci.id=t.conversation_import_id AND ci.state='published'))",
         )
         .bind(interaction_id.value())
         .fetch_optional(&mut *connection)
@@ -296,8 +288,7 @@ impl SqliteProductStore {
         &self,
         interaction_id: InteractionId,
         expected_attempt_id: i64,
-        text: &str,
-        input_digest: Option<&str>,
+        input: NewInteractionInput<'_>,
         model_selection: &InteractionModelSelection,
         harness_configuration_name: &str,
     ) -> Result<bool, StorageError> {
@@ -317,14 +308,44 @@ impl SqliteProductStore {
                 ),
             ));
         }
-        let status: String =
-            sqlx::query_scalar("SELECT completion_status FROM interactions WHERE id=?1")
-                .bind(interaction_id.value())
-                .fetch_one(&mut *transaction)
-                .await?;
+        let retry_row = sqlx::query("SELECT completion_status,input_identity,input_digest,model_provider_id,provider_model_id,model_family_id,harness_configuration_name FROM interactions WHERE id=?1")
+            .bind(interaction_id.value())
+            .fetch_one(&mut *transaction)
+            .await?;
+        let status: String = retry_row.try_get("completion_status")?;
         if status != "not_started" {
-            transaction.commit().await?;
-            return Ok(false);
+            let exact_replay = retry_row
+                .try_get::<Option<String>, _>("input_identity")?
+                .as_deref()
+                == Some(input.input_identity)
+                && retry_row
+                    .try_get::<Option<String>, _>("input_digest")?
+                    .as_deref()
+                    == Some(input.input_digest)
+                && retry_row
+                    .try_get::<Option<String>, _>("model_provider_id")?
+                    .as_deref()
+                    == Some(model_selection.provider_id.as_str())
+                && retry_row
+                    .try_get::<Option<String>, _>("provider_model_id")?
+                    .as_deref()
+                    == Some(model_selection.model_id.as_str())
+                && retry_row.try_get::<Option<i64>, _>("model_family_id")?
+                    == Some(model_selection.family_id.value())
+                && retry_row
+                    .try_get::<Option<String>, _>("harness_configuration_name")?
+                    .as_deref()
+                    == Some(harness_configuration_name);
+            if exact_replay {
+                transaction.commit().await?;
+                return Ok(false);
+            }
+            return Err(StorageError::Catalog(
+                crate::product::CatalogError::invalid(
+                    "interaction_retry_stale",
+                    "This draft has already changed. Refresh it before sending again.",
+                ),
+            ));
         }
         let latest_attempt_id: Option<i64> = sqlx::query_scalar(
             "SELECT id FROM interaction_attempts WHERE interaction_id=?1 ORDER BY attempt_number DESC LIMIT 1",
@@ -348,19 +369,44 @@ impl SqliteProductStore {
         };
         catalog::validate_model_selection_on(&mut transaction, &command).await?;
         let result = sqlx::query(
-            "UPDATE interactions SET text=?1,model_provider_id=?2,provider_model_id=?3,model_family_id=?4,completion_status='submitted',harness_configuration_name=?5,input_digest=CASE WHEN input_identity IS NULL THEN NULL ELSE ?6 END,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?7 AND completion_status='not_started' AND NOT EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence)",
+            "UPDATE interactions SET text=?1,model_provider_id=?2,provider_model_id=?3,model_family_id=?4,completion_status='submitted',harness_configuration_name=?5,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL,input_identity=?6,input_digest=?7 WHERE id=?8 AND completion_status='not_started' AND NOT EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence)",
         )
-        .bind(text)
+        .bind(input.text)
         .bind(model_selection.provider_id.as_str())
         .bind(&model_selection.model_id)
         .bind(model_selection.family_id.value())
         .bind(harness_configuration_name)
-        .bind(input_digest)
+        .bind(input.input_identity)
+        .bind(input.input_digest)
         .bind(interaction_id.value())
         .execute(&mut *transaction)
         .await?;
+        if result.rows_affected() == 1 {
+            sqlx::query("DELETE FROM interaction_context_intents WHERE interaction_id=?1")
+                .bind(interaction_id.value())
+                .execute(&mut *transaction)
+                .await?;
+            for (context_position, context) in input.contexts.iter().enumerate() {
+                sqlx::query("INSERT INTO interaction_context_intents(interaction_id,position,target_node_id,source_interaction_node_id,source_layer_id) VALUES (?1,?2,?3,?4,?5)")
+                    .bind(interaction_id.value()).bind(context_position as i64).bind(context.target.node_id).bind(context.target.source_interaction_node_id).bind(context.target.source_layer_id)
+                    .execute(&mut *transaction).await?;
+                for (annotation_position, annotation) in context.annotations.iter().enumerate() {
+                    sqlx::query("INSERT INTO interaction_context_annotations(interaction_id,context_position,position,text) VALUES (?1,?2,?3,?4)")
+                        .bind(interaction_id.value()).bind(context_position as i64).bind(annotation_position as i64).bind(annotation)
+                        .execute(&mut *transaction).await?;
+                }
+            }
+        }
+        if result.rows_affected() == 0 {
+            return Err(StorageError::Catalog(
+                crate::product::CatalogError::invalid(
+                    "interaction_retry_stale",
+                    "This draft is no longer the latest interaction. Refresh it before sending again.",
+                ),
+            ));
+        }
         transaction.commit().await?;
-        Ok(result.rows_affected() == 1)
+        Ok(true)
     }
 
     pub(crate) async fn accept_interaction_completion(
@@ -509,13 +555,8 @@ impl SqliteProductStore {
         interaction_id: InteractionId,
         harness_configuration_name: &str,
     ) -> Result<(), StorageError> {
-        let result = sqlx::query("UPDATE interactions SET graph_node_id=NULL,completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='running'")
+        sqlx::query("UPDATE interactions SET completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status='running'")
             .bind(harness_configuration_name).bind(interaction_id.value()).execute(&self.pool).await?;
-        if result.rows_affected() != 1 {
-            return Err(StorageError::IncompatibleSchema(format!(
-                "interaction {interaction_id} was not running while returning it to unsent"
-            )));
-        }
         Ok(())
     }
 }
@@ -525,7 +566,7 @@ pub(super) async fn fetch_interactions(
     thread_id: ThreadId,
 ) -> Result<Vec<Interaction>, StorageError> {
     let rows = sqlx::query(
-        "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.thread_id=?1 ORDER BY i.sequence ASC",
+        "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.thread_id=?1 ORDER BY i.sequence ASC",
     )
     .bind(thread_id.value())
     .fetch_all(connection)
@@ -564,6 +605,18 @@ pub(super) fn interaction_from_row(row: &SqliteRow) -> Result<Interaction, Stora
         latest_attempt: row
             .try_get::<Option<i64>, _>(17)?
             .map(|id| {
+                let admitted_plan: Option<crate::product::AdmittedExecutionModelPlan> = row
+                    .try_get::<Option<String>, _>(35)?
+                    .map(|value| serde_json::from_str(&value))
+                    .transpose()
+                    .map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
+                let admitted_plan_digest: Option<String> = row.try_get(36)?;
+                if admitted_plan.as_ref().map(|plan| &plan.digest) != admitted_plan_digest.as_ref()
+                {
+                    return Err(sqlx::Error::Decode(
+                        "stored admitted model-plan digest does not match its snapshot".into(),
+                    ));
+                }
                 Ok::<_, sqlx::Error>(crate::product::InteractionAttempt {
                     id,
                     attempt_number: row.try_get(18)?,
@@ -582,6 +635,8 @@ pub(super) fn interaction_from_row(row: &SqliteRow) -> Result<Interaction, Stora
                     outcome: row.try_get(31)?,
                     failure_category: row.try_get(32)?,
                     effect_boundary: row.try_get(33)?,
+                    attempt_admission_id: row.try_get(34)?,
+                    admitted_plan,
                 })
             })
             .transpose()?,
@@ -753,26 +808,31 @@ mod tests {
             .unwrap()
             .last_insert_rowid();
         let next_model = selection("second-model");
-        sqlx::query("UPDATE interactions SET input_identity='retry-input',input_digest='sha256:old' WHERE id=?1")
-            .bind(thread.root_interaction_id.value())
-            .execute(&store.pool)
-            .await
-            .unwrap();
-        let edited_digest =
-            relayer_graph_core::interaction_input_digest("Edited prompt", &[]).unwrap();
+        let contexts = vec![crate::product::InteractionContextIntent {
+            target: crate::product::InteractionContextTarget {
+                node_id: 8,
+                source_interaction_node_id: 3,
+                source_layer_id: 4,
+            },
+            annotations: vec!["new context".into()],
+        }];
+        let edited_input = || NewInteractionInput {
+            text: "Edited prompt",
+            input_identity: "retry-input",
+            input_digest: "sha256:retry-input",
+            contexts: &contexts,
+        };
         let first = store.claim_interaction_retry(
             thread.root_interaction_id,
             attempt_id,
-            "Edited prompt",
-            Some(&edited_digest),
+            edited_input(),
             &next_model,
             "codex-basic",
         );
         let second = store.claim_interaction_retry(
             thread.root_interaction_id,
             attempt_id,
-            "Edited prompt",
-            Some(&edited_digest),
+            edited_input(),
             &next_model,
             "codex-basic",
         );
@@ -784,6 +844,37 @@ mod tests {
                 .count(),
             1
         );
+        let conflicting_contexts = vec![crate::product::InteractionContextIntent {
+            target: crate::product::InteractionContextTarget {
+                node_id: 9,
+                source_interaction_node_id: 3,
+                source_layer_id: 4,
+            },
+            annotations: vec!["conflicting edit".into()],
+        }];
+        let conflicting = store
+            .claim_interaction_retry(
+                thread.root_interaction_id,
+                attempt_id,
+                NewInteractionInput {
+                    text: "A different edit",
+                    input_identity: "retry-input-conflict",
+                    input_digest: "sha256:retry-input-conflict",
+                    contexts: &conflicting_contexts,
+                },
+                &next_model,
+                "codex-basic",
+            )
+            .await;
+        assert!(matches!(
+            conflicting,
+            Err(StorageError::Catalog(
+                crate::product::CatalogError::Invalid {
+                    code: "interaction_retry_stale",
+                    ..
+                }
+            ))
+        ));
 
         let interaction = store
             .get_interaction(thread.root_interaction_id)
@@ -794,13 +885,17 @@ mod tests {
         assert_eq!(interaction.text, "Edited prompt");
         assert_eq!(interaction.completion_status, "submitted");
         assert_eq!(interaction.model_selection, Some(next_model));
-        let stored_digest: String =
-            sqlx::query_scalar("SELECT input_digest FROM interactions WHERE id=?1")
-                .bind(thread.root_interaction_id.value())
-                .fetch_one(&store.pool)
+        assert_eq!(
+            store
+                .interaction_input(thread.root_interaction_id)
                 .await
-                .unwrap();
-        assert_eq!(stored_digest, edited_digest);
+                .unwrap(),
+            Some(crate::product::DurableInteractionInput {
+                input_identity: "retry-input".into(),
+                input_digest: "sha256:retry-input".into(),
+                contexts,
+            })
+        );
         let receipt = interaction.latest_attempt.unwrap();
         assert_eq!(receipt.id, attempt_id);
         assert_eq!(receipt.model_id, "first-model");

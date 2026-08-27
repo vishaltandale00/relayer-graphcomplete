@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import type { GraphCapability, GraphNode } from "@relayer/graph-client";
+import type { GraphCapability } from "@relayer/graph-client";
 import type {
   Harness,
   HarnessExecutionAccess,
@@ -66,7 +66,7 @@ export class ClaudeBasicHarness implements Harness {
       this.sessionProviderDefinitionId = undefined;
     }
     const graph = context.graph.acquireCapability();
-    const prompt = this.prompt(context.inputGraph);
+    const prompt = this.prompt(context);
     await context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
     const result = await this.run(prompt, context.model.modelId, graph, context.access, signal);
     await context.trace.emit({ type: "message", data: { role: "assistant", text: result.text } });
@@ -116,8 +116,8 @@ export class ClaudeBasicHarness implements Harness {
     return collectClaudeResult(child, signal);
   }
 
-  private prompt(interaction: GraphNode): string {
-    return buildLayeredNavigationPrompt(interaction, this.clientModuleUrl);
+  private prompt(context: HarnessRunContext): string {
+    return buildLayeredNavigationPrompt(context, this.clientModuleUrl);
   }
 }
 

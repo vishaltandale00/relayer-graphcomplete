@@ -48,7 +48,12 @@ describe("provider adapter packaging", () => {
     const source = join(root, "desktop-source");
     const stage = join(root, "app-stage");
     const archive = join(root, "app.asar");
-    await cp(resolve("desktop"), source, { recursive: true });
+    const desktopRoot = resolve("desktop");
+    const generatedRoots = new Set(["dist", "eval-dist", "eval-main", "eval-renderer"]);
+    await cp(desktopRoot, source, {
+      recursive: true,
+      filter: (path) => !generatedRoots.has(relative(desktopRoot, path).split(/[\\/]/u)[0]),
+    });
 
     await mkdir(join(source, "main/providers/implementations/__fixtures__"), { recursive: true });
     await writeFile(

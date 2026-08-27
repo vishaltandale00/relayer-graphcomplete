@@ -343,7 +343,7 @@ describe("EvalService simulated-user result persistence", () => {
     });
   });
 
-  it("uses a harness's sole Full access profile explicitly for H3 and standalone runs", async () => {
+  it("preserves Prime's requested bounded profile while retaining the explicit sole-Full exception", async () => {
     const { stateFile } = await testPaths();
     const product = fakeAcceptedProduct();
     globalThis.fetch = product;
@@ -354,8 +354,8 @@ describe("EvalService simulated-user result persistence", () => {
       platform: "darwin",
     }).open();
 
-    const configuration = { name: "prime-agent-basic", permissionBindings: { full: {} } };
-    expect(resolveH3PermissionProfile(configuration, "ask")).toEqual({
+    const soleFullConfiguration = { name: "legacy-full-only", permissionBindings: { full: {} } };
+    expect(resolveH3PermissionProfile(soleFullConfiguration, "ask")).toEqual({
       requestedProfileId: "ask",
       effectiveProfileId: "full",
       overridden: true,
@@ -371,7 +371,7 @@ describe("EvalService simulated-user result persistence", () => {
     const createRequest = product.mock.calls.find(([url, options]) => (
       new URL(url).pathname === "/api/threads" && options?.method === "POST"
     ));
-    expect(JSON.parse(createRequest[1].body).permissionProfileId).toBe("full");
+    expect(JSON.parse(createRequest[1].body).permissionProfileId).toBe("auto");
   });
 
   it("does not override an unavailable H3 profile for an ambiguous harness", () => {

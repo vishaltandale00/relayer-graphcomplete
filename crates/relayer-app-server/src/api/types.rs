@@ -72,6 +72,8 @@ pub(crate) struct InteractionAttemptResponse {
     failure_category: Option<String>,
     failure_message: Option<String>,
     effect_boundary: String,
+    attempt_admission_id: Option<String>,
+    admitted_plan: Option<crate::product::AdmittedExecutionModelPlan>,
 }
 
 impl From<crate::product::InteractionAttempt> for InteractionAttemptResponse {
@@ -101,6 +103,8 @@ impl From<crate::product::InteractionAttempt> for InteractionAttemptResponse {
             failure_category: attempt.failure_category,
             failure_message,
             effect_boundary: attempt.effect_boundary,
+            attempt_admission_id: attempt.attempt_admission_id,
+            admitted_plan: attempt.admitted_plan,
         }
     }
 }
@@ -263,7 +267,7 @@ impl InteractionResponse {
 }
 
 #[cfg(test)]
-mod attempt_tests {
+mod attempt_response_tests {
     use super::*;
     use crate::product::{InteractionContextIntent, InteractionContextTarget};
     use serde_json::json;
@@ -490,7 +494,10 @@ impl ThreadDetailResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::product::{InteractionAttempt, InteractionId, ModelFamilyId, ProviderId, ThreadId};
+    use crate::product::{
+        AdmittedExecutionModelPlan, AdmittedExecutionModelRoute, InteractionAttempt, InteractionId,
+        ModelFamilyId, ProviderId, ThreadId,
+    };
     use serde_json::json;
 
     #[test]
@@ -532,6 +539,21 @@ mod tests {
                 outcome: "model_failed".into(),
                 failure_category: Some("provider_rate_limit".into()),
                 effect_boundary: "none".into(),
+                attempt_admission_id: Some("admission-44".into()),
+                admitted_plan: Some(AdmittedExecutionModelPlan {
+                    family_id: ModelFamilyId::from_database(12),
+                    family_revision: 3,
+                    orchestrator: AdmittedExecutionModelRoute {
+                        provider_id: ProviderId::from_database("openai-work".into()),
+                        adapter_id: "openai-api".into(),
+                        access_contract: "secret@1".into(),
+                        model_id: "gpt-5.2".into(),
+                        adapter_implementation_version: "1".into(),
+                    },
+                    roster: vec![],
+                    harness_policy_digest: "sha256:policy".into(),
+                    digest: "sha256:plan".into(),
+                }),
             }),
             created_at: "1".into(),
         };
@@ -541,6 +563,11 @@ mod tests {
         assert_eq!(value["latestAttempt"]["id"], 44);
         assert_eq!(value["latestAttempt"]["outcome"], "model_failed");
         assert_eq!(value["latestAttempt"]["effectBoundary"], "none");
+        assert_eq!(value["latestAttempt"]["attemptAdmissionId"], "admission-44");
+        assert_eq!(
+            value["latestAttempt"]["admittedPlan"]["orchestrator"]["accessContract"],
+            "secret@1"
+        );
         assert_eq!(
             value["latestAttempt"]["modelSelection"],
             json!({
