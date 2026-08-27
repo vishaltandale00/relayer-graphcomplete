@@ -1081,6 +1081,146 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn save_node_context_draft(
+        &self,
+        thread_id: ThreadId,
+        id: &str,
+        target: &super::InteractionContextTarget,
+        target_node: &relayer_graph_core::InteractionInputNode,
+        text: &str,
+        expected_revision: Option<i64>,
+    ) -> Result<super::NodeContextDraft, ProductError> {
+        let id = required(id, "draftId")?;
+        if id.len() > 128 || id.contains('\0') {
+            return Err(ProductError::Invalid(
+                "draftId must contain between 1 and 128 ordinary characters".into(),
+            ));
+        }
+        if expected_revision.is_some_and(|revision| revision <= 0) {
+            return Err(ProductError::Invalid(
+                "expectedRevision must be a positive integer".into(),
+            ));
+        }
+        if target.node_id <= 0
+            || target.source_interaction_node_id <= 0
+            || target.source_layer_id <= 0
+        {
+            return Err(ProductError::Invalid(
+                "node-context draft target IDs must be positive".into(),
+            ));
+        }
+        if target_node.id.value() != target.node_id
+            || target_node.state != relayer_graph_core::RecordState::Accepted
+        {
+            return Err(ProductError::Invalid(
+                "node-context draft snapshots must match an accepted target node".into(),
+            ));
+        }
+        required(&target_node.kind, "targetNode.kind")?;
+        required(&target_node.icon, "targetNode.icon")?;
+        required(&target_node.title, "targetNode.title")?;
+        required(&target_node.detail, "targetNode.detail")?;
+        if self.storage.thread_is_imported(thread_id).await? {
+            return Err(ProductError::Invalid(
+                "imported conversations are immutable".into(),
+            ));
+        }
+        self.storage
+            .save_node_context_draft(
+                thread_id,
+                crate::storage::NewNodeContextDraft {
+                    id,
+                    target,
+                    target_node,
+                    text,
+                },
+                expected_revision,
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn node_context_drafts(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<super::NodeContextDraft>, ProductError> {
+        if self.storage.get_thread(thread_id).await?.is_none() {
+            return Err(ProductError::NotFound(format!("thread {thread_id}")));
+        }
+        self.storage
+            .node_context_drafts(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn node_context_draft(
+        &self,
+        thread_id: ThreadId,
+        draft_id: &str,
+    ) -> Result<super::NodeContextDraft, ProductError> {
+        let draft_id = required(draft_id, "draftId")?;
+        self.storage
+            .node_context_draft(thread_id, draft_id)
+            .await?
+            .ok_or_else(|| ProductError::NotFound(format!("node-context draft {draft_id}")))
+    }
+
+    pub(crate) async fn node_context_draft_confirmation(
+        &self,
+        thread_id: ThreadId,
+        draft_id: &str,
+        expected_revision: i64,
+    ) -> Result<Option<super::NodeContextDraftConfirmation>, ProductError> {
+        let draft_id = required(draft_id, "draftId")?;
+        if expected_revision <= 0 {
+            return Err(ProductError::Invalid(
+                "expectedRevision must be a positive integer".into(),
+            ));
+        }
+        self.storage
+            .node_context_draft_confirmation(thread_id, draft_id, expected_revision)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn confirm_node_context_draft(
+        &self,
+        thread_id: ThreadId,
+        draft_id: &str,
+        expected_revision: i64,
+    ) -> Result<super::NodeContextDraftConfirmation, ProductError> {
+        let draft_id = required(draft_id, "draftId")?;
+        if expected_revision <= 0 {
+            return Err(ProductError::Invalid(
+                "expectedRevision must be a positive integer".into(),
+            ));
+        }
+        let draft = self.node_context_draft(thread_id, draft_id).await?;
+        required(&draft.text, "annotation")?;
+        self.storage
+            .confirm_node_context_draft(thread_id, draft_id, expected_revision)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn discard_node_context_draft(
+        &self,
+        thread_id: ThreadId,
+        draft_id: &str,
+        expected_revision: i64,
+    ) -> Result<bool, ProductError> {
+        let draft_id = required(draft_id, "draftId")?;
+        if expected_revision <= 0 {
+            return Err(ProductError::Invalid(
+                "expectedRevision must be a positive integer".into(),
+            ));
+        }
+        self.storage
+            .discard_node_context_draft(thread_id, draft_id, expected_revision)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn interrupted_interactions(&self) -> Result<Vec<Interaction>, ProductError> {
         self.storage
             .interrupted_interactions()

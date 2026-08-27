@@ -77,6 +77,30 @@ const INTERACTION_CONTEXT_ANNOTATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("position", "INTEGER", true, 3),
     ("text", "TEXT", true, 0),
 ];
+const NODE_CONTEXT_DRAFT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("id", "TEXT", true, 1),
+    ("thread_id", "INTEGER", true, 0),
+    ("target_node_id", "INTEGER", true, 0),
+    ("source_interaction_node_id", "INTEGER", true, 0),
+    ("source_layer_id", "INTEGER", true, 0),
+    ("target_node_json", "TEXT", true, 0),
+    ("text", "TEXT", true, 0),
+    ("revision", "INTEGER", true, 0),
+    ("created_at", "TEXT", true, 0),
+    ("updated_at", "TEXT", true, 0),
+];
+const NODE_CONTEXT_DRAFT_RESOLUTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("draft_id", "TEXT", true, 1),
+    ("thread_id", "INTEGER", true, 0),
+    ("outcome", "TEXT", true, 0),
+    ("draft_revision", "INTEGER", true, 0),
+    ("target_node_id", "INTEGER", true, 0),
+    ("source_interaction_node_id", "INTEGER", true, 0),
+    ("source_layer_id", "INTEGER", true, 0),
+    ("target_node_json", "TEXT", true, 0),
+    ("text", "TEXT", true, 0),
+    ("resolved_at", "TEXT", true, 0),
+];
 const INTERACTION_ATTEMPT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "INTEGER", false, 1),
     ("interaction_id", "INTEGER", true, 0),
@@ -278,6 +302,13 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         pool,
         "interaction_context_annotations",
         INTERACTION_CONTEXT_ANNOTATION_COLUMNS,
+    )
+    .await?;
+    validate_columns(pool, "node_context_drafts", NODE_CONTEXT_DRAFT_COLUMNS).await?;
+    validate_columns(
+        pool,
+        "node_context_draft_resolutions",
+        NODE_CONTEXT_DRAFT_RESOLUTION_COLUMNS,
     )
     .await?;
     validate_columns(pool, "conversation_imports", CONVERSATION_IMPORT_COLUMNS).await?;

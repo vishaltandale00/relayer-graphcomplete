@@ -192,6 +192,9 @@ impl From<ProductError> for ApiError {
             ProductError::Catalog(error) | ProductError::Storage(StorageError::Catalog(error)) => {
                 catalog_error(error)
             }
+            ProductError::Storage(StorageError::ContextDraftConflict { code, message }) => {
+                Self::conflict(code, message)
+            }
             ProductError::Storage(error) => Self::internal(&error.to_string()),
         }
     }

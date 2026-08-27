@@ -18,6 +18,7 @@ import { graphLayoutSignature, projectLayerNodePositions } from "./graph-layout.
 import { renderMarkdown } from "./markdown.js";
 import { productWorkspaceMarkup } from "./view.js";
 import { restoredDraftForInteraction } from "../interaction-failure-model.js";
+import { createNodeContextDraftController } from "../node-context-drafts.js";
 import {
   annotationNavigationContext,
   annotationRatingLabel,
@@ -799,6 +800,7 @@ export function createProductWorkspace({
   onInvokeAction = async () => {},
   onDecideApproval = async () => {},
   annotationApi = null,
+  contextDraftApi = null,
 }) {
   const capabilities = workspaceModeCapabilities(mode);
   let graphNodes = [];
@@ -837,6 +839,13 @@ export function createProductWorkspace({
   let contextPopoverOpen = false;
   const contextNodeOverrides = new Map();
   let selectedContextTarget = null;
+  const contextDraftController = contextDraftApi
+    ? createNodeContextDraftController({
+      api: contextDraftApi,
+      onChange: () => renderContextDraftStatus(),
+    })
+    : null;
+  const loadedContextDraftThreads = new Set();
 
   const $ = (selector) => root.querySelector(selector);
   const $$ = (selector) => [...root.querySelectorAll(selector)];
@@ -1563,16 +1572,56 @@ export function createProductWorkspace({
   const openContextEditor = (node, annotationIndex = null) => {
     if (!node || contextStagingDisabled() || contextEditor) return;
     const context = contextForNode(node.id);
+    const interaction = currentInteraction();
+    const sourceTarget = String(selectedContextTarget?.nodeId) === String(node.id)
+      ? selectedContextTarget
+      : {
+        nodeId: node.id,
+        sourceInteractionNodeId: interaction?.graphNodeId,
+        sourceLayerId: currentLayerId(),
+      };
+    const durableDraft = annotationIndex == null && contextDraftController
+      ? contextDraftController.open(getThread()?.id, sourceTarget, {
+        id: node.id,
+        kind: node.kind,
+        icon: node.icon,
+        title: node.title,
+        detail: node.detail,
+        state: node.state || "accepted",
+      })
+      : null;
     openComposerContextNodeId = context ? node.id : null;
     contextEditor = {
       nodeId: node.id,
       annotationIndex,
-      value: annotationIndex == null ? "" : context?.annotations?.[annotationIndex] || "",
+      value: annotationIndex == null
+        ? durableDraft?.text || ""
+        : context?.annotations?.[annotationIndex] || "",
       attaching: !context,
+      durable: Boolean(durableDraft),
     };
     renderComposerContexts();
     $("#contextAnnotationEditor")?.focus();
   };
+  function renderContextDraftStatus() {
+    if (!contextEditor?.durable) return;
+    const status = $(".composer-context-draft-status");
+    if (!status) return;
+    const draft = contextDraftController.draftForNode(getThread()?.id, contextEditor.nodeId);
+    const textarea = $("#contextAnnotationEditor");
+    if (draft?.editVersion === 0 && textarea && contextEditor.value !== draft.text) {
+      contextEditor.value = draft.text;
+      textarea.value = draft.text;
+      resizeContextEditorTextarea(textarea);
+      const confirm = textarea.parentElement?.querySelector('[aria-label="Confirm annotation"]');
+      if (confirm) confirm.disabled = !String(draft.text).trim() || contextStagingDisabled();
+    }
+    status.className = `composer-context-draft-status status-${draft?.status || "unsaved"}`;
+    status.textContent = draft?.status === "error"
+      ? `Not saved: ${draft.error}`
+      : ({ saving: "Saving…", saved: "Saved", unsaved: "Not saved yet" }[draft?.status]
+        || "Not saved yet");
+  }
   function renderComposerContexts() {
     const tray = $("#composerContextTray");
     const parts = [];
@@ -1608,27 +1657,68 @@ export function createProductWorkspace({
       const remove = graphDocument.createElement("button");
       remove.type = "button";
       remove.textContent = "🗑";
-      remove.title = "Delete annotation";
-      remove.setAttribute("aria-label", `Delete annotation being edited for ${node.title}`);
-      remove.onclick = () => {
-        if (contextStagingDisabled() || contextEditor?.annotationIndex == null) return;
-        composerContexts = removeContextAnnotation(
-          composerContexts,
-          node.id,
-          contextEditor.annotationIndex,
-        );
-        contextEditor = null;
-        renderComposerContexts();
+      remove.title = contextEditor.durable ? "Discard draft" : "Delete annotation";
+      remove.setAttribute("aria-label", contextEditor.durable
+        ? `Discard annotation draft for ${node.title}`
+        : `Delete annotation being edited for ${node.title}`);
+      remove.onclick = async () => {
+        if (contextStagingDisabled()) return;
+        if (contextEditor?.durable) {
+          try {
+            await contextDraftController.discard(getThread()?.id, node.id);
+            contextEditor = null;
+            renderComposerContexts();
+          } catch (error) {
+            toast(error.message);
+          }
+          return;
+        }
+        if (contextEditor.annotationIndex != null) {
+          composerContexts = removeContextAnnotation(
+            composerContexts,
+            node.id,
+            contextEditor.annotationIndex,
+          );
+          contextEditor = null;
+          renderComposerContexts();
+        }
       };
-      remove.disabled = contextStagingDisabled() || contextEditor?.annotationIndex == null;
+      remove.disabled = contextStagingDisabled()
+        || (!contextEditor.durable && contextEditor?.annotationIndex == null);
       const confirm = graphDocument.createElement("button");
       confirm.type = "button";
       confirm.textContent = "✓";
       confirm.title = "Confirm";
       confirm.setAttribute("aria-label", "Confirm annotation");
-      confirm.disabled = editorPresentation.confirmDisabled;
-      confirm.onclick = () => {
+      confirm.disabled = editorPresentation.confirmDisabled
+        || (contextEditor.durable && !String(contextEditor.value).trim());
+      confirm.onclick = async () => {
         if (contextStagingDisabled()) return;
+        if (contextEditor.durable) {
+          try {
+            const confirmation = await contextDraftController.confirm(
+              getThread()?.id,
+              node.id,
+            );
+            if (!confirmation) {
+              renderComposerContexts();
+              return;
+            }
+            composerContexts = applyContextEditor(
+              composerContexts,
+              { ...contextEditor, value: confirmation.annotation },
+              confirmation.targetNode,
+              confirmation.target,
+            );
+            openComposerContextNodeId = node.id;
+            contextEditor = null;
+            renderComposerContexts();
+          } catch (error) {
+            toast(error.message);
+            renderComposerContexts();
+          }
+          return;
+        }
         const interaction = currentInteraction();
         const sourceTarget = String(selectedContextTarget?.nodeId) === String(node.id)
           ? selectedContextTarget
@@ -1649,15 +1739,29 @@ export function createProductWorkspace({
       };
       textarea.oninput = () => {
         contextEditor.value = textarea.value;
+        if (contextEditor.durable) {
+          contextDraftController.update(getThread()?.id, node.id, textarea.value);
+        }
         resizeContextEditorTextarea(textarea);
         confirm.disabled = contextEditorPresentation(
           contextEditor,
           contextStagingDisabled(),
-        ).confirmDisabled;
+        ).confirmDisabled || (contextEditor.durable && !textarea.value.trim());
       };
       if (contextEditor.annotationIndex != null) controls.append(remove);
+      else if (contextEditor.durable) controls.append(remove);
       controls.append(cancel, confirm);
       body.append(textarea, controls);
+      if (contextEditor.durable) {
+        const draft = contextDraftController.draftForNode(getThread()?.id, node.id);
+        const status = graphDocument.createElement("small");
+        status.className = `composer-context-draft-status status-${draft?.status || "unsaved"}`;
+        status.setAttribute("aria-live", "polite");
+        status.textContent = draft?.status === "error"
+          ? `Not saved: ${draft.error}`
+          : ({ saving: "Saving…", saved: "Saved", unsaved: "Not saved yet" }[draft?.status] || "Not saved yet");
+        body.append(status);
+      }
       return body;
     };
 
@@ -2147,6 +2251,13 @@ export function createProductWorkspace({
       return;
     }
     const threadId = String(thread.id);
+    if (contextDraftController && !loadedContextDraftThreads.has(threadId)) {
+      loadedContextDraftThreads.add(threadId);
+      void contextDraftController.load(thread.id).catch((error) => {
+        loadedContextDraftThreads.delete(threadId);
+        toast(`Annotation drafts could not be restored: ${error.message}`);
+      });
+    }
     if (renderedThreadId !== null && renderedThreadId !== threadId) {
       annotationSubject = null;
       annotationThreadId = null;

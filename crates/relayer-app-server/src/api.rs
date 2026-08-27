@@ -1,5 +1,6 @@
 mod annotations;
 mod auth;
+mod context_drafts;
 mod conversation_imports;
 mod environment;
 mod error;
@@ -179,6 +180,18 @@ pub(crate) fn router(
         .route("/api/threads", get(threads::list).post(threads::create))
         .route("/api/threads/{id}", get(threads::get))
         .route("/api/threads/{id}/export", get(threads::export))
+        .route(
+            "/api/threads/{thread_id}/context-drafts",
+            get(context_drafts::list),
+        )
+        .route(
+            "/api/threads/{thread_id}/context-drafts/{draft_id}",
+            axum::routing::put(context_drafts::save).delete(context_drafts::discard),
+        )
+        .route(
+            "/api/threads/{thread_id}/context-drafts/{draft_id}/confirm",
+            axum::routing::post(context_drafts::confirm),
+        )
         .route(
             "/api/internal/annotation-sessions",
             axum::routing::post(annotations::register_session)
