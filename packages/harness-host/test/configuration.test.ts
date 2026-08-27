@@ -26,13 +26,16 @@ describe("harness configuration", () => {
     await expect(Promise.all(paths.map(loadHarnessConfiguration))).resolves.toHaveLength(paths.length);
   });
 
-  it("loads the production codex.basic configuration", async () => {
-    await expect(loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-basic.yaml"))).resolves.toEqual({
+  it.each([
+    ["codex-basic", "medium"],
+    ["codex-basic-high", "high"],
+  ])("loads the production %s configuration", async (name, modelReasoningEffort) => {
+    await expect(loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`))).resolves.toEqual({
       schemaVersion: 1,
-      name: "codex-basic",
+      name,
       implementation: "codex.basic",
       implementationVersion: 1,
-      revision: 1,
+      revision: 2,
       permissionBindings: {
         ask: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user", networkAccessEnabled: true },
         auto: { sandboxMode: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccessEnabled: true },
@@ -49,9 +52,9 @@ describe("harness configuration", () => {
         deny: [],
       },
       executionAccessContracts: ["managed-runtime@1", "secret@1"],
-      modelDefaults: { familyPolicy: { id: "codex-default-family", version: 1 } },
+      modelDefaults: { familyPolicy: { id: "codex-default-family", version: 2 } },
       settings: {
-        modelReasoningEffort: "medium",
+        modelReasoningEffort,
         skipGitRepoCheck: true,
       },
     });

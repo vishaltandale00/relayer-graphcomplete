@@ -181,7 +181,7 @@ impl ProductService {
         let managed_policy = self
             .apply_default_harness_family_policy(&definition, &mut snapshot)
             .await?;
-        validate_provider_snapshot(&snapshot)?;
+        validate_provider_snapshot(&snapshot, managed_policy.as_ref())?;
         self.storage
             .create_provider_with_catalog(&definition, &snapshot, managed_policy.as_ref(), &now())
             .await
@@ -577,7 +577,7 @@ impl ProductService {
         let managed_policy = self
             .apply_default_harness_family_policy(&definition, &mut snapshot)
             .await?;
-        validate_provider_snapshot(&snapshot)?;
+        validate_provider_snapshot(&snapshot, managed_policy.as_ref())?;
         match self
             .storage
             .publish_provider_catalog(&snapshot, managed_policy.as_ref(), &now())
@@ -1741,7 +1741,10 @@ fn normalize_member_positions(members: &mut [super::ModelFamilyMember]) {
     }
 }
 
-fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), CatalogError> {
+fn validate_provider_snapshot(
+    snapshot: &ProviderCatalogSnapshot,
+    managed_policy: Option<&FamilyPolicyReference>,
+) -> Result<(), CatalogError> {
     super::catalog::validate_stable_id(snapshot.provider_id.as_str(), "providerId")?;
     if snapshot.label.trim().is_empty() {
         return Err(CatalogError::invalid(
@@ -1802,17 +1805,22 @@ fn validate_provider_snapshot(snapshot: &ProviderCatalogSnapshot) -> Result<(), 
                 "system family key and name must be non-empty",
             ));
         }
-        let mut defaults = snapshot
-            .models
+        let Some(policy) = managed_policy else {
+            return Err(CatalogError::invalid(
+                "system_family_policy_required",
+                "managed family membership requires an active product policy",
+            ));
+        };
+        let expected = super::model_policy::derive_managed_family_members(policy, snapshot)?;
+        if family
+            .model_ids
             .iter()
-            .filter(|model| model.visible && model.provider_default)
-            .collect::<Vec<_>>();
-        defaults.sort_by_key(|model| model.order);
-        let expected = defaults.into_iter().take(5).map(|model| model.id.as_str());
-        if !family.model_ids.iter().map(String::as_str).eq(expected) {
+            .map(String::as_str)
+            .ne(expected.iter().map(|member| member.model_id.as_str()))
+        {
             return Err(CatalogError::invalid(
                 "system_family_members_invalid",
-                "managed family must contain visible provider-default models in provider order",
+                "managed family must match its active product policy",
             ));
         }
     }
@@ -2263,7 +2271,24 @@ mod tests {
             .initialize_model_catalog("codex-basic", &managed_runtime_harnesses(2))
             .await
             .unwrap();
-        service.publish_provider_catalog(snapshot).await.unwrap();
+        let mut v2_snapshot = snapshot;
+        for (order, id) in ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]
+            .into_iter()
+            .enumerate()
+        {
+            v2_snapshot.models.push(CatalogModelSnapshot {
+                id: id.into(),
+                label: id.into(),
+                order: order + 2,
+                visible: true,
+                available: true,
+                unavailable_reason: None,
+                provider_default: false,
+                replacement_model_id: None,
+                metadata: serde_json::json!({}),
+            });
+        }
+        service.publish_provider_catalog(v2_snapshot).await.unwrap();
         let migrated = service.model_settings().await.unwrap();
         let migrated_default = migrated.defaults.family_id.unwrap();
         assert_ne!(migrated_default, first_default);
@@ -2278,6 +2303,18 @@ mod tests {
                 .unwrap()
                 .policy_version,
             2
+        );
+        assert_eq!(
+            migrated
+                .families
+                .iter()
+                .find(|family| family.id == migrated_default)
+                .unwrap()
+                .members
+                .iter()
+                .map(|member| member.model_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "default"]
         );
         assert!(
             !migrated
