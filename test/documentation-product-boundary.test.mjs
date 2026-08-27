@@ -5,12 +5,13 @@ const readRepositoryFile = (path) => readFile(new URL(`../${path}`, import.meta.
 
 describe("product documentation boundary", () => {
   it("defines Relayer as harness and provider agnostic without promising arbitrary adapters", async () => {
-    const [readme, packageManifest, architecture, prd, walkthrough, decision, supersededDecision] = await Promise.all([
+    const [readme, packageManifest, architecture, prd, walkthrough, layeredDecision, decision, supersededDecision] = await Promise.all([
       readRepositoryFile("README.md"),
       readRepositoryFile("package.json"),
       readRepositoryFile("docs/architecture.md"),
       readRepositoryFile("docs/prd/index.html"),
       readRepositoryFile("docs/prd/assets/product-walkthrough.html"),
+      readRepositoryFile("docs/decisions/0005-layered-navigation-contract.md"),
       readRepositoryFile("docs/decisions/0006-harness-provider-agnostic-product-boundary.md"),
       readRepositoryFile("docs/decisions/0001-prime-agent-runtime-boundary.md"),
     ]);
@@ -29,8 +30,9 @@ describe("product documentation boundary", () => {
     expect(walkthrough).toContain("Candidate trace");
     expect(walkthrough).not.toContain("See in App");
     expect(walkthrough).not.toContain("Continue with this configuration");
+    expect(layeredDecision).toContain("Each selected harness owns any provider-native recursive execution it uses");
     expect(decision).toContain("It does not create a generic agent protocol or make arbitrary providers and harnesses work without explicit adapters");
-    expect(decision).toContain("Prime Agent remains the only recursive scheduler");
+    expect(decision).toContain("Each harness owns any provider-native delegation it uses");
     expect(supersededDecision).toContain("Status: superseded by [ADR 0006]");
   });
 });

@@ -375,6 +375,7 @@ impl SqliteProductStore {
                 }
             }
         }
+        retire_absent_product_codex_high(&mut transaction, runtime_harnesses).await?;
         sqlx::query(
             "UPDATE product_model_preferences SET default_harness_configuration_name=?1 WHERE singleton=1 AND defaults_modified=0",
         )
@@ -2382,6 +2383,58 @@ pub(super) async fn validate_catalog_rows(pool: &SqlitePool) -> Result<(), Stora
     Ok(())
 }
 
+async fn retire_absent_product_codex_high(
+    connection: &mut SqliteConnection,
+    runtime_harnesses: &[RuntimeProductHarness],
+) -> Result<(), StorageError> {
+    let has_product_basic = runtime_harnesses
+        .iter()
+        .any(|harness| harness.id == "codex-basic");
+    let has_eval_high = runtime_harnesses
+        .iter()
+        .any(|harness| harness.id == "codex-basic-high");
+    if !has_product_basic || has_eval_high {
+        return Ok(());
+    }
+
+    sqlx::query(
+        "UPDATE threads SET harness_configuration_name='codex-basic' WHERE harness_configuration_name='codex-basic-high'",
+    )
+    .execute(&mut *connection)
+    .await?;
+    // Identified sends and authoritative invoke results have durable replay identities. An
+    // interrupted preparation may therefore be rebound to the same graph interaction under the
+    // replacement product harness. Clear only that unfinished mutable binding; accepted rows and
+    // immutable attempt receipts continue to describe the harness that actually executed.
+    sqlx::query(
+        "UPDATE interactions
+         SET graph_node_id=NULL,completion_status='submitted',
+             harness_configuration_name='codex-basic',harness_configuration_digest=NULL,
+             effective_execution_digest=NULL,effective_permission_receipt_json=NULL,
+             completion_output_json=NULL,completion_error=NULL
+         WHERE harness_configuration_name='codex-basic-high'
+           AND completion_status IN ('not_started','running','submitted','waiting_for_approval')
+           AND graph_node_id IS NOT NULL
+           AND (input_identity IS NOT NULL OR EXISTS (
+               SELECT 1 FROM action_invocations
+               WHERE result_interaction_id=interactions.id AND authoritative=1
+           ))",
+    )
+    .execute(&mut *connection)
+    .await?;
+    sqlx::query(
+        "UPDATE product_model_preferences SET default_harness_configuration_name='codex-basic' WHERE singleton=1 AND default_harness_configuration_name='codex-basic-high'",
+    )
+    .execute(&mut *connection)
+    .await?;
+    sqlx::query(
+        "UPDATE product_harnesses SET product_visible=0,available=0,unavailable_reason_code='harness_retired',unavailable_reason_message='This product harness has been retired.' WHERE configuration_name='codex-basic-high'",
+    )
+    .execute(&mut *connection)
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod provider_definition_tests {
     use super::*;
@@ -2398,6 +2451,162 @@ mod provider_definition_tests {
             lifecycle_state: "active".into(),
             removed_at: None,
         }
+    }
+
+    fn runtime_harness(id: &str) -> RuntimeProductHarness {
+        RuntimeProductHarness {
+            id: id.into(),
+            configuration_digest: format!("sha256:{id}"),
+            model_compatibility: Vec::new(),
+            configuration_revision: 1,
+            model_rules: None,
+            execution_access_contracts: Vec::new(),
+            family_policy: None,
+            runtime_available: true,
+            unavailable_reason: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn desktop_catalog_retires_product_codex_high_without_rewriting_history() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-product-codex-retirement-{}-{}.sqlite3",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        sqlx::query("INSERT INTO product_harnesses(configuration_name,label,product_visible,available,unavailable_reason_code,unavailable_reason_message) VALUES ('codex-basic-high','Codex Basic High',1,1,NULL,NULL)")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("UPDATE product_model_preferences SET default_harness_configuration_name='codex-basic-high',defaults_modified=1 WHERE singleton=1")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (1,'Legacy high','1','1','codex-basic-high','auto')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name) VALUES (1,1,1,'Historical','1','accepted','codex-basic-high')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,effective_execution_digest,effective_permission_receipt_json,input_identity,input_digest) VALUES (2,1,2,'Recoverable','1',22,'running','codex-basic-high','sha256:high','sha256:execution','{}','send-2','sha256:input')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,effect_boundary) VALUES (2,1,'1',1,1,'codex-basic-high',1,'sha256:high','codex','codex-subscription',1,'test','managed-runtime@1','running','unknown')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name) VALUES (3,1,3,'Source','1',33,'accepted','codex-basic-high')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,effective_execution_digest,effective_permission_receipt_json) VALUES (4,1,4,'Leased invoke','1',44,'waiting_for_approval','codex-basic-high','sha256:high','sha256:execution','{}')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative) VALUES (3,41,4,'1',1,1)")
+            .execute(&store.pool).await.unwrap();
+
+        store
+            .initialize_model_catalog("codex-basic", &[runtime_harness("codex-basic")])
+            .await
+            .unwrap();
+
+        let thread_harness: String =
+            sqlx::query_scalar("SELECT harness_configuration_name FROM threads WHERE id=1")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        let default_harness: String = sqlx::query_scalar(
+            "SELECT default_harness_configuration_name FROM product_model_preferences WHERE singleton=1",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        let retired: (bool, bool, Option<String>) = sqlx::query_as(
+            "SELECT product_visible,available,unavailable_reason_code FROM product_harnesses WHERE configuration_name='codex-basic-high'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        let historical_harness: String =
+            sqlx::query_scalar("SELECT harness_configuration_name FROM interactions WHERE id=1")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        type RecoverableBinding = (Option<i64>, String, String, Option<String>, Option<String>);
+        let recoverable_bindings: Vec<RecoverableBinding> = sqlx::query_as("SELECT graph_node_id,completion_status,harness_configuration_name,harness_configuration_digest,effective_execution_digest FROM interactions WHERE id IN (2,4) ORDER BY id")
+                .fetch_all(&store.pool)
+                .await
+                .unwrap();
+        let attempt_history: (String, String) = sqlx::query_as(
+            "SELECT harness_configuration_name,harness_configuration_digest FROM interaction_attempts WHERE interaction_id=2",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(thread_harness, "codex-basic");
+        assert_eq!(default_harness, "codex-basic");
+        assert_eq!(retired, (false, false, Some("harness_retired".into())));
+        assert_eq!(historical_harness, "codex-basic-high");
+        assert_eq!(
+            recoverable_bindings,
+            vec![
+                (None, "submitted".into(), "codex-basic".into(), None, None),
+                (None, "submitted".into(), "codex-basic".into(), None, None),
+            ]
+        );
+        assert_eq!(
+            attempt_history,
+            ("codex-basic-high".into(), "sha256:high".into())
+        );
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn eval_catalog_preserves_codex_basic_high_threads_and_preferences() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-eval-codex-high-{}-{}.sqlite3",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        sqlx::query("INSERT INTO product_harnesses(configuration_name,label,product_visible,available,unavailable_reason_code,unavailable_reason_message) VALUES ('codex-basic-high','Codex Basic High',1,1,NULL,NULL)")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("UPDATE product_model_preferences SET default_harness_configuration_name='codex-basic-high',defaults_modified=1 WHERE singleton=1")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (1,'Eval high','1','1','codex-basic-high','auto')")
+            .execute(&store.pool).await.unwrap();
+
+        store
+            .initialize_model_catalog(
+                "codex-basic",
+                &[
+                    runtime_harness("codex-basic"),
+                    runtime_harness("codex-basic-high"),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let thread_harness: String =
+            sqlx::query_scalar("SELECT harness_configuration_name FROM threads WHERE id=1")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        let default_harness: String = sqlx::query_scalar(
+            "SELECT default_harness_configuration_name FROM product_model_preferences WHERE singleton=1",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        let high: (bool, bool) = sqlx::query_as(
+            "SELECT product_visible,available FROM product_harnesses WHERE configuration_name='codex-basic-high'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(thread_harness, "codex-basic-high");
+        assert_eq!(default_harness, "codex-basic-high");
+        assert_eq!(high, (true, true));
+        drop(store);
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test]

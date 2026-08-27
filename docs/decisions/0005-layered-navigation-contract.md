@@ -31,7 +31,7 @@ When submission identifies an intentionally abandoned orphan draft layer, the ow
 ## Consequences
 
 - Flat accepted answers remain valid.
-- Prime Agent remains the only recursive execution scheduler; GraphComplete owns graph semantics and acceptance only.
+- Each selected harness owns any provider-native recursive execution it uses; GraphComplete owns graph semantics and acceptance without adding another scheduler.
 - Product and Eval clients use the same relation and provenance contract.
 - Invoke results use existing graph authoring and submission. Generic Back, breadcrumbs, viewport restoration, and click-occurrence navigation history remain orthogonal and are not defined by this lease.
 - Pre-lease invocations remain unchanged and unleased; no migration infers or creates leases for them.
