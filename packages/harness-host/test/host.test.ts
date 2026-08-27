@@ -1633,16 +1633,18 @@ describe("HarnessHost", () => {
   });
 
   it.each([
-    ["codex-basic", "medium"],
-    ["codex-basic-high", "high"],
-  ])("migrates schema-v5 %s sessions to the product Codex configuration", async (legacyName, legacyEffort) => {
+    ["codex-basic", "medium", 1],
+    ["codex-basic", "medium", 2],
+    ["codex-basic-high", "high", 1],
+    ["codex-basic-high", "high", 2],
+  ])("migrates schema-v5 %s with %s effort at revision %i to the product Codex configuration", async (legacyName, legacyEffort, legacyRevision) => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v5-product-codex-"));
     const stateFile = join(directory, "sessions.json");
     const legacy: HarnessConfiguration = {
       ...testConfiguration,
       name: legacyName,
       implementation: "codex.basic",
-      revision: 2,
+      revision: legacyRevision,
       settings: { modelReasoningEffort: legacyEffort, skipGitRepoCheck: true },
     };
     const current: HarnessConfiguration = {
@@ -1687,6 +1689,88 @@ describe("HarnessHost", () => {
       expect(JSON.parse(await readFile(stateFile, "utf8"))).toMatchObject({
         schemaVersion: 6,
         sessions: [{ threadId: 1, configuration: current, state: { providerSessionId: "existing-session" } }],
+      });
+
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: current,
+        workingDirectory: directory,
+      });
+
+      expect(restoredState).toEqual({ providerSessionId: "existing-session" });
+    } finally {
+      warning.mockRestore();
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["codex-basic", "medium"],
+    ["codex-basic-high", "high"],
+  ])("migrates deferred schema-v5 %s sessions to the product Codex configuration", async (legacyName, legacyEffort) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-v5-deferred-product-codex-"));
+    const stateFile = join(directory, "sessions.json");
+    const current: HarnessConfiguration = {
+      ...testConfiguration,
+      name: "codex-basic",
+      implementation: "codex.basic",
+      revision: 3,
+      executionAccessContracts: ["managed-runtime@1", "secret@1"],
+      settings: {
+        modelReasoningEffort: "medium",
+        promptProfile: "layered-navigation-multi-agent-v1",
+        skipGitRepoCheck: true,
+      },
+    };
+    const serialized = JSON.stringify({
+      schemaVersion: 5,
+      sessions: [],
+      legacySessions: [{
+        threadId: 1,
+        configuration: {
+          schemaVersion: 1,
+          name: legacyName,
+          implementation: "codex.basic",
+          implementationVersion: 1,
+          settings: { modelReasoningEffort: legacyEffort, skipGitRepoCheck: true },
+        },
+        workingDirectory: directory,
+        state: { providerSessionId: "existing-session" },
+      }],
+    });
+    let restoredState: HarnessSessionState | undefined;
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const host = new HarnessHost({
+      stateFile,
+      controlToken: "control",
+      implementations: { "codex.basic": (context) => {
+        restoredState = context.savedState;
+        return { async complete() {}, state: () => context.savedState ?? emptyState() };
+      } },
+    });
+    try {
+      await writeFile(stateFile, serialized, { mode: 0o600 });
+
+      await host.initialize();
+
+      expect(await readFile(`${stateFile}.v5.backup`, "utf8")).toBe(serialized);
+      expect(warning).toHaveBeenCalledWith(
+        "Migrating deferred product Codex configuration for harness thread 1 during schema v5 migration",
+      );
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).toMatchObject({
+        schemaVersion: 6,
+        legacySessions: [{
+          threadId: 1,
+          configuration: {
+            name: "codex-basic",
+            revision: 3,
+            executionAccessContracts: ["managed-runtime@1", "secret@1"],
+            settings: current.settings,
+          },
+          state: { providerSessionId: "existing-session" },
+        }],
       });
 
       await host.createSession({

@@ -115,58 +115,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retired_product_codex_high_threads_migrate_without_rewriting_history() {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        super::MIGRATOR.run(&pool).await.unwrap();
-        sqlx::query("INSERT INTO product_harnesses(configuration_name,label,product_visible,available,unavailable_reason_code,unavailable_reason_message) VALUES ('codex-basic-high','Codex Basic High',1,1,NULL,NULL)")
-            .execute(&pool).await.unwrap();
-        sqlx::query("UPDATE product_model_preferences SET default_harness_configuration_name='codex-basic-high' WHERE singleton=1")
-            .execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (1,'Legacy high','1','1','codex-basic-high','auto')")
-            .execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name) VALUES (1,1,1,'Historical','1','accepted','codex-basic-high')")
-            .execute(&pool).await.unwrap();
-
-        pool.execute(include_str!(
-            "migrations/0020_retire_product_codex_high.sql"
-        ))
-        .await
-        .unwrap();
-
-        let thread_harness: String =
-            sqlx::query_scalar("SELECT harness_configuration_name FROM threads WHERE id=1")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        let default_harness: String = sqlx::query_scalar(
-            "SELECT default_harness_configuration_name FROM product_model_preferences WHERE singleton=1",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        let retired: (bool, bool, Option<String>) = sqlx::query_as(
-            "SELECT product_visible,available,unavailable_reason_code FROM product_harnesses WHERE configuration_name='codex-basic-high'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        let historical_harness: String =
-            sqlx::query_scalar("SELECT harness_configuration_name FROM interactions WHERE id=1")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-
-        assert_eq!(thread_harness, "codex-basic");
-        assert_eq!(default_harness, "codex-basic");
-        assert_eq!(retired, (false, false, Some("harness_retired".into())));
-        assert_eq!(historical_harness, "codex-basic-high");
-    }
-
-    #[tokio::test]
     async fn legacy_reused_action_duplicates_are_canonicalized_before_open_validation() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

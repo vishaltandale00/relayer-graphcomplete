@@ -234,7 +234,7 @@ export class HarnessHost {
         if (parsed.legacySessions !== undefined && !Array.isArray(parsed.legacySessions)) {
           throw new Error("Harness state contains invalid legacy sessions");
         }
-        this.legacySaved = readLegacySessions(parsed.legacySessions ?? []);
+        this.legacySaved = migrateSchemaV5LegacySessions(readLegacySessions(parsed.legacySessions ?? []));
         await this.persist();
         if (this.closed) throw new Error("Harness host is closed");
         this.initialized = true;
@@ -1332,7 +1332,7 @@ function migratedProductCodexConfiguration(configuration: HarnessConfiguration):
   if ((configuration.name !== "codex-basic" && configuration.name !== "codex-basic-high")
     || configuration.implementation !== "codex.basic"
     || configuration.implementationVersion !== 1
-    || configuration.revision !== 2
+    || (configuration.revision !== 1 && configuration.revision !== 2)
     || legacySettings !== expectedLegacySettings) return configuration;
   return parseHarnessConfiguration({
     ...configuration,
@@ -1344,6 +1344,41 @@ function migratedProductCodexConfiguration(configuration: HarnessConfiguration):
       skipGitRepoCheck: true,
     },
   });
+}
+
+function migrateSchemaV5LegacySessions(
+  sessions: Map<number, LegacyPersistedHarnessSessionDescriptor>,
+): Map<number, LegacyPersistedHarnessSessionDescriptor> {
+  return new Map([...sessions].map(([threadId, session]) => {
+    const configuration = migratedLegacyProductCodexConfiguration(session.configuration);
+    if (configuration === session.configuration) return [threadId, session];
+    console.warn(`Migrating deferred product Codex configuration for harness thread ${threadId} during schema v5 migration`);
+    return [threadId, { ...session, configuration }];
+  }));
+}
+
+function migratedLegacyProductCodexConfiguration(
+  configuration: Omit<HarnessConfiguration, "permissionBindings">,
+): Omit<HarnessConfiguration, "permissionBindings"> {
+  const legacySettings = stableJson(configuration.settings);
+  const expectedLegacySettings = configuration.name === "codex-basic-high"
+    ? stableJson({ modelReasoningEffort: "high", skipGitRepoCheck: true })
+    : stableJson({ modelReasoningEffort: "medium", skipGitRepoCheck: true });
+  if ((configuration.name !== "codex-basic" && configuration.name !== "codex-basic-high")
+    || configuration.implementation !== "codex.basic"
+    || configuration.implementationVersion !== 1
+    || legacySettings !== expectedLegacySettings) return configuration;
+  return {
+    ...configuration,
+    name: "codex-basic",
+    revision: 3,
+    executionAccessContracts: ["managed-runtime@1", "secret@1"],
+    settings: {
+      modelReasoningEffort: "medium",
+      promptProfile: "layered-navigation-multi-agent-v1",
+      skipGitRepoCheck: true,
+    },
+  };
 }
 
 function preAccessContractThreadId(value: unknown): number | undefined {
