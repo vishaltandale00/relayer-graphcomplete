@@ -794,6 +794,54 @@ describe("managed runtime installer", () => {
         .rejects.toMatchObject({ code: "ENOENT" });
       await expect(access(join(root, ".pending-app-updates", "0.2.15", "claude-macos-arm64.json")))
         .resolves.toBeUndefined();
+      await expect(JSON.parse(await readFile(
+        join(root, ".pending-app-updates", "0.2.15", "claude-macos-arm64.json"),
+        "utf8",
+      ))).toMatchObject({ automaticAttempted: true });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("consumes a failed automatic activation and retries it only through the explicit recovery entry point", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+    let probeCalls = 0;
+    const installer = createManagedRuntimeInstaller({
+      root,
+      platform: "darwin",
+      architecture: "arm64",
+      fetch: registryFixture(latestClaudeRoutes("0.3.247", "retry-explicit")),
+      probes: { claude: async ({ version }) => {
+        probeCalls += 1;
+        if (probeCalls === 2) throw new Error("transient activation failure");
+        return { version };
+      } },
+      extract: async (_tarball, destination, { artifact }) => {
+        await mkdir(destination, { recursive: true });
+        await writeFile(join(destination, artifact.role === "sdk" ? "sdk.mjs" : "claude"), "runtime", { mode: 0o755 });
+      },
+    });
+    try {
+      await installer.stageForAppUpdate("2.0.0", [
+        { runtimeId: "claude", minimumVersion: "0.3.200" },
+      ]);
+
+      await expect(installer.activatePendingAppUpdate("2.0.0")).resolves.toMatchObject({
+        failures: [expect.objectContaining({ runtimeId: "claude" })],
+      });
+      expect(probeCalls).toBe(2);
+      await expect(installer.activatePendingAppUpdate("2.0.0")).resolves.toEqual({
+        appVersion: "2.0.0",
+        activated: [],
+        failures: [],
+      });
+      expect(probeCalls).toBe(2);
+
+      await expect(installer.retryPendingAppUpdate("2.0.0")).resolves.toMatchObject({
+        activated: [expect.objectContaining({ runtimeId: "claude" })],
+        failures: [],
+      });
+      expect(probeCalls).toBe(3);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

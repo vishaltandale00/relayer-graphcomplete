@@ -679,6 +679,7 @@ export function createManagedRuntimeInstaller({
       appVersion: _appVersion,
       minimumVersion: _minimumVersion,
       pendingOwnsInstallation: _pendingOwnsInstallation,
+      automaticAttempted: _automaticAttempted,
       ...activeReceipt
     } = receipt;
     signal?.throwIfAborted();
@@ -702,7 +703,7 @@ export function createManagedRuntimeInstaller({
     }
   }
 
-  async function runPendingAppUpdateActivation(appVersion, operation) {
+  async function runPendingAppUpdateActivation(appVersion, operation, { automatic }) {
     const directory = join(root, ".pending-app-updates", appVersion);
     let entries;
     try {
@@ -725,6 +726,18 @@ export function createManagedRuntimeInstaller({
     const failures = [];
     for (const runtimeId of runtimeIds) {
       try {
+        if (automatic) {
+          const receipt = await readPending(appVersion, runtimeId);
+          if (receipt?.automaticAttempted === true) continue;
+          if (!receipt) {
+            await rm(pendingPath(appVersion, runtimeId), { force: true });
+            throw new Error(`${runtimeId} pending runtime receipt is invalid.`);
+          }
+          await atomicWriteJson(pendingPath(appVersion, runtimeId), {
+            ...receipt,
+            automaticAttempted: true,
+          });
+        }
         operation.controller.signal.throwIfAborted();
         activated.push(await activatePendingRuntime(appVersion, runtimeId, operation.controller.signal));
       } catch (error) {
@@ -739,17 +752,25 @@ export function createManagedRuntimeInstaller({
     });
   }
 
-  function activatePendingAppUpdate(appVersionValue) {
+  function beginPendingAppUpdateActivation(appVersionValue, { automatic }) {
     let appVersion;
     try { appVersion = validateVersion(appVersionValue, "installed app version"); } catch (error) { return Promise.reject(error); }
     const existing = activationOperations.get(appVersion);
     if (existing) return existing.promise;
     const operation = { controller: new AbortController(), runtimeIds: [], promise: null };
-    operation.promise = runPendingAppUpdateActivation(appVersion, operation).finally(() => {
+    operation.promise = runPendingAppUpdateActivation(appVersion, operation, { automatic }).finally(() => {
       if (activationOperations.get(appVersion) === operation) activationOperations.delete(appVersion);
     });
     activationOperations.set(appVersion, operation);
     return operation.promise;
+  }
+
+  function activatePendingAppUpdate(appVersionValue) {
+    return beginPendingAppUpdateActivation(appVersionValue, { automatic: true });
+  }
+
+  function retryPendingAppUpdate(appVersionValue) {
+    return beginPendingAppUpdateActivation(appVersionValue, { automatic: false });
   }
 
   async function pruneInactiveInstallations() {
@@ -867,6 +888,7 @@ export function createManagedRuntimeInstaller({
     installed,
     stageForAppUpdate,
     activatePendingAppUpdate,
+    retryPendingAppUpdate,
     pruneInactiveInstallations,
     activeOperations: () => Object.freeze([...new Set([
       ...operations.keys(),

@@ -27,10 +27,7 @@ import { createSettingsStore } from "./services/settings-store.mjs";
 import { createTutorialLifecycle } from "./services/tutorial-lifecycle.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
 import { createManagedRuntimeInstaller } from "./managed-runtimes/installer.mjs";
-import {
-  bootstrapLegacyManagedRuntimes,
-  createManagedRuntimeResolver,
-} from "./managed-runtimes/resolver.mjs";
+import { createManagedRuntimeResolver } from "./managed-runtimes/resolver.mjs";
 import { confirmManagedRuntimeQuit } from "./managed-runtimes/quit-guard.mjs";
 import { claimPrimaryDesktopInstance } from "./single-instance.mjs";
 import { createWindowFactory } from "./window.mjs";
@@ -329,16 +326,6 @@ if (primaryInstance) {
       publishCatalog,
     });
     ({ modelCatalog, providerDefinitions: providerSetup } = providerComposition);
-    if (app.isPackaged && saved.providerOnboardingComplete === true && saved.managedRuntimeMigrationVersion !== 1) {
-      await bootstrapLegacyManagedRuntimes({
-        definitions: await providerSetup.list(),
-        resolver: managedRuntimeResolver,
-        requirementForAdapter: (adapterId) => managedRuntimeRequirementForHarness(
-          compatibleHarnessImplementationForAdapter(adapterId),
-        ),
-      });
-      await settings.update((current) => ({ ...current, managedRuntimeMigrationVersion: 1 }));
-    }
     await providerComposition.start();
     const conversationExporter = createConversationExportService({
       dialog,

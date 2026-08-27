@@ -31,24 +31,3 @@ export function createManagedRuntimeResolver(installer) {
     },
   });
 }
-
-export async function bootstrapLegacyManagedRuntimes({ definitions, requirementForAdapter, resolver }) {
-  const requirements = new Map();
-  for (const definition of definitions) {
-    if (definition?.lifecycleState !== "active") continue;
-    const requirement = requirementForAdapter(definition.adapterId);
-    const existing = requirements.get(requirement.runtimeId);
-    if (!existing || semver.gt(requirement.minimumVersion, existing.minimumVersion)) {
-      requirements.set(requirement.runtimeId, requirement);
-    }
-  }
-  const bootstrapped = [];
-  for (const requirement of requirements.values()) {
-    try {
-      await resolver.get(requirement.runtimeId, requirement.minimumVersion);
-    } catch {
-      bootstrapped.push(await resolver.prepare(requirement.runtimeId, requirement.minimumVersion));
-    }
-  }
-  return Object.freeze(bootstrapped);
-}
