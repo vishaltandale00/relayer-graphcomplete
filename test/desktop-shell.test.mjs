@@ -7,7 +7,10 @@ import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-credential-adapter.mjs";
+import {
+  CodexCredentialAdapter,
+  findCodexExecutable,
+} from "../desktop/main/credentials/codex-credential-adapter.mjs";
 import { CredentialAdapter } from "../desktop/main/credentials/credential-adapter.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
@@ -1353,6 +1356,19 @@ describe("desktop skeleton", () => {
     } finally {
       delete globalThis[hookName];
       await service.close().catch(() => {});
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("never substitutes an ambient Codex executable for a missing managed runtime", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-ambient-codex-"));
+    try {
+      await writeFile(join(directory, "codex"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      await expect(findCodexExecutable({
+        RELAYER_CODEX_BINARY: join(directory, "missing-managed-codex"),
+        PATH: directory,
+      })).resolves.toBeNull();
+    } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });
