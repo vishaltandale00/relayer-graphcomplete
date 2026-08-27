@@ -238,7 +238,7 @@ describe("Relayer Eval application service", () => {
     ]);
     expect(h3Execution.turns).toHaveLength(6);
     expect(h3Execution.turns.map((turn) => turn.permissionProfileId)).toEqual([
-      "ask", "ask", "auto", "auto", "full", "full",
+      "auto", "auto", "auto", "auto", "full", "full",
     ]);
     expect(h3Execution.turns.every((turn) => turn.effectiveExecutionDigest.startsWith("sha256:"))).toBe(true);
     expect(h3Execution.turns.slice(4).every((turn) => (
@@ -261,7 +261,7 @@ describe("Relayer Eval application service", () => {
     )));
     expect(new Set(h3Threads.map((threadDetail) => threadDetail.thread.projectId)).size).toBe(1);
     expect(h3Threads.every((threadDetail) => threadDetail.interactions.length === 2)).toBe(true);
-    expect(h3Threads.map((threadDetail) => threadDetail.thread.permissionProfileId)).toEqual(["ask", "auto", "full"]);
+    expect(h3Threads.map((threadDetail) => threadDetail.thread.permissionProfileId)).toEqual(["auto", "auto", "full"]);
 
     const autonomousCreated = await evalService.createRun({
       testCaseIds: [H3_AUTONOMOUS_FIX_CASE_ID, H3_AUTONOMOUS_INVESTIGATION_CASE_ID],

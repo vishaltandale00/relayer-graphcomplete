@@ -80,7 +80,7 @@ export const h3ProjectEvalCase: ProjectEvalCaseDefinition = Object.freeze({
     Object.freeze({
       id: "architecture",
       name: "Architecture question",
-      permissionProfileId: "ask",
+      permissionProfileId: "auto",
       mutationPolicy: "read-only",
       workspaceGrade: "question",
       prompts: Object.freeze([

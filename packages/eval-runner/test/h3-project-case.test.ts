@@ -42,7 +42,7 @@ describe("pinned h3 project case", () => {
       },
     });
     expect(h3ProjectEvalCase.threads.map((thread) => [thread.id, thread.permissionProfileId, thread.mutationPolicy, thread.prompts.length])).toEqual([
-      ["architecture", "ask", "read-only", 2],
+      ["architecture", "auto", "read-only", 2],
       ["diagnosis", "auto", "read-only", 2],
       ["implementation", "full", "writable", 2],
     ]);
