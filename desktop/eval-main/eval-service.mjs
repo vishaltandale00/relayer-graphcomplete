@@ -29,6 +29,10 @@ import {
   h3AutonomousCases,
   frontierAutonomousCases,
   frontierAutonomousCaseIds,
+  calibrationAutonomousCases,
+  calibrationAutonomousCaseIds,
+  materializeCalibrationFixture,
+  gradeCalibrationWorkspace,
   materializeFrontierProjectFixture,
   materializeH3ProjectFixture,
   projectDeterministicChecksToOutcome,
@@ -73,6 +77,11 @@ export const evalCases = Object.freeze([
     caseSnapshot: entry.catalogSnapshot,
     caseSnapshotDigest: entry.snapshotDigest,
   })),
+  ...calibrationAutonomousCases.map((entry) => Object.freeze({
+    ...entry.definition,
+    caseSnapshot: entry.catalogSnapshot,
+    caseSnapshotDigest: entry.snapshotDigest,
+  })),
 ]);
 
 const h3CaseIds = new Set([
@@ -80,7 +89,7 @@ const h3CaseIds = new Set([
   H3_AUTONOMOUS_FIX_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
 ]);
-const projectCaseIds = new Set([...h3CaseIds, ...frontierAutonomousCaseIds]);
+const projectCaseIds = new Set([...h3CaseIds, ...frontierAutonomousCaseIds, ...calibrationAutonomousCaseIds]);
 
 export const evalJudges = Object.freeze([
   Object.freeze({ id: "deterministic-graph-contract", name: "Deterministic graph contract" }),
@@ -298,7 +307,7 @@ function completeExecutionLifecycle(execution, status = "complete") {
 function validateFixtureAgainstCaseSnapshot(execution, fixture) {
   const workspace = execution.caseSnapshot?.artifacts?.workspace;
   if (!workspace) return;
-  const actualRevision = fixture.seededTree ? `git-tree:${fixture.seededTree}` : null;
+  const actualRevision = fixture.sourceRevision ?? (fixture.seededTree ? `git-tree:${fixture.seededTree}` : null);
   if (workspace.source !== fixture.repositoryUrl || workspace.revision !== actualRevision) {
     throw new Error(
       `Materialized fixture identity does not match case ${execution.testCaseId}: `
@@ -452,6 +461,8 @@ export class EvalService {
     workspaceGrader = gradeH3Workspace,
     frontierProjectFixtureMaterializer = materializeFrontierProjectFixture,
     frontierWorkspaceGrader = gradeFrontierProjectWorkspace,
+    calibrationFixtureMaterializer = materializeCalibrationFixture,
+    calibrationWorkspaceGrader = gradeCalibrationWorkspace,
     acceptedTopologyBuilder = buildAcceptedReviewTopology,
     acceptedTopologyGrader = gradeAcceptedReviewTopology,
     candidateTraceExporter = null,
@@ -470,6 +481,8 @@ export class EvalService {
     this.workspaceGrader = workspaceGrader;
     this.frontierProjectFixtureMaterializer = frontierProjectFixtureMaterializer;
     this.frontierWorkspaceGrader = frontierWorkspaceGrader;
+    this.calibrationFixtureMaterializer = calibrationFixtureMaterializer;
+    this.calibrationWorkspaceGrader = calibrationWorkspaceGrader;
     this.acceptedTopologyBuilder = acceptedTopologyBuilder;
     this.acceptedTopologyGrader = acceptedTopologyGrader;
     this.candidateTraceExporter = candidateTraceExporter;
@@ -1352,13 +1365,18 @@ export class EvalService {
     );
     const workspaceDirectory = join(executionDirectory, "workspace");
     const isH3 = h3CaseIds.has(definition.id);
+    const isCalibration = calibrationAutonomousCaseIds.has(definition.id);
     const fixture = isH3
       ? await this.projectFixtureMaterializer({
         cacheDirectory: join(dirname(this.stateFile), "fixtures", `h3-${H3_UPSTREAM_COMMIT}`),
         workspaceDirectory,
         platform: this.platform,
       })
-      : await this.frontierProjectFixtureMaterializer({
+      : isCalibration ? await this.calibrationFixtureMaterializer({
+        caseId: definition.id,
+        workspaceDirectory,
+        platform: this.platform,
+      }) : await this.frontierProjectFixtureMaterializer({
         caseId: definition.id,
         cacheDirectory: join(dirname(this.stateFile), "fixtures", `${definition.id}-${definition.fixture.upstreamCommit}`),
         workspaceDirectory,
@@ -1398,7 +1416,9 @@ export class EvalService {
           if (threadDefinition.mutationPolicy === "read-only" || promptIndex === threadDefinition.prompts.length - 1) {
             workspaceChecks.set(String(interactionId), isH3
               ? await this.workspaceGrader({ workspaceDirectory, grade: threadDefinition.workspaceGrade })
-              : await this.frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory }));
+              : isCalibration
+                ? await this.calibrationWorkspaceGrader({ caseId: definition.id, workspaceDirectory, baseRevision: fixture.seededCommit })
+                : await this.frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory }));
           }
         },
       });
@@ -1410,6 +1430,12 @@ export class EvalService {
 
   async #createAndRunThread({ execution, title, prompts, projectId = null, permissionProfileId = "auto", afterTurn = async () => {} }) {
     if (!Array.isArray(prompts) || prompts.length === 0) throw new Error(`Eval thread ${title} has no prompts.`);
+    const modelSelection = execution.harnessConfiguration?.implementation === "claude.basic"
+      ? await this.#productRequest(`/api/model-selection/default?harnessId=${encodeURIComponent(execution.harnessConfigurationName)}`)
+      : null;
+    if (execution.harnessConfiguration?.implementation === "claude.basic" && modelSelection === null) {
+      throw new Error("claude-basic has no connected compatible model; connect Claude or Anthropic before running this matrix cell.");
+    }
     const thread = await this.#productRequest("/api/threads", {
       method: "POST",
       body: {
@@ -1417,6 +1443,7 @@ export class EvalService {
         initialMessage: prompts[0],
         harnessConfigurationName: execution.harnessConfigurationName,
         permissionProfileId,
+        ...(modelSelection === null ? {} : { modelSelection }),
         ...(projectId === null ? {} : { projectId }),
       },
     });

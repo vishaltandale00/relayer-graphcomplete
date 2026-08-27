@@ -181,6 +181,8 @@ npm run eval-app:dev
 
 The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Packaged Eval builds still omit those internal options. Build the unsigned internal application with `npm run eval-app:pack`.
 
+The candidate catalog includes twelve deep calibration cases: seven coding cases, including three evaluator-owned greenfield products, and five research, planning, creative, and forecasting cases. Each materializes an isolated Git workspace and records a sealed reference, deterministic verifier gates, and an outcome rubric separately from graph-presentation judgment. Coding fixtures begin with a failing behavioral contract; open-research fixtures provide no curated source bundle and require the candidate to leave a durable deliverable and source trail. Candidate cases remain calibration-only until human review promotes them.
+
 The public Relayer and internal Relayer Eval builds use distinct application identifiers, entry points, data profiles, and dashboard assets. They share the graph runtime, harness host, app server, product records, API contracts, and production workspace. See [ADR 0003](docs/decisions/0003-shared-product-eval-workspace.md).
 
 Build an unsigned development application for the host platform (Apple Silicon or Intel macOS, or Windows x64), including both Rust servers and the external graph client used by harness-authored scripts, with:

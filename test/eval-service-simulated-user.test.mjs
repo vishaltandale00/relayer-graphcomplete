@@ -10,6 +10,7 @@ import {
   OFETCH_RETRY_METHODS_CASE_ID,
   SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
   TRUE_MYTH_INSPECT_BOTH_CASE_ID,
+  calibrationAutonomousCaseIds,
 } from "@relayer/eval-runner";
 
 import {
@@ -65,6 +66,35 @@ describe("EvalService simulated-user result persistence", () => {
     expect(judgeArtifactForExecution({})).toBeUndefined();
   });
 
+  it("pins a connected default model when a Claude matrix cell creates its thread", async () => {
+    const { stateFile } = await testPaths();
+    const requests = [];
+    globalThis.fetch = vi.fn(async (url, options = {}) => {
+      const parsed = new URL(url);
+      requests.push({ parsed, options });
+      if (parsed.pathname === "/api/model-selection/default") {
+        expect(parsed.searchParams.get("harnessId")).toBe("claude-basic");
+        return jsonResponse({ familyId: 7, providerId: "claude-work", modelId: "sonnet" });
+      }
+      if (parsed.pathname === "/api/threads" && options.method === "POST") return jsonResponse({ error: "stop after model assertion" }, 500);
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [join(repositoryRoot, "harnesses", "claude-basic.yaml")],
+    }).open();
+
+    const created = await service.createRun({
+      testCaseIds: ["empty-project.task-system.single-turn"],
+      harnessConfigurationNames: ["claude-basic"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    await waitForCompletedRun(service, created.id);
+    const threadRequest = requests.find(({ parsed, options }) => parsed.pathname === "/api/threads" && options.method === "POST");
+    expect(JSON.parse(threadRequest.options.body).modelSelection).toEqual({ familyId: 7, providerId: "claude-work", modelId: "sonnet" });
+  });
+
   it("runs after deterministic checks and reloads the immutable completed artifact", async () => {
     const { stateFile, configurationPath } = await testPaths();
     globalThis.fetch = fakeAcceptedProduct();
@@ -104,6 +134,7 @@ describe("EvalService simulated-user result persistence", () => {
       TRUE_MYTH_INSPECT_BOTH_CASE_ID,
       SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
       HTTPX_PROXY_AUTH_REPORT_CASE_ID,
+      ...calibrationAutonomousCaseIds,
     ]);
     const created = await service.createRun(simulatedUserSelection());
     const completed = await waitForCompletedRun(service, created.id);
