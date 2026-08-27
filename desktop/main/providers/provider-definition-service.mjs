@@ -170,6 +170,8 @@ export class ProviderDefinitionService {
         });
         if (descriptor.connection.mode === "managed-login") {
           const login = await runtime.credentials.login({ signal });
+          signal?.throwIfAborted();
+          if (preparation.cancelled) throw new Error("Provider connection was cancelled.");
           this.pendingConnections.set(id, { candidate, runtime, login });
           return Object.freeze({
             status: "pending",

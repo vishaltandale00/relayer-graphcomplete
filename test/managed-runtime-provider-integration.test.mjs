@@ -175,6 +175,53 @@ describe("managed runtime provider Connect boundary", () => {
     expect(subject.create).not.toHaveBeenCalled();
   });
 
+  it("closes managed login and does not publish it when onboarding is cancelled while login starts", async () => {
+    const loginStarted = deferred();
+    const close = vi.fn(async () => {});
+    let attempt = 0;
+    const service = new ProviderDefinitionService({
+      registry: createProviderAdapterRegistry([{
+        adapterId: "fake-managed",
+        implementationVersion: "1",
+        label: "Fake managed",
+        accessContract: "managed-runtime@1",
+        defaultEndpoint: null,
+        connection: { mode: "managed-login", fields: [] },
+        create: vi.fn(() => ({
+          credentials: {
+            login: vi.fn(() => (attempt++ === 0
+              ? loginStarted.promise
+              : Promise.resolve({ verificationUri: "https://example.test/login" }))),
+          },
+          close,
+        })),
+      }]),
+      definitionStore: { async load() { return []; } },
+      credentialStore: {},
+    });
+    const connection = service.connect({
+      connectionId: "managed-login-cancel",
+      adapterId: "fake-managed",
+      label: "Managed login",
+      fields: {},
+    });
+    await vi.waitFor(() => expect(attempt).toBe(1));
+
+    await expect(service.cancelConnection("managed-login-cancel")).resolves.toBe(true);
+    loginStarted.resolve({ verificationUri: "https://example.test/login" });
+
+    await expect(connection).rejects.toThrow("Provider connection was cancelled");
+    expect(close).toHaveBeenCalledTimes(1);
+    await expect(service.connect({
+      connectionId: "managed-login-cancel",
+      adapterId: "fake-managed",
+      label: "Managed login",
+      fields: {},
+    })).resolves.toMatchObject({ status: "pending" });
+    await expect(service.cancelConnection("managed-login-cancel")).resolves.toBe(true);
+    expect(close).toHaveBeenCalledTimes(2);
+  });
+
   it("does not commit a secret provider when onboarding is cancelled during discovery", async () => {
     const discovery = deferred();
     const subject = fixture({ discover: () => discovery.promise });
