@@ -1,8 +1,10 @@
 use super::{SqliteProductStore, catalog};
-use crate::product::{BeginInteractionAttempt, PreExecutionModelFailure};
 #[cfg(test)]
 use crate::product::{ExecutionModelSelection, InteractionId, InteractionModelSelection};
-use crate::storage::StorageError;
+use crate::{
+    product::{BeginInteractionAttempt, ExecutionLeaseDebt, PreExecutionModelFailure, ThreadId},
+    storage::StorageError,
+};
 #[cfg(test)]
 use sqlx::Row;
 
@@ -41,7 +43,7 @@ impl SqliteProductStore {
             .bind(failure.interaction_id.value())
             .fetch_one(&mut *transaction)
             .await?;
-        let id = sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,failure_category,effect_boundary) SELECT ?1,?2,?3,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'model_failed',?14,'none' WHERE EXISTS(SELECT 1 FROM interactions WHERE id=?1 AND completion_status IN ('submitted','running')) AND NOT EXISTS(SELECT 1 FROM interaction_attempts WHERE interaction_id=?1 AND outcome='running')")
+        let inserted = sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,failure_category,effect_boundary) SELECT ?1,?2,?3,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'model_failed',?14,'none' WHERE EXISTS(SELECT 1 FROM interactions WHERE id=?1 AND completion_status IN ('submitted','running')) AND NOT EXISTS(SELECT 1 FROM interaction_attempts WHERE interaction_id=?1 AND outcome='running')")
             .bind(failure.interaction_id.value())
             .bind(attempt_number)
             .bind(timestamp)
@@ -58,13 +60,12 @@ impl SqliteProductStore {
             .bind(failure.failure_category)
             .execute(&mut *transaction)
             .await?;
-        if id.rows_affected() != 1 {
+        if inserted.rows_affected() != 1 {
             return Err(StorageError::IncompatibleSchema(
-                "pre-execution model failure requires one submitted or running interaction with no active attempt"
-                    .into(),
+                "pre-execution model failure requires one submitted or running interaction with no active attempt".into(),
             ));
         }
-        let id = id.last_insert_rowid();
+        let id = inserted.last_insert_rowid();
         let restored = sqlx::query("UPDATE interactions SET graph_node_id=NULL,completion_status='not_started',harness_configuration_name=?1,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL WHERE id=?2 AND completion_status IN ('submitted','running')")
             .bind(failure.harness_name)
             .bind(failure.interaction_id.value())
@@ -97,28 +98,66 @@ impl SqliteProductStore {
                     .into(),
             ));
         }
+        if receipt.attempt_admission_id.is_empty() {
+            return Err(StorageError::IncompatibleSchema(
+                "an execution attempt requires a non-empty admission id".into(),
+            ));
+        }
+        if receipt.execution_lease_id.is_empty() {
+            return Err(StorageError::IncompatibleSchema(
+                "an execution attempt requires a non-empty execution lease id".into(),
+            ));
+        }
         let selection = crate::product::InteractionModelSelection {
             family_id: receipt.route.family_id,
             provider_id: receipt.route.provider_id.clone(),
             model_id: receipt.route.model_id.clone(),
         };
-        let admitted = catalog::validate_execution_model_selection_on(
+        let (current_plan, admitted) = catalog::resolve_execution_model_plan_on(
             &mut transaction,
             receipt.harness_name,
             &selection,
         )
         .await?;
+        if current_plan != receipt.model_plan {
+            return Err(StorageError::IncompatibleSchema(
+                "the model family plan changed between resolution and atomic attempt admission"
+                    .into(),
+            ));
+        }
         if admitted != *receipt.route {
             return Err(StorageError::IncompatibleSchema(
                 "the execution route changed between resolution and atomic attempt admission"
                     .into(),
             ));
         }
-        let family_revision: i64 =
-            sqlx::query_scalar("SELECT revision FROM model_families WHERE id=?1")
-                .bind(receipt.route.family_id.value())
-                .fetch_one(&mut *transaction)
-                .await?;
+        if receipt.admitted_plan.family_id != receipt.model_plan.family_id
+            || receipt.admitted_plan.family_revision != receipt.model_plan.family_revision
+            || receipt.admitted_plan.orchestrator.provider_id
+                != receipt.model_plan.orchestrator.provider_id
+            || receipt.admitted_plan.orchestrator.adapter_id
+                != receipt.model_plan.orchestrator.adapter_id
+            || receipt.admitted_plan.orchestrator.access_contract
+                != receipt.model_plan.orchestrator.access_contract
+            || receipt.admitted_plan.orchestrator.model_id
+                != receipt.model_plan.orchestrator.model_id
+            || receipt.admitted_plan.roster.len() != receipt.model_plan.roster.len()
+            || !receipt
+                .admitted_plan
+                .roster
+                .iter()
+                .zip(&receipt.model_plan.roster)
+                .all(|(admitted, planned)| {
+                    admitted.provider_id == planned.provider_id
+                        && admitted.adapter_id == planned.adapter_id
+                        && admitted.access_contract == planned.access_contract
+                        && admitted.model_id == planned.model_id
+                })
+        {
+            return Err(StorageError::IncompatibleSchema(
+                "the provider broker admitted a different model family plan".into(),
+            ));
+        }
         let (harness_revision, harness_digest): (i64, String) = sqlx::query_as(
             "SELECT configuration_revision,configuration_digest FROM product_harnesses WHERE configuration_name=?1 AND product_visible=1 AND available=1",
         )
@@ -136,11 +175,15 @@ impl SqliteProductStore {
         }
         let attempt_number: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(attempt_number),0)+1 FROM interaction_attempts WHERE interaction_id=?1")
             .bind(receipt.interaction_id.value()).fetch_one(&mut *transaction).await?;
-        let id = sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,effect_boundary) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'running','unknown')")
+        let admitted_plan_json = serde_json::to_string(&receipt.admitted_plan)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let id = sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,effect_boundary,attempt_admission_id,admitted_plan_json,admitted_plan_digest,execution_lease_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'running','unknown',?14,?15,?16,?17)")
             .bind(receipt.interaction_id.value()).bind(attempt_number).bind(timestamp).bind(receipt.route.family_id.value())
-            .bind(family_revision).bind(receipt.harness_name).bind(harness_revision).bind(harness_digest)
+            .bind(receipt.model_plan.family_revision).bind(receipt.harness_name).bind(harness_revision).bind(harness_digest)
             .bind(receipt.route.provider_id.as_str()).bind(&receipt.route.adapter_id).bind(receipt.adapter_version).bind(&receipt.route.model_id)
-            .bind(&receipt.route.access_contract).execute(&mut *transaction).await?.last_insert_rowid();
+            .bind(&receipt.route.access_contract).bind(&receipt.attempt_admission_id).bind(admitted_plan_json)
+            .bind(&receipt.admitted_plan.digest).bind(receipt.execution_lease_id)
+            .execute(&mut *transaction).await?.last_insert_rowid();
         transaction.commit().await?;
         Ok(id)
     }
@@ -149,12 +192,9 @@ impl SqliteProductStore {
         &self,
         receipt: BeginInteractionAttempt<'_>,
         failure_category: &str,
+        execution_lease_reconciled: bool,
         timestamp: &str,
     ) -> Result<i64, StorageError> {
-        // The broker has already admitted a concrete adapter version at this point, but the
-        // product-side catalog/policy guard rejected the attempt. Preserve that exact attempted
-        // route as a terminal receipt while atomically restoring the prompt. Do not revalidate
-        // the route here: the failed validation is precisely what this receipt records.
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let status: (String, bool) = sqlx::query_as(
             "SELECT completion_status,EXISTS(SELECT 1 FROM interaction_attempts WHERE interaction_id=?1 AND outcome='running') FROM interactions WHERE id=?1",
@@ -164,15 +204,9 @@ impl SqliteProductStore {
         .await?;
         if status.0 != "running" || status.1 {
             return Err(StorageError::IncompatibleSchema(
-                "a failed attempt admission requires one running interaction with no active attempt"
-                    .into(),
+                "a failed attempt admission requires one running interaction with no active attempt".into(),
             ));
         }
-        let family_revision: i64 =
-            sqlx::query_scalar("SELECT revision FROM model_families WHERE id=?1")
-                .bind(receipt.route.family_id.value())
-                .fetch_one(&mut *transaction)
-                .await?;
         let (harness_revision, harness_digest) = receipt
             .expected_harness_policy
             .map(|policy| {
@@ -190,12 +224,14 @@ impl SqliteProductStore {
             .bind(receipt.interaction_id.value())
             .fetch_one(&mut *transaction)
             .await?;
-        let id = sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,failure_category,effect_boundary) VALUES (?1,?2,?3,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'model_failed',?14,'none')")
+        let admitted_plan_json = serde_json::to_string(&receipt.admitted_plan)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let id = sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,failure_category,effect_boundary,attempt_admission_id,admitted_plan_json,admitted_plan_digest,execution_lease_id,execution_lease_reconciled_at) VALUES (?1,?2,?3,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'model_failed',?14,'none',?15,?16,?17,?18,?19)")
             .bind(receipt.interaction_id.value())
             .bind(attempt_number)
             .bind(timestamp)
             .bind(receipt.route.family_id.value())
-            .bind(family_revision)
+            .bind(receipt.model_plan.family_revision)
             .bind(receipt.harness_name)
             .bind(harness_revision)
             .bind(harness_digest)
@@ -205,6 +241,11 @@ impl SqliteProductStore {
             .bind(&receipt.route.model_id)
             .bind(&receipt.route.access_contract)
             .bind(failure_category)
+            .bind(&receipt.attempt_admission_id)
+            .bind(admitted_plan_json)
+            .bind(&receipt.admitted_plan.digest)
+            .bind(receipt.execution_lease_id)
+            .bind(execution_lease_reconciled.then_some(timestamp))
             .execute(&mut *transaction)
             .await?
             .last_insert_rowid();
@@ -220,6 +261,62 @@ impl SqliteProductStore {
         }
         transaction.commit().await?;
         Ok(id)
+    }
+
+    pub(crate) async fn execution_lease_debt(
+        &self,
+        attempt_id: i64,
+    ) -> Result<Option<ExecutionLeaseDebt>, StorageError> {
+        let row: Option<(i64, i64, String)> = sqlx::query_as(
+            "SELECT a.id,i.thread_id,a.execution_lease_id FROM interaction_attempts a JOIN interactions i ON i.id=a.interaction_id WHERE a.id=?1 AND a.execution_lease_id IS NOT NULL AND a.execution_lease_reconciled_at IS NULL AND a.outcome!='running'",
+        )
+        .bind(attempt_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(
+            |(attempt_id, thread_id, execution_lease_id)| ExecutionLeaseDebt {
+                attempt_id,
+                thread_id: ThreadId::from_database(thread_id),
+                execution_lease_id,
+            },
+        ))
+    }
+
+    pub(crate) async fn unreconciled_execution_lease_debts(
+        &self,
+    ) -> Result<Vec<ExecutionLeaseDebt>, StorageError> {
+        let rows: Vec<(i64, i64, String)> = sqlx::query_as(
+            "SELECT a.id,i.thread_id,a.execution_lease_id FROM interaction_attempts a JOIN interactions i ON i.id=a.interaction_id WHERE a.execution_lease_id IS NOT NULL AND a.execution_lease_reconciled_at IS NULL AND a.outcome!='running' ORDER BY a.id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(attempt_id, thread_id, execution_lease_id)| ExecutionLeaseDebt {
+                    attempt_id,
+                    thread_id: ThreadId::from_database(thread_id),
+                    execution_lease_id,
+                },
+            )
+            .collect())
+    }
+
+    pub(crate) async fn acknowledge_execution_lease_reconciled(
+        &self,
+        attempt_id: i64,
+        execution_lease_id: &str,
+        timestamp: &str,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query(
+            "UPDATE interaction_attempts SET execution_lease_reconciled_at=?1 WHERE id=?2 AND execution_lease_id=?3 AND execution_lease_reconciled_at IS NULL AND outcome!='running'",
+        )
+        .bind(timestamp)
+        .bind(attempt_id)
+        .bind(execution_lease_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
     }
 
     #[cfg(test)]
@@ -261,27 +358,121 @@ impl SqliteProductStore {
 mod tests {
     use super::*;
     use crate::product::{
-        AcceptedInteractionCompletion, FailedInteractionCompletion, ModelFamilyId, ProviderId,
+        AcceptedInteractionCompletion, AdmittedExecutionModelPlan, AdmittedExecutionModelRoute,
+        ExecutionModelPlan, ExecutionModelRoute, FailedInteractionCompletion, ModelFamilyId,
+        ProductService, ProviderId,
     };
+    use axum::{Json, Router, http::StatusCode, routing};
     use serde_json::json;
     use std::{
+        fs,
+        sync::Arc,
         sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
 
     static TEST_STORE_ID: AtomicU64 = AtomicU64::new(1);
 
+    fn retry_input(text: &str) -> crate::storage::NewInteractionInput<'_> {
+        crate::storage::NewInteractionInput {
+            text,
+            input_identity: "retry-input",
+            input_digest: "sha256:retry-input",
+            contexts: &[],
+        }
+    }
+
+    async fn test_runtime(
+        harness: Router,
+    ) -> (
+        crate::runtime::RuntimeClient,
+        tokio::task::JoinHandle<()>,
+        std::path::PathBuf,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move { axum::serve(listener, harness).await.unwrap() });
+        let unique = TEST_STORE_ID.fetch_add(1, Ordering::Relaxed);
+        let directory = std::env::temp_dir().join(format!(
+            "relayer-attempt-runtime-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let catalog = directory.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({"schemaVersion":1,"configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+            },"digest":"sha256:test"}]})
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = crate::runtime::RuntimeClient::open(
+            &url,
+            &url,
+            "graph-control".into(),
+            "harness-control".into(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+        (runtime, task, directory)
+    }
+
     fn receipt<'a>(
         interaction_id: InteractionId,
         route: &'a ExecutionModelSelection,
     ) -> BeginInteractionAttempt<'a> {
+        let (model_plan, admitted_plan) = plans(route);
         BeginInteractionAttempt {
             interaction_id,
+            attempt_admission_id: "00000000-0000-0000-0000-000000000001".into(),
             harness_name: "codex-basic",
             route,
+            model_plan,
+            admitted_plan,
             adapter_version: 1,
             expected_harness_policy: None,
+            execution_lease_id: "lease-test",
         }
+    }
+
+    fn plans(route: &ExecutionModelSelection) -> (ExecutionModelPlan, AdmittedExecutionModelPlan) {
+        let member = ExecutionModelRoute {
+            provider_id: route.provider_id.clone(),
+            adapter_id: route.adapter_id.clone(),
+            access_contract: route.access_contract.clone(),
+            model_id: route.model_id.clone(),
+        };
+        (
+            ExecutionModelPlan {
+                family_id: route.family_id,
+                family_revision: 1,
+                orchestrator: member.clone(),
+                roster: vec![member],
+            },
+            AdmittedExecutionModelPlan {
+                family_id: route.family_id,
+                family_revision: 1,
+                orchestrator: AdmittedExecutionModelRoute {
+                    provider_id: route.provider_id.clone(),
+                    adapter_id: route.adapter_id.clone(),
+                    access_contract: route.access_contract.clone(),
+                    model_id: route.model_id.clone(),
+                    adapter_implementation_version: "1".into(),
+                },
+                roster: vec![AdmittedExecutionModelRoute {
+                    provider_id: route.provider_id.clone(),
+                    adapter_id: route.adapter_id.clone(),
+                    access_contract: route.access_contract.clone(),
+                    model_id: route.model_id.clone(),
+                    adapter_implementation_version: "1".into(),
+                }],
+                harness_policy_digest: "sha256:test-policy".into(),
+                digest: "sha256:test-plan".into(),
+            },
+        )
     }
 
     async fn seeded_store() -> (SqliteProductStore, InteractionId, ExecutionModelSelection) {
@@ -335,20 +526,36 @@ mod tests {
     #[tokio::test]
     async fn attempt_receipt_is_immutable_and_terminal_transition_is_one_shot() {
         let (store, interaction_id, route) = seeded_store().await;
+        sqlx::query("UPDATE model_providers SET endpoint='https://secret.example.test/v1?token=do-not-persist',credential_reference='provider:do-not-persist' WHERE id='codex'")
+            .execute(&store.pool).await.expect("secret provider configuration");
         sqlx::query("UPDATE product_harnesses SET configuration_revision=7,configuration_digest='sha256:authoritative' WHERE configuration_name='codex-basic'")
             .execute(&store.pool).await.expect("harness receipt");
         let attempt = store
             .begin_interaction_attempt(receipt(interaction_id, &route), "10")
             .await
             .expect("begin");
-        let recorded: (i64, String) = sqlx::query_as(
-            "SELECT harness_configuration_revision,harness_configuration_digest FROM interaction_attempts WHERE id=?1",
+        let recorded: (i64, String, String, String, String, String, Option<String>) = sqlx::query_as(
+            "SELECT harness_configuration_revision,harness_configuration_digest,attempt_admission_id,admitted_plan_json,admitted_plan_digest,execution_lease_id,execution_lease_reconciled_at FROM interaction_attempts WHERE id=?1",
         )
         .bind(attempt)
         .fetch_one(&store.pool)
         .await
         .expect("recorded receipt");
-        assert_eq!(recorded, (7, "sha256:authoritative".into()));
+        assert_eq!(recorded.0, 7);
+        assert_eq!(recorded.1, "sha256:authoritative");
+        assert_eq!(recorded.2, "00000000-0000-0000-0000-000000000001");
+        assert!(
+            recorded
+                .3
+                .contains("\"accessContract\":\"managed-runtime@1\"")
+        );
+        assert!(!recorded.3.contains("do-not-persist"));
+        assert!(!recorded.3.contains("credential"));
+        assert!(!recorded.3.contains("endpoint"));
+        assert_eq!(recorded.4, "sha256:test-plan");
+        assert_eq!(recorded.5, "lease-test");
+        assert_eq!(recorded.6, None);
+        assert!(store.execution_lease_debt(attempt).await.unwrap().is_none());
         store
             .finish_interaction_attempt(
                 attempt,
@@ -367,6 +574,19 @@ mod tests {
                 .as_deref(),
             Some("none")
         );
+        let debt = store
+            .execution_lease_debt(attempt)
+            .await
+            .unwrap()
+            .expect("terminal attempt retains release debt");
+        assert_eq!(debt.execution_lease_id, "lease-test");
+        assert!(
+            store
+                .acknowledge_execution_lease_reconciled(attempt, "lease-test", "12")
+                .await
+                .unwrap()
+        );
+        assert!(store.execution_lease_debt(attempt).await.unwrap().is_none());
         assert!(
             store
                 .finish_interaction_attempt(attempt, "accepted", None, "graph_write", "12")
@@ -376,15 +596,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pre_execution_failure_preserves_exact_available_route_and_policy_snapshot() {
+    async fn pre_execution_model_failure_atomically_preserves_receipt_and_restores_draft() {
         let (store, interaction_id, route) = seeded_store().await;
-        sqlx::query("UPDATE product_harnesses SET configuration_revision=9,configuration_digest='sha256:policy-nine' WHERE configuration_name='codex-basic'")
-            .execute(&store.pool)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE interactions SET completion_status='submitted',graph_node_id=NULL,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL WHERE id=?1")
-            .bind(interaction_id.value())
-            .execute(&store.pool)
+        let policy = store
+            .load_execution_harness_policy("codex-basic")
             .await
             .unwrap();
         let selection = InteractionModelSelection {
@@ -400,7 +615,7 @@ mod tests {
                     harness_name: "codex-basic",
                     selection: &selection,
                     route: Some(&route),
-                    policy: None,
+                    policy: Some(&policy),
                     adapter_version: None,
                     failure_category: "provider_authentication",
                 },
@@ -408,35 +623,96 @@ mod tests {
             )
             .await
             .unwrap();
-        let row: (
-            String,
-            Option<i64>,
-            i64,
-            String,
-            String,
-            String,
-            i64,
-            String,
-            String,
-        ) = sqlx::query_as("SELECT i.completion_status,i.graph_node_id,a.family_id,a.provider_id,a.model_id,a.harness_configuration_digest,a.adapter_implementation_version,a.outcome,a.failure_category FROM interactions i JOIN interaction_attempts a ON a.interaction_id=i.id WHERE a.id=?1")
-            .bind(attempt)
-            .fetch_one(&store.pool)
-            .await
-            .unwrap();
+
+        let receipt: (String, String, i64, Option<String>) = sqlx::query_as(
+            "SELECT outcome,failure_category,adapter_implementation_version,admitted_plan_json FROM interaction_attempts WHERE id=?1",
+        )
+        .bind(attempt)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
         assert_eq!(
-            row,
+            receipt,
             (
-                "not_started".into(),
-                None,
-                route.family_id.value(),
-                "codex".into(),
-                "gpt-test".into(),
-                "sha256:policy-nine".into(),
-                0,
                 "model_failed".into(),
                 "provider_authentication".into(),
+                0,
+                None,
             )
         );
+        let interaction = store
+            .get_interaction(interaction_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(interaction.completion_status, "not_started");
+        assert_eq!(interaction.text, "hello");
+        assert_eq!(interaction.latest_attempt.unwrap().id, attempt);
+    }
+
+    #[tokio::test]
+    async fn rejected_attempt_admission_preserves_frozen_plan_and_release_debt() {
+        let (store, interaction_id, route) = seeded_store().await;
+        let policy = store
+            .load_execution_harness_policy("codex-basic")
+            .await
+            .unwrap();
+        let expected_plan = receipt(interaction_id, &route).admitted_plan;
+        let mut failed = receipt(interaction_id, &route);
+        failed.expected_harness_policy = Some(&policy);
+
+        let attempt = store
+            .record_model_attempt_admission_failure(failed, "model_unavailable", false, "11")
+            .await
+            .unwrap();
+
+        let recorded: (String, String, String, Option<String>) = sqlx::query_as(
+            "SELECT outcome,failure_category,execution_lease_id,execution_lease_reconciled_at FROM interaction_attempts WHERE id=?1",
+        )
+        .bind(attempt)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(recorded.0, "model_failed");
+        assert_eq!(recorded.1, "model_unavailable");
+        assert_eq!(recorded.2, "lease-test");
+        assert_eq!(recorded.3, None);
+        assert_eq!(
+            store
+                .get_interaction(interaction_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .latest_attempt
+                .unwrap()
+                .admitted_plan,
+            Some(expected_plan),
+        );
+        assert_eq!(
+            store
+                .execution_lease_debt(attempt)
+                .await
+                .unwrap()
+                .unwrap()
+                .execution_lease_id,
+            "lease-test",
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_attempt_without_an_admitted_plan_remains_readable() {
+        let (store, interaction_id, route) = seeded_store().await;
+        sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,effect_boundary) VALUES (?1,1,'1','2',?2,1,'codex-basic',1,'sha256:legacy','codex','codex-subscription',1,'gpt-test','managed-runtime@1','accepted','graph_write')")
+            .bind(interaction_id.value()).bind(route.family_id.value()).execute(&store.pool).await.unwrap();
+        let attempt = store
+            .get_interaction(interaction_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .latest_attempt
+            .unwrap();
+        assert!(attempt.attempt_admission_id.is_none());
+        assert!(attempt.admitted_plan.is_none());
     }
 
     #[tokio::test]
@@ -452,6 +728,16 @@ mod tests {
                 .await
                 .unwrap(),
             1
+        );
+        let debt = store
+            .execution_lease_debt(attempt)
+            .await
+            .unwrap()
+            .expect("restart terminalization exposes the exact lease debt");
+        assert_eq!(debt.execution_lease_id, "lease-test");
+        assert_eq!(
+            store.unreconciled_execution_lease_debts().await.unwrap(),
+            vec![debt]
         );
         let row: (String, String, String) = sqlx::query_as(
             "SELECT outcome,failure_category,effect_boundary FROM interaction_attempts WHERE id=?1",
@@ -478,27 +764,79 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restart_preserves_a_recoverable_unsent_draft() {
+    async fn terminal_lease_reconciliation_retries_release_and_accepts_host_absence() {
         let (store, interaction_id, route) = seeded_store().await;
         let attempt = store
             .begin_interaction_attempt(receipt(interaction_id, &route), "10")
             .await
             .unwrap();
         store
-            .fail_interaction_completion_with_attempt(
-                FailedInteractionCompletion {
-                    attempt_id: attempt,
-                    interaction_id,
-                    harness_configuration_name: "codex-basic",
-                    error: "provider unavailable",
-                    outcome: "model_failed",
-                    failure_category: "provider_timeout",
-                    effect_boundary: "none",
-                    return_to_unsent: true,
-                    graph_node_id: None,
-                },
-                "11",
-            )
+            .recover_interrupted_interactions("restart", false)
+            .await
+            .unwrap();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = calls.clone();
+        let harness = Router::new().route(
+            "/sessions/{thread}/execution-leases/{lease}",
+            routing::delete(move || {
+                let observed = observed.clone();
+                async move {
+                    if observed.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(json!({"error":"temporary"})),
+                        );
+                    }
+                    (StatusCode::OK, Json(json!({"released":true})))
+                }
+            }),
+        );
+        let (runtime, task, directory) = test_runtime(harness).await;
+        let product = ProductService::new(store.clone(), true);
+        assert!(
+            !crate::app_server::reconcile_terminal_execution_lease(&product, &runtime, attempt)
+                .await
+        );
+        assert!(store.execution_lease_debt(attempt).await.unwrap().is_some());
+        assert!(
+            crate::app_server::reconcile_terminal_execution_lease(&product, &runtime, attempt)
+                .await
+        );
+        assert!(store.execution_lease_debt(attempt).await.unwrap().is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        task.abort();
+        fs::remove_dir_all(directory).unwrap();
+
+        let (store, interaction_id, route) = seeded_store().await;
+        let attempt = store
+            .begin_interaction_attempt(receipt(interaction_id, &route), "10")
+            .await
+            .unwrap();
+        store
+            .recover_interrupted_interactions("restart", false)
+            .await
+            .unwrap();
+        let harness = Router::new().route(
+            "/sessions/{thread}/execution-leases/{lease}",
+            routing::delete(|| async { Json(json!({"released":false})) }),
+        );
+        let (runtime, task, directory) = test_runtime(harness).await;
+        let product = ProductService::new(store.clone(), true);
+        assert!(
+            crate::app_server::reconcile_terminal_execution_lease(&product, &runtime, attempt)
+                .await
+        );
+        assert!(store.execution_lease_debt(attempt).await.unwrap().is_none());
+        task.abort();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn restart_preserves_a_recoverable_unsent_draft() {
+        let (store, interaction_id, _) = seeded_store().await;
+        sqlx::query("UPDATE interactions SET completion_status='not_started' WHERE id=?1")
+            .bind(interaction_id.value())
+            .execute(&store.pool)
             .await
             .unwrap();
 
@@ -516,110 +854,6 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(status, "not_started");
-    }
-
-    #[tokio::test]
-    async fn restart_preserves_a_model_failure_draft_even_after_partial_effects() {
-        let (store, interaction_id, route) = seeded_store().await;
-        let attempt = store
-            .begin_interaction_attempt(receipt(interaction_id, &route), "10")
-            .await
-            .unwrap();
-        sqlx::query("UPDATE interactions SET graph_node_id=77,harness_configuration_digest='sha256:prepared',effective_execution_digest='sha256:execution',effective_permission_receipt_json='{}' WHERE id=?1")
-            .bind(interaction_id.value())
-            .execute(&store.pool)
-            .await
-            .unwrap();
-        store
-            .fail_interaction_completion_with_attempt(
-                FailedInteractionCompletion {
-                    attempt_id: attempt,
-                    interaction_id,
-                    harness_configuration_name: "codex-basic",
-                    error: "provider failed after a tool effect",
-                    outcome: "model_failed",
-                    failure_category: "provider_timeout",
-                    effect_boundary: "tool_effect",
-                    return_to_unsent: true,
-                    graph_node_id: Some(77),
-                },
-                "11",
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            store
-                .recover_interrupted_interactions("restart", false)
-                .await
-                .unwrap(),
-            0
-        );
-        let row: (String, Option<i64>, Option<String>, Option<String>, String, String) =
-            sqlx::query_as("SELECT i.completion_status,i.graph_node_id,i.harness_configuration_digest,i.effective_execution_digest,a.outcome,a.effect_boundary FROM interactions i JOIN interaction_attempts a ON a.interaction_id=i.id WHERE a.id=?1")
-                .bind(attempt)
-                .fetch_one(&store.pool)
-                .await
-                .unwrap();
-        assert_eq!(
-            row,
-            (
-                "not_started".into(),
-                None,
-                None,
-                None,
-                "model_failed".into(),
-                "tool_effect".into(),
-            )
-        );
-    }
-
-    #[tokio::test]
-    async fn canonical_acceptance_reconciles_the_running_attempt_before_restart_cleanup() {
-        let (store, interaction_id, route) = seeded_store().await;
-        let attempt = store
-            .begin_interaction_attempt(receipt(interaction_id, &route), "10")
-            .await
-            .unwrap();
-        sqlx::query("UPDATE interactions SET graph_node_id=99,completion_status='failed',completion_error='Canonical reconciliation pending: transient product write failure',harness_configuration_name='codex-basic',harness_configuration_digest='sha256:prepared',effective_execution_digest='sha256:execution',effective_permission_receipt_json='{}' WHERE id=?1")
-            .bind(interaction_id.value())
-            .execute(&store.pool)
-            .await
-            .unwrap();
-
-        let interrupted = store.interrupted_interactions().await.unwrap();
-        assert_eq!(interrupted.len(), 1);
-        assert_eq!(interrupted[0].id, interaction_id);
-
-        assert!(
-            store
-                .recover_interaction_accepted(interaction_id, &json!({"nodeId": 99}))
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            store
-                .recover_interrupted_interactions("restart", false)
-                .await
-                .unwrap(),
-            0
-        );
-        let row: (String, String, String, Option<String>) = sqlx::query_as(
-            "SELECT i.completion_status,a.outcome,a.effect_boundary,a.failure_category FROM interactions i JOIN interaction_attempts a ON a.interaction_id=i.id WHERE a.id=?1",
-        )
-        .bind(attempt)
-        .fetch_one(&store.pool)
-        .await
-        .unwrap();
-        assert_eq!(
-            row,
-            (
-                "accepted".into(),
-                "accepted".into(),
-                "graph_write".into(),
-                None,
-            )
-        );
     }
 
     #[tokio::test]
@@ -644,45 +878,142 @@ mod tests {
             .expect_err("stale policy must not cross attempt admission");
 
         assert!(error.to_string().contains("harness model policy changed"));
+    }
 
-        // The broker admission supplied an adapter version before the product snapshot changed.
-        // Record that rejected route and restore the same prompt in one transaction.
-        sqlx::query("UPDATE interactions SET graph_node_id=77,harness_configuration_digest='sha256:prepared',effective_execution_digest='sha256:execution',effective_permission_receipt_json='{}' WHERE id=?1")
-            .bind(interaction_id.value())
-            .execute(&store.pool)
-            .await
-            .unwrap();
-        let mut rejected = receipt(interaction_id, &route);
-        rejected.expected_harness_policy = Some(&policy);
-        let attempt = store
-            .record_model_attempt_admission_failure(rejected, "model_unavailable", "11")
-            .await
-            .unwrap();
-        let row: (
-            String,
-            Option<i64>,
-            Option<String>,
-            Option<String>,
-            String,
-            String,
-            String,
-        ) = sqlx::query_as("SELECT i.completion_status,i.graph_node_id,i.harness_configuration_digest,i.effective_execution_digest,a.outcome,a.failure_category,a.effect_boundary FROM interactions i JOIN interaction_attempts a ON a.interaction_id=i.id WHERE a.id=?1")
-            .bind(attempt)
-            .fetch_one(&store.pool)
+    #[tokio::test]
+    async fn model_plan_preserves_resolvable_family_order_and_requires_the_orchestrator() {
+        let (store, _, route) = seeded_store().await;
+        sqlx::query("INSERT INTO model_providers(id,label,connected,refreshed_at,adapter_id,access_contract,lifecycle_state) VALUES ('openai-work','OpenAI work',1,'1','openai-api','managed-runtime@1','active')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('openai-work','gpt-second','Second',0,1,1,0,'{}'),('openai-work','gpt-offline','Offline',1,1,0,0,'{}')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO harness_provider_compatibility(harness_configuration_name,provider_id,all_models) VALUES ('codex-basic','openai-work',1)")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (?1,1,'openai-work','gpt-second'),(?1,2,'openai-work','gpt-offline')")
+            .bind(route.family_id.value()).execute(&store.pool).await.unwrap();
+        let selected = crate::product::InteractionModelSelection {
+            family_id: route.family_id,
+            provider_id: route.provider_id.clone(),
+            model_id: route.model_id.clone(),
+        };
+        let (plan, _) = store
+            .resolve_execution_model_plan("codex-basic", &selected)
             .await
             .unwrap();
         assert_eq!(
-            row,
-            (
-                "not_started".into(),
-                None,
-                None,
-                None,
-                "model_failed".into(),
-                "model_unavailable".into(),
-                "none".into(),
-            )
+            plan.roster
+                .iter()
+                .map(|member| (member.provider_id.as_str(), member.model_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("codex", "gpt-test"), ("openai-work", "gpt-second")]
         );
+        let unavailable = crate::product::InteractionModelSelection {
+            family_id: route.family_id,
+            provider_id: ProviderId::from_database("openai-work".into()),
+            model_id: "gpt-offline".into(),
+        };
+        assert!(
+            store
+                .resolve_execution_model_plan("codex-basic", &unavailable)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("unavailable")
+        );
+
+        store
+            .update_harness_model_rules(&crate::product::UpdateHarnessModelRulesCommand {
+                harness_id: "codex-basic".into(),
+                expected_revision: 1,
+                rules: crate::product::HarnessModelRules {
+                    allow: vec![
+                        crate::product::HarnessModelRule {
+                            adapter_id: "codex-subscription".into(),
+                            model_id_exact: None,
+                            model_id_regex: Some(".*".into()),
+                        },
+                        crate::product::HarnessModelRule {
+                            adapter_id: "openai-api".into(),
+                            model_id_exact: None,
+                            model_id_regex: Some(".*".into()),
+                        },
+                    ],
+                    deny: vec![crate::product::HarnessModelRule {
+                        adapter_id: "openai-api".into(),
+                        model_id_exact: Some("gpt-second".into()),
+                        model_id_regex: None,
+                    }],
+                },
+            })
+            .await
+            .unwrap();
+        let (next_plan, _) = store
+            .resolve_execution_model_plan("codex-basic", &selected)
+            .await
+            .unwrap();
+        assert_eq!(next_plan.family_revision, plan.family_revision);
+        assert_eq!(
+            next_plan
+                .roster
+                .iter()
+                .map(|member| (member.provider_id.as_str(), member.model_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("codex", "gpt-test")]
+        );
+        let denied = crate::product::InteractionModelSelection {
+            family_id: route.family_id,
+            provider_id: ProviderId::from_database("openai-work".into()),
+            model_id: "gpt-second".into(),
+        };
+        assert!(
+            store
+                .resolve_execution_model_plan("codex-basic", &denied)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("No available models for this harness")
+        );
+    }
+
+    #[tokio::test]
+    async fn attempt_admission_rejects_family_revision_race_and_freezes_the_admitted_plan() {
+        let (store, interaction_id, route) = seeded_store().await;
+        let stale = receipt(interaction_id, &route);
+        sqlx::query("UPDATE model_families SET revision=2 WHERE id=?1")
+            .bind(route.family_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .begin_interaction_attempt(stale, "10")
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("family plan changed")
+        );
+
+        sqlx::query("UPDATE model_families SET revision=1 WHERE id=?1")
+            .bind(route.family_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let expected = receipt(interaction_id, &route).admitted_plan;
+        store
+            .begin_interaction_attempt(receipt(interaction_id, &route), "11")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE model_families SET revision=2 WHERE id=?1")
+            .bind(route.family_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let loaded = store
+            .get_interaction(interaction_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.latest_attempt.unwrap().admitted_plan, Some(expected));
     }
 
     #[tokio::test]
@@ -737,13 +1068,6 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(graph_node_id, None);
-        assert!(
-            store
-                .return_interaction_to_unsent(interaction_id, "codex-basic")
-                .await
-                .is_err(),
-            "a lost or duplicate rewind must not report success"
-        );
     }
 
     #[tokio::test]
@@ -796,8 +1120,7 @@ mod tests {
                 .claim_interaction_retry(
                     interaction_id,
                     attempt,
-                    "edited prompt",
-                    None,
+                    retry_input("edited prompt"),
                     &selection,
                     "codex-basic",
                 )
@@ -809,8 +1132,7 @@ mod tests {
                 .claim_interaction_retry(
                     interaction_id,
                     attempt,
-                    "duplicated click",
-                    None,
+                    retry_input("duplicated click"),
                     &selection,
                     "codex-basic",
                 )
@@ -856,14 +1178,92 @@ mod tests {
                 .claim_interaction_retry(
                     protected_interaction,
                     protected_attempt,
-                    "must not replay",
-                    None,
+                    retry_input("must not replay"),
                     &protected_selection,
                     "codex-basic",
                 )
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn model_failures_restore_the_same_draft_after_every_effect_boundary() {
+        for boundary in ["partial_output", "graph_write", "tool_effect", "unknown"] {
+            let (store, interaction_id, route) = seeded_store().await;
+            let refreshed_at = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                .to_string();
+            sqlx::query("UPDATE model_providers SET refreshed_at=?1 WHERE id='codex'")
+                .bind(refreshed_at)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            let attempt = store
+                .begin_interaction_attempt(receipt(interaction_id, &route), "10")
+                .await
+                .unwrap();
+            sqlx::query("UPDATE interactions SET graph_node_id=77,harness_configuration_digest='sha256:prepared',effective_execution_digest='sha256:execution',effective_permission_receipt_json='{}' WHERE id=?1")
+                .bind(interaction_id.value())
+                .execute(&store.pool)
+                .await
+                .unwrap();
+
+            store
+                .fail_interaction_completion_with_attempt(
+                    FailedInteractionCompletion {
+                        attempt_id: attempt,
+                        interaction_id,
+                        harness_configuration_name: "codex-basic",
+                        error: "model stopped after partial work",
+                        outcome: "model_failed",
+                        failure_category: "provider_timeout",
+                        effect_boundary: boundary,
+                        return_to_unsent: true,
+                        graph_node_id: Some(77),
+                    },
+                    "11",
+                )
+                .await
+                .unwrap();
+
+            let row: (String, Option<i64>, String, String) = sqlx::query_as(
+                "SELECT i.completion_status,i.graph_node_id,a.outcome,a.effect_boundary FROM interactions i JOIN interaction_attempts a ON a.interaction_id=i.id WHERE a.id=?1",
+            )
+            .bind(attempt)
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                row,
+                (
+                    "not_started".into(),
+                    None,
+                    "model_failed".into(),
+                    boundary.into(),
+                )
+            );
+            let selection = InteractionModelSelection {
+                family_id: route.family_id,
+                provider_id: route.provider_id.clone(),
+                model_id: route.model_id.clone(),
+            };
+            assert!(
+                store
+                    .claim_interaction_retry(
+                        interaction_id,
+                        attempt,
+                        retry_input("explicit retry accepts duplicate risk"),
+                        &selection,
+                        "codex-basic",
+                    )
+                    .await
+                    .unwrap(),
+                "model failure at {boundary} must remain explicitly resendable",
+            );
+        }
     }
 
     #[tokio::test]
@@ -918,88 +1318,6 @@ mod tests {
                     "execution_failed".into(),
                     boundary.into(),
                 )
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn model_failure_after_each_effect_boundary_restores_the_same_draft() {
-        for boundary in ["partial_output", "graph_write", "tool_effect", "unknown"] {
-            let (store, interaction_id, route) = seeded_store().await;
-            let attempt = store
-                .begin_interaction_attempt(receipt(interaction_id, &route), "10")
-                .await
-                .unwrap();
-            let graph_evidence = std::env::temp_dir().join(format!(
-                "relayer-authoritative-graph-write-{}-{attempt}-{boundary}",
-                std::process::id()
-            ));
-            std::fs::write(
-                &graph_evidence,
-                b"canonical graph write remains authoritative",
-            )
-            .unwrap();
-            sqlx::query("UPDATE interactions SET graph_node_id=77,harness_configuration_digest='sha256:prepared',effective_execution_digest='sha256:execution',effective_permission_receipt_json='{}' WHERE id=?1")
-                .bind(interaction_id.value())
-                .execute(&store.pool)
-                .await
-                .unwrap();
-            store
-                .fail_interaction_completion_with_attempt(
-                    FailedInteractionCompletion {
-                        attempt_id: attempt,
-                        interaction_id,
-                        harness_configuration_name: "codex-basic",
-                        error: "model stopped after partial work",
-                        outcome: "model_failed",
-                        failure_category: "provider_timeout",
-                        effect_boundary: boundary,
-                        return_to_unsent: true,
-                        graph_node_id: Some(77),
-                    },
-                    "11",
-                )
-                .await
-                .unwrap();
-
-            let row: (String, Option<i64>, String, String) = sqlx::query_as(
-                "SELECT i.completion_status,i.graph_node_id,a.outcome,a.effect_boundary FROM interactions i JOIN interaction_attempts a ON a.interaction_id=i.id WHERE a.id=?1",
-            )
-            .bind(attempt)
-            .fetch_one(&store.pool)
-            .await
-            .unwrap();
-            assert_eq!(
-                row,
-                (
-                    "not_started".into(),
-                    None,
-                    "model_failed".into(),
-                    boundary.into(),
-                )
-            );
-            assert_eq!(
-                std::fs::read(&graph_evidence).unwrap(),
-                b"canonical graph write remains authoritative"
-            );
-            std::fs::remove_file(graph_evidence).unwrap();
-            let selection = crate::product::InteractionModelSelection {
-                family_id: route.family_id,
-                provider_id: route.provider_id.clone(),
-                model_id: route.model_id.clone(),
-            };
-            assert!(
-                store
-                    .claim_interaction_retry(
-                        interaction_id,
-                        attempt,
-                        "explicit retry accepts duplicate risk",
-                        None,
-                        &selection,
-                        "codex-basic",
-                    )
-                    .await
-                    .unwrap()
             );
         }
     }

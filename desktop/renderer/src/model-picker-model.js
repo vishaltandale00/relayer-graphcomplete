@@ -165,6 +165,23 @@ export function reconcilePickerSelection(settings, candidate) {
   return null;
 }
 
+export function modelPickerContextCandidate({
+  settings,
+  mode,
+  pinnedHarnessId,
+  currentSelection,
+  nextSelection,
+  replaceSelection = false,
+}) {
+  const harnessId = mode === "ongoing"
+    ? pinnedHarnessId
+    : nextSelection?.harnessId
+      ?? (replaceSelection ? null : currentSelection?.harnessId)
+      ?? settings?.defaults?.harnessId;
+  const candidate = replaceSelection ? nextSelection : currentSelection ?? nextSelection;
+  return { ...candidate, harnessId };
+}
+
 export function pickerSelectionIsAvailable(settings, candidate) {
   if (candidate?.harnessId && candidate.familyId == null) {
     return harnessUsesConfigurationModel(settings, candidate.harnessId);

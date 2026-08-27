@@ -6,10 +6,14 @@ use serde_json::Value;
 
 pub(crate) struct BeginInteractionAttempt<'a> {
     pub(crate) interaction_id: InteractionId,
+    pub(crate) attempt_admission_id: String,
     pub(crate) harness_name: &'a str,
     pub(crate) route: &'a ExecutionModelSelection,
+    pub(crate) model_plan: super::ExecutionModelPlan,
+    pub(crate) admitted_plan: super::AdmittedExecutionModelPlan,
     pub(crate) adapter_version: u32,
     pub(crate) expected_harness_policy: Option<&'a super::ExecutionHarnessPolicy>,
+    pub(crate) execution_lease_id: &'a str,
 }
 
 pub(crate) struct PreExecutionModelFailure<'a> {
@@ -20,6 +24,13 @@ pub(crate) struct PreExecutionModelFailure<'a> {
     pub(crate) policy: Option<&'a super::ExecutionHarnessPolicy>,
     pub(crate) adapter_version: Option<u32>,
     pub(crate) failure_category: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExecutionLeaseDebt {
+    pub(crate) attempt_id: i64,
+    pub(crate) thread_id: ThreadId,
+    pub(crate) execution_lease_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +74,8 @@ pub(crate) struct InteractionAttempt {
     pub(crate) outcome: String,
     pub(crate) failure_category: Option<String>,
     pub(crate) effect_boundary: String,
+    pub(crate) attempt_admission_id: Option<String>,
+    pub(crate) admitted_plan: Option<super::AdmittedExecutionModelPlan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

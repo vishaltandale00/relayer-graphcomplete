@@ -58,6 +58,7 @@ pub(crate) struct ApiRuntime {
     pub(crate) allow_conversation_import: bool,
     pub(crate) standalone_workspaces_directory: PathBuf,
     pub(crate) export_producer: crate::conversation_export::ExportProducer,
+    pub(crate) execution_lease_reconciler: Option<crate::app_server::ExecutionLeaseReconciler>,
 }
 
 pub(crate) fn router(
@@ -76,6 +77,7 @@ pub(crate) fn router(
             runtime.permission_catalog.clone(),
             runtime.standalone_workspaces_directory.clone(),
             approval_decisions.clone(),
+            runtime.execution_lease_reconciler.clone(),
         )
     });
     let state = ApiState {
@@ -106,9 +108,16 @@ pub(crate) fn router(
         .route("/api/permission-profiles", get(state::permission_profiles))
         .route("/api/model-settings", get(model_settings::get))
         .route(
-            "/api/provider-onboarding",
-            get(model_settings::onboarding_projection)
-                .post(model_settings::complete_onboarding),
+            "/api/provider-onboarding/projection",
+            get(model_settings::provider_onboarding_projection),
+        )
+        .route(
+            "/api/provider-onboarding/complete",
+            axum::routing::post(model_settings::complete_provider_onboarding),
+        )
+        .route(
+            "/api/provider-onboarding/status",
+            get(model_settings::provider_onboarding_status),
         )
         .route(
             "/api/model-settings/defaults",

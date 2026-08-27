@@ -14,8 +14,11 @@ import {
 } from "../desktop/renderer/src/model-family-model.js";
 import {
   createModelFamily,
+  completeProviderOnboarding,
   deleteModelFamily,
   loadModelSettings,
+  loadProviderOnboardingProjection,
+  loadProviderOnboardingStatus,
   saveModelDefaults,
   saveModelFamilyOrder,
   updateModelFamily,
@@ -218,6 +221,12 @@ describe("model settings API boundary", () => {
     await updateModelFamily(12, { name: "Coding", enabled: false, members: [] });
     await deleteModelFamily(12);
     await saveModelFamilyOrder([12, 4]);
+    await loadProviderOnboardingProjection("anthropic work");
+    await completeProviderOnboarding({
+      providerId: "anthropic-work", harnessId: "claude-basic", expectedProjectionRevision: "revision-3",
+      family: { kind: "existing", familyId: 12 },
+    });
+    await loadProviderOnboardingStatus();
 
     expect(fetchMock.mock.calls.map(([path, options]) => [path, options?.method ?? "GET"])).toEqual([
       ["/api/model-settings", "GET"],
@@ -227,7 +236,14 @@ describe("model settings API boundary", () => {
       ["/api/model-families/12", "PUT"],
       ["/api/model-families/12", "DELETE"],
       ["/api/model-families/order", "PUT"],
+      ["/api/provider-onboarding/projection?providerId=anthropic%20work", "GET"],
+      ["/api/provider-onboarding/complete", "POST"],
+      ["/api/provider-onboarding/status", "GET"],
     ]);
+    expect(JSON.parse(fetchMock.mock.calls.at(-2)[1].body)).toEqual({
+      providerId: "anthropic-work", harnessId: "claude-basic", expectedProjectionRevision: "revision-3",
+      family: { kind: "existing", familyId: 12 },
+    });
   });
 });
 

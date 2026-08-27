@@ -2092,7 +2092,7 @@ describe("evidence capture integrity", () => {
         child.once("close", (status) => resolve({ status, stdout, stderr }));
         child.stdin.end(program);
       });
-      expect(result).toMatchObject({ status: 0 });
+      expect(result, JSON.stringify(result)).toMatchObject({ status: 0 });
       expect(result.stderr).not.toContain("provider secret leaked");
       expect(result.stdout.trim().split(",").filter((name) => name !== "__CF_USER_TEXT_ENCODING")).toEqual([
         "LANG", "LC_ALL", "RELAYER_GRAPH_TOKEN", "RELAYER_GRAPH_URL", "RELAYER_NODE_ID",

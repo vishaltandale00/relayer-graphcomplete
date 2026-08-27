@@ -4,17 +4,6 @@ export function loadModelSettings() {
   return request("/api/model-settings");
 }
 
-export function loadProviderOnboardingProjection(providerId) {
-  return request(`/api/provider-onboarding?providerId=${encodeURIComponent(providerId)}`);
-}
-
-export function completeProviderOnboarding(input) {
-  return request("/api/provider-onboarding", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
 export function saveModelDefaults(defaults) {
   return request("/api/model-settings/defaults", {
     method: "PUT",
@@ -31,6 +20,21 @@ export function validateModelSelection(selection) {
 
 export function loadDefaultModelSelection(harnessId) {
   return request(`/api/model-selection/default?harnessId=${encodeURIComponent(harnessId)}`);
+}
+
+export function loadProviderOnboardingProjection(providerId) {
+  return request(`/api/provider-onboarding/projection?providerId=${encodeURIComponent(providerId)}`);
+}
+
+export function completeProviderOnboarding(intent) {
+  return request("/api/provider-onboarding/complete", {
+    method: "POST",
+    body: JSON.stringify(intent),
+  });
+}
+
+export function loadProviderOnboardingStatus() {
+  return request("/api/provider-onboarding/status");
 }
 
 export function createModelFamily(family) {

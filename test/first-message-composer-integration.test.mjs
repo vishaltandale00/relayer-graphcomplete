@@ -44,7 +44,11 @@ describe("first-message composer integration", () => {
             adapterId: "codex-subscription",
             accessContract: "managed-runtime@1",
           },
-          descriptor: { implementationVersion: "1" },
+          descriptor: {
+            adapterId: "codex-subscription",
+            accessContract: "managed-runtime@1",
+            implementationVersion: "1",
+          },
           runtime: {
             async executionAccess() {
               return { kind: "managed-runtime", environment: {} };

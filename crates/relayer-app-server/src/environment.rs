@@ -1554,15 +1554,15 @@ fn hash_snapshot_file_with_before_open(
 ) -> Result<(), GitRunError> {
     use std::io::Read as _;
     remaining_until(deadline)?;
-    let before = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
+    let before = match snapshot_file_state(path) {
+        Ok(state) => state,
         Err(error) if !required && error.kind() == io::ErrorKind::NotFound => {
             hasher.update(b"missing");
             return Ok(());
         }
         Err(error) => return Err(GitRunError::Output(error)),
     };
-    if !before.file_type().is_file() || before.len() > MAX_INDEX_BYTES {
+    if !before.metadata.file_type().is_file() || before.metadata.len() > MAX_INDEX_BYTES {
         return Err(GitRunError::Output(io::Error::other(
             "Git index snapshot is not a bounded regular file",
         )));
@@ -1587,8 +1587,8 @@ fn hash_snapshot_file_with_before_open(
         hasher.update(&buffer[..count]);
     }
     remaining_until(deadline)?;
-    let after = std::fs::symlink_metadata(path).map_err(GitRunError::Output)?;
-    if !after.file_type().is_file() || !same_snapshot_file(&before, &after) {
+    let after = snapshot_file_state(path).map_err(GitRunError::Output)?;
+    if !after.metadata.file_type().is_file() || !same_snapshot_file(&before, &after) {
         return Err(GitRunError::Output(io::Error::other(
             "Git index snapshot changed while it was hashed",
         )));
@@ -1775,13 +1775,13 @@ fn copy_snapshot_file(
 ) -> Result<(), GitRunError> {
     use std::io::{Read as _, Write as _};
     remaining_until(deadline)?;
-    let before = match std::fs::symlink_metadata(source) {
-        Ok(metadata) => metadata,
+    let before = match snapshot_file_state(source) {
+        Ok(state) => state,
         Err(error) if !required && error.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(GitRunError::Output(error)),
     };
-    if !before.file_type().is_file() || before.len() > maximum {
-        return Err(if before.len() > maximum {
+    if !before.metadata.file_type().is_file() || before.metadata.len() > maximum {
+        return Err(if before.metadata.len() > maximum {
             GitRunError::OutputTooLarge
         } else {
             GitRunError::Output(io::Error::other(
@@ -1811,8 +1811,8 @@ fn copy_snapshot_file(
     }
     output.flush().map_err(GitRunError::Output)?;
     remaining_until(deadline)?;
-    let after = std::fs::symlink_metadata(source).map_err(GitRunError::Output)?;
-    if !after.file_type().is_file() || !same_snapshot_file(&before, &after) {
+    let after = snapshot_file_state(source).map_err(GitRunError::Output)?;
+    if !after.metadata.file_type().is_file() || !same_snapshot_file(&before, &after) {
         return Err(GitRunError::Output(io::Error::other(
             "Git snapshot storage changed while it was copied",
         )));
@@ -1822,9 +1822,46 @@ fn copy_snapshot_file(
 
 fn open_snapshot_file(
     path: &Path,
-    before: &std::fs::Metadata,
+    before: &SnapshotFileState,
     maximum: u64,
 ) -> Result<std::fs::File, GitRunError> {
+    let opened = snapshot_file_state(path).map_err(GitRunError::Output)?;
+    if !opened.metadata.is_file()
+        || opened.metadata.len() > maximum
+        || !same_snapshot_file(before, &opened)
+    {
+        return Err(GitRunError::Output(io::Error::other(
+            "Git snapshot storage changed before it was opened",
+        )));
+    }
+    Ok(opened.file)
+}
+
+struct SnapshotFileState {
+    file: std::fs::File,
+    metadata: std::fs::Metadata,
+    identity: Option<SnapshotFileIdentity>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SnapshotFileIdentity {
+    #[cfg(unix)]
+    Unix { device: u64, inode: u64 },
+    #[cfg(windows)]
+    Windows {
+        volume: u64,
+        file_id: WindowsSnapshotFileId,
+    },
+}
+
+#[cfg(any(windows, test))]
+type WindowsSnapshotFileId = [u8; 16];
+
+#[cfg(windows)]
+const _: [(); 16] =
+    [(); std::mem::size_of::<windows_sys::Win32::Storage::FileSystem::FILE_ID_128>()];
+
+fn snapshot_file_state(path: &Path) -> io::Result<SnapshotFileState> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -1839,53 +1876,114 @@ fn open_snapshot_file(
         use std::os::windows::fs::OpenOptionsExt as _;
         options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
     }
-    let file = options.open(path).map_err(GitRunError::Output)?;
-    let opened = file.metadata().map_err(GitRunError::Output)?;
-    if !opened.is_file() || opened.len() > maximum || !same_snapshot_file(before, &opened) {
-        return Err(GitRunError::Output(io::Error::other(
-            "Git snapshot storage changed before it was opened",
-        )));
-    }
-    Ok(file)
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    let identity = snapshot_file_identity(&file, &metadata)?;
+    Ok(SnapshotFileState {
+        file,
+        metadata,
+        identity,
+    })
 }
 
-fn same_snapshot_file(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
-    if left.len() != right.len() || left.modified().ok() != right.modified().ok() {
+fn same_snapshot_file(left: &SnapshotFileState, right: &SnapshotFileState) -> bool {
+    if left.metadata.len() != right.metadata.len()
+        || left.metadata.modified().ok() != right.metadata.modified().ok()
+    {
         return false;
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::MetadataExt as _;
-        left.dev() == right.dev() && left.ino() == right.ino()
+        matches!((left.identity, right.identity), (Some(left), Some(right)) if left == right)
     }
     #[cfg(windows)]
     {
-        use std::os::windows::fs::MetadataExt as _;
+        let (
+            Some(SnapshotFileIdentity::Windows {
+                volume: left_volume,
+                file_id: left_file_id,
+            }),
+            Some(SnapshotFileIdentity::Windows {
+                volume: right_volume,
+                file_id: right_file_id,
+            }),
+        ) = (left.identity, right.identity)
+        else {
+            return false;
+        };
         same_windows_snapshot_identity(
-            left.volume_serial_number(),
-            left.file_index(),
-            right.volume_serial_number(),
-            right.file_index(),
+            Some(left_volume),
+            Some(left_file_id),
+            Some(right_volume),
+            Some(right_file_id),
         )
     }
     #[cfg(not(any(unix, windows)))]
     {
-        // Platforms without a stable filesystem identity API must fail closed.
         false
+    }
+}
+
+fn snapshot_file_identity(
+    file: &std::fs::File,
+    metadata: &std::fs::Metadata,
+) -> io::Result<Option<SnapshotFileIdentity>> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let _ = file;
+        Ok(Some(SnapshotFileIdentity::Unix {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        }))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle as _;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx,
+        };
+
+        let _ = metadata;
+        let mut information = FILE_ID_INFO::default();
+        // SAFETY: the raw handle is borrowed from `file` and remains valid for the
+        // duration of the call. The output pointer and byte count describe exactly
+        // one live FILE_ID_INFO value, as required by the FileIdInfo query class.
+        if unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle(),
+                FileIdInfo,
+                (&raw mut information).cast(),
+                std::mem::size_of::<FILE_ID_INFO>() as u32,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Some(SnapshotFileIdentity::Windows {
+            volume: information.VolumeSerialNumber,
+            file_id: information.FileId.Identifier,
+        }))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (file, metadata);
+        // Platforms without a stable filesystem identity API must fail closed.
+        Ok(None)
     }
 }
 
 #[cfg(any(windows, test))]
 fn same_windows_snapshot_identity(
-    left_volume: Option<u32>,
-    left_index: Option<u64>,
-    right_volume: Option<u32>,
-    right_index: Option<u64>,
+    left_volume: Option<u64>,
+    left_file_id: Option<WindowsSnapshotFileId>,
+    right_volume: Option<u64>,
+    right_file_id: Option<WindowsSnapshotFileId>,
 ) -> bool {
     matches!(
-        (left_volume, left_index, right_volume, right_index),
-        (Some(left_volume), Some(left_index), Some(right_volume), Some(right_index))
-            if left_volume == right_volume && left_index == right_index
+        (left_volume, left_file_id, right_volume, right_file_id),
+        (Some(left_volume), Some(left_file_id), Some(right_volume), Some(right_file_id))
+            if left_volume == right_volume && left_file_id == right_file_id
     )
 }
 
@@ -4786,31 +4884,53 @@ mod tests {
     }
 
     #[test]
-    fn windows_snapshot_identity_requires_matching_volume_and_file_index() {
+    fn windows_snapshot_identity_requires_matching_volume_and_full_file_id() {
+        let file_id = [42; 16];
+        let mut other_file_id = file_id;
+        other_file_id[15] = 43;
+        assert_eq!(std::mem::size_of::<WindowsSnapshotFileId>(), 16);
         assert!(same_windows_snapshot_identity(
             Some(7),
-            Some(42),
+            Some(file_id),
             Some(7),
-            Some(42)
+            Some(file_id)
         ));
         assert!(!same_windows_snapshot_identity(
             Some(7),
-            Some(42),
+            Some(file_id),
             Some(8),
-            Some(42)
+            Some(file_id)
         ));
         assert!(!same_windows_snapshot_identity(
             Some(7),
-            Some(42),
+            Some(file_id),
             Some(7),
-            Some(43)
+            Some(other_file_id)
         ));
         assert!(!same_windows_snapshot_identity(
             Some(7),
-            Some(42),
+            Some(file_id),
             None,
-            Some(42)
+            Some(file_id)
         ));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_snapshot_identity_comes_from_the_open_file_handle() {
+        let directory = tempfile::tempdir().unwrap();
+        let first_path = directory.path().join("first");
+        let second_path = directory.path().join("second");
+        std::fs::write(&first_path, b"same bytes").unwrap();
+        std::fs::write(&second_path, b"same bytes").unwrap();
+
+        let first = snapshot_file_state(&first_path).unwrap();
+        let reopened = snapshot_file_state(&first_path).unwrap();
+        let second = snapshot_file_state(&second_path).unwrap();
+
+        assert!(first.identity.is_some());
+        assert_eq!(first.identity, reopened.identity);
+        assert_ne!(first.identity, second.identity);
     }
 
     #[test]

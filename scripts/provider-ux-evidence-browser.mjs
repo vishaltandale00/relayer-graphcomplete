@@ -44,7 +44,7 @@ const connectedDefinitions = [
   },
 ];
 
-const onboardingScenes = new Set(["onboarding", "endpoint", "family", "alternate-harness", "loading", "error", "authorization", "flow"]);
+const onboardingScenes = new Set(["onboarding", "endpoint", "family", "alternate-harness", "loading", "invalid", "error", "no-compatible", "authorization", "flow"]);
 let definitions = onboardingScenes.has(scene) ? [] : structuredClone(connectedDefinitions);
 let onboardingComplete = !onboardingScenes.has(scene);
 if (scene === "long-label") {
@@ -54,6 +54,10 @@ if (scene === "unavailable") {
   definitions[0].connected = false;
   delete definitions[0].lifecycleState;
 }
+if (scene === "removed") {
+  definitions[0].lifecycleState = "removal_pending";
+}
+window.__providerEvidence = { get definitions() { return definitions; } };
 const listeners = new Set();
 const noopSubscription = (callback) => {
   listeners.add(callback);
@@ -167,18 +171,39 @@ async function prepareScene() {
     document.body.dataset.evidenceReady = "true";
     return;
   }
-  if (["endpoint", "family", "loading", "error"].includes(scene)) {
+  if (["endpoint", "family", "loading", "invalid", "error", "no-compatible"].includes(scene)) {
     (await waitFor('[data-provider-adapter="openai-api"]')).click();
     const endpoint = await waitFor("#providerField-endpoint");
     endpoint.value = "https://gateway.example.com/openai/v1";
     endpoint.setAttribute("value", endpoint.value);
     endpoint.dispatchEvent(new Event("input", { bubbles: true }));
   }
-  if (["family", "loading", "error"].includes(scene)) {
+  if (scene === "alternate-harness") {
+    (await waitFor('[data-provider-adapter="claude-subscription"]')).click();
+    document.querySelector("#providerSetupForm").requestSubmit();
+    await waitFor("#providerFamilyStep:not(.hidden)");
+    (await waitFor('[data-onboarding-harness="claude-basic"]')).click();
+    (await waitFor('[data-onboarding-family-kind="create"]')).click();
+    await waitFor('[data-onboarding-member-model="claude-sonnet-4"]');
+  }
+  if (["family", "loading", "error", "no-compatible"].includes(scene)) {
     document.querySelector("#providerField-label").value = "OpenAI Work";
     document.querySelector('[data-provider-field="api-key"]').value = "evidence-secret";
     document.querySelector("#providerSetupForm").requestSubmit();
-    if (scene === "family") await waitFor("#providerFamilyStep:not(.hidden)");
+    if (["family", "no-compatible"].includes(scene)) {
+      await waitForCondition(
+        () => document.querySelector("#providerFamilyStep:not(.hidden)")
+          || document.querySelector("#authStatus.error")?.textContent,
+        "default family step",
+      );
+      const setupError = document.querySelector("#authStatus.error")?.textContent;
+      if (setupError) throw new Error(`Family setup failed: ${setupError}`);
+      if (scene === "family") {
+        (await waitFor('[data-onboarding-harness="universal-coding"]')).click();
+        (await waitFor('[data-onboarding-family-kind="create"]')).click();
+        await waitFor('[data-onboarding-member-model="gpt-5.2"]');
+      }
+    }
     if (scene === "loading") {
       await waitForCondition(
         () => document.querySelector("#authStatus")?.textContent.includes("Connecting and discovering models"),
@@ -192,12 +217,14 @@ async function prepareScene() {
       );
     }
   }
-  if (scene === "alternate-harness") {
-    (await waitFor('[data-provider-adapter="claude-subscription"]')).click();
+  if (scene === "invalid") {
+    const endpoint = await waitFor("#providerField-endpoint");
+    endpoint.value = "http://example.com/v1";
+    endpoint.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector('[data-provider-field="api-key"]').value = "";
     document.querySelector("#providerSetupForm").requestSubmit();
-    await waitFor("#providerFamilyStep:not(.hidden)");
-    (await waitFor('[data-onboarding-harness="claude-basic"]')).click();
-    (await waitFor('[data-onboarding-model="claude-sonnet-4"]')).click();
+    await waitFor('[aria-invalid="true"]');
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   }
   if (scene === "authorization") {
     (await waitFor('[data-provider-adapter="claude-subscription"]')).click();
@@ -207,14 +234,14 @@ async function prepareScene() {
       "authorization pending status",
     );
   }
-  if (["providers", "families", "harnesses", "light", "narrow", "long-label", "unavailable"].includes(scene)) {
+  if (["providers", "families", "harnesses", "light", "narrow", "long-label", "unavailable", "stale", "removed"].includes(scene)) {
     await waitFor("#appShell:not(.hidden)");
     await waitForCondition(
       () => document.querySelector("#currentFamilyName")?.textContent === "Work coding",
       "model settings",
     );
     (await waitFor("#settingsButton")).click();
-    const tab = scene === "families" ? "models" : scene === "harnesses" ? "harnesses" : "providers";
+    const tab = ["families", "stale"].includes(scene) ? "models" : scene === "harnesses" ? "harnesses" : "providers";
     (await waitFor(`[data-settings-tab="${tab}"]`)).click();
     document.activeElement?.blur();
   }

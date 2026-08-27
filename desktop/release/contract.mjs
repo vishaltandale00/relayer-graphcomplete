@@ -128,6 +128,10 @@ export function resolveDesktopReleaseContract({
   }
 
   if (!release) {
+    const normalizedDevelopmentCommit = String(sourceCommit || "").trim().toLowerCase();
+    if (normalizedDevelopmentCommit && !GIT_SHA_PATTERN.test(normalizedDevelopmentCommit)) {
+      throw new Error("Desktop development evidence requires a full 40-character source commit SHA.");
+    }
     return Object.freeze({
       release: false,
       artifactMode: "development",
@@ -146,7 +150,7 @@ export function resolveDesktopReleaseContract({
       providerChannel: null,
       manifestName: null,
       updateBaseUrl: null,
-      sourceCommit: null,
+      sourceCommit: normalizedDevelopmentCommit || null,
       signingIdentity: null,
       signingMode: "unsigned",
       notarizationMode: "disabled",
@@ -255,18 +259,18 @@ export async function loadDesktopReleaseContract({
 } = {}) {
   const packageMetadata = JSON.parse(await readFile(resolve(desktopRoot, "package.json"), "utf8"));
   const release = value(environment, "RELAYER_DESKTOP_RELEASE") === "1";
+  const declaredCommit = value(environment, "RELAYER_DESKTOP_SOURCE_COMMIT");
   let sourceCommit = null;
-  if (release) {
+  if (release || declaredCommit) {
     const repositoryRoot = resolve(desktopRoot, "..");
     const [{ stdout: commitOutput }, { stdout: statusOutput }] = await Promise.all([
       execute("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot, encoding: "utf8" }),
       execute("git", ["status", "--porcelain", "--untracked-files=normal"], { cwd: repositoryRoot, encoding: "utf8" }),
     ]);
     if (String(statusOutput).trim()) {
-      throw new Error("Desktop releases must be built from a clean Git worktree.");
+      throw new Error("Source-bound desktop builds must be built from a clean Git worktree.");
     }
     const checkedOutCommit = String(commitOutput).trim();
-    const declaredCommit = value(environment, "RELAYER_DESKTOP_SOURCE_COMMIT");
     if (declaredCommit && declaredCommit !== checkedOutCommit) {
       throw new Error("RELAYER_DESKTOP_SOURCE_COMMIT must match the checked-out Git commit.");
     }

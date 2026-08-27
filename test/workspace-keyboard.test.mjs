@@ -9,6 +9,7 @@ import {
   applyComposerCapabilities,
   applyContextEditor,
   bindComposerKeydown,
+  clearSubmittedComposerDraft,
   composerDisabledForState,
   composerDraftMatchesSubmission,
   composerDraftScopeKey,
@@ -367,6 +368,47 @@ describe("product workspace keyboard behavior", () => {
     expect(transition.promptValue).toBe("edited retry A");
     expect(state.drafts.get(composerDraftScopeKey("thread-b", "interaction-b")))
       .toEqual({ promptValue: "draft B", restoredDraftInteractionId: null });
+  });
+
+  it("does not restore a durably sent inactive draft after returning to its thread", () => {
+    let transition = transitionComposerDraftScope(createComposerDraftScopeState(), {
+      threadId: "thread-a",
+      interactionId: "interaction-a",
+      currentPromptValue: "",
+      restoredDraft: { text: "retry A" },
+    });
+    const submittedScopeKey = transition.state.activeScopeKey;
+    transition = transitionComposerDraftScope(transition.state, {
+      threadId: "thread-b",
+      interactionId: "interaction-b",
+      currentPromptValue: "retry A",
+    });
+    const cleared = clearSubmittedComposerDraft(
+      transition.state,
+      submittedScopeKey,
+      "retry A",
+      "draft B",
+    );
+    transition = transitionComposerDraftScope(cleared, {
+      threadId: "thread-a",
+      interactionId: "interaction-a",
+      currentPromptValue: "draft B",
+    });
+    expect(transition.promptValue).toBe("");
+
+    const edited = transitionComposerDraftScope(transition.state, {
+      threadId: "thread-a",
+      interactionId: "interaction-a",
+      currentPromptValue: "",
+      restoredDraft: { text: "retry A again" },
+    });
+    const preserved = clearSubmittedComposerDraft(
+      edited.state,
+      edited.state.activeScopeKey,
+      "retry A again",
+      "user edited A while the send settled",
+    );
+    expect(preserved.drafts.get(edited.state.activeScopeKey).promptValue).toBe("retry A again");
   });
 
   it("never exposes another interaction's restored prompt as the active send value", () => {

@@ -1,18 +1,22 @@
 use super::SqliteProductStore;
 use crate::product::{
-    CatalogError, CreateModelFamilyCommand, ExecutionHarnessPolicy, FamilyPolicyReference,
+    CatalogError, CompleteProviderOnboardingCommand, CreateModelFamilyCommand,
+    ExecutionHarnessPolicy, ExecutionModelPlan, ExecutionModelRoute, FamilyPolicyReference,
     HarnessModelCompatibility, HarnessModelRule, HarnessModelRules, ManagedFamilyPolicy,
     ModelFamily, ModelFamilyId, ModelFamilyKind, ModelFamilyMember, ModelSettings,
     ModelSettingsDefaults, ProductHarness, Provider, ProviderCatalogSnapshot, ProviderDefinition,
-    ProviderId, ProviderModel, ReorderModelFamiliesCommand, RuntimeProductHarness,
-    SystemFamilySnapshot, UnavailableReason, UpdateHarnessModelRulesCommand,
+    ProviderId, ProviderModel, ProviderOnboardingCompletion, ProviderOnboardingFamily,
+    ProviderOnboardingFamilyIntent, ProviderOnboardingHarness, ProviderOnboardingManagedFamily,
+    ProviderOnboardingModel, ProviderOnboardingProjection, ProviderOnboardingProvider,
+    ProviderOnboardingResolution, ProviderOnboardingStatus, ReorderModelFamiliesCommand,
+    RuntimeProductHarness, SystemFamilySnapshot, UnavailableReason, UpdateHarnessModelRulesCommand,
     UpdateModelFamilyCommand, UpdateModelSettingsDefaultsCommand, ValidateModelSelectionCommand,
     validate_family,
 };
 use crate::storage::StorageError;
 use sha2::{Digest, Sha256};
 use sqlx::{Row, SqliteConnection, SqlitePool, sqlite::SqliteRow};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 impl SqliteProductStore {
     pub(crate) async fn update_harness_model_rules(
@@ -206,8 +210,14 @@ impl SqliteProductStore {
             && !system_family.model_ids.is_empty()
             && let Some(managed_policy) = managed_policy
         {
-            replace_system_family(&mut transaction, snapshot, system_family, managed_policy)
-                .await?;
+            replace_system_family(
+                &mut transaction,
+                snapshot,
+                system_family,
+                managed_policy,
+                false,
+            )
+            .await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -243,12 +253,17 @@ impl SqliteProductStore {
                 model_rules: None,
                 execution_access_contracts: Vec::new(),
                 family_policy: None,
+                runtime_available: false,
+                unavailable_reason: Some(UnavailableReason {
+                    code: "harness_unavailable".into(),
+                    message: "The harness runtime is unavailable.".into(),
+                }),
             });
         }
         harnesses.sort_by(|left, right| left.id.cmp(&right.id));
         harnesses.dedup_by(|left, right| left.id == right.id);
         for harness in harnesses {
-            let runtime_present = runtime_harnesses.iter().any(|item| item.id == harness.id);
+            let runtime_present = harness.runtime_available;
             let model_selecting =
                 harness.model_rules.is_some() || !harness.model_compatibility.is_empty();
             let available = runtime_present
@@ -290,8 +305,8 @@ impl SqliteProductStore {
             .bind(&harness.id)
             .bind(harness_label(&harness.id))
             .bind(available)
-            .bind((!available).then_some(if runtime_present { "harness_access_contract_missing" } else { "harness_unavailable" }))
-            .bind((!available).then_some(if runtime_present { "The model-selecting harness has no execution access contract." } else { "The harness runtime is unavailable." }))
+            .bind((!available).then_some(if runtime_present { "harness_access_contract_missing" } else { harness.unavailable_reason.as_ref().map_or("harness_unavailable", |reason| reason.code.as_str()) }))
+            .bind((!available).then_some(if runtime_present { "The model-selecting harness has no execution access contract." } else { harness.unavailable_reason.as_ref().map_or("The harness runtime is unavailable.", |reason| reason.message.as_str()) }))
             .bind(effective_revision)
             .bind(&effective_digest)
             .bind(harness.model_rules.is_some())
@@ -390,8 +405,9 @@ impl SqliteProductStore {
         harness_id: &str,
     ) -> Result<ExecutionHarnessPolicy, StorageError> {
         let mut transaction = self.pool.begin().await?;
-        let (revision, digest, rules_present): (i64, String, bool) = sqlx::query_as(
-            "SELECT configuration_revision,configuration_digest,model_rules_present FROM product_harnesses WHERE configuration_name=?1 AND product_visible=1 AND available=1",
+        let (revision, digest, rules_present, access_contracts_json):
+            (i64, String, bool, String) = sqlx::query_as(
+            "SELECT configuration_revision,configuration_digest,model_rules_present,execution_access_contracts_json FROM product_harnesses WHERE configuration_name=?1 AND product_visible=1 AND available=1",
         )
         .bind(harness_id)
         .fetch_optional(&mut *transaction)
@@ -435,7 +451,21 @@ impl SqliteProductStore {
             configuration_revision: revision as u32,
             configuration_digest: digest,
             model_rules: rules_present.then_some(rules),
+            execution_access_contracts: serde_json::from_str(&access_contracts_json)
+                .map_err(|error| StorageError::Serialization(error.to_string()))?,
         })
+    }
+
+    pub(crate) async fn resolve_execution_model_plan(
+        &self,
+        harness_id: &str,
+        selection: &crate::product::InteractionModelSelection,
+    ) -> Result<(ExecutionModelPlan, crate::product::ExecutionModelSelection), StorageError> {
+        let mut transaction = self.pool.begin().await?;
+        let resolved =
+            resolve_execution_model_plan_on(&mut transaction, harness_id, selection).await?;
+        transaction.commit().await?;
+        Ok(resolved)
     }
 
     pub(crate) async fn update_model_settings_defaults(
@@ -599,8 +629,14 @@ impl SqliteProductStore {
             && !system_family.model_ids.is_empty()
             && let Some(managed_policy) = managed_policy
         {
-            replace_system_family(&mut transaction, snapshot, system_family, managed_policy)
-                .await?;
+            replace_system_family(
+                &mut transaction,
+                snapshot,
+                system_family,
+                managed_policy,
+                true,
+            )
+            .await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -736,103 +772,6 @@ impl SqliteProductStore {
         validate_model_selection_on(&mut connection, command).await
     }
 
-    pub(crate) async fn provider_onboarding_model_compatible(
-        &self,
-        harness_id: &str,
-        provider_id: &ProviderId,
-        model_id: &str,
-    ) -> Result<bool, StorageError> {
-        let mut connection = self.pool.acquire().await?;
-        match validate_onboarding_model_on(&mut connection, harness_id, provider_id, model_id).await
-        {
-            Ok(()) => Ok(true),
-            Err(StorageError::Catalog(_)) => Ok(false),
-            Err(error) => Err(error),
-        }
-    }
-
-    pub(crate) async fn complete_provider_onboarding(
-        &self,
-        command: &crate::product::CompleteProviderOnboardingCommand,
-    ) -> Result<(ModelSettingsDefaults, ModelFamily), StorageError> {
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        validate_onboarding_model_on(
-            &mut transaction,
-            &command.harness_id,
-            &command.provider_id,
-            &command.model_id,
-        )
-        .await?;
-        let existing: Option<i64> = sqlx::query_scalar(
-            "SELECT f.id FROM product_model_preferences preferences JOIN model_families f ON f.id=preferences.default_family_id WHERE preferences.singleton=1 AND preferences.default_harness_configuration_name=?1 AND preferences.default_provider_id=?2 AND f.kind='custom' AND f.lifecycle_state='active' AND (SELECT COUNT(*) FROM model_family_members member WHERE member.family_id=f.id)=1 AND EXISTS(SELECT 1 FROM model_family_members member WHERE member.family_id=f.id AND member.provider_id=?2 AND member.model_id=?3)",
-        )
-        .bind(&command.harness_id)
-        .bind(command.provider_id.as_str())
-        .bind(&command.model_id)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if let Some(family_id) = existing {
-            let defaults = load_defaults(&mut transaction).await?;
-            let family = load_family(&mut transaction, ModelFamilyId::from_database(family_id))
-                .await?
-                .ok_or(sqlx::Error::RowNotFound)?;
-            transaction.commit().await?;
-            return Ok((defaults, family));
-        }
-        let family_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM model_families")
-            .fetch_one(&mut *transaction)
-            .await?;
-        let mut family_name = command.family_name.clone();
-        for suffix in 2..=(family_count + 2) {
-            let available = !sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(SELECT 1 FROM model_families WHERE lower(name)=lower(?1))",
-            )
-            .bind(&family_name)
-            .fetch_one(&mut *transaction)
-            .await?;
-            if available {
-                break;
-            }
-            family_name = format!("{} ({suffix})", command.family_name);
-        }
-        let position: i64 =
-            sqlx::query_scalar("SELECT COALESCE(MAX(position),-1)+1 FROM model_families")
-                .fetch_one(&mut *transaction)
-                .await?;
-        let result = sqlx::query(
-            "INSERT INTO model_families(name,kind,system_key,enabled,position,revision,lifecycle_state) VALUES (?1,'custom',NULL,1,?2,1,'active')",
-        )
-        .bind(&family_name)
-        .bind(position)
-        .execute(&mut *transaction)
-        .await?;
-        let family_id = ModelFamilyId::from_database(result.last_insert_rowid());
-        replace_family_members(
-            &mut transaction,
-            family_id,
-            &[ModelFamilyMember {
-                provider_id: command.provider_id.clone(),
-                model_id: command.model_id.clone(),
-                position: 0,
-            }],
-        )
-        .await?;
-        sqlx::query(
-            "UPDATE product_model_preferences SET default_harness_configuration_name=?1,default_provider_id=?2,default_family_id=?3,defaults_modified=1 WHERE singleton=1",
-        )
-        .bind(&command.harness_id)
-        .bind(command.provider_id.as_str())
-        .bind(family_id.value())
-        .execute(&mut *transaction)
-        .await?;
-        let defaults = load_defaults(&mut transaction).await?;
-        let family = load_family(&mut transaction, family_id)
-            .await?
-            .ok_or(sqlx::Error::RowNotFound)?;
-        transaction.commit().await?;
-        Ok((defaults, family))
-    }
-
     pub(crate) async fn validate_execution_model_selection(
         &self,
         harness_id: &str,
@@ -841,6 +780,518 @@ impl SqliteProductStore {
         let mut connection = self.pool.acquire().await?;
         validate_execution_model_selection_on(&mut connection, harness_id, selection).await
     }
+
+    pub(crate) async fn provider_onboarding_projection(
+        &self,
+        provider_id: &ProviderId,
+        app_default_harness_id: &str,
+        permission_available_harnesses: &HashSet<String>,
+    ) -> Result<ProviderOnboardingProjection, StorageError> {
+        let mut transaction = self.pool.begin().await?;
+        let projection = provider_onboarding_projection_on(
+            &mut transaction,
+            provider_id,
+            app_default_harness_id,
+            permission_available_harnesses,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(projection)
+    }
+
+    pub(crate) async fn complete_provider_onboarding(
+        &self,
+        command: &CompleteProviderOnboardingCommand,
+        app_default_harness_id: &str,
+        permission_available_harnesses: &HashSet<String>,
+    ) -> Result<ProviderOnboardingCompletion, StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let projection = provider_onboarding_projection_on(
+            &mut transaction,
+            &command.provider_id,
+            app_default_harness_id,
+            permission_available_harnesses,
+        )
+        .await?;
+        if projection.projection_revision != command.expected_projection_revision {
+            return Err(StorageError::Catalog(CatalogError::invalid(
+                "onboarding_projection_conflict",
+                "Provider, harness, or model-family settings changed. Review the current choices before finishing setup.",
+            )));
+        }
+        let harness = projection
+            .harnesses
+            .iter()
+            .find(|harness| harness.id == command.harness_id)
+            .filter(|harness| harness.selectable)
+            .ok_or_else(|| {
+                StorageError::Catalog(CatalogError::invalid(
+                    "onboarding_harness_incompatible",
+                    "The selected harness is not currently compatible with this provider.",
+                ))
+            })?;
+        let family_id = match &command.family {
+            ProviderOnboardingFamilyIntent::Existing { family_id } => harness
+                .existing_custom_families
+                .iter()
+                .chain(&harness.existing_managed_families)
+                .find(|family| family.id == *family_id)
+                .map(|family| family.id)
+                .ok_or_else(|| {
+                    StorageError::Catalog(CatalogError::invalid(
+                        "onboarding_family_incompatible",
+                        "The selected family is no longer resolvable by this harness and provider.",
+                    ))
+                })?,
+            ProviderOnboardingFamilyIntent::Managed {
+                policy_id,
+                policy_version,
+            } => {
+                let candidate = harness
+                    .managed_family_candidate
+                    .as_ref()
+                    .filter(|candidate| {
+                        candidate.policy_id == *policy_id
+                            && candidate.policy_version == *policy_version
+                    })
+                    .ok_or_else(|| {
+                        StorageError::Catalog(CatalogError::invalid(
+                            "onboarding_managed_family_changed",
+                            "The managed family preview changed. Review it before finishing setup.",
+                        ))
+                    })?;
+                let mut snapshot =
+                    provider_catalog_snapshot_on(&mut transaction, &command.provider_id).await?;
+                snapshot.system_family = Some(SystemFamilySnapshot {
+                    key: format!("{}@{}", candidate.policy_id, candidate.policy_version),
+                    name: candidate.name.clone(),
+                    model_ids: candidate
+                        .members
+                        .iter()
+                        .map(|member| member.model_id.clone())
+                        .collect(),
+                });
+                replace_system_family(
+                    &mut transaction,
+                    &snapshot,
+                    snapshot
+                        .system_family
+                        .as_ref()
+                        .expect("managed onboarding candidate supplies a family"),
+                    &FamilyPolicyReference {
+                        id: policy_id.clone(),
+                        version: *policy_version,
+                    },
+                    false,
+                )
+                .await?
+            }
+            ProviderOnboardingFamilyIntent::Create { name, members } => {
+                let normalized_name = validate_family(name, members)?;
+                let eligible = harness
+                    .eligible_models
+                    .iter()
+                    .map(|model| (model.provider_id.as_str(), model.model_id.as_str()))
+                    .collect::<HashSet<_>>();
+                if members.iter().any(|member| {
+                    member.provider_id != command.provider_id
+                        || !eligible
+                            .contains(&(member.provider_id.as_str(), member.model_id.as_str()))
+                }) {
+                    return Err(StorageError::Catalog(CatalogError::invalid(
+                        "onboarding_family_member_incompatible",
+                        "Every new-family member must be an explicitly selected eligible model from this provider.",
+                    )));
+                }
+                let duplicate: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM model_families WHERE lifecycle_state='active' AND lower(name)=lower(?1))",
+                )
+                .bind(&normalized_name)
+                .fetch_one(&mut *transaction)
+                .await?;
+                if duplicate {
+                    return Err(StorageError::Catalog(CatalogError::invalid(
+                        "model_family_name_duplicate",
+                        "A model family with this name already exists.",
+                    )));
+                }
+                let position: i64 =
+                    sqlx::query_scalar("SELECT COALESCE(MAX(position),-1)+1 FROM model_families")
+                        .fetch_one(&mut *transaction)
+                        .await?;
+                let id = ModelFamilyId::from_database(
+                    sqlx::query("INSERT INTO model_families(name,kind,system_key,enabled,position,revision,lifecycle_state) VALUES (?1,'custom',NULL,1,?2,1,'active')")
+                        .bind(normalized_name)
+                        .bind(position)
+                        .execute(&mut *transaction)
+                        .await?
+                        .last_insert_rowid(),
+                );
+                replace_family_members(&mut transaction, id, members).await?;
+                id
+            }
+        };
+        let resolution = onboarding_resolution_on(
+            &mut transaction,
+            &command.harness_id,
+            &command.provider_id,
+            family_id,
+        )
+        .await?;
+        sqlx::query("UPDATE product_model_preferences SET default_harness_configuration_name=?1,default_provider_id=?2,default_family_id=?3,defaults_modified=1 WHERE singleton=1")
+            .bind(&command.harness_id)
+            .bind(command.provider_id.as_str())
+            .bind(family_id.value())
+            .execute(&mut *transaction)
+            .await?;
+        let defaults = load_defaults(&mut transaction).await?;
+        transaction.commit().await?;
+        Ok(ProviderOnboardingCompletion {
+            defaults,
+            resolution,
+        })
+    }
+
+    pub(crate) async fn provider_onboarding_status(
+        &self,
+        permission_available_harnesses: &HashSet<String>,
+    ) -> Result<ProviderOnboardingStatus, StorageError> {
+        let mut transaction = self.pool.begin().await?;
+        let defaults = load_defaults(&mut transaction).await?;
+        let blocking = |code: &str, message: &str| ProviderOnboardingStatus {
+            complete: false,
+            defaults: defaults.clone(),
+            resolution: None,
+            blocking_reason: Some(UnavailableReason {
+                code: code.into(),
+                message: message.into(),
+            }),
+        };
+        if !permission_available_harnesses.contains(&defaults.harness_id) {
+            transaction.commit().await?;
+            return Ok(blocking(
+                "onboarding_harness_permission_unavailable",
+                "The saved harness has no enabled permission profile.",
+            ));
+        }
+        let provider_ready: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM model_providers WHERE id=?1 AND connected=1 AND lifecycle_state='active')",
+        )
+        .bind(defaults.provider_id.as_str())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !provider_ready {
+            transaction.commit().await?;
+            return Ok(blocking(
+                "onboarding_provider_unavailable",
+                "The saved default provider is not connected.",
+            ));
+        }
+        let Some(family_id) = defaults.family_id else {
+            transaction.commit().await?;
+            return Ok(blocking(
+                "onboarding_family_required",
+                "Choose a default model family to finish setup.",
+            ));
+        };
+        match onboarding_resolution_on(
+            &mut transaction,
+            &defaults.harness_id,
+            &defaults.provider_id,
+            family_id,
+        )
+        .await
+        {
+            Ok(resolution) => {
+                transaction.commit().await?;
+                Ok(ProviderOnboardingStatus {
+                    complete: true,
+                    defaults,
+                    resolution: Some(resolution),
+                    blocking_reason: None,
+                })
+            }
+            Err(StorageError::Catalog(_)) => {
+                transaction.commit().await?;
+                Ok(blocking(
+                    "onboarding_defaults_unresolvable",
+                    "The saved provider, harness, and family defaults do not currently resolve.",
+                ))
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+async fn provider_onboarding_projection_on(
+    connection: &mut SqliteConnection,
+    provider_id: &ProviderId,
+    app_default_harness_id: &str,
+    permission_available_harnesses: &HashSet<String>,
+) -> Result<ProviderOnboardingProjection, StorageError> {
+    let snapshot = provider_catalog_snapshot_on(connection, provider_id).await?;
+    if !snapshot.connected {
+        return Err(StorageError::Catalog(CatalogError::invalid(
+            "onboarding_provider_disconnected",
+            "The provider must be connected before onboarding can continue.",
+        )));
+    }
+    let (adapter_id, access_contract): (String, String) = sqlx::query_as(
+        "SELECT adapter_id,access_contract FROM model_providers WHERE id=?1 AND lifecycle_state='active'",
+    )
+    .bind(provider_id.as_str())
+    .fetch_optional(&mut *connection)
+    .await?
+    .ok_or_else(|| {
+        StorageError::Catalog(CatalogError::invalid(
+            "onboarding_provider_unavailable",
+            "The provider is not available for onboarding.",
+        ))
+    })?;
+    let provider = ProviderOnboardingProvider {
+        id: provider_id.clone(),
+        label: snapshot.label.clone(),
+        adapter_id: adapter_id.clone(),
+        access_contract: access_contract.clone(),
+    };
+    let families = load_families(connection).await?;
+    let product_harnesses = load_harnesses(connection).await?;
+    let mut harnesses = Vec::with_capacity(product_harnesses.len() + 1);
+    for harness in product_harnesses {
+        let matching_access_contract = harness
+            .execution_access_contracts
+            .contains(&access_contract)
+            .then_some(access_contract.clone());
+        let mut eligible_models = Vec::new();
+        for model in &snapshot.models {
+            if validate_onboarding_model_on(connection, &harness.id, provider_id, &model.id)
+                .await
+                .is_ok()
+            {
+                eligible_models.push(ProviderOnboardingModel {
+                    provider_id: provider_id.clone(),
+                    model_id: model.id.clone(),
+                    label: model.label.clone(),
+                });
+            }
+        }
+        let mut existing_custom_families = Vec::new();
+        let mut existing_managed_families = Vec::new();
+        for family in &families {
+            let mut exact_provider_member_resolves = false;
+            for member in family
+                .members
+                .iter()
+                .filter(|member| member.provider_id == *provider_id)
+            {
+                let validation = ValidateModelSelectionCommand {
+                    harness_id: harness.id.clone(),
+                    family_id: family.id,
+                    provider_id: member.provider_id.clone(),
+                    model_id: member.model_id.clone(),
+                };
+                if validate_model_selection_on(connection, &validation)
+                    .await
+                    .is_ok()
+                {
+                    exact_provider_member_resolves = true;
+                    break;
+                }
+            }
+            if exact_provider_member_resolves {
+                let choice = ProviderOnboardingFamily {
+                    id: family.id,
+                    name: family.name.clone(),
+                    revision: family.revision,
+                    members: family.members.clone(),
+                };
+                match family.kind {
+                    ModelFamilyKind::Custom => existing_custom_families.push(choice),
+                    ModelFamilyKind::System => existing_managed_families.push(choice),
+                }
+            }
+        }
+        let managed_family_candidate = harness
+            .family_policy
+            .as_ref()
+            .filter(|policy| crate::product::applies_to_adapter(policy, &adapter_id))
+            .and_then(|policy| {
+                crate::product::derive_managed_family_members(policy, &snapshot)
+                    .ok()
+                    .filter(|members| !members.is_empty())
+                    .map(|members| ProviderOnboardingManagedFamily {
+                        provider_id: provider_id.clone(),
+                        policy_id: policy.id.clone(),
+                        policy_version: policy.version,
+                        name: format!("{} defaults", snapshot.label),
+                        members,
+                    })
+            })
+            .filter(|candidate| {
+                candidate.members.iter().any(|member| {
+                    eligible_models.iter().any(|model| {
+                        model.provider_id == member.provider_id && model.model_id == member.model_id
+                    })
+                })
+            });
+        let incompatibility_reason = if !harness.available {
+            Some(
+                harness
+                    .unavailable_reason
+                    .clone()
+                    .unwrap_or(UnavailableReason {
+                        code: "harness_unavailable".into(),
+                        message: "The harness runtime is unavailable.".into(),
+                    }),
+            )
+        } else if !permission_available_harnesses.contains(&harness.id) {
+            Some(UnavailableReason {
+                code: "harness_permission_unavailable".into(),
+                message: "The harness has no enabled permission profile.".into(),
+            })
+        } else if matching_access_contract.is_none() {
+            Some(UnavailableReason {
+                code: "harness_access_contract_incompatible".into(),
+                message: "The harness does not support this provider access mode.".into(),
+            })
+        } else if eligible_models.is_empty() {
+            Some(UnavailableReason {
+                code: "harness_model_incompatible".into(),
+                message: "The harness has no eligible models from this provider.".into(),
+            })
+        } else {
+            None
+        };
+        let selectable = incompatibility_reason.is_none();
+        harnesses.push(ProviderOnboardingHarness {
+            id: harness.id,
+            label: harness.label,
+            configuration_revision: harness.configuration_revision,
+            selectable,
+            selected_initially: false,
+            matching_access_contract,
+            incompatibility_reason,
+            existing_custom_families,
+            existing_managed_families,
+            managed_family_candidate,
+            eligible_models,
+        });
+    }
+    if !harnesses
+        .iter()
+        .any(|harness| harness.id == app_default_harness_id)
+    {
+        harnesses.push(ProviderOnboardingHarness {
+            id: app_default_harness_id.into(),
+            label: app_default_harness_id.into(),
+            configuration_revision: 0,
+            selectable: false,
+            selected_initially: false,
+            matching_access_contract: None,
+            incompatibility_reason: Some(UnavailableReason {
+                code: "harness_not_product_visible".into(),
+                message: "The app-default harness is not product-visible.".into(),
+            }),
+            existing_custom_families: Vec::new(),
+            existing_managed_families: Vec::new(),
+            managed_family_candidate: None,
+            eligible_models: Vec::new(),
+        });
+    }
+    let app_default_index = harnesses
+        .iter()
+        .position(|harness| harness.id == app_default_harness_id)
+        .expect("the app-default harness is projected");
+    let initial_harness_id = harnesses[app_default_index]
+        .selectable
+        .then(|| app_default_harness_id.to_owned());
+    harnesses[app_default_index].selected_initially = initial_harness_id.is_some();
+    let app_default_reason = harnesses[app_default_index].incompatibility_reason.clone();
+    harnesses.sort_by(|left, right| {
+        (left.id != app_default_harness_id, &left.label, &left.id).cmp(&(
+            right.id != app_default_harness_id,
+            &right.label,
+            &right.id,
+        ))
+    });
+    let blocking_reason =
+        (!harnesses.iter().any(|harness| harness.selectable)).then_some(UnavailableReason {
+            code: "no_compatible_harness".into(),
+            message: "No product-visible harness currently supports this provider.".into(),
+        });
+    let mut projection = ProviderOnboardingProjection {
+        provider,
+        app_default_harness_id: app_default_harness_id.into(),
+        initial_harness_id,
+        app_default_reason,
+        harnesses,
+        projection_revision: String::new(),
+        blocking_reason,
+    };
+    let mut digest = Sha256::new();
+    digest.update(b"relayer.provider-onboarding-projection.v1\0");
+    digest.update(
+        serde_json::to_vec(&projection)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?,
+    );
+    projection.projection_revision = format!("sha256:{:x}", digest.finalize());
+    Ok(projection)
+}
+
+async fn provider_catalog_snapshot_on(
+    connection: &mut SqliteConnection,
+    provider_id: &ProviderId,
+) -> Result<ProviderCatalogSnapshot, StorageError> {
+    let (label, connected, unavailable_code, unavailable_message): (
+        String,
+        bool,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT label,connected,unavailable_reason_code,unavailable_reason_message FROM model_providers WHERE id=?1 AND lifecycle_state='active'",
+    )
+    .bind(provider_id.as_str())
+    .fetch_optional(&mut *connection)
+    .await?
+    .ok_or_else(|| {
+        StorageError::Catalog(CatalogError::invalid(
+            "provider_unknown",
+            "Unknown active provider definition.",
+        ))
+    })?;
+    let rows = sqlx::query("SELECT model_id,label,provider_order,visible,available,unavailable_reason_code,unavailable_reason_message,provider_default,replacement_model_id,metadata_json FROM provider_models WHERE provider_id=?1 ORDER BY provider_order,model_id")
+        .bind(provider_id.as_str()).fetch_all(&mut *connection).await?;
+    let mut models = Vec::with_capacity(rows.len());
+    for row in rows {
+        models.push(crate::product::CatalogModelSnapshot {
+            id: row.try_get(0)?,
+            label: row.try_get(1)?,
+            order: row.try_get::<i64, _>(2)? as usize,
+            visible: row.try_get(3)?,
+            available: row.try_get(4)?,
+            unavailable_reason: reason_from_row(&row, 5, 6)?,
+            provider_default: row.try_get(7)?,
+            replacement_model_id: row.try_get(8)?,
+            metadata: serde_json::from_str(&row.try_get::<String, _>(9)?)
+                .map_err(|error| StorageError::Serialization(error.to_string()))?,
+        });
+    }
+    Ok(ProviderCatalogSnapshot {
+        provider_id: provider_id.clone(),
+        label,
+        connected,
+        unavailable_reason: match (unavailable_code, unavailable_message) {
+            (Some(code), Some(message)) => Some(UnavailableReason { code, message }),
+            (None, None) => None,
+            _ => {
+                return Err(StorageError::IncompatibleSchema(
+                    "provider unavailable reason is partially populated".into(),
+                ));
+            }
+        },
+        models,
+        system_family: None,
+    })
 }
 
 async fn validate_onboarding_model_on(
@@ -850,65 +1301,115 @@ async fn validate_onboarding_model_on(
     model_id: &str,
 ) -> Result<(), StorageError> {
     let command = ValidateModelSelectionCommand {
-        harness_id: harness_id.to_owned(),
+        harness_id: harness_id.into(),
         family_id: ModelFamilyId::from_database(1),
         provider_id: provider_id.clone(),
-        model_id: model_id.to_owned(),
+        model_id: model_id.into(),
     };
-    let row = sqlx::query(
-        "SELECT h.product_visible AS harness_visible,h.available AS harness_available,h.model_rules_present,h.execution_access_contracts_json,p.connected AS provider_connected,p.lifecycle_state='active' AS provider_active,p.adapter_id,p.access_contract,m.visible AS model_visible,m.available AS model_available,EXISTS(SELECT 1 FROM harness_provider_compatibility c WHERE c.harness_configuration_name=h.configuration_name AND c.provider_id=p.id AND (c.all_models=1 OR EXISTS(SELECT 1 FROM harness_model_compatibility cm WHERE cm.harness_configuration_name=c.harness_configuration_name AND cm.provider_id=c.provider_id AND cm.model_id=m.model_id))) AS compatible FROM product_harnesses h JOIN model_providers p ON p.id=?2 JOIN provider_models m ON m.provider_id=p.id AND m.model_id=?3 WHERE h.configuration_name=?1",
-    )
-    .bind(harness_id)
-    .bind(provider_id.as_str())
-    .bind(model_id)
-    .fetch_optional(&mut *connection)
-    .await?;
+    let row = sqlx::query("SELECT h.product_visible AS harness_visible,h.available AS harness_available,h.model_rules_present,h.execution_access_contracts_json,p.connected AS provider_connected,p.lifecycle_state='active' AS provider_active,p.adapter_id,p.access_contract,m.visible AS model_visible,m.available AS model_available,EXISTS(SELECT 1 FROM harness_provider_compatibility c WHERE c.harness_configuration_name=h.configuration_name AND c.provider_id=p.id AND (c.all_models=1 OR EXISTS(SELECT 1 FROM harness_model_compatibility cm WHERE cm.harness_configuration_name=c.harness_configuration_name AND cm.provider_id=c.provider_id AND cm.model_id=m.model_id))) AS compatible FROM product_harnesses h JOIN model_providers p ON p.id=?2 JOIN provider_models m ON m.provider_id=p.id AND m.model_id=?3 WHERE h.configuration_name=?1")
+        .bind(harness_id).bind(provider_id.as_str()).bind(model_id).fetch_optional(&mut *connection).await?;
     let Some(row) = row else {
-        return Err(StorageError::Catalog(CatalogError::selection(
+        return Err(StorageError::Catalog(CatalogError::invalid(
             "onboarding_model_unknown",
-            "The selected onboarding harness, provider, or model is unknown.",
-            &command,
+            "The provider model or harness is unknown.",
         )));
     };
     for (valid, code, message) in [
         (
             row.get::<bool, _>("harness_visible"),
             "harness_not_product_visible",
-            "The selected harness is not product visible.",
+            "The harness is not product-visible.",
         ),
         (
             row.get::<bool, _>("harness_available"),
             "harness_unavailable",
-            "The selected harness is unavailable.",
+            "The harness is unavailable.",
         ),
         (
             row.get::<bool, _>("provider_connected"),
             "provider_disconnected",
-            "The selected provider is disconnected.",
+            "The provider is disconnected.",
         ),
         (
             row.get::<bool, _>("provider_active"),
             "provider_removal_pending",
-            "The selected provider is unavailable for new interactions.",
+            "The provider is unavailable for new interactions.",
         ),
         (
             row.get::<bool, _>("model_visible"),
             "model_hidden",
-            "The selected model is hidden.",
+            "The model is hidden.",
         ),
         (
             row.get::<bool, _>("model_available"),
             "model_unavailable",
-            "The selected model is unavailable.",
+            "The model is unavailable.",
         ),
     ] {
         if !valid {
-            return Err(StorageError::Catalog(CatalogError::selection(
-                code, message, &command,
-            )));
+            return Err(StorageError::Catalog(CatalogError::invalid(code, message)));
         }
     }
     validate_harness_route(connection, harness_id, model_id, &row, &command).await
+}
+
+async fn onboarding_resolution_on(
+    connection: &mut SqliteConnection,
+    harness_id: &str,
+    onboarding_provider_id: &ProviderId,
+    family_id: ModelFamilyId,
+) -> Result<ProviderOnboardingResolution, StorageError> {
+    let family_revision: i64 = sqlx::query_scalar(
+        "SELECT revision FROM model_families WHERE id=?1 AND enabled=1 AND lifecycle_state='active'",
+    )
+    .bind(family_id.value())
+    .fetch_optional(&mut *connection)
+    .await?
+    .ok_or_else(|| {
+        StorageError::Catalog(CatalogError::invalid(
+            "onboarding_family_unavailable",
+            "The selected family is unavailable.",
+        ))
+    })?;
+    let members: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT provider_id,model_id,position FROM model_family_members WHERE family_id=?1 ORDER BY position",
+    )
+    .bind(family_id.value())
+    .fetch_all(&mut *connection)
+    .await?;
+    let mut resolvable_members = Vec::new();
+    let mut onboarding_provider_resolves = false;
+    for (provider_id, model_id, position) in members {
+        let provider_id = ProviderId::from_database(provider_id);
+        let validation = ValidateModelSelectionCommand {
+            harness_id: harness_id.into(),
+            family_id,
+            provider_id: provider_id.clone(),
+            model_id: model_id.clone(),
+        };
+        if validate_model_selection_on(connection, &validation)
+            .await
+            .is_ok()
+        {
+            onboarding_provider_resolves |= provider_id == *onboarding_provider_id;
+            resolvable_members.push(ModelFamilyMember {
+                provider_id,
+                model_id,
+                position: position as usize,
+            });
+        }
+    }
+    if resolvable_members.is_empty() || !onboarding_provider_resolves {
+        return Err(StorageError::Catalog(CatalogError::invalid(
+            "onboarding_family_unresolvable",
+            "The family must contain a currently resolvable model from the connected provider.",
+        )));
+    }
+    Ok(ProviderOnboardingResolution {
+        family_id,
+        family_revision: family_revision as u32,
+        resolvable_members,
+    })
 }
 
 pub(super) async fn validate_model_selection_on(
@@ -1080,6 +1581,84 @@ pub(super) async fn validate_execution_model_selection_on(
         access_contract: row.get("access_contract"),
         model_id: selection.model_id.clone(),
     })
+}
+
+pub(super) async fn resolve_execution_model_plan_on(
+    connection: &mut SqliteConnection,
+    harness_id: &str,
+    selection: &crate::product::InteractionModelSelection,
+) -> Result<(ExecutionModelPlan, crate::product::ExecutionModelSelection), StorageError> {
+    let orchestrator =
+        validate_execution_model_selection_on(connection, harness_id, selection).await?;
+    let family_revision: i64 = sqlx::query_scalar(
+        "SELECT revision FROM model_families WHERE id=?1 AND enabled=1 AND lifecycle_state='active'",
+    )
+    .bind(selection.family_id.value())
+    .fetch_optional(&mut *connection)
+    .await?
+    .ok_or_else(|| {
+        StorageError::Catalog(CatalogError::selection(
+            "model_family_unresolvable",
+            "The selected model family is unavailable for execution.",
+            &ValidateModelSelectionCommand {
+                harness_id: harness_id.to_owned(),
+                family_id: selection.family_id,
+                provider_id: selection.provider_id.clone(),
+                model_id: selection.model_id.clone(),
+            },
+        ))
+    })?;
+    let members: Vec<(String, String)> = sqlx::query_as(
+        "SELECT provider_id,model_id FROM model_family_members WHERE family_id=?1 ORDER BY position",
+    )
+    .bind(selection.family_id.value())
+    .fetch_all(&mut *connection)
+    .await?;
+    let mut roster = Vec::with_capacity(members.len());
+    for (provider_id, model_id) in members {
+        let member = crate::product::InteractionModelSelection {
+            family_id: selection.family_id,
+            provider_id: ProviderId::from_database(provider_id),
+            model_id,
+        };
+        match validate_execution_model_selection_on(connection, harness_id, &member).await {
+            Ok(route) => roster.push(ExecutionModelRoute {
+                provider_id: route.provider_id,
+                adapter_id: route.adapter_id,
+                access_contract: route.access_contract,
+                model_id: route.model_id,
+            }),
+            Err(StorageError::Catalog(_)) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    let orchestrator_route = ExecutionModelRoute {
+        provider_id: orchestrator.provider_id.clone(),
+        adapter_id: orchestrator.adapter_id.clone(),
+        access_contract: orchestrator.access_contract.clone(),
+        model_id: orchestrator.model_id.clone(),
+    };
+    if roster.is_empty() || !roster.contains(&orchestrator_route) {
+        return Err(StorageError::Catalog(CatalogError::selection(
+            "orchestrator_not_in_resolved_family",
+            "The selected orchestrator is not in the executable family roster.",
+            &ValidateModelSelectionCommand {
+                harness_id: harness_id.to_owned(),
+                family_id: selection.family_id,
+                provider_id: selection.provider_id.clone(),
+                model_id: selection.model_id.clone(),
+            },
+        )));
+    }
+    Ok((
+        ExecutionModelPlan {
+            family_id: selection.family_id,
+            family_revision,
+            orchestrator: orchestrator_route,
+            roster,
+        },
+        orchestrator,
+    ))
 }
 
 async fn validate_harness_route(
@@ -1340,7 +1919,7 @@ async fn load_harnesses(
 
 async fn load_providers(connection: &mut SqliteConnection) -> Result<Vec<Provider>, StorageError> {
     let rows = sqlx::query(
-            "SELECT id,adapter_id,label,connected,unavailable_reason_code,unavailable_reason_message FROM model_providers WHERE lifecycle_state='active' ORDER BY label,id",
+        "SELECT id,adapter_id,label,connected,unavailable_reason_code,unavailable_reason_message FROM model_providers WHERE lifecycle_state='active' ORDER BY label,id",
     )
     .fetch_all(&mut *connection)
     .await?;
@@ -1461,7 +2040,8 @@ async fn replace_system_family(
     snapshot: &ProviderCatalogSnapshot,
     system_family: &SystemFamilySnapshot,
     policy: &FamilyPolicyReference,
-) -> Result<(), StorageError> {
+    reconcile_managed_default: bool,
+) -> Result<ModelFamilyId, StorageError> {
     let members = system_family
         .model_ids
         .iter()
@@ -1558,13 +2138,15 @@ async fn replace_system_family(
     compact_family_positions(connection).await?;
     // Move only an unset or managed default. A user-owned custom family is never replaced by
     // reconciliation. The entire catalog/family/default transition commits atomically.
-    sqlx::query("UPDATE product_model_preferences SET default_family_id=CASE WHEN ?3 OR EXISTS(SELECT 1 FROM model_families current WHERE current.id=default_family_id AND current.kind='system' AND current.managed_provider_id=?2) OR (default_family_id IS NULL AND (default_provider_id IS NULL OR default_provider_id=?2 OR NOT EXISTS(SELECT 1 FROM model_providers chosen WHERE chosen.id=default_provider_id AND chosen.lifecycle_state='active' AND chosen.connected=1))) THEN ?1 ELSE default_family_id END,default_provider_id=CASE WHEN ?3 OR EXISTS(SELECT 1 FROM model_families current WHERE current.id=default_family_id AND current.kind='system' AND current.managed_provider_id=?2) OR (default_family_id IS NULL AND (default_provider_id IS NULL OR default_provider_id=?2 OR NOT EXISTS(SELECT 1 FROM model_providers chosen WHERE chosen.id=default_provider_id AND chosen.lifecycle_state='active' AND chosen.connected=1))) THEN ?2 ELSE default_provider_id END WHERE singleton=1")
-        .bind(id.value())
-        .bind(snapshot.provider_id.as_str())
-        .bind(legacy_default)
-        .execute(&mut *connection)
-        .await?;
-    Ok(())
+    if reconcile_managed_default {
+        sqlx::query("UPDATE product_model_preferences SET default_family_id=CASE WHEN ?3 OR EXISTS(SELECT 1 FROM model_families current WHERE current.id=default_family_id AND current.kind='system' AND current.managed_provider_id IS NOT NULL) OR (default_family_id IS NULL AND (default_provider_id IS NULL OR default_provider_id=?2 OR NOT EXISTS(SELECT 1 FROM model_providers chosen WHERE chosen.id=default_provider_id AND chosen.lifecycle_state='active' AND chosen.connected=1))) THEN ?1 ELSE default_family_id END,default_provider_id=CASE WHEN ?3 OR EXISTS(SELECT 1 FROM model_families current WHERE current.id=default_family_id AND current.kind='system' AND current.managed_provider_id IS NOT NULL) OR (default_family_id IS NULL AND (default_provider_id IS NULL OR default_provider_id=?2 OR NOT EXISTS(SELECT 1 FROM model_providers chosen WHERE chosen.id=default_provider_id AND chosen.lifecycle_state='active' AND chosen.connected=1))) THEN ?2 ELSE default_provider_id END WHERE singleton=1")
+            .bind(id.value())
+            .bind(snapshot.provider_id.as_str())
+            .bind(legacy_default)
+            .execute(&mut *connection)
+            .await?;
+    }
+    Ok(id)
 }
 
 async fn replace_family_members(
@@ -1818,31 +2400,6 @@ mod provider_definition_tests {
         }
     }
 
-    fn catalog_snapshot(id: &str, label: &str) -> ProviderCatalogSnapshot {
-        ProviderCatalogSnapshot {
-            provider_id: ProviderId::parse(id).unwrap(),
-            label: label.into(),
-            connected: true,
-            unavailable_reason: None,
-            models: vec![crate::product::CatalogModelSnapshot {
-                id: "model-one".into(),
-                label: "Model One".into(),
-                order: 0,
-                visible: true,
-                available: true,
-                unavailable_reason: None,
-                provider_default: true,
-                replacement_model_id: None,
-                metadata: serde_json::json!({}),
-            }],
-            system_family: Some(SystemFamilySnapshot {
-                key: "ignored".into(),
-                name: format!("{label} defaults"),
-                model_ids: vec!["model-one".into()],
-            }),
-        }
-    }
-
     #[tokio::test]
     async fn sqlite_is_authoritative_for_provider_identity_and_removal_admission() {
         let path = std::env::temp_dir().join(format!(
@@ -2021,6 +2578,82 @@ mod provider_definition_tests {
     }
 
     #[tokio::test]
+    async fn provider_removal_waits_for_restart_to_finalize_a_durable_running_attempt() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-provider-removal-drain-{}-{}.sqlite3",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let mut provider = definition("draining-provider");
+        store
+            .sync_provider_definitions(std::slice::from_ref(&provider))
+            .await
+            .unwrap();
+        let family_id = sqlx::query("INSERT INTO model_families(name,kind,enabled,position,revision,lifecycle_state) VALUES ('Drain receipt','custom',1,1,1,'active')")
+            .execute(&store.pool).await.unwrap().last_insert_rowid();
+        let thread_id = sqlx::query(
+            "INSERT INTO threads(title,created_at,updated_at) VALUES ('Drain','1','1')",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,model_provider_id,provider_model_id,model_family_id) VALUES (?1,0,'in flight','1','running',?2,'gpt-work',?3)")
+            .bind(thread_id).bind(provider.id.as_str()).bind(family_id)
+            .execute(&store.pool).await.unwrap().last_insert_rowid();
+        sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,effect_boundary,attempt_admission_id,admitted_plan_json,admitted_plan_digest) VALUES (?1,1,'1',?2,1,'codex-basic',1,'sha256:test',?3,'openai-api',7,'gpt-work','secret@1','running','unknown','admission-drain','{}','sha256:plan')")
+            .bind(interaction_id).bind(family_id).bind(provider.id.as_str())
+            .execute(&store.pool).await.unwrap();
+
+        provider.lifecycle_state = "removal_pending".into();
+        store
+            .sync_provider_definitions(std::slice::from_ref(&provider))
+            .await
+            .unwrap();
+        let mut tombstone = provider.clone();
+        tombstone.lifecycle_state = "tombstoned".into();
+        tombstone.credential_reference = None;
+        tombstone.removed_at = Some("2".into());
+        let blocked = store
+            .sync_provider_definitions(std::slice::from_ref(&tombstone))
+            .await
+            .unwrap_err();
+        assert!(blocked.to_string().contains("attempt is running"));
+
+        assert_eq!(
+            store
+                .recover_interrupted_interactions("restart", false)
+                .await
+                .unwrap(),
+            1
+        );
+        store
+            .sync_provider_definitions(std::slice::from_ref(&tombstone))
+            .await
+            .unwrap();
+        let state: (String, String, String) = sqlx::query_as(
+            "SELECT p.lifecycle_state,a.outcome,a.effect_boundary FROM model_providers p JOIN interaction_attempts a ON a.provider_id=p.id WHERE p.id=?1",
+        )
+        .bind(provider.id.as_str())
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            state,
+            (
+                "tombstoned".into(),
+                "execution_failed".into(),
+                "unknown".into()
+            )
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
     async fn declarative_policy_retires_and_moves_a_legacy_system_default_atomically() {
         let path = std::env::temp_dir().join(format!(
             "relayer-legacy-managed-family-{}-{}.sqlite3",
@@ -2121,6 +2754,8 @@ mod provider_definition_tests {
             }),
             execution_access_contracts: vec!["managed-runtime@1".into()],
             family_policy: None,
+            runtime_available: true,
+            unavailable_reason: None,
         };
         store
             .initialize_model_catalog("codex-basic", std::slice::from_ref(&shipped))
@@ -2166,7 +2801,7 @@ mod provider_definition_tests {
                 &[RuntimeProductHarness {
                     configuration_revision: 3,
                     configuration_digest: "sha256:shipped-v3".into(),
-                    ..shipped
+                    ..shipped.clone()
                 }],
             )
             .await
@@ -2181,250 +2816,401 @@ mod provider_definition_tests {
             .unwrap();
         assert_eq!(harness.configuration_revision, 3);
         assert_eq!(harness.model_rules, Some(edited));
-        let rebased_digest: String = sqlx::query_scalar(
-            "SELECT configuration_digest FROM product_harnesses WHERE configuration_name='codex-basic'",
-        )
-        .fetch_one(&store.pool)
-        .await
-        .unwrap();
         store
             .initialize_model_catalog(
                 "codex-basic",
                 &[RuntimeProductHarness {
-                    id: "codex-basic".into(),
-                    configuration_revision: 3,
-                    configuration_digest: "sha256:shipped-v3".into(),
-                    model_compatibility: Vec::new(),
-                    model_rules: Some(HarnessModelRules::default()),
-                    execution_access_contracts: vec!["managed-runtime@1".into()],
-                    family_policy: None,
-                }],
-            )
-            .await
-            .unwrap();
-        let unchanged: (i64, String) = sqlx::query_as(
-            "SELECT configuration_revision,configuration_digest FROM product_harnesses WHERE configuration_name='codex-basic'",
-        )
-        .fetch_one(&store.pool)
-        .await
-        .unwrap();
-        assert_eq!(unchanged, (3, rebased_digest));
-    }
-
-    #[tokio::test]
-    async fn managed_families_preserve_visibility_do_not_steal_defaults_and_retire_with_provider() {
-        let path = std::env::temp_dir().join(format!(
-            "relayer-managed-family-lifecycle-{}-{}.sqlite3",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let store = SqliteProductStore::open(&path).await.unwrap();
-        store
-            .initialize_model_catalog(
-                "codex-basic",
-                &[RuntimeProductHarness {
-                    id: "codex-basic".into(),
-                    configuration_digest: "sha256:test".into(),
-                    model_compatibility: Vec::new(),
-                    configuration_revision: 1,
-                    model_rules: Some(HarnessModelRules {
-                        allow: vec![HarnessModelRule {
-                            adapter_id: "openai-api".into(),
-                            model_id_exact: Some("model-one".into()),
-                            model_id_regex: None,
-                        }],
-                        deny: Vec::new(),
+                    runtime_available: false,
+                    unavailable_reason: Some(UnavailableReason {
+                        code: "prime_agent_boundary_unsupported".into(),
+                        message: "Choose another available harness on this device.".into(),
                     }),
-                    execution_access_contracts: vec!["secret@1".into()],
-                    family_policy: None,
+                    ..shipped
                 }],
             )
             .await
             .unwrap();
-        let policy = FamilyPolicyReference {
-            id: "codex-default-family".into(),
-            version: 1,
-        };
-        let mut first = definition("first-openai");
-        first.label = "First".into();
-        let mut second = definition("second-openai");
-        second.label = "Second".into();
-        for (definition, label) in [(&first, "First"), (&second, "Second")] {
-            store
-                .create_provider_with_catalog(
-                    definition,
-                    &catalog_snapshot(definition.id.as_str(), label),
-                    Some(&policy),
-                    "1",
-                )
-                .await
-                .unwrap();
-        }
-        let defaults = store.load_model_settings().await.unwrap().defaults;
-        assert_eq!(defaults.provider_id, first.id);
+        let unavailable = store
+            .load_model_settings()
+            .await
+            .unwrap()
+            .harnesses
+            .into_iter()
+            .find(|item| item.id == "codex-basic")
+            .unwrap();
+        assert!(!unavailable.available);
         assert_eq!(
-            store
-                .load_model_settings()
-                .await
-                .unwrap()
-                .providers
-                .into_iter()
-                .find(|provider| provider.id == first.id)
-                .unwrap()
-                .adapter_id,
-            "openai-api"
+            unavailable.unavailable_reason.unwrap().code,
+            "prime_agent_boundary_unsupported"
         );
-        let first_family: i64 = sqlx::query_scalar(
-            "SELECT id FROM model_families WHERE managed_provider_id='first-openai' AND lifecycle_state='active'",
-        )
-        .fetch_one(&store.pool)
-        .await
-        .unwrap();
-        let second_family: i64 = sqlx::query_scalar(
-            "SELECT id FROM model_families WHERE managed_provider_id='second-openai' AND lifecycle_state='active'",
-        )
-        .fetch_one(&store.pool)
-        .await
-        .unwrap();
-        let disable_store = store.clone();
-        let default_store = store.clone();
-        let disable_command = UpdateModelFamilyCommand {
-            id: ModelFamilyId::from_database(first_family),
-            name: None,
-            enabled: false,
-            members: None,
-        };
-        let default_command = UpdateModelSettingsDefaultsCommand {
-            harness_id: None,
-            provider_id: Some(second.id.clone()),
-            family_id: Some(ModelFamilyId::from_database(second_family)),
-        };
-        let (disable_result, default_result) = tokio::join!(
-            disable_store.update_model_family(&disable_command),
-            default_store.update_model_settings_defaults(&default_command)
-        );
-        assert!(default_result.is_ok());
-        assert!(
-            disable_result.is_ok()
-                || disable_result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("before disabling")
-        );
-        let default_enabled: bool = sqlx::query_scalar(
-            "SELECT family.enabled FROM product_model_preferences preferences JOIN model_families family ON family.id=preferences.default_family_id WHERE preferences.singleton=1",
-        )
-        .fetch_one(&store.pool)
-        .await
-        .unwrap();
-        assert!(default_enabled);
-        store
-            .update_model_family(&UpdateModelFamilyCommand {
-                id: ModelFamilyId::from_database(first_family),
-                name: None,
-                enabled: false,
-                members: None,
-            })
-            .await
-            .unwrap();
-        store
-            .publish_provider_catalog(
-                &catalog_snapshot("first-openai", "First"),
-                Some(&policy),
-                "2",
-            )
-            .await
-            .unwrap();
-        assert!(
-            !sqlx::query_scalar::<_, bool>("SELECT enabled FROM model_families WHERE id=?1")
-                .bind(first_family)
-                .fetch_one(&store.pool)
-                .await
-                .unwrap()
-        );
-
-        store
-            .create_model_family(&CreateModelFamilyCommand {
-                name: format!("First defaults (removed {first_family})"),
-                enabled: true,
-                members: vec![ModelFamilyMember {
-                    provider_id: first.id.clone(),
-                    model_id: "model-one".into(),
-                    position: 0,
-                }],
-            })
-            .await
-            .unwrap();
-        let mut removing = first.clone();
-        removing.lifecycle_state = "removal_pending".into();
-        store.sync_provider_definitions(&[removing]).await.unwrap();
-        let retired: (String, bool) =
-            sqlx::query_as("SELECT lifecycle_state,enabled FROM model_families WHERE id=?1")
-                .bind(first_family)
-                .fetch_one(&store.pool)
-                .await
-                .unwrap();
-        assert_eq!(retired, ("tombstoned".into(), false));
-        let positions: Vec<i64> = sqlx::query_scalar(
-            "SELECT position FROM model_families ORDER BY CASE lifecycle_state WHEN 'active' THEN 0 ELSE 1 END,position",
-        )
-        .fetch_all(&store.pool)
-        .await
-        .unwrap();
-        assert_eq!(positions, vec![0, 1, 2]);
     }
 
     #[tokio::test]
-    async fn deleted_custom_family_releases_its_name_without_reusing_its_tombstone_position() {
-        let path = std::env::temp_dir().join(format!(
-            "relayer-custom-family-reuse-{}-{}.sqlite3",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let store = SqliteProductStore::open(&path).await.unwrap();
-        sqlx::query("UPDATE model_providers SET connected=1 WHERE id='codex'")
-            .execute(&store.pool)
+    async fn onboarding_projection_uses_exact_rules_access_and_app_default_without_fallback() {
+        let (store, path, provider_id) = onboarding_store().await;
+        let allowed = HashSet::from(["codex-basic".to_owned(), "claude-basic".to_owned()]);
+        let projection = store
+            .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('codex','model-one','Model One',0,1,1,0,'{}')")
-            .execute(&store.pool).await.unwrap();
-        let command = CreateModelFamilyCommand {
-            name: "Reusable".into(),
-            enabled: true,
-            members: vec![ModelFamilyMember {
-                provider_id: ProviderId::parse("codex").unwrap(),
-                model_id: "model-one".into(),
-                position: 0,
-            }],
-        };
-        let removed = store.create_model_family(&command).await.unwrap();
-        let collision = CreateModelFamilyCommand {
-            name: format!("Reusable (removed {})", removed.id.value()),
-            enabled: true,
-            members: command.members.clone(),
-        };
-        store.create_model_family(&collision).await.unwrap();
-        assert!(store.delete_model_family(removed.id).await.unwrap());
-        let replacement = store.create_model_family(&command).await.unwrap();
-        assert_ne!(removed.id, replacement.id);
-        let rows: Vec<(String, i64)> =
-            sqlx::query_as("SELECT lifecycle_state,position FROM model_families ORDER BY position")
-                .fetch_all(&store.pool)
-                .await
-                .unwrap();
         assert_eq!(
-            rows,
-            vec![
-                ("active".into(), 0),
-                ("active".into(), 1),
-                ("tombstoned".into(), 2)
-            ]
+            projection.initial_harness_id.as_deref(),
+            Some("codex-basic")
         );
+        let codex = projection
+            .harnesses
+            .iter()
+            .find(|harness| harness.id == "codex-basic")
+            .unwrap();
+        assert!(codex.selectable);
+        assert!(codex.selected_initially);
+        assert_eq!(codex.matching_access_contract.as_deref(), Some("secret@1"));
+        assert_eq!(codex.eligible_models.len(), 1);
+        let claude = projection
+            .harnesses
+            .iter()
+            .find(|harness| harness.id == "claude-basic")
+            .unwrap();
+        assert!(!claude.selectable);
+        assert_eq!(
+            claude.incompatibility_reason.as_ref().unwrap().code,
+            "harness_access_contract_incompatible"
+        );
+
+        store
+            .update_harness_model_rules(&UpdateHarnessModelRulesCommand {
+                harness_id: "codex-basic".into(),
+                expected_revision: 1,
+                rules: HarnessModelRules {
+                    allow: vec![HarnessModelRule {
+                        adapter_id: "openai-api".into(),
+                        model_id_exact: None,
+                        model_id_regex: Some("^gpt-".into()),
+                    }],
+                    deny: vec![HarnessModelRule {
+                        adapter_id: "openai-api".into(),
+                        model_id_exact: Some("gpt-work".into()),
+                        model_id_regex: None,
+                    }],
+                },
+            })
+            .await
+            .unwrap();
+        let denied = store
+            .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
+            .await
+            .unwrap();
+        assert!(denied.initial_harness_id.is_none());
+        assert_eq!(
+            denied
+                .harnesses
+                .iter()
+                .find(|harness| harness.id == "codex-basic")
+                .unwrap()
+                .incompatibility_reason
+                .as_ref()
+                .unwrap()
+                .code,
+            "harness_model_incompatible"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn onboarding_create_and_defaults_commit_together_and_status_uses_saved_harness() {
+        let (store, path, provider_id) = onboarding_store().await;
+        let allowed = HashSet::from(["codex-basic".to_owned(), "codex-alternate".to_owned()]);
+        let projection = store
+            .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
+            .await
+            .unwrap();
+        let completion = store
+            .complete_provider_onboarding(
+                &CompleteProviderOnboardingCommand {
+                    provider_id: provider_id.clone(),
+                    harness_id: "codex-alternate".into(),
+                    expected_projection_revision: projection.projection_revision,
+                    family: ProviderOnboardingFamilyIntent::Create {
+                        name: "Work default".into(),
+                        members: vec![ModelFamilyMember {
+                            provider_id: provider_id.clone(),
+                            model_id: "gpt-work".into(),
+                            position: 0,
+                        }],
+                    },
+                },
+                "codex-basic",
+                &allowed,
+            )
+            .await
+            .unwrap();
+        assert_eq!(completion.defaults.provider_id, provider_id);
+        assert_eq!(completion.defaults.harness_id, "codex-alternate");
+        assert_eq!(
+            completion.defaults.family_id,
+            Some(completion.resolution.family_id)
+        );
+        assert_eq!(completion.resolution.resolvable_members.len(), 1);
+        let status = store.provider_onboarding_status(&allowed).await.unwrap();
+        assert!(status.complete);
+        assert_eq!(status.defaults.harness_id, "codex-alternate");
+        assert_eq!(status.resolution.unwrap(), completion.resolution);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn onboarding_revision_conflict_rolls_back_family_and_defaults() {
+        let (store, path, provider_id) = onboarding_store().await;
+        let allowed = HashSet::from(["codex-basic".to_owned()]);
+        let projection = store
+            .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE provider_models SET available=0 WHERE provider_id=?1 AND model_id='gpt-work'",
+        )
+        .bind(provider_id.as_str())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let before = store.load_model_settings().await.unwrap().defaults;
+        let error = store
+            .complete_provider_onboarding(
+                &CompleteProviderOnboardingCommand {
+                    provider_id,
+                    harness_id: "codex-basic".into(),
+                    expected_projection_revision: projection.projection_revision,
+                    family: ProviderOnboardingFamilyIntent::Create {
+                        name: "Must not persist".into(),
+                        members: vec![ModelFamilyMember {
+                            provider_id: ProviderId::parse("work-openai").unwrap(),
+                            model_id: "gpt-work".into(),
+                            position: 0,
+                        }],
+                    },
+                },
+                "codex-basic",
+                &allowed,
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("changed"));
+        assert_eq!(store.load_model_settings().await.unwrap().defaults, before);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM model_families WHERE name='Must not persist'",
+            )
+            .fetch_one(&store.pool)
+            .await
+            .unwrap(),
+            0
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn onboarding_managed_preview_comes_from_the_candidate_harness_policy() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-managed-onboarding-{}-{}.sqlite3",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let rules = HarnessModelRules {
+            allow: vec![HarnessModelRule {
+                adapter_id: "codex-subscription".into(),
+                model_id_exact: Some("default".into()),
+                model_id_regex: None,
+            }],
+            deny: Vec::new(),
+        };
+        store
+            .initialize_model_catalog(
+                "plain-basic",
+                &[
+                    RuntimeProductHarness {
+                        id: "plain-basic".into(),
+                        configuration_digest: "sha256:plain".into(),
+                        model_compatibility: Vec::new(),
+                        configuration_revision: 1,
+                        model_rules: Some(rules.clone()),
+                        execution_access_contracts: vec!["managed-runtime@1".into()],
+                        family_policy: None,
+                        runtime_available: true,
+                        unavailable_reason: None,
+                    },
+                    RuntimeProductHarness {
+                        id: "managed-codex".into(),
+                        configuration_digest: "sha256:managed".into(),
+                        model_compatibility: Vec::new(),
+                        configuration_revision: 1,
+                        model_rules: Some(rules),
+                        execution_access_contracts: vec!["managed-runtime@1".into()],
+                        family_policy: Some(FamilyPolicyReference {
+                            id: "codex-default-family".into(),
+                            version: 1,
+                        }),
+                        runtime_available: true,
+                        unavailable_reason: None,
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE model_providers SET connected=1,lifecycle_state='active' WHERE id='codex'",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('codex','default','Default',0,1,1,1,'{}')")
+            .execute(&store.pool).await.unwrap();
+        let allowed = HashSet::from(["plain-basic".into(), "managed-codex".into()]);
+        let projection = store
+            .provider_onboarding_projection(
+                &ProviderId::parse("codex").unwrap(),
+                "plain-basic",
+                &allowed,
+            )
+            .await
+            .unwrap();
+        assert!(
+            projection
+                .harnesses
+                .iter()
+                .find(|harness| harness.id == "plain-basic")
+                .unwrap()
+                .managed_family_candidate
+                .is_none()
+        );
+        let candidate = projection
+            .harnesses
+            .iter()
+            .find(|harness| harness.id == "managed-codex")
+            .unwrap()
+            .managed_family_candidate
+            .clone()
+            .unwrap();
+        let completion = store
+            .complete_provider_onboarding(
+                &CompleteProviderOnboardingCommand {
+                    provider_id: ProviderId::parse("codex").unwrap(),
+                    harness_id: "managed-codex".into(),
+                    expected_projection_revision: projection.projection_revision,
+                    family: ProviderOnboardingFamilyIntent::Managed {
+                        policy_id: candidate.policy_id,
+                        policy_version: candidate.policy_version,
+                    },
+                },
+                "plain-basic",
+                &allowed,
+            )
+            .await
+            .unwrap();
+        assert_eq!(completion.defaults.harness_id, "managed-codex");
+        assert_eq!(
+            completion.resolution.resolvable_members[0].model_id,
+            "default"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    async fn onboarding_store() -> (SqliteProductStore, std::path::PathBuf, ProviderId) {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-provider-onboarding-{}-{}.sqlite3",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let allow = HarnessModelRules {
+            allow: vec![HarnessModelRule {
+                adapter_id: "openai-api".into(),
+                model_id_exact: None,
+                model_id_regex: Some("^gpt-".into()),
+            }],
+            deny: Vec::new(),
+        };
+        store
+            .initialize_model_catalog(
+                "codex-basic",
+                &[
+                    RuntimeProductHarness {
+                        id: "codex-basic".into(),
+                        configuration_digest: "sha256:onboarding-codex".into(),
+                        model_compatibility: Vec::new(),
+                        configuration_revision: 1,
+                        model_rules: Some(allow.clone()),
+                        execution_access_contracts: vec!["secret@1".into()],
+                        family_policy: None,
+                        runtime_available: true,
+                        unavailable_reason: None,
+                    },
+                    RuntimeProductHarness {
+                        id: "claude-basic".into(),
+                        configuration_digest: "sha256:onboarding-claude".into(),
+                        model_compatibility: Vec::new(),
+                        configuration_revision: 1,
+                        model_rules: Some(allow),
+                        execution_access_contracts: vec!["managed-runtime@1".into()],
+                        family_policy: None,
+                        runtime_available: true,
+                        unavailable_reason: None,
+                    },
+                    RuntimeProductHarness {
+                        id: "codex-alternate".into(),
+                        configuration_digest: "sha256:onboarding-codex-alternate".into(),
+                        model_compatibility: Vec::new(),
+                        configuration_revision: 1,
+                        model_rules: Some(HarnessModelRules {
+                            allow: vec![HarnessModelRule {
+                                adapter_id: "openai-api".into(),
+                                model_id_exact: None,
+                                model_id_regex: Some("^gpt-".into()),
+                            }],
+                            deny: Vec::new(),
+                        }),
+                        execution_access_contracts: vec!["secret@1".into()],
+                        family_policy: None,
+                        runtime_available: true,
+                        unavailable_reason: None,
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        let provider_id = ProviderId::parse("work-openai").unwrap();
+        let definition = ProviderDefinition {
+            id: provider_id.clone(),
+            adapter_id: "openai-api".into(),
+            label: "Work OpenAI".into(),
+            endpoint: Some("https://api.openai.com/v1".into()),
+            access_contract: "secret@1".into(),
+            credential_reference: Some("provider:work-openai".into()),
+            lifecycle_state: "active".into(),
+            removed_at: None,
+        };
+        let snapshot = ProviderCatalogSnapshot {
+            provider_id: provider_id.clone(),
+            label: definition.label.clone(),
+            connected: true,
+            unavailable_reason: None,
+            models: vec![crate::product::CatalogModelSnapshot {
+                id: "gpt-work".into(),
+                label: "GPT Work".into(),
+                order: 0,
+                visible: true,
+                available: true,
+                unavailable_reason: None,
+                provider_default: false,
+                replacement_model_id: None,
+                metadata: serde_json::json!({}),
+            }],
+            system_family: None,
+        };
+        store
+            .create_provider_with_catalog(&definition, &snapshot, None, "1")
+            .await
+            .unwrap();
+        (store, path, provider_id)
     }
 }

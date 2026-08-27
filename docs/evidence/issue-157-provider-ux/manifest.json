@@ -2,18 +2,26 @@
   "schemaVersion": 1,
   "generator": "scripts/capture-provider-ux-video.mjs",
   "inference": false,
+  "activeAdapters": [
+    "codex-subscription",
+    "claude-subscription",
+    "openai-api",
+    "anthropic-api",
+    "openrouter",
+    "vercel-ai-router"
+  ],
   "viewport": {
     "width": 1280,
     "height": 800
   },
   "recording": {
     "kind": "cdp-interaction-frames",
-    "frameCount": 130,
+    "frameCount": 134,
     "captureFps": 6,
     "frameWidth": 1280,
     "frameHeight": 800,
-    "frameBytes": 7046586,
-    "framesSha256": "cac5f5d306cad4ae957f85d6d60926c34d330e952d586d5d2582c905afb2183d",
+    "frameBytes": 7401680,
+    "framesSha256": "47323601e33bb2c46b00d62382ca6375fbce20421d85dd9ae7e502547b5b5994",
     "interactions": [
       "click",
       "type",
@@ -54,8 +62,8 @@
       "file": "frames/family.png",
       "width": 1280,
       "height": 800,
-      "bytes": 43418,
-      "sha256": "0673811d471ee04f3d49ccd22d661785b2667ef5232847f43788af0e92763581"
+      "bytes": 62110,
+      "sha256": "42d4484bd697648cb65b63c1c3e4ff4e5cfbb529afb3abc7ed0ee98f7e6db518"
     },
     "providers": {
       "caption": "Manage independent provider connections",
@@ -86,8 +94,8 @@
       "file": "frames/recovery.png",
       "width": 1280,
       "height": 800,
-      "bytes": 43580,
-      "sha256": "2dff54bbd6c93fccb4fe8a003fdedc17422b515c9e5365dd4f238fbfae078d39"
+      "bytes": 43577,
+      "sha256": "afc02c16766058a98410bf3b1b6bd90cb5b6e38379c1df896fbf8f89929ec58e"
     }
   },
   "variants": {
@@ -120,8 +128,16 @@
       "file": "variants/loading.png",
       "width": 1280,
       "height": 800,
-      "bytes": 42412,
-      "sha256": "58618bc4387a32d50828775aa78009a0657621fbfad0e87e0854dfb02816e8e5"
+      "bytes": 42216,
+      "sha256": "c643e95b712224e8e2ebec706d3e06f3df37abc0460942ab35a1017371b9b083"
+    },
+    "invalid": {
+      "caption": "Invalid connection details",
+      "file": "variants/invalid.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 44414,
+      "sha256": "34b8c06cd02fa2419b28a0dc2bcff775825245171b99f6a2d64de90a9bc4fe08"
     },
     "error": {
       "caption": "Authentication error",
@@ -139,13 +155,37 @@
       "bytes": 60746,
       "sha256": "cb0fb8a5e17b37a86acbc110b2273b844fa1b83cdbdd614fcded65e8ba26194d"
     },
+    "stale": {
+      "caption": "Stale catalog member",
+      "file": "variants/stale.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 59006,
+      "sha256": "3254ed692881798b7bab39c93abbf1d214895ce308d277aaf132e4b97496d80e"
+    },
+    "removed": {
+      "caption": "Provider removal in progress",
+      "file": "variants/removed.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 60859,
+      "sha256": "65239af1f7db36439a3260220f5350634464d4df0446c1853488e41751f8fc6e"
+    },
+    "no-compatible": {
+      "caption": "No compatible harness recovery",
+      "file": "variants/no-compatible.png",
+      "width": 1280,
+      "height": 800,
+      "bytes": 54555,
+      "sha256": "9b157d59a6cb1f32167863535bee7df0c1ae6ca7b4444a83ea0eb16320f75625"
+    },
     "authorization": {
       "caption": "Authorization pending",
       "file": "variants/authorization.png",
       "width": 1280,
       "height": 800,
-      "bytes": 38921,
-      "sha256": "16e90401903f6d295beaadd53d543d0fbeb60c2d3f4c75b408e725a5e5bc0267"
+      "bytes": 38824,
+      "sha256": "ecf455728f15793a095d4acd04bee56594eb7a970ffa3639ac30b1dd4846e590"
     }
   },
   "poster": {
@@ -160,7 +200,7 @@
     "codec": "h264",
     "width": 1280,
     "height": 800,
-    "bytes": 328426,
-    "sha256": "d11ce7fd73e863dcd1f9f514a4ce58c435b7ddd21f0c0cb670c6736c79c27c5d"
+    "bytes": 369154,
+    "sha256": "f05eab4715d61980c8f519114c069544a9a95adc53b2b2be5689104e031df46b"
   }
 }

@@ -30,6 +30,7 @@ pub(crate) struct InteractionExecutionService {
     permission_catalog: PermissionCatalog,
     standalone_workspaces_directory: PathBuf,
     approval_decisions: Arc<Mutex<HashMap<String, ApprovalDecision>>>,
+    execution_lease_reconciler: Option<crate::app_server::ExecutionLeaseReconciler>,
 }
 
 impl InteractionExecutionService {
@@ -39,6 +40,7 @@ impl InteractionExecutionService {
         permission_catalog: PermissionCatalog,
         standalone_workspaces_directory: PathBuf,
         approval_decisions: Arc<Mutex<HashMap<String, ApprovalDecision>>>,
+        execution_lease_reconciler: Option<crate::app_server::ExecutionLeaseReconciler>,
     ) -> Self {
         Self {
             product,
@@ -46,6 +48,7 @@ impl InteractionExecutionService {
             permission_catalog,
             standalone_workspaces_directory,
             approval_decisions,
+            execution_lease_reconciler,
         }
     }
 
@@ -114,13 +117,16 @@ impl InteractionExecutionService {
                 return;
             }
         };
-        let execution_model_selection = match interaction.model_selection.as_ref() {
+        let (execution_model_plan, execution_model_selection) = match interaction
+            .model_selection
+            .as_ref()
+        {
             Some(selection) => match execution
                 .product
-                .validate_execution_model_selection(&thread.harness_configuration_name, selection)
+                .resolve_execution_model_plan(&thread.harness_configuration_name, selection)
                 .await
             {
-                Ok(selection) => Some(selection),
+                Ok((plan, selection)) => (Some(plan), Some(selection)),
                 Err(error) => {
                     if let Err(cleanup) = discard_model_preparation(runtime, prepared).await {
                         record_reconciliation_pending(execution, &thread, &interaction, &cleanup)
@@ -142,7 +148,7 @@ impl InteractionExecutionService {
                     return;
                 }
             },
-            None => None,
+            None => (None, None),
         };
         let harness_policy = match execution_model_selection.as_ref() {
             Some(_) => match execution
@@ -200,6 +206,8 @@ impl InteractionExecutionService {
             harness_configuration_name: &thread.harness_configuration_name,
             permission_profile,
             model_selection: execution_model_selection.as_ref(),
+            model_plan: execution_model_plan.as_ref(),
+            attempt_admission_id: None,
             execution_lease_id: None,
             harness_policy: harness_policy.as_ref(),
             invocation,
@@ -213,6 +221,13 @@ impl InteractionExecutionService {
                 .as_ref()
                 .map(|input| input.contexts.as_slice())
                 .unwrap_or(&[]),
+        };
+        let attempt_admission_id = execution_model_selection
+            .as_ref()
+            .map(|_| uuid::Uuid::new_v4().to_string());
+        let command = CompleteInteraction {
+            attempt_admission_id: attempt_admission_id.as_deref(),
+            ..command
         };
         let admission = if execution_model_selection.is_some() {
             match runtime.admit_provider_execution(&command).await {
@@ -250,53 +265,88 @@ impl InteractionExecutionService {
         {
             match execution
                 .product
-                .begin_interaction_attempt(
-                    interaction.id,
-                    &thread.harness_configuration_name,
-                    selection,
-                    admission.adapter_implementation_version,
-                    harness_policy
+                .begin_interaction_attempt(super::BeginInteractionAttempt {
+                    interaction_id: interaction.id,
+                    attempt_admission_id: attempt_admission_id
+                        .as_deref()
+                        .expect("provider admission requires an attempt admission id")
+                        .to_owned(),
+                    harness_name: &thread.harness_configuration_name,
+                    route: selection,
+                    model_plan: execution_model_plan
                         .as_ref()
-                        .expect("provider admission requires a harness policy"),
-                )
+                        .expect("provider admission requires a model plan")
+                        .clone(),
+                    admitted_plan: admission.admitted_plan.clone(),
+                    adapter_version: admission.adapter_implementation_version,
+                    execution_lease_id: &admission.execution_lease_id,
+                    expected_harness_policy: Some(
+                        harness_policy
+                            .as_ref()
+                            .expect("provider admission requires a harness policy"),
+                    ),
+                })
                 .await
             {
                 Ok(attempt) => Some(attempt),
                 Err(error) => {
-                    let _ = runtime
+                    let execution_lease_reconciled = runtime
                         .release_provider_execution(
                             thread.id.value(),
                             &admission.execution_lease_id,
                         )
-                        .await;
+                        .await
+                        .is_ok();
                     if let Err(cleanup) = discard_model_preparation(runtime, prepared).await {
                         record_reconciliation_pending(execution, &thread, &interaction, &cleanup)
                             .await;
                         return;
                     }
-                    if let Err(receipt_error) = execution
-                        .product
-                        .record_model_attempt_admission_failure(
-                            interaction.id,
-                            &thread.harness_configuration_name,
-                            selection,
-                            admission.adapter_implementation_version,
+                    let failed_receipt = super::BeginInteractionAttempt {
+                        interaction_id: interaction.id,
+                        attempt_admission_id: attempt_admission_id
+                            .as_deref()
+                            .expect("provider admission requires an attempt admission id")
+                            .to_owned(),
+                        harness_name: &thread.harness_configuration_name,
+                        route: selection,
+                        model_plan: execution_model_plan
+                            .as_ref()
+                            .expect("provider admission requires a model plan")
+                            .clone(),
+                        admitted_plan: admission.admitted_plan.clone(),
+                        adapter_version: admission.adapter_implementation_version,
+                        expected_harness_policy: Some(
                             harness_policy
                                 .as_ref()
                                 .expect("provider admission requires a harness policy"),
+                        ),
+                        execution_lease_id: &admission.execution_lease_id,
+                    };
+                    match execution
+                        .product
+                        .record_model_attempt_admission_failure(
+                            failed_receipt,
                             "model_unavailable",
+                            execution_lease_reconciled,
                         )
                         .await
                     {
-                        record_background_failure(
-                        &execution.product,
-                        &thread,
-                        &interaction,
-                        format!(
-                            "attempt admission failed ({error}); failed receipt persistence also failed: {receipt_error}"
-                        ),
-                    )
-                    .await;
+                        Ok(attempt) if !execution_lease_reconciled => {
+                            release_terminal_admission(execution, Some(attempt)).await;
+                        }
+                        Ok(_) => {}
+                        Err(receipt_error) => {
+                            record_background_failure(
+                                &execution.product,
+                                &thread,
+                                &interaction,
+                                format!(
+                                    "attempt admission failed ({error}); failed receipt persistence also failed: {receipt_error}"
+                                ),
+                            )
+                            .await;
+                        }
                     }
                     return;
                 }
@@ -479,7 +529,7 @@ impl InteractionExecutionService {
                             }
                         };
                         if terminalized {
-                            release_terminal_admission(runtime, &thread, admission.as_ref()).await;
+                            release_terminal_admission(execution, Some(attempt)).await;
                         }
                     } else {
                         record_background_failure(&execution.product, &thread, &interaction, error)
@@ -519,7 +569,7 @@ impl InteractionExecutionService {
                     )
                     .await;
                 } else {
-                    release_terminal_admission(runtime, &thread, admission.as_ref()).await;
+                    release_terminal_admission(execution, attempt).await;
                 }
             }
             Err(error) => {
@@ -616,8 +666,7 @@ impl InteractionExecutionService {
                                 )
                                 .await;
                             } else {
-                                release_terminal_admission(runtime, &thread, admission.as_ref())
-                                    .await;
+                                release_terminal_admission(execution, attempt).await;
                             }
                             return;
                         }
@@ -662,8 +711,7 @@ impl InteractionExecutionService {
                                 )
                                 .await;
                             if result.is_ok() {
-                                release_terminal_admission(runtime, &thread, admission.as_ref())
-                                    .await;
+                                release_terminal_admission(execution, Some(attempt)).await;
                             } else if let Err(persistence_error) = result {
                                 eprintln!(
                                     "could not atomically finalize failed attempt {attempt}: {persistence_error}"
@@ -792,17 +840,19 @@ async fn record_reconciliation_pending(
 }
 
 async fn release_terminal_admission(
-    runtime: &crate::runtime::RuntimeClient,
-    thread: &Thread,
-    admission: Option<&crate::runtime::RuntimeExecutionAdmission>,
+    execution: &InteractionExecutionService,
+    attempt_id: Option<i64>,
 ) {
-    let Some(admission) = admission else { return };
-    if runtime
-        .release_provider_execution(thread.id.value(), &admission.execution_lease_id)
-        .await
-        .is_err()
+    let Some(attempt_id) = attempt_id else { return };
+    if !crate::app_server::reconcile_terminal_execution_lease(
+        &execution.product,
+        &execution.runtime,
+        attempt_id,
+    )
+    .await
+        && let Some(reconciler) = &execution.execution_lease_reconciler
     {
-        eprintln!("could not release terminal provider execution admission");
+        reconciler.schedule();
     }
 }
 
@@ -858,14 +908,14 @@ async fn record_pre_execution_model_failure_to_unsent(
         .await
     {
         record_background_failure(
-                &execution.product,
-                thread,
-                interaction,
-                format!(
-                    "pre-execution model failure ({error}); attempt receipt persistence failed: {persistence_error}"
-                ),
-            )
-            .await;
+            &execution.product,
+            thread,
+            interaction,
+            format!(
+                "pre-execution model failure ({error}); attempt receipt persistence failed: {persistence_error}"
+            ),
+        )
+        .await;
     }
 }
 

@@ -53,6 +53,8 @@ For every product interaction, the app server durably creates the product intera
 
 Rust product policy defines exactly `ask`, `auto`, and `full`, including their labels, enabled state, default, and authority semantics. A thread pins one profile and one named harness configuration before inference. Each harness configuration carries implementation-specific bindings for the supported profile IDs, while product APIs and Eval cases exchange only the stable IDs. Accepted interactions persist a combined effective-execution digest and normalized permission receipt alongside the harness digest. Full-access receipts disclose that the process was not hard-confined from the host filesystem or network. See [ADR 0004](decisions/0004-product-permission-profiles.md).
 
+Prime Ask and Auto are two cooperating run-scoped capabilities, not configuration labels. The tool authority covers the root and recursive children and recognizes the complete IPython cell as the initial tool unit. The kernel authority launches the real kernel inside an attested version-1 workspace-write boundary before provider inference. That bounded mode permits workspace writes and loopback TCP for Jupyter, but denies subprocess creation, launchd job creation, Unix-domain outbound sockets, AppleEvents, and Mach lookup/registration so a kernel cannot daemonize past terminal cleanup or reach host control sockets. Ask routes the exact cell, canonical working directory, validated-argument digest, and boundary identity through the shared approval coordinator. Auto is a deterministic allow for that recognized request only after attestation; it never asks the orchestrator to review itself. Terminal cleanup is awaited and emitted as sanitized trace evidence. Full deliberately omits both capabilities and retains ordinary subprocess support.
+
 The desktop New Thread composer loads profile labels, availability, and the default from the Rust product API. It sends only the selected stable ID during ordinary thread creation and displays the pinned profile on saved threads. Unavailable profiles remain visible but disabled; provider-specific bindings never enter the renderer contract.
 
 ## Provider, model-family, and harness boundaries
@@ -186,15 +188,35 @@ The standalone server keeps only an in-memory map from opaque graph capability t
 
 Each interaction is serialized on its thread's host queue and receives a new `HarnessRunContext`. The context contains `inputGraph` plus a host-owned graph-scope handle; it is not factory input or persistent session state. `codex.basic` acquires the current capability to configure its lightweight SDK execution wrapper while resuming the same Codex thread ID. `prime.agent` passes the run context to `promptAndWait`; a stable `relayer.graph.current` handler returns the matching capability to root or child IPython kernels. The Python kernel calls Rust directly through `GraphSession.current()`. When the call settles, the host closes the handle and the calling runtime revokes the Rust token.
 
+For `prime.agent`, a root prompt settling is not the run boundary. The adapter waits for Prime's recursive runtime to become quiescent before returning or releasing graph and provider access. HarnessHost serializes each thread, so every prior completion reaches this barrier before the next interaction can use the persistent session. External cancellation starts Prime abort and still waits for quiescence and cleanup; barrier and abort failures remain visible rather than releasing authority early.
+
 Harness factories may initialize asynchronously so provider runtimes such as Prime Agent can open durable sessions before registration completes. The host serializes first construction and Complete calls per thread, forwards cancellation through an `AbortSignal`, aborts active work during shutdown, and disposes every live harness object exactly once.
 
 Product and graph metadata remain in separate SQLite databases, so the app server uses an explicit recoverable handoff rather than pretending they share a transaction. It first creates the durable product interaction, conditionally reserves `submitted`, prepares the canonical graph interaction, and stores the graph `NodeId`, frozen configuration/model identity, effective-execution digest, and permission receipt. Only a conditional transition on that exact prepared identity may claim `running` and enter the harness. The graph capability token remains transient runtime memory and is never product data. Product graph reads use control-authenticated read endpoints rather than minting harness writer capabilities.
+
+Terminal provider-execution lease debt is handled by one app-owned reconciliation worker. Startup and later release failures only wake that worker; they never spawn competing retry loops. The worker serially scans durable debt, retries with capped backoff, and returns to an idle notification wait after the debt is clear.
 
 Invoke preparation supplies the accepted source interaction/action pair to graph control. That pair is the graph-side idempotency key, so retrying a lost create response recovers the same leased graph interaction while the product-side invocation record recovers the same result interaction. At startup, bound interrupted invokes are reconciled against canonical graph completion output: an accepted graph finalizes product history using its already persisted execution receipt, while the absence of graph acceptance fails the product result and leaves the leased action unresolved. This closes the graph-accepted/product-uncommitted crash window without a distributed transaction or a second scheduler.
 
 ## Desktop release boundary
 
 Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of any selected harness, provider, or GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates target Apple Silicon and Intel macOS 13 or newer plus Windows x64 and begin at version `0.2.0`.
+
+Optional packaged harnesses are admitted through an exact runtime contract rather
+than filesystem discovery. Prime Agent is installed from four checked-in,
+content-addressed archives built reproducibly from the commit recorded in its
+manifest. The packaged desktop carries only the Basic and Deep production
+configurations plus the trusted Python graph client. Startup verifies the
+manifest identity, installed package versions, required run-scope APIs,
+recursive-quiescence barrier, configurations, and Python assets before adding
+either Prime configuration to the catalog. Failure leaves the Codex and Claude
+configurations available and records a local diagnostic; explicitly requesting
+an unavailable Prime default fails closed before the product runtime starts.
+The product catalog retains unavailable Prime entries and their stable reason for
+Harness Settings, while executable configuration lookup, onboarding, and the
+composer exclude them. The diagnostic and execution trace contain only the
+reviewed source commit and package name/version pairs. Current bounded Ask and
+Auto support is macOS-only, so a Windows build never advertises Prime as runnable.
 
 Release configuration resolves through one fail-closed contract. The contract seals the numeric version, source commit, product identity, target, architecture, signing authority, channel manifest, and exact HTTPS update base into both the application package and its release receipt. macOS targets additionally seal the Apple team and minimum OS; Windows seals the Artifact Signing endpoint, account, profile, and publisher. The updater and publisher consume this contract rather than maintaining parallel identity or channel rules. See [ADR 0002](decisions/0002-desktop-release-contract.md).
 

@@ -10,6 +10,24 @@ A product thread pins both its harness configuration and permission profile befo
 
 The `codex.basic` binding translates `ask` and `auto` to bounded workspace access with user or automatic approval review, respectively. `full` translates to unrestricted Codex access without approvals. Because Full access is not a hard filesystem or network boundary, its receipt and Eval artifacts must disclose that fact.
 
+The `prime.agent` binding uses a versioned run-scoped tool-authority capability
+and a separately factory-minted workspace-write kernel boundary. Ask sends each
+recognized, schema-validated IPython cell through the ordinary normalized
+approval channel; session grants therefore retain the exact matching semantics
+from issue #54. Auto allows that same recognized tool deterministically only
+after Prime reports that the exact run's kernel boundary was initialized. It is
+not model self-review. Unknown tools, malformed arguments, missing or mismatched
+boundary attestation, and unsupported platforms fail closed. Full supplies
+neither capability and remains explicitly unrestricted.
+
+The initial macOS boundary intentionally denies subprocess creation, launchd
+job creation, outbound Unix-domain sockets, AppleEvents, and Mach service
+lookup or registration. It preserves loopback TCP for Jupyter and writes below
+the admitted workspace and private runtime roots. This prevents a bounded
+kernel from daemonizing beyond terminal cleanup or reaching host control
+sockets. Work that requires subprocesses must use the explicitly unrestricted
+`full` profile.
+
 Relayer Eval selects these same product profiles through the ordinary thread API. The H3 project case uses `ask` for architecture, `auto` for diagnosis, and `full` for implementation. Read-only task prompts and unchanged-workspace grading remain acceptance constraints, not hidden permission profiles. Simulated-user judges retain their separate read-only review authority.
 
 An internal Eval matrix may explicitly substitute `full` for an H3 thread's requested profile only when the selected development harness exposes `full` as its sole binding and the fixture is disposable. The run records the requested profile, effective profile, unrestricted authority, and override reason. This compatibility resolution happens before thread creation; it does not silently change a product thread's pinned authority.
@@ -22,3 +40,4 @@ An internal Eval matrix may explicitly substitute `full` for an H3 thread's requ
 - A thread cannot silently change permission authority between turns or after restart.
 - Harness implementations may translate profiles differently, but cannot add a fourth base product profile.
 - Full access is useful for Git-writing implementation work, but outer process isolation is required when hard confinement matters.
+- Prime Ask and Auto require both version-1 upstream authority APIs and a supported host process boundary before inference. The initial host boundary is macOS Seatbelt; other platforms remain unavailable rather than silently relabeling unrestricted execution.

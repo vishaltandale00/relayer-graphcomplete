@@ -21,6 +21,7 @@ import { createConversationExportService } from "./services/conversation-export.
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
 import { GraphCompleteRuntimeService } from "./services/graphcomplete-runtime.mjs";
+import { inspectPrimeAgentRuntime, requirePrimeAgentRuntime } from "./services/prime-agent-runtime.mjs";
 import { resolveDesktopHarnessConfiguration } from "./services/desktop-harness-configuration.mjs";
 import { createSettingsStore } from "./services/settings-store.mjs";
 import { createTutorialLifecycle } from "./services/tutorial-lifecycle.mjs";
@@ -71,6 +72,28 @@ const permissionCatalogPath = app.isPackaged
 const graphClientModuleUrl = app.isPackaged
   ? pathToFileURL(join(process.resourcesPath, "graph-client", "index.js")).href
   : undefined;
+const primePythonClientRoot = app.isPackaged
+  ? join(process.resourcesPath, "python", "relayer-graph", "src")
+  : join(repositoryRoot, "python", "relayer-graph", "src");
+process.env.RELAYER_PRIME_PYTHON_CLIENT_ROOT = primePythonClientRoot;
+const primeAgentRuntime = await inspectPrimeAgentRuntime({
+  appPath: app.isPackaged ? app.getAppPath() : repositoryRoot,
+  harnessDirectory,
+  manifestPath: app.isPackaged
+    ? join(process.resourcesPath, "prime-agent", "manifest.json")
+    : join(repositoryRoot, "vendor", "prime-agent", "manifest.json"),
+  pythonClientRoot: primePythonClientRoot,
+  platform: process.platform,
+  defaultPermissionProfileId: "auto",
+});
+if (!primeAgentRuntime.available) {
+  delete process.env.RELAYER_PRIME_RUNTIME_PROVENANCE;
+  console.error("Prime Agent runtime unavailable", {
+    code: primeAgentRuntime.code,
+    message: primeAgentRuntime.message,
+    diagnostics: primeAgentRuntime.diagnostics,
+  });
+} else process.env.RELAYER_PRIME_RUNTIME_PROVENANCE = JSON.stringify(primeAgentRuntime.diagnostics);
 const rendererDirectory = app.isPackaged
   ? join(process.resourcesPath, "renderer")
   : join(desktopDirectory, "renderer");
@@ -78,6 +101,7 @@ const defaultHarnessConfiguration = resolveDesktopHarnessConfiguration({
   isPackaged: app.isPackaged,
   environment: process.env,
 });
+if (defaultHarnessConfiguration.startsWith("prime-agent-")) requirePrimeAgentRuntime(primeAgentRuntime);
 
 let mainWindow;
 const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => mainWindow });
@@ -94,7 +118,13 @@ if (primaryInstance) {
       "codex-basic",
       "codex-basic-high",
       "claude-basic",
+      ...(primeAgentRuntime.available ? primeAgentRuntime.configurationNames : []),
     ])].map((name) => join(harnessDirectory, `${name}.yaml`)),
+    unavailableConfigurations: primeAgentRuntime.available ? [] : ["prime-agent-basic", "prime-agent-deep"].map((name) => ({
+      name,
+      reason: { code: primeAgentRuntime.code, message: primeAgentRuntime.message },
+      diagnostics: primeAgentRuntime.diagnostics,
+    })),
     codexBasicClientModuleUrl: graphClientModuleUrl,
     codexPathOverride: bundledCodexBinary,
     acquireProviderExecution: (providerId) => {

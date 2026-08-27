@@ -7,6 +7,7 @@ import {
   firstAvailableSelection,
   harnessUsesConfigurationModel,
   isModelSelectionCatalogError,
+  modelPickerContextCandidate,
   NO_MODELS_FOR_HARNESS,
   normalizePickerSelection,
   pickerSelectionIsAvailable,
@@ -146,6 +147,25 @@ describe("composer model picker selection", () => {
     expect(availablePickerFamilies(catalog, "codex-basic")[0].availableMembers).toEqual([
       { providerId: "codex", modelId: "two", position: 1 },
     ]);
+  });
+
+  it("does not make Prime selectable when its model rules match no available family member", () => {
+    const catalog = settings();
+    catalog.providers[0].adapterId = "codex-subscription";
+    catalog.harnesses.push({
+      id: "prime-agent-basic",
+      label: "Prime Agent Basic",
+      available: true,
+      modelRules: {
+        allow: [{ adapterId: "openai-api", modelIdRegex: ".*" }],
+        deny: [],
+      },
+      executionAccessContracts: ["secret@1"],
+    });
+    expect(availablePickerFamilies(catalog, "prime-agent-basic")).toEqual([]);
+    expect(firstAvailableSelection(catalog, "prime-agent-basic")).toBeNull();
+    expect(normalizePickerSelection(catalog, { harnessId: "prime-agent-basic" })).toBeNull();
+    expect(pickerSelectionIsAvailable(catalog, { harnessId: "prime-agent-basic" })).toBe(false);
   });
 
   it("keeps the first family's first available member authoritative over a later preferred model", () => {
@@ -289,6 +309,54 @@ describe("composer model picker selection", () => {
     await expect(validateCandidateHarness(catalog, current, "stale", validateSelection)).resolves.toEqual({
       selection: current,
       error: NO_MODELS_FOR_HARNESS,
+    });
+  });
+
+  it("adopts new defaults when picker context explicitly replaces its prior selection", () => {
+    const catalog = settings();
+    catalog.defaults.harnessId = "prime-agent-basic";
+    const currentSelection = { harnessId: "codex-basic" };
+    expect(modelPickerContextCandidate({
+      settings: catalog,
+      mode: "new",
+      pinnedHarnessId: null,
+      currentSelection,
+      nextSelection: null,
+      replaceSelection: true,
+    })).toEqual({ harnessId: "prime-agent-basic" });
+    expect(modelPickerContextCandidate({
+      settings: catalog,
+      mode: "new",
+      pinnedHarnessId: null,
+      currentSelection,
+      nextSelection: null,
+      replaceSelection: false,
+    })).toEqual({ harnessId: "codex-basic" });
+  });
+
+  it("resets a new-thread picker to the configured default family rather than family order", () => {
+    const catalog = settings();
+    catalog.families.push({
+      id: 3,
+      name: "Configured default",
+      enabled: true,
+      position: 2,
+      members: [{ providerId: "codex", modelId: "one", position: 0 }],
+    });
+    catalog.defaults.familyId = 3;
+    const candidate = modelPickerContextCandidate({
+      settings: catalog,
+      mode: "new",
+      pinnedHarnessId: null,
+      currentSelection: { harnessId: "codex-basic", familyId: 1, providerId: "codex", modelId: "one" },
+      nextSelection: null,
+      replaceSelection: true,
+    });
+    expect(reconcilePickerSelection(catalog, candidate)).toMatchObject({
+      harnessId: "codex-basic",
+      familyId: 3,
+      providerId: "codex",
+      modelId: "one",
     });
   });
 
