@@ -1,11 +1,13 @@
 import { appState } from "./state.js";
 import { saveHarnessModelRules } from "./model-settings-api.js";
 import { harnessConfigurationsMarkup } from "./provider-ui.js";
-import { validateHarnessRules } from "./harness-settings-model.js";
+import { authoritativeRefreshConfirmed, validateHarnessRules } from "./harness-settings-model.js";
 import { $, $$, escapeHtml, escapeHtmlAttribute } from "./ui.js";
 
 let edit = null;
 let saving = false;
+let advanced = false;
+let eligibilityRefreshFailed = false;
 
 function status(message = "", kind = "") {
   const target = $("#harnessSettingsStatus");
@@ -46,12 +48,55 @@ function editorMarkup(harness) {
   const errors = edit.errors ?? {};
   const group = (effect, empty) => `<section><div class="harness-rule-editor-heading"><h4>${effect === "allow" ? "Allow" : "Deny"}</h4><button type="button" class="secondary" data-harness-rule-add="${effect}" ${saving ? "disabled" : ""}>＋ Add rule</button></div>${edit.rules[effect].length ? edit.rules[effect].map((rule, index) => ruleEditor(effect, rule, index, errors)).join("") : `<p>${empty}</p>`}</section>`;
   return `<article class="harness-configuration-card harness-rules-editor-card" aria-busy="${saving}">
-    <div class="provider-definition-heading"><div><h3>${escapeHtml(harness.label)}</h3><span>${escapeHtml(harness.id)} · revision ${revision(harness)}</span></div></div>
+    <div class="provider-definition-heading"><div><h3 id="harnessAdvancedEditorHeading" tabindex="-1">${escapeHtml(harness.label)} advanced configuration</h3></div></div>
     <p class="harness-rules-help">Rules match adapter ID plus model ID. Deny always wins; an empty Allow list permits every model not denied.</p>
     <div class="harness-rule-editor-groups">${group("allow", "All models not denied")}${group("deny", "No deny rules")}</div>
     ${errors.form ? `<div class="field-error" role="alert">${escapeHtml(errors.form)}</div>` : ""}
     <div class="provider-definition-actions"><button type="button" class="secondary" id="cancelHarnessRules" ${saving ? "disabled" : ""}>Cancel</button><span class="push"></span><button type="button" class="primary" id="saveHarnessRules" ${saving ? "disabled" : ""}>${saving ? "Saving…" : "Save rules"}</button></div>
   </article>`;
+}
+
+function advancedMarkup(harnesses) {
+  const editable = harnesses.filter((harness) => harness.available !== false);
+  return `<section class="harness-advanced-panel" aria-labelledby="harnessAdvancedHeading">
+    <div class="provider-definition-heading"><div><h3 id="harnessAdvancedHeading" tabindex="-1">Advanced configuration</h3><span>Edit model eligibility rules for an installed harness.</span></div></div>
+    <div class="harness-advanced-options">${editable.length ? editable.map((harness) => `<button type="button" class="secondary" data-harness-advanced-edit="${escapeHtmlAttribute(harness.id)}">${escapeHtml(harness.label)}</button>`).join("") : `<p>No installed harness rules can be edited.</p>`}</div>
+    <div class="provider-definition-actions"><button type="button" class="secondary" id="closeHarnessAdvanced">Back to harnesses</button></div>
+  </section>`;
+}
+
+function focusAfterRender(selector) {
+  requestAnimationFrame(() => $(selector)?.focus());
+}
+
+async function retryEligibilityRefresh() {
+  try {
+    const { refreshModelSettings } = await import("./model-family-settings.js");
+    const previousSettings = appState.modelSettings;
+    const applied = await refreshModelSettings();
+    const refreshed = authoritativeRefreshConfirmed(
+      previousSettings,
+      appState.modelSettings,
+      applied,
+    );
+    if (refreshed) return status();
+  } catch {}
+  eligibilityRefreshFailed = true;
+  status("Current harness eligibility could not be refreshed.", "error");
+  renderHarnessSettings();
+  focusAfterRender("#retryHarnessEligibility");
+}
+
+function beginEditing(selected, returnToAdvanced = false) {
+  edit = {
+    harnessId: selected.id,
+    rules: structuredClone(selected.modelRules ?? { allow: [], deny: [] }),
+    errors: {},
+    returnToAdvanced,
+  };
+  status();
+  renderHarnessSettings();
+  focusAfterRender("#harnessAdvancedEditorHeading");
 }
 
 function setRuleValue(path, field, value) {
@@ -95,7 +140,15 @@ function bindEditor(harness) {
       requestAnimationFrame(() => $$('[data-harness-rule-adapter]').at(-1)?.focus());
     };
   });
-  $("#cancelHarnessRules").onclick = () => { edit = null; status(); renderHarnessSettings(); };
+  $("#cancelHarnessRules").onclick = () => {
+    const harnessId = edit.harnessId;
+    const returnToAdvanced = edit.returnToAdvanced;
+    edit = null;
+    advanced = returnToAdvanced;
+    status();
+    renderHarnessSettings();
+    focusAfterRender(returnToAdvanced ? "#harnessAdvancedHeading" : `[data-harness-rules-edit="${harnessId}"]`);
+  };
   $("#saveHarnessRules").onclick = async () => {
     edit.errors = validateHarnessRules(edit.rules);
     if (Object.keys(edit.errors).length) {
@@ -104,6 +157,8 @@ function bindEditor(harness) {
       return;
     }
     const submittedRules = structuredClone(edit.rules);
+    let savedHarnessId = null;
+    let refreshed = false;
     saving = true;
     renderHarnessSettings();
     try {
@@ -111,14 +166,41 @@ function bindEditor(harness) {
       harness.modelRules = submittedRules;
       harness.configurationRevision = revision(harness) + 1;
       edit = null;
+      advanced = false;
+      savedHarnessId = harness.id;
+      eligibilityRefreshFailed = false;
       status("Harness model rules saved.", "success");
+      try {
+        const { refreshModelSettings } = await import("./model-family-settings.js");
+        const previousSettings = appState.modelSettings;
+        const applied = await refreshModelSettings();
+        refreshed = authoritativeRefreshConfirmed(
+          previousSettings,
+          appState.modelSettings,
+          applied,
+        );
+        if (!refreshed) {
+          eligibilityRefreshFailed = true;
+          status("Harness model rules saved, but current eligibility could not be confirmed.", "error");
+        }
+      } catch {
+        eligibilityRefreshFailed = true;
+        status("Harness model rules saved, but current eligibility could not be refreshed.", "error");
+      }
     } catch (error) {
       status(error.message, "error");
     } finally {
       saving = false;
-      renderHarnessSettings();
+      if (!refreshed) renderHarnessSettings();
+      if (savedHarnessId) {
+        focusAfterRender(`#retryHarnessEligibility, [data-harness-rules-edit="${savedHarnessId}"], #openHarnessAdvanced`);
+      }
     }
   };
+}
+
+export function markHarnessEligibilityCurrent() {
+  eligibilityRefreshFailed = false;
 }
 
 export function renderHarnessSettings(settings = appState.modelSettings) {
@@ -126,14 +208,43 @@ export function renderHarnessSettings(settings = appState.modelSettings) {
   if (!target) return;
   const harnesses = settings?.harnesses ?? [];
   const harness = edit && harnesses.find((candidate) => candidate.id === edit.harnessId);
-  target.innerHTML = harness ? editorMarkup(harness) : harnessConfigurationsMarkup(harnesses);
+  if (!harness && eligibilityRefreshFailed) {
+    target.innerHTML = `<div class="family-empty harness-empty" role="alert"><div><strong>Harness availability needs to be refreshed.</strong><span>Reload the current provider and model eligibility before choosing a harness.</span><button type="button" class="secondary" id="retryHarnessEligibility">Refresh harnesses</button></div></div>`;
+    $("#retryHarnessEligibility").onclick = retryEligibilityRefresh;
+    return;
+  }
+  target.innerHTML = harness
+    ? editorMarkup(harness)
+    : advanced
+      ? advancedMarkup(harnesses)
+      : harnessConfigurationsMarkup(settings);
   if (harness) return bindEditor(harness);
+  if (advanced) {
+    $$('[data-harness-advanced-edit]').forEach((button) => {
+      button.onclick = () => beginEditing(
+        harnesses.find((candidate) => candidate.id === button.dataset.harnessAdvancedEdit),
+        true,
+      );
+    });
+    $("#closeHarnessAdvanced").onclick = () => {
+      advanced = false;
+      renderHarnessSettings(settings);
+      focusAfterRender("#openHarnessAdvanced");
+    };
+    return;
+  }
   $$('[data-harness-rules-edit]').forEach((button) => {
     button.onclick = () => {
       const selected = harnesses.find((candidate) => candidate.id === button.dataset.harnessRulesEdit);
-      edit = { harnessId: selected.id, rules: structuredClone(selected.modelRules ?? { allow: [], deny: [] }), errors: {} };
-      status();
-      renderHarnessSettings(settings);
+      beginEditing(selected);
     };
   });
+  const openAdvanced = $("#openHarnessAdvanced");
+  if (openAdvanced) {
+    openAdvanced.onclick = () => {
+      advanced = true;
+      renderHarnessSettings(settings);
+      focusAfterRender("#harnessAdvancedHeading");
+    };
+  }
 }

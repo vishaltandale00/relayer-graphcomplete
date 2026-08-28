@@ -60,10 +60,12 @@ The `prime.agent` adapter uses the exact reviewed Prime Agent build recorded in
 runtime API contract, production configurations, and Python graph client are
 installed and packaged by the ordinary repository build. Prime configurations
 are omitted from the runtime catalog unless that complete contract passes the
-desktop preflight. An unavailable packaged runtime remains visible with a stable,
-actionable reason in Harness Settings, but is omitted from onboarding and model
-selection. Prime Ask and Auto currently require the macOS boundary; Windows
-therefore records both packaged Prime configurations as unavailable.
+desktop preflight. Unavailable packaged runtimes remain in the authoritative
+catalog with a stable reason, but ordinary Harness Settings, onboarding, and
+model selection show only harnesses with an exactly resolvable connected
+provider, available model, and enabled family. Prime Ask and Auto currently
+require the macOS boundary; Windows therefore records both packaged Prime
+configurations as unavailable.
 
 Prime Agent is one optional recursive harness implementation, not the product runtime. See the [visual Product Requirements](docs/prd/index.html), [Architecture](docs/architecture.md), [ADR 0006](docs/decisions/0006-harness-provider-agnostic-product-boundary.md), and the adapter-specific [ADR 0001](docs/decisions/0001-prime-agent-runtime-boundary.md).
 

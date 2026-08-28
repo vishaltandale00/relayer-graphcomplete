@@ -203,6 +203,7 @@ async function captureBrowserScene(url, frame, profile, width = 1280) {
             })(),
             firstInvalidFocused: invalidInputs.length > 0 && document.activeElement === invalidInputs[0],
             connectedProviderRetained: Boolean(window.__providerEvidence?.definitions?.some((definition) => definition.id === "openai-work")),
+            harnessMarkup: document.querySelector("#harnessConfigurationList")?.innerHTML ?? "",
           };
         })()`,
         returnByValue: true,
@@ -476,6 +477,9 @@ const modelSettings = (scene) => ({
         ],
         deny: [{ adapterId: "openai-api", modelIdRegex: "-deprecated$" }],
       },
+      usableNow: true,
+      usableProviderIds: ["openai-work", "codex"],
+      usableFamilyIds: [11, 12],
     },
     {
       id: "claude-basic",
@@ -485,6 +489,9 @@ const modelSettings = (scene) => ({
       executionAccessContracts: ["managed-runtime@1"],
       compatibleProviderIds: [],
       modelRules: { allow: [{ adapterId: "anthropic-api", modelIdRegex: "^claude-" }], deny: [] },
+      usableNow: false,
+      usableProviderIds: [],
+      usableFamilyIds: [],
     },
   ],
 });
@@ -747,11 +754,16 @@ try {
       "alternate-harness": ["Choose your default model family", "Claude basic", "Claude Sonnet"],
       providers: ["OpenAI Work", "gateway.example.com/openai/v1", "Default provider"],
       families: ["Work coding", "Fast review", "GPT-5.6 Sol"],
-      harnesses: ["Harnesses", "Codex basic", "openai-api"],
+      harnesses: ["Harnesses", "Codex basic", "OpenAI Work", "Work coding", "Advanced configuration"],
       recovery: ["OpenAI Work is rate limited", "Review the provider adapter architecture"],
     }[scene];
     for (const text of required) {
       if (!dom.includes(text)) throw new Error(`Evidence scene ${scene} is missing ${text}.`);
+    }
+    if (scene === "harnesses") {
+      for (const internal of ["Claude basic", "Execution access", "Revision", "managed-runtime@1", "openai-api", "Available"]) {
+        if (audit.harnessMarkup.includes(internal)) throw new Error(`Evidence scene harnesses exposes ${internal}.`);
+      }
     }
     if (scene === "onboarding" && !audit.providerOptionsUseRovingRadio) {
       throw new Error("Provider choices do not use a single-tab-stop roving radio group.");

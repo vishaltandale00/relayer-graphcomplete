@@ -5,6 +5,7 @@ import {
   createFamilyVisibilityGate,
   createModelFamilyDraft,
   defaultHarnessError,
+  usableDefaultHarnesses,
   MAX_MODELS_PER_FAMILY,
   modelMember,
   moveItem,
@@ -206,6 +207,21 @@ describe("model family settings model", () => {
     };
     expect(defaultHarnessError(settings)).toBe("No available models for this harness.");
     expect(settings.defaults.harnessId).toBe("codex-basic");
+  });
+
+  it("offers only currently usable harnesses as new defaults", () => {
+    const settings = {
+      defaults: { harnessId: "claude-basic" },
+      harnesses: [
+        { id: "codex-basic", usableNow: true },
+        { id: "claude-basic", available: true, usableNow: false },
+      ],
+    };
+    expect(usableDefaultHarnesses(settings)).toEqual([settings.harnesses[0]]);
+    expect(defaultHarnessError(settings)).toBe(
+      "No currently connected provider and eligible model can use this harness.",
+    );
+    expect(settings.defaults.harnessId).toBe("claude-basic");
   });
 });
 

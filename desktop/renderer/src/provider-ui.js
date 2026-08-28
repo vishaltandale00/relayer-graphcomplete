@@ -3,6 +3,7 @@ import {
   providerDefinitionStatus,
   providerDescriptorGroups,
 } from "./provider-ui-model.js";
+import { usableHarnessPresentations } from "./harness-settings-model.js";
 import { escapeHtmlAttribute } from "./ui.js";
 
 const escapeHtml = escapeHtmlAttribute;
@@ -205,21 +206,21 @@ export function providerDefinitionsMarkup(definitions, defaults = {}, descriptor
   }).join("");
 }
 
-function ruleLabel(rule) {
-  const matcher = rule.modelIdExact ? `is ${rule.modelIdExact}` : `matches ${rule.modelIdRegex}`;
-  return `${rule.adapterId} · ${matcher}`;
+function compactLabels(labels) {
+  if (labels.length <= 2) return labels.join(", ");
+  return `${labels.slice(0, 2).join(", ")} +${labels.length - 2}`;
 }
 
-export function harnessConfigurationsMarkup(harnesses) {
-  if (!harnesses.length) return `<div class="family-empty">No harness configurations available.</div>`;
-  return harnesses.map((harness) => `<article class="harness-configuration-card" data-harness-configuration="${escapeHtmlAttribute(harness.id)}">
-    <div class="provider-definition-heading"><div><h3>${escapeHtml(harness.label)}</h3><span>${escapeHtml(harness.id)}</span></div><span class="provider-status ${harness.available === false ? "unavailable" : "connected"}">${harness.available === false ? "Unavailable" : "Available"}</span></div>
-    ${harness.available === false && harness.unavailableReason ? `<p class="provider-removal-help">${escapeHtml(harness.unavailableReason.message)}</p>` : ""}
-    <dl><div><dt>Execution access</dt><dd>${escapeHtml((harness.executionAccessContracts ?? []).join(", ") || "Configuration managed")}</dd></div><div><dt>Revision</dt><dd>${escapeHtml(harness.configurationRevision ?? harness.revision ?? "Current")}</dd></div></dl>
-    <div class="harness-rule-groups">
-      <section><h4>Allow</h4>${(harness.modelRules?.allow ?? []).length ? `<ul>${harness.modelRules.allow.map((rule) => `<li>${escapeHtml(ruleLabel(rule))}</li>`).join("")}</ul>` : `<p>All models not denied</p>`}</section>
-      <section><h4>Deny</h4>${(harness.modelRules?.deny ?? []).length ? `<ul>${harness.modelRules.deny.map((rule) => `<li>${escapeHtml(ruleLabel(rule))}</li>`).join("")}</ul>` : `<p>No deny rules</p>`}</section>
-    </div>
-    <div class="provider-definition-actions"><span class="push"></span><button type="button" class="secondary" data-harness-rules-edit="${escapeHtmlAttribute(harness.id)}"${harness.available === false ? " disabled" : ""}>Edit model rules</button></div>
-  </article>`).join("");
+export function harnessConfigurationsMarkup(settings) {
+  const presentations = usableHarnessPresentations(settings);
+  if (!presentations.length) return `<div class="family-empty harness-empty"><div><strong>No harnesses are usable right now.</strong><span>Connect a provider with an eligible model, or review advanced configuration.</span><button type="button" class="secondary" id="openHarnessAdvanced">Advanced configuration</button></div></div>`;
+  const usableIds = new Set(presentations.map(({ harness }) => harness.id));
+  const hasHiddenEditableHarness = (settings?.harnesses ?? []).some((harness) => (
+    harness.available !== false && !usableIds.has(harness.id)
+  ));
+  return `${presentations.map(({ harness, providerLabels, familyLabels, isDefault }) => `<article class="harness-configuration-card harness-summary-card" data-harness-configuration="${escapeHtmlAttribute(harness.id)}">
+    <div class="provider-definition-heading"><div><h3>${escapeHtml(harness.label)}</h3><span>${escapeHtml(compactLabels(providerLabels))}</span></div>${isDefault ? `<span class="default-badge">Default harness</span>` : ""}</div>
+    <p class="harness-compatible-families">${escapeHtml(compactLabels(familyLabels))}</p>
+    <div class="provider-definition-actions"><span class="push"></span><button type="button" class="secondary" data-harness-rules-edit="${escapeHtmlAttribute(harness.id)}">Advanced configuration</button></div>
+  </article>`).join("")}${hasHiddenEditableHarness ? `<div class="harness-advanced-entry"><button type="button" class="secondary" id="openHarnessAdvanced">Configure other harnesses</button></div>` : ""}`;
 }

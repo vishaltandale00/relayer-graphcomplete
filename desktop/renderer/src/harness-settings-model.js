@@ -36,3 +36,32 @@ export function validateHarnessRules(rules) {
   }
   return errors;
 }
+
+function uniqueLabels(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+export function usableHarnessPresentations(settings) {
+  const providers = settings?.providers ?? [];
+  const families = settings?.families ?? [];
+  return (settings?.harnesses ?? []).flatMap((harness) => {
+    if (!harness.usableNow) return [];
+    const providerIds = uniqueLabels((harness.usableProviderIds ?? []).map(String));
+    const providerLabels = providerIds.map((providerId) => (
+      providers.find((provider) => String(provider.id) === providerId)?.label
+    )).filter(Boolean);
+    const familyIds = new Set((harness.usableFamilyIds ?? []).map(String));
+    return [{
+      harness,
+      providerLabels: uniqueLabels(providerLabels),
+      familyLabels: uniqueLabels(families
+        .filter((family) => familyIds.has(String(family.id)))
+        .map((family) => family.name)),
+      isDefault: harness.id === settings?.defaults?.harnessId,
+    }];
+  });
+}
+
+export function authoritativeRefreshConfirmed(previousSettings, currentSettings, applied) {
+  return applied || currentSettings !== previousSettings;
+}

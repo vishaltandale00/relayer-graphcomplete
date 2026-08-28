@@ -71,6 +71,9 @@ pub(crate) struct ProductHarness {
     pub(crate) model_rules: Option<HarnessModelRules>,
     pub(crate) execution_access_contracts: Vec<String>,
     pub(crate) family_policy: Option<FamilyPolicyReference>,
+    pub(crate) usable_now: bool,
+    pub(crate) usable_provider_ids: Vec<ProviderId>,
+    pub(crate) usable_family_ids: Vec<ModelFamilyId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

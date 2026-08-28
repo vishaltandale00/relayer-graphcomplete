@@ -168,7 +168,14 @@ export function defaultHarnessError(settings) {
   if (selected.available === false) {
     return unavailableReasonMessage(selected.unavailableReason) || "No available models for this harness.";
   }
+  if (selected.usableNow !== true) {
+    return "No currently connected provider and eligible model can use this harness.";
+  }
   return null;
+}
+
+export function usableDefaultHarnesses(settings) {
+  return settings.harnesses.filter((harness) => harness.usableNow === true);
 }
 
 export function availableModels(providerCatalog, providerId) {
