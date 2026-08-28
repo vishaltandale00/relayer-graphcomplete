@@ -64,8 +64,13 @@ class FakeSocket {
     if (request.method === "Runtime.evaluate") {
       const expression = String(request.params?.expression);
       const evaluated = this.evaluateExpression?.(expression);
+      const marker = "existing-session-marker";
       const result = {
-        result: { value: evaluated?.value ?? (expression.includes("textContent") ? "existing-session-marker" : true) },
+        result: {
+          value: evaluated?.value ?? (expression.includes("textContent")
+            ? { text: marker, originalLength: marker.length }
+            : true),
+        },
         ...(evaluated?.exception ? { exceptionDetails: {} } : {}),
       };
       this.emit("message", { data: JSON.stringify({ id: request.id, result }) });
@@ -93,6 +98,7 @@ class DomHTMLElement {
   disabled = false;
   readOnly = false;
   ariaDisabled = false;
+  textContent: string | null = null;
   clickCount = 0;
   readonly events: string[] = [];
   onDispatch: ((type: string) => void) | undefined;
@@ -204,7 +210,7 @@ describe("claude.basic browser MCP tool", () => {
 
     expect(result.isError).toBeUndefined();
     expect(JSON.parse(result.content[0]!.text)).toMatchObject({ operations: [
-      { type: "read_text", text: "existing-session-marker" },
+      { type: "read_text", text: "existing-session-marker", truncated: false },
       { type: "navigate", url: "https://example.test/next" },
       { type: "fill", filled: true },
       { type: "click", clicked: true },
@@ -287,6 +293,24 @@ describe("claude.basic browser MCP tool", () => {
       content: [{ text: "The browser request is not supported." }],
     });
     expect(socket.sent).toHaveLength(0);
+  });
+
+  it("truncates highly escaped page text before CDP serializes the response", async () => {
+    const socket = new FakeSocket();
+    const element = new DomHTMLElement();
+    element.textContent = "\u0000\"\\\n".repeat(100_000);
+    socket.evaluateExpression = (expression) => evaluateInDom(expression, element);
+    const { handler } = fixture({ socket });
+
+    const result = await handler({ operations: [{ type: "read_text", selector: "#large" }] }, {});
+
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.content[0]!.text)).toEqual({ operations: [{
+      type: "read_text",
+      text: element.textContent.slice(0, 20_000),
+      truncated: true,
+    }] });
+    expect(socket.closed).toBe(true);
   });
 
   it("fails honestly instead of clicking a disabled control", async () => {

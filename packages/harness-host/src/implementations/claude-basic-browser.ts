@@ -174,8 +174,19 @@ async function runBrowserOperations(
         }
         case "read_text": {
           const value = await client.evaluate(pageFunction("read_text"), { selector: current.selector ?? "body" });
-          const text = typeof value === "string" ? value.slice(0, MAX_TEXT_LENGTH) : "";
-          results.push({ type: current.type, text, truncated: typeof value === "string" && value.length > MAX_TEXT_LENGTH });
+          if (!isRecord(value)
+            || typeof value.text !== "string"
+            || value.text.length > MAX_TEXT_LENGTH
+            || typeof value.originalLength !== "number"
+            || !Number.isSafeInteger(value.originalLength)
+            || value.originalLength < value.text.length) {
+            throw new BrowserFailure("operation-failed");
+          }
+          results.push({
+            type: current.type,
+            text: value.text,
+            truncated: value.originalLength > value.text.length,
+          });
           break;
         }
         case "click": {
@@ -432,7 +443,7 @@ class CdpClient {
 }
 
 function pageFunction(type: "read_text" | "click" | "fill"): string {
-  if (type === "read_text") return `({selector}) => { const element = document.querySelector(selector); if (!element) throw new Error("missing"); return element.textContent ?? ""; }`;
+  if (type === "read_text") return `({selector}) => { const element = document.querySelector(selector); if (!element) throw new Error("missing"); const text = element.textContent ?? ""; return {text:text.slice(0,${MAX_TEXT_LENGTH}),originalLength:text.length}; }`;
   if (type === "click") return `({selector}) => { const element = document.querySelector(selector); if (!(element instanceof HTMLElement) || element.matches(":disabled") || element.getAttribute("aria-disabled") === "true") throw new Error("invalid"); element.click(); return true; }`;
   return `({selector,value}) => { const element = document.querySelector(selector); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) || element.matches(":disabled") || element.readOnly) throw new Error("invalid"); const prototype = element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype; const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set; if (!setter) throw new Error("invalid"); element.focus(); setter.call(element, value); element.dispatchEvent(new Event("input", {bubbles:true})); element.dispatchEvent(new Event("change", {bubbles:true})); return element.value === value; }`;
 }
