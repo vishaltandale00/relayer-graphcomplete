@@ -39,7 +39,7 @@ import {
   selectStandalonePermissionProfile,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
-import { firstAvailableSelection } from "../renderer/src/model-picker-model.js";
+import { firstAvailableSelection, harnessUsesConfigurationModel } from "../renderer/src/model-picker-model.js";
 import {
   buildAcceptedReviewTopology,
   gradeAcceptedReviewTopology,
@@ -110,8 +110,8 @@ function copy(value) {
   return structuredClone(value);
 }
 
-export function evalModelSelectionRequest(selectedModel) {
-  return selectedModel === null ? {} : {
+export function evalModelSelectionRequest(selectedModel, productModelSelection = true) {
+  return selectedModel === null || !productModelSelection ? {} : {
     modelSelection: {
       familyId: selectedModel.familyId,
       providerId: selectedModel.providerId,
@@ -506,6 +506,7 @@ export class EvalService {
     acceptedTopologyBuilder = buildAcceptedReviewTopology,
     acceptedTopologyGrader = gradeAcceptedReviewTopology,
     candidateTraceExporter = null,
+    candidateTraceAttributionLoader = null,
     candidateTraceRequired = false,
     ensureModelCatalog = async () => {},
     conversationImportEnabled = false,
@@ -527,6 +528,7 @@ export class EvalService {
     this.acceptedTopologyBuilder = acceptedTopologyBuilder;
     this.acceptedTopologyGrader = acceptedTopologyGrader;
     this.candidateTraceExporter = candidateTraceExporter;
+    this.candidateTraceAttributionLoader = candidateTraceAttributionLoader;
     this.candidateTraceRequired = candidateTraceRequired;
     this.ensureModelCatalog = ensureModelCatalog;
     this.conversationImportEnabled = conversationImportEnabled;
@@ -1291,6 +1293,7 @@ export class EvalService {
           ? copy(permissionResolution)
           : null,
         effectiveExecutionDigest: interaction.effectiveExecutionDigest,
+        personalPresentationVersionId: execution.candidateTraceCaptures?.[String(interaction.id)]?.personalPresentationVersionId ?? null,
         modelSelection: copy(interaction.modelSelection || null),
         effectivePermissionReceipt: copy(interaction.effectivePermissionReceipt),
         status: interaction.completionStatus,
@@ -1523,7 +1526,12 @@ export class EvalService {
     if (execution.harnessConfiguration.implementation === "codex.basic") await this.ensureModelCatalog();
     const modelSettings = await this.#productRequest("/api/model-settings");
     const selectedModel = firstAvailableSelection(modelSettings, execution.harnessConfigurationName);
-    if (execution.harnessConfiguration.modelRules && selectedModel === null) {
+    const productModelSelection = !harnessUsesConfigurationModel(
+      modelSettings,
+      execution.harnessConfigurationName,
+    );
+    const modelLessEvalFixture = execution.harnessConfiguration.implementation === "fixture.task-system";
+    if (productModelSelection && selectedModel === null && !modelLessEvalFixture) {
       throw new Error(`Eval has no available model for ${execution.harnessConfigurationName}.`);
     }
     const thread = await this.#productRequest("/api/threads", {
@@ -1533,7 +1541,7 @@ export class EvalService {
         initialMessage: prompts[0],
         harnessConfigurationName: execution.harnessConfigurationName,
         permissionProfileId,
-        ...evalModelSelectionRequest(selectedModel),
+        ...evalModelSelectionRequest(selectedModel, productModelSelection),
         ...(projectId === null ? {} : { projectId }),
       },
     });
@@ -1546,7 +1554,7 @@ export class EvalService {
         method: "POST",
         body: {
           text: prompt,
-          ...evalModelSelectionRequest(selectedModel),
+          ...evalModelSelectionRequest(selectedModel, productModelSelection),
         },
       });
       const completedInteraction = await this.#waitForInteraction(thread.id, interaction.id);
@@ -1677,6 +1685,15 @@ export class EvalService {
       encodeURIComponent(execution.testRunId),
       ...ref.split("/").slice(0, -1),
     );
+    let pinnedPersonalPresentationVersionId;
+    try {
+      const candidate = await this.candidateTraceAttributionLoader?.(interaction.id);
+      if (Number.isSafeInteger(candidate) && candidate > 0) {
+        pinnedPersonalPresentationVersionId = candidate;
+      }
+    } catch {
+      // Export remains authoritative when an optional pre-export lookup is unavailable.
+    }
     try {
       const descriptor = await this.candidateTraceExporter(interaction.id, targetDirectory, {
         runId: execution.testRunId,
@@ -1688,15 +1705,24 @@ export class EvalService {
       execution.candidateTraceCaptures ||= {};
       execution.candidateTraceCaptures[String(interaction.id)] = {
         ...copy(descriptor),
+        ...(descriptor.personalPresentationVersionId === undefined
+          && pinnedPersonalPresentationVersionId !== undefined
+          ? { personalPresentationVersionId: pinnedPersonalPresentationVersionId }
+          : {}),
         ref,
         promotable: descriptor.status === "complete",
       };
     } catch (error) {
+      const personalPresentationVersionId = error?.personalPresentationVersionId
+        ?? pinnedPersonalPresentationVersionId;
       execution.candidateTraceCaptures ||= {};
       execution.candidateTraceCaptures[String(interaction.id)] = {
         status: "failed",
         format: "relayer-harness-trace-v1",
         coverage: emptyTraceCoverage(),
+        ...(Number.isSafeInteger(personalPresentationVersionId) && personalPresentationVersionId > 0
+          ? { personalPresentationVersionId }
+          : {}),
         error: error instanceof Error ? error.message : String(error),
         ref: null,
         promotable: false,

@@ -498,6 +498,9 @@ async function start() {
     candidateTraceExporter: (productInteractionId, targetDirectory, correlation) => (
       graphRuntime.exportCandidateTrace(productInteractionId, targetDirectory, correlation)
     ),
+    candidateTraceAttributionLoader: (productInteractionId) => (
+      graphRuntime.candidateTracePersonalPresentationVersionId(productInteractionId)
+    ),
     candidateTraceRequired: true,
     ensureModelCatalog: ensureEvalCodexCatalog,
     conversationImportEnabled: true,

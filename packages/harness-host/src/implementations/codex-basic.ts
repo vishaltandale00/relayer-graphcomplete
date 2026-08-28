@@ -89,6 +89,7 @@ interface ResolvedCodexPermission {
 interface CodexTraceState {
   readonly collaborationSpans: Map<string, HarnessTraceSpan>;
   readonly graphAuthoringCommandIds: Set<string>;
+  readonly fallbackGraphAuthoringEnabled: boolean;
 }
 
 interface NormalizedCollaborationItem {
@@ -137,6 +138,7 @@ export class CodexBasicHarness implements Harness {
     const traceState: CodexTraceState = {
       collaborationSpans: new Map(),
       graphAuthoringCommandIds: new Set(),
+      fallbackGraphAuthoringEnabled: this.dependencies.graphAuthoringLauncherPath === undefined,
     };
     const forceShutdown = new AbortController();
     this.activeForceShutdowns.add(forceShutdown);
@@ -442,7 +444,7 @@ export function buildLayeredNavigationPrompt(
     ? renderInteractionInput(context.interactionInput)
     : `Interaction:\n- id: ${interactionNode.id}\n- title: ${interactionNode.title}\n- detail: ${interactionNode.detail}`;
   const authoringInstructions = graphAuthoringLauncherPath === undefined
-    ? `Write a temporary .mjs file outside the project checkout and run it with Node.js. Import RelayerGraphClient, NodeObject, EdgeObject, and LayerObject from ${clientModuleUrl}, then use RelayerGraphClient.fromEnv(). Author in whatever order fits the task. Keep each object's generated clientKey stable when retrying the same rejected submit; create a new object only for a genuinely new graph record. Submit each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.`
+    ? `Run exactly node --input-type=module with no additional arguments and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM; never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import RelayerGraphClient, NodeObject, EdgeObject, and LayerObject from:\n${clientModuleUrl}\nThen use RelayerGraphClient.fromEnv(). Author in whatever order fits the task. Keep each object's generated clientKey stable when retrying the same rejected submit; create a new object only for a genuinely new graph record. Submit each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.`
     : `Run exactly ${graphAuthoringCommand(graphAuthoringLauncherPath)} with no arguments, including the displayed double quotes, and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM; do not resolve the launcher or Node.js from PATH, never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. Request Codex sandbox escalation for this exact launcher command; Relayer preauthorizes only this pinned internal launcher, which applies its own narrower graph sandbox. The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:\n${clientModuleUrl}\n${pinnedExecutionClause(graphAuthoringLauncherPath)}`;
   return `You are the Relayer layered-navigation harness. ${UNDERLYING_TASK_GUIDANCE}
 
@@ -586,9 +588,16 @@ function rememberGraphAuthoringCommand(state: CodexTraceState, params: unknown):
       ? item.commandActions.flatMap((action) => isRecord(action) ? [action.command] : [])
       : []),
   ];
-  if (commands.some((command) => pinnedGraphAuthoringLauncher(command) !== undefined)) {
+  if (commands.some((command) => pinnedGraphAuthoringLauncher(command) !== undefined
+    || (state.fallbackGraphAuthoringEnabled && isFallbackGraphAuthoringCommand(command)))) {
     state.graphAuthoringCommandIds.add(id);
   }
+}
+
+function isFallbackGraphAuthoringCommand(command: unknown): boolean {
+  if (typeof command !== "string") return false;
+  const input = command.trim();
+  return /^node[ \t]+--input-type=module[ \t]+<<'RELAYER_GRAPH_PROGRAM'[ \t]*\r?\n/.test(input);
 }
 
 function isPersonalPresentationEchoEvent(

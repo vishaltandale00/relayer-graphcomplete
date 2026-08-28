@@ -200,6 +200,7 @@ describe("ClaudeBasicHarness", () => {
       expect(harness.state()).toEqual({
         claudeSessionId: "session-1",
         claudeSessionProviderDefinitionId: "anthropic-work",
+        claudeSessionPersonalPresentationVersionId: null,
       });
     } finally {
       vi.unstubAllEnvs();
@@ -254,7 +255,11 @@ describe("ClaudeBasicHarness", () => {
     expect(tracedPrompt).not.toContain("Decision-useful center");
     expect(calls[0]?.options.allowedTools).toEqual(["Bash"]);
     expect(calls[1]?.prompt).not.toContain("Personal graph presentation preferences:");
-    expect(calls[1]?.options.resume).toBe("session-1");
+    expect(calls[1]?.options.resume).toBeUndefined();
+    expect(harness.state()).toMatchObject({
+      claudeSessionId: "session-1",
+      claudeSessionPersonalPresentationVersionId: 100,
+    });
   });
 
   it("redacts preference fragments echoed by Claude from message traces", async () => {
@@ -303,6 +308,7 @@ describe("ClaudeBasicHarness", () => {
     const harness = new ClaudeBasicHarness(factoryContext("bypassPermissions", {
       claudeSessionId: "prior",
       claudeSessionProviderDefinitionId: "claude-work",
+      claudeSessionPersonalPresentationVersionId: null,
     }), {
       query: sdkQuery([{ type: "result", subtype: "success", result: "done", session_id: "prior" }], (input) => { call = input; }),
       browserSdk: browserSdk(),
@@ -324,6 +330,25 @@ describe("ClaudeBasicHarness", () => {
     expect(call?.options.env.CLAUDE_CONFIG_DIR).toBe("/isolated");
     expect(call?.options.env).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(call?.options.env.RELAYER_GRAPH_TOKEN).toBe("token");
+  });
+
+  it("rotates provider-scoped legacy state whose presentation version is unknown", async () => {
+    let call: Parameters<ClaudeSdkQuery>[0] | undefined;
+    const harness = new ClaudeBasicHarness(factoryContext("ask", {
+      claudeSessionId: "legacy-session",
+      claudeSessionProviderDefinitionId: "claude-work",
+    }), {
+      query: sdkQuery([{ type: "result", subtype: "success", result: "done", session_id: "legacy-session" }], (input) => { call = input; }),
+    });
+
+    await harness.complete(runContext(managedAccess()));
+
+    expect(call?.options.resume).toBeUndefined();
+    expect(harness.state()).toEqual({
+      claudeSessionId: "legacy-session",
+      claudeSessionProviderDefinitionId: "claude-work",
+      claudeSessionPersonalPresentationVersionId: null,
+    });
   });
 
   it("preserves one conventional Windows Path for Claude SDK Bash execution", async () => {
@@ -388,6 +413,7 @@ describe("ClaudeBasicHarness", () => {
     expect(harness.state()).toEqual({
       claudeSessionId: "replacement",
       claudeSessionProviderDefinitionId: next.providerId,
+      claudeSessionPersonalPresentationVersionId: null,
     });
   });
 

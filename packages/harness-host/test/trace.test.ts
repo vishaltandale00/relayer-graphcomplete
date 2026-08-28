@@ -76,6 +76,35 @@ describe("HarnessTraceStore", () => {
     }
   });
 
+  it("preserves presentation attribution when trace export fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-trace-export-failure-"));
+    const target = join(directory, "existing-target");
+    try {
+      const store = new HarnessTraceStore({ directory: join(directory, "spool"), policy: policy() });
+      await store.start({
+        threadId: 1,
+        interactionNodeId: 2,
+        productInteractionId: 3,
+        personalPresentationVersionId: 90,
+        implementation: "fixture.trace",
+        configurationName: "fixture-trace",
+        support: fullSupport,
+      }).seal("complete");
+      await mkdir(target);
+
+      const error = await store.export(3, target, {
+        runId: "run-1", executionId: "execution-1", interactionId: "3", harnessConfigurationName: "fixture-trace",
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({
+        name: "HarnessTraceExportError",
+        personalPresentationVersionId: 90,
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("seals nested portable events, redacts secrets, and exports exactly once", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-trace-store-"));
     const target = join(directory, "exported", "candidate-trace");

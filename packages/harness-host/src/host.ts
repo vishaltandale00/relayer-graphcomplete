@@ -805,6 +805,11 @@ export class HarnessHost {
     return this.traceStore.export(productInteractionId, targetDirectory, correlation);
   }
 
+  candidateTracePersonalPresentationVersionId(productInteractionId: number): number | undefined {
+    if (this.traceStore === undefined) return undefined;
+    return this.traceStore.personalPresentationVersionId(productInteractionId);
+  }
+
   cancel(threadId: number): boolean {
     const session = this.sessions.get(threadId);
     const active = session?.activeCompletion;

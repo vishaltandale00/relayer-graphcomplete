@@ -333,11 +333,9 @@ describe("CodexBasicHarness", () => {
 
       await harness.complete(runContext(1, "token"));
 
-      if (promptProfile === undefined) {
-        expect(submittedPrompt).toContain("Run exactly node --input-type=module");
-      } else {
-        expect(submittedPrompt).toContain("Write a temporary .mjs file outside the project checkout");
-      }
+      expect(submittedPrompt).toContain("Run exactly node --input-type=module");
+      expect(submittedPrompt).toContain("delimited by exactly RELAYER_GRAPH_PROGRAM");
+      expect(submittedPrompt).toContain("do not create a script in either the project checkout or a temporary directory");
       expect(submittedPrompt).not.toContain("do not resolve Node.js from PATH");
       expect(submittedEnvironment).not.toHaveProperty("RELAYER_GRAPH_AUTHORING_NODE");
     }
@@ -819,7 +817,13 @@ describe("CodexBasicHarness", () => {
       options.onNotification?.("item/started", { item: {
         id: "graph-command",
         type: "commandExecution",
-        command: "/immutable/runtime/graph-authoring-launcher <<'NODE'\nDecision-useful center\nNODE",
+        command: "node --input-type=module <<'RELAYER_GRAPH_PROGRAM'\n// Decision-useful center\nawait graph.submit(1);\nRELAYER_GRAPH_PROGRAM",
+        aggregatedOutput: "Decision-useful center",
+      } });
+      options.onNotification?.("item/started", { item: {
+        id: "unrelated-node-heredoc",
+        type: "commandExecution",
+        command: "node --input-type=module <<'NODE'\nconsole.log('Decision-useful center')\nNODE",
         aggregatedOutput: "Decision-useful center",
       } });
       options.onNotification?.("item/agentMessage/delta", {
@@ -856,7 +860,7 @@ describe("CodexBasicHarness", () => {
 
     await harness.complete({ ...context, trace: trace.sink });
 
-    const echoEvents = trace.events.filter((event) => event.providerEventId !== "unrelated-command");
+    const echoEvents = trace.events.filter((event) => !["unrelated-command", "unrelated-node-heredoc"].includes(event.providerEventId ?? ""));
     const serializedEchoes = JSON.stringify(echoEvents);
     expect(serializedEchoes).not.toContain("Decision-useful center");
     expect(serializedEchoes).not.toContain("The user prefers central layers that are immediately decision-useful.");
@@ -865,6 +869,9 @@ describe("CodexBasicHarness", () => {
     const unrelatedCommand = trace.events.find((event) => event.type === "provider.event"
       && event.providerEventId === "unrelated-command");
     expect(JSON.stringify(unrelatedCommand?.data)).toContain("Decision-useful center");
+    const unrelatedNodeHeredoc = trace.events.find((event) => event.type === "provider.event"
+      && event.providerEventId === "unrelated-node-heredoc");
+    expect(JSON.stringify(unrelatedNodeHeredoc?.data)).toContain("Decision-useful center");
     const agentDelta = trace.events.find((event) => event.type === "provider.event"
       && event.data.method === "item/agentMessage/delta");
     expect(JSON.stringify(agentDelta?.data)).toContain("[redacted-personal-presentation]");
