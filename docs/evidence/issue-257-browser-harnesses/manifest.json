@@ -1,11 +1,12 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "issue": 257,
   "historicalProofBase": "61de23d527210b8a0d5972e3d12bb6b80a1b59e2",
   "assemblyMergeBase": "9188a8123b7c40436f0100d124c24103a768d32d",
   "integratedSource": {
     "algorithm": "sha256-of-sorted-path-nul-file-sha256-lf",
-    "sha256": "207da56bd66160f46e67ae07a95c55204547aafddd02644e9fad7b42658cfc3c",
+    "snapshotId": "issue-257-browser-harnesses-v1",
+    "sha256": "8b1f7662b910c88fd46b64bafbda79033b0e9c8628570985b2c8c2bf1c796bad",
     "files": [
       ".github/workflows/ci.yml",
       "README.md",
@@ -39,9 +40,45 @@
       "test/desktop-shell.test.mjs",
       "test/managed-runtime-installer.test.mjs",
       "test/prime-agent-packaging.test.mjs",
-      "vendor/prime-agent/earendil-works-pi-coding-agent-0.8.1-sha256-a1bcc855b83e0d6f7d2f08f803f24d36c771d7ca1a4835a79ecb57e23f51a281.tgz",
+      "vendor/prime-agent/earendil-works-pi-coding-agent-0.8.1-sha256-322ae6a08741da4611c1d65c3672ab8690ccbb416bb288e0f01b3f4682ecdf1e.tgz",
       "vendor/prime-agent/manifest.json"
-    ]
+    ],
+    "fileSha256": {
+      ".github/workflows/ci.yml": "cce4652280aa81796c1ee2e71df609843201554a12a7600258f6651221f3b2e1",
+      "README.md": "366eb41f919a15cdd92d100a9e11613398155fa8118a33f54ead3d91efea29ba",
+      "crates/relayer-app-server/src/runtime.rs": "ff2ca123393f19d95d64e0c14325dca6fd1f716de59a54291f08e787542dd564",
+      "desktop/eval-main/index.mjs": "982d4871f57c96945a18c903f3c6cc7bebaae046b806b5d355aa2e46293d877f",
+      "desktop/main/index.mjs": "8bd679e5896be1352eb1bc2a3abfddd779c2c582a683807a49b1c1d5a54a80d1",
+      "desktop/main/managed-runtimes/probes.mjs": "f2e74915fdca5a78effebd0537294d09ecc24a370ffd41917c4801e4a999b9cc",
+      "desktop/main/services/codex-browser-mcp-runtime.mjs": "2e95fd710b8a373a41f43ece4496fd284c7e3c6231cbb2753d110afc852589d0",
+      "desktop/main/services/graphcomplete-runtime.mjs": "f638372902d4200e2e419ae3095f91945d43232bae9f31b0e2f5dba4e9ac7b05",
+      "desktop/main/services/prime-agent-runtime.mjs": "09cd4434f8b4f43ba21d60b2aecd225d7dd850e90672ffd43f59a4c7b30184dc",
+      "desktop/package.json": "90aa3e33d09f3f3de575827d20ef133e163f5a5eb2f6bbaf62ce553c463ec175",
+      "desktop/packaging/electron-builder.mjs": "f1abd06cd16c71f33b7fedf9860f022456a2e254189120eb701c3f45316705b6",
+      "desktop/packaging/eval-electron-builder.mjs": "9e3a4e206beeede788e94e8e6fdf6b58ec5a664657dd43433049bd4677612b77",
+      "desktop/packaging/verify-bundled-app-server.mjs": "065d0c19b21aafe5786751cbc016cb4862a22ce79dba6826172b9a56884e923d",
+      "docs/evidence/issue-257-browser-harnesses/README.md": "70e495b4706d6fe4057cb96954a797e61c895157b00967ba65764bc1effad3e4",
+      "docs/prd/index.html": "9a03c31ec7d5b75b15f712dfa4e7630d1365db3f4e472f905b608bc283b31801",
+      "package-lock.json": "7d007f36c4d8cd8ba7b101609fb3cf5807d63a122fe1820c16f8d7b76849edc5",
+      "packages/harness-host/package.json": "10f934519885a74bdb478e445b32f19add1bcc12d811c16fb6773208d3617c1e",
+      "packages/harness-host/src/implementations/claude-basic-browser.ts": "a3e4331f46e14305a99531fc5b73cbcbd6ccf51b4f4f35ff10d5dd96bd044769",
+      "packages/harness-host/src/implementations/claude-basic.ts": "b58c101db0444e44bb52b6175e490195b759ad9971aeaac34c3a619531ce0f5a",
+      "packages/harness-host/src/implementations/codex-approvals.ts": "69873788880dc92fcc7a3c9f71c29f7e4df70ff3c4b9623b64379c6a3101467b",
+      "packages/harness-host/src/implementations/codex-basic.ts": "13698f465acabeccc986a40067c2b8d6e4a6f7ed467ee3529868ad545776e72b",
+      "packages/harness-host/test/claude-basic-browser.test.ts": "89e68cdf92fca4cebcaf700f77ec35fec7751155edecf55e067cde4d46380869",
+      "packages/harness-host/test/claude-basic.test.ts": "5b4e1bbc30ef9b1c1b0eaf599db1fd9e5cfd1d74b7eeae67d03a797c5fba3322",
+      "packages/harness-host/test/codex-app-server.test.ts": "6865ef964406974132a79984777f7e34cb5b46f23042daa23217e9b9ced27814",
+      "packages/harness-host/test/codex-approvals.test.ts": "03732c833ec96f2b6d47782803c094e3d7ea5e1685c1e143fffd02636dcfe148",
+      "packages/harness-host/test/codex-basic.test.ts": "4457693221eab27968dfaf480a05b4feb88315f49e53ecffd18bad22661ee947",
+      "packages/harness-host/test/prime-agent.test.ts": "89e687735b010aa427281ad9cef160888c61892a90768cd7c10360161a8f7b31",
+      "test/browser-harness-evidence.test.mjs": "8db925c2cffd0cbf007e6daa80e16be1e47ccabd2b64c335943bc748e2fe4368",
+      "test/codex-browser-runtime.test.mjs": "a4dda079955a0ea3c4534e701abc42aef894b131a09210ca856bc1863ca5e02e",
+      "test/desktop-shell.test.mjs": "d51bda3a6efafa3d67e022cd41900772dacda23f765fafc4574798c1c8b9e677",
+      "test/managed-runtime-installer.test.mjs": "73248288dbbbf1bf64156c8b6aad0c2cfd6d07afe1018eaff8f92e0975575d07",
+      "test/prime-agent-packaging.test.mjs": "519ee8f8083b2c9cccce1a0a7cbb1b0199d30341c9fe39a52afe204fa060b24e",
+      "vendor/prime-agent/earendil-works-pi-coding-agent-0.8.1-sha256-322ae6a08741da4611c1d65c3672ab8690ccbb416bb288e0f01b3f4682ecdf1e.tgz": "322ae6a08741da4611c1d65c3672ab8690ccbb416bb288e0f01b3f4682ecdf1e",
+      "vendor/prime-agent/manifest.json": "149295c53b846f3a5659c8c8414283f52d09bb429e2af35346dac6db3bb39720"
+    }
   },
   "profileKind": "dedicated-non-default",
   "endpointKind": "explicit-loopback-cdp",
@@ -81,7 +118,7 @@
       "configurationSha256": {
         "claude-basic.yaml": "05fbc6f5c50337595f020b1b2171fbd7a52ae58047a0166878573ea0cd8775da"
       },
-      "browserRuntimeSourceSha256": "4feeb71b1781aa7d6054b30348bfd277658f72bdd5f78d962289463d10f17283",
+      "browserRuntimeSourceSha256": "a3e4331f46e14305a99531fc5b73cbcbd6ccf51b4f4f35ff10d5dd96bd044769",
       "mechanismProof": {
         "commentUrl": "https://github.com/vishaltandale00/relayer-graphcomplete/issues/250#issuecomment-5448833579",
         "commentBodyPlusLfSha256": "9e70d873e30660bfc9ac37d1a851a283fa0c2d1dd783980543af0401e61087c4"
@@ -104,18 +141,18 @@
     },
     "prime": {
       "implementation": "prime.agent",
-      "sourceCommit": "bfd41d7786a9177aed5f609f9db3fec2f308a326",
-      "archiveSha256": "a1bcc855b83e0d6f7d2f08f803f24d36c771d7ca1a4835a79ecb57e23f51a281",
-      "runtimeTreeSha256": "0ace2791829f84f1449ad7a1c53c5645d92257706bbea9e00c02c63c2ab0ca81",
-      "browserHelperSha256": "a0c2320561b5722cc0dae68d71df1c049373a3b657c29e74d722cc880227c377",
+      "sourceCommit": "dcf944527913245e3d4937f2143081894db8eaeb",
+      "archiveSha256": "322ae6a08741da4611c1d65c3672ab8690ccbb416bb288e0f01b3f4682ecdf1e",
+      "runtimeTreeSha256": "0da40d8011d34ee538424497c79960ff2b20b682a8791c659ebd47fbe0c08d42",
+      "browserHelperSha256": "c6406aa5e17cc486cf21e7a87ecebd8cffa8a968441067fa41176540836c9ba6",
       "configurationSha256": {
         "prime-agent-basic.yaml": "55e720e4628a3cab25e149a80325b804f247830b0bc00e5c472400d382fb9775",
         "prime-agent-deep.yaml": "b91e705d99197419deecd5455ce4715b05246f8cc927dc5ba88c1eb4b50acad7"
       },
       "targetClosureSha256": {
-        "darwin-arm64": "6fd251fc85f715a4cc1aa18813dd0818f8c0b010ae88e3f58135293933287de2",
-        "darwin-x64": "317a3739e81420dd8c482312078588eccb35ff2af967dccbd5c5b7f0f819c782",
-        "win32-x64": "78b385100afa98def93114544834f4a364f6806c34e92376aec66e3b38c4b920"
+        "darwin-arm64": "cc58cd77b217880ef47519110c2842105845a5ef18737279fb96ad0d6e6e7a50",
+        "darwin-x64": "bae82dd3c460c73ea6986ea0662bf4e89a94129a83319a9d16700ef5993bc3da",
+        "win32-x64": "634c3cf4b207a7690e2a2eaef7af07a9375f4fe48587efbcaa95f69c22c5107a"
       },
       "mechanismProof": {
         "commentUrl": "https://github.com/vishaltandale00/relayer-graphcomplete/issues/254#issuecomment-5449230377",
