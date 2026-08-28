@@ -1257,7 +1257,10 @@ export function createProductWorkspace({
       textarea: $("#nodeContextDock #contextAnnotationEditor"),
     });
     editor.resolving = false;
-    if (requestSequence !== nodeSelectionSequence || contextEditor !== editor) return false;
+    if (requestSequence !== nodeSelectionSequence || contextEditor !== editor) {
+      if (contextEditor === editor) renderComposerContexts();
+      return false;
+    }
     if (!saved) {
       renderComposerContexts();
       return false;
@@ -3844,7 +3847,10 @@ export function createProductWorkspace({
       });
       previousEditor.resolving = false;
       if (requestSequence !== nodeSelectionSequence
-        || String(getThread()?.id) !== sourceThreadId) return false;
+        || String(getThread()?.id) !== sourceThreadId) {
+        if (contextEditor === previousEditor) renderComposerContexts();
+        return false;
+      }
       if (!saved) {
         contextEditor = previousEditor;
         renderComposerContexts();
@@ -4046,6 +4052,7 @@ export function createProductWorkspace({
     mode,
     capabilities,
     render,
+    prepareSelectionChange: prepareNodeContextSelectionChange,
     modelSelectionPayload: () => modelPicker?.isReady()
       ? pickerSelectionPayload(modelPicker.getSelection())
       : null,

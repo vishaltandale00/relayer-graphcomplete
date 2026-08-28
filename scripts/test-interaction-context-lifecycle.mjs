@@ -63,7 +63,7 @@ function controlledTaskSystemFixtureFactory(...args) {
     state: (...methodArgs) => harness.state(...methodArgs),
     async complete(context) {
       fixtureCompletionCount += 1;
-      if (fixtureCompletionCount === 2) await pendingFixtureGate;
+      if (fixtureCompletionCount === 3) await pendingFixtureGate;
       return harness.complete(context);
     },
   };
@@ -420,6 +420,17 @@ async function run() {
     }),
   });
   await waitForAcceptedInteractions(thread.id, 1);
+  const siblingThread = await productRequest("/api/threads", {
+    method: "POST",
+    body: JSON.stringify({
+      title: "Interaction context sibling",
+      initialMessage: "Show the deterministic task system.",
+      projectId: project.id,
+      harnessId: "fixture-task-system",
+      modelSelection,
+    }),
+  });
+  await waitForAcceptedInteractions(siblingThread.id, 1);
   await openThreadWindow(thread.id);
 
   await stageContext(INITIAL_EDITOR_VALUE);
@@ -563,6 +574,77 @@ async function run() {
   await setValue("#threadPrompt", "");
   await clickNode("Incoming queue");
   await waitFor("draft editor restored after closing Node Details", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(EDITOR_VALUE)}
+  `));
+  let releaseSidebarSave;
+  let heldSidebarSave = false;
+  const sidebarSaveFilter = { urls: [`${productSession.origin}/api/threads/*/context-drafts/*`] };
+  window.webContents.session.webRequest.onBeforeRequest(sidebarSaveFilter, (details, callback) => {
+    if (!heldSidebarSave && details.method === "PUT") {
+      heldSidebarSave = true;
+      releaseSidebarSave = () => callback({});
+      return;
+    }
+    callback({});
+  });
+  await setValue("#contextAnnotationEditor", EDITOR_VALUE);
+  await click(`[data-thread='${siblingThread.id}']`);
+  await waitFor("sidebar thread change waits for draft persistence", () => heldSidebarSave);
+  await click("#closeInspector");
+  releaseSidebarSave();
+  await waitFor("cancelled sidebar change restores dock controls", () => evaluate(`(() => {
+    const editor = document.querySelector('#contextAnnotationEditor');
+    return new URL(location.href).searchParams.get('threadId') === ${JSON.stringify(String(thread.id))}
+      && editor?.disabled === false
+      && editor.value === ${JSON.stringify(EDITOR_VALUE)};
+  })()`));
+  window.webContents.session.webRequest.onBeforeRequest(sidebarSaveFilter, null);
+  await click(`[data-thread='${siblingThread.id}']`);
+  await waitFor("saved sidebar transition reaches sibling thread", () => evaluate(`
+    new URL(location.href).searchParams.get('threadId') === ${JSON.stringify(String(siblingThread.id))}
+      && document.querySelector('#threadTitle')?.textContent === 'Interaction context sibling'
+  `));
+  await click(`[data-thread='${thread.id}']`);
+  await waitFor("sidebar transition returns to draft source thread", () => evaluate(`
+    new URL(location.href).searchParams.get('threadId') === ${JSON.stringify(String(thread.id))}
+      && document.querySelector('#threadTitle')?.textContent === 'Interaction context lifecycle'
+      && document.querySelectorAll('.graph-node').length === 3
+  `));
+  await clickNode("Incoming queue");
+  await waitFor("sidebar return restores source draft", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(EDITOR_VALUE)}
+  `));
+  let rejectedSidebarSave = false;
+  window.webContents.session.webRequest.onBeforeRequest(sidebarSaveFilter, (details, callback) => {
+    if (!rejectedSidebarSave && details.method === "PUT") {
+      rejectedSidebarSave = true;
+      callback({ cancel: true });
+      return;
+    }
+    callback({});
+  });
+  await setValue("#contextAnnotationEditor", EDITOR_VALUE);
+  await click(`[data-thread='${siblingThread.id}']`);
+  await waitFor("failed sidebar save remains inline on the source thread", () => evaluate(`(() => {
+    const error = document.querySelector('#nodeContextDock [role="alert"]');
+    return new URL(location.href).searchParams.get('threadId') === ${JSON.stringify(String(thread.id))}
+      && error?.textContent?.startsWith('Not saved:')
+      && document.querySelector('#contextAnnotationEditor')?.disabled === false;
+  })()`));
+  window.webContents.session.webRequest.onBeforeRequest(sidebarSaveFilter, null);
+  if (!rejectedSidebarSave) throw new Error("The sidebar save interceptor did not reject the request.");
+  await click(`[data-thread='${siblingThread.id}']`);
+  await waitFor("retried sidebar save reaches sibling thread", () => evaluate(`
+    new URL(location.href).searchParams.get('threadId') === ${JSON.stringify(String(siblingThread.id))}
+  `));
+  await click(`[data-thread='${thread.id}']`);
+  await waitFor("sidebar retry returns to source thread", () => evaluate(`
+    new URL(location.href).searchParams.get('threadId') === ${JSON.stringify(String(thread.id))}
+      && document.querySelector('#threadTitle')?.textContent === 'Interaction context lifecycle'
+      && document.querySelectorAll('.graph-node').length === 3
+  `));
+  await clickNode("Incoming queue");
+  await waitFor("sidebar retry preserves the source draft", () => evaluate(`
     document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(EDITOR_VALUE)}
   `));
   await evaluate("document.querySelector('#contextAnnotationEditor').focus()");

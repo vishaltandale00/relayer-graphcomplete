@@ -303,6 +303,43 @@ describe("product workspace keyboard behavior", () => {
     expect(styles).toContain("@media(prefers-reduced-motion:reduce){.node-context-dock *");
   });
 
+  it("routes every selection-clearing control through the production draft-save gate", async () => {
+    const workspaceSource = await readFile(new URL(
+      "../desktop/renderer/src/product-workspace/workspace.js",
+      import.meta.url,
+    ), "utf8");
+    const graphSource = await readFile(new URL(
+      "../desktop/renderer/src/graph.js",
+      import.meta.url,
+    ), "utf8");
+    const mainSource = await readFile(new URL(
+      "../desktop/renderer/src/main.js",
+      import.meta.url,
+    ), "utf8");
+    const seam = (start, end) => workspaceSource.slice(
+      workspaceSource.indexOf(start),
+      workspaceSource.indexOf(end, workspaceSource.indexOf(start)),
+    );
+
+    for (const [label, source] of [
+      ["close", seam("const closeInspector = async", "const closeInspectorOnEscape")],
+      ["history", seam("const navigateHistory = async", '$("#historyBack")')],
+      ["previous turn", seam('$("#previousTurn").onclick', '$("#nextTurn").onclick')],
+      ["next turn", seam('$("#nextTurn").onclick', "const openTurnPopover")],
+      ["graph keyboard", seam("graphStage.onkeydown", "graphStage.onpointerdown")],
+      ["turn picker", seam("row.onclick = async", "list.append(row)")],
+      ["breadcrumb", seam("segment.onclick = async", "children.push(segment)")],
+      ["breadcrumb annotation", seam("badge.onclick = async", "children.push(badge)")],
+      ["navigational action", seam("if (activation.navigational)", "button.disabled = true")],
+    ]) {
+      expect(source, `${label} bypasses the draft-save gate`)
+        .toContain("prepareNodeContextSelectionChange()");
+    }
+    expect(workspaceSource).toContain("prepareSelectionChange: prepareNodeContextSelectionChange");
+    expect(graphSource).toContain("productWorkspace?.prepareSelectionChange()");
+    expect(mainSource.match(/prepareCurrentWorkspaceTransition\(\)/g)).toHaveLength(3);
+  });
+
   it("presents every unconfirmed draft with stable accessible identity", () => {
     const drafts = Array.from({ length: 12 }, (_, index) => ({
       id: `draft-${index}`,

@@ -99,3 +99,7 @@ export function renderThread() {
 export function currentThreadModelSelectionPayload() {
   return workspace().modelSelectionPayload();
 }
+
+export function prepareCurrentWorkspaceTransition() {
+  return productWorkspace?.prepareSelectionChange() ?? Promise.resolve(true);
+}
