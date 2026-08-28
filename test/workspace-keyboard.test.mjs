@@ -12,6 +12,7 @@ import {
   composerDisabledForState,
   confirmationSendFailureMayHaveCommitted,
   confirmationSendReplayIntent,
+  continueDraftOverrideAfterPersistence,
   composerConfirmationAuthorityChanged,
   composerDraftScopeKey,
   composerContextsFromConfirmations,
@@ -374,6 +375,50 @@ describe("product workspace keyboard behavior", () => {
     expect(sendIntentIsCurrentThread("thread-a", "thread-a")).toBe(true);
     expect(sendIntentIsCurrentThread("thread-b", "thread-a")).toBe(false);
     expect(sendIntentIsCurrentThread(null, "thread-a")).toBe(false);
+  });
+
+  it("cancels Send without drafts while its held persistence settles without losing the draft", async () => {
+    const draft = {
+      id: "draft-held",
+      target: { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 },
+      text: "Keep this exact pending annotation.",
+      revision: 1,
+    };
+    const originalDraftIdentity = draft;
+    let releasePersistence;
+    const persistenceHeld = new Promise((resolve) => { releasePersistence = resolve; });
+    const controller = {
+      persistAll: vi.fn(async () => {
+        await persistenceHeld;
+        draft.revision = 2;
+        return [draft];
+      }),
+    };
+    const attempt = { threadId: "thread-a" };
+    let currentAttempt = attempt;
+    const continueSend = vi.fn();
+
+    const settlement = continueDraftOverrideAfterPersistence({
+      controller,
+      threadId: "thread-a",
+      attempt,
+      readCurrentThreadId: () => "thread-a",
+      readCurrentAttempt: () => currentAttempt,
+      continueSend,
+    });
+    currentAttempt = null;
+    releasePersistence();
+
+    await expect(settlement).resolves.toBe(false);
+    expect(controller.persistAll).toHaveBeenCalledWith("thread-a");
+    expect(continueSend).not.toHaveBeenCalled();
+    expect(draft).toBe(originalDraftIdentity);
+    expect(draft).toEqual({
+      id: "draft-held",
+      target: { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 },
+      text: "Keep this exact pending annotation.",
+      revision: 2,
+    });
   });
 
   it("scopes an asynchronous send lock to the thread that owns it", () => {

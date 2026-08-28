@@ -169,6 +169,31 @@ async function captureStep(caption, selector, duration = 4.5) {
   })()`);
 }
 
+function holdNextDraftSave() {
+  const filter = { urls: [`${productSession.origin}/api/threads/*/context-drafts/*`] };
+  let heldCallback;
+  let intercepted = false;
+  const held = new Promise((resolveHeld) => {
+    mainWindow.webContents.session.webRequest.onBeforeRequest(filter, (details, callback) => {
+      if (!intercepted && details.method === "PUT") {
+        intercepted = true;
+        heldCallback = callback;
+        resolveHeld();
+        return;
+      }
+      callback({});
+    });
+  });
+  return Object.freeze({
+    wait: () => held,
+    release() {
+      if (!heldCallback) throw new Error("Cannot release a draft save before it is held.");
+      mainWindow.webContents.session.webRequest.onBeforeRequest(filter, null);
+      heldCallback({});
+    },
+  });
+}
+
 async function startServices() {
   runtime = new GraphCompleteRuntimeService({
     userDataDirectory: dataDirectory,
@@ -378,8 +403,28 @@ async function run() {
       && await evaluate(`document.querySelector('#nodeContextDock [role="alert"]')?.classList.contains('hidden')`);
   });
   const switchedDraftText = "Queue order remains FIFO when both workers are busy.";
+  const heldSwitchSave = holdNextDraftSave();
   await setValue("#contextAnnotationEditor", switchedDraftText);
   await clickNode("Two-worker pool");
+  await waitFor("node-switch draft persistence to be held", () => Promise.race([
+    heldSwitchSave.wait().then(() => true),
+    sleep(40).then(() => false),
+  ]));
+  const heldSwitchState = await evaluate(`({
+    title: document.querySelector('#detailTitle')?.textContent,
+    editorValue: document.querySelector('#contextAnnotationEditor')?.value,
+    dockHidden: document.querySelector('#nodeContextDock')?.classList.contains('hidden'),
+  })`);
+  if (heldSwitchState.title !== "Incoming queue"
+    || heldSwitchState.editorValue !== switchedDraftText
+    || heldSwitchState.dockHidden) {
+    throw new Error(`Node switch escaped before its draft save settled: ${JSON.stringify(heldSwitchState)}`);
+  }
+  await captureStep(
+    "4. While the draft save is held, Node Details stays on the source node with the exact text visible",
+    "#nodeContextDock",
+  );
+  heldSwitchSave.release();
   await waitFor("node switch persists and hides the source draft dock", async () => {
     const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
     return response.drafts?.[0]?.text === switchedDraftText
@@ -387,7 +432,7 @@ async function run() {
         && document.querySelector('#nodeContextDock')?.classList.contains('hidden')`);
   });
   await captureStep(
-    "4. Switching nodes first saves the draft, then opens the next node without carrying the editor across",
+    "5. After persistence settles, switching opens the next node without carrying the editor across",
     "#inspector",
   );
   await clickNode("Incoming queue");
@@ -395,11 +440,31 @@ async function run() {
     document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(switchedDraftText)}
   `));
   await captureStep(
-    "5. Returning to the source node restores the exact unconfirmed draft in its Node Details dock",
+    "6. Returning to the source node restores the exact unconfirmed draft in its Node Details dock",
     "#inspector",
   );
   await setValue("#contextAnnotationEditor", "Queue order controls which task is claimed next.");
+  const heldCloseSave = holdNextDraftSave();
   await click("#closeInspector");
+  await waitFor("Node Details close persistence to be held", () => Promise.race([
+    heldCloseSave.wait().then(() => true),
+    sleep(40).then(() => false),
+  ]));
+  const heldCloseState = await evaluate(`({
+    inspectorHidden: document.querySelector('#inspector')?.classList.contains('hidden'),
+    title: document.querySelector('#detailTitle')?.textContent,
+    editorValue: document.querySelector('#contextAnnotationEditor')?.value,
+  })`);
+  if (heldCloseState.inspectorHidden
+    || heldCloseState.title !== "Incoming queue"
+    || heldCloseState.editorValue !== "Queue order controls which task is claimed next.") {
+    throw new Error(`Node Details closed before its draft save settled: ${JSON.stringify(heldCloseState)}`);
+  }
+  await captureStep(
+    "7. While Close waits on a held save, the exact draft remains visible in Node Details",
+    "#nodeContextDock",
+  );
+  heldCloseSave.release();
   await waitFor("Node Details closes only after the draft is saved", async () => {
     const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
     return response.drafts?.[0]?.text === "Queue order controls which task is claimed next."
@@ -407,7 +472,7 @@ async function run() {
         && !document.querySelector('#contextAnnotationEditor')`);
   });
   await captureStep(
-    "6. Closing Node Details completes only after the active draft is saved; the graph and composer remain usable",
+    "8. After persistence settles, Node Details closes and the graph and composer remain usable",
     "#graphStage",
   );
   await clickNode("Incoming queue");
@@ -421,7 +486,7 @@ async function run() {
       && !document.querySelector('.composer-context-preview')
   `));
   await captureStep(
-    "7. Confirming closes the editor and leaves a compact collapsed node pill above the composer",
+    "9. Confirming closes the editor and leaves a compact collapsed node pill above the composer",
     "#composerContextTray",
   );
   await click("#attachNodeContext");
@@ -431,7 +496,7 @@ async function run() {
     return response.drafts?.[0]?.text === "Discard this temporary annotation.";
   });
   await captureStep(
-    "8. The × control discards only this unconfirmed draft while the confirmed node context remains attached",
+    "10. The × control discards only this unconfirmed draft while the confirmed node context remains attached",
     "#nodeContextDock",
   );
   await click("[aria-label='Discard annotation draft for Incoming queue']");
@@ -441,7 +506,7 @@ async function run() {
       && await evaluate(`!document.querySelector('#contextAnnotationEditor')`);
   });
   await captureStep(
-    "9. After discard, the temporary editor is gone and the confirmed collapsed pill is unchanged",
+    "11. After discard, the temporary editor is gone and the confirmed collapsed pill is unchanged",
     "#composerContextTray",
   );
   await click("[aria-label='Show Incoming queue annotations']");
@@ -474,7 +539,7 @@ async function run() {
     throw new Error(`Composer context preview overlaps Node Details: ${JSON.stringify(explicitPreview)}`);
   }
   await captureStep(
-    "10. Confirmed annotations stay read-only in an explicitly opened compact preview",
+    "12. Confirmed annotations stay read-only in an explicitly opened compact preview",
     ".composer-context-preview",
   );
   await click("[aria-label='Delete annotation 2 for Incoming queue']");
@@ -523,7 +588,7 @@ async function run() {
     throw new Error(`Multiple node pills did not scroll horizontally: ${JSON.stringify(pillOverflow)}`);
   }
   await captureStep(
-    "11. Multiple attached-node pills scroll horizontally within the available composer width",
+    "13. Multiple attached-node pills scroll horizontally within the available composer width",
     ".composer-context-pills",
   );
   mainWindow.setSize(1480, 920);
@@ -539,7 +604,7 @@ async function run() {
   await refreshCaptureSurface();
   await writeFile(composerScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
   await captureStep(
-    "12. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
+    "14. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
     "#composerContextTray",
     4.5,
   );
@@ -563,7 +628,7 @@ async function run() {
       && document.querySelectorAll('#interactionContextPopover li').length === 2
   `));
   await captureStep(
-    "13. The turn banner shows one connected-node pill; its popover restores both annotations in order",
+    "15. The turn banner shows one connected-node pill; its popover restores both annotations in order",
     "#interactionContextPopover",
     4.5,
   );
@@ -576,7 +641,7 @@ async function run() {
       && document.querySelector('#attachNodeContext')?.disabled === false
   `));
   await captureStep(
-    "14. Clicking the connected node reopens its full Node Details from history",
+    "16. Clicking the connected node reopens its full Node Details from history",
     "#inspector",
   );
 
@@ -591,7 +656,7 @@ async function run() {
       && document.querySelector('#sendInteraction')?.disabled === false
   `));
   await captureStep(
-    "15. A connected node with a non-empty annotation enables send even when message text is empty",
+    "17. A connected node with a non-empty annotation enables send even when message text is empty",
     "#threadComposerShell",
   );
   await click("#sendInteraction");
@@ -611,7 +676,7 @@ async function run() {
       === 'This annotation alone is a valid interaction input.'
   `));
   await captureStep(
-    "16. Annotation-only history has no derived message label; the context pill preserves the actual input",
+    "18. Annotation-only history has no derived message label; the context pill preserves the actual input",
     "#interactionBanner",
     4.5,
   );
@@ -631,7 +696,7 @@ async function run() {
   await refreshCaptureSurface();
   await writeFile(restartedScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
   await captureStep(
-    "17. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
+    "19. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
     "#interactionContextPopover",
     4.5,
   );
@@ -641,7 +706,7 @@ async function run() {
       && !document.querySelector('#inspector')?.classList.contains('hidden')
   `));
   await captureStep(
-    "18. The persisted context still reopens the exact target node after restart",
+    "20. The persisted context still reopens the exact target node after restart",
     "#inspector",
     4.5,
   );

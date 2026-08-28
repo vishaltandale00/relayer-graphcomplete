@@ -522,6 +522,21 @@ export function sendIntentIsCurrentThread(currentThreadId, attemptedThreadId) {
   return String(currentThreadId) === String(attemptedThreadId);
 }
 
+export async function continueDraftOverrideAfterPersistence({
+  controller,
+  threadId,
+  attempt,
+  readCurrentThreadId,
+  readCurrentAttempt,
+  continueSend,
+}) {
+  await controller.persistAll(threadId);
+  if (!sendIntentIsCurrentThread(readCurrentThreadId(), threadId)
+    || readCurrentAttempt() !== attempt) return false;
+  await continueSend();
+  return true;
+}
+
 export function sendAttemptBlocksThread(pendingThreadId, currentThreadId) {
   return pendingThreadId != null && String(pendingThreadId) === String(currentThreadId);
 }
@@ -2857,8 +2872,18 @@ export function createProductWorkspace({
         }
       }
       if (draftOverride && contextDraftController) {
-        await contextDraftController.persistAll(threadId);
-        if (!sendIntentIsCurrentThread(getThread()?.id, threadId) || sendAttempt !== attempt) return;
+        await continueDraftOverrideAfterPersistence({
+          controller: contextDraftController,
+          threadId,
+          attempt,
+          readCurrentThreadId: () => getThread()?.id,
+          readCurrentAttempt: () => sendAttempt,
+          continueSend: async () => {
+            closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });
+            await submitInteraction(intent);
+          },
+        });
+        return;
       }
       if (draftOverride) {
         closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });
