@@ -437,6 +437,7 @@ async function run() {
   await click("[aria-label='Close Incoming queue annotations']");
   await clickNode("Two-worker pool");
   await click("#attachNodeContext");
+  await setValue("#contextAnnotationEditor", "Keep both workers busy while tasks are queued.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("worker-pool context confirmation settled", () => evaluate(`
     !document.querySelector('#contextAnnotationEditor')
@@ -444,6 +445,7 @@ async function run() {
   `));
   await clickNode("Results store");
   await click("#attachNodeContext");
+  await setValue("#contextAnnotationEditor", "Preserve completed results in claim order.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("results context confirmation settled", () => evaluate(`
     !document.querySelector('#contextAnnotationEditor')
