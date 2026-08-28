@@ -124,6 +124,15 @@ pub(crate) struct DurableInteractionInput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SubmittedInputEvidence {
+    pub(crate) occurrence: relayer_graph_core::PresentingInputOccurrence,
+    pub(crate) source_node_id: i64,
+    pub(crate) action: relayer_graph_core::InputAction,
+    pub(crate) value: relayer_graph_core::SubmittedInputValue,
+    pub(crate) attempt_state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NodeContextDraft {
     pub(crate) id: String,
     pub(crate) thread_id: ThreadId,

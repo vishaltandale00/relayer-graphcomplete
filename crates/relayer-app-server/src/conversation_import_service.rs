@@ -1,7 +1,7 @@
 use relayer_graph_core::{
     ImportedAcceptedView, ImportedAction, ImportedConversationReceipt, ImportedConversationStage,
-    ImportedEdge, ImportedInteractionContext, ImportedInvokeOrigin, ImportedLayer, ImportedNode,
-    ImportedResolvedLayer, ImportedTurn,
+    ImportedEdge, ImportedInputSource, ImportedInteractionContext, ImportedInvokeOrigin,
+    ImportedLayer, ImportedNode, ImportedResolvedLayer, ImportedSubmittedInput, ImportedTurn,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -385,6 +385,63 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                 annotations: context.annotations,
             })
             .collect(),
+        submitted_inputs: turn
+            .submitted_inputs
+            .into_iter()
+            .map(|submitted| ImportedSubmittedInput {
+                id: submitted.id,
+                root_turn_id: submitted.root_turn_id,
+                source: ImportedInputSource {
+                    interaction_node_id: submitted.source.interaction_node_id,
+                    layer_id: submitted.source.layer_id,
+                    action_id: submitted.source.action_id,
+                    node_id: submitted.source.node_id,
+                },
+                action: relayer_graph_core::InputAction {
+                    control: match submitted.action.control {
+                        crate::conversation_export::ExportInputControl::Text => {
+                            relayer_graph_core::InputControl::Text
+                        }
+                        crate::conversation_export::ExportInputControl::SingleSelect => {
+                            relayer_graph_core::InputControl::SingleSelect
+                        }
+                        crate::conversation_export::ExportInputControl::MultiSelect => {
+                            relayer_graph_core::InputControl::MultiSelect
+                        }
+                    },
+                    prompt: submitted.action.prompt,
+                    options: submitted
+                        .action
+                        .options
+                        .into_iter()
+                        .map(|option| relayer_graph_core::InputOption {
+                            key: option.key,
+                            label: option.label,
+                        })
+                        .collect(),
+                    minimum_selections: submitted
+                        .action
+                        .minimum_selections
+                        .map(|minimum| minimum as usize),
+                },
+                value: match submitted.value {
+                    crate::conversation_export::ExportSubmittedInputValue::Text { text } => {
+                        relayer_graph_core::SubmittedInputValue::Text { text }
+                    }
+                    crate::conversation_export::ExportSubmittedInputValue::Selected {
+                        selected,
+                    } => relayer_graph_core::SubmittedInputValue::Selected {
+                        selected: selected
+                            .into_iter()
+                            .map(|option| relayer_graph_core::InputOption {
+                                key: option.key,
+                                label: option.label,
+                            })
+                            .collect(),
+                    },
+                },
+            })
+            .collect(),
         accepted_view: turn.accepted_view.map(|view| ImportedAcceptedView {
             interaction_node_id: view.interaction_node_id,
             root_action: import_action(view.root_action),
@@ -536,6 +593,7 @@ mod tests {
                 admitted_model_plan: None,
             },
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: None,
         }
     }

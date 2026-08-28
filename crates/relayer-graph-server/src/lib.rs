@@ -45,6 +45,10 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/control/interactions/{id}", get(interaction_metadata))
         .route("/api/control/interactions/{id}/input", get(control_input))
         .route(
+            "/api/control/interactions/{id}/input-children",
+            get(control_input_children),
+        )
+        .route(
             "/api/control/interactions/{id}/context-actions",
             get(control_context_actions),
         )
@@ -448,6 +452,32 @@ async fn control_input(
             .interaction_input()
             .await?,
     ))
+}
+
+async fn control_input_children(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let children = state
+        .graph
+        .writer_for_subgraph(id)
+        .await?
+        .interaction_input_children()
+        .await?;
+    Ok(Json(json!({
+        "children": children.into_iter().map(|child| json!({
+            "id": child.id,
+            "parentInteractionNodeId": child.parent_interaction_node_id,
+            "presentingInteractionNodeId": child.occurrence.presenting_interaction_node_id,
+            "presentingLayerId": child.occurrence.presenting_layer_id,
+            "actionId": child.occurrence.action_id,
+            "sourceNodeId": child.source_node_id,
+            "action": child.action,
+            "value": child.value,
+        })).collect::<Vec<_>>()
+    })))
 }
 
 async fn control_context_actions(
@@ -1168,6 +1198,7 @@ mod tests {
             interaction_node_id: None,
             invoke_origin: None,
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: None,
         })
         .unwrap();

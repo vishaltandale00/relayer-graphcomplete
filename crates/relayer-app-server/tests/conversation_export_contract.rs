@@ -40,6 +40,30 @@ fn invoke(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction
     }
 }
 
+fn input(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction {
+    ExportAction {
+        id: id.into(),
+        source_node_id: source_node_id.into(),
+        source_layer_id: Some(source_layer_id.into()),
+        kind: ExportActionKind::Input,
+        relation: None,
+        label: "".into(),
+        variant: ExportActionVariant::Pill,
+        icon: None,
+        description: None,
+        target_layer_id: None,
+        interaction_text: None,
+        state: ExportRecordState::Accepted,
+    }
+}
+
+fn option(key: &str, label: &str) -> ExportInputOption {
+    ExportInputOption {
+        key: key.into(),
+        label: label.into(),
+    }
+}
+
 fn layer(id: &str, node_id: &str, actions: Vec<ExportAction>) -> ExportResolvedLayer {
     ExportResolvedLayer {
         layer: ExportLayer {
@@ -168,6 +192,7 @@ fn records() -> Vec<ConversationExportRecord> {
             origin: ExportTurnOrigin::User,
             completion: receipt(ExportCompletionStatus::Accepted),
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: Some(accepted_view()),
         })),
     ]
@@ -195,6 +220,7 @@ fn two_turn_records() -> Vec<ConversationExportRecord> {
             },
             completion: receipt(ExportCompletionStatus::Accepted),
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: Some(ExportAcceptedView {
                 interaction_node_id: "node:interaction-2".into(),
                 root_action: action(
@@ -316,6 +342,7 @@ fn context_round_trip_preserves_order_nonaccepted_turns_and_shared_snapshots() {
             origin: ExportTurnOrigin::User,
             completion: receipt(ExportCompletionStatus::Failed),
             contexts: vec![context("action:context-2", &["Still inspect this"])],
+            submitted_inputs: vec![],
             accepted_view: None,
         },
     )));
@@ -539,6 +566,7 @@ fn allows_reused_action_provenance_and_requires_action_origins_to_name_prior_inv
             },
             completion: receipt(ExportCompletionStatus::Accepted),
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: Some(ExportAcceptedView {
                 interaction_node_id: "node:interaction-2".into(),
                 root_action: action(
@@ -760,4 +788,105 @@ fn admitted_model_plan_requires_its_selected_family_and_orchestrator() {
         .unwrap()
         .family_revision += 1;
     assert_rejected_with_parity(&fixture, "admitted_model_plan_digest_mismatch");
+}
+
+#[test]
+fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
+    let mut fixture = two_turn_records();
+    let ConversationExportRecord::Turn(source_turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    let source_actions = &mut source_turn.accepted_view.as_mut().unwrap().layers[0].actions;
+    source_actions.extend([
+        input("action:text", "node:1", "layer:1"),
+        input("action:single", "node:1", "layer:1"),
+        input("action:multi", "node:1", "layer:1"),
+    ]);
+
+    let ConversationExportRecord::Turn(consuming_turn) = &mut fixture[2] else {
+        unreachable!()
+    };
+    consuming_turn.text.clear();
+    consuming_turn.interaction_node_id = Some("node:input-root-2".into());
+    consuming_turn.origin = ExportTurnOrigin::User;
+    consuming_turn.completion = receipt(ExportCompletionStatus::Failed);
+    consuming_turn.accepted_view = None;
+    let source = |action_id: &str| ExportInputSource {
+        interaction_node_id: "node:interaction-1".into(),
+        layer_id: "layer:1".into(),
+        action_id: action_id.into(),
+        node_id: "node:1".into(),
+    };
+    let single_options = vec![option("red", "Red"), option("blue", "Blue")];
+    let multi_options = vec![option("a", "Alpha"), option("b", "Beta")];
+    consuming_turn.submitted_inputs = vec![
+        ExportSubmittedInput {
+            id: "input-child:text".into(),
+            root_turn_id: "turn:2".into(),
+            source: source("action:text"),
+            action: ExportInputActionSnapshot {
+                control: ExportInputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+            },
+            value: ExportSubmittedInputValue::Text {
+                text: "Because".into(),
+            },
+        },
+        ExportSubmittedInput {
+            id: "input-child:single".into(),
+            root_turn_id: "turn:2".into(),
+            source: source("action:single"),
+            action: ExportInputActionSnapshot {
+                control: ExportInputControl::SingleSelect,
+                prompt: "Choose one".into(),
+                options: single_options.clone(),
+                minimum_selections: None,
+            },
+            value: ExportSubmittedInputValue::Selected {
+                selected: vec![single_options[1].clone()],
+            },
+        },
+        ExportSubmittedInput {
+            id: "input-child:multi".into(),
+            root_turn_id: "turn:2".into(),
+            source: source("action:multi"),
+            action: ExportInputActionSnapshot {
+                control: ExportInputControl::MultiSelect,
+                prompt: "Choose several".into(),
+                options: multi_options.clone(),
+                minimum_selections: Some(2),
+            },
+            value: ExportSubmittedInputValue::Selected {
+                selected: multi_options,
+            },
+        },
+    ];
+    consuming_turn.submitted_inputs.sort_by_key(|input| {
+        serde_json::to_vec(&(
+            &input.source.interaction_node_id,
+            &input.source.layer_id,
+            &input.source.action_id,
+            &input.source.node_id,
+            &input.action,
+            &input.value,
+        ))
+        .unwrap()
+    });
+
+    validate_export_records(&fixture).unwrap();
+    let mut jsonl = Vec::new();
+    for record in &fixture {
+        serde_json::to_writer(&mut jsonl, record).unwrap();
+        jsonl.push(b'\n');
+    }
+    assert_eq!(decode_export_jsonl(&jsonl).unwrap(), fixture);
+
+    let mut unresolved = fixture.clone();
+    let ConversationExportRecord::Turn(turn) = &mut unresolved[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].source.action_id = "action:missing".into();
+    assert_rejected_with_parity(&unresolved, "submitted_input_source_unresolved");
 }

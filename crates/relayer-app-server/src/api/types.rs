@@ -203,6 +203,7 @@ pub(crate) struct InteractionResponse {
     latest_attempt: Option<InteractionAttemptResponse>,
     projection_fresh: bool,
     contexts: Vec<InteractionContextResponse>,
+    submitted_inputs: Vec<relayer_graph_core::SubmittedInput>,
 }
 
 impl From<Interaction> for InteractionResponse {
@@ -226,6 +227,7 @@ impl From<Interaction> for InteractionResponse {
             latest_attempt: interaction.latest_attempt.map(Into::into),
             projection_fresh: true,
             contexts: Vec::new(),
+            submitted_inputs: Vec::new(),
         }
     }
 }
@@ -263,6 +265,13 @@ impl InteractionResponse {
             .collect();
         self.contexts = project_interaction_contexts(intents, contexts, actions)?;
         Ok(())
+    }
+
+    pub(crate) fn set_submitted_inputs(
+        &mut self,
+        submitted_inputs: Vec<relayer_graph_core::SubmittedInput>,
+    ) {
+        self.submitted_inputs = submitted_inputs;
     }
 }
 

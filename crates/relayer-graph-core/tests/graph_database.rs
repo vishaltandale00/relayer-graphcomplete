@@ -113,6 +113,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
             interaction_node_id: None,
             invoke_origin: None,
             contexts: vec![],
+            submitted_inputs: vec![],
             accepted_view: Some(ImportedAcceptedView {
                 interaction_node_id: interaction_node_id.into(),
                 root_action: ImportedAction {
@@ -165,6 +166,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
         interaction_node_id: None,
         invoke_origin: None,
         contexts: vec![],
+        submitted_inputs: vec![],
         accepted_view: Some(ImportedAcceptedView {
             interaction_node_id: "interaction-1".into(),
             root_action: ImportedAction {
@@ -221,6 +223,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
             source_action_id: "invoke-action-1".into(),
         }),
         contexts: vec![],
+        submitted_inputs: vec![],
         accepted_view: Some(ImportedAcceptedView {
             interaction_node_id: "interaction-2".into(),
             root_action: ImportedAction {
@@ -345,6 +348,7 @@ async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_
             source_layer_id: "another-foreign-layer".into(),
             annotations: vec!["Failure still keeps this".into()],
         }],
+        submitted_inputs: vec![],
         accepted_view: None,
     });
 
@@ -382,6 +386,90 @@ async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_
             .await,
         Err(GraphError::Forbidden(_))
     ));
+}
+
+#[tokio::test]
+async fn imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let mut input = imported_conversation("interaction-1");
+    input.turns[0].accepted_view.as_mut().unwrap().layers[0]
+        .actions
+        .push(ImportedAction {
+            id: "input-action-1".into(),
+            source_node_id: "node-1".into(),
+            source_layer_id: Some("layer-1".into()),
+            kind: "input".into(),
+            relation: None,
+            label: "".into(),
+            variant: "pill".into(),
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+        });
+    input.turns.push(ImportedTurn {
+        source_turn_id: "turn-2".into(),
+        text: "".into(),
+        interaction_node_id: Some("input-root-2".into()),
+        invoke_origin: None,
+        contexts: vec![],
+        submitted_inputs: vec![ImportedSubmittedInput {
+            id: "input-child-1".into(),
+            root_turn_id: "turn-2".into(),
+            source: ImportedInputSource {
+                interaction_node_id: "interaction-1".into(),
+                layer_id: "layer-1".into(),
+                action_id: "input-action-1".into(),
+                node_id: "node-1".into(),
+            },
+            action: InputAction {
+                control: InputControl::SingleSelect,
+                prompt: "Choose".into(),
+                options: vec![InputOption {
+                    key: "one".into(),
+                    label: "One".into(),
+                }],
+                minimum_selections: None,
+            },
+            value: SubmittedInputValue::Selected {
+                selected: vec![InputOption {
+                    key: "one".into(),
+                    label: "One".into(),
+                }],
+            },
+        }],
+        accepted_view: None,
+    });
+
+    let receipt = database.import_accepted_conversation(&input).await.unwrap();
+    let root = NodeId::new(receipt.turns[1].graph_node_id.unwrap()).unwrap();
+    let writer = database.writer_for_subgraph(root).await.unwrap();
+    let projected = writer.interaction_input().await.unwrap();
+    assert_eq!(
+        projected.submitted_inputs,
+        vec![SubmittedInput {
+            action: input.turns[1].submitted_inputs[0].action.clone(),
+            value: input.turns[1].submitted_inputs[0].value.clone(),
+        }]
+    );
+    assert!(matches!(
+        writer
+            .submit_node(&NodeDraft {
+                client_key: "forbidden".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Forbidden".into(),
+                detail: "Imported input is inert".into(),
+            })
+            .await,
+        Err(GraphError::Forbidden(_))
+    ));
+    drop(writer);
+    database
+        .remove_imported_conversation(&input.import_id)
+        .await
+        .unwrap();
+    assert!(database.writer_for_subgraph(root).await.is_err());
 }
 
 #[tokio::test]

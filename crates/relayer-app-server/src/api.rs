@@ -256,6 +256,10 @@ pub(crate) fn router(
             get(threads::get_layer),
         )
         .route(
+            "/api/threads/{thread_id}/interactions/{interaction_id}/input-children",
+            get(threads::get_input_children),
+        )
+        .route(
             "/api/threads/{thread_id}/interactions/{interaction_id}/actions/{action_id}/invoke",
             axum::routing::post(threads::invoke_action),
         )

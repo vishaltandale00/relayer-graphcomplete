@@ -1196,6 +1196,16 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn submitted_input_evidence(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<Vec<super::SubmittedInputEvidence>, ProductError> {
+        self.storage
+            .submitted_input_evidence(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn save_node_context_draft(
         &self,
         thread_id: ThreadId,

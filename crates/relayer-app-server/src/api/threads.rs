@@ -373,6 +373,18 @@ pub(super) async fn project_interaction(
         .product
         .interaction_input(InteractionId::try_from(id)?)
         .await?;
+    let submitted_evidence = state
+        .product
+        .submitted_input_evidence(InteractionId::try_from(id)?)
+        .await?;
+    let durable_submitted_inputs = submitted_evidence
+        .iter()
+        .map(|input| relayer_graph_core::SubmittedInput {
+            action: input.action.clone(),
+            value: input.value.clone(),
+        })
+        .collect::<Vec<_>>();
+    response.set_submitted_inputs(durable_submitted_inputs.clone());
     let has_durable_context = durable_input
         .as_ref()
         .is_some_and(|input| !input.contexts.is_empty());
@@ -388,6 +400,16 @@ pub(super) async fn project_interaction(
         };
         match runtime.interaction_input(graph_node_id).await {
             Ok(input) => {
+                if imported_thread {
+                    response.set_submitted_inputs(input.submitted_inputs.clone());
+                } else if !durable_submitted_inputs.is_empty()
+                    && input.submitted_inputs != durable_submitted_inputs
+                {
+                    response.mark_projection_stale();
+                    eprintln!(
+                        "could not project submitted input for interaction {id}: product and graph semantic values diverged"
+                    );
+                }
                 let projected = if input.contexts.is_empty() {
                     if has_durable_context {
                         Err("durable product contexts are missing from graph input")
@@ -759,6 +781,42 @@ pub(super) async fn get_layer(
         .as_ref()
         .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
     Ok(Json(runtime.get_layer(graph_node_id, layer_id).await?))
+}
+
+pub(super) async fn get_input_children(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, interaction_id)): Path<(i64, i64)>,
+) -> Result<Json<Value>, ApiError> {
+    authorize_read(&state, &headers)?;
+    let thread_id = ThreadId::try_from(thread_id)?;
+    let interaction_id = InteractionId::try_from(interaction_id)?;
+    let interaction = state.product.get_interaction(interaction_id).await?;
+    if interaction.thread_id != thread_id {
+        return Err(ApiError::invalid(
+            "interaction does not belong to this thread",
+        ));
+    }
+    if let Some((runtime, graph_node_id)) = state.runtime.as_ref().zip(interaction.graph_node_id) {
+        return Ok(Json(
+            runtime.interaction_input_children(graph_node_id).await?,
+        ));
+    }
+    let evidence = state
+        .product
+        .submitted_input_evidence(interaction_id)
+        .await?;
+    Ok(Json(serde_json::json!({
+        "children": evidence.into_iter().map(|input| serde_json::json!({
+            "presentingInteractionNodeId": input.occurrence.presenting_interaction_node_id,
+            "presentingLayerId": input.occurrence.presenting_layer_id,
+            "actionId": input.occurrence.action_id,
+            "sourceNodeId": input.source_node_id,
+            "action": input.action,
+            "value": input.value,
+            "attemptState": input.attempt_state,
+        })).collect::<Vec<_>>()
+    })))
 }
 
 pub(super) async fn get_action_destination(

@@ -1,13 +1,14 @@
 use crate::{
     ActionDraft, CompletionOutput, EdgeDraft, GraphAction, GraphDatabase, GraphEdge, GraphError,
-    GraphLayer, GraphNode, InteractionInput, LayerDraft, LayerId, NavigateRelation, NodeDraft,
-    NodeId, RecordState, ResolvedLayer,
+    GraphLayer, GraphNode, InteractionInput, InteractionInputChild, LayerDraft, LayerId,
+    NavigateRelation, NodeDraft, NodeId, RecordState, ResolvedLayer,
     graph::{InteractionScope, completion, model::LayerCandidate},
     storage::{
         GraphConnection,
         sqlite::{
             actions::ActionTable, completions::CompletionTable, contexts::ContextTable,
-            edges::EdgeTable, layers, layers::LayerTable, nodes::NodeTable,
+            edges::EdgeTable, input_children::InputChildTable, layers, layers::LayerTable,
+            nodes::NodeTable,
         },
     },
 };
@@ -30,6 +31,15 @@ impl GraphWriter {
         let mut connection = self.database.storage.acquire().await?;
         ContextTable::new(&mut connection)
             .interaction_input(&self.scope)
+            .await
+    }
+
+    pub async fn interaction_input_children(
+        &self,
+    ) -> Result<Vec<InteractionInputChild>, GraphError> {
+        let mut connection = self.database.storage.acquire().await?;
+        InputChildTable::new(&mut connection)
+            .children(self.scope.root_node_id)
             .await
     }
 

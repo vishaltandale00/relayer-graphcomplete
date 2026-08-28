@@ -2,7 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{GraphError, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, ThreadId};
+use crate::{
+    GraphError, InputAction, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId,
+    SubmittedInputValue, ThreadId,
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,7 +39,28 @@ pub struct ImportedTurn {
     pub invoke_origin: Option<ImportedInvokeOrigin>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contexts: Vec<ImportedInteractionContext>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub submitted_inputs: Vec<ImportedSubmittedInput>,
     pub accepted_view: Option<ImportedAcceptedView>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedSubmittedInput {
+    pub id: String,
+    pub root_turn_id: String,
+    pub source: ImportedInputSource,
+    pub action: InputAction,
+    pub value: SubmittedInputValue,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedInputSource {
+    pub interaction_node_id: String,
+    pub layer_id: String,
+    pub action_id: String,
+    pub node_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -418,11 +442,26 @@ impl crate::GraphDatabase {
             }
         }
 
+        let mut input_action_snapshots = HashMap::<String, InputAction>::new();
+        for position in 0..turn_count {
+            let turn = load_turn(&mut tx, import_id, position).await?;
+            for submitted in turn.submitted_inputs {
+                if let Some(existing) = input_action_snapshots.get(&submitted.source.action_id)
+                    && existing != &submitted.action
+                {
+                    return Err(GraphError::Internal(
+                        "imported input action snapshot changed across consuming turns".into(),
+                    ));
+                }
+                input_action_snapshots.insert(submitted.source.action_id, submitted.action);
+            }
+        }
         let mut action_ids = HashMap::<String, i64>::new();
         let context = InsertContext {
             metadata: &metadata,
             nodes: &node_ids,
             layers: &layer_ids,
+            input_actions: &input_action_snapshots,
         };
         for position in 0..turn_count {
             let turn = load_turn(&mut tx, import_id, position).await?;
@@ -513,6 +552,66 @@ impl crate::GraphDatabase {
                         .await?;
                 }
                 action_ids.insert(imported_context.id.clone(), action_id);
+            }
+        }
+
+        for position in 0..turn_count {
+            let turn = load_turn(&mut tx, import_id, position).await?;
+            if turn.submitted_inputs.is_empty() {
+                continue;
+            }
+            let portable_parent = turn.interaction_node_id.as_ref().ok_or_else(|| {
+                GraphError::Internal(
+                    "imported submitted input turn is missing its interaction root".into(),
+                )
+            })?;
+            let parent = *node_ids.get(portable_parent).ok_or_else(|| {
+                GraphError::Internal("imported submitted input root was not materialized".into())
+            })?;
+            for (child_position, submitted) in turn.submitted_inputs.iter().enumerate() {
+                if submitted.root_turn_id != turn.source_turn_id {
+                    return Err(GraphError::Internal(
+                        "imported submitted input names a different root turn".into(),
+                    ));
+                }
+                let presenting_interaction = *node_ids
+                    .get(&submitted.source.interaction_node_id)
+                    .ok_or_else(|| {
+                    GraphError::Internal(
+                        "imported submitted input source interaction is missing".into(),
+                    )
+                })?;
+                let presenting_layer =
+                    *layer_ids.get(&submitted.source.layer_id).ok_or_else(|| {
+                        GraphError::Internal(
+                            "imported submitted input source layer is missing".into(),
+                        )
+                    })?;
+                let source_action =
+                    *action_ids.get(&submitted.source.action_id).ok_or_else(|| {
+                        GraphError::Internal(
+                            "imported submitted input source action is missing".into(),
+                        )
+                    })?;
+                let source_node = *node_ids.get(&submitted.source.node_id).ok_or_else(|| {
+                    GraphError::Internal("imported submitted input source node is missing".into())
+                })?;
+                sqlx::query(
+                    "INSERT INTO interaction_input_children(parent_interaction_node_id,position,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_snapshot_json,value_snapshot_json,attempt_key,authority_digest,semantic_digest) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'authority-stripped','semantic-read-only')",
+                )
+                .bind(parent)
+                .bind(i64::try_from(child_position).map_err(|_| {
+                    GraphError::Internal("imported submitted input position exceeds SQLite range".into())
+                })?)
+                .bind(presenting_interaction)
+                .bind(presenting_layer)
+                .bind(source_action)
+                .bind(source_node)
+                .bind(serde_json::to_string(&submitted.action).map_err(|error| GraphError::Internal(error.to_string()))?)
+                .bind(serde_json::to_string(&submitted.value).map_err(|error| GraphError::Internal(error.to_string()))?)
+                .bind(format!("imported-inert:{position}"))
+                .execute(&mut *tx)
+                .await?;
             }
         }
 
@@ -674,6 +773,7 @@ impl crate::GraphDatabase {
                 .await?;
         if let Some(thread_id) = thread_id {
             for statement in [
+                "DELETE FROM interaction_input_children WHERE parent_interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
                 "DELETE FROM completions WHERE interaction_node_id IN (SELECT id FROM nodes WHERE thread_id=?1)",
                 "DELETE FROM layer_actions WHERE layer_id IN (SELECT id FROM layers WHERE thread_id=?1)",
                 "DELETE FROM actions WHERE thread_id=?1",
@@ -807,6 +907,7 @@ struct InsertContext<'a> {
     metadata: &'a ImportedConversationStage,
     nodes: &'a HashMap<String, i64>,
     layers: &'a HashMap<String, i64>,
+    input_actions: &'a HashMap<String, InputAction>,
 }
 
 async fn insert_action(
@@ -817,12 +918,34 @@ async fn insert_action(
     response: bool,
     ids: &mut HashMap<String, i64>,
 ) -> Result<(), GraphError> {
+    let input = context.input_actions.get(&action.id);
+    if (action.kind == "input") != input.is_some() {
+        return Err(GraphError::Internal(
+            "imported input action is missing or conflicts with its frozen child snapshot".into(),
+        ));
+    }
+    let input_options_json = input
+        .map(|input| serde_json::to_string(&input.options))
+        .transpose()
+        .map_err(|error| GraphError::Internal(error.to_string()))?;
     let result = sqlx::query("INSERT INTO actions(project_id,thread_id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,response,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'accepted',?14,?15)")
         .bind(context.metadata.project_id.map(ProjectId::value)).bind(context.metadata.thread_id.value())
         .bind(context.nodes[&action.source_node_id]).bind(action.source_layer_id.as_ref().map(|id| context.layers[id]))
         .bind(&action.kind).bind(&action.relation).bind(&action.label).bind(&action.variant).bind(&action.icon).bind(&action.description)
-        .bind(action.target_layer_id.as_ref().map(|id| context.layers[id])).bind(&action.interaction_text).bind(response).bind(owner).bind(&action.id)
+        .bind(action.target_layer_id.as_ref().map(|id| context.layers[id])).bind(&action.interaction_text)
+        .bind(response).bind(owner).bind(&action.id)
         .execute(&mut **tx).await?;
-    ids.insert(action.id.clone(), result.last_insert_rowid());
+    let action_id = result.last_insert_rowid();
+    if let Some(input) = input {
+        sqlx::query("INSERT INTO input_action_payloads(action_id,control,prompt,options_json,minimum_selections) VALUES (?1,?2,?3,?4,?5)")
+            .bind(action_id)
+            .bind(input.control.as_str())
+            .bind(&input.prompt)
+            .bind(input_options_json.expect("input options serialized"))
+            .bind(input.minimum_selections.map(|minimum| minimum as i64))
+            .execute(&mut **tx)
+            .await?;
+    }
+    ids.insert(action.id.clone(), action_id);
     Ok(())
 }
