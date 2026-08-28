@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -8,9 +10,12 @@ import {
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
   HTTPX_PROXY_AUTH_REPORT_CASE_ID,
   OFETCH_RETRY_METHODS_CASE_ID,
+  RESERVATION_CAPACITY_CASE_ID,
   SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
   TRUE_MYTH_INSPECT_BOTH_CASE_ID,
   calibrationAutonomousCaseIds,
+  materializeReservationCapacityFixture,
+  reservationCapacityCase,
 } from "@relayer/eval-runner";
 
 import {
@@ -23,6 +28,7 @@ import {
 } from "../desktop/eval-main/eval-service.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
+const execFileAsync = promisify(execFile);
 const directories = [];
 const originalFetch = globalThis.fetch;
 
@@ -257,6 +263,7 @@ describe("EvalService simulated-user result persistence", () => {
       SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
       HTTPX_PROXY_AUTH_REPORT_CASE_ID,
       ...calibrationAutonomousCaseIds,
+      RESERVATION_CAPACITY_CASE_ID,
     ]);
     const created = await service.createRun(simulatedUserSelection());
     const completed = await waitForCompletedRun(service, created.id);
@@ -341,6 +348,163 @@ describe("EvalService simulated-user result persistence", () => {
     expect(reloaded.catalog().judges.map(({ id }) => id)).toEqual(["deterministic-graph-contract"]);
     expect(await readFile(bundleFile, "utf8")).toBe(bundleBeforeReload);
 
+  });
+
+  it("routes the reservation case through its injected services and persists independent safe gate receipts", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    globalThis.fetch = fakeAcceptedProjectProduct();
+    const reservationMaterializer = vi.fn((options) => materializeReservationCapacityFixture(options));
+    const calibrationMaterializer = vi.fn(async () => { throw new Error("reservation case reached calibration materializer"); });
+    const frontierMaterializer = vi.fn(async () => { throw new Error("reservation case reached frontier materializer"); });
+    const checks = [
+      "availability",
+      "expiring-holds",
+      "idempotent-confirmation",
+      "concurrent-contention",
+      "time-zone-schedules",
+      "cancellation",
+      "capacity-conservation",
+      "restart-persistence",
+    ].map((id) => ({
+      name: `workspace:reservation-${id}`,
+      passed: id !== "time-zone-schedules",
+      detail: `${id} independent receipt.`,
+    }));
+    checks.push(
+      { name: "workspace:reservation-required-artifacts", passed: true, detail: "Required artifacts present." },
+      { name: "workspace:reservation-ui-contract", passed: true, detail: "UI contract passed." },
+      { name: "workspace:reservation-project-tests", passed: true, detail: "Project tests passed." },
+      { name: "workspace:reservation-delivery-commit", passed: true, detail: "Delivery committed." },
+      { name: "workspace:reservation-delivery-clean", passed: true, detail: "Delivery clean." },
+    );
+    const reservationGrader = vi.fn(async () => checks);
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      reservationCapacityFixtureMaterializer: reservationMaterializer,
+      reservationCapacityWorkspaceGrader: reservationGrader,
+      calibrationFixtureMaterializer: calibrationMaterializer,
+      frontierProjectFixtureMaterializer: frontierMaterializer,
+      platform: "darwin",
+    }).open();
+
+    const catalogCase = service.catalog().cases.find(({ id }) => id === RESERVATION_CAPACITY_CASE_ID);
+    expect(catalogCase.caseSnapshot).toEqual(reservationCapacityCase.catalogSnapshot);
+    expect(catalogCase.caseSnapshotDigest).toBe(reservationCapacityCase.snapshotDigest);
+    expect(catalogCase.caseSnapshotDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(JSON.stringify(catalogCase)).not.toContain("sealedPath");
+    expect(JSON.stringify(catalogCase)).not.toContain("reservation-capacity-case.test.ts");
+
+    const created = await service.createRun({
+      testCaseIds: [RESERVATION_CAPACITY_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const completed = await waitForCompletedRun(service, created.id);
+    const execution = completed.executions[0];
+
+    expect(reservationMaterializer).toHaveBeenCalledOnce();
+    expect(reservationMaterializer).toHaveBeenCalledWith(expect.objectContaining({
+      caseId: RESERVATION_CAPACITY_CASE_ID,
+      platform: "darwin",
+    }));
+    expect(reservationGrader).toHaveBeenCalledOnce();
+    expect(reservationGrader).toHaveBeenCalledWith(expect.objectContaining({
+      caseId: RESERVATION_CAPACITY_CASE_ID,
+      baseRevision: expect.any(String),
+    }));
+    expect(calibrationMaterializer).not.toHaveBeenCalled();
+    expect(frontierMaterializer).not.toHaveBeenCalled();
+    expect(execution.outcomeGrade).toMatchObject({ status: "partial", qualified: null });
+    expect(execution.outcomeGrade.mandatoryGates).toHaveLength(9);
+    expect(execution.outcomeGrade.mandatoryGates.map(({ gateId, passed }) => [gateId, passed])).toEqual([
+      ["reservation-availability", true],
+      ["reservation-expiring-holds", true],
+      ["reservation-idempotent-confirmation", true],
+      ["reservation-concurrent-contention", true],
+      ["reservation-time-zone-schedules", false],
+      ["reservation-cancellation", true],
+      ["reservation-capacity-conservation", true],
+      ["reservation-restart-persistence", true],
+      ["reservation-durable-delivery", true],
+    ]);
+    expect(execution.outcomeGrade.mandatoryGates[4].evidenceRefs).toHaveLength(1);
+    expect(execution.outcomeGrade.mandatoryGates[8].evidenceRefs).toHaveLength(5);
+
+    const persisted = await waitForPersistedRun(stateFile, completed.id);
+    const persistedExecution = persisted.runs[0].executions[0];
+    expect(persistedExecution.caseSnapshotDigest).toBe(reservationCapacityCase.snapshotDigest);
+    expect(persistedExecution.outcomeGrade.mandatoryGates).toEqual(execution.outcomeGrade.mandatoryGates);
+    expect(JSON.stringify(persistedExecution)).not.toContain("sealedPath");
+    expect(JSON.stringify(persistedExecution)).not.toContain("reservation-capacity-case.test.ts");
+  });
+
+  it("fails the reservation execution before routing when its injected fixture identity drifts", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const product = fakeAcceptedProjectProduct();
+    globalThis.fetch = product;
+    const reservationGrader = vi.fn(async () => []);
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      reservationCapacityFixtureMaterializer: vi.fn(async ({ workspaceDirectory }) => ({
+        schemaVersion: 1,
+        fixtureId: RESERVATION_CAPACITY_CASE_ID,
+        workspaceDirectory,
+        repositoryUrl: "relayer-eval://drifted-reservation-fixture",
+        sourceRevision: "template:drifted",
+        seededCommit: "drifted-commit",
+        seededTree: "drifted-tree",
+        packageManager: "node@22",
+        installedWithFrozenLockfile: false,
+      })),
+      reservationCapacityWorkspaceGrader: reservationGrader,
+      platform: "darwin",
+    }).open();
+
+    const completed = await waitForCompletedRun(service, (await service.createRun({
+      testCaseIds: [RESERVATION_CAPACITY_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).id);
+
+    expect(completed.status).toBe("error");
+    expect(completed.executions[0].error).toContain("Materialized fixture identity does not match case");
+    expect(reservationGrader).not.toHaveBeenCalled();
+    expect(product).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["source content", "sourceContentDigest", `sha256:${"d".repeat(64)}`, "content digest"],
+    ["environment", "environmentDigest", `sha256:${"e".repeat(64)}`, "environment digest"],
+  ])("fails the reservation execution when its %s digest drifts", async (_label, field, value, errorText) => {
+    await expectReservationFixtureFailure({
+      mutateReceipt: async (receipt) => ({ ...receipt, [field]: value }),
+      errorText,
+    });
+  });
+
+  it("fails the reservation execution when seededCommit does not resolve to the receipted tree", async () => {
+    await expectReservationFixtureFailure({
+      mutateReceipt: async (receipt) => ({ ...receipt, seededTree: "0".repeat(40) }),
+      errorText: "fixture tree receipt does not match case",
+    });
+  });
+
+  it("fails the reservation execution when sourceRevision does not identify the valid seeded tree", async () => {
+    await expectReservationFixtureFailure({
+      mutateReceipt: async (receipt) => {
+        await writeFile(join(receipt.workspaceDirectory, "receipt-drift.txt"), "different sealed tree\n", "utf8");
+        await execFileAsync("git", ["add", "receipt-drift.txt"], { cwd: receipt.workspaceDirectory });
+        await execFileAsync("git", ["commit", "--quiet", "-m", "Create a different valid tree"], { cwd: receipt.workspaceDirectory });
+        const { stdout: seededCommit } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: receipt.workspaceDirectory });
+        const { stdout: seededTree } = await execFileAsync("git", ["rev-parse", "HEAD^{tree}"], { cwd: receipt.workspaceDirectory });
+        return { ...receipt, seededCommit: seededCommit.trim(), seededTree: seededTree.trim() };
+      },
+      errorText: "fixture source revision does not match case",
+    });
   });
 
   it("persists explicit partial and thrown-failure artifacts without losing deterministic evidence", async () => {
@@ -643,6 +807,43 @@ function fakeAcceptedProduct() {
   });
 }
 
+function fakeAcceptedProjectProduct() {
+  const interaction = {
+    id: "interaction-1",
+    sequence: 1,
+    graphNodeId: 1,
+    completionStatus: "accepted",
+    completionOutput: acceptedOutput(),
+    completionError: null,
+    text: "Build the reservation and capacity product.",
+    effectiveExecutionDigest: `sha256:${"a".repeat(64)}`,
+    effectivePermissionReceipt: {
+      permissionProfileId: "auto",
+      unconfinedHostAccess: false,
+      disclosure: "Workspace-confined automatic approval.",
+    },
+  };
+  return vi.fn(async (url, options = {}) => {
+    const path = new URL(url).pathname;
+    if (path === "/api/model-settings" && (options.method === undefined || options.method === "GET")) {
+      return jsonResponse({
+        defaults: { harnessId: "fixture-task-system", familyId: 1 },
+        harnesses: [{ id: "fixture-task-system", available: true, modelCompatibility: [{ providerId: "codex" }] }],
+        providers: [{ id: "codex", adapterId: "codex", connected: true, models: [{ id: "gpt-test", visible: true, available: true }] }],
+        families: [{ id: 1, enabled: true, position: 0, members: [{ position: 0, providerId: "codex", modelId: "gpt-test" }] }],
+      });
+    }
+    if (path === "/api/projects" && options.method === "POST") return jsonResponse({ id: "project-1" });
+    if (path === "/api/threads" && options.method === "POST") {
+      return jsonResponse({ id: "thread-1", rootInteractionId: interaction.id });
+    }
+    if (path === "/api/threads/thread-1" && (options.method === undefined || options.method === "GET")) {
+      return jsonResponse({ id: "thread-1", interactions: [interaction] });
+    }
+    return jsonResponse({ error: `Unexpected fake product request: ${options.method || "GET"} ${path}` }, 404);
+  });
+}
+
 function acceptedOutput() {
   const node = { id: 2, kind: "concept", icon: "queue", title: "Queue", detail: "Tasks wait here.", state: "accepted" };
   const layer = {
@@ -694,4 +895,33 @@ async function waitForPersistedRun(stateFile, runId) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 10));
   }
   throw new Error("Completed Eval run was not persisted in time.");
+}
+
+async function expectReservationFixtureFailure({ mutateReceipt, errorText }) {
+  const { stateFile, configurationPath } = await testPaths();
+  const product = fakeAcceptedProjectProduct();
+  globalThis.fetch = product;
+  const reservationGrader = vi.fn(async () => []);
+  const materializer = vi.fn(async (options) => mutateReceipt(await materializeReservationCapacityFixture(options)));
+  const service = await new EvalService({
+    stateFile,
+    productSession: productSession(),
+    configurationPaths: [configurationPath],
+    reservationCapacityFixtureMaterializer: materializer,
+    reservationCapacityWorkspaceGrader: reservationGrader,
+    platform: "darwin",
+  }).open();
+
+  const completed = await waitForCompletedRun(service, (await service.createRun({
+    testCaseIds: [RESERVATION_CAPACITY_CASE_ID],
+    harnessConfigurationNames: ["fixture-task-system"],
+    judgeConfigurationName: "deterministic-graph-contract",
+  })).id);
+
+  expect(completed.status).toBe("error");
+  expect(completed.executions[0].error).toContain(errorText);
+  expect(materializer).toHaveBeenCalledOnce();
+  expect(reservationGrader).not.toHaveBeenCalled();
+  expect(product).not.toHaveBeenCalled();
+  await waitForPersistedRun(stateFile, completed.id);
 }
