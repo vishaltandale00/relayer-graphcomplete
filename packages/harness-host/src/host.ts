@@ -45,6 +45,7 @@ import type {
   HarnessModelRoute,
   HarnessTraceDescriptor,
   HarnessTraceSink,
+  CompletionOrigin,
 } from "./types.js";
 
 interface HeldExecutionAccessLease {
@@ -78,8 +79,8 @@ interface LiveSession {
     readonly interactionId: number;
     readonly controller: AbortController;
   }>;
-  recursiveCompletionRuns: Map<GraphId, {
-    readonly capabilityDigest: string;
+  invokedCompletionRuns: Map<GraphId, {
+    readonly invocationDigest: string;
     readonly run: Promise<HarnessCompleteResult>;
   }>;
   activeHumanRootCompletionId?: GraphId;
@@ -92,6 +93,12 @@ interface HarnessExecutionPolicy {
   readonly configurationDigest: string;
   readonly modelRules?: HarnessConfiguration["modelRules"];
   readonly executionAccessContracts?: readonly string[];
+}
+
+export interface HarnessInvokedCompletion {
+  readonly capability: GraphCapability;
+  readonly origin: Extract<CompletionOrigin, { readonly kind: "invoke" }>;
+  readonly model?: InteractionModelSelection;
 }
 
 const EXECUTION_ADMISSION_TIMEOUT_MS = 30_000;
@@ -361,13 +368,18 @@ export class HarnessHost {
       approvals: new HarnessApprovalCoordinator({ threadId: descriptor.threadId }),
       tail: Promise.resolve(),
       activeCompletions: new Map(),
-      recursiveCompletionRuns: new Map(),
+      invokedCompletionRuns: new Map(),
     });
     this.saved.set(descriptor.threadId, persistedDescriptor(persisted));
     this.legacySaved.delete(descriptor.threadId);
     await this.persist();
   }
 
+  async complete(
+    threadId: number,
+    invocation: HarnessInvokedCompletion,
+    signal?: AbortSignal,
+  ): Promise<HarnessCompleteResult>;
   async complete(
     threadId: number,
     interactionId: number,
@@ -388,8 +400,8 @@ export class HarnessHost {
   ): Promise<HarnessCompleteResult>;
   async complete(
     threadId: number,
-    interactionId: number,
-    capability: GraphCapability,
+    interactionOrInvocation: number | HarnessInvokedCompletion,
+    capabilityOrSignal?: GraphCapability | AbortSignal,
     modelOrSignal?: InteractionModelSelection | AbortSignal,
     trailingSignal?: AbortSignal,
     traceContext?: HarnessCompletionTraceContext,
@@ -399,6 +411,12 @@ export class HarnessHost {
     attemptAdmissionId?: string,
   ): Promise<HarnessCompleteResult> {
     if (this.closed) throw new Error("Harness host is closed");
+    if (typeof interactionOrInvocation !== "number") {
+      const invocationSignal = isAbortSignal(capabilityOrSignal) ? capabilityOrSignal : undefined;
+      return this.completeInvoked(threadId, interactionOrInvocation, invocationSignal);
+    }
+    const interactionId = interactionOrInvocation;
+    const capability = capabilityOrSignal as GraphCapability;
     if (!Number.isSafeInteger(interactionId) || interactionId < 1) throw new Error("Harness interactionId must be a positive integer");
     validateGraphCapability(capability);
     const suppliedModel = isAbortSignal(modelOrSignal) ? undefined : modelOrSignal;
@@ -424,25 +442,28 @@ export class HarnessHost {
       ...(harnessPolicy === undefined ? {} : { harnessPolicy }),
       ...(modelPlan === undefined ? {} : { modelPlan }),
       ...(attemptAdmissionId === undefined ? {} : { attemptAdmissionId }),
-      humanRoot: true,
+      origin: { kind: "root" },
     } as const;
     return this.withSessionLock(session, () => this.runCompletion(runInput));
   }
 
-  /** Provider-owned recursive execution bypasses only the human-root thread queue. */
-  async completeRecursive(
+  /** Agent-invoked Complete uses the same operation while bypassing only the human-root queue. */
+  private async completeInvoked(
     threadId: number,
-    capability: GraphCapability,
+    invocation: HarnessInvokedCompletion,
     signal?: AbortSignal,
   ): Promise<HarnessCompleteResult> {
-    if (this.closed) throw new Error("Harness host is closed");
+    const { capability, origin, model } = invocation;
     validateGraphCapability(capability);
+    validateCompletionOrigin(origin);
+    if (model !== undefined) validateInteractionModelSelection(model);
     const session = this.liveSession(threadId);
-    const capabilityDigest = graphCapabilityDigest(capability);
-    const existing = session.recursiveCompletionRuns.get(capability.nodeId);
+    if (model !== undefined) validateConfiguredModelSelection(executionConfiguration(session, undefined), model);
+    const invocationDigest = graphInvocationDigest(capability, origin, model);
+    const existing = session.invokedCompletionRuns.get(capability.nodeId);
     if (existing !== undefined) {
-      if (existing.capabilityDigest !== capabilityDigest) {
-        throw new Error("Recursive completion is already active under a different graph capability");
+      if (existing.invocationDigest !== invocationDigest) {
+        throw new Error("Invoked completion is already active under a different graph binding");
       }
       return existing.run;
     }
@@ -451,10 +472,11 @@ export class HarnessHost {
       interactionId: capability.nodeId,
       session,
       capability,
+      origin,
+      ...(model === undefined ? {} : { model }),
       ...(signal === undefined ? {} : { signal }),
-      humanRoot: false,
     });
-    session.recursiveCompletionRuns.set(capability.nodeId, { capabilityDigest, run });
+    session.invokedCompletionRuns.set(capability.nodeId, { invocationDigest, run });
     return run;
   }
 
@@ -470,7 +492,7 @@ export class HarnessHost {
     readonly harnessPolicy?: HarnessExecutionPolicy;
     readonly modelPlan?: HarnessModelPlan;
     readonly attemptAdmissionId?: string;
-    readonly humanRoot: boolean;
+    readonly origin: CompletionOrigin;
   }): Promise<HarnessCompleteResult> {
     const { threadId, interactionId, session, capability } = input;
     const controller = new AbortController();
@@ -478,7 +500,7 @@ export class HarnessHost {
     const completeCallId = randomUUID();
     const approvals = session.approvals.beginCompletion({ interactionId, completeCallId });
     session.activeCompletions.set(capability.nodeId, { completeCallId, interactionId, controller });
-    if (input.humanRoot) session.activeHumanRootCompletionId = capability.nodeId;
+    if (input.origin.kind === "root") session.activeHumanRootCompletionId = capability.nodeId;
     const abortApprovals = () => session.approvals.endCompletion(
       completeCallId,
       "aborted",
@@ -503,7 +525,7 @@ export class HarnessHost {
         input.harnessPolicy,
         input.modelPlan,
         input.attemptAdmissionId,
-        !input.humanRoot,
+        input.origin,
       );
     } catch (error) {
       operationError = error;
@@ -699,7 +721,7 @@ export class HarnessHost {
     harnessPolicy?: HarnessExecutionPolicy,
     modelPlan?: HarnessModelPlan,
     attemptAdmissionId?: string,
-    recursive = false,
+    origin: CompletionOrigin = { kind: "root" },
   ): Promise<HarnessCompleteResult> {
     const graph = new RelayerGraphClient(capability);
     const interactionNodeId = capability.nodeId;
@@ -713,6 +735,22 @@ export class HarnessHost {
       graph.getNode(interactionNodeId),
       graph.getInteractionInput(),
     ]);
+    if (origin.kind === "invoke") {
+      if (interaction.leasedActionId !== origin.actionId) {
+        throw new HarnessExecutionFailure(
+          "Invoked completion does not match its graph-owned action lease",
+          "configuration",
+          "none",
+        );
+      }
+      if (session.harness.supportsInvokedComplete !== true) {
+        throw new HarnessExecutionFailure(
+          `Harness ${session.descriptor.configuration.name} does not support agent-invoked Complete`,
+          "configuration",
+          "none",
+        );
+      }
+    }
     const scope = new ActiveHarnessGraphScope(capability);
     const support = session.harness.traceSupport?.() ?? NO_HARNESS_TRACE_SUPPORT;
     const trace = this.traceStore?.start({
@@ -779,16 +817,9 @@ export class HarnessHost {
         }
         selectedAccess = accessLease.access;
       }
-      const execution = recursive ? session.harness.completeRecursive : session.harness.complete;
-      if (execution === undefined) {
-        throw new HarnessExecutionFailure(
-          `Harness ${session.descriptor.configuration.name} does not expose provider-owned recursive Complete`,
-          "configuration",
-          "none",
-        );
-      }
       harnessStarted = true;
-      await execution.call(session.harness, {
+      await session.harness.complete({
+        origin,
         inputGraph: interaction,
         interactionInput,
         graph: scope,
@@ -931,12 +962,12 @@ export class HarnessHost {
     }
     await Promise.all([...this.sessions.entries()].map(async ([threadId, session]) => {
       try {
-        const recursiveRuns = Promise.allSettled(
-          [...session.recursiveCompletionRuns.values()].map(({ run }) => run),
+        const invokedRuns = Promise.allSettled(
+          [...session.invokedCompletionRuns.values()].map(({ run }) => run),
         )
           .then(() => undefined);
         await waitForHarnessSessionClose(
-          Promise.all([session.tail, recursiveRuns]).then(() => undefined),
+          Promise.all([session.tail, invokedRuns]).then(() => undefined),
           HARNESS_CLOSE_SESSION_TIMEOUT_MS,
         );
       } catch (error) {
@@ -2049,9 +2080,37 @@ function validateGraphCapability(capability: GraphCapability): void {
   }
 }
 
-function graphCapabilityDigest(capability: GraphCapability): string {
+function validateCompletionOrigin(
+  origin: unknown,
+): asserts origin is Extract<CompletionOrigin, { readonly kind: "invoke" }> {
+  if (!isRecord(origin)
+    || origin.kind !== "invoke"
+    || Object.keys(origin).sort().join(",") !== "actionId,kind,sourceCompletionId"
+    || !Number.isSafeInteger(origin.sourceCompletionId) || (origin.sourceCompletionId as number) < 1
+    || !Number.isSafeInteger(origin.actionId) || (origin.actionId as number) < 1) {
+    throw new Error("Harness invoked completion contains invalid trusted origin provenance");
+  }
+}
+
+function graphInvocationDigest(
+  capability: GraphCapability,
+  origin: Extract<CompletionOrigin, { readonly kind: "invoke" }>,
+  model: InteractionModelSelection | undefined,
+): string {
   return createHash("sha256")
-    .update(JSON.stringify({ url: capability.url, nodeId: capability.nodeId, token: capability.token }))
+    .update(JSON.stringify({
+      capability: { url: capability.url, nodeId: capability.nodeId, token: capability.token },
+      origin: {
+        kind: origin.kind,
+        sourceCompletionId: origin.sourceCompletionId,
+        actionId: origin.actionId,
+      },
+      model: model === undefined ? undefined : {
+        providerId: model.providerId,
+        adapterId: model.adapterId,
+        modelId: model.modelId,
+      },
+    }))
     .digest("hex");
 }
 

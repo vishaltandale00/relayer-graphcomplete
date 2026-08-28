@@ -100,6 +100,7 @@ interface NormalizedCollaborationItem {
 }
 
 export class CodexBasicHarness implements Harness {
+  readonly supportsInvokedComplete = true;
   private readonly clientModuleUrl: string;
   private readonly resolved: ResolvedCodexConfiguration;
   private codexThreadId: string | undefined;
@@ -115,21 +116,17 @@ export class CodexBasicHarness implements Harness {
   }
 
   complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
-    return this.executionHandle(context, "root", signal);
-  }
-
-  completeRecursive(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
-    if (context.model === undefined || context.access === undefined) {
+    if (context.origin.kind === "invoke" && (context.model === undefined || context.access === undefined)) {
       return nativeExecutionHandle(Promise.reject(new Error(
-        "codex.basic recursive completion requires an explicitly admitted model and execution-scoped access",
+        "codex.basic invoked completion requires an explicitly admitted model and execution-scoped access",
       )));
     }
-    return this.executionHandle(context, "recursive", signal);
+    return this.executionHandle(context, context.origin.kind, signal);
   }
 
   private executionHandle(
     context: HarnessRunContext,
-    kind: "root" | "recursive",
+    kind: "root" | "invoke",
     signal?: AbortSignal,
   ): NativeExecutionHandle {
     let resolveAttached!: (identity: JsonObject) => void;
@@ -145,7 +142,7 @@ export class CodexBasicHarness implements Harness {
 
   private async execute(
     context: HarnessRunContext,
-    kind: "root" | "recursive",
+    kind: "root" | "invoke",
     attach: (identity: JsonObject) => void,
     signal?: AbortSignal,
   ): Promise<void> {

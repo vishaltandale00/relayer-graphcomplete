@@ -1161,6 +1161,7 @@ function runContext(nodeId: number, token: string, trace: HarnessTraceSink = cre
     fields: { "api-key": "test-secret" },
   } as const;
   return {
+    origin: { kind: "root" },
     inputGraph,
     interactionInput: { interaction: inputGraph, contexts: [] },
     graph: {

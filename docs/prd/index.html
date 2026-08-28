@@ -357,7 +357,7 @@
 <tr><td>Relayer Harness</td><td>The package group that contains the graph runtime, harness host, and evaluations.</td></tr>
 <tr><td>Harness configuration</td><td>A named, versioned execution setup pinned to a thread. It selects one supported implementation.</td></tr>
 <tr><td>Provider adapter</td><td>The implementation boundary for authentication, model discovery, credentials, and provider-specific execution details.</td></tr>
-<tr><td>Thread</td><td>A saved conversation entry in Relayer Desktop.</td></tr>
+<tr><td>Thread</td><td>A saved graph of completions in Relayer Desktop. Its identity and context do not depend on one provider conversation or session.</td></tr>
 <tr><td>Interaction</td><td>One user event that calls Complete. A message or an authored node action can be an interaction.</td></tr>
 <tr><td>Complete</td><td>The operation <code>complete(inputGraph)</code>. It immediately returns a completion handle whose result promise settles from durable GraphComplete state.</td></tr>
 <tr><td>Accepted layer</td><td>The exact response layer that passed graph validation and acceptance.</td></tr>
@@ -1820,6 +1820,7 @@ GET  /api/graph/nodes/:id/output
 <pre><code class="language-ts">type CompleteInputGraph = NodeReference;
 
 interface HarnessRunContext {
+  origin: { kind: &quot;root&quot; } | { kind: &quot;invoke&quot;; sourceCompletionId: GraphId; actionId: GraphId };
   inputGraph: GraphNode;
   graph: HarnessGraphScope;
 }
@@ -1836,10 +1837,11 @@ interface NativeExecutionHandle {
   stopSelf(reason: SafeReason): Promise&lt;void&gt;;
 }
 </code></pre>
-<p>The external name remains <code>complete(inputGraph)</code>, and that input graph is only a pointer to an already-prepared canonical interaction node. The trusted human or recursive adapter prepares or exactly recovers the identity and capability before invoking the shared completion-execution module. The host resolves the pointer once and creates one run context. The persistent harness keeps its provider session and working directory, but it does not persist a current graph credential.</p>
+<p>The external name remains <code>complete(inputGraph)</code>, and that input graph is only a pointer to an already-prepared canonical interaction node. A GraphComplete thread is a graph of completions, not a provider conversation. The trusted human or invoke adapter prepares or exactly recovers the identity, origin, and capability before invoking the shared completion-execution module. The host resolves the pointer once and creates one run context. The persistent harness keeps its working directory and may retain provider-session state as an optimization, but it does not persist a current graph credential.</p>
 <p>Complete returns a <code>CompletionHandle</code> whose current and result are settled from durable GraphComplete state independently of <code>NativeExecutionHandle.settled</code>. A successful Return may resolve the semantic result while provider cleanup continues. Provider exit while GraphComplete remains active records trusted failure and never implies success. An explicit recursive call is bound or launched only through that provider adapter's defined native mechanism. Collaboration or RLM trace events alone never create semantic children.</p>
-<p>One GraphComplete completion owns one provider execution scope. Provider-native helpers remain inside that scope and may share its completion authority. Their creation does not create GraphComplete children.</p>
-<p>An explicit <code>complete(inputGraph)</code> call creates a new semantic completion and a fresh provider execution scope. That new scope retains the harness's ordinary native helper infrastructure. A helper may ask its owning orchestrator to create semantic work, but helper topology is never mirrored automatically.</p>
+<p>One GraphComplete completion owns one independently runnable provider execution attachment. Provider-native helpers remain inside that attachment and may share its completion authority. Their creation does not create GraphComplete children.</p>
+<p>An explicit <code>complete(inputGraph)</code> call creates a new semantic completion and a distinct provider execution attachment. The adapter may use a fresh provider session or safely multiplex an existing session.</p>
+<p>Required context and identity come from GraphComplete rather than hidden provider history. The attachment retains the harness's ordinary native helper infrastructure. A helper may ask its owning orchestrator to create semantic work, but helper topology is never mirrored automatically.</p>
 <p>Codex binds a semantic child to a fresh app-server thread and turn whose orchestrator receives the child scope. Codex-native subagents remain internal helpers for that orchestrator. Prime binds a semantic child to an invocation-aware native RLM execution whose orchestrator receives the child scope. Nested RLM helpers remain internal unless that orchestrator explicitly calls Complete again.</p>
 <h3>12.2 Persistent Node harness host</h3>
 <p>The Node harness host is a long-lived child process of the evaluator or Relayer app server. It resolves a small code-owned implementation map and lazily constructs one harness object per thread:</p>
@@ -1848,8 +1850,8 @@ interface NativeExecutionHandle {
   &quot;prime.agent&quot;: createPrimeAgentHarness,
 };
 </code></pre>
-<p>The thread stores a copy of its selected named harness configuration. The configuration's <code>implementation</code> field selects a factory from the map. The host does not interpret the implementation-specific <code>settings</code> object. The host keeps the same JavaScript harness object and provider session alive across turns. Factories may initialize asynchronously.</p>
-<p>If the Node process or provider session expires, the host recreates the object from stored configuration and opaque provider resume state. The next Complete call supplies its own graph scope. Continuous conversation must not start a new provider conversation on every Complete call.</p>
+<p>The thread stores a copy of its selected named harness configuration. The configuration's <code>implementation</code> field selects a factory from the map. The host does not interpret the implementation-specific <code>settings</code> object. The host may keep the same JavaScript harness object and provider session alive across turns when the adapter can safely reuse them. Factories may initialize asynchronously.</p>
+<p>If the Node process or provider session expires, the host recreates the object from stored configuration and opaque provider resume state when available. The next Complete call supplies its own graph scope and remains semantically valid even when the provider starts a fresh session. Session reuse should be used when obvious and behavior preserving, but continuous GraphComplete context must not depend on it.</p>
 <p>The Relayer app server owns one-active-human-root-completion coordination for a thread. The Node host owns the live JavaScript object and a completion registry keyed by canonical completion identity. It serializes construction and durable provider-session state mutation where required, but it does not place recursive provider work behind a thread-global Complete queue. Cancellation, approval, trace, capability, and settlement state are completion scoped. Parent terminality never waits for, cancels, settles, or incorporates an active child. Codex and Prime Agent each retain their native execution behavior; the host owns no recursive child-agent scheduler.</p>
 <h3>12.3 Minimal harness configuration</h3>
 <p>Each YAML file has a unique machine-readable <code>name</code>, selects an implementation type and version, and carries implementation-owned settings. The host validates only the common envelope. Each implementation validates its own settings. Prime Agent can add recursive model policy, review, and budget settings without changing host or product types.</p>

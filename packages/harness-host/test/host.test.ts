@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { InteractionInput } from "@relayer/graph-client";
-import { HarnessExecutionFailure, HarnessHost, startHarnessHost } from "../src/host.js";
+import { HarnessExecutionFailure, HarnessHost, startHarnessHost, type HarnessInvokedCompletion } from "../src/host.js";
 import { PrimeAgentHarness } from "../src/implementations/prime-agent.js";
 import type {
   Harness,
@@ -27,6 +27,14 @@ const completion = {
 };
 const emptyState = (): HarnessSessionState => ({});
 const graph = (nodeId = 1, token = "token") => ({ url: "http://127.0.0.1:43123", token, nodeId });
+const invoked = (
+  inputGraph: ReturnType<typeof graph>,
+  sourceCompletionId = 1,
+  actionId = inputGraph.nodeId + 100,
+) => ({
+  capability: inputGraph,
+  origin: { kind: "invoke" as const, sourceCompletionId, actionId },
+});
 const graphNode = (nodeId = 1, leasedActionId?: number) => ({
   id: nodeId,
   ...(leasedActionId === undefined ? {} : { leasedActionId }),
@@ -1550,7 +1558,7 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("lets provider-owned recursive completions run concurrently and cancels one exact completion", async () => {
+  it("lets provider-owned invoked completions run concurrently and cancels one exact completion", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-concurrency-"));
     const started = new Set<number>();
     const accepted = new Set<number>();
@@ -1563,15 +1571,16 @@ describe("HarnessHost", () => {
           : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
       }
       const token = new Headers(init?.headers).get("authorization");
-      return graphReadResponse(url, token === "Bearer child-b-token" ? 3 : 2);
+      const nodeId = token === "Bearer child-b-token" ? 3 : 2;
+      return graphReadResponse(url, nodeId, [], nodeId + 100);
     }));
     try {
       const host = new HarnessHost({
         stateFile: join(directory, "sessions.json"),
         controlToken: "control",
         implementations: { test: () => ({
-          async complete() {},
-          completeRecursive(context, signal) {
+          supportsInvokedComplete: true,
+          complete(context, signal) {
             const id = context.inputGraph.id;
             started.add(id);
             return new Promise<void>((resolve, reject) => {
@@ -1590,8 +1599,8 @@ describe("HarnessHost", () => {
         workingDirectory: directory,
       });
 
-      const first = host.completeRecursive(1, graph(2, "child-a-token"));
-      const second = host.completeRecursive(1, graph(3, "child-b-token"));
+      const first = host.complete(1, invoked(graph(2, "child-a-token")));
+      const second = host.complete(1, invoked(graph(3, "child-b-token")));
       await vi.waitFor(() => expect([...started].sort()).toEqual([2, 3]));
 
       expect(host.cancel(1, 2)).toBe(true);
@@ -1605,7 +1614,7 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("recovers an in-flight recursive completion without starting the provider twice", async () => {
+  it("recovers an in-flight invoked completion without starting the provider twice", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-retry-"));
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -1615,13 +1624,16 @@ describe("HarnessHost", () => {
       ? (accepted
         ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
         : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } }))
-      : graphReadResponse(url, 2)));
+      : (() => {
+          const nodeId = Number(/nodes\/(\d+)/u.exec(url)?.[1] ?? 2);
+          return graphReadResponse(url, nodeId, [], nodeId + 100);
+        })()));
     const host = new HarnessHost({
       stateFile: join(directory, "sessions.json"),
       controlToken: "control",
       implementations: { test: () => ({
-        async complete() {},
-        async completeRecursive() {
+        supportsInvokedComplete: true,
+        async complete() {
           starts += 1;
           await gate;
           accepted = true;
@@ -1638,8 +1650,8 @@ describe("HarnessHost", () => {
         workingDirectory: directory,
       });
       const capability = graph(2, "child-token");
-      const first = host.completeRecursive(1, capability);
-      const retry = host.completeRecursive(1, capability);
+      const first = host.complete(1, invoked(capability));
+      const retry = host.complete(1, invoked(capability));
       await vi.waitFor(() => expect(starts).toBe(1));
       release();
       await expect(Promise.all([first, retry])).resolves.toHaveLength(2);
@@ -1650,20 +1662,20 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("replays a settled recursive failure without starting the provider twice", async () => {
+  it("replays a settled invoked failure without starting the provider twice", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-settled-retry-"));
     let starts = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
       ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
-      : graphReadResponse(url, 2)));
+      : graphReadResponse(url, 2, [], 102)));
     const host = new HarnessHost({
       stateFile: join(directory, "sessions.json"),
       controlToken: "control",
       implementations: { test: () => ({
-        async complete() {},
-        async completeRecursive() {
+        supportsInvokedComplete: true,
+        async complete() {
           starts += 1;
-          throw new Error("recursive provider failed");
+          throw new Error("invoked provider failed");
         },
         state: emptyState,
       }) },
@@ -1678,11 +1690,11 @@ describe("HarnessHost", () => {
       });
       const capability = graph(2, "child-token");
 
-      const first = host.completeRecursive(1, capability);
-      await expect(first).rejects.toThrow("recursive provider failed");
-      const retry = host.completeRecursive(1, capability);
+      const first = host.complete(1, invoked(capability));
+      await expect(first).rejects.toThrow("invoked provider failed");
+      const retry = host.complete(1, invoked(capability));
 
-      await expect(retry).rejects.toThrow("recursive provider failed");
+      await expect(retry).rejects.toThrow("invoked provider failed");
       expect(starts).toBe(1);
     } finally {
       vi.unstubAllGlobals();
@@ -1690,7 +1702,47 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("rejects a conflicting capability instead of transferring an in-flight recursive result", async () => {
+  it("recovers an accepted invoked result before requiring a new provider attachment", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-invoked-accepted-recovery-"));
+    let starts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const nodeId = Number(/nodes\/(\d+)/u.exec(url)?.[1] ?? 2);
+      if (url.endsWith("/output")) {
+        return nodeId === 2
+          ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      return graphReadResponse(url, nodeId, [], nodeId + 100);
+    }));
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => ({
+        async complete() { starts += 1; },
+        state: emptyState,
+      }) },
+    });
+    try {
+      await host.initialize();
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+
+      await expect(host.complete(1, invoked(graph(3, "unsupported-token"))))
+        .rejects.toThrow("does not support agent-invoked Complete");
+      await expect(host.complete(1, invoked(graph(2, "recovered-token"))))
+        .resolves.toMatchObject({ output: completion });
+      expect(starts).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a conflicting binding instead of transferring an in-flight invoked result", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-binding-conflict-"));
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -1700,13 +1752,13 @@ describe("HarnessHost", () => {
       ? (accepted
         ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
         : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } }))
-      : graphReadResponse(url, 2)));
+      : graphReadResponse(url, 2, [], 102)));
     const host = new HarnessHost({
       stateFile: join(directory, "sessions.json"),
       controlToken: "control",
       implementations: { test: () => ({
-        async complete() {},
-        async completeRecursive() {
+        supportsInvokedComplete: true,
+        async complete() {
           starts += 1;
           await gate;
           accepted = true;
@@ -1722,14 +1774,32 @@ describe("HarnessHost", () => {
         configuration: testConfiguration,
         workingDirectory: directory,
       });
-      const running = host.completeRecursive(1, graph(2, "child-token"));
+      await expect(host.complete(1, {
+        capability: graph(4, "root-smuggle-token"),
+        origin: ({ kind: "root", sourceCompletionId: 1, actionId: 104 } as unknown as HarnessInvokedCompletion["origin"]),
+      })).rejects.toThrow("invalid trusted origin provenance");
+      await expect(host.complete(1, invoked(graph(3, "forged-token"), 1, 999)))
+        .rejects.toThrow("does not match its graph-owned action lease");
+      expect(starts).toBe(0);
+      const running = host.complete(1, invoked(graph(2, "child-token")));
       await vi.waitFor(() => expect(starts).toBe(1));
 
-      await expect(host.completeRecursive(1, graph(2, "foreign-token")))
-        .rejects.toThrow("different graph capability");
+      const reorderedRetry = host.complete(1, {
+        capability: { nodeId: 2, token: "child-token", url: "http://127.0.0.1:43123" },
+        origin: { actionId: 102, sourceCompletionId: 1, kind: "invoke" },
+      });
+
+      await expect(host.complete(1, invoked(graph(2, "foreign-token"))))
+        .rejects.toThrow("different graph binding");
+      await expect(host.complete(1, invoked(graph(2, "child-token"), 1, 999)))
+        .rejects.toThrow("different graph binding");
+      await expect(host.complete(1, {
+        ...invoked(graph(2, "child-token")),
+        model: { providerId: "provider", adapterId: "openai-api", modelId: "different-model" },
+      })).rejects.toThrow("different graph binding");
 
       release();
-      await expect(running).resolves.toMatchObject({ output: completion });
+      await expect(Promise.all([running, reorderedRetry])).resolves.toHaveLength(2);
       expect(starts).toBe(1);
     } finally {
       vi.unstubAllGlobals();
@@ -1737,7 +1807,7 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("waits for recursive completion cleanup before disposing the provider session", async () => {
+  it("waits for invoked completion cleanup before disposing the provider session", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-close-"));
     let started!: () => void;
     const didStart = new Promise<void>((resolve) => { started = resolve; });
@@ -1745,13 +1815,13 @@ describe("HarnessHost", () => {
     let disposed = false;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
       ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
-      : graphReadResponse(url, 2)));
+      : graphReadResponse(url, 2, [], 102)));
     const host = new HarnessHost({
       stateFile: join(directory, "sessions.json"),
       controlToken: "control",
       implementations: { test: () => ({
-        async complete() {},
-        completeRecursive(_context, signal) {
+        supportsInvokedComplete: true,
+        complete(_context, signal) {
           started();
           return new Promise<void>((_resolve, reject) => {
             signal?.addEventListener("abort", () => {
@@ -1777,7 +1847,7 @@ describe("HarnessHost", () => {
         configuration: testConfiguration,
         workingDirectory: directory,
       });
-      const running = host.completeRecursive(1, graph(2, "child-token"));
+      const running = host.complete(1, invoked(graph(2, "child-token")));
       await didStart;
       const closing = host.close();
       await expect(running).rejects.toThrow("Harness host closed");

@@ -1,14 +1,8 @@
 import { createHash } from "node:crypto";
 import type { GraphCapability, GraphId, ResolvedLayer } from "@relayer/graph-client";
-import type { JsonObject } from "./types.js";
+import type { CompletionOrigin, JsonObject } from "./types.js";
 
-export type CompletionOrigin =
-  | { readonly kind: "root" }
-  | {
-      readonly kind: "invoke";
-      readonly sourceCompletionId: GraphId;
-      readonly actionId: GraphId;
-    };
+export type { CompletionOrigin } from "./types.js";
 
 export interface CompletionBinding {
   readonly completionId: GraphId;
@@ -98,7 +92,7 @@ export function nativeExecutionHandle(
   });
 }
 
-export interface RecursiveHarnessAdapter {
+export interface CompletionExecutionAdapter {
   complete(binding: CompletionBinding): NativeExecutionHandle;
 }
 
@@ -138,7 +132,7 @@ export class CompletionExecutionModule {
 
   constructor(
     private readonly preparation: CompletionPreparation,
-    private readonly adapter: RecursiveHarnessAdapter,
+    private readonly adapter: CompletionExecutionAdapter,
   ) {}
 
   complete(inputGraph: CompletionInputGraph): CompletionHandle {

@@ -104,6 +104,7 @@ function runContext(access: HarnessRunContext["access"]): HarnessRunContext {
   if (!access) throw new Error("test access is required");
   const inputGraph = { id: 4, kind: "user-interaction", icon: "user", title: "Question", detail: "Explain", state: "accepted" as const };
   return {
+    origin: { kind: "root" },
     inputGraph,
     interactionInput: { interaction: inputGraph, contexts: [] },
     graph: { interactionNodeId: 4, acquireCapability: () => ({ url: "http://127.0.0.1:9", token: "token", nodeId: 4 }) },

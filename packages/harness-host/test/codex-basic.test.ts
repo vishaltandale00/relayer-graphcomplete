@@ -537,11 +537,12 @@ describe("CodexBasicHarness", () => {
 
     const admitted = (id: number, token: string): HarnessRunContext => ({
       ...runContext(id, token),
+      origin: { kind: "invoke", sourceCompletionId: 1, actionId: id + 100 },
       model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-test" },
       access: codexAccess(),
     });
-    const first = harness.completeRecursive!(admitted(2, "child-token-a"));
-    const second = harness.completeRecursive!(admitted(3, "child-token-b"));
+    const first = harness.complete(admitted(2, "child-token-a"));
+    const second = harness.complete(admitted(3, "child-token-b"));
     await Promise.all([first, second]);
 
     await expect(first.attached).resolves.toEqual({
@@ -579,7 +580,10 @@ describe("CodexBasicHarness", () => {
     }));
     const harness = harnessFixture("auto", runAppServerTurn);
 
-    await expect(harness.completeRecursive!(runContext(2, "child-token")))
+    await expect(harness.complete({
+      ...runContext(2, "child-token"),
+      origin: { kind: "invoke", sourceCompletionId: 1, actionId: 102 },
+    }))
       .rejects.toThrow("requires an explicitly admitted model and execution-scoped access");
     expect(runAppServerTurn).not.toHaveBeenCalled();
   });
@@ -961,6 +965,7 @@ function harnessFixture(
 function runContext(id: number, token: string, trace: HarnessTraceSink = createNoopHarnessTraceSink()): HarnessRunContext {
   const inputGraph = { id, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" as const };
   return {
+    origin: { kind: "root" },
     inputGraph,
     interactionInput: { interaction: inputGraph, contexts: [] },
     graph: {

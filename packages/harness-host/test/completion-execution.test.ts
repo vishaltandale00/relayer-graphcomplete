@@ -7,7 +7,7 @@ import {
   type CompletionLifecycleObservation,
   type CompletionPreparation,
   type NativeCompletionExecution,
-  type RecursiveHarnessAdapter,
+  type CompletionExecutionAdapter,
   type NativeExecutionHandle,
 } from "../src/completion-execution.js";
 
@@ -66,7 +66,7 @@ describe("CompletionExecutionModule", () => {
       observe: vi.fn(() => semantic.promise),
       fail: vi.fn(async () => {}),
     };
-    const adapter: RecursiveHarnessAdapter = {
+    const adapter: CompletionExecutionAdapter = {
       complete: vi.fn(() => nativeHandle(native.promise)),
     };
     const module = new CompletionExecutionModule(preparation, adapter);
@@ -127,7 +127,7 @@ describe("CompletionExecutionModule", () => {
         });
       }),
     };
-    const adapter: RecursiveHarnessAdapter = {
+    const adapter: CompletionExecutionAdapter = {
       complete: vi.fn((prepared) => {
         const settled = deferred<NativeCompletionExecution>();
         nativeSettlements.set(prepared.completionId, settled);
@@ -164,7 +164,7 @@ describe("CompletionExecutionModule", () => {
       observe: vi.fn(() => terminal.promise),
       fail: vi.fn(async () => {}),
     };
-    const adapter: RecursiveHarnessAdapter = {
+    const adapter: CompletionExecutionAdapter = {
       complete: vi.fn(() => nativeHandle(new Promise<NativeCompletionExecution>(() => {}))),
     };
     const module = new CompletionExecutionModule(preparation, adapter);
@@ -192,7 +192,7 @@ describe("CompletionExecutionModule", () => {
       observe: vi.fn(() => terminal.promise),
       fail: vi.fn(async () => {}),
     };
-    const adapter: RecursiveHarnessAdapter = {
+    const adapter: CompletionExecutionAdapter = {
       complete: vi.fn(() => nativeHandle(new Promise<NativeCompletionExecution>(() => {}))),
     };
     const module = new CompletionExecutionModule(preparation, adapter);
@@ -229,7 +229,7 @@ describe("CompletionExecutionModule", () => {
       observe: vi.fn(() => terminal.promise),
       fail: vi.fn(async () => {}),
     };
-    const adapter: RecursiveHarnessAdapter = {
+    const adapter: CompletionExecutionAdapter = {
       complete: vi.fn(() => nativeHandle(new Promise<NativeCompletionExecution>(() => {}))),
     };
     const module = new CompletionExecutionModule(preparation, adapter);

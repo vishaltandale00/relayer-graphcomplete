@@ -189,7 +189,18 @@ export interface HarnessGraphScope {
   acquireCapability(): GraphCapability;
 }
 
+/** Trusted provenance for one semantic Complete call. */
+export type CompletionOrigin =
+  | { readonly kind: "root" }
+  | {
+      readonly kind: "invoke";
+      readonly sourceCompletionId: GraphId;
+      readonly actionId: GraphId;
+    };
+
 export interface HarnessRunContext {
+  /** GraphComplete provenance; provider session identity is deliberately separate. */
+  readonly origin: CompletionOrigin;
   readonly inputGraph: GraphNode;
   /** Normalized model-visible input resolved from inputGraph; excludes context occurrence authority. */
   readonly interactionInput: InteractionInput;
@@ -305,9 +316,9 @@ export interface InteractionModelSelection {
 
 export interface Harness {
   traceSupport?(): HarnessTraceSupport;
+  /** Root Complete is mandatory; this opts the same method into agent-invoked Complete. */
+  readonly supportsInvokedComplete?: true;
   complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle | Promise<void>;
-  /** Provider-owned semantic child binding; absence means recursive Complete is unsupported. */
-  completeRecursive?(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle | Promise<void>;
   state(): HarnessSessionState;
   dispose?(): void | Promise<void>;
   /** Immediately interrupt provider work so the host-owned dispose operation can finish. */
