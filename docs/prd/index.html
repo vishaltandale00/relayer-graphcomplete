@@ -433,7 +433,7 @@
 <p>The Rust app server creates product interactions and calls the same persistent Node harness host used by evaluation. It persists the accepted result and serves it to the renderer.</p>
 <h3>1.4 Relayer Desktop and Relayer Harness interface</h3>
 <p>The canonical external boundary is one Complete call. <code>inputGraph</code> is a small pointer. Its root is one already-prepared canonical user-interaction node. It is not a serialized copy of the project graph. Human-root product code prepares that interaction from the user event. Trusted recursive adapter code prepares or exactly recovers an agent child from one immutable published invoke occurrence. Both paths then enter the same Complete module. Model-authored code cannot substitute an arbitrary interaction-shaped node or mint child authority.</p>
-<p>The root package does not export this boundary yet. Today, the Rust app server reaches the same executable seam through the persistent <code>HarnessHost</code>. Exporting <code>complete(inputGraph)</code> remains required.</p>
+<p>The root package exports this boundary and a process-owned configuration seam for injecting its trusted completion runtime. The Rust app server reaches the same executable seam through the persistent <code>HarnessHost</code>.</p>
 <pre><code class="language-ts">interface RelayerHarnessClient {
   complete(inputGraph: { interactionNode: NodeReference }): CompletionHandle;
 }
@@ -1842,7 +1842,7 @@ interface NativeExecutionHandle {
 <p>One GraphComplete completion owns one independently runnable provider execution attachment. Provider-native helpers remain inside that attachment and may share its completion authority. Their creation does not create GraphComplete children.</p>
 <p>An explicit <code>complete(inputGraph)</code> call creates a new semantic completion and a distinct provider execution attachment. The adapter may use a fresh provider session or safely multiplex an existing session.</p>
 <p>Required context and identity come from GraphComplete rather than hidden provider history. The attachment retains the harness's ordinary native helper infrastructure. A helper may ask its owning orchestrator to create semantic work, but helper topology is never mirrored automatically.</p>
-<p>Codex binds a semantic child to a fresh app-server thread and turn whose orchestrator receives the child scope. Codex-native subagents remain internal helpers for that orchestrator. Claude binds a semantic child to a fresh Agent SDK query that neither resumes nor replaces the root session. Prime binds a semantic child to an invocation-aware native RLM execution whose orchestrator receives the child scope. Nested RLM helpers remain internal unless that orchestrator explicitly calls Complete again.</p>
+<p>Codex binds a semantic child to a fresh app-server thread and turn whose orchestrator receives the child scope. Codex-native subagents remain internal helpers for that orchestrator. Claude binds a semantic child to a fresh Agent SDK query that neither resumes nor replaces the root session. Prime binds a semantic child to a fresh ordinary Prime session and execution. Prime's RLM and subagents remain internal helpers unless that execution explicitly calls Complete again.</p>
 <h3>12.2 Persistent Node harness host</h3>
 <p>The Node harness host is a long-lived child process of the evaluator or Relayer app server. It resolves a small code-owned implementation map and lazily constructs one harness object per thread:</p>
 <pre><code class="language-ts">const harnessImplementations: Record&lt;string, HarnessFactory&gt; = {
@@ -2690,7 +2690,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 <li>Rename, archive, pin, delete-entry, move-to-project, and unsent-draft recovery do not have product proof.</li>
 <li>API-key providers and operating-system secret storage do not have product proof.</li>
 <li>Prime Agent does not have clean-install live-product proof.</li>
-<li>The root package does not export the canonical <code>complete(inputGraph)</code> boundary.</li>
+<li>The root package exports canonical <code>complete(inputGraph)</code>; live app-server adoption of that exported seam does not yet have product proof.</li>
 <li>The Eval promotion bundle and retention contract remain incomplete.</li>
 <li>Windows signing, installation, and interactive updater canary remain blocked.</li>
 </ul>

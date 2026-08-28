@@ -7,10 +7,12 @@ use crate::{
         ApprovalActor, ApprovalCorrelation, ApprovalDecision, ApprovalOutcome, ApprovalRequest,
         ApprovalResolution,
     },
+    completion_broker::{CompletionBrokerGrant, CompletionBrokerRegistry},
     permissions::PermissionCatalog,
     runtime::{
         ApprovalEvent, ApprovalEventSnapshot, CompleteInteraction, PreparedInteraction,
-        PreparedInvocation, RuntimeClient, RuntimeCompletion, RuntimeError,
+        PreparedInvocation, RuntimeClient, RuntimeCompletion, RuntimeCompletionBroker,
+        RuntimeError,
     },
 };
 use serde_json::Value;
@@ -31,6 +33,7 @@ pub(crate) struct InteractionExecutionService {
     standalone_workspaces_directory: PathBuf,
     approval_decisions: Arc<Mutex<HashMap<String, ApprovalDecision>>>,
     execution_lease_reconciler: Option<crate::app_server::ExecutionLeaseReconciler>,
+    completion_brokers: CompletionBrokerRegistry,
 }
 
 impl InteractionExecutionService {
@@ -41,6 +44,7 @@ impl InteractionExecutionService {
         standalone_workspaces_directory: PathBuf,
         approval_decisions: Arc<Mutex<HashMap<String, ApprovalDecision>>>,
         execution_lease_reconciler: Option<crate::app_server::ExecutionLeaseReconciler>,
+        completion_brokers: CompletionBrokerRegistry,
     ) -> Self {
         Self {
             product,
@@ -49,6 +53,7 @@ impl InteractionExecutionService {
             standalone_workspaces_directory,
             approval_decisions,
             execution_lease_reconciler,
+            completion_brokers,
         }
     }
 
@@ -362,7 +367,23 @@ impl InteractionExecutionService {
         };
         let expected_invocation = invocation;
         let prepared_graph_node_id = prepared.graph_node_id;
-        let completion = runtime.complete_prepared(&command, prepared);
+        let broker_url = execution.completion_brokers.url();
+        let broker_lease = broker_url.as_ref().map(|_| {
+            execution.completion_brokers.issue(CompletionBrokerGrant {
+                thread_id: thread.id,
+                source_interaction_id: interaction.id,
+                source_completion_id: prepared_graph_node_id,
+            })
+        });
+        let completion_broker =
+            broker_lease
+                .as_ref()
+                .zip(broker_url.as_deref())
+                .map(|(lease, url)| RuntimeCompletionBroker {
+                    url,
+                    token: lease.token(),
+                });
+        let completion = runtime.complete_prepared(&command, prepared, completion_broker);
         tokio::pin!(completion);
         let mut cursor = 0;
         let mut harness_session_id = None;

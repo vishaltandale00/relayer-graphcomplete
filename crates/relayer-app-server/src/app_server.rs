@@ -3,7 +3,7 @@ use crate::{
     permissions::PermissionCatalog,
     product::{Interaction, PreparedInteractionBinding, ProductService, ProjectId},
     runtime::RuntimeClient,
-    storage::SqliteProductStore,
+    storage::{CompletionExecutionRestartSettlement, SqliteProductStore},
 };
 use axum::Router;
 use std::time::Duration;
@@ -253,6 +253,90 @@ async fn reconcile_interrupted_interaction(
     Ok(())
 }
 
+async fn reconcile_interrupted_recursive_completion_executions(
+    storage: &SqliteProductStore,
+    runtime: &RuntimeClient,
+) -> anyhow::Result<usize> {
+    let executions = storage
+        .interrupted_recursive_completion_executions()
+        .await?;
+    let mut reconciled = 0;
+    for execution in executions {
+        let projection = runtime
+            .current_projection_page(&[execution.graph_completion_id], 0, 1)
+            .await?;
+        let current = projection
+            .states
+            .into_iter()
+            .find(|state| state.completion_id.value() == execution.graph_completion_id)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "canonical current is missing for launched recursive completion {}",
+                    execution.graph_completion_id
+                )
+            })?;
+        let settlement = match current.lifecycle {
+            relayer_graph_core::CompletionLifecycle::Succeeded => {
+                let output = runtime
+                    .completion_output(execution.graph_completion_id)
+                    .await?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "succeeded recursive completion {} has no canonical output",
+                            execution.graph_completion_id
+                        )
+                    })?;
+                if output.get("nodeId").and_then(serde_json::Value::as_i64)
+                    != Some(execution.graph_completion_id)
+                {
+                    anyhow::bail!(
+                        "canonical output node mismatch for recursive completion {}",
+                        execution.graph_completion_id
+                    );
+                }
+                CompletionExecutionRestartSettlement::Accepted { output }
+            }
+            relayer_graph_core::CompletionLifecycle::Stopped
+            | relayer_graph_core::CompletionLifecycle::Failed => {
+                let safe_reason = current.safe_reason.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "terminal recursive completion {} has no safe reason",
+                        execution.graph_completion_id
+                    )
+                })?;
+                CompletionExecutionRestartSettlement::Failed { safe_reason }
+            }
+            relayer_graph_core::CompletionLifecycle::Active => {
+                runtime
+                    .fail_graph_completion(
+                        execution.graph_completion_id,
+                        &format!(
+                            "completion-execution-restart:{}:{}",
+                            execution.interaction_id, execution.graph_completion_id
+                        ),
+                        "application_restart",
+                    )
+                    .await?;
+                CompletionExecutionRestartSettlement::Failed {
+                    safe_reason: "application_restart".into(),
+                }
+            }
+        };
+        if storage
+            .reconcile_completion_execution_on_restart(
+                execution.interaction_id,
+                &execution.permission_origin_digest,
+                settlement,
+                &startup_timestamp(),
+            )
+            .await?
+        {
+            reconciled += 1;
+        }
+    }
+    Ok(reconciled)
+}
+
 pub struct RelayerAppServerConfig {
     pub database_path: PathBuf,
     pub web_directory: PathBuf,
@@ -262,6 +346,7 @@ pub struct RelayerAppServerConfig {
     pub runtime: Option<RelayerRuntimeConfig>,
     pub allow_conversation_import: bool,
     pub export_producer: crate::conversation_export::ExportProducer,
+    pub completion_broker_origin: Option<String>,
 }
 
 pub struct RelayerAppServer {
@@ -277,6 +362,7 @@ pub struct RelayerAppServer {
     standalone_workspaces_directory: PathBuf,
     export_producer: crate::conversation_export::ExportProducer,
     execution_lease_reconciler: Option<ExecutionLeaseReconciler>,
+    completion_broker_origin: Option<String>,
 }
 
 pub(crate) async fn reconcile_terminal_execution_lease(
@@ -462,6 +548,13 @@ impl RelayerAppServer {
             }
         }
         if let Some(runtime) = &runtime {
+            let reconciled =
+                reconcile_interrupted_recursive_completion_executions(&storage, runtime).await?;
+            if reconciled > 0 {
+                eprintln!(
+                    "reconciled {reconciled} launched recursive completion(s) without provider replay"
+                );
+            }
             for interaction in storage.interrupted_interactions().await? {
                 if let Err(error) = reconcile_interrupted_interaction(
                     &storage,
@@ -578,6 +671,7 @@ impl RelayerAppServer {
             standalone_workspaces_directory,
             export_producer: config.export_producer,
             execution_lease_reconciler,
+            completion_broker_origin: config.completion_broker_origin,
         })
     }
 
@@ -598,6 +692,7 @@ impl RelayerAppServer {
                 standalone_workspaces_directory: self.standalone_workspaces_directory.clone(),
                 export_producer: self.export_producer.clone(),
                 execution_lease_reconciler: self.execution_lease_reconciler.clone(),
+                completion_broker_origin: self.completion_broker_origin.clone(),
             },
         )
     }

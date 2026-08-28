@@ -12,6 +12,7 @@ mod types;
 
 use crate::{approval::ApprovalDecision, runtime::RuntimeClient};
 use crate::{
+    completion_broker::CompletionBrokerRegistry,
     permissions::PermissionCatalog,
     product::{InteractionExecutionService, NodeContextDraftConfirmationService, ProductService},
 };
@@ -50,6 +51,7 @@ pub(crate) struct ApiState {
     pub(crate) annotation_sessions: Arc<Mutex<HashMap<String, AnnotationSession>>>,
     pub(crate) annotations_enabled: bool,
     pub(crate) environment_inspector: crate::environment::EnvironmentInspector,
+    pub(crate) completion_brokers: CompletionBrokerRegistry,
 }
 
 pub(crate) struct ApiRuntime {
@@ -61,6 +63,7 @@ pub(crate) struct ApiRuntime {
     pub(crate) standalone_workspaces_directory: PathBuf,
     pub(crate) export_producer: crate::conversation_export::ExportProducer,
     pub(crate) execution_lease_reconciler: Option<crate::app_server::ExecutionLeaseReconciler>,
+    pub(crate) completion_broker_origin: Option<String>,
 }
 
 pub(crate) fn router(
@@ -72,6 +75,8 @@ pub(crate) fn router(
     let (control_token, read_only_control_token) = control_tokens;
     let annotations_enabled = read_only_control_token.is_some();
     let approval_decisions = Arc::new(Mutex::new(HashMap::new()));
+    let completion_brokers =
+        CompletionBrokerRegistry::new(runtime.completion_broker_origin.clone());
     let interaction_execution = runtime.runtime.as_ref().map(|runtime_client| {
         InteractionExecutionService::new(
             product.clone(),
@@ -80,6 +85,7 @@ pub(crate) fn router(
             runtime.standalone_workspaces_directory.clone(),
             approval_decisions.clone(),
             runtime.execution_lease_reconciler.clone(),
+            completion_brokers.clone(),
         )
     });
     let context_draft_confirmation =
@@ -100,6 +106,7 @@ pub(crate) fn router(
         annotation_sessions: Arc::new(Mutex::new(HashMap::new())),
         annotations_enabled,
         environment_inspector: crate::environment::EnvironmentInspector::new(),
+        completion_brokers,
     };
     if state.runtime.is_some() {
         let recovery_state = state.clone();
@@ -186,6 +193,19 @@ pub(crate) fn router(
             get(environment::get),
         )
         .route("/api/threads", get(threads::list).post(threads::create))
+        .route("/api/completions", axum::routing::post(threads::complete_prepared_child))
+        .route(
+            "/api/completions/{completion_id}/current",
+            get(threads::completion_current),
+        )
+        .route(
+            "/api/completions/{completion_id}/result",
+            get(threads::completion_result),
+        )
+        .route(
+            "/api/completions/{completion_id}/stop",
+            axum::routing::post(threads::stop_completion),
+        )
         .route("/api/threads/{id}", get(threads::get))
         .route("/api/threads/{id}/export", get(threads::export))
         .route(

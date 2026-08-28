@@ -57,6 +57,7 @@ export interface ClaudeBasicDependencies {
   readonly browser?: ClaudeBasicBrowserDependencies;
   readonly loadSdk?: (moduleUrl: string) => Promise<ClaudeSdkModule>;
   readonly clientModuleUrl?: string;
+  readonly completeModuleUrl?: string;
   readonly platform?: NodeJS.Platform;
 }
 
@@ -69,6 +70,7 @@ interface ClaudeRuntimeDescriptor {
 export class ClaudeBasicHarness implements Harness {
   readonly supportsInvokedComplete = true;
   private readonly clientModuleUrl: string;
+  private readonly completeModuleUrl: string;
   private sessionId: string | undefined;
   private sessionProviderDefinitionId: string | undefined;
 
@@ -77,6 +79,7 @@ export class ClaudeBasicHarness implements Harness {
     private readonly dependencies: ClaudeBasicDependencies = {},
   ) {
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
+    this.completeModuleUrl = dependencies.completeModuleUrl ?? new URL("../../../../dist/index.js", import.meta.url).href;
     const savedSessionId = context.savedState?.claudeSessionId;
     const savedProviderDefinitionId = context.savedState?.claudeSessionProviderDefinitionId;
     // State written before provider-scoped Claude sessions cannot prove which
@@ -112,7 +115,15 @@ export class ClaudeBasicHarness implements Harness {
     const graph = context.graph.acquireCapability();
     const prompt = this.prompt(context);
     await context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
-    const result = await this.run(prompt, context.model.modelId, graph, context.access, resumeSessionId, signal);
+    const result = await this.run(
+      prompt,
+      context.model.modelId,
+      graph,
+      context.access,
+      context.completionBroker,
+      resumeSessionId,
+      signal,
+    );
     await context.trace.emit({ type: "message", data: { role: "assistant", text: result.text } });
     if (isRoot && result.sessionId) {
       this.sessionId = result.sessionId;
@@ -141,11 +152,12 @@ export class ClaudeBasicHarness implements Harness {
     model: string,
     graph: GraphCapability,
     access: HarnessExecutionAccess,
+    completionBroker: HarnessRunContext["completionBroker"],
     resumeSessionId?: string,
     signal?: AbortSignal,
   ): Promise<{ text: string; sessionId?: string }> {
     const runtime = claudeRuntime(access);
-    const environment = executionEnvironment(access, runtime.environment, graph, this.dependencies.platform);
+    const environment = executionEnvironment(access, runtime.environment, graph, completionBroker, this.dependencies.platform);
     const permissionMode = claudePermissionMode(this.context.permissionBinding.approvalMode);
     const abortController = new AbortController();
     const abort = () => abortController.abort(signal?.reason ?? new Error("Claude completion was cancelled"));
@@ -186,7 +198,13 @@ export class ClaudeBasicHarness implements Harness {
   }
 
   private prompt(context: HarnessRunContext): string {
-    return buildLayeredNavigationPrompt(context, this.clientModuleUrl);
+    return buildLayeredNavigationPrompt(
+      context,
+      this.clientModuleUrl,
+      undefined,
+      this.completeModuleUrl,
+      "Claude",
+    );
   }
 }
 
@@ -251,6 +269,7 @@ function executionEnvironment(
   access: HarnessExecutionAccess,
   runtimeEnvironment: Readonly<Record<string, string>>,
   graph: GraphCapability,
+  completionBroker: HarnessRunContext["completionBroker"],
   platform = process.platform,
 ): Record<string, string> {
   const environment = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => (
@@ -274,6 +293,10 @@ function executionEnvironment(
   environment.RELAYER_GRAPH_URL = graph.url;
   environment.RELAYER_GRAPH_TOKEN = graph.token;
   environment.RELAYER_NODE_ID = String(graph.nodeId);
+  if (completionBroker !== undefined) {
+    environment.RELAYER_COMPLETE_URL = completionBroker.url;
+    environment.RELAYER_COMPLETE_TOKEN = completionBroker.token;
+  }
   return environment;
 }
 

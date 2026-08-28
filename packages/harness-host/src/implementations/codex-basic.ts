@@ -45,6 +45,7 @@ export interface CodexBasicDependencies {
   readonly runAppServerTurn?: (options: CodexAppServerTurnOptions) => ReturnType<typeof runCodexAppServerTurn>;
   readonly spawnProcess?: CodexAppServerSpawn;
   readonly clientModuleUrl?: string;
+  readonly completeModuleUrl?: string;
   readonly graphAuthoringLauncherPath?: string;
   readonly codexPathOverride?: string;
   readonly browserMcpRuntime?: {
@@ -102,6 +103,7 @@ interface NormalizedCollaborationItem {
 export class CodexBasicHarness implements Harness {
   readonly supportsInvokedComplete = true;
   private readonly clientModuleUrl: string;
+  private readonly completeModuleUrl: string;
   private readonly resolved: ResolvedCodexConfiguration;
   private codexThreadId: string | undefined;
   private readonly activeForceShutdowns = new Set<AbortController>();
@@ -110,6 +112,7 @@ export class CodexBasicHarness implements Harness {
     const resolved = parseCodexBasicConfiguration(context);
     this.resolved = resolved;
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
+    this.completeModuleUrl = dependencies.completeModuleUrl ?? new URL("../../../../dist/index.js", import.meta.url).href;
     validateBrowserMcpRuntime(dependencies.browserMcpRuntime);
     const codexThreadId = context.savedState?.codexThreadId;
     this.codexThreadId = typeof codexThreadId === "string" ? codexThreadId : undefined;
@@ -152,7 +155,7 @@ export class CodexBasicHarness implements Harness {
     }
     const capability = context.graph.acquireCapability();
     const resolvedRuntime = await this.codexRuntime(context.access);
-    const environment = this.graphEnvironment(capability, context.access, resolvedRuntime.environment);
+    const environment = this.graphEnvironment(capability, context.completionBroker, context.access, resolvedRuntime.environment);
     const sandboxPolicy = this.sandboxPolicy();
     const run = this.dependencies.runAppServerTurn ?? runCodexAppServerTurn;
     const prompt = this.prompt(context);
@@ -220,6 +223,7 @@ export class CodexBasicHarness implements Harness {
 
   private graphEnvironment(
     graph: GraphCapability,
+    completionBroker: HarnessRunContext["completionBroker"],
     access: HarnessExecutionAccess | undefined,
     resolvedRuntimeEnvironment: Readonly<Record<string, string>>,
   ): Record<string, string> {
@@ -258,6 +262,10 @@ export class CodexBasicHarness implements Harness {
     environment.RELAYER_GRAPH_URL = graph.url;
     environment.RELAYER_GRAPH_TOKEN = graph.token;
     environment.RELAYER_NODE_ID = String(graph.nodeId);
+    if (completionBroker !== undefined) {
+      environment.RELAYER_COMPLETE_URL = completionBroker.url;
+      environment.RELAYER_COMPLETE_TOKEN = completionBroker.token;
+    }
     return environment;
   }
 
@@ -429,7 +437,12 @@ If a graph call rejects an object or graph.submit reports a repairable issue, ed
   }
 
   private layeredNavigationPrompt(context: HarnessRunContext): string {
-    return buildLayeredNavigationPrompt(context, this.clientModuleUrl, this.dependencies.graphAuthoringLauncherPath);
+    return buildLayeredNavigationPrompt(
+      context,
+      this.clientModuleUrl,
+      this.dependencies.graphAuthoringLauncherPath,
+      this.completeModuleUrl,
+    );
   }
 
   private graphAuthoringCommand(): string {
@@ -457,6 +470,8 @@ export function buildLayeredNavigationPrompt(
   input: HarnessRunContext | GraphNode,
   clientModuleUrl: string,
   graphAuthoringLauncherPath?: string,
+  completeModuleUrl: string = new URL("../../../../dist/index.js", import.meta.url).href,
+  nativeAgentLabel = "Codex",
 ): string {
   const context = "inputGraph" in input ? input as HarnessRunContext : undefined;
   const interactionNode = context ? context.inputGraph : input as GraphNode;
@@ -479,6 +494,8 @@ ${INTERACTION_INPUT_GUIDANCE} In JavaScript, call graph.getInteractionInput() to
 Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. ${authoringInstructions}
 
 The module exports RelayerGraphClient, NodeObject, EdgeObject, NodePlacementObject, LayerLayoutObject, and LayerObject. Use RelayerGraphClient.fromEnv(). Give every persisted node, edge, layer, and action an explicit descriptive clientKey that is unique within this interaction and stable across edits and reruns. For example, use new NodeObject("info", "Summary", "...", "concept", "summary-node"), new EdgeObject([summaryNode, detailNode], "summary-detail-edge"), and new LayerObject(nodes, edges, layout, "response-layer"). Never rely on the constructors' generated client keys in an authored program. Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.
+
+For explicit semantic child work, first author and submit the invoke action in its layer. Read const current = await graph.getCurrent(), then publish that layer with await graph.advanceCurrent(layer, current.headRevision, "a-stable-operation-key"). Only after that succeeds, call const inputGraph = await graph.prepareComplete(invokeAction). Import complete from ${completeModuleUrl} and call const child = complete(inputGraph). That returns immediately with completionId, current.snapshot(), and result; launch multiple children before awaiting them when the work is independent. Native ${nativeAgentLabel} subagents remain inside this completion and do not create semantic children by themselves.
 
 The current interaction may carry an invoke lease created by the product. Before authoring, use graph.getNode(${interactionNode.id}) and graph.getNeighbors(${interactionNode.id}) to inspect the current node and any relevant source context exposed by the graph. Treat that context as input to your answer; do not copy, forge, or manage lease metadata. Author the response normally. A successful ordinary graph.submit(${interactionNode.id}) automatically fulfills any lease held by this interaction. There is no separate resolveAction call.
 

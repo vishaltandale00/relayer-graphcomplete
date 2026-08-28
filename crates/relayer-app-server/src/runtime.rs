@@ -146,6 +146,19 @@ pub(crate) struct RuntimeCompletion {
     pub(crate) output: Value,
 }
 
+pub(crate) struct RuntimeCompletionBroker<'a> {
+    pub(crate) url: &'a str,
+    pub(crate) token: &'a str,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RuntimeInvokedCompletionStart {
+    pub(crate) completion_id: i64,
+    #[serde(default)]
+    pub(crate) attachment: Option<Map<String, Value>>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeAction {
@@ -425,7 +438,7 @@ impl RuntimeClient {
     ) -> Result<RuntimeCompletion, RuntimeError> {
         let prepared = self.prepare(&command).await?;
         self.activate_prepared(&prepared).await?;
-        self.complete_prepared(&command, prepared).await
+        self.complete_prepared(&command, prepared, None).await
     }
 
     pub(crate) async fn prepare(
@@ -614,6 +627,7 @@ impl RuntimeClient {
         &self,
         command: &CompleteInteraction<'_>,
         prepared: PreparedInteraction,
+        completion_broker: Option<RuntimeCompletionBroker<'_>>,
     ) -> Result<RuntimeCompletion, RuntimeError> {
         let graph = serde_json::json!({
             "url": self.graph_url.as_str().trim_end_matches('/'),
@@ -659,6 +673,12 @@ impl RuntimeClient {
             if let Some(harness_policy) = command.harness_policy {
                 complete_body["harnessPolicy"] = serde_json::to_value(harness_policy)?;
             }
+            if let Some(completion_broker) = completion_broker {
+                complete_body["completionBroker"] = serde_json::json!({
+                    "url": completion_broker.url,
+                    "token": completion_broker.token,
+                });
+            }
             self.post(
                 self.harness_url
                     .join(&format!("sessions/{}/complete", command.thread_id))?,
@@ -703,6 +723,83 @@ impl RuntimeClient {
             effective_permission_receipt: prepared.effective_permission_receipt,
             output: completed.output,
         })
+    }
+
+    /// Starts one already-prepared recursive completion. The response is only
+    /// the provider attachment acknowledgement; terminal graph state remains
+    /// independently observable through GraphComplete control APIs.
+    pub(crate) async fn start_invoked_completion(
+        &self,
+        thread_id: i64,
+        prepared: &PreparedInteraction,
+        invocation: PreparedInvocation,
+        completion_broker: Option<RuntimeCompletionBroker<'_>>,
+    ) -> Result<RuntimeInvokedCompletionStart, RuntimeError> {
+        if thread_id < 1
+            || prepared.graph_node_id < 1
+            || invocation.source_interaction_node_id < 1
+            || invocation.source_action_id < 1
+        {
+            return Err(RuntimeError::Configuration(
+                "invoked completion binding identifiers must be positive".into(),
+            ));
+        }
+        let mut body = serde_json::json!({
+            "capability": {
+                "url": self.graph_url.as_str().trim_end_matches('/'),
+                "token": &prepared.graph_token,
+                "nodeId": prepared.graph_node_id,
+            },
+            "origin": {
+                "kind": "invoke",
+                "sourceCompletionId": invocation.source_interaction_node_id,
+                "actionId": invocation.source_action_id,
+            },
+        });
+        if let Some(model_selection) = prepared.model_selection.as_ref() {
+            body["model"] = serde_json::json!({
+                "providerId": model_selection.provider_id.as_str(),
+                "adapterId": &model_selection.adapter_id,
+                "modelId": &model_selection.model_id,
+            });
+        }
+        if let Some(completion_broker) = completion_broker {
+            body["completionBroker"] = serde_json::json!({
+                "url": completion_broker.url,
+                "token": completion_broker.token,
+            });
+        }
+        let started: RuntimeInvokedCompletionStart = self
+            .post(
+                self.harness_url
+                    .join(&format!("sessions/{thread_id}/invoked-completions"))?,
+                &body,
+                &self.harness_control_token,
+                StatusCode::CREATED,
+            )
+            .await?;
+        if started.completion_id != prepared.graph_node_id {
+            return Err(RuntimeError::Protocol(
+                "harness attached a different invoked completion identity".into(),
+            ));
+        }
+        Ok(started)
+    }
+
+    pub(crate) async fn observe_invoked_completion(
+        &self,
+        thread_id: i64,
+        completion_id: i64,
+    ) -> Result<Value, RuntimeError> {
+        if thread_id < 1 || completion_id < 1 {
+            return Err(RuntimeError::Configuration(
+                "invoked completion observation identifiers must be positive".into(),
+            ));
+        }
+        self.control_harness_get(&format!(
+            "sessions/{thread_id}/invoked-completions/{completion_id}"
+        ))
+        .await
     }
 
     pub(crate) async fn admit_provider_execution(
@@ -854,10 +951,43 @@ impl RuntimeClient {
     }
 
     pub(crate) async fn cancel_completion(&self, thread_id: i64) -> Result<bool, RuntimeError> {
+        self.cancel_completion_request(thread_id, None).await
+    }
+
+    pub(crate) async fn cancel_invoked_completion(
+        &self,
+        thread_id: i64,
+        completion_id: i64,
+    ) -> Result<bool, RuntimeError> {
+        if completion_id < 1 {
+            return Err(RuntimeError::Configuration(
+                "invoked completion id must be positive".into(),
+            ));
+        }
+        self.cancel_completion_request(thread_id, Some(completion_id))
+            .await
+    }
+
+    async fn cancel_completion_request(
+        &self,
+        thread_id: i64,
+        completion_id: Option<i64>,
+    ) -> Result<bool, RuntimeError> {
+        if thread_id < 1 {
+            return Err(RuntimeError::Configuration(
+                "completion thread id must be positive".into(),
+            ));
+        }
+        let mut url = self
+            .harness_url
+            .join(&format!("sessions/{thread_id}/cancel"))?;
+        if let Some(completion_id) = completion_id {
+            url.query_pairs_mut()
+                .append_pair("completionId", &completion_id.to_string());
+        }
         let response: CancelCompletionResponse = self
             .post(
-                self.harness_url
-                    .join(&format!("sessions/{thread_id}/cancel"))?,
+                url,
                 &serde_json::json!({}),
                 &self.harness_control_token,
                 StatusCode::OK,
@@ -915,6 +1045,18 @@ impl RuntimeClient {
             }
             Err(error) => Err(error),
         }
+    }
+
+    pub(crate) async fn completion_current(
+        &self,
+        interaction_node_id: i64,
+    ) -> Result<relayer_graph_core::CompletionState, RuntimeError> {
+        Ok(serde_json::from_value(
+            self.control_get(&format!(
+                "api/control/interactions/{interaction_node_id}/current"
+            ))
+            .await?,
+        )?)
     }
 
     pub(crate) async fn get_layer(
@@ -1123,6 +1265,17 @@ impl RuntimeClient {
             .client
             .get(self.graph_url.join(path)?)
             .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .send()
+            .await?;
+        response_json(response, StatusCode::OK).await
+    }
+
+    async fn control_harness_get(&self, path: &str) -> Result<Value, RuntimeError> {
+        let response = self
+            .client
+            .get(self.harness_url.join(path)?)
+            .bearer_auth(&self.harness_control_token)
             .timeout(CONTROL_REQUEST_TIMEOUT)
             .send()
             .await?;
@@ -1629,12 +1782,13 @@ impl RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CompleteInteraction, HarnessConfiguration, PreparedInvocation, RuntimeClient, RuntimeError,
+        CompleteInteraction, HarnessConfiguration, PreparedInteraction, PreparedInvocation,
+        RuntimeClient, RuntimeError,
     };
     use crate::{permissions::PermissionProfile, product::ExecutionHarnessPolicy};
     use axum::{
         Json, Router,
-        http::{HeaderMap, StatusCode},
+        http::{HeaderMap, StatusCode, Uri},
         response::IntoResponse,
         routing,
     };
@@ -1716,6 +1870,228 @@ mod tests {
             cleanup: Box::new(RuntimeError::Timeout("capability cleanup")),
         };
         assert!(!failure.is_retryable_startup_failure());
+    }
+
+    #[tokio::test]
+    async fn invoked_start_returns_attachment_before_graph_terminal_and_cancels_exact_completion() {
+        let graph_observations = Arc::new(AtomicUsize::new(0));
+        let current_observations = graph_observations.clone();
+        let output_observations = graph_observations.clone();
+        let graph = Router::new()
+            .route(
+                "/api/control/temporal-features",
+                routing::get(|| async {
+                    Json(json!({
+                        "configVersion": 1,
+                        "schemaRead": true,
+                        "rootCurrentWrite": true,
+                        "projectionUi": true,
+                        "invokeResolution": true,
+                        "providerRecursion": true
+                    }))
+                }),
+            )
+            .route(
+                "/api/control/interactions/41/current",
+                routing::get(move |headers: HeaderMap| {
+                    let current_observations = current_observations.clone();
+                    async move {
+                        assert_eq!(headers["authorization"], "Bearer graph-control");
+                        current_observations.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({
+                            "completionId": 41,
+                            "lifecycle": "active",
+                            "headRevision": 0,
+                            "currentLayerId": null,
+                            "finalLayerId": null,
+                            "safeReason": null,
+                            "temporalFeatures": {
+                                "configVersion": 1,
+                                "schemaRead": true,
+                                "rootCurrentWrite": true,
+                                "projectionUi": true,
+                                "invokeResolution": true,
+                                "providerRecursion": true
+                            }
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/api/control/interactions/41/output",
+                routing::get(move |headers: HeaderMap| {
+                    let output_observations = output_observations.clone();
+                    async move {
+                        assert_eq!(headers["authorization"], "Bearer graph-control");
+                        output_observations.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({ "nodeId": 41, "rootLayer": { "layer": { "id": 9 } } }))
+                    }
+                }),
+            );
+        let starts = Arc::new(AtomicUsize::new(0));
+        let observed_starts = starts.clone();
+        let harness = Router::new()
+            .route(
+                "/sessions/7/invoked-completions",
+                routing::post(move |headers: HeaderMap, Json(body): Json<Value>| {
+                    let observed_starts = observed_starts.clone();
+                    async move {
+                        assert_eq!(headers["authorization"], "Bearer harness-control");
+                        assert_eq!(
+                            body,
+                            json!({
+                                "capability": {
+                                    "url": body["capability"]["url"],
+                                    "token": "child-token",
+                                    "nodeId": 41
+                                },
+                                "origin": {
+                                    "kind": "invoke",
+                                    "sourceCompletionId": 17,
+                                    "actionId": 23
+                                }
+                            })
+                        );
+                        observed_starts.fetch_add(1, Ordering::SeqCst);
+                        (
+                            StatusCode::CREATED,
+                            Json(json!({
+                                "completionId": 41,
+                                "attachment": {
+                                    "schemaVersion": 1,
+                                    "provider": "codex",
+                                    "threadId": "native-thread",
+                                    "turnId": "native-turn"
+                                }
+                            })),
+                        )
+                    }
+                }),
+            )
+            .route(
+                "/sessions/7/cancel",
+                routing::post(
+                    |headers: HeaderMap, uri: Uri, Json(body): Json<Value>| async move {
+                        assert_eq!(headers["authorization"], "Bearer harness-control");
+                        assert_eq!(uri.query(), Some("completionId=41"));
+                        assert_eq!(body, json!({}));
+                        Json(json!({ "cancelled": true }))
+                    },
+                ),
+            );
+        let (graph_url, graph_task) = serve(graph).await;
+        let (harness_url, harness_task) = serve(harness).await;
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "relayer-runtime-invoked-start-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog = root.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({"schemaVersion":1,"configurations":[{"configuration":{
+                "schemaVersion":1,"name":"test","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+            },"digest":"sha256:test"}]})
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            &graph_url,
+            &harness_url,
+            "graph-control".into(),
+            "harness-control".into(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+        let prepared = PreparedInteraction {
+            graph_node_id: 41,
+            graph_token: "child-token".into(),
+            harness_configuration_name: "test".into(),
+            harness_configuration_digest: "sha256:test".into(),
+            permission_profile_id: "auto".into(),
+            effective_execution_digest: "sha256:execution".into(),
+            effective_permission_receipt: json!({}),
+            configuration: HarnessConfiguration {
+                schema_version: 1,
+                name: "test".into(),
+                implementation: "test".into(),
+                implementation_version: 1,
+                revision: 1,
+                permission_bindings: serde_json::Map::from_iter([("auto".into(), json!({}))]),
+                model_compatibility: vec![],
+                model_rules: None,
+                execution_access_contracts: vec![],
+                model_defaults: None,
+                settings: json!({}),
+            },
+            model_selection: None,
+        };
+
+        let started = runtime
+            .start_invoked_completion(
+                7,
+                &prepared,
+                PreparedInvocation {
+                    source_interaction_node_id: 17,
+                    source_action_id: 23,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(started.completion_id, 41);
+        assert_eq!(
+            started.attachment,
+            json!({
+                "schemaVersion": 1,
+                "provider": "codex",
+                "threadId": "native-thread",
+                "turnId": "native-turn"
+            })
+            .as_object()
+            .cloned()
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+        assert_eq!(graph_observations.load(Ordering::SeqCst), 0);
+
+        let current = runtime.completion_current(41).await.unwrap();
+        assert_eq!(current.completion_id.value(), 41);
+        assert_eq!(
+            current.lifecycle,
+            relayer_graph_core::CompletionLifecycle::Active
+        );
+        assert!(runtime.completion_output(41).await.unwrap().is_some());
+        assert_eq!(graph_observations.load(Ordering::SeqCst), 2);
+        assert!(runtime.cancel_invoked_completion(7, 41).await.unwrap());
+
+        graph_task.abort();
+        harness_task.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn invoked_start_acknowledgement_is_strict_and_attachment_is_an_object() {
+        assert!(
+            serde_json::from_value::<super::RuntimeInvokedCompletionStart>(json!({
+                "completionId": 41,
+                "attachment": {},
+                "unexpected": true
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<super::RuntimeInvokedCompletionStart>(json!({
+                "completionId": 41,
+                "attachment": ["not", "opaque", "object"]
+            }))
+            .is_err()
+        );
     }
 
     #[test]

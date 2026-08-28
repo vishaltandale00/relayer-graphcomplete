@@ -1,6 +1,10 @@
 import type { RelayerIconName } from "./icons.js";
 
 export type GraphId = number;
+
+export interface CompletionInputGraph {
+  readonly interactionNode: GraphId;
+}
 export type RecordState = "draft" | "accepted" | "stopped";
 
 export interface GraphNode {

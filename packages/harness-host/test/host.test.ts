@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { InteractionInput } from "@relayer/graph-client";
 import { HarnessExecutionFailure, HarnessHost, startHarnessHost, type HarnessInvokedCompletion } from "../src/host.js";
+import { nativeExecutionHandle } from "../src/completion-execution.js";
 import { PrimeAgentHarness } from "../src/implementations/prime-agent.js";
 import type {
   Harness,
@@ -1614,6 +1615,106 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("starts an invoked completion over HTTP once, acknowledges native attachment, and cancels its exact completion", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-start-route-"));
+    const nativeFetch = globalThis.fetch;
+    let running: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
+    let starts = 0;
+    let observedCompletionBroker: unknown;
+    let resolveAttachment!: (attachment: { schemaVersion: number; provider: string; threadId: string; turnId: string }) => void;
+    const attached = new Promise<{ schemaVersion: number; provider: string; threadId: string; turnId: string }>((resolve) => {
+      resolveAttachment = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (!url.startsWith("http://127.0.0.1:43123")) return nativeFetch(input, init);
+      if (url.endsWith("/output")) {
+        return new Response(JSON.stringify({ error: { code: "completion_not_found" } }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/neighbors")) {
+        return new Response(JSON.stringify({ nodes: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return graphReadResponse(url, 2, [], 102);
+    }));
+    try {
+      running = await startHarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          supportsInvokedComplete: true,
+          complete(context, signal) {
+            starts += 1;
+            observedCompletionBroker = context.completionBroker;
+            const execution = new Promise<void>((_resolve, reject) => {
+              signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+            });
+            return nativeExecutionHandle(execution, undefined, attached);
+          },
+          state: emptyState,
+        }) },
+      });
+      await running.host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      const invocation = {
+        ...invoked(graph(2, "child-token")),
+        completionBroker: {
+          url: "http://127.0.0.1:43125/api/completions",
+          token: "12345678901234567890123456789012",
+        },
+      };
+      const request = () => fetch(`${running!.url}/sessions/1/invoked-completions`, {
+        method: "POST",
+        headers: { authorization: "Bearer control", "content-type": "application/json" },
+        body: JSON.stringify(invocation),
+      });
+
+      const first = request();
+      const retry = request();
+      await vi.waitFor(() => expect(starts).toBe(1));
+      resolveAttachment({ schemaVersion: 1, provider: "codex", threadId: "native-thread", turnId: "native-turn" });
+
+      const [firstResponse, retryResponse] = await Promise.all([first, retry]);
+      expect(firstResponse.status).toBe(201);
+      expect(retryResponse.status).toBe(201);
+      const acknowledgement = {
+        completionId: 2,
+        attachment: { schemaVersion: 1, provider: "codex", threadId: "native-thread", turnId: "native-turn" },
+      };
+      await expect(firstResponse.json()).resolves.toEqual(acknowledgement);
+      await expect(retryResponse.json()).resolves.toEqual(acknowledgement);
+      expect(starts).toBe(1);
+      expect(observedCompletionBroker).toEqual(invocation.completionBroker);
+
+      const malformed = await fetch(`${running.url}/sessions/1/invoked-completions`, {
+        method: "POST",
+        headers: { authorization: "Bearer control", "content-type": "application/json" },
+        body: JSON.stringify({ ...invocation, interactionId: 2 }),
+      });
+      expect(malformed.status).toBe(400);
+      await expect(malformed.json()).resolves.toMatchObject({ error: "invalid_invoked_completion" });
+      expect(starts).toBe(1);
+
+      const cancelled = await fetch(`${running.url}/sessions/1/cancel?completionId=2`, {
+        method: "POST",
+        headers: { authorization: "Bearer control" },
+      });
+      expect(cancelled.status).toBe(200);
+      await expect(cancelled.json()).resolves.toEqual({ cancelled: true });
+      await vi.waitFor(() => expect(running!.host.cancel(1, 2)).toBe(false));
+    } finally {
+      await running?.close();
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("recovers an in-flight invoked completion without starting the provider twice", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-retry-"));
     let release!: () => void;
@@ -1789,8 +1890,7 @@ describe("HarnessHost", () => {
         origin: { actionId: 102, sourceCompletionId: 1, kind: "invoke" },
       });
 
-      await expect(host.complete(1, invoked(graph(2, "foreign-token"))))
-        .rejects.toThrow("different graph binding");
+      const rotatedCapabilityRetry = host.complete(1, invoked(graph(2, "foreign-token")));
       await expect(host.complete(1, invoked(graph(2, "child-token"), 1, 999)))
         .rejects.toThrow("different graph binding");
       await expect(host.complete(1, {
@@ -1799,7 +1899,7 @@ describe("HarnessHost", () => {
       })).rejects.toThrow("different graph binding");
 
       release();
-      await expect(Promise.all([running, reorderedRetry])).resolves.toHaveLength(2);
+      await expect(Promise.all([running, reorderedRetry, rotatedCapabilityRetry])).resolves.toHaveLength(3);
       expect(starts).toBe(1);
     } finally {
       vi.unstubAllGlobals();

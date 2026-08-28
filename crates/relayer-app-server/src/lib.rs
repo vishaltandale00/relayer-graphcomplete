@@ -1,6 +1,7 @@
 mod api;
 mod app_server;
 mod approval;
+mod completion_broker;
 pub mod conversation_export;
 mod conversation_export_service;
 mod conversation_import_service;

@@ -183,11 +183,6 @@ function completionBindingDigest(binding: CompletionBinding): string {
   return createHash("sha256").update(JSON.stringify({
     completionId: binding.completionId,
     inputGraph: binding.inputGraph,
-    capability: {
-      url: binding.capability.url,
-      token: binding.capability.token,
-      nodeId: binding.capability.nodeId,
-    },
     origin: binding.origin,
   })).digest("hex");
 }

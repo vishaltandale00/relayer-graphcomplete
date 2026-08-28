@@ -83,6 +83,7 @@ export interface InvokeActionFields {
 export type NavigateActionObject = NavigateActionFields & ActionPresentationObject;
 export type InvokeActionObject = InvokeActionFields & ActionPresentationObject;
 export type ActionObject = NavigateActionObject | InvokeActionObject;
+export type ActionReference = ActionObject | GraphAction | GraphId;
 export type NodeReference = NodeObject | GraphNode | GraphId;
 export type EdgeReference = EdgeObject | GraphEdge | GraphId;
 export type LayerReference = LayerObject | GraphLayer | GraphId;
@@ -109,6 +110,15 @@ export function layerId(value: LayerReference): GraphId {
   if (typeof value === "number") return value;
   if (value instanceof LayerObject) {
     if (value.ref === undefined) throw new Error(`LayerObject ${value.clientKey} must be submitted before it can be referenced`);
+    return value.ref.id;
+  }
+  return value.id;
+}
+
+export function actionId(value: ActionReference): GraphId {
+  if (typeof value === "number") return value;
+  if (!("id" in value)) {
+    if (value.ref === undefined) throw new Error(`Action ${value.clientKey ?? "unknown"} must be submitted before it can be referenced`);
     return value.ref.id;
   }
   return value.id;

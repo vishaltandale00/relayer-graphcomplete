@@ -9,11 +9,11 @@ import types
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from relayer_graph import (APIError, ConfigurationError, EdgeObject, GraphNode, GraphSession,
+from relayer_graph import (APIError, CompletionCurrentSnapshot, CompletionInputGraph, ConfigurationError, EdgeObject, GraphNode, GraphSession,
                            LayerLayoutObject, LayerObject, NodeObject,
                            NodePlacementObject,
-                           RELAYER_ICON_NAMES, RelayerGraphClient, ValidationError,
-                           is_supported_relayer_icon, resolve_relayer_icon_name)
+                           RELAYER_ICON_NAMES, RelayerGraphClient, TransportError, ValidationError,
+                           complete, is_supported_relayer_icon, resolve_relayer_icon_name)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -35,7 +35,9 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get("content-length", "0"))) or b"{}")
         Handler.requests.append((self.path, dict(self.headers), body))
         Handler.next_id += 1
-        if self.path.endswith("/nodes") and body["title"] == "server-error":
+        if self.path == "/api/completions":
+            self._reply({"completionId": body["interactionNode"]}, 201)
+        elif self.path.endswith("/nodes") and body["title"] == "server-error":
             self._reply({"error": {"message": "database failed"}}, 500)
         elif self.path.endswith("/nodes") and not body["title"].strip():
             self._reply({"error": {"message": "title is required", "issues": [{
@@ -64,12 +66,21 @@ class Handler(BaseHTTPRequestHandler):
                 "snapshotDigest": "sha256:snapshot",
                 "projectionSequence": 2,
             })
+        elif self.path.endswith("/completions/prepare"):
+            self._reply({"interactionNode": 91})
         else:
             self._reply({"ok": True})
 
     def do_GET(self):
         Handler.requests.append((self.path, dict(self.headers), None))
-        if self.path.endswith("/input"):
+        if self.path == "/api/completions/91/current":
+            self._reply({
+                "completionId": 91, "lifecycle": "active", "headRevision": 2,
+                "currentLayerId": 8, "finalLayerId": None,
+            })
+        elif self.path == "/api/completions/91/result":
+            self._reply({"layer": {"id": 9}, "nodes": [], "edges": [], "actions": []})
+        elif self.path.endswith("/input"):
             self._reply({
                 "interaction": {"id": 7, "kind": "user-interaction", "icon": "user", "title": "Compare", "detail": "Compare", "state": "accepted"},
                 "contexts": [{
@@ -273,6 +284,39 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         orphan = NodeObject("box", "Orphan", "Not submitted")
         with self.assertRaisesRegex(ValueError, "must be submitted"):
             await self.client.create_edge(orphan, 7)
+
+    async def test_prepares_a_canonical_child_pointer_from_a_persisted_invoke(self):
+        prepared = await self.client.prepare_complete({"action": {"id": 44}})
+        self.assertEqual(prepared.interaction_node, 91)
+        path, headers, body = Handler.requests[-1]
+        self.assertEqual(path, "/api/graph/completions/prepare")
+        self.assertEqual(headers["Authorization"], f"Bearer {self.client.token}")
+        self.assertEqual(body, {"actionId": 44})
+
+    async def test_complete_returns_a_live_handle_before_broker_settlement(self):
+        previous = os.environ.copy()
+        try:
+            os.environ["RELAYER_COMPLETE_URL"] = self.url + "/api/completions"
+            os.environ["RELAYER_COMPLETE_TOKEN"] = "broker-token"
+            handle = complete(CompletionInputGraph(91))
+            self.assertEqual(handle.completion_id, 91)
+            current = await handle.current.snapshot()
+            self.assertEqual((current.lifecycle, current.revision, current.current_layer_id), ("active", 2, 8))
+            result = await handle.result
+            self.assertEqual(result["layer"]["id"], 9)
+        finally:
+            os.environ.clear()
+            os.environ.update(previous)
+
+    async def test_completion_current_rejects_coerced_identity_fields(self):
+        with self.assertRaisesRegex(TransportError, "invalid revision"):
+            CompletionCurrentSnapshot.from_dict({
+                "completionId": 91,
+                "lifecycle": "active",
+                "headRevision": "2",
+                "currentLayerId": 8,
+                "finalLayerId": None,
+            })
 
     async def test_current_session_uses_the_prime_agent_host_scope(self):
         requests = []

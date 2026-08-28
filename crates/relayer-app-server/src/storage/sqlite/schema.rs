@@ -138,6 +138,20 @@ const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("graph_lease_required", "INTEGER", true, 0),
     ("authoritative", "INTEGER", true, 0),
 ];
+const COMPLETION_EXECUTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("interaction_id", "INTEGER", true, 1),
+    ("graph_completion_id", "INTEGER", true, 0),
+    ("harness_configuration_name", "TEXT", true, 0),
+    ("harness_configuration_digest", "TEXT", true, 0),
+    ("model_execution_digest", "TEXT", true, 0),
+    ("permission_origin_digest", "TEXT", true, 0),
+    ("phase", "TEXT", true, 0),
+    ("attachment_json", "TEXT", false, 0),
+    ("settlement_json", "TEXT", false, 0),
+    ("safe_reason", "TEXT", false, 0),
+    ("created_at", "TEXT", true, 0),
+    ("updated_at", "TEXT", true, 0),
+];
 const MODEL_PROVIDER_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "TEXT", true, 1),
     ("label", "TEXT", true, 0),
@@ -318,6 +332,7 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "conversation_imports", CONVERSATION_IMPORT_COLUMNS).await?;
     validate_columns(pool, "imported_turns", IMPORTED_TURN_COLUMNS).await?;
     validate_columns(pool, "action_invocations", ACTION_INVOCATION_COLUMNS).await?;
+    validate_columns(pool, "completion_executions", COMPLETION_EXECUTION_COLUMNS).await?;
     validate_columns(pool, "model_providers", MODEL_PROVIDER_COLUMNS).await?;
     validate_columns(pool, "provider_models", PROVIDER_MODEL_COLUMNS).await?;
     validate_columns(pool, "product_harnesses", PRODUCT_HARNESS_COLUMNS).await?;
@@ -381,6 +396,13 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     )
     .await?;
     validate_index(pool, "action_invocations", &["result_interaction_id"], true).await?;
+    validate_index(
+        pool,
+        "completion_executions",
+        &["graph_completion_id"],
+        true,
+    )
+    .await?;
     validate_index(pool, "provider_models", &["provider_id", "model_id"], true).await?;
     validate_index(
         pool,
@@ -656,6 +678,15 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         pool,
         "action_invocations",
         "source_interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "completion_executions",
+        "interaction_id",
         "interactions",
         "id",
         "CASCADE",

@@ -138,6 +138,27 @@ impl SqliteProductStore {
         action_id: i64,
         text: &str,
     ) -> Result<ActionInvocationInsertOutcome, StorageError> {
+        self.insert_action_invocation_with_mode(source_interaction_id, action_id, text, false)
+            .await
+    }
+
+    pub(crate) async fn insert_recursive_action_invocation(
+        &self,
+        source_interaction_id: InteractionId,
+        action_id: i64,
+        text: &str,
+    ) -> Result<ActionInvocationInsertOutcome, StorageError> {
+        self.insert_action_invocation_with_mode(source_interaction_id, action_id, text, true)
+            .await
+    }
+
+    async fn insert_action_invocation_with_mode(
+        &self,
+        source_interaction_id: InteractionId,
+        action_id: i64,
+        text: &str,
+        recursive: bool,
+    ) -> Result<ActionInvocationInsertOutcome, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some((invocation, interaction)) =
             existing_for_action_scope(&mut transaction, source_interaction_id, action_id).await?
@@ -165,14 +186,24 @@ impl SqliteProductStore {
         .bind(thread_id.value())
         .fetch_one(&mut *transaction)
         .await?;
-        if interaction_in_progress {
+        if interaction_in_progress && !recursive {
             return Err(StorageError::Catalog(CatalogError::invalid(
                 "interaction_in_progress",
                 "Wait for the active interaction to finish.",
             )));
         }
-        let source_accepted: bool = source.try_get::<String, _>("completion_status")? == "accepted"
-            && source.try_get::<Option<i64>, _>("graph_node_id")?.is_some();
+        let source_status: String = source.try_get("completion_status")?;
+        let source_has_graph = source.try_get::<Option<i64>, _>("graph_node_id")?.is_some();
+        let source_accepted = source_status == "accepted" && source_has_graph;
+        if recursive
+            && (!source_has_graph
+                || !matches!(source_status.as_str(), "running" | "submitted" | "accepted"))
+        {
+            return Err(StorageError::Catalog(CatalogError::invalid(
+                "recursive_source_inactive",
+                "Recursive Complete requires an active or accepted graph-bound source completion.",
+            )));
+        }
         let model_selection = match (model_provider_id, provider_model_id, model_family_id) {
             (Some(provider_id), Some(model_id), Some(family_id)) if family_id > 0 => {
                 Some(InteractionModelSelection {
@@ -512,6 +543,93 @@ mod tests {
                 .unwrap()
         );
         reopened.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn recursive_invocations_can_bind_concurrent_children_while_the_parent_is_active() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-recursive-action-invocation-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_model_selection(&store).await;
+        let model_selection = InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(1),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: "test-model".into(),
+        };
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                title: "Active recursive source",
+                project_id: None,
+                initial_message: "Original prompt",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&model_selection),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE interactions SET completion_status='running',graph_node_id=701 WHERE id=?1",
+        )
+        .bind(thread.root_interaction_id.value())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        let (first, second) = tokio::join!(
+            store.insert_recursive_action_invocation(
+                thread.root_interaction_id,
+                41,
+                "First semantic child",
+            ),
+            store.insert_recursive_action_invocation(
+                thread.root_interaction_id,
+                42,
+                "Second semantic child",
+            ),
+        );
+        let first = first.unwrap();
+        let second = second.unwrap();
+        let child_id = |outcome: &ActionInvocationInsertOutcome| match outcome {
+            ActionInvocationInsertOutcome::Created { interaction, .. }
+            | ActionInvocationInsertOutcome::Existing { interaction, .. } => interaction.id,
+        };
+        assert_ne!(child_id(&first), child_id(&second));
+
+        let retry = store
+            .insert_recursive_action_invocation(
+                thread.root_interaction_id,
+                41,
+                "Ignored exact retry text",
+            )
+            .await
+            .unwrap();
+        assert_eq!(child_id(&first), child_id(&retry));
+        assert!(matches!(
+            retry,
+            ActionInvocationInsertOutcome::Existing { .. }
+        ));
+
+        let ordinary = match store
+            .insert_action_invocation(thread.root_interaction_id, 43, "User action")
+            .await
+        {
+            Ok(_) => panic!("ordinary invocation unexpectedly bypassed active interaction"),
+            Err(error) => error,
+        };
+        match ordinary {
+            StorageError::Catalog(error) => assert_eq!(error.code(), "interaction_in_progress"),
+            other => panic!("unexpected error: {other}"),
+        }
+
+        store.pool.close().await;
         std::fs::remove_file(path).unwrap();
     }
 

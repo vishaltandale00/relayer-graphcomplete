@@ -602,6 +602,7 @@ mod tests {
             directory.path().to_path_buf(),
             crate::api::ApiRuntime {
                 execution_lease_reconciler: None,
+                completion_broker_origin: None,
                 runtime: Some(runtime),
                 permission_catalog,
                 default_harness_configuration: "codex-basic".into(),

@@ -110,6 +110,53 @@ pub(crate) struct NewConversationImport<'a> {
     pub(crate) header: &'a ConversationExportHeader,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CompletionExecutionBinding<'a> {
+    pub(crate) interaction_id: crate::product::InteractionId,
+    pub(crate) graph_completion_id: i64,
+    pub(crate) harness_configuration_name: &'a str,
+    pub(crate) harness_configuration_digest: &'a str,
+    pub(crate) model_execution_digest: &'a str,
+    /// Digest of the durable permission receipt and invocation origin. Transient graph
+    /// capability tokens must never be included in this identity.
+    pub(crate) permission_origin_digest: &'a str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompletionExecutionPhase {
+    Reserved,
+    Launching,
+    Attached,
+    Settled,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CompletionExecution {
+    pub(crate) interaction_id: crate::product::InteractionId,
+    pub(crate) graph_completion_id: i64,
+    pub(crate) harness_configuration_name: String,
+    pub(crate) harness_configuration_digest: String,
+    pub(crate) model_execution_digest: String,
+    pub(crate) permission_origin_digest: String,
+    pub(crate) phase: CompletionExecutionPhase,
+    pub(crate) attachment: Option<serde_json::Value>,
+    pub(crate) settlement: Option<serde_json::Value>,
+    pub(crate) safe_reason: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum CompletionExecutionReserveOutcome {
+    Created(CompletionExecution),
+    Existing(CompletionExecution),
+}
+
+pub(crate) enum CompletionExecutionRestartSettlement {
+    Accepted { output: serde_json::Value },
+    Failed { safe_reason: String },
+}
+
 #[derive(Debug, Error)]
 pub(crate) enum StorageError {
     #[error("database operation failed: {0}")]
@@ -128,4 +175,6 @@ pub(crate) enum StorageError {
     AnnotationConflict(String),
     #[error("node-context draft conflict: {message}")]
     ContextDraftConflict { code: &'static str, message: String },
+    #[error("completion execution conflict: {0}")]
+    CompletionExecutionConflict(String),
 }

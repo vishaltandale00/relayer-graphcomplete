@@ -138,6 +138,10 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/graph/actions/{id}", get(get_action))
         .route("/api/graph/submit", post(submit_completion))
         .route("/api/graph/current", get(graph_current))
+        .route(
+            "/api/graph/completions/prepare",
+            post(prepare_graph_completion),
+        )
         .route("/api/graph/current/transitions", post(transition_current))
         .route("/api/graph/nodes/{id}/output", get(completion_output))
         .with_state(state)
@@ -374,6 +378,39 @@ async fn prepare_recursive_completion(
         .prepare_recursive_completion(input.action_id)
         .await?;
     Ok(Json(PrepareRecursiveCompletionResponse { node }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PrepareGraphCompletionRequest {
+    action_id: ActionId,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PrepareGraphCompletionResponse {
+    interaction_node: NodeId,
+}
+
+async fn prepare_graph_completion(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<PrepareGraphCompletionRequest>,
+) -> Result<Json<PrepareGraphCompletionResponse>, ApiError> {
+    require_temporal_feature(
+        state.temporal_features.provider_recursion,
+        "provider-recursion",
+    )?;
+    let authority = session(&state, &headers)?;
+    let node = state
+        .graph
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
+        .await?
+        .prepare_recursive_completion(input.action_id)
+        .await?;
+    Ok(Json(PrepareGraphCompletionResponse {
+        interaction_node: node.id,
+    }))
 }
 
 async fn control_input(
@@ -1914,13 +1951,34 @@ mod tests {
         let first: PrepareRecursiveCompletionResponse =
             serde_json::from_slice(&to_bytes(first.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
-        let retry = app.oneshot(request()).await.unwrap();
+        let retry = app.clone().oneshot(request()).await.unwrap();
         assert_eq!(retry.status(), StatusCode::OK);
         let retry: PrepareRecursiveCompletionResponse =
             serde_json::from_slice(&to_bytes(retry.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
 
+        let model_prepared = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/graph/completions/prepare")
+                    .header("authorization", format!("Bearer {parent_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(json!({ "actionId": invoke.id }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(model_prepared.status(), StatusCode::OK);
+        let model_prepared: PrepareGraphCompletionResponse = serde_json::from_slice(
+            &to_bytes(model_prepared.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+
         assert_eq!(retry.node.id, first.node.id);
+        assert_eq!(model_prepared.interaction_node, first.node.id);
         assert_eq!(first.node.detail, "Canonical child input");
         assert_eq!(first.node.leased_action_id, Some(invoke.id));
         assert_ne!(first.node.id, parent.id);

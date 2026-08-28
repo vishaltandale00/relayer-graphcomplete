@@ -9,7 +9,7 @@ const completion = complete(inputGraph);
 const result = await completion.result;
 ```
 
-The root package does not export this top-level function yet. `inputGraph` points to the current user-interaction node. A GraphComplete thread is a graph of completions. Each `complete()` call receives a completion-bound graph broker and a provider-native execution attachment; the adapter may reuse provider-session state as a behavior-preserving optimization. A model turn ending does not mean the graph is complete. The compatibility path finishes with `graph.submit(interactionNode)`; temporal-capable clients may durably advance the completion's current layer before returning its final layer.
+The root package exports this top-level function and `configureCompletionRuntime(runtime)`, which the process owner uses to inject the trusted preparation and execution implementation. `inputGraph` is only `{ interactionNode }`, a pointer to an already-prepared canonical interaction. A GraphComplete thread is a graph of completions. Each `complete()` call receives a completion-bound graph broker and a provider-native execution attachment; the adapter may reuse provider-session state as a behavior-preserving optimization. A model turn ending does not mean the graph is complete. The compatibility path finishes with `graph.submit(interactionNode)`; temporal-capable clients may durably advance the completion's current layer before returning its final layer.
 
 The working desktop reaches this boundary through the Rust app server and persistent `HarnessHost`. There is intentionally no second structured-output path: every supported harness produces accepted product output through graph-tool writes and explicit submission.
 

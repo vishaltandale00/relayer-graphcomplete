@@ -169,6 +169,7 @@ type PrimeAgentKernelBoundaryFactory = (
 
 interface PrimeAgentRunContext {
   readonly graph: HarnessRunContext["graph"];
+  readonly completionBroker?: HarnessRunContext["completionBroker"];
 }
 
 interface PrimeAgentRequestAccess {
@@ -209,6 +210,65 @@ interface PrimeAgentExecutionScope {
   readonly sensitiveValues: readonly string[];
 }
 
+class PrimeAgentSessionLifecycle {
+  private forceShutdownStarted = false;
+  private gracefullyDisposed = false;
+  private gracefulDisposePromise: Promise<void> | undefined;
+  private nativeDisposeInProgress = false;
+  private nativeDisposeCompleted = false;
+  private readonly nativeSessionDispose: () => void;
+
+  constructor(readonly session: PrimeAgentSession) {
+    this.nativeSessionDispose = session.dispose.bind(session);
+    session.dispose = () => this.disposeNativeOnce();
+  }
+
+  dispose(): Promise<void> {
+    if (this.gracefulDisposePromise !== undefined) return this.gracefulDisposePromise;
+    if (this.nativeDisposeCompleted) return Promise.resolve();
+    this.gracefulDisposePromise = Promise.resolve()
+      .then(async () => {
+        if (this.nativeDisposeCompleted) return;
+        if (this.session.disposeAsync !== undefined) await this.session.disposeAsync();
+        else if (!this.nativeDisposeCompleted) this.disposeNativeOnce();
+        if (!this.nativeDisposeCompleted && this.session.disposeAsync !== undefined) {
+          // A conforming disposeAsync drains resources and owns native disposal.
+          // Mark the lifecycle terminal even if it does not call the guarded
+          // synchronous boundary itself.
+          this.nativeDisposeCompleted = true;
+        }
+        this.gracefullyDisposed = true;
+      })
+      .catch((error: unknown) => {
+        if (!this.nativeDisposeCompleted) throw error;
+      });
+    return this.gracefulDisposePromise;
+  }
+
+  forceShutdown(): void {
+    if (this.forceShutdownStarted || this.gracefullyDisposed) return;
+    this.forceShutdownStarted = true;
+    try {
+      void this.session.abort().catch(() => undefined);
+    } catch {
+      // Force disposal must continue if a nonconforming provider throws
+      // synchronously instead of returning a rejected abort promise.
+    }
+    this.disposeNativeOnce();
+  }
+
+  private disposeNativeOnce(): void {
+    if (this.nativeDisposeInProgress || this.nativeDisposeCompleted) return;
+    this.nativeDisposeInProgress = true;
+    try {
+      this.nativeSessionDispose();
+      this.nativeDisposeCompleted = true;
+    } finally {
+      this.nativeDisposeInProgress = false;
+    }
+  }
+}
+
 const PRIME_ADAPTERS: Readonly<Record<string, PrimeAdapterMapping>> = Object.freeze({
   "openai-api": Object.freeze({ api: "openai-responses" }),
   "anthropic-api": Object.freeze({ api: "anthropic-messages" }),
@@ -217,24 +277,21 @@ const PRIME_ADAPTERS: Readonly<Record<string, PrimeAdapterMapping>> = Object.fre
 });
 
 export class PrimeAgentHarness implements Harness {
+  readonly supportsInvokedComplete = true;
   private forceShutdownStarted = false;
-  private gracefullyDisposed = false;
   private gracefulDisposePromise: Promise<void> | undefined;
-  private nativeDisposeInProgress = false;
-  private nativeDisposeCompleted = false;
-  private disposeGuardInstalled = false;
-  private readonly nativeSessionDispose: () => void;
+  private readonly invokedSessions = new Set<PrimeAgentSessionLifecycle>();
+  private readonly pendingInvokedSessions = new Set<Promise<PrimeAgentSessionLifecycle>>();
 
   private constructor(
     private readonly context: HarnessFactoryContext,
-    private readonly session: PrimeAgentSession,
+    private readonly rootSession: PrimeAgentSessionLifecycle,
+    private readonly createFreshSession: () => Promise<PrimeAgentSession>,
     private readonly primeAgent: PrimeAgentModule,
     private readonly permission: PrimeAgentPermission,
     private readonly workspaceRoot: string,
     private readonly createKernelBoundary: PrimeAgentDependencies["createKernelBoundary"],
-  ) {
-    this.nativeSessionDispose = session.dispose.bind(session);
-  }
+  ) {}
 
   static async create(context: HarnessFactoryContext, dependencies: PrimeAgentDependencies = {}): Promise<PrimeAgentHarness> {
     const configuration = parsePrimeAgentConfiguration(context);
@@ -250,31 +307,47 @@ export class PrimeAgentHarness implements Harness {
       if (run === undefined) throw new Error("relayer.graph.current requires an active GraphComplete run");
       return capabilityResponse(run.graph.acquireCapability());
     });
-    const savedSessionFile = context.savedState?.primeAgentSessionFile;
-    const sessionManager = typeof savedSessionFile === "string"
-      ? primeAgent.SessionManager.open(savedSessionFile)
-      : primeAgent.SessionManager.create(workspaceRoot);
-    const services = await primeAgent.createAgentSessionServices({ cwd: workspaceRoot, telemetryDisabled: true });
+    const completeCurrent = primeAgent.createHostRequestHandler<PrimeAgentRunContext>(async (_payload, invocation) => {
+      if (!invocation.isCurrent() || invocation.signal.aborted) throw new Error("The completion run is no longer active");
+      const broker = invocation.runContext?.completionBroker;
+      if (broker === undefined) throw new Error("relayer.complete.current requires an active completion broker");
+      return Object.freeze({ url: broker.url, token: broker.token });
+    });
     const prewarmIpythonKernel = permission.profile === "full"
       ? configuration.prewarmIpythonKernel
       : false;
-    const { session } = await primeAgent.createAgentSessionFromServices({
-      services,
-      sessionManager,
-      tools: ["ipython"],
-      hostRequestHandlers: { "relayer.graph.current": graphCurrent },
-      telemetryDisabled: true,
-      ...(configuration.thinkingLevel === undefined ? {} : { thinkingLevel: configuration.thinkingLevel }),
-      ...(configuration.rlmMaxDepth === undefined ? {} : { rlmMaxDepth: configuration.rlmMaxDepth }),
-      ...(prewarmIpythonKernel === undefined ? {} : { prewarmIpythonKernel }),
-    });
-    if (typeof session.waitForRlmQuiescence !== "function") {
-      await session.dispose();
-      throw new Error("Installed Prime Agent package does not expose recursive quiescence");
-    }
+    const createSession = async (savedSessionFile?: string): Promise<PrimeAgentSession> => {
+      const sessionManager = savedSessionFile === undefined
+        ? primeAgent.SessionManager.create(workspaceRoot)
+        : primeAgent.SessionManager.open(savedSessionFile);
+      const services = await primeAgent.createAgentSessionServices({ cwd: workspaceRoot, telemetryDisabled: true });
+      const { session } = await primeAgent.createAgentSessionFromServices({
+        services,
+        sessionManager,
+        tools: ["ipython"],
+        hostRequestHandlers: {
+          "relayer.graph.current": graphCurrent,
+          "relayer.complete.current": completeCurrent,
+        },
+        telemetryDisabled: true,
+        ...(configuration.thinkingLevel === undefined ? {} : { thinkingLevel: configuration.thinkingLevel }),
+        ...(configuration.rlmMaxDepth === undefined ? {} : { rlmMaxDepth: configuration.rlmMaxDepth }),
+        ...(prewarmIpythonKernel === undefined ? {} : { prewarmIpythonKernel }),
+      });
+      if (typeof session.waitForRlmQuiescence !== "function") {
+        await session.dispose();
+        throw new Error("Installed Prime Agent package does not expose recursive quiescence");
+      }
+      return session;
+    };
+    const savedSessionFile = context.savedState?.primeAgentSessionFile;
+    const rootSession = new PrimeAgentSessionLifecycle(await createSession(
+      typeof savedSessionFile === "string" ? savedSessionFile : undefined,
+    ));
     return new PrimeAgentHarness(
       context,
-      session,
+      rootSession,
+      () => createSession(),
       primeAgent,
       permission,
       workspaceRoot,
@@ -283,13 +356,63 @@ export class PrimeAgentHarness implements Harness {
   }
 
   complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
-    return nativeExecutionHandle(this.execute(context, signal), () => this.session.abort());
+    if (context.origin.kind === "root") {
+      return nativeExecutionHandle(
+        this.executeOn(this.rootSession.session, context, signal),
+        () => this.rootSession.session.abort(),
+      );
+    }
+    const controller = new AbortController();
+    const abort = () => controller.abort(signal?.reason ?? new Error("Prime Agent completion was cancelled"));
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+    const execution = this.executeInvoked(context, controller.signal)
+      .finally(() => signal?.removeEventListener("abort", abort));
+    return nativeExecutionHandle(
+      execution,
+      (reason) => controller.abort(new Error(reason)),
+    );
   }
 
-  private async execute(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+  private async executeInvoked(context: HarnessRunContext, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    if (this.forceShutdownStarted) throw new Error("Prime Agent harness is shutting down");
+    const pending = this.createFreshSession().then((session) => {
+      const lifecycle = new PrimeAgentSessionLifecycle(session);
+      this.invokedSessions.add(lifecycle);
+      if (this.forceShutdownStarted) lifecycle.forceShutdown();
+      return lifecycle;
+    });
+    this.pendingInvokedSessions.add(pending);
+    let lifecycle: PrimeAgentSessionLifecycle;
+    try {
+      lifecycle = await pending;
+    } finally {
+      this.pendingInvokedSessions.delete(pending);
+    }
+    let executionOutcome: OperationOutcome<void> | undefined;
+    let disposalOutcome: OperationOutcome<void> | undefined;
+    try {
+      executionOutcome = this.forceShutdownStarted
+        ? { ok: false, error: new Error("Prime Agent harness is shutting down") }
+        : await operationOutcome(() => this.executeOn(lifecycle.session, context, signal));
+    } finally {
+      disposalOutcome = await operationOutcome(() => lifecycle.dispose());
+      this.invokedSessions.delete(lifecycle);
+    }
+    const failures = [executionOutcome, disposalOutcome]
+      .flatMap((outcome) => outcome !== undefined && !outcome.ok ? [outcome.error] : []);
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "Prime Agent invoked execution or disposal failed");
+  }
+
+  private async executeOn(session: PrimeAgentSession, context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
     const execution = createPrimeAgentModelScope(context, this.primeAgent);
-    const runContext: PrimeAgentRunContext = Object.freeze({ graph: context.graph });
+    const runContext: PrimeAgentRunContext = Object.freeze({
+      graph: context.graph,
+      ...(context.completionBroker === undefined ? {} : { completionBroker: context.completionBroker }),
+    });
     const permissions = createPrimeAgentPermissionScopes({
       context,
       runContext,
@@ -299,7 +422,7 @@ export class PrimeAgentHarness implements Harness {
       createKernelBoundary: this.createKernelBoundary,
     });
     const childStreams = new Map<string, HarnessTraceStream>();
-    const unsubscribe = this.session.subscribe?.((event) => tracePrimeEvent(context, event, childStreams, execution));
+    const unsubscribe = session.subscribe?.((event) => tracePrimeEvent(context, event, childStreams, execution));
     const runtimeProvenance = primeRuntimeProvenance(process.env.RELAYER_PRIME_RUNTIME_PROVENANCE);
     if (runtimeProvenance) context.trace.emit({
       type: "provider.event",
@@ -310,7 +433,7 @@ export class PrimeAgentHarness implements Harness {
     let abortOutcome: Promise<OperationOutcome<void>> | undefined;
     const abort = () => {
       if (abortOutcome !== undefined) return;
-      abortOutcome = operationOutcome(() => this.session.abort());
+      abortOutcome = operationOutcome(() => session.abort());
     };
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
@@ -323,12 +446,12 @@ export class PrimeAgentHarness implements Harness {
         if (settledAbort !== undefined && !settledAbort.ok) throw settledAbort.error;
         signal.throwIfAborted();
       }
-      promptOutcome = await operationOutcome(() => this.session.promptAndWait(prompt, {
+      promptOutcome = await operationOutcome(() => session.promptAndWait(prompt, {
         runContext,
         modelScope: execution.modelScope,
         ...permissions,
       }));
-      quiescenceOutcome = await operationOutcome(() => this.session.waitForRlmQuiescence());
+      quiescenceOutcome = await operationOutcome(() => session.waitForRlmQuiescence());
       signal?.removeEventListener("abort", abort);
       settledAbort = await abortOutcome;
     } finally {
@@ -356,60 +479,38 @@ export class PrimeAgentHarness implements Harness {
   }
 
   state(): HarnessSessionState {
-    return this.session.sessionFile === undefined ? {} : { primeAgentSessionFile: this.session.sessionFile };
+    const sessionFile = this.rootSession.session.sessionFile;
+    return sessionFile === undefined ? {} : { primeAgentSessionFile: sessionFile };
   }
 
   dispose(): Promise<void> {
     if (this.gracefulDisposePromise !== undefined) return this.gracefulDisposePromise;
-    if (this.nativeDisposeCompleted) return Promise.resolve();
-    this.installNativeDisposeGuard();
     this.gracefulDisposePromise = Promise.resolve()
       .then(async () => {
-        if (this.nativeDisposeCompleted) return;
-        if (this.session.disposeAsync !== undefined) await this.session.disposeAsync();
-        else if (!this.nativeDisposeCompleted) this.disposeNativeOnce();
-        if (!this.nativeDisposeCompleted && this.session.disposeAsync !== undefined) {
-          // A conforming disposeAsync drains resources and owns native disposal.
-          // Mark the harness terminal even if it does not call the guarded
-          // synchronous boundary itself.
-          this.nativeDisposeCompleted = true;
-        }
-        this.gracefullyDisposed = true;
-      })
-      .catch((error: unknown) => {
-        if (!this.nativeDisposeCompleted) throw error;
+        await Promise.allSettled([...this.pendingInvokedSessions]);
+        const childOutcomes = await Promise.allSettled(
+          [...this.invokedSessions].map((lifecycle) => lifecycle.dispose()),
+        );
+        const childFailures = childOutcomes.flatMap((outcome) => outcome.status === "rejected" ? [outcome.reason] : []);
+        const rootOutcome = await operationOutcome(() => this.rootSession.dispose());
+        const failures = [
+          ...childFailures,
+          ...(rootOutcome.ok ? [] : [rootOutcome.error]),
+        ];
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1) throw new AggregateError(failures, "Prime Agent session disposal failed");
       });
     return this.gracefulDisposePromise;
   }
 
   forceShutdown(): void {
-    if (this.forceShutdownStarted || this.gracefullyDisposed) return;
+    if (this.forceShutdownStarted) return;
     this.forceShutdownStarted = true;
-    this.installNativeDisposeGuard();
-    try {
-      void this.session.abort().catch(() => undefined);
-    } catch {
-      // Force disposal must continue even if a nonconforming provider throws
-      // synchronously instead of returning a rejected abort promise.
+    for (const lifecycle of this.invokedSessions) lifecycle.forceShutdown();
+    for (const pending of this.pendingInvokedSessions) {
+      void pending.then((lifecycle) => lifecycle.forceShutdown(), () => undefined);
     }
-    this.disposeNativeOnce();
-  }
-
-  private installNativeDisposeGuard(): void {
-    if (this.disposeGuardInstalled) return;
-    this.disposeGuardInstalled = true;
-    this.session.dispose = () => this.disposeNativeOnce();
-  }
-
-  private disposeNativeOnce(): void {
-    if (this.nativeDisposeInProgress || this.nativeDisposeCompleted) return;
-    this.nativeDisposeInProgress = true;
-    try {
-      this.nativeSessionDispose();
-      this.nativeDisposeCompleted = true;
-    } finally {
-      this.nativeDisposeInProgress = false;
-    }
+    this.rootSession.forceShutdown();
   }
 
   private prompt(context: HarnessRunContext): string {
@@ -429,6 +530,8 @@ Use this entry point:
 
 from relayer_graph import GraphSession
 graph = await GraphSession.current()
+
+For explicit semantic child work, first author and submit the invoke action in its layer. Read current = await graph.get_current(), then publish that layer with await graph.advance_current(layer, expected_revision=current["headRevision"], operation_key="a-stable-operation-key"). Only after that succeeds, use input_graph = await graph.prepare_complete(invoke_action) and from relayer_graph import complete; child = complete(input_graph). Complete returns immediately with a completion ID, current snapshot, and awaitable result. Launch independent children before awaiting them. Prime RLM and subagents remain internal to this completion and do not create semantic children by themselves.
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. Never rely on generated client keys in authored code.
 
@@ -457,6 +560,8 @@ Use this entry point:
 
 from relayer_graph import GraphSession
 graph = await GraphSession.current()
+
+For explicit semantic child work, first author and submit the invoke action in its layer. Read current = await graph.get_current(), then publish that layer with await graph.advance_current(layer, expected_revision=current["headRevision"], operation_key="a-stable-operation-key"). Only after that succeeds, use input_graph = await graph.prepare_complete(invoke_action) and from relayer_graph import complete; child = complete(input_graph). Complete returns immediately with a completion ID, current snapshot, and awaitable result. Launch independent children before awaiting them. Prime RLM and subagents remain internal to this completion and do not create semantic children by themselves.
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. For example, use NodeObject("info", "Summary", "...", client_key="summary-node"), EdgeObject((summary_node, detail_node), client_key="summary-detail-edge"), and LayerObject(nodes, edges, layout, client_key="response-layer"). Never rely on generated client keys in authored code. Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interaction.id}); call it only after the full response has been authored.
 

@@ -189,6 +189,12 @@ export interface HarnessGraphScope {
   acquireCapability(): GraphCapability;
 }
 
+/** Execution-scoped transport for starting and observing prepared semantic children. */
+export interface HarnessCompletionBrokerScope {
+  readonly url: string;
+  readonly token: string;
+}
+
 /** Trusted provenance for one semantic Complete call. */
 export type CompletionOrigin =
   | { readonly kind: "root" }
@@ -205,6 +211,7 @@ export interface HarnessRunContext {
   /** Normalized model-visible input resolved from inputGraph; excludes context occurrence authority. */
   readonly interactionInput: InteractionInput;
   readonly graph: HarnessGraphScope;
+  readonly completionBroker?: HarnessCompletionBrokerScope;
   readonly approvals: HarnessApprovalChannel;
   /** Immutable admitted family plan. Its orchestrator is also exposed through model. */
   readonly modelPlan?: HarnessAdmittedModelPlan;

@@ -36,6 +36,7 @@ import type {
   HarnessSessionRegistration,
   HarnessSessionState,
   HarnessCompletionTraceContext,
+  HarnessCompletionBrokerScope,
   HarnessExecutionAccess,
   HarnessExecutionAccessBroker,
   HarnessExecutionAccessBundle,
@@ -46,7 +47,9 @@ import type {
   HarnessTraceDescriptor,
   HarnessTraceSink,
   CompletionOrigin,
+  JsonObject,
 } from "./types.js";
+import type { NativeExecutionHandle } from "./completion-execution.js";
 
 interface HeldExecutionAccessLease {
   readonly lease: HarnessExecutionAccessLease;
@@ -79,10 +82,7 @@ interface LiveSession {
     readonly interactionId: number;
     readonly controller: AbortController;
   }>;
-  invokedCompletionRuns: Map<GraphId, {
-    readonly invocationDigest: string;
-    readonly run: Promise<HarnessCompleteResult>;
-  }>;
+  invokedCompletionRuns: Map<GraphId, InvokedCompletionRun>;
   activeHumanRootCompletionId?: GraphId;
   currentPolicyRevision?: number;
   currentPolicyIdentity?: string;
@@ -99,6 +99,18 @@ export interface HarnessInvokedCompletion {
   readonly capability: GraphCapability;
   readonly origin: Extract<CompletionOrigin, { readonly kind: "invoke" }>;
   readonly model?: InteractionModelSelection;
+  readonly completionBroker?: HarnessCompletionBrokerScope;
+}
+
+export interface HarnessInvokedCompletionStart {
+  readonly completionId: GraphId;
+  readonly attachment?: JsonObject;
+}
+
+interface InvokedCompletionRun {
+  readonly invocationDigest: string;
+  readonly run: Promise<HarnessCompleteResult>;
+  readonly started: Promise<HarnessInvokedCompletionStart>;
 }
 
 const EXECUTION_ADMISSION_TIMEOUT_MS = 30_000;
@@ -397,6 +409,7 @@ export class HarnessHost {
     harnessPolicy?: HarnessExecutionPolicy,
     modelPlan?: HarnessModelPlan,
     attemptAdmissionId?: string,
+    completionBroker?: HarnessCompletionBrokerScope,
   ): Promise<HarnessCompleteResult>;
   async complete(
     threadId: number,
@@ -409,11 +422,12 @@ export class HarnessHost {
     harnessPolicy?: HarnessExecutionPolicy,
     inputPlan?: HarnessModelPlan,
     attemptAdmissionId?: string,
+    completionBroker?: HarnessCompletionBrokerScope,
   ): Promise<HarnessCompleteResult> {
     if (this.closed) throw new Error("Harness host is closed");
     if (typeof interactionOrInvocation !== "number") {
       const invocationSignal = isAbortSignal(capabilityOrSignal) ? capabilityOrSignal : undefined;
-      return this.completeInvoked(threadId, interactionOrInvocation, invocationSignal);
+      return this.invokedCompletion(threadId, interactionOrInvocation, invocationSignal).run;
     }
     const interactionId = interactionOrInvocation;
     const capability = capabilityOrSignal as GraphCapability;
@@ -442,18 +456,37 @@ export class HarnessHost {
       ...(harnessPolicy === undefined ? {} : { harnessPolicy }),
       ...(modelPlan === undefined ? {} : { modelPlan }),
       ...(attemptAdmissionId === undefined ? {} : { attemptAdmissionId }),
+      ...(completionBroker === undefined ? {} : { completionBroker }),
       origin: { kind: "root" },
     } as const;
     return this.withSessionLock(session, () => this.runCompletion(runInput));
   }
 
   /** Agent-invoked Complete uses the same operation while bypassing only the human-root queue. */
-  private async completeInvoked(
+  startInvokedCompletion(
     threadId: number,
     invocation: HarnessInvokedCompletion,
     signal?: AbortSignal,
-  ): Promise<HarnessCompleteResult> {
-    const { capability, origin, model } = invocation;
+  ): Promise<HarnessInvokedCompletionStart> {
+    if (this.closed) throw new Error("Harness host is closed");
+    return this.invokedCompletion(threadId, invocation, signal).started;
+  }
+
+  observeInvokedCompletion(threadId: number, completionId: GraphId): Promise<HarnessCompleteResult> {
+    if (!Number.isSafeInteger(completionId) || completionId < 1) {
+      throw new Error("Invoked completion ID must be a positive integer");
+    }
+    const run = this.liveSession(threadId).invokedCompletionRuns.get(completionId);
+    if (run === undefined) throw new Error("Invoked completion is not registered");
+    return run.run;
+  }
+
+  private invokedCompletion(
+    threadId: number,
+    invocation: HarnessInvokedCompletion,
+    signal?: AbortSignal,
+  ): InvokedCompletionRun {
+    const { capability, origin, model, completionBroker } = invocation;
     validateGraphCapability(capability);
     validateCompletionOrigin(origin);
     if (model !== undefined) validateInteractionModelSelection(model);
@@ -465,8 +498,18 @@ export class HarnessHost {
       if (existing.invocationDigest !== invocationDigest) {
         throw new Error("Invoked completion is already active under a different graph binding");
       }
-      return existing.run;
+      return existing;
     }
+    let resolveStarted!: (value: HarnessInvokedCompletionStart) => void;
+    let rejectStarted!: (error: unknown) => void;
+    let nativeReported = false;
+    const started = new Promise<HarnessInvokedCompletionStart>((resolve, reject) => {
+      resolveStarted = resolve;
+      rejectStarted = reject;
+    });
+    // The blocking Complete compatibility path observes only `run`. Keep its
+    // unused start acknowledgement from becoming an unhandled rejection.
+    void started.catch(() => undefined);
     const run = this.runCompletion({
       threadId,
       interactionId: capability.nodeId,
@@ -474,10 +517,26 @@ export class HarnessHost {
       capability,
       origin,
       ...(model === undefined ? {} : { model }),
+      ...(completionBroker === undefined ? {} : { completionBroker }),
       ...(signal === undefined ? {} : { signal }),
+      onNativeExecution: (native) => {
+        nativeReported = true;
+        if (native?.attached === undefined) {
+          resolveStarted({ completionId: capability.nodeId });
+          return;
+        }
+        void native.attached.then(
+          (attachment) => resolveStarted({ completionId: capability.nodeId, attachment }),
+          rejectStarted,
+        );
+      },
     });
-    session.invokedCompletionRuns.set(capability.nodeId, { invocationDigest, run });
-    return run;
+    void run.catch((error) => {
+      if (!nativeReported) rejectStarted(error);
+    });
+    const entry = { invocationDigest, run, started };
+    session.invokedCompletionRuns.set(capability.nodeId, entry);
+    return entry;
   }
 
   private async runCompletion(input: {
@@ -492,7 +551,9 @@ export class HarnessHost {
     readonly harnessPolicy?: HarnessExecutionPolicy;
     readonly modelPlan?: HarnessModelPlan;
     readonly attemptAdmissionId?: string;
+    readonly completionBroker?: HarnessCompletionBrokerScope;
     readonly origin: CompletionOrigin;
+    readonly onNativeExecution?: (native: NativeExecutionHandle | undefined) => void;
   }): Promise<HarnessCompleteResult> {
     const { threadId, interactionId, session, capability } = input;
     const controller = new AbortController();
@@ -526,6 +587,8 @@ export class HarnessHost {
         input.modelPlan,
         input.attemptAdmissionId,
         input.origin,
+        input.completionBroker,
+        input.onNativeExecution,
       );
     } catch (error) {
       operationError = error;
@@ -722,11 +785,14 @@ export class HarnessHost {
     modelPlan?: HarnessModelPlan,
     attemptAdmissionId?: string,
     origin: CompletionOrigin = { kind: "root" },
+    completionBroker?: HarnessCompletionBrokerScope,
+    onNativeExecution?: (native: NativeExecutionHandle | undefined) => void,
   ): Promise<HarnessCompleteResult> {
     const graph = new RelayerGraphClient(capability);
     const interactionNodeId = capability.nodeId;
     try {
       const output = await graph.getCompletionOutput(interactionNodeId);
+      onNativeExecution?.(undefined);
       return { threadId, configurationName: session.descriptor.configuration.name, output, trace: disabledTraceDescriptor() };
     } catch (error) {
       if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) throw error;
@@ -818,11 +884,12 @@ export class HarnessHost {
         selectedAccess = accessLease.access;
       }
       harnessStarted = true;
-      await session.harness.complete({
+      const native = session.harness.complete({
         origin,
         inputGraph: interaction,
         interactionInput,
         graph: scope,
+        ...(completionBroker === undefined ? {} : { completionBroker }),
         approvals,
         trace: observedTrace,
         ...(admittedModelPlan === undefined ? {} : { modelPlan: admittedModelPlan }),
@@ -830,6 +897,8 @@ export class HarnessHost {
         ...(accessBundle === undefined ? {} : { accessBundle }),
         ...(selectedAccess === undefined ? {} : { access: selectedAccess }),
       }, signal);
+      onNativeExecution?.(isNativeExecutionHandle(native) ? native : undefined);
+      await native;
     } catch (error) {
       completionError = normalizeHarnessFailure(error, harnessStarted, observedTrace.effectBoundary());
     } finally {
@@ -1321,6 +1390,31 @@ async function route(host: HarnessHost, token: string, request: IncomingMessage,
       }
       return reply(response, 200, { cancelled: host.cancel(threadId, completionId) });
     }
+    const invokedCompletionMatch = /^\/sessions\/([^/]+)\/invoked-completions$/.exec(url.pathname);
+    if (request.method === "POST" && invokedCompletionMatch?.[1] !== undefined) {
+      const threadId = readThreadId(invokedCompletionMatch[1]);
+      if (threadId === undefined) return reply(response, 400, { error: "invalid_thread_id" });
+      let input: HarnessInvokedCompletion;
+      try {
+        input = readInvokedCompletionInput(await body(request));
+      } catch (error) {
+        return reply(response, 400, { error: "invalid_invoked_completion", message: errorMessage(error) });
+      }
+      return reply(response, 201, await host.startInvokedCompletion(
+        threadId,
+        input,
+      ));
+    }
+    const invokedCompletionObservationMatch = /^\/sessions\/([^/]+)\/invoked-completions\/([^/]+)$/.exec(url.pathname);
+    if (request.method === "GET" && invokedCompletionObservationMatch?.[1] !== undefined
+      && invokedCompletionObservationMatch[2] !== undefined) {
+      const threadId = readThreadId(invokedCompletionObservationMatch[1]);
+      const completionId = readThreadId(invokedCompletionObservationMatch[2]);
+      if (threadId === undefined || completionId === undefined) {
+        return reply(response, 400, { error: "invalid_completion_identity" });
+      }
+      return reply(response, 200, await host.observeInvokedCompletion(threadId, completionId));
+    }
     const approvalDecisionMatch = /^\/sessions\/([^/]+)\/approvals\/([^/]+)\/decision$/.exec(url.pathname);
     if (request.method === "POST" && approvalDecisionMatch?.[1] !== undefined && approvalDecisionMatch[2] !== undefined) {
       const threadId = readThreadId(approvalDecisionMatch[1]);
@@ -1360,6 +1454,7 @@ async function route(host: HarnessHost, token: string, request: IncomingMessage,
           readHarnessExecutionPolicy(input),
           input.modelPlan,
           input.attemptAdmissionId,
+          input.completionBroker,
         );
         return reply(response, 200, completed);
       } finally {
@@ -1638,10 +1733,11 @@ function readCompleteInput(value: unknown): {
   readonly traceContext?: HarnessCompletionTraceContext;
   readonly executionLeaseId?: string;
   readonly harnessPolicy?: HarnessExecutionPolicy;
+  readonly completionBroker?: HarnessCompletionBrokerScope;
 } {
   if (!isRecord(value)) throw new Error("Harness completion input must be an object");
   const unknown = Object.keys(value).filter((key) => ![
-    "interactionId", "graph", "model", "modelPlan", "attemptAdmissionId", "traceContext", "executionLeaseId", "harnessPolicy",
+    "interactionId", "graph", "model", "modelPlan", "attemptAdmissionId", "traceContext", "executionLeaseId", "harnessPolicy", "completionBroker",
   ].includes(key));
   if (unknown.length > 0) throw new Error(`Harness completion contains unsupported fields: ${unknown.join(", ")}`);
   if (!Number.isSafeInteger(value.interactionId) || (value.interactionId as number) < 1) {
@@ -1656,6 +1752,7 @@ function readCompleteInput(value: unknown): {
   const traceContext = readTraceContext(value);
   const executionLeaseId = readExecutionLeaseId(value);
   const harnessPolicy = readHarnessExecutionPolicy(value);
+  const completionBroker = readCompletionBroker(value);
   return {
     interactionId: value.interactionId as number,
     graph: readGraphCapability(value),
@@ -1665,7 +1762,48 @@ function readCompleteInput(value: unknown): {
     ...(traceContext === undefined ? {} : { traceContext }),
     ...(executionLeaseId === undefined ? {} : { executionLeaseId }),
     ...(harnessPolicy === undefined ? {} : { harnessPolicy }),
+    ...(completionBroker === undefined ? {} : { completionBroker }),
   };
+}
+
+function readInvokedCompletionInput(value: unknown): HarnessInvokedCompletion {
+  if (!isRecord(value)) throw new Error("Harness invoked completion input must be an object");
+  const unknown = Object.keys(value).filter((key) => !["capability", "origin", "model", "completionBroker"].includes(key));
+  if (unknown.length > 0) throw new Error(`Harness invoked completion contains unsupported fields: ${unknown.join(", ")}`);
+  if (!isRecord(value.capability)
+    || Object.keys(value.capability).some((key) => !["url", "token", "nodeId"].includes(key))) {
+    throw new Error("Harness invoked completion requires an exact graph capability");
+  }
+  if (value.model !== undefined
+    && (!isRecord(value.model) || Object.keys(value.model).some((key) => !["providerId", "adapterId", "modelId"].includes(key)))) {
+    throw new Error("Harness invoked completion contains an invalid model selection");
+  }
+  validateCompletionOrigin(value.origin);
+  const model = readInteractionModelSelection(value);
+  const completionBroker = readCompletionBroker(value);
+  return {
+    capability: readGraphCapability({ graph: value.capability }),
+    origin: value.origin,
+    ...(model === undefined ? {} : { model }),
+    ...(completionBroker === undefined ? {} : { completionBroker }),
+  };
+}
+
+function readCompletionBroker(value: unknown): HarnessCompletionBrokerScope | undefined {
+  if (!isRecord(value) || value.completionBroker === undefined) return undefined;
+  const broker = value.completionBroker;
+  if (!isRecord(broker)
+    || Object.keys(broker).some((key) => !["url", "token"].includes(key))
+    || typeof broker.url !== "string"
+    || typeof broker.token !== "string"
+    || broker.token.length < 32) {
+    throw new Error("Harness completion contains an invalid completion broker");
+  }
+  const url = new URL(broker.url);
+  if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || url.port === "") {
+    throw new Error("Harness completion broker must use authenticated 127.0.0.1 HTTP");
+  }
+  return Object.freeze({ url: url.toString().replace(/\/$/u, ""), token: broker.token });
 }
 
 function readGraphCapability(value: unknown): GraphCapability {
@@ -2017,6 +2155,10 @@ function isAbortSignal(value: unknown): value is AbortSignal {
     && typeof value.removeEventListener === "function";
 }
 
+function isNativeExecutionHandle(value: Promise<void> | NativeExecutionHandle): value is NativeExecutionHandle {
+  return typeof value === "object" && value !== null && "settled" in value;
+}
+
 function readTraceContext(value: unknown): HarnessCompletionTraceContext | undefined {
   if (!isRecord(value) || value.traceContext === undefined) return undefined;
   if (!isRecord(value.traceContext)) throw new Error("Harness completion contains an invalid trace context");
@@ -2099,7 +2241,7 @@ function graphInvocationDigest(
 ): string {
   return createHash("sha256")
     .update(JSON.stringify({
-      capability: { url: capability.url, nodeId: capability.nodeId, token: capability.token },
+      completionId: capability.nodeId,
       origin: {
         kind: origin.kind,
         sourceCompletionId: origin.sourceCompletionId,

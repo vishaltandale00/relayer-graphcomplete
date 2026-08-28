@@ -1,78 +1,109 @@
-export type NodeStatus = "draft" | "accepted" | "stopped";
+export type GraphId = number;
+export type RecordState = "draft" | "accepted" | "stopped";
 
 export interface GraphNode {
-  readonly id: string;
+  readonly id: GraphId;
+  readonly leasedActionId?: GraphId | null;
   readonly kind: string;
+  readonly icon: string;
   readonly title: string;
-  readonly content: string;
-  readonly status: NodeStatus;
-  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly detail: string;
+  readonly state: RecordState;
 }
 
 export interface GraphEdge {
-  readonly id: string;
-  readonly source: string;
-  readonly target: string;
-  readonly kind: string;
-  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly id: GraphId;
+  readonly endpoints: readonly [GraphId, GraphId];
+  readonly state: RecordState;
 }
 
-export interface InputGraph {
+export interface NodePlacement {
+  readonly nodeId: GraphId;
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface LayerLayout {
   readonly version: 1;
-  readonly rootNodeId: string;
+  readonly placements: readonly NodePlacement[];
+}
+
+export interface GraphLayer {
+  readonly id: GraphId;
+  readonly nodes: readonly GraphId[];
+  readonly edges: readonly GraphId[];
+  readonly layout?: LayerLayout | null;
+  readonly state: RecordState;
+}
+
+export type ActionKind = "navigate" | "invoke" | "interaction.context";
+export type NavigateRelation = "expand" | "reference";
+export type ActionVariant = "chip" | "pill" | "wide" | "card";
+
+export interface GraphAction {
+  readonly id: GraphId;
+  readonly sourceNodeId: GraphId;
+  readonly sourceLayerId?: GraphId | null;
+  readonly kind: ActionKind;
+  readonly relation?: NavigateRelation | null;
+  readonly label: string;
+  readonly variant: ActionVariant;
+  readonly icon?: string | null;
+  readonly description?: string | null;
+  readonly targetLayerId?: GraphId | null;
+  readonly interactionText?: string | null;
+  readonly state: RecordState;
+}
+
+export interface ResolvedGraphLayer {
+  readonly layer: GraphLayer;
   readonly nodes: readonly GraphNode[];
   readonly edges: readonly GraphEdge[];
+  readonly actions: readonly GraphAction[];
 }
 
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-
-export interface ModelChoice {
-  readonly model: string;
-  readonly thinking?: ThinkingLevel;
+/** Pointer to one interaction whose completion identity and authority are already prepared. */
+export interface CompletionInputGraph {
+  readonly interactionNode: GraphId;
 }
 
-export interface ModelPolicy {
-  readonly orchestrator: ModelChoice;
-  readonly contentOwner: ModelChoice;
-  readonly reviewer: ModelChoice;
-  readonly reviser: ModelChoice;
+export type InputGraph = CompletionInputGraph;
+
+export type CompletionLifecycle = "active" | "succeeded" | "stopped" | "failed";
+
+export interface CompletionCurrentSnapshot {
+  readonly completionId: GraphId;
+  readonly lifecycle: CompletionLifecycle;
+  readonly revision: number;
+  readonly currentLayerId: GraphId | null;
+  readonly finalLayerId: GraphId | null;
+  readonly safeReason?: string;
 }
 
-export interface CompletionBudget {
-  readonly maxTokens?: number;
-  readonly maxDurationMs?: number;
-  readonly maxNodes?: number;
+export interface CompletionCurrent {
+  snapshot(): Promise<CompletionCurrentSnapshot>;
 }
 
-export interface CompletionPolicy {
-  readonly models: ModelPolicy;
-  readonly budget?: CompletionBudget;
-  readonly minChildren: number;
-  readonly maxChildren: number;
-  readonly maxDepth?: number;
+export interface CompletionHandle {
+  readonly completionId: GraphId;
+  readonly current: CompletionCurrent;
+  /** Resolves only from durable GraphComplete success. */
+  readonly result: Promise<ResolvedGraphLayer>;
 }
 
-export type CompletionStopReason = "accepted" | "budget" | "cancelled" | "blocked" | "failed";
-
-export interface CompletionResult {
-  readonly graph: InputGraph;
-  readonly reason: CompletionStopReason;
-  readonly accepted: boolean;
-  readonly diagnostics: readonly string[];
+/** Injected implementation of trusted preparation, execution, and durable settlement. */
+export interface CompletionRuntime {
+  complete(inputGraph: CompletionInputGraph): CompletionHandle;
 }
 
-export interface CompletionRequest {
-  readonly inputGraph: InputGraph;
-  readonly policy: CompletionPolicy;
-  readonly signal?: AbortSignal;
-}
-
-export interface GraphCompleteRuntime {
-  run(request: CompletionRequest): Promise<CompletionResult>;
-}
-
-export interface CompleteOptions {
-  readonly runtime: GraphCompleteRuntime;
-  readonly policy: CompletionPolicy;
-  readonly signal?: AbortSignal;
+export class CompletionTerminalError extends Error {
+  constructor(
+    readonly completionId: GraphId,
+    readonly lifecycle: "stopped" | "failed",
+    readonly current: CompletionCurrentSnapshot,
+    readonly reason: string,
+  ) {
+    super(`Completion ${completionId} ${lifecycle}: ${reason}`);
+    this.name = "CompletionTerminalError";
+  }
 }

@@ -268,7 +268,7 @@ describe("PrimeAgentHarness", () => {
       abort: vi.fn(async () => undefined),
       dispose: vi.fn(),
     };
-    let graphHandler: ((payload: Record<string, unknown>, context: any) => Promise<Record<string, unknown>>) | undefined;
+    const hostHandlers: ((payload: Record<string, unknown>, context: any) => Promise<Record<string, unknown>>)[] = [];
     const services = { modelRegistry: { find: vi.fn() } };
     const createAgentRunModelScope = vi.fn((input: unknown) => input);
     const createAgentSessionFromServices = vi.fn(async () => ({ session }));
@@ -281,12 +281,21 @@ describe("PrimeAgentHarness", () => {
       AGENT_RUN_MODEL_SCOPE_VERSION: 1,
       createAgentRunModelScope,
       SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
-      createHostRequestHandler: (handler: typeof graphHandler) => { graphHandler = handler; return handler; },
+      createHostRequestHandler: (handler: (payload: Record<string, unknown>, context: any) => Promise<Record<string, unknown>>) => {
+        hostHandlers.push(handler);
+        return handler;
+      },
       createAgentSessionServices: vi.fn(async () => services),
       createAgentSessionFromServices,
     }) as never });
 
-    const first = runContext(11, "first-token");
+    const first = {
+      ...runContext(11, "first-token"),
+      completionBroker: {
+        url: "http://127.0.0.1:43125/api/completions",
+        token: "12345678901234567890123456789012",
+      },
+    };
     const second = runContext(12, "second-token");
     await harness.complete(first);
     await harness.complete(second);
@@ -295,7 +304,10 @@ describe("PrimeAgentHarness", () => {
     expect(createAgentSessionFromServices).toHaveBeenCalledWith(expect.objectContaining({ prewarmIpythonKernel: true }));
     expect(services.modelRegistry.find).not.toHaveBeenCalled();
     expect(createAgentSessionFromServices).toHaveBeenCalledWith(expect.not.objectContaining({ model: expect.anything() }));
-    expect(prompts.map(({ runContext }) => runContext)).toEqual([{ graph: first.graph }, { graph: second.graph }]);
+    expect(prompts.map(({ runContext }) => runContext)).toEqual([
+      { graph: first.graph, completionBroker: first.completionBroker },
+      { graph: second.graph },
+    ]);
     expect(createAgentRunModelScope).toHaveBeenCalledTimes(2);
     expect(prompts[0]!.text).toContain("graph = await GraphSession.current()");
     expect(prompts[0]!.text).toContain("await graph.submit(11)");
@@ -307,12 +319,179 @@ describe("PrimeAgentHarness", () => {
     expect(prompts[0]!.text).toContain("rerun the same authoring code with the same client_key values");
     expect(prompts[0]!.text).toContain("Do not add fake navigation");
     expect(prompts[0]!.text).toContain("await graph.discard_layer(layer)");
-    await expect(graphHandler?.({}, invocation(first))).resolves.toEqual({
+    await expect(hostHandlers[0]?.({}, invocation(first))).resolves.toEqual({
       url: "http://127.0.0.1:43123",
       token: "first-token",
       nodeId: 11,
     });
+    await expect(hostHandlers[1]?.({}, invocation(first))).resolves.toEqual(first.completionBroker);
     expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/prime-session.jsonl" });
+  });
+
+  it("runs concurrent invoked completions in fresh sessions without changing root continuity", async () => {
+    const scopes: ControlledRunScope[] = [];
+    const root = primeSession("/tmp/root-prime-session.jsonl");
+    const firstChild = primeSession("/tmp/invoked-a.jsonl");
+    const secondChild = primeSession("/tmp/invoked-b.jsonl");
+    const sessions = [root, firstChild, secondChild];
+    const create = vi.fn()
+      .mockReturnValueOnce("fresh-a")
+      .mockReturnValueOnce("fresh-b");
+    const open = vi.fn(() => "saved-root");
+    const createAgentSessionServices = vi.fn(async () => ({}));
+    const createAgentSessionFromServices = vi.fn(async () => {
+      const session = sessions.shift();
+      if (session === undefined) throw new Error("unexpected Prime session creation");
+      return { session };
+    });
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7,
+      workingDirectory: "/tmp/project",
+      ...fullPermission,
+      configuration,
+      savedState: { primeAgentSessionFile: "/tmp/root-prime-session.jsonl" },
+    }, { loadModule: async () => ({
+      ...controlledRunScopeApi(scopes),
+      SessionManager: { create, open },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices,
+      createAgentSessionFromServices,
+    }) as never });
+
+    await Promise.all([
+      harness.complete(invokedRunContext(familyRunContext(41, "child-a", 0), 101)),
+      harness.complete(invokedRunContext(familyRunContext(42, "child-b", 2), 102)),
+    ]);
+
+    expect(open).toHaveBeenCalledWith("/tmp/root-prime-session.jsonl");
+    expect(create.mock.calls).toEqual([["/tmp/project"], ["/tmp/project"]]);
+    expect(createAgentSessionServices).toHaveBeenCalledTimes(3);
+    expect(createAgentSessionFromServices).toHaveBeenCalledTimes(3);
+    expect(root.promptAndWait).not.toHaveBeenCalled();
+    expect(firstChild.promptAndWait).toHaveBeenCalledOnce();
+    expect(secondChild.promptAndWait).toHaveBeenCalledOnce();
+    expect(scopes.map(({ input }) => input.root.id)).toEqual(["gpt-shared", "claude-root"]);
+    expect(scopes[0]!.input.root.provider).not.toBe(scopes[1]!.input.root.provider);
+    expect(firstChild.waitForRlmQuiescence).toHaveBeenCalledOnce();
+    expect(secondChild.waitForRlmQuiescence).toHaveBeenCalledOnce();
+    expect(firstChild.disposeAsync).toHaveBeenCalledOnce();
+    expect(secondChild.disposeAsync).toHaveBeenCalledOnce();
+    expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/root-prime-session.jsonl" });
+
+    await harness.complete(runContext(43, "root-token"));
+    expect(root.promptAndWait).toHaveBeenCalledOnce();
+    expect(root.disposeAsync).not.toHaveBeenCalled();
+  });
+
+  it("cancels and quiesces only the exact invoked Prime session before disposing it", async () => {
+    let releasePrompt!: () => void;
+    const promptGate = new Promise<void>((resolve) => { releasePrompt = resolve; });
+    let releaseQuiescence!: () => void;
+    const quiescenceGate = new Promise<void>((resolve) => { releaseQuiescence = resolve; });
+    const root = primeSession("/tmp/root.jsonl");
+    const cancelledChild = primeSession("/tmp/cancelled.jsonl", {
+      promptAndWait: vi.fn(async () => promptGate),
+      waitForRlmQuiescence: vi.fn(async () => quiescenceGate),
+      abort: vi.fn(async () => { releasePrompt(); }),
+    });
+    const sibling = primeSession("/tmp/sibling.jsonl");
+    const sessions = [root, cancelledChild, sibling];
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7,
+      workingDirectory: "/tmp/project",
+      ...fullPermission,
+      configuration,
+    }, { loadModule: async () => ({
+      ...runScopeApi(),
+      SessionManager: { create: vi.fn(() => "fresh"), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({})),
+      createAgentSessionFromServices: vi.fn(async () => {
+        const session = sessions.shift();
+        if (session === undefined) throw new Error("unexpected Prime session creation");
+        return { session };
+      }),
+    }) as never });
+    const controller = new AbortController();
+    let cancelledSettled = false;
+
+    const cancelled = harness.complete(invokedRunContext(runContext(51, "cancelled"), 151), controller.signal);
+    const completedSibling = harness.complete(invokedRunContext(runContext(52, "sibling"), 152));
+    void cancelled.finally(() => { cancelledSettled = true; });
+    await vi.waitFor(() => expect(cancelledChild.promptAndWait).toHaveBeenCalledOnce());
+    controller.abort();
+    await completedSibling;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(cancelledChild.abort).toHaveBeenCalledOnce();
+    expect(root.abort).not.toHaveBeenCalled();
+    expect(sibling.abort).not.toHaveBeenCalled();
+    expect(cancelledSettled).toBe(false);
+    expect(cancelledChild.disposeAsync).not.toHaveBeenCalled();
+
+    releaseQuiescence();
+    await cancelled;
+    expect(cancelledSettled).toBe(true);
+    expect(cancelledChild.disposeAsync).toHaveBeenCalledOnce();
+    expect(sibling.disposeAsync).toHaveBeenCalledOnce();
+    expect(root.disposeAsync).not.toHaveBeenCalled();
+  });
+
+  it("force-disposes active and late-created invoked sessions without leaking into root", async () => {
+    let markActiveStarted!: () => void;
+    const activeStarted = new Promise<void>((resolve) => { markActiveStarted = resolve; });
+    let releaseActive!: () => void;
+    const activeGate = new Promise<void>((resolve) => { releaseActive = resolve; });
+    let releaseCreation!: () => void;
+    const creationGate = new Promise<void>((resolve) => { releaseCreation = resolve; });
+    const root = primeSession("/tmp/root.jsonl");
+    const activeChild = primeSession("/tmp/active-child.jsonl", {
+      promptAndWait: vi.fn(async () => {
+        markActiveStarted();
+        await activeGate;
+      }),
+      abort: vi.fn(async () => { releaseActive(); }),
+    });
+    const lateChild = primeSession("/tmp/late-child.jsonl");
+    const rootNativeDispose = root.dispose;
+    const activeChildNativeDispose = activeChild.dispose;
+    const lateChildNativeDispose = lateChild.dispose;
+    let creations = 0;
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7,
+      workingDirectory: "/tmp/project",
+      ...fullPermission,
+      configuration,
+    }, { loadModule: async () => ({
+      ...runScopeApi(),
+      SessionManager: { create: vi.fn(() => "fresh"), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({})),
+      createAgentSessionFromServices: vi.fn(async () => {
+        creations += 1;
+        if (creations === 1) return { session: root };
+        if (creations === 2) return { session: activeChild };
+        await creationGate;
+        return { session: lateChild };
+      }),
+    }) as never });
+
+    const active = harness.complete(invokedRunContext(runContext(61, "active"), 161));
+    await activeStarted;
+    const late = harness.complete(invokedRunContext(runContext(62, "late"), 162));
+    await new Promise((resolve) => setImmediate(resolve));
+    harness.forceShutdown();
+    releaseCreation();
+
+    await active;
+    await expect(late).rejects.toThrow("shutting down");
+    expect(activeChild.abort).toHaveBeenCalledOnce();
+    expect(activeChildNativeDispose).toHaveBeenCalledOnce();
+    expect(lateChild.promptAndWait).not.toHaveBeenCalled();
+    expect(lateChild.abort).toHaveBeenCalledOnce();
+    expect(lateChildNativeDispose).toHaveBeenCalledOnce();
+    expect(root.abort).toHaveBeenCalledOnce();
+    expect(rootNativeDispose).toHaveBeenCalledOnce();
   });
 
   it("maps an admitted family to isolated native providers and reuses the session across root changes", async () => {
@@ -1181,6 +1360,28 @@ function runContext(nodeId: number, token: string, trace: HarnessTraceSink = cre
     access,
     accessBundle: { byProviderId: { [route.providerId]: access } },
     trace,
+  };
+}
+
+function invokedRunContext(context: HarnessRunContext, actionId: number): HarnessRunContext {
+  return {
+    ...context,
+    origin: { kind: "invoke", sourceCompletionId: 1, actionId },
+  };
+}
+
+function primeSession(
+  sessionFile: string,
+  overrides: Partial<PrimeAgentSessionFixture> = {},
+): PrimeAgentSessionFixture & { readonly sessionFile: string } {
+  return {
+    sessionFile,
+    promptAndWait: vi.fn(async () => undefined),
+    waitForRlmQuiescence: vi.fn(async () => undefined),
+    abort: vi.fn(async () => undefined),
+    dispose: vi.fn(),
+    disposeAsync: vi.fn(async () => undefined),
+    ...overrides,
   };
 }
 

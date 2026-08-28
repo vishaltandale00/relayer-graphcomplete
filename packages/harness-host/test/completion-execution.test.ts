@@ -177,11 +177,42 @@ describe("CompletionExecutionModule", () => {
     expect(preparation.observe).toHaveBeenCalledTimes(1);
   });
 
-  test("rejects recovery of one completion through a different prepared capability", () => {
+  test("recovers one durable completion identity after its ephemeral capability rotates", () => {
     const terminal = deferred<CompletionLifecycleObservation>();
     let preparations = 0;
     const preparation: CompletionPreparation = {
       prepare: vi.fn(() => binding(2, preparations++ === 0 ? "first-token" : "foreign-token")),
+      current: vi.fn(async (): Promise<CompletionCurrentSnapshot> => ({
+        completionId: 2,
+        lifecycle: "active",
+        revision: 0,
+        currentLayerId: null,
+        finalLayerId: null,
+      })),
+      observe: vi.fn(() => terminal.promise),
+      fail: vi.fn(async () => {}),
+    };
+    const adapter: CompletionExecutionAdapter = {
+      complete: vi.fn(() => nativeHandle(new Promise<NativeCompletionExecution>(() => {}))),
+    };
+    const module = new CompletionExecutionModule(preparation, adapter);
+
+    const first = module.complete(inputGraph(2));
+
+    expect(module.complete(inputGraph(2))).toBe(first);
+    expect(adapter.complete).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects recovery through different durable invocation provenance", () => {
+    const terminal = deferred<CompletionLifecycleObservation>();
+    let preparations = 0;
+    const preparation: CompletionPreparation = {
+      prepare: vi.fn(() => ({
+        ...binding(2),
+        origin: preparations++ === 0
+          ? { kind: "invoke" as const, sourceCompletionId: 1, actionId: 102 }
+          : { kind: "invoke" as const, sourceCompletionId: 1, actionId: 103 },
+      })),
       current: vi.fn(async (): Promise<CompletionCurrentSnapshot> => ({
         completionId: 2,
         lifecycle: "active",

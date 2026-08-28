@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { EdgeObject, LayerObject, NodeObject, edgeId, layerId, nodeId, type ActionObject, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
-import { GraphApiError, type CompletionOutput, type CompletionState, type CurrentTransitionReceipt, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type StopReason } from "./types.js";
+import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId, type ActionObject, type ActionReference, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
+import { GraphApiError, type CompletionInputGraph, type CompletionOutput, type CompletionState, type CurrentTransitionReceipt, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type StopReason } from "./types.js";
 
 export class RelayerGraphClient {
   readonly capability: GraphCapability;
@@ -139,6 +139,13 @@ export class RelayerGraphClient {
 
   async getCurrent(): Promise<CompletionState> {
     return this.request<CompletionState>("/api/graph/current");
+  }
+
+  async prepareComplete(action: ActionReference): Promise<CompletionInputGraph> {
+    return this.request<CompletionInputGraph>("/api/graph/completions/prepare", {
+      method: "POST",
+      body: JSON.stringify({ actionId: actionId(action) }),
+    });
   }
 
   async advanceCurrent(layer: LayerReference, expectedRevision: number, operationKey: string): Promise<CurrentTransitionReceipt> {
