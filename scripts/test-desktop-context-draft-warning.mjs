@@ -183,11 +183,17 @@ async function clickNode(title) {
 }
 
 async function sendKey(keyCode, modifiers = []) {
+  if (process.platform === "darwin") app.focus({ steal: true });
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.focus();
+  await sleep(40);
   mainWindow.webContents.sendInputEvent({ type: "keyDown", keyCode, modifiers });
   if (keyCode === "Enter") {
     mainWindow.webContents.sendInputEvent({ type: "char", keyCode: "\r", modifiers });
   }
   mainWindow.webContents.sendInputEvent({ type: "keyUp", keyCode, modifiers });
+  await sleep(40);
 }
 
 async function click(selector, { focus = false, twice = false } = {}) {
@@ -677,7 +683,14 @@ async function run() {
     actionsInViewport: true,
     noHorizontalOverflow: true,
   })) throw new Error(`Many-draft layout is not usable at large zoom: ${JSON.stringify(mountedManyDraftLayout)}`);
-  await evaluate(`document.querySelector('[data-context-draft-warning-list]').scrollTop = 0`);
+  await evaluate(`(() => {
+    const list = document.querySelector('[data-context-draft-warning-list]');
+    list.scrollTop = 0;
+    list.focus({ preventScroll: true });
+  })()`);
+  await waitFor("many-draft list keyboard focus", () => evaluate(
+    `document.activeElement?.matches('[data-context-draft-warning-list]') === true`,
+  ));
   await sendKey("PageDown");
   await waitFor("keyboard scrolling in many-draft list", () => evaluate(
     `document.querySelector('[data-context-draft-warning-list]')?.scrollTop > 0`,

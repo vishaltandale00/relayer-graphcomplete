@@ -46,7 +46,6 @@ import {
   interactionContextPayload,
   interactionSendIntent,
   interactionContextTargetForEditor,
-  keyboardPageScrollTop,
   removeContextAnnotation,
   refreshComposerContextsAfterFailedConfirmationSend,
   resolveInteractionContextNode,
@@ -428,21 +427,6 @@ describe("product workspace keyboard behavior", () => {
       text: "Keep this exact pending annotation.",
       revision: 2,
     });
-  });
-
-  it("maps PageDown and PageUp to deterministic list scroll positions", () => {
-    expect(keyboardPageScrollTop({
-      key: "PageDown", scrollTop: 0, clientHeight: 160, scrollHeight: 480,
-    })).toBe(160);
-    expect(keyboardPageScrollTop({
-      key: "PageDown", scrollTop: 300, clientHeight: 160, scrollHeight: 480,
-    })).toBe(320);
-    expect(keyboardPageScrollTop({
-      key: "PageUp", scrollTop: 120, clientHeight: 160, scrollHeight: 480,
-    })).toBe(0);
-    expect(keyboardPageScrollTop({
-      key: "ArrowDown", scrollTop: 120, clientHeight: 160, scrollHeight: 480,
-    })).toBeNull();
   });
 
   it("scopes an asynchronous send lock to the thread that owns it", () => {

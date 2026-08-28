@@ -522,13 +522,6 @@ export function sendIntentIsCurrentThread(currentThreadId, attemptedThreadId) {
   return String(currentThreadId) === String(attemptedThreadId);
 }
 
-export function keyboardPageScrollTop({ key, scrollTop, clientHeight, scrollHeight }) {
-  if (key !== "PageDown" && key !== "PageUp") return null;
-  const maximum = Math.max(0, scrollHeight - clientHeight);
-  const delta = key === "PageDown" ? clientHeight : -clientHeight;
-  return Math.max(0, Math.min(maximum, scrollTop + delta));
-}
-
 export async function continueDraftOverrideAfterPersistence({
   controller,
   threadId,
@@ -2042,7 +2035,6 @@ export function createProductWorkspace({
   const prompt = $("#threadPrompt");
   const send = $("#sendInteraction");
   const contextDraftSendWarning = $("#contextDraftSendWarning");
-  const contextDraftSendWarningList = $("#contextDraftSendWarningList");
   const cancelContextDraftSend = $("#cancelContextDraftSend");
   const confirmContextDraftSend = $("#confirmContextDraftSend");
   let sendAttempt = null;
@@ -2681,7 +2673,7 @@ export function createProductWorkspace({
   };
   const openContextDraftSendWarning = (drafts, intent) => {
     const presentation = contextDraftSendWarningPresentation(drafts);
-    const list = contextDraftSendWarningList;
+    const list = $("#contextDraftSendWarningList");
     list.replaceChildren(...presentation.items.map((item) => {
       const row = graphDocument.createElement("li");
       const marker = graphDocument.createElement("span");
@@ -2699,17 +2691,6 @@ export function createProductWorkspace({
     contextDraftSendWarning.showModal();
     positionContextDraftSendWarning();
     cancelContextDraftSend.focus({ preventScroll: true });
-  };
-  contextDraftSendWarningList.onkeydown = (event) => {
-    const scrollTop = keyboardPageScrollTop({
-      key: event.key,
-      scrollTop: contextDraftSendWarningList.scrollTop,
-      clientHeight: contextDraftSendWarningList.clientHeight,
-      scrollHeight: contextDraftSendWarningList.scrollHeight,
-    });
-    if (scrollTop == null) return;
-    event.preventDefault();
-    contextDraftSendWarningList.scrollTop = scrollTop;
   };
   const repositionContextDraftSendWarning = () => {
     if (contextDraftSendWarning.open) positionContextDraftSendWarning();
