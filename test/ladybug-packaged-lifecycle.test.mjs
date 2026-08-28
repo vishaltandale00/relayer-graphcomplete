@@ -10,6 +10,7 @@ import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.
 import {
   captureLadybugPackagedLifecycle,
   npmEnvironmentForDesktopTarget,
+  parseMachOArchitectures,
   qualificationLifecycleTimeout,
   parseLadybugLockContention,
   parseDynamicLibraries,
@@ -20,6 +21,7 @@ import {
 } from "../scripts/capture-ladybug-packaged-lifecycle.mjs";
 import {
   createLadybugCargoEnvironment,
+  digestLadybugSourceTree,
   loadLadybugSourceManifest,
   sha256File,
 } from "../scripts/prepare-ladybug-source.mjs";
@@ -53,31 +55,51 @@ describe("Ladybug packaged lifecycle qualification", () => {
     })).rejects.toThrow("exact 40-character source commit");
   });
 
-  it("binds the isolated capture to its exact committed qualification inputs", async () => {
-    const receipt = JSON.parse(await readFile("docs/evidence/issue-261-ladybug-packaged-arm64.json", "utf8"));
-    expect(receipt.sourceCommit).toMatch(/^[0-9a-f]{40}$/u);
-    for (const [path, expected] of Object.entries(receipt.inputSha256)) {
-      const { stdout } = await execFileAsync("git", ["show", `${receipt.sourceCommit}:${path}`], {
-        encoding: "buffer",
-        maxBuffer: 10 * 1024 * 1024,
+  it("binds both isolated macOS captures to their exact committed qualification inputs", async () => {
+    const expectations = [
+      ["issue-261-ladybug-packaged-arm64.json", {
+        target: "macos-arm64",
+        rustTarget: "aarch64-apple-darwin",
+        hostArchitecture: "arm64",
+        executionMode: "native",
+        lifecycleTimeoutMs: 5_000,
+      }],
+      ["issue-261-ladybug-packaged-intel.json", {
+        target: "macos-x64",
+        rustTarget: "x86_64-apple-darwin",
+        hostArchitecture: "arm64",
+        executionMode: "rosetta",
+        lifecycleTimeoutMs: 15_000,
+      }],
+    ];
+
+    for (const [file, targetExpectation] of expectations) {
+      const receipt = JSON.parse(await readFile(`docs/evidence/${file}`, "utf8"));
+      expect(receipt.sourceCommit).toMatch(/^[0-9a-f]{40}$/u);
+      for (const [path, expected] of Object.entries(receipt.inputSha256)) {
+        const { stdout } = await execFileAsync("git", ["show", `${receipt.sourceCommit}:${path}`], {
+          encoding: "buffer",
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        expect(createHash("sha256").update(stdout).digest("hex"), `${file}:${path}`).toBe(expected);
+      }
+      for (const expected of Object.values(receipt.preparedReceiptSha256)) {
+        expect(expected).toMatch(/^[0-9a-f]{64}$/u);
+      }
+      expect(receipt).toMatchObject({
+        ...targetExpectation,
+        buildIsolation: "clean-detached-worktree-and-empty-cargo-target",
+        dependencyIsolation: "locked-offline-npm-ci-and-generated-assets",
+        nativeMode: "fully-static-ladybug-and-openssl",
+        minimumMacOSVersion: "13.3",
+        cleanProfileCreated: true,
+        lockContentionRejected: true,
+        cleanShutdown: true,
+        restartReopenedPersistedMarker: true,
+        storageVersion: 42,
+        lbug: { version: "0.18.0", extensions: [] },
       });
-      expect(createHash("sha256").update(stdout).digest("hex"), path).toBe(expected);
     }
-    for (const expected of Object.values(receipt.preparedReceiptSha256)) {
-      expect(expected).toMatch(/^[0-9a-f]{64}$/u);
-    }
-    expect(receipt).toMatchObject({
-      target: "macos-arm64",
-      buildIsolation: "clean-detached-worktree-and-empty-cargo-target",
-      dependencyIsolation: "locked-offline-npm-ci-and-generated-assets",
-      nativeMode: "fully-static-ladybug-and-openssl",
-      minimumMacOSVersion: "13.3",
-      cleanProfileCreated: true,
-      lockContentionRejected: true,
-      cleanShutdown: true,
-      restartReopenedPersistedMarker: true,
-      lbug: { version: "0.19.1", extensions: [] },
-    });
   });
 
   it("accepts only system dynamic-library imports", () => {
@@ -110,6 +132,12 @@ describe("Ladybug packaged lifecycle qualification", () => {
           sdk 26.0
 `)).toBe("13.3");
     expect(() => parseMinimumMacOSVersion("no build version")).toThrow("omits LC_BUILD_VERSION");
+  });
+
+  it("reads the exact packaged Mach-O architecture", () => {
+    expect(parseMachOArchitectures("x86_64\n")).toEqual(["x86_64"]);
+    expect(parseMachOArchitectures("arm64 x86_64\n")).toEqual(["arm64", "x86_64"]);
+    expect(() => parseMachOArchitectures("\n")).toThrow("no Mach-O architecture");
   });
 
   it("rejects every Mach-O runtime search path", () => {
@@ -186,6 +214,10 @@ describe("Ladybug packaged lifecycle qualification", () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-ladybug-capture-test-"));
     try {
       const manifest = await loadLadybugSourceManifest();
+      const ladybugCore = join(root, "lbug-0.18.0", "lbug-src");
+      await mkdir(ladybugCore, { recursive: true });
+      await writeFile(join(ladybugCore, "reviewed.cpp"), "reviewed Ladybug core");
+      manifest.core.embeddedTreeSha256 = await digestLadybugSourceTree(ladybugCore);
       const lib = join(root, "openssl-prefix", "lib");
       await mkdir(lib, { recursive: true });
       await writeFile(join(lib, "libssl.a"), "reviewed ssl");
@@ -214,6 +246,14 @@ describe("Ladybug packaged lifecycle qualification", () => {
         manifest,
         target: "aarch64-apple-darwin",
       })).resolves.toMatchObject({ cargoEnvironment: receipt });
+
+      await writeFile(join(ladybugCore, "reviewed.cpp"), "mutated Ladybug core");
+      await expect(validatePreparedLadybugSource({
+        sourceOutput: root,
+        manifest,
+        target: "aarch64-apple-darwin",
+      })).rejects.toThrow("differs from the reviewed source tree");
+      await writeFile(join(ladybugCore, "reviewed.cpp"), "reviewed Ladybug core");
 
       receipt.environment.LBUG_SOURCE_DIR = "/tmp/ambient-ladybug";
       await writeFile(join(root, "cargo-build-env.json"), `${JSON.stringify(receipt)}\n`);

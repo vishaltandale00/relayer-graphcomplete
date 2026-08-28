@@ -5,13 +5,13 @@
   "sourceCommit": "15a0770f6d958d790ba68dc2809fe8aee6f83afe",
   "buildIsolation": "clean-detached-worktree-and-empty-cargo-target",
   "dependencyIsolation": "locked-offline-npm-ci-and-generated-assets",
-  "target": "macos-arm64",
-  "rustTarget": "aarch64-apple-darwin",
+  "target": "macos-x64",
+  "rustTarget": "x86_64-apple-darwin",
   "hostArchitecture": "arm64",
-  "executionMode": "native",
+  "executionMode": "rosetta",
   "application": "Relayer Dev.app",
   "binary": "Contents/Resources/bin/relayer-graph-server",
-  "binarySha256": "c205eea882f7c2affcee6ece6e926d98c3eba3035c7a634ae9ab79d17689b189",
+  "binarySha256": "ef9b861daff99bd202d3228fc0f4bf8778f74ab9fa116ff327dc76a1f680f026",
   "lbug": { "version": "0.18.0", "extensions": [] },
   "nativeMode": "fully-static-ladybug-and-openssl",
   "dynamicLibraries": [
@@ -31,17 +31,17 @@
   },
   "preparedReceiptSha256": {
     "source-receipt.json": "48ab7e907c539bb4077c8e3081f9c3760433ffb0650d3356a7ab16684183e3c9",
-    "cargo-build-env.json": "3e51ad91c834fc7ab90a93d8cde09f3ba0708797ec006d595e1ed75106a04cdf"
+    "cargo-build-env.json": "a713a1158b03dccd3b97a3e24735c8ebbc42d377fd85ba68e374975f5752d5c0"
   },
-  "lifecycleTimeoutMs": 5000,
+  "lifecycleTimeoutMs": 15000,
   "cleanProfileCreated": true,
   "lockContentionRejected": true,
   "cleanShutdown": true,
   "restartReopenedPersistedMarker": true,
   "storageVersion": 42,
-  "lockFailure": "Could not set lock on file : /var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-ladybug-packaged-YlgtHY/ladybug (Lock is held by PID 75088)",
+  "lockFailure": "Could not set lock on file : /var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-ladybug-packaged-kOEyHs/ladybug (Lock is held by PID 78448)",
   "limitations": [
-    "local macos-arm64 native execution only",
+    "local macos-x64 Rosetta execution only",
     "unsigned development package",
     "not release-ready licensing evidence"
   ]

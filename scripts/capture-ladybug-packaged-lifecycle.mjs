@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn as spawnProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
-import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { cp, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
@@ -11,6 +11,7 @@ import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.
 import { desktopTargetFromEnvironment } from "../desktop/shared/target.mjs";
 import {
   createLadybugCargoEnvironment,
+  digestLadybugSourceTree,
   loadLadybugSourceManifest,
   sha256File,
 } from "./prepare-ladybug-source.mjs";
@@ -45,6 +46,12 @@ export function verifyNoRuntimePaths(output) {
   if (/^\s*cmd LC_RPATH\s*$/mu.test(String(output))) {
     throw new Error("packaged graph server contains a forbidden LC_RPATH load command");
   }
+}
+
+export function parseMachOArchitectures(output) {
+  const architectures = String(output).trim().split(/\s+/u).filter(Boolean);
+  if (architectures.length === 0) throw new Error("packaged graph server has no Mach-O architecture");
+  return architectures;
 }
 
 export function parseLadybugLockContention(output) {
@@ -258,12 +265,24 @@ export async function validatePreparedLadybugSource({ sourceOutput, manifest, ta
     assert.equal(await sha256File(path), artifact.sha256, `${artifact.file} differs from its prepared digest`);
   }
 
+  const ladybugSourceTreeSha256 = await digestLadybugSourceTree(
+    cargoEnvironment.environment.LBUG_SOURCE_DIR,
+  );
+  assert.equal(
+    ladybugSourceTreeSha256,
+    manifest.core.embeddedTreeSha256,
+    "prepared Ladybug core differs from the reviewed source tree immediately before compilation",
+  );
+
   return {
     sourceReceipt,
     cargoEnvironment,
     preparedReceiptSha256: {
       "source-receipt.json": await sha256File(sourceReceiptPath),
       "cargo-build-env.json": await sha256File(cargoEnvironmentPath),
+    },
+    preparedSourceSha256: {
+      ladybugCoreTree: ladybugSourceTreeSha256,
     },
   };
 }
@@ -360,33 +379,54 @@ export async function captureLadybugPackagedLifecycle({
     throw new Error("the local #261 packaged Ladybug proof supports only macOS targets");
   }
   const manifest = await loadLadybugSourceManifest();
-  const {
-    sourceReceipt,
-    cargoEnvironment: sourceEnvironment,
-    preparedReceiptSha256,
-  } = await validatePreparedLadybugSource({
-    sourceOutput,
-    manifest,
-    target: target.rustTarget,
-  });
   if (manifest.rustBinding.version !== "0.18.0" || manifest.extensions.length !== 0) {
     throw new Error("Ladybug source manifest is not the exact extension-free 0.18.0 contract");
   }
-  if (
-    sourceReceipt.sources?.find((source) => source.id === "rust-binding")?.sha256 !== manifest.rustBinding.sha256
-    || sourceReceipt.sources?.find((source) => source.id === "openssl")?.sha256 !== manifest.openssl.sha256
-    || sourceReceipt.rustBinding?.version !== manifest.rustBinding.version
-    || sourceReceipt.rustBinding?.patched !== false
-    || sourceReceipt.rustBinding?.buildScriptSha256 !== manifest.rustBinding.buildScriptSha256
-    || sourceReceipt.core?.embeddedTreeSha256 !== manifest.core.embeddedTreeSha256
-    || sourceReceipt.openssl?.version !== manifest.openssl.version
-    || sourceReceipt.openssl?.sha256 !== manifest.openssl.sha256
-    || sourceReceipt.extensions?.length !== 0
-  ) {
-    throw new Error("Ladybug source receipt does not match the pinned unmodified source manifest");
-  }
   if (environment.RUSTFLAGS || environment.CARGO_ENCODED_RUSTFLAGS) {
     throw new Error("the packaged Ladybug proof rejects ambient Rust compiler flags");
+  }
+  const qualificationRoot = await mkdtemp(join(tmpdir(), "relayer-ladybug-clean-build-"));
+  const preparedSource = join(qualificationRoot, "prepared-source");
+  let sourceReceipt;
+  let sourceEnvironment;
+  let preparedReceiptSha256;
+  let preparedSourceSha256;
+  try {
+    await cp(resolve(sourceOutput), preparedSource, { recursive: true, errorOnExist: true, force: false });
+    const copiedCargoEnvironmentPath = join(preparedSource, "cargo-build-env.json");
+    const copiedCargoEnvironment = JSON.parse(await readFile(copiedCargoEnvironmentPath, "utf8"));
+    copiedCargoEnvironment.environment = createLadybugCargoEnvironment({
+      manifest,
+      outputDirectory: preparedSource,
+      target: target.rustTarget,
+    });
+    await writeFile(copiedCargoEnvironmentPath, `${JSON.stringify(copiedCargoEnvironment, null, 2)}\n`);
+    ({
+      sourceReceipt,
+      cargoEnvironment: sourceEnvironment,
+      preparedReceiptSha256,
+      preparedSourceSha256,
+    } = await validatePreparedLadybugSource({
+      sourceOutput: preparedSource,
+      manifest,
+      target: target.rustTarget,
+    }));
+    if (
+      sourceReceipt.sources?.find((source) => source.id === "rust-binding")?.sha256 !== manifest.rustBinding.sha256
+      || sourceReceipt.sources?.find((source) => source.id === "openssl")?.sha256 !== manifest.openssl.sha256
+      || sourceReceipt.rustBinding?.version !== manifest.rustBinding.version
+      || sourceReceipt.rustBinding?.patched !== false
+      || sourceReceipt.rustBinding?.buildScriptSha256 !== manifest.rustBinding.buildScriptSha256
+      || sourceReceipt.core?.embeddedTreeSha256 !== manifest.core.embeddedTreeSha256
+      || sourceReceipt.openssl?.version !== manifest.openssl.version
+      || sourceReceipt.openssl?.sha256 !== manifest.openssl.sha256
+      || sourceReceipt.extensions?.length !== 0
+    ) {
+      throw new Error("Ladybug source receipt does not match the pinned unmodified source manifest");
+    }
+  } catch (error) {
+    await rm(qualificationRoot, { recursive: true, force: true });
+    throw error;
   }
   const buildEnvironment = {
     ...environment,
@@ -396,7 +436,6 @@ export async function captureLadybugPackagedLifecycle({
   };
   for (const name of manifest.build.environmentMustBeUnset) delete buildEnvironment[name];
   buildEnvironment.LBUG_BUILD_FROM_SOURCE = "1";
-  const qualificationRoot = await mkdtemp(join(tmpdir(), "relayer-ladybug-clean-build-"));
   const checkout = join(qualificationRoot, "source");
   const cargoTarget = join(qualificationRoot, "cargo-target");
   let checkoutAdded = false;
@@ -407,6 +446,8 @@ export async function captureLadybugPackagedLifecycle({
     const { stdout: checkoutStatus } = await execFileAsync("git", ["status", "--porcelain"], { cwd: checkout });
     if (checkoutStatus !== "") throw new Error("detached qualification checkout is not clean");
     for (const path of [
+      "desktop/packaging/build-development.mjs",
+      "desktop/shared/target.mjs",
       "scripts/capture-ladybug-packaged-lifecycle.mjs",
       "scripts/prepare-ladybug-source.mjs",
       "vendor/ladybug/source-build-manifest.json",
@@ -441,6 +482,15 @@ export async function captureLadybugPackagedLifecycle({
     const appPath = await packagedApplicationBuiltAfter(join(checkout, "desktop", "dist"), startedAt);
   const executable = join(appPath, "Contents", "Resources", "bin", "relayer-graph-server");
   const binarySha256 = createHash("sha256").update(await readFile(executable)).digest("hex");
+  const binaryArchitectures = parseMachOArchitectures(
+    (await execFileAsync("/usr/bin/lipo", ["-archs", executable])).stdout,
+  );
+  const expectedArchitecture = target.architecture === "x64" ? "x86_64" : target.architecture;
+  assert.deepEqual(
+    binaryArchitectures,
+    [expectedArchitecture],
+    `packaged graph server architecture differs from ${target.key}`,
+  );
   const libraries = parseDynamicLibraries((await execFileAsync("/usr/bin/otool", ["-L", executable])).stdout);
   verifySystemOnlyDynamicLibraries(libraries);
   const loadCommands = (await execFileAsync("/usr/bin/otool", ["-l", executable])).stdout;
@@ -458,6 +508,7 @@ export async function captureLadybugPackagedLifecycle({
     "crates/relayer-graph-server/Cargo.toml",
     "crates/relayer-graph-server/src/main.rs",
     "desktop/packaging/build-development.mjs",
+    "desktop/shared/target.mjs",
     "scripts/capture-ladybug-packaged-lifecycle.mjs",
     "scripts/prepare-ladybug-source.mjs",
     "vendor/ladybug/source-build-manifest.json",
@@ -483,12 +534,14 @@ export async function captureLadybugPackagedLifecycle({
     application: basename(appPath),
     binary: "Contents/Resources/bin/relayer-graph-server",
     binarySha256,
+    binaryArchitectures,
     lbug: { version: manifest.rustBinding.version, extensions: manifest.extensions },
     nativeMode: manifest.build.nativeMode,
     dynamicLibraries: libraries,
     minimumMacOSVersion,
     inputSha256,
     preparedReceiptSha256,
+    preparedSourceSha256,
     lifecycleTimeoutMs,
     ...lifecycle,
     limitations: [

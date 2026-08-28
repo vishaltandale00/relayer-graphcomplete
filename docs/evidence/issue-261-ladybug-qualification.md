@@ -35,10 +35,9 @@ mean that commit alone is not an exact substitute for the crate bytes.
 ## What passed
 
 - The exact unmodified 0.18.0 binding and core build from reviewed source bytes on macOS arm64 and
-  Intel with
-  pinned static-only OpenSSL 3.5.8, Cargo offline, and operating-system network access denied. The
-  resulting binary targets macOS 13.3 and imports only system `libiconv`, libc++, and libSystem; it
-  has no undefined OpenSSL symbols and needs no Ladybug/OpenSSL dylib or rpath.
+  Intel with pinned static-only OpenSSL 3.5.8 and locked offline Cargo. The resulting binary targets
+  macOS 13.3 and imports only system `libiconv`, libc++, and libSystem; it needs no
+  Ladybug/OpenSSL dylib or rpath.
 - All 20 positive v1 cases execute through contract-private Ladybug lowerings and deep-compare
   exactly with the frozen columns, ordered rows, tagged values, graph identities/properties, path
   order, and truncation flags. Node, layer, relationship, path, list, record, null, and scalar
@@ -140,8 +139,10 @@ embedded core, and static OpenSSL source bytes.
 
 The upstream release digests were independently compared to the downloaded arm64, Intel, and
 Windows shared archives. The pinned source build and full contract probe were executed on macOS
-arm64. Cross-target packaged launch, signing, and release evidence remain unproven; source and API
-inspection are not substitutes for those runtime boundaries.
+arm64. Clean detached packaged captures at commit
+`15a0770f6d958d790ba68dc2809fe8aee6f83afe` bind the macOS arm64 native and Intel/Rosetta results
+to their exact source inputs. Windows packaged launch, signing, and release evidence remain
+unproven; source and API inspection are not substitutes for those runtime boundaries.
 
 The superseded 0.19.1 Intel attempt is retained in `issue-261-ladybug-intel-link-blocker.txt`. It used an exact clean
 checkout, offline lockfile install, empty Cargo target, x86_64 static OpenSSL, and Rosetta. Ladybug's
@@ -151,10 +152,12 @@ avoids the regression without a fork.
 
 The original focused probe and historical cancellation falsifier are in
 `issue-261-ladybug-probe/`. The 0.18.0 exact-envelope corpus probe, captured output, lockfile,
-coverage, and digest receipt are in `issue-261-ladybug-contract-probe/`. The checked-in arm64 source
-and package observations still describe the preceding 0.19.1 qualification and remain historical
-until the clean detached 0.18.0 captures replace them. Current local arm64 and Intel results are
-non-certifying until those receipts bind an exact commit.
+coverage, and digest receipt are in `issue-261-ladybug-contract-probe/`. The superseded source
+observation remains historical. The active package receipts are
+`issue-261-ladybug-packaged-arm64.json` and `issue-261-ladybug-packaged-intel.json`; both bind the
+exact 0.18.0 qualification inputs at commit `15a0770f6d958d790ba68dc2809fe8aee6f83afe`.
+The Intel receipt records a bounded 15-second first-launch window for Rosetta translation; the
+arm64 native receipt retains the 5-second window.
 
 Source identity was checked with recursive diffs. The crate's packaged
 `lbug-src/{src,cmake,third_party,CMakeLists.txt,tools/CMakeLists.txt}` bytes match core tag v0.18.0.
