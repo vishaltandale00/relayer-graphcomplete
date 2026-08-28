@@ -140,7 +140,7 @@ embedded core, and static OpenSSL source bytes.
 The upstream release digests were independently compared to the downloaded arm64, Intel, and
 Windows shared archives. The pinned source build and full contract probe were executed on macOS
 arm64. Clean detached packaged captures at commit
-`15a0770f6d958d790ba68dc2809fe8aee6f83afe` bind the macOS arm64 native and Intel/Rosetta results
+`23a2d3d176d4e29330a3154d071b365881abf017` bind the macOS arm64 native and Intel/Rosetta results
 to their exact source inputs. Windows packaged launch, signing, and release evidence remain
 unproven; source and API inspection are not substitutes for those runtime boundaries.
 
@@ -155,7 +155,7 @@ The original focused probe and historical cancellation falsifier are in
 coverage, and digest receipt are in `issue-261-ladybug-contract-probe/`. The superseded source
 observation remains historical. The active package receipts are
 `issue-261-ladybug-packaged-arm64.json` and `issue-261-ladybug-packaged-intel.json`; both bind the
-exact 0.18.0 qualification inputs at commit `15a0770f6d958d790ba68dc2809fe8aee6f83afe`.
+exact 0.18.0 qualification inputs at commit `23a2d3d176d4e29330a3154d071b365881abf017`.
 Both receipts use a bounded 15-second cold packaged-startup window. The previous 5-second native
 window was falsified by a clean arm64 capture before the lifecycle emitted its first state.
 

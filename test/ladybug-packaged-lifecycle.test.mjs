@@ -27,6 +27,67 @@ import {
 } from "../scripts/prepare-ladybug-source.mjs";
 
 const execFileAsync = promisify(execFile);
+const receiptInputPaths = [
+  "Cargo.lock",
+  "crates/relayer-graph-server/Cargo.toml",
+  "crates/relayer-graph-server/src/main.rs",
+  "desktop/packaging/build-development.mjs",
+  "desktop/shared/target.mjs",
+  "scripts/capture-ladybug-packaged-lifecycle.mjs",
+  "scripts/prepare-ladybug-source.mjs",
+  "vendor/ladybug/source-build-manifest.json",
+].sort();
+const receiptFields = [
+  "application", "binary", "binaryArchitectures", "binarySha256", "buildIsolation",
+  "capturedOn", "cleanProfileCreated", "cleanShutdown", "dependencyIsolation",
+  "dynamicLibraries", "executionMode", "hostArchitecture", "inputSha256", "lbug",
+  "lifecycleTimeoutMs", "limitations", "lockContentionRejected", "lockFailure",
+  "minimumMacOSVersion", "nativeMode", "preparedReceiptSha256", "preparedSourceSha256",
+  "restartReopenedPersistedMarker", "rustTarget", "schemaVersion", "scope", "sourceCommit",
+  "storageVersion", "target",
+].sort();
+
+function verifyReceiptShape(receipt, targetExpectation) {
+  const { limitation, ...receiptExpectation } = targetExpectation;
+  expect(Object.keys(receipt).sort()).toEqual(receiptFields);
+  expect(Object.keys(receipt.inputSha256).sort()).toEqual(receiptInputPaths);
+  expect(Object.keys(receipt.preparedReceiptSha256).sort()).toEqual([
+    "cargo-build-env.json", "source-receipt.json",
+  ]);
+  expect(receipt.preparedSourceSha256).toEqual({
+    ladybugCoreTree: "c90c2bd925e72dcc6c9e51c17b1a150589e719c949d364ded4a98389f0aabe62",
+  });
+  expect(receipt.binarySha256).toMatch(/^[0-9a-f]{64}$/u);
+  expect(receipt.capturedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
+  expect(receipt.dynamicLibraries).toEqual([
+    "/usr/lib/libc++.1.dylib",
+    "/usr/lib/libiconv.2.dylib",
+    "/usr/lib/libSystem.B.dylib",
+  ]);
+  expect(receipt.limitations).toEqual([
+    limitation,
+    "unsigned development package",
+    "not release-ready licensing evidence",
+  ]);
+  expect(parseLadybugLockContention(receipt.lockFailure)).toBe(receipt.lockFailure);
+  expect(receipt).toMatchObject({
+    ...receiptExpectation,
+    schemaVersion: 1,
+    scope: "issue-261-local-packaged-qualification",
+    application: "Relayer Dev.app",
+    binary: "Contents/Resources/bin/relayer-graph-server",
+    buildIsolation: "clean-detached-worktree-and-empty-cargo-target",
+    dependencyIsolation: "locked-offline-npm-ci-and-generated-assets",
+    nativeMode: "fully-static-ladybug-and-openssl",
+    minimumMacOSVersion: "13.3",
+    cleanProfileCreated: true,
+    lockContentionRejected: true,
+    cleanShutdown: true,
+    restartReopenedPersistedMarker: true,
+    storageVersion: 42,
+    lbug: { version: "0.18.0", extensions: [] },
+  });
+}
 
 describe("Ladybug packaged lifecycle qualification", () => {
   it("gives every cold packaged launch one recorded bounded window", () => {
@@ -62,20 +123,27 @@ describe("Ladybug packaged lifecycle qualification", () => {
         rustTarget: "aarch64-apple-darwin",
         hostArchitecture: "arm64",
         executionMode: "native",
-        lifecycleTimeoutMs: 5_000,
+        binaryArchitectures: ["arm64"],
+        lifecycleTimeoutMs: 15_000,
+        limitation: "local macos-arm64 native execution only",
       }],
       ["issue-261-ladybug-packaged-intel.json", {
         target: "macos-x64",
         rustTarget: "x86_64-apple-darwin",
         hostArchitecture: "arm64",
         executionMode: "rosetta",
+        binaryArchitectures: ["x86_64"],
         lifecycleTimeoutMs: 15_000,
+        limitation: "local macos-x64 Rosetta execution only",
       }],
     ];
+    const sourceCommits = new Set();
 
     for (const [file, targetExpectation] of expectations) {
       const receipt = JSON.parse(await readFile(`docs/evidence/${file}`, "utf8"));
+      verifyReceiptShape(receipt, targetExpectation);
       expect(receipt.sourceCommit).toMatch(/^[0-9a-f]{40}$/u);
+      sourceCommits.add(receipt.sourceCommit);
       for (const [path, expected] of Object.entries(receipt.inputSha256)) {
         const { stdout } = await execFileAsync("git", ["show", `${receipt.sourceCommit}:${path}`], {
           encoding: "buffer",
@@ -83,23 +151,34 @@ describe("Ladybug packaged lifecycle qualification", () => {
         });
         expect(createHash("sha256").update(stdout).digest("hex"), `${file}:${path}`).toBe(expected);
       }
-      for (const expected of Object.values(receipt.preparedReceiptSha256)) {
+      for (const expected of [
+        ...Object.values(receipt.preparedReceiptSha256),
+        ...Object.values(receipt.preparedSourceSha256),
+      ]) {
         expect(expected).toMatch(/^[0-9a-f]{64}$/u);
       }
-      expect(receipt).toMatchObject({
-        ...targetExpectation,
-        buildIsolation: "clean-detached-worktree-and-empty-cargo-target",
-        dependencyIsolation: "locked-offline-npm-ci-and-generated-assets",
-        nativeMode: "fully-static-ladybug-and-openssl",
-        minimumMacOSVersion: "13.3",
-        cleanProfileCreated: true,
-        lockContentionRejected: true,
-        cleanShutdown: true,
-        restartReopenedPersistedMarker: true,
-        storageVersion: 42,
-        lbug: { version: "0.18.0", extensions: [] },
-      });
     }
+    expect(sourceCommits).toEqual(new Set(["23a2d3d176d4e29330a3154d071b365881abf017"]));
+  });
+
+  it("rejects omitted or mutated packaged receipt authority fields", async () => {
+    const receipt = JSON.parse(await readFile(
+      "docs/evidence/issue-261-ladybug-packaged-arm64.json",
+      "utf8",
+    ));
+    const expectation = {
+      target: "macos-arm64",
+      rustTarget: "aarch64-apple-darwin",
+      hostArchitecture: "arm64",
+      executionMode: "native",
+      binaryArchitectures: ["arm64"],
+      lifecycleTimeoutMs: 15_000,
+      limitation: "local macos-arm64 native execution only",
+    };
+    expect(() => verifyReceiptShape({ ...receipt, inputSha256: {} }, expectation)).toThrow();
+    expect(() => verifyReceiptShape({ ...receipt, preparedReceiptSha256: {} }, expectation)).toThrow();
+    expect(() => verifyReceiptShape({ ...receipt, binaryArchitectures: ["x86_64"] }, expectation)).toThrow();
+    expect(() => verifyReceiptShape({ ...receipt, limitations: [] }, expectation)).toThrow();
   });
 
   it("accepts only system dynamic-library imports", () => {
