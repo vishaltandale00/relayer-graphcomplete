@@ -111,9 +111,6 @@ impl SqliteGraphStore {
         else {
             return Ok(AttachPersonalPresentationResult::VersionNotPublished);
         };
-        if retired != 0 {
-            return Ok(AttachPersonalPresentationResult::VersionRetired);
-        }
         let root_layer_id = valid_layer_id(root_layer_id)?;
 
         if let Some((stored_version, stored_root)) = sqlx::query_as::<_, (i64, i64)>(
@@ -130,6 +127,9 @@ impl SqliteGraphStore {
                 return Ok(AttachPersonalPresentationResult::Attached(root_layer_id));
             }
             return Ok(AttachPersonalPresentationResult::Conflict);
+        }
+        if retired != 0 {
+            return Ok(AttachPersonalPresentationResult::VersionRetired);
         }
 
         sqlx::query(

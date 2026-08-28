@@ -578,7 +578,8 @@ async fn accept_single_node(
 
 #[tokio::test]
 async fn personal_presentation_attachment_is_control_owned_one_shot_and_hidden_from_completion() {
-    let database = GraphDatabase::in_memory().await.unwrap();
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
     let version = personal_presentation_interaction(
         &database,
         "Personal presentation version V1",
@@ -630,6 +631,43 @@ async fn personal_presentation_attachment_is_control_owned_one_shot_and_hidden_f
         resolved.graph.layers[0].nodes[0].kind,
         "presentation-preference"
     );
+
+    let fixture = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(file.path())
+                .foreign_keys(true),
+        )
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE personal_presentation_versions SET retired=1 WHERE version_interaction_node_id=?1",
+    )
+    .bind(version.id.value())
+    .execute(&fixture)
+    .await
+    .unwrap();
+    assert_eq!(
+        database
+            .attach_personal_presentation(target.id, version.id)
+            .await
+            .unwrap(),
+        first
+    );
+    let new_target = database
+        .create_interaction(Some(project(1)), thread(1), "New interaction")
+        .await
+        .unwrap();
+    assert!(matches!(
+        database
+            .attach_personal_presentation(new_target.id, version.id)
+            .await,
+        Err(GraphError::Validation {
+            code: "personal_presentation_version_retired",
+            ..
+        })
+    ));
 
     let target_writer = database.writer_for_subgraph(target.id).await.unwrap();
     let answer = node(&target_writer, "answer").await;
