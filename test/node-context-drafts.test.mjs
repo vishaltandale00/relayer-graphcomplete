@@ -12,6 +12,79 @@ const targetNode = {
 };
 
 describe("node-context draft renderer state", () => {
+  it("lists no drafts for an empty thread", () => {
+    const controller = createNodeContextDraftController({ api: {} });
+
+    expect(controller.draftsForThread("alpha")).toEqual([]);
+  });
+
+  it("lists many restored drafts in their stable server order", async () => {
+    const drafts = Array.from({ length: 12 }, (_, index) => ({
+      id: `draft-${index}`,
+      threadId: 1,
+      target: { ...target, nodeId: 100 + index },
+      targetNode: { ...targetNode, id: 100 + index, title: `Node ${index}` },
+      text: `Draft ${index}`,
+      revision: index + 1,
+    }));
+    const api = { list: vi.fn(async () => ({ drafts })) };
+    const controller = createNodeContextDraftController({ api });
+
+    await controller.load("alpha");
+
+    expect(controller.draftsForThread("alpha").map((draft) => draft.id)).toEqual(
+      drafts.map((draft) => draft.id),
+    );
+  });
+
+  it("includes local unsaved drafts in controller order", () => {
+    let nextId = 0;
+    const controller = createNodeContextDraftController({
+      api: {},
+      createId: () => `local-${nextId++}`,
+      schedule: () => 1,
+      cancel: vi.fn(),
+    });
+    const secondTarget = { ...target, nodeId: 8 };
+    const secondNode = { ...targetNode, id: 8, title: "Second queue" };
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "First local note");
+    controller.open("alpha", secondTarget, secondNode);
+
+    expect(controller.draftsForThread("alpha")).toMatchObject([
+      { id: "local-0", text: "First local note", status: "unsaved" },
+      { id: "local-1", text: "", status: "unsaved" },
+    ]);
+  });
+
+  it("returns detached immutable observations that cannot mutate controller drafts", () => {
+    const controller = createNodeContextDraftController({
+      api: {},
+      createId: () => "local-id",
+      schedule: () => 1,
+      cancel: vi.fn(),
+    });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "Keep this note");
+
+    const observed = controller.draftsForThread("alpha");
+    expect(() => observed.push({})).toThrow();
+    expect(() => { observed[0].text = "mutated"; }).toThrow();
+    expect(() => { observed[0].target.nodeId = 999; }).toThrow();
+    expect(() => { observed[0].targetNode.title = "Mutated title"; }).toThrow();
+
+    expect(controller.draftForNode("alpha", 7)).toMatchObject({
+      text: "Keep this note",
+      target: { nodeId: 7 },
+      targetNode: { title: "Incoming queue" },
+    });
+    expect(controller.draftsForThread("alpha")[0]).toMatchObject({
+      text: "Keep this note",
+      target: { nodeId: 7 },
+      targetNode: { title: "Incoming queue" },
+    });
+  });
+
   it("restores independent server drafts when navigating between threads", async () => {
     const api = {
       list: vi.fn(async (threadId) => ({
@@ -52,6 +125,85 @@ describe("node-context draft renderer state", () => {
       error: "disk full",
       revision: null,
     });
+  });
+
+  it("persists every local draft before an overridden send can continue", async () => {
+    const api = {
+      save: vi.fn(async (_threadId, draft) => ({
+        ...draft,
+        revision: draft.target.nodeId,
+        createdAt: "2026-08-28T00:00:00Z",
+        updatedAt: "2026-08-28T00:00:00Z",
+      })),
+    };
+    let nextId = 0;
+    const controller = createNodeContextDraftController({
+      api,
+      createId: () => `draft-${nextId++}`,
+      schedule: () => 1,
+      cancel: vi.fn(),
+    });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "First note");
+    controller.open(
+      "alpha",
+      { ...target, nodeId: 8 },
+      { ...targetNode, id: 8, title: "Second queue" },
+    );
+    controller.update("alpha", 8, "Second note");
+
+    await expect(controller.persistAll("alpha")).resolves.toMatchObject([
+      { text: "First note", revision: 7, status: "saved" },
+      { text: "Second note", revision: 8, status: "saved" },
+    ]);
+    expect(api.save).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not rewrite drafts that are already durably saved", async () => {
+    const api = {
+      list: vi.fn(async () => ({
+        drafts: [{
+          id: "saved-draft",
+          threadId: "alpha",
+          target,
+          targetNode,
+          text: "Already durable",
+          revision: 4,
+        }],
+      })),
+      save: vi.fn(),
+    };
+    const controller = createNodeContextDraftController({ api });
+    await controller.load("alpha");
+
+    await expect(controller.persistAll("alpha")).resolves.toMatchObject([{
+      id: "saved-draft",
+      revision: 4,
+      status: "saved",
+    }]);
+    expect(api.save).not.toHaveBeenCalled();
+  });
+
+  it("blocks an overridden send while any draft still cannot be persisted", async () => {
+    const api = { save: vi.fn(async () => { throw new Error("disk full"); }) };
+    const controller = createNodeContextDraftController({
+      api,
+      createId: () => "stable-draft",
+      schedule: () => 1,
+      cancel: vi.fn(),
+    });
+    controller.open("alpha", target, targetNode);
+    controller.update("alpha", 7, "Keep this note");
+
+    await expect(controller.persistAll("alpha")).rejects.toThrow(
+      "1 annotation draft is not saved yet",
+    );
+    expect(controller.draftsForThread("alpha")).toMatchObject([{
+      id: "stable-draft",
+      text: "Keep this note",
+      status: "error",
+      revision: null,
+    }]);
   });
 
   it("keeps a newer edit unsaved when an older autosave response arrives", async () => {
