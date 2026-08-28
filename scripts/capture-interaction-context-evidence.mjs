@@ -137,6 +137,23 @@ async function refreshCaptureSurface() {
   await sleep(120);
 }
 
+async function capturePagePng(label, timeoutMs = 10_000) {
+  let timeout;
+  try {
+    const image = await Promise.race([
+      mainWindow.webContents.capturePage(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(
+          `Timed out after ${timeoutMs}ms while capturing ${label}.`,
+        )), timeoutMs);
+      }),
+    ]);
+    return image.toPNG();
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 async function captureStep(caption, selector, duration = 4.5) {
   await mkdir(framesDirectory, { recursive: true });
   await evaluate(`(() => {
@@ -158,8 +175,9 @@ async function captureStep(caption, selector, duration = 4.5) {
   })()`);
   await refreshCaptureSurface();
   const file = join(framesDirectory, `${String(frames.length + 1).padStart(2, "0")}.png`);
-  await writeFile(file, (await mainWindow.webContents.capturePage()).toPNG());
+  await writeFile(file, await capturePagePng(`video frame ${frames.length + 1}`));
   frames.push({ file, duration, caption });
+  process.stdout.write(`Captured ${frames.length}/20: ${caption}\n`);
   await evaluate(`(() => {
     document.querySelector('[data-relayer-evidence-caption]')?.remove();
     document.querySelectorAll('[data-relayer-evidence-highlight]').forEach((element) => {
@@ -593,6 +611,7 @@ async function run() {
   );
   mainWindow.setSize(1480, 920);
   await waitForPaint();
+  await evaluate(`(() => { window.confirm = () => true; return true; })()`);
   await click("[aria-label='Detach Two-worker pool']");
   await click("[aria-label='Detach Results store']");
   await click("[aria-label='Show Incoming queue annotations']");
@@ -602,7 +621,7 @@ async function run() {
   await setValue("#threadPrompt", "Use this connected queue context in the follow-up.");
   await waitFor("message and context send enabled", () => evaluate(`document.querySelector('#sendInteraction')?.disabled === false`));
   await refreshCaptureSurface();
-  await writeFile(composerScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
+  await writeFile(composerScreenshotFile, await capturePagePng("grouped composer screenshot"));
   await captureStep(
     "14. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
     "#composerContextTray",
@@ -694,7 +713,7 @@ async function run() {
       === 'This annotation alone is a valid interaction input.'
   `));
   await refreshCaptureSurface();
-  await writeFile(restartedScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
+  await writeFile(restartedScreenshotFile, await capturePagePng("restarted context screenshot"));
   await captureStep(
     "19. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
     "#interactionContextPopover",
