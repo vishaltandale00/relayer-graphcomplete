@@ -30,12 +30,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Apple Silicon is the only target smoke-packaged per PR. Intel macOS
+          # and Windows x64 are still built at release time by
+          # desktop-signed-preview.yml; re-add them here if they need per-PR
+          # coverage again.
           - target: macos-arm64
             runner: macos-15
-          - target: macos-x64
-            runner: macos-15-intel
-          - target: windows-x64
-            runner: windows-2025
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
