@@ -16,6 +16,7 @@ export async function verifyMacOSApplication(
     execute = execFileAsync,
     expectedTeamId = DESKTOP_RELEASE.appleTeamId,
     expectedArchitecture = process.arch === "x64" ? "x86_64" : process.arch,
+    verifyBundle = verifyBundledAppServer,
   } = {},
 ) {
   await access(appPath);
@@ -51,9 +52,10 @@ export async function verifyMacOSApplication(
   if (String(architectures.stdout || "").trim() !== expectedArchitecture) {
     throw new Error(`Signed Relayer.app must contain only ${expectedArchitecture} executable code.`);
   }
-  await verifyBundledAppServer(appPath, {
+  await verifyBundle(appPath, {
     execute,
     expectedArchitecture,
+    primeAgentIntegrityPhase: "signed",
   });
 
   if (assessNotarization) {

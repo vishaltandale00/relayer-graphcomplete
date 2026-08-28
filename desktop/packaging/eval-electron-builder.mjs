@@ -19,9 +19,12 @@ export default {
   files: [
     "package.json",
     "eval-main/**/*",
+    "main/credentials/**/*",
     "main/managed-runtimes/**/*",
+    "main/models/**/*",
     "main/services/**/*",
     "main/single-instance.mjs",
+    "renderer/src/model-picker-model.js",
     "shared/codex-runtime-environment.mjs",
     "shared/managed-runtime-requirements.mjs",
     "shared/target.mjs",

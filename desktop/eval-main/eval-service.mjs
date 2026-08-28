@@ -39,6 +39,7 @@ import {
   selectStandalonePermissionProfile,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
+import { firstAvailableSelection, harnessUsesConfigurationModel } from "../renderer/src/model-picker-model.js";
 import {
   buildAcceptedReviewTopology,
   gradeAcceptedReviewTopology,
@@ -107,6 +108,16 @@ const execFileAsync = promisify(execFile);
 
 function copy(value) {
   return structuredClone(value);
+}
+
+export function evalModelSelectionRequest(selectedModel, productModelSelection = true) {
+  return selectedModel === null || !productModelSelection ? {} : {
+    modelSelection: {
+      familyId: selectedModel.familyId,
+      providerId: selectedModel.providerId,
+      modelId: selectedModel.modelId,
+    },
+  };
 }
 
 function outcomeGradeFromChecks(checks, caseSnapshot = null) {
@@ -495,7 +506,9 @@ export class EvalService {
     acceptedTopologyBuilder = buildAcceptedReviewTopology,
     acceptedTopologyGrader = gradeAcceptedReviewTopology,
     candidateTraceExporter = null,
+    candidateTraceAttributionLoader = null,
     candidateTraceRequired = false,
+    ensureModelCatalog = async () => {},
     conversationImportEnabled = false,
     conversationImportMaxBytes = MAX_CONVERSATION_IMPORT_BYTES,
     annotationSnapshotLoader = null,
@@ -515,7 +528,9 @@ export class EvalService {
     this.acceptedTopologyBuilder = acceptedTopologyBuilder;
     this.acceptedTopologyGrader = acceptedTopologyGrader;
     this.candidateTraceExporter = candidateTraceExporter;
+    this.candidateTraceAttributionLoader = candidateTraceAttributionLoader;
     this.candidateTraceRequired = candidateTraceRequired;
+    this.ensureModelCatalog = ensureModelCatalog;
     this.conversationImportEnabled = conversationImportEnabled;
     this.conversationImportMaxBytes = conversationImportMaxBytes;
     this.annotationSnapshotLoader = annotationSnapshotLoader;
@@ -1278,6 +1293,8 @@ export class EvalService {
           ? copy(permissionResolution)
           : null,
         effectiveExecutionDigest: interaction.effectiveExecutionDigest,
+        personalPresentationVersionId: execution.candidateTraceCaptures?.[String(interaction.id)]?.personalPresentationVersionId ?? null,
+        modelSelection: copy(interaction.modelSelection || null),
         effectivePermissionReceipt: copy(interaction.effectivePermissionReceipt),
         status: interaction.completionStatus,
         prompt: interaction.text,
@@ -1506,11 +1523,30 @@ export class EvalService {
 
   async #createAndRunThread({ execution, title, prompts, projectId = null, permissionProfileId = "auto", afterTurn = async () => {} }) {
     if (!Array.isArray(prompts) || prompts.length === 0) throw new Error(`Eval thread ${title} has no prompts.`);
-    const modelSelection = execution.harnessConfiguration?.implementation === "claude.basic"
-      ? await this.#productRequest(`/api/model-selection/default?harnessId=${encodeURIComponent(execution.harnessConfigurationName)}`)
-      : null;
-    if (execution.harnessConfiguration?.implementation === "claude.basic" && modelSelection === null) {
-      throw new Error("claude-basic has no connected compatible model; connect Claude or Anthropic before running this matrix cell.");
+    let selectedModel;
+    let productModelSelection;
+    if (execution.harnessConfiguration.implementation === "claude.basic") {
+      selectedModel = await this.#productRequest(
+        `/api/model-selection/default?harnessId=${encodeURIComponent(execution.harnessConfigurationName)}`,
+      );
+      productModelSelection = true;
+      if (selectedModel === null) {
+        throw new Error("claude-basic has no connected compatible model; connect Claude or Anthropic before running this matrix cell.");
+      }
+    } else {
+      if (execution.harnessConfiguration.implementation === "codex.basic") {
+        await this.ensureModelCatalog(execution.harnessConfigurationName);
+      }
+      const modelSettings = await this.#productRequest("/api/model-settings");
+      selectedModel = firstAvailableSelection(modelSettings, execution.harnessConfigurationName);
+      productModelSelection = !harnessUsesConfigurationModel(
+        modelSettings,
+        execution.harnessConfigurationName,
+      );
+      const modelLessEvalFixture = execution.harnessConfiguration.implementation === "fixture.task-system";
+      if (productModelSelection && selectedModel === null && !modelLessEvalFixture) {
+        throw new Error(`Eval has no available model for ${execution.harnessConfigurationName}.`);
+      }
     }
     const thread = await this.#productRequest("/api/threads", {
       method: "POST",
@@ -1519,7 +1555,7 @@ export class EvalService {
         initialMessage: prompts[0],
         harnessConfigurationName: execution.harnessConfigurationName,
         permissionProfileId,
-        ...(modelSelection === null ? {} : { modelSelection }),
+        ...evalModelSelectionRequest(selectedModel, productModelSelection),
         ...(projectId === null ? {} : { projectId }),
       },
     });
@@ -1530,7 +1566,10 @@ export class EvalService {
     for (const [offset, prompt] of prompts.slice(1).entries()) {
       const interaction = await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
         method: "POST",
-        body: { text: prompt },
+        body: {
+          text: prompt,
+          ...evalModelSelectionRequest(selectedModel, productModelSelection),
+        },
       });
       const completedInteraction = await this.#waitForInteraction(thread.id, interaction.id);
       await this.#captureCandidateTrace(execution, completedInteraction);
@@ -1660,6 +1699,15 @@ export class EvalService {
       encodeURIComponent(execution.testRunId),
       ...ref.split("/").slice(0, -1),
     );
+    let pinnedPersonalPresentationVersionId;
+    try {
+      const candidate = await this.candidateTraceAttributionLoader?.(interaction.id);
+      if (Number.isSafeInteger(candidate) && candidate > 0) {
+        pinnedPersonalPresentationVersionId = candidate;
+      }
+    } catch {
+      // Export remains authoritative when an optional pre-export lookup is unavailable.
+    }
     try {
       const descriptor = await this.candidateTraceExporter(interaction.id, targetDirectory, {
         runId: execution.testRunId,
@@ -1671,15 +1719,24 @@ export class EvalService {
       execution.candidateTraceCaptures ||= {};
       execution.candidateTraceCaptures[String(interaction.id)] = {
         ...copy(descriptor),
+        ...(descriptor.personalPresentationVersionId === undefined
+          && pinnedPersonalPresentationVersionId !== undefined
+          ? { personalPresentationVersionId: pinnedPersonalPresentationVersionId }
+          : {}),
         ref,
         promotable: descriptor.status === "complete",
       };
     } catch (error) {
+      const personalPresentationVersionId = error?.personalPresentationVersionId
+        ?? pinnedPersonalPresentationVersionId;
       execution.candidateTraceCaptures ||= {};
       execution.candidateTraceCaptures[String(interaction.id)] = {
         status: "failed",
         format: "relayer-harness-trace-v1",
         coverage: emptyTraceCoverage(),
+        ...(Number.isSafeInteger(personalPresentationVersionId) && personalPresentationVersionId > 0
+          ? { personalPresentationVersionId }
+          : {}),
         error: error instanceof Error ? error.message : String(error),
         ref: null,
         promotable: false,

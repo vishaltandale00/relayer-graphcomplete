@@ -10,7 +10,7 @@ use crate::{
         ThreadId,
     },
 };
-pub(crate) use sqlite::SqliteProductStore;
+pub(crate) use sqlite::{PersonalPresentationPin, SqliteProductStore};
 use thiserror::Error;
 
 pub(crate) struct ProductStateSnapshot {
@@ -177,4 +177,6 @@ pub(crate) enum StorageError {
     ContextDraftConflict { code: &'static str, message: String },
     #[error("completion execution conflict: {0}")]
     CompletionExecutionConflict(String),
+    #[error("personal presentation conflict: {0}")]
+    PersonalPresentationConflict(String),
 }

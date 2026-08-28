@@ -176,6 +176,120 @@ describe("ReviewSession", () => {
       .toMatchObject({ contentDigest: full.contentDigest, tileCount: 3 });
   });
 
+  it("restores an element capture when presentation changes and permits a retry", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
+    directories.push(directory);
+    let state = reviewState({ selectedNodeId: "node-1" });
+    let captureActive = false;
+    let capturePlans = 0;
+    let restorations = 0;
+    const electron = fakeElectron({
+      snapshot: async () => state,
+      capturePlan: async ({ target, mode }) => {
+        if (captureActive) throw new Error("A review capture is already active.");
+        captureActive = true;
+        capturePlans += 1;
+        if (capturePlans === 1) state = reviewState({ selectedNodeId: "node-2" });
+        return {
+          target,
+          mode,
+          clip: { x: 20, y: 40, width: 300, height: 200 },
+          tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
+        };
+      },
+      prepareCaptureTile: async ({ index }) => ({
+        index,
+        clip: { x: 20, y: 40, width: 300, height: 200 },
+      }),
+      restoreCapture: async () => {
+        captureActive = false;
+        restorations += 1;
+      },
+    });
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: directory,
+      ipc: electron.ipc,
+    });
+    await session.open();
+
+    await expect(session.screenshot({
+      target: { kind: "element", elementRef: "node-detail" },
+      label: "unstable selection",
+    })).rejects.toThrow("changed presentation while preparing the screenshot");
+    expect(captureActive).toBe(false);
+    expect(restorations).toBe(1);
+    expect(electron.captures).toHaveLength(0);
+
+    await expect(session.screenshot({
+      target: { kind: "element", elementRef: "node-detail" },
+      label: "stable retry",
+    })).resolves.toMatchObject({ ok: true, screenshot: { selectedNodeId: "node-2" } });
+    expect(captureActive).toBe(false);
+    expect(restorations).toBe(2);
+    expect(electron.captures).toHaveLength(1);
+  });
+
+  it("does not restore an element capture owned by an overlapping request", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
+    directories.push(directory);
+    let captureActive = false;
+    let restorations = 0;
+    let releaseFirstPlan;
+    let markFirstPlanActive;
+    const firstPlanActive = new Promise((resolve) => { markFirstPlanActive = resolve; });
+    const firstPlanRelease = new Promise((resolve) => { releaseFirstPlan = resolve; });
+    const plan = {
+      target: { kind: "element", elementRef: "node-detail" },
+      mode: "visible",
+      clip: { x: 20, y: 40, width: 300, height: 200 },
+      tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
+    };
+    const electron = fakeElectron({
+      snapshot: async () => reviewState({ selectedNodeId: "node-2" }),
+      capturePlan: async () => {
+        if (captureActive) throw new Error("A review capture is already active.");
+        captureActive = true;
+        markFirstPlanActive();
+        await firstPlanRelease;
+        return plan;
+      },
+      prepareCaptureTile: async ({ index }) => ({ index, clip: plan.clip }),
+      restoreCapture: async () => {
+        captureActive = false;
+        restorations += 1;
+      },
+    });
+    const session = new ReviewSession({
+      executionId: "execution-1",
+      readOnly: true,
+      webContents: electron.webContents,
+      artifactDirectory: directory,
+      ipc: electron.ipc,
+    });
+    await session.open();
+
+    const first = session.screenshot({
+      target: { kind: "element", elementRef: "node-detail" },
+      label: "winning capture",
+    });
+    await firstPlanActive;
+    await expect(session.screenshot({
+      target: { kind: "element", elementRef: "node-detail" },
+      label: "overlapping capture",
+    })).rejects.toThrow("A review capture is already active");
+    expect(captureActive).toBe(true);
+    expect(restorations).toBe(0);
+
+    releaseFirstPlan();
+    await expect(first).resolves.toMatchObject({ ok: true });
+    expect(captureActive).toBe(false);
+    expect(restorations).toBe(1);
+    expect(electron.captures).toHaveLength(1);
+  });
+
   it("activates only current controls and delegates arbitrary signed history deltas to the workspace", async () => {
     let state = reviewState({
       controls: [{
@@ -377,6 +491,77 @@ describe("ReviewSession", () => {
     await expect(session.history({ delta: -1 })).resolves.toMatchObject({
       state: { turnId: "turn-running", layerId: null, navigationPath: [] },
     });
+  });
+});
+
+describe("review presentation capture synchronization", () => {
+  const presentation = (selectedNodeId = null) => ({
+    threadId: "thread-1",
+    turnId: "turn-1",
+    layerId: "layer-1",
+    selectedNodeId,
+    navigationPath: [{ layerId: "layer-1", viaActionId: null }],
+  });
+
+  it("waits for two renderer frames before planning a capture", async () => {
+    let frames = 0;
+    const adapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => presentation("node-2"),
+      navigateHistory: async () => {},
+      root: { querySelectorAll: () => [] },
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 800,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => { frames += 1; callback(); },
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
+    });
+
+    await expect(adapter.capturePlan({
+      target: { kind: "viewport" },
+      mode: "visible",
+    })).resolves.toMatchObject({ clip: { width: 1200, height: 800 } });
+    expect(frames).toBe(2);
+  });
+
+  it("does not complete node activation before the selected presentation changes", async () => {
+    let current = presentation();
+    let frames = 0;
+    const attributes = new Map([["aria-label", "Open Worker 2"], ["role", "button"]]);
+    const button = {
+      dataset: { reviewRef: "node-2", reviewKind: "node", node: "node-2" },
+      isConnected: true,
+      hidden: false,
+      disabled: false,
+      textContent: "Worker 2",
+      matches: () => true,
+      getAttribute: (key) => attributes.get(key) ?? null,
+      getBoundingClientRect: () => ({ left: 10, top: 10, right: 100, bottom: 40, width: 90, height: 30 }),
+      click: () => {},
+    };
+    const adapter = createReviewPresentationAdapter({
+      executionId: "execution-1",
+      getPresentationState: () => current,
+      navigateHistory: async () => {},
+      root: { querySelectorAll: () => [button] },
+      windowObject: {
+        innerWidth: 1200,
+        innerHeight: 800,
+        devicePixelRatio: 2,
+        requestAnimationFrame: (callback) => {
+          frames += 1;
+          if (frames === 3) current = presentation("node-2");
+          callback();
+        },
+        getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+      },
+    });
+
+    await expect(adapter.activate({ elementRef: "node-2", operation: "activate" }))
+      .resolves.toMatchObject({ selectedNodeId: "node-2" });
+    expect(frames).toBe(3);
   });
 });
 

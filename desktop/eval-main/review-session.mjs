@@ -137,11 +137,19 @@ export class ReviewSession {
   async screenshot({ target, mode = "visible", label }) {
     validateScreenshotInput({ target, mode, label });
     this.#assertOpen();
-    const state = validateState(this.executionId, await this.#rendererCommand("snapshot"));
-    const plan = await this.#rendererCommand("capturePlan", { target, mode });
-    if (!Array.isArray(plan?.tiles) || !plan.tiles.length) throw new Error("The review capture plan has no tiles.");
+    const initialState = validateState(this.executionId, await this.#rendererCommand("snapshot"));
+    let plan;
+    let state;
+    let ownsCapture = false;
     const tileArtifacts = [];
     try {
+      plan = await this.#rendererCommand("capturePlan", { target, mode });
+      ownsCapture = target.kind === "element";
+      state = validateState(this.executionId, await this.#rendererCommand("snapshot"));
+      if (presentationKey(state) !== presentationKey(initialState)) {
+        throw new Error("The production workspace changed presentation while preparing the screenshot.");
+      }
+      if (!Array.isArray(plan?.tiles) || !plan.tiles.length) throw new Error("The review capture plan has no tiles.");
       for (const tile of plan.tiles) {
         const prepared = target.kind === "viewport"
           ? { index: tile.index, clip: plan.clip }
@@ -164,7 +172,7 @@ export class ReviewSession {
         });
       }
     } finally {
-      if (target.kind !== "viewport") await this.#rendererCommand("restoreCapture");
+      if (ownsCapture) await this.#rendererCommand("restoreCapture");
     }
 
     const screenshotId = `shot-${randomUUID()}`;

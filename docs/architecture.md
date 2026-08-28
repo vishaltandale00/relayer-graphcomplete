@@ -77,6 +77,12 @@ Every execution attempt has an immutable receipt and a durable effect boundary: 
 
 This contract applies equally to `codex.basic`, `prime.agent`, and future harness implementations. It adds no scheduler and does not change `complete(inputGraph)` or graph acceptance authority.
 
+## Personal presentation profile
+
+Relayer owns one hidden profile thread whose accepted completions are immutable personal-presentation versions. Before provider execution, product preparation atomically pins either the active version or an explicit Eval override to the interaction. Graph core represents that pin as a control-owned attachment, not an edge, action, context occurrence, or response record. It is excluded from ordinary completion closure, graph navigation, product history, Node Details, and conversation export. A harness receives the resolved accepted graph only through its interaction capability and renders it after generic graph guidance but before task input. Candidate traces and Eval artifacts retain only the exact version interaction ID. See [ADR 0009](decisions/0009-personal-presentation-graph-attachments.md).
+
+Activation changes only future pins. Existing interactions, retries, and recovery retain their original version and effective execution identity. V0 is neutral; V1 encodes the active decision-useful and progressive-disclosure preferences. The Eval-only layered Codex V0/V1 configurations use the same existing cases, matrix, judges, artifact schema, and read-only production renderer.
+
 ## Shared product and Eval workspace
 
 Relayer and Relayer Eval are separate Electron build targets. Relayer exposes the ordinary product window and lets each new thread pin an available catalog configuration. Relayer Eval exposes a test-run dashboard and selects named configurations for its matrix, but executes each case through the same product app server. A case may create one or more ordinary product threads and interactions.
@@ -108,6 +114,7 @@ Each product or Eval review window owns one bounded renderer-side navigation his
 11. A model turn ending is not completion; the root must explicitly submit or stop. Submission validates authored closure, expansion cycles, reference visibility, orphan drafts, layer size, and current-draft layout completeness. For a leased interaction, the same submission transaction also changes the exact accepted source action's `target_layer_id` once from `null` to the accepted result root layer. Its kind remains `invoke`; no `resolveAction` authoring API or resolution table exists.
 12. A resolved invoke is project-visible cross-interaction navigation wherever its node-owned action is reused, not an `expand` or `reference` relation. Generic renderer navigation history remains an independent product concern.
 13. The selected harness owns model execution and any provider-native child scheduling. GraphComplete does not add a model-call or recursive-agent scheduler. See [ADR 0005](decisions/0005-layered-navigation-contract.md) and [ADR 0006](decisions/0006-harness-provider-agnostic-product-boundary.md).
+14. A personal-presentation attachment is a control relation from one interaction to one published accepted profile completion. It never participates in ordinary response topology or graph authority, and one interaction can pin it only once. See [ADR 0009](decisions/0009-personal-presentation-graph-attachments.md).
 
 ## Target self-assessing policy invariants
 
@@ -262,9 +269,10 @@ effort remote revocation, without signing the browser out. See
 After provider setup, the optional account decision is a dedicated full-screen
 onboarding step. The desktop workspace is not revealed until the user signs in or
 explicitly continues without an account. Once resolved, a viewport-anchored
-bottom-right account control provides manual access; its everyday label is
-channel-neutral. Stable or Preview remains visible only in Account settings and
-diagnostics.
+bottom-right control starts sign-in directly while signed out and opens Account
+settings for an existing account. The Account panel contains only concise status
+and the applicable sign-in or logout action. Stable or Preview is not part of the
+account UX; callback-pool diagnostics remain main-owned.
 
 ## Desktop release boundary
 

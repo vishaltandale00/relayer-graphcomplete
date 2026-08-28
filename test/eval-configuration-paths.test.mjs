@@ -24,6 +24,8 @@ describe("Eval harness configuration availability", () => {
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
+      "codex-layered-personal-presentation-v0.yaml",
+      "codex-layered-personal-presentation-v1.yaml",
       "prime-agent-basic.yaml",
       "prime-agent-deep.yaml",
       "prime-agent-layered-navigation-luna.yaml",
@@ -43,6 +45,8 @@ describe("Eval harness configuration availability", () => {
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
+      "codex-layered-personal-presentation-v0.yaml",
+      "codex-layered-personal-presentation-v1.yaml",
     ]);
   });
 
@@ -60,6 +64,8 @@ describe("Eval harness configuration availability", () => {
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
+      "codex-layered-personal-presentation-v0.yaml",
+      "codex-layered-personal-presentation-v1.yaml",
     ]);
     expect(packageAvailable).not.toHaveBeenCalled();
   });
@@ -95,6 +101,9 @@ describe("Eval harness configuration availability", () => {
     });
     expect(evalPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses"), to: "harnesses", filter: ["*.yaml"] }');
     expect(evalPackaging).toContain('"main/managed-runtimes/**/*"');
+    expect(evalPackaging).toContain('"main/credentials/**/*"');
+    expect(evalPackaging).toContain('"main/models/**/*"');
+    expect(evalPackaging).toContain('"renderer/src/model-picker-model.js"');
     expect(evalPackaging).toContain('"shared/codex-runtime-environment.mjs"');
     expect(evalPackaging).toContain('"shared/managed-runtime-requirements.mjs"');
     expect(evalPackaging).toContain('"shared/target.mjs"');
@@ -103,5 +112,23 @@ describe("Eval harness configuration availability", () => {
     expect(productPackaging).not.toContain("codex-basic-high.yaml");
     expect(productPackaging).not.toContain("codex-multi-agent-layered-navigation.yaml");
     expect(productPackaging).not.toContain("codex-layered-navigation-luna.yaml");
+    expect(productPackaging).not.toContain("codex-layered-personal-presentation-v0.yaml");
+    expect(productPackaging).not.toContain("codex-layered-personal-presentation-v1.yaml");
+  });
+
+  it("keeps the personal presentation matrix identical except for name and pinned version", async () => {
+    const catalog = await loadHarnessConfigurations([
+      resolve(repositoryRoot, "harnesses/codex-layered-personal-presentation-v0.yaml"),
+      resolve(repositoryRoot, "harnesses/codex-layered-personal-presentation-v1.yaml"),
+    ]);
+    const control = structuredClone(catalog.get("codex-layered-personal-presentation-v0"));
+    const treatment = structuredClone(catalog.get("codex-layered-personal-presentation-v1"));
+    expect(control?.settings.personalPresentationVersion).toBe("personal-presentation-v0");
+    expect(treatment?.settings.personalPresentationVersion).toBe("personal-presentation-v1");
+    delete control?.settings.personalPresentationVersion;
+    delete treatment?.settings.personalPresentationVersion;
+    if (control) control.name = "comparison";
+    if (treatment) treatment.name = "comparison";
+    expect(treatment).toEqual(control);
   });
 });

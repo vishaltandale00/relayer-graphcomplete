@@ -23,7 +23,11 @@ import { inspectCodexBrowserMcpRuntime } from "../main/services/codex-browser-mc
 import { RelayerAppServerService } from "../main/services/relayer-app-server.mjs";
 import { claimPrimaryDesktopInstance } from "../main/single-instance.mjs";
 import { confirmManagedRuntimeQuit } from "../main/managed-runtimes/quit-guard.mjs";
-import { createEvalManagedCodexRuntime } from "./managed-codex-runtime.mjs";
+import {
+  createEvalCodexExecutionLease,
+  createEvalCodexCatalogProvisioner,
+  createEvalManagedCodexRuntime,
+} from "./managed-codex-runtime.mjs";
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(desktopDirectory, "..");
@@ -74,6 +78,9 @@ const managedCodexRuntime = createEvalManagedCodexRuntime({
   developmentExecutable: developmentCodexBinary,
   enableMaintenance: app.isPackaged,
 });
+const acquireEvalProviderExecution = createEvalCodexExecutionLease(
+  () => managedCodexRuntime.resolve(),
+);
 
 let dashboardWindow;
 const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => dashboardWindow });
@@ -93,6 +100,7 @@ const graphRuntime = new GraphCompleteRuntimeService({
   codexBasicClientModuleUrl: graphClientModuleUrl,
   ...(codexBrowserMcpInspection.available ? { codexBrowserMcpRuntime: codexBrowserMcpInspection } : {}),
   resolveCodexRuntime: () => managedCodexRuntime.resolve(),
+  acquireProviderExecution: acquireEvalProviderExecution,
   candidateTrace: {
     directory: join(userDataDirectory, "eval-data", "candidate-trace-spool"),
     policy: {
@@ -469,6 +477,10 @@ async function start() {
     onUnexpectedStop: () => app.quit(),
   });
   const productSession = await productServer.start();
+  const ensureEvalCodexCatalog = createEvalCodexCatalogProvisioner({
+    productSession,
+    resolveRuntime: () => managedCodexRuntime.resolve(),
+  });
   const simulatedUserJudgeRunner = createLocalSimulatedUserJudgeRunner({
     resolveCodexRuntime: () => managedCodexRuntime.resolve(),
     loadLayer: ({ threadId, turnId, layerId }) => productRequest(productSession, (
@@ -486,7 +498,11 @@ async function start() {
     candidateTraceExporter: (productInteractionId, targetDirectory, correlation) => (
       graphRuntime.exportCandidateTrace(productInteractionId, targetDirectory, correlation)
     ),
+    candidateTraceAttributionLoader: (productInteractionId) => (
+      graphRuntime.candidateTracePersonalPresentationVersionId(productInteractionId)
+    ),
     candidateTraceRequired: true,
+    ensureModelCatalog: ensureEvalCodexCatalog,
     conversationImportEnabled: true,
     annotationSnapshotLoader: (threadIds) => loadAnnotationSnapshots(productSession, threadIds),
     onChanged: (runs) => dashboardWindow?.webContents.send("relayer-eval:runs-changed", runs),

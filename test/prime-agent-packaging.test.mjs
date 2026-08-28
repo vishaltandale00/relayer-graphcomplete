@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -20,12 +20,21 @@ import {
   verifyPackagedPrimeAgent,
 } from "../desktop/packaging/verify-bundled-app-server.mjs";
 import { PACKAGED_PROVIDER_MODULES } from "../desktop/main/providers/provider-adapter-registry.mjs";
-import { primeRuntimeSourcePathIsPackaged } from "../desktop/shared/prime-runtime-integrity.mjs";
+import {
+  createSignedDependencyClosureSnapshot,
+  primeRuntimeSourcePathIsPackaged,
+  verifySignedDependencyClosureSnapshot,
+} from "../desktop/shared/prime-runtime-integrity.mjs";
 import { resolveDesktopReleaseContract } from "../desktop/release/contract.mjs";
+import { verifyMacOSApplication } from "../desktop/release/verify-macos-app.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const manifestPath = join(repositoryRoot, "vendor", "prime-agent", "manifest.json");
 const execFileAsync = promisify(execFile);
+const machONativeBytes = (signature) => Buffer.concat([
+  Buffer.from([0xcf, 0xfa, 0xed, 0xfe]),
+  Buffer.from(signature),
+]);
 
 async function packageFileEntries(root, relativeRoot, output = []) {
   for (const entry of await readdir(root, { withFileTypes: true })) {
@@ -298,6 +307,13 @@ describe("Prime Agent packaged runtime", () => {
         verifyDependencyClosure: () => manifest.dependencyClosureSha256ByTarget["darwin-arm64"],
         targetKey: "darwin-arm64",
       })).resolves.toMatchObject({ sourceCommit: manifest.source.commit, packages: 4 });
+      await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
+        extractPackageFile,
+        vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
+        verifyDependencyClosure: () => "unreviewed-closure",
+        targetKey: "darwin-arm64",
+      })).rejects.toThrow("dependency closure mismatch");
+
       expect(Object.keys(manifest.dependencyClosureSha256ByTarget).sort()).toEqual([
         "darwin-arm64",
         "darwin-x64",
@@ -370,6 +386,131 @@ describe("Prime Agent packaged runtime", () => {
       await rm(resources, { recursive: true, force: true });
     }
   });
+
+  it("permits only the snapshotted Mach-O signature variance after signing", () => {
+    const unsignedEntries = [
+      { path: "node_modules/runtime/index.js", bytes: Buffer.from("reviewed JavaScript") },
+      {
+        path: "node_modules/runtime/addon.node",
+        bytes: machONativeBytes("unsigned signature"),
+      },
+    ];
+    const snapshot = createSignedDependencyClosureSnapshot(unsignedEntries, "darwin-arm64");
+    const signedEntries = [
+      unsignedEntries[0],
+      {
+        path: "node_modules/runtime/addon.node",
+        bytes: machONativeBytes("Developer ID signature"),
+      },
+    ];
+    expect(() => verifySignedDependencyClosureSnapshot(signedEntries, snapshot, "darwin-arm64"))
+      .not.toThrow();
+    expect(() => verifySignedDependencyClosureSnapshot([
+      { path: "node_modules/runtime/index.js", bytes: Buffer.from("mutated JavaScript") },
+      signedEntries[1],
+    ], snapshot, "darwin-arm64")).toThrow("signed immutable closure mismatch");
+    expect(() => verifySignedDependencyClosureSnapshot([signedEntries[0]], snapshot, "darwin-arm64"))
+      .toThrow("signed native-code inventory mismatch");
+    expect(() => verifySignedDependencyClosureSnapshot([
+      ...signedEntries,
+      { path: "node_modules/runtime/added.node", bytes: machONativeBytes("added signature") },
+    ], snapshot, "darwin-arm64")).toThrow("signed native-code inventory mismatch");
+    expect(() => verifySignedDependencyClosureSnapshot([
+      signedEntries[0],
+      { path: signedEntries[1].path, bytes: Buffer.from("not Mach-O") },
+    ], snapshot, "darwin-arm64")).toThrow("signed native-code inventory mismatch");
+    expect(() => verifySignedDependencyClosureSnapshot(signedEntries, snapshot, "darwin-x64"))
+      .toThrow("signed closure snapshot is invalid");
+    expect(() => verifySignedDependencyClosureSnapshot(signedEntries, {
+      ...snapshot,
+      schemaVersion: 2,
+    }, "darwin-arm64")).toThrow("signed closure snapshot is invalid");
+  });
+
+  it("uses the app signature instead of unsigned native hashes after macOS signing", async () => {
+    const appPath = await mkdtemp(join(tmpdir(), "relayer-signed-prime-"));
+    try {
+      const bundleCalls = [];
+      const verificationOrder = [];
+      const execute = async (command, args) => {
+        if (command === "/usr/bin/codesign" && args[0] === "--verify") {
+          verificationOrder.push("signature");
+        }
+        if (command === "/usr/bin/codesign" && args[0] === "--display") {
+          return {
+            stdout: "",
+            stderr: "Authority=Developer ID Application: Relayer, Inc.\nTeamIdentifier=NZ253AL7U6\n",
+          };
+        }
+        if (command === "/usr/bin/plutil") {
+          const values = {
+            CFBundleIdentifier: "ai.relayer.desktop",
+            CFBundleName: "Relayer",
+            LSMinimumSystemVersion: "13.0.0",
+          };
+          return { stdout: `${values[args[1]]}\n`, stderr: "" };
+        }
+        if (command === "/usr/bin/lipo") return { stdout: "arm64\n", stderr: "" };
+        return { stdout: "", stderr: "" };
+      };
+      await expect(verifyMacOSApplication(appPath, {
+        execute,
+        expectedArchitecture: "arm64",
+        verifyBundle: async (...args) => {
+          verificationOrder.push("bundle");
+          bundleCalls.push(args);
+        },
+      })).resolves.toMatchObject({ appPath, expectedTeamId: "NZ253AL7U6" });
+      expect(verificationOrder).toEqual(["signature", "bundle"]);
+      expect(bundleCalls).toEqual([[appPath, expect.objectContaining({
+        expectedArchitecture: "arm64",
+        primeAgentIntegrityPhase: "signed",
+      })]]);
+    } finally {
+      await rm(appPath, { recursive: true, force: true });
+    }
+  });
+
+  it("admits a signed packaged Prime runtime after walking its mutated native closure", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-signed-prime-runtime-"));
+    const packagedAppPath = join(directory, "app.asar");
+    try {
+      await symlink(repositoryRoot, packagedAppPath, "dir");
+      const unsignedEntries = [
+        { path: "node_modules/runtime/index.js", bytes: Buffer.from("reviewed JavaScript") },
+        {
+          path: "node_modules/runtime/addon.node",
+          bytes: machONativeBytes("unsigned signature"),
+        },
+      ];
+      const signedEntries = [
+        unsignedEntries[0],
+        {
+          path: "node_modules/runtime/addon.node",
+          bytes: machONativeBytes("Developer ID signature"),
+        },
+      ];
+      await expect(inspectPrimeAgentRuntime({
+        appPath: packagedAppPath,
+        architecture: "arm64",
+        collectDependencyClosure: async () => signedEntries,
+        harnessDirectory: join(repositoryRoot, "harnesses"),
+        integrityPhase: "signed",
+        manifestPath,
+        platform: "darwin",
+        pythonClientRoot: join(repositoryRoot, "python", "relayer-graph", "src"),
+        readSignedClosureSnapshot: async () => createSignedDependencyClosureSnapshot(
+          unsignedEntries,
+          "darwin-arm64",
+        ),
+      })).resolves.toMatchObject({
+        available: true,
+        configurationNames: ["prime-agent-basic", "prime-agent-deep"],
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
 
   it("fails closed with a stable harness-neutral reason for Windows default Auto", async () => {
     const rejected = await inspectPrimeAgentRuntime({

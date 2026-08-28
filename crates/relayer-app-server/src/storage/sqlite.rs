@@ -9,6 +9,7 @@ mod conversation_imports;
 mod interaction_contexts;
 mod interactions;
 mod migrations;
+mod personal_presentation;
 mod product_state;
 mod projects;
 mod schema;
@@ -18,6 +19,8 @@ use super::StorageError;
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use std::{path::Path, time::Duration};
+
+pub(crate) use personal_presentation::PersonalPresentationPin;
 
 #[derive(Clone)]
 pub(crate) struct SqliteProductStore {

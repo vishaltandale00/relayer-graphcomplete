@@ -14,7 +14,9 @@ pub use graph::{
     InteractionContext, InteractionContextAction, InteractionContextDraft,
     InteractionContextTarget, InteractionInput, InteractionInputNode, InteractionInvocation,
     LayerDraft, LayerId, LayerLayout, NavigateRelation, NodeDraft, NodeId, NodePlacement,
-    ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState, ResolvedLayer,
-    TemporalFeatureConfig, ThreadId, current_transition_request_digest, interaction_input_digest,
-    is_supported_icon, normalize_icon_name, resolve_icon_name,
+    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PersonalPresentationAttachment, ProjectId,
+    PublishedPersonalPresentationVersion, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState,
+    ResolvedLayer, ResolvedPersonalPresentation, TemporalFeatureConfig, ThreadId,
+    current_transition_request_digest, interaction_input_digest, is_supported_icon,
+    normalize_icon_name, resolve_icon_name,
 };

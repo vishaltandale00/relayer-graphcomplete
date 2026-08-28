@@ -52,8 +52,9 @@ const catalogSnapshot = {
 
 function registerIpc() {
   ipcMain.handle("relayer:account-read", () => ({
-    status: "connected",
-    account: { email: "zero-inference@relayer.test", planType: "Fixture" },
+    status: "signed-in",
+    channel: "stable",
+    subject: "fixture|node-details-warning",
   }));
   ipcMain.handle("relayer:appearance-read", () => ({ appearance: "dark" }));
   ipcMain.handle("relayer:provider-status", () => ({
@@ -183,11 +184,17 @@ async function clickNode(title) {
 }
 
 async function sendKey(keyCode, modifiers = []) {
+  if (process.platform === "darwin") app.focus({ steal: true });
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.focus();
+  await sleep(40);
   mainWindow.webContents.sendInputEvent({ type: "keyDown", keyCode, modifiers });
   if (keyCode === "Enter") {
     mainWindow.webContents.sendInputEvent({ type: "char", keyCode: "\r", modifiers });
   }
   mainWindow.webContents.sendInputEvent({ type: "keyUp", keyCode, modifiers });
+  await sleep(40);
 }
 
 async function click(selector, { focus = false, twice = false } = {}) {
@@ -284,7 +291,11 @@ async function openThreadWindow(threadId) {
   mainWindow.focus();
   mainWindow.webContents.focus();
   await waitFor("interactive production workspace", () => evaluate(`(() => (
-    !document.querySelector('#threadView')?.classList.contains('hidden')
+    document.querySelector('#desktopAccountOnboarding')?.classList.contains('hidden')
+      && !document.body.classList.contains('desktop-account-pending')
+      && !document.querySelector('#appShell')?.classList.contains('hidden')
+      && getComputedStyle(document.querySelector('#appShell')).visibility !== 'hidden'
+      && !document.querySelector('#threadView')?.classList.contains('hidden')
       && document.querySelectorAll('.graph-node').length === 3
       && document.querySelector('#threadPrompt')?.disabled === false
       && document.querySelector('#sendInteraction')
@@ -677,7 +688,14 @@ async function run() {
     actionsInViewport: true,
     noHorizontalOverflow: true,
   })) throw new Error(`Many-draft layout is not usable at large zoom: ${JSON.stringify(mountedManyDraftLayout)}`);
-  await evaluate(`document.querySelector('[data-context-draft-warning-list]').scrollTop = 0`);
+  await evaluate(`(() => {
+    const list = document.querySelector('[data-context-draft-warning-list]');
+    list.scrollTop = 0;
+    list.focus({ preventScroll: true });
+  })()`);
+  await waitFor("many-draft list keyboard focus", () => evaluate(
+    `document.activeElement?.matches('[data-context-draft-warning-list]') === true`,
+  ));
   await sendKey("PageDown");
   await waitFor("keyboard scrolling in many-draft list", () => evaluate(
     `document.querySelector('[data-context-draft-warning-list]')?.scrollTop > 0`,
@@ -751,40 +769,42 @@ async function run() {
     `Boolean(document.querySelector('#contextAnnotationEditor'))`,
   ));
   await evaluate(`window.__contextDraftWarningFetchProbe.holdNextDraftSave = true`);
-  const heldDraftText = "This draft save is intentionally held while the override is cancelled.";
+  const heldDraftText = "This draft save is intentionally held before Node Details closes.";
   await setField("#contextAnnotationEditor", heldDraftText);
-  await click("[aria-label='Cancel annotation edit']");
-  await setPrompt("Do not send after I cancel the pending draft-save override.");
+  await click("#closeInspector");
+  await waitFor("Node Details waits for its held draft save", () => evaluate(
+    `window.__contextDraftWarningFetchProbe.draftSaveHeld === true
+      && !document.querySelector('#inspector')?.classList.contains('hidden')
+      && document.querySelector('#contextAnnotationEditor')?.disabled === true`,
+  ));
+  await evaluate(`window.__contextDraftWarningFetchProbe.releaseDraftSave = true`);
+  await waitFor("draft save releases before Node Details closes", () => evaluate(
+    `window.__contextDraftWarningFetchProbe.draftSaveHeld === false
+      && document.querySelector('#inspector')?.classList.contains('hidden')
+      && !document.querySelector('#contextAnnotationEditor')`,
+  ));
+  await setPrompt("Do not send after I cancel the saved-draft warning.");
   await click("#sendInteraction", { focus: true });
-  await waitFor("warning before held draft persistence", () => evaluate(
+  await waitFor("warning for the saved draft", () => evaluate(
     `document.querySelector('#contextDraftSendWarning')?.open === true`,
   ));
-  await click("[data-context-draft-warning-action='send']");
-  await waitFor("held draft persistence", () => evaluate(
-    `window.__contextDraftWarningFetchProbe.draftSaveHeld === true
-      && document.querySelector('#confirmContextDraftSend')?.disabled === true`,
-  ));
   await click("[data-context-draft-warning-action='cancel']");
-  await waitFor("pending override cancellation", () => evaluate(`(() => (
+  await waitFor("saved-draft warning cancellation", () => evaluate(`(() => (
     !document.querySelector('#contextDraftSendWarning')?.open
       && document.activeElement?.id === 'sendInteraction'
       && document.querySelector('#confirmContextDraftSend')?.disabled === false
   ))()`));
-  await evaluate(`window.__contextDraftWarningFetchProbe.releaseDraftSave = true`);
-  await waitFor("held draft save release", () => evaluate(
-    `window.__contextDraftWarningFetchProbe.draftSaveHeld === false`,
-  ));
   await new Promise((resolve) => setTimeout(resolve, 150));
-  const requestsAfterPendingCancel = await evaluate(
+  const requestsAfterSavedDraftCancel = await evaluate(
     `window.__contextDraftWarningFetchProbe.interactionRequests.length`,
   );
-  if (requestsAfterPendingCancel !== 1) {
-    throw new Error(`Cancelled pending persistence submitted an interaction: ${requestsAfterPendingCancel}`);
+  if (requestsAfterSavedDraftCancel !== 1) {
+    throw new Error(`Cancelled saved-draft warning submitted an interaction: ${requestsAfterSavedDraftCancel}`);
   }
-  const draftsAfterPendingCancel = await productRequest(
+  const draftsAfterSavedDraftCancel = await productRequest(
     `/api/threads/${withDraft.thread.id}/context-drafts`,
   );
-  const heldDraft = draftsAfterPendingCancel.drafts.find(
+  const heldDraft = draftsAfterSavedDraftCancel.drafts.find(
     (draft) => String(draft.target.nodeId) === String(pendingCancelNodeId),
   );
   if (!heldDraft
@@ -796,7 +816,6 @@ async function run() {
     throw new Error(`Cancelled persistence did not preserve the held draft: ${JSON.stringify(heldDraft)}`);
   }
   await clickNode(pendingCancelNodeTitle);
-  await click("#attachNodeContext");
   await waitFor("persisted cancellation-test draft editor", () => evaluate(`(() => (
     document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(heldDraftText)}
   ))()`));
@@ -1041,7 +1060,7 @@ async function run() {
     duplicateActivationRequests: initialWarning.requests,
     cancelPreserved: true,
     keyboardCancelRestoredFocus: true,
-    pendingPersistenceCancelPassed: true,
+    closeWaitedForPersistence: true,
     workspaceDisposalCancelPassed: true,
     newThreadCancelPassed: true,
     newThreadRestorationPassed: true,

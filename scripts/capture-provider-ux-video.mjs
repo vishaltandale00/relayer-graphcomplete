@@ -314,6 +314,9 @@ async function recordBrowserFlow(url, directory, profile) {
         }
         return true;
       })()`);
+      await caption("4 · Start Relayer sign-in directly from the bottom-right control");
+      await click("#desktopAccountButton");
+      await waitFor("window.__providerEvidence.accountLoginCalls === 1 && document.querySelector('#desktopAccountButton').textContent === 'Signing in…'", "direct bottom-right account sign-in");
       await click('[data-model-picker="new"] [data-model-picker-trigger]');
       await waitFor(`(() => {
         const picker = document.querySelector('[data-model-picker="new"]');
@@ -321,7 +324,7 @@ async function recordBrowserFlow(url, directory, profile) {
           && picker.querySelector('[data-model-option][data-provider-id="openai-work"][data-model-id="gpt-5.2-mini"]')?.getAttribute('aria-checked') === 'true';
       })()`, "onboarded family available in chat before opening Settings");
 
-      await caption("4 · Add and sign out a managed subscription");
+      await caption("5 · Add and sign out a managed subscription");
       await click("#settingsButton");
       await waitFor("document.querySelector('[data-provider-definition=\"openai-work\"]')", "provider settings");
       await click('[data-settings-tab="providers"]');
@@ -337,7 +340,7 @@ async function recordBrowserFlow(url, directory, profile) {
       await click("#refreshProviderCatalogs");
       await waitFor("document.querySelector('#providerSettingsStatus')?.textContent.includes('refreshed')", "manual provider refresh");
 
-      await caption("5 · Confirm the currently usable harnesses");
+      await caption("6 · Confirm the currently usable harnesses");
       await click('[data-settings-tab="harnesses"]');
       await waitFor(`(() => {
         const list = document.querySelector('#harnessConfigurationList');
@@ -348,7 +351,7 @@ async function recordBrowserFlow(url, directory, profile) {
       })()`, "read-only usable harness list");
       await capture(8);
 
-      await caption("6 · Edit, reselect, and retry the same unsent turn");
+      await caption("7 · Edit, reselect, and retry the same unsent turn");
       await click("#settingsBackButton");
       await click('[data-thread="1"]');
       await waitFor("document.querySelector('#composerRetryMessage:not(.hidden)') && !document.querySelector('#threadPrompt').disabled", "editable restored draft");

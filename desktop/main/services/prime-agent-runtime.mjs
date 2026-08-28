@@ -1,11 +1,13 @@
 import { access, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   digestFilesystemTree,
   digestFilesystemDependencyClosure,
+  collectFilesystemDependencyClosureEntries,
   primeRuntimeSourcePathIsPackaged,
   sha256,
+  verifySignedDependencyClosureSnapshot,
 } from "../../shared/prime-runtime-integrity.mjs";
 
 export const PRIME_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
@@ -63,6 +65,11 @@ export async function inspectPrimeAgentRuntime({
   architecture = process.arch,
   defaultPermissionProfileId = "auto",
   importPrimeAgent = () => import(PRIME_AGENT_PACKAGE),
+  integrityPhase = "unsigned",
+  collectDependencyClosure = collectFilesystemDependencyClosureEntries,
+  readSignedClosureSnapshot = () => readFile(join(dirname(manifestPath), "signing-closure.json"), "utf8")
+    .then((bytes) => JSON.parse(bytes)),
+  verifyDependencyClosure = digestFilesystemDependencyClosure,
 } = {}) {
   const diagnostics = runtimeDiagnostics();
   if (platform !== "darwin" && (defaultPermissionProfileId === "ask" || defaultPermissionProfileId === "auto")) {
@@ -116,12 +123,19 @@ export async function inspectPrimeAgentRuntime({
       if (packageDigest !== entry.treeSha256) throw new Error("package integrity mismatch");
     }
     if (appPath.endsWith(".asar")) {
-      const closureDigest = await digestFilesystemDependencyClosure(
-        appPath,
-        manifest.packages.map((entry) => `node_modules/${entry.name}`),
-      );
-      const targetDigest = manifest.dependencyClosureSha256ByTarget[`${platform}-${architecture}`];
-      if (!targetDigest || closureDigest !== targetDigest) throw new Error("dependency closure mismatch");
+      const rootInstallPaths = manifest.packages.map((entry) => `node_modules/${entry.name}`);
+      const targetKey = `${platform}-${architecture}`;
+      if (integrityPhase === "signed") {
+        verifySignedDependencyClosureSnapshot(
+          await collectDependencyClosure(appPath, rootInstallPaths),
+          await readSignedClosureSnapshot(),
+          targetKey,
+        );
+      } else {
+        const closureDigest = await verifyDependencyClosure(appPath, rootInstallPaths);
+        const targetDigest = manifest.dependencyClosureSha256ByTarget[targetKey];
+        if (!targetDigest || closureDigest !== targetDigest) throw new Error("dependency closure mismatch");
+      }
     }
   } catch {
     return unavailable(

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "passed": true,
-  "capturedAt": "2026-08-26T04:37:22.194Z",
-  "sourceCommit": "7158294bf2747f4a6058257e4beda1fced62285c",
+  "capturedAt": "2026-08-28T16:36:23.518Z",
+  "sourceCommit": "edaa442fb01c65756072ee2944b6131dd4949e7c",
   "workingTreeDirty": false,
   "command": "npm run build && RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE=1 electron scripts/capture-interaction-context-evidence.mjs",
   "paidInferenceCalls": 0,
@@ -27,13 +27,15 @@
   },
   "assertions": {
     "nodeDetailsOpened": true,
-    "multipleAnnotationsAddedEditedAndOrdered": true,
+    "nodeSwitchSavedAndRestoredDraft": true,
+    "closeWaitedForDraftSave": true,
+    "draftDiscardedFromDock": true,
+    "multipleAnnotationsAddedAndOrdered": true,
     "compactComposerPopoverVisible": true,
     "compactComposerPopoverAvoidsNodeDetails": true,
     "multipleNodePillStripScrolls": true,
-    "editPreservesPopoverDimensions": true,
-    "longAnnotationEditorScrolls": true,
-    "annotationDeletedWhileEditing": true,
+    "confirmedPreviewIsReadOnly": true,
+    "annotationDeletedFromExplicitPreview": true,
     "messageAndContextSent": true,
     "historyPillAndPopoverVisible": true,
     "historicalTargetNodeReopened": true,
@@ -45,17 +47,17 @@
   "screenshots": [
     {
       "file": "grouped-composer.png",
-      "sha256": "963275926d437369b9d8d98dd21c5fc88db4662d7e2851ebf8ccb5580798d3fa"
+      "sha256": "584868ec3bea9323a84860750e3661e680374a9ed672c3e2d30789fdc983e0d2"
     },
     {
       "file": "restarted-context.png",
-      "sha256": "141d7a2d1331b37ca5c51f51a2d586964a773ba47f7c6a2da1c611b7458b750b"
+      "sha256": "cea062009b9b4e195ade602be06c71d850ac0ff3f924bbcd43c3d37baf109a8b"
     }
   ],
   "video": {
     "file": "interaction-context.mp4",
-    "sha256": "9d12751bbcf51c6da7f5d0c5cf79af839846cdccafd275a27e6b1ff9f06f3f1f",
-    "durationSeconds": 31.167,
+    "sha256": "f0d62a99b3fe5ab7f0edb652c069e6834b4675fd87b7439306090e5e50165f56",
+    "durationSeconds": 94.433,
     "stream": {
       "codec_name": "h264",
       "width": 1480,
@@ -67,16 +69,26 @@
     },
     "playbackDecoded": true,
     "steps": [
-      "1. Open Node Details for any visible node; the + control connects it to the next interaction",
-      "2. Editing stays inside the fixed popover and keeps an explicit trash control available",
-      "3. Multiple attached-node pills scroll horizontally within the available composer width",
-      "4. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
-      "5. The turn banner shows one connected-node pill; its popover restores both annotations in order",
-      "6. Clicking the connected node reopens its full Node Details from history",
-      "7. A connected node with a non-empty annotation enables send even when message text is empty",
-      "8. Annotation-only history has no derived message label; the context pill preserves the actual input",
-      "9. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
-      "10. The persisted context still reopens the exact target node after restart"
+      "1. Selecting a graph node opens its full Node Details without covering the graph or composer",
+      "2. The node's + opens its saved annotation editor in the bottom third of Node Details",
+      "3. A failed save stays in Node Details with the draft intact and an inline retryable error",
+      "4. While the draft save is held, Node Details stays on the source node with the exact text visible",
+      "5. After persistence settles, switching opens the next node without carrying the editor across",
+      "6. Returning to the source node restores the exact unconfirmed draft in its Node Details dock",
+      "7. While Close waits on a held save, the exact draft remains visible in Node Details",
+      "8. After persistence settles, Node Details closes and the graph and composer remain usable",
+      "9. Confirming closes the editor and leaves a compact collapsed node pill above the composer",
+      "10. The × control discards only this unconfirmed draft while the confirmed node context remains attached",
+      "11. After discard, the temporary editor is gone and the confirmed collapsed pill is unchanged",
+      "12. Confirmed annotations stay read-only in an explicitly opened compact preview",
+      "13. Multiple attached-node pills scroll horizontally within the available composer width",
+      "14. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
+      "15. The turn banner shows one connected-node pill; its popover restores both annotations in order",
+      "16. Clicking the connected node reopens its full Node Details from history",
+      "17. A connected node with a non-empty annotation enables send even when message text is empty",
+      "18. Annotation-only history has no derived message label; the context pill preserves the actual input",
+      "19. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
+      "20. The persisted context still reopens the exact target node after restart"
     ]
   }
 }

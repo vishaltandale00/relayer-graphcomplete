@@ -3,6 +3,7 @@ mod database;
 mod import;
 mod interaction_scope;
 mod model;
+mod personal_presentation;
 mod writer;
 
 pub use completion::{AcceptedGraphClosure, CompletionOutput, current_transition_request_digest};
@@ -19,9 +20,14 @@ pub use model::{
     EdgeDraft, EdgeId, GraphAction, GraphEdge, GraphLayer, GraphNode, InteractionContext,
     InteractionContextAction, InteractionContextDraft, InteractionContextTarget, InteractionInput,
     InteractionInputNode, InteractionInvocation, LayerDraft, LayerId, LayerLayout,
-    NavigateRelation, NodeDraft, NodeId, NodePlacement, ProjectId, RELAYER_ICON_ALIASES,
-    RELAYER_ICON_NAMES, RecordState, ResolvedLayer, TemporalFeatureConfig, ThreadId,
-    interaction_input_digest, is_supported_icon, normalize_icon_name, resolve_icon_name,
+    NavigateRelation, NodeDraft, NodeId, NodePlacement, PERSONAL_PRESENTATION_PROFILE_THREAD_ID,
+    ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState, ResolvedLayer,
+    TemporalFeatureConfig, ThreadId, interaction_input_digest, is_supported_icon,
+    normalize_icon_name, resolve_icon_name,
+};
+pub use personal_presentation::{
+    PersonalPresentationAttachment, PublishedPersonalPresentationVersion,
+    ResolvedPersonalPresentation,
 };
 pub use writer::GraphWriter;
 

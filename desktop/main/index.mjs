@@ -112,6 +112,7 @@ const primeAgentRuntime = await inspectPrimeAgentRuntime({
   pythonClientRoot: primePythonClientRoot,
   platform: process.platform,
   defaultPermissionProfileId: "auto",
+  integrityPhase: releaseArtifact && process.platform === "darwin" ? "signed" : "unsigned",
 });
 if (!primeAgentRuntime.available) {
   delete process.env.RELAYER_PRIME_RUNTIME_PROVENANCE;

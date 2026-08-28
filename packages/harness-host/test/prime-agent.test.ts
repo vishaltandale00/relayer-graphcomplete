@@ -325,7 +325,10 @@ describe("PrimeAgentHarness", () => {
       nodeId: 11,
     });
     await expect(hostHandlers[1]?.({}, invocation(first))).resolves.toEqual(first.completionBroker);
-    expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/prime-session.jsonl" });
+    expect(harness.state()).toEqual({
+      primeAgentSessionFile: "/tmp/prime-session.jsonl",
+      primeAgentSessionPersonalPresentationVersionId: null,
+    });
   });
 
   it("runs concurrent invoked completions in fresh sessions without changing root continuity", async () => {
@@ -349,7 +352,10 @@ describe("PrimeAgentHarness", () => {
       workingDirectory: "/tmp/project",
       ...fullPermission,
       configuration,
-      savedState: { primeAgentSessionFile: "/tmp/root-prime-session.jsonl" },
+      savedState: {
+        primeAgentSessionFile: "/tmp/root-prime-session.jsonl",
+        primeAgentSessionPersonalPresentationVersionId: null,
+      },
     }, { loadModule: async () => ({
       ...controlledRunScopeApi(scopes),
       SessionManager: { create, open },
@@ -365,7 +371,7 @@ describe("PrimeAgentHarness", () => {
 
     expect(open).toHaveBeenCalledWith("/tmp/root-prime-session.jsonl");
     expect(create.mock.calls).toEqual([["/tmp/project"], ["/tmp/project"]]);
-    expect(createAgentSessionServices).toHaveBeenCalledTimes(3);
+    expect(createAgentSessionServices).toHaveBeenCalledOnce();
     expect(createAgentSessionFromServices).toHaveBeenCalledTimes(3);
     expect(root.promptAndWait).not.toHaveBeenCalled();
     expect(firstChild.promptAndWait).toHaveBeenCalledOnce();
@@ -376,7 +382,10 @@ describe("PrimeAgentHarness", () => {
     expect(secondChild.waitForRlmQuiescence).toHaveBeenCalledOnce();
     expect(firstChild.disposeAsync).toHaveBeenCalledOnce();
     expect(secondChild.disposeAsync).toHaveBeenCalledOnce();
-    expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/root-prime-session.jsonl" });
+    expect(harness.state()).toEqual({
+      primeAgentSessionFile: "/tmp/root-prime-session.jsonl",
+      primeAgentSessionPersonalPresentationVersionId: null,
+    });
 
     await harness.complete(runContext(43, "root-token"));
     expect(root.promptAndWait).toHaveBeenCalledOnce();
@@ -560,19 +569,33 @@ describe("PrimeAgentHarness", () => {
     expect(createAgentSessionFromServices).toHaveBeenCalledOnce();
     expect(session.promptAndWait).toHaveBeenCalledTimes(2);
     expect(modelRegistryAuth).not.toHaveBeenCalled();
-    expect(scopes[0]!.input.models.map(({ id }) => id)).toEqual(["gpt-shared", "gpt-shared", "claude-root"]);
+    expect(scopes[0]!.input.models.map(({ id }) => id)).toEqual([
+      "gpt-shared", "gpt-shared", "claude-root", "qwen-root", "gemini-root",
+    ]);
     expect(scopes[0]!.input.models[0]!.provider).not.toBe(scopes[0]!.input.models[1]!.provider);
     expect(scopes[0]!.input.models[0]!.api).toBe("openai-responses");
     expect(scopes[0]!.input.models[1]!.api).toBe("openai-responses");
     expect(scopes[0]!.input.models[2]).toMatchObject({
       id: "claude-root",
       api: "anthropic-messages",
-      baseUrl: "https://anthropic-work.test/v1",
+      baseUrl: "https://anthropic-work.test",
       reasoning: false,
       input: ["text"],
       contextWindow: 32_768,
       maxTokens: 4_096,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+    expect(scopes[0]!.input.models[3]).toMatchObject({
+      id: "qwen-root",
+      api: "openai-completions",
+      baseUrl: "https://openrouter-work.test/v1",
+      compat: { thinkingFormat: "openrouter", openRouterRouting: {} },
+    });
+    expect(scopes[0]!.input.models[4]).toMatchObject({
+      id: "gemini-root",
+      api: "openai-completions",
+      baseUrl: "https://vercel-work.test/v1",
+      compat: { vercelGatewayRouting: {} },
     });
     expect(scopes[0]!.input.root.id).toBe("claude-root");
     expect(scopes[1]!.input.root.id).toBe("gpt-shared");
@@ -585,13 +608,20 @@ describe("PrimeAgentHarness", () => {
       { kind: "secret", contract: "secret@1", apiKey: "secret-openai-personal" },
       { kind: "secret", contract: "secret@1", apiKey: "secret-openai-work" },
       { kind: "secret", contract: "secret@1", apiKey: "secret-anthropic-work" },
+      { kind: "secret", contract: "secret@1", apiKey: "secret-openrouter-work" },
+      { kind: "secret", contract: "secret@1", apiKey: "secret-vercel-work" },
     ]);
     expect(scopes[0]!.input).not.toHaveProperty("resolveRequestAuth");
     expect(providerRequests.map(({ apiKey }) => apiKey)).toEqual([
       "secret-openai-personal", "secret-openai-work", "secret-anthropic-work",
+      "secret-openrouter-work", "secret-vercel-work",
       "secret-openai-personal", "secret-openai-work", "secret-anthropic-work",
+      "secret-openrouter-work", "secret-vercel-work",
     ]);
-    expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/family-session.jsonl" });
+    expect(harness.state()).toEqual({
+      primeAgentSessionFile: "/tmp/family-session.jsonl",
+      primeAgentSessionPersonalPresentationVersionId: null,
+    });
 
     const trace = JSON.stringify(firstTrace.events);
     expect(trace).toContain('"providerDefinitionId":"anthropic-work"');
@@ -641,7 +671,7 @@ describe("PrimeAgentHarness", () => {
     expect(session.promptAndWait).not.toHaveBeenCalled();
   });
 
-  it("uses explicit conservative transport metadata for every product-visible API adapter", async () => {
+  it("uses discovered per-model token capabilities with a conservative fallback", async () => {
     const scopes: ControlledRunScope[] = [];
     const session = {
       promptAndWait: vi.fn(async (_text: string, options: { modelScope: ControlledRunScope }) => { options.modelScope.revoke(); }),
@@ -663,11 +693,29 @@ describe("PrimeAgentHarness", () => {
     }) as never });
 
     for (const [index, adapterId] of ["openai-api", "anthropic-api", "openrouter", "vercel-ai-router"].entries()) {
-      await harness.complete(singleAdapterRunContext(40 + index, adapterId));
+      await harness.complete(singleAdapterRunContext(
+        40 + index,
+        adapterId,
+        adapterId === "openrouter"
+          ? { contextWindow: 196_608, maxOutputTokens: 131_072 }
+          : undefined,
+      ));
     }
+    await harness.complete(singleAdapterRunContext(
+      44,
+      "openrouter",
+      { contextWindow: 32_768, maxOutputTokens: 2_048 },
+    ));
+    await harness.complete(singleAdapterRunContext(
+      45,
+      "anthropic-api",
+      undefined,
+      "https://provider-45.test/proxy/anthropic/v1/",
+    ));
 
     expect(scopes.map(({ input }) => ({
       api: input.root.api,
+      baseUrl: input.root.baseUrl,
       compat: input.root.compat,
       reasoning: input.root.reasoning,
       input: input.root.input,
@@ -675,11 +723,30 @@ describe("PrimeAgentHarness", () => {
       maxTokens: input.root.maxTokens,
       cost: input.root.cost,
     }))).toEqual([
-      { api: "openai-responses", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "anthropic-messages", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "openai-completions", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "openai-completions", compat: { vercelGatewayRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-responses", baseUrl: "https://provider-40.test/v1", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "anthropic-messages", baseUrl: "https://provider-41.test", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", baseUrl: "https://provider-42.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 196_608, maxTokens: 131_072, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", baseUrl: "https://provider-43.test/v1", compat: { vercelGatewayRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", baseUrl: "https://provider-44.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 2_048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "anthropic-messages", baseUrl: "https://provider-45.test/proxy/anthropic", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
     ]);
+  });
+
+  it("rejects a discovered context that cannot satisfy Prime's compaction reserve", async () => {
+    const session = {
+      promptAndWait: vi.fn(async (_text: string, _options: { modelScope: ControlledRunScopeInput }) => undefined),
+      waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const harness = await createHarness(session);
+
+    await expect(harness.complete(singleAdapterRunContext(
+      45,
+      "openrouter",
+      { contextWindow: 4_095, maxOutputTokens: 3_685 },
+    ))).rejects.toThrow("context window cannot satisfy Prime's 16384-token compaction reserve");
+    expect(session.promptAndWait).not.toHaveBeenCalled();
   });
 
   it("opens saved Prime Agent state and forwards cancellation", async () => {
@@ -700,7 +767,10 @@ describe("PrimeAgentHarness", () => {
       workingDirectory: "/tmp/project",
       ...fullPermission,
       configuration,
-      savedState: { primeAgentSessionFile: "/tmp/saved.jsonl" },
+      savedState: {
+        primeAgentSessionFile: "/tmp/saved.jsonl",
+        primeAgentSessionPersonalPresentationVersionId: null,
+      },
     }, { loadModule: async () => ({
       ...runScopeApi(),
       SessionManager: { create: vi.fn(), open },
@@ -721,11 +791,38 @@ describe("PrimeAgentHarness", () => {
 
   it("uses the separate layered-navigation prompt profile", async () => {
     let prompt = "";
+    let listener: ((event: unknown) => void) | undefined;
+    let resourceLoaderOptions: { appendSystemPromptOverride(base: string[]): string[] } | undefined;
     const session = {
-      promptAndWait: vi.fn(async (text: string) => { prompt = text; }),
+      promptAndWait: vi.fn(async (text: string) => {
+        prompt = text;
+        listener?.({
+          type: "rlm_child_update",
+          child: {
+            id: "graph-child",
+            status: "completed",
+            answerPreview: "Decision-useful center",
+          },
+        });
+        listener?.({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Foreground the conclusion and material tradeoffs." }],
+          },
+        });
+        listener?.({
+          type: "tool_execution_start",
+          toolCallId: "unrelated-tool",
+          toolName: "ipython",
+          args: { label: "Decision-useful center" },
+        });
+      }),
+      subscribe: vi.fn((next: (event: unknown) => void) => { listener = next; return vi.fn(); }),
       waitForRlmQuiescence: vi.fn(async () => undefined),
       abort: vi.fn(async () => undefined),
       dispose: vi.fn(),
+      reload: vi.fn(async () => undefined),
     };
     const harness = await PrimeAgentHarness.create({
       threadId: 7,
@@ -740,11 +837,33 @@ describe("PrimeAgentHarness", () => {
       ...runScopeApi(),
       SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
       createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionServices: vi.fn(async (options: { resourceLoaderOptions: typeof resourceLoaderOptions }) => {
+        resourceLoaderOptions = options.resourceLoaderOptions;
+        return { modelRegistry: { find: vi.fn() } };
+      }),
       createAgentSessionFromServices: vi.fn(async () => ({ session })),
     }) as never });
 
-    await harness.complete(runContext(11, "token"));
+    const context = runContext(11, "token");
+    const trace = recordingTrace();
+    await harness.complete({
+      ...context,
+      trace: trace.sink,
+      personalPresentation: {
+        attachment: { interactionNodeId: 11, versionInteractionNodeId: 90, rootLayerId: 91 },
+        graph: {
+          nodeId: 90,
+          rootLayerId: 91,
+          rootAction: { id: 92, sourceNodeId: 90, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: 91, state: "accepted" },
+          layers: [{
+            layer: { id: 91, nodes: [93], edges: [], state: "accepted" },
+            nodes: [{ id: 93, kind: "presentation-preference", icon: "compass", title: "Decision-useful center", detail: "Foreground the conclusion and material tradeoffs.", state: "accepted" }],
+            edges: [],
+            actions: [],
+          }],
+        },
+      },
+    });
 
     expect(prompt).toContain('relation="expand"');
     expect(prompt).toContain('relation="reference"');
@@ -768,6 +887,261 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("rerun it with the same client_key values");
     expect(prompt).toContain("Do not add fake navigate or reference actions");
     expect(prompt).toContain("await graph.discard_layer(layer)");
+    expect(prompt).toContain("Decision-useful center: Foreground the conclusion and material tradeoffs.");
+    expect(prompt.indexOf("Graph presentation guidance:")).toBeLessThan(
+      prompt.indexOf("Personal graph presentation preferences:"),
+    );
+    expect(prompt.indexOf("Personal graph presentation preferences:")).toBeLessThan(
+      prompt.indexOf("Normalized interaction input:"),
+    );
+    const tracedPrompt = trace.events.find((event) => event.type === "prompt")?.data.text;
+    expect(tracedPrompt).not.toContain("Decision-useful center");
+    expect(tracedPrompt).not.toContain("Personal graph presentation preferences");
+    const providerEchoes = trace.events.filter((event) => !JSON.stringify(event.data).includes("unrelated-tool"));
+    expect(JSON.stringify(providerEchoes)).not.toContain("Foreground the conclusion and material tradeoffs.");
+    expect(JSON.stringify(providerEchoes)).not.toContain("Decision-useful center");
+    expect(JSON.stringify(providerEchoes)).toContain("[redacted-personal-presentation]");
+    const unrelatedTool = trace.events.find((event) => event.type === "tool.call.started");
+    expect(JSON.stringify(unrelatedTool?.data)).toContain("Decision-useful center");
+    expect(session.reload).toHaveBeenCalledOnce();
+    const nativeInstructions = resourceLoaderOptions?.appendSystemPromptOverride(["base prompt"]);
+    expect(nativeInstructions).toHaveLength(2);
+    expect(nativeInstructions?.[1]).toContain("If you are the root agent");
+    expect(nativeInstructions?.[1]).toContain("only when assigning a native child to author graph content");
+    expect(nativeInstructions?.[1]).toContain("Never include that block in an unrelated delegate's task");
+    expect(nativeInstructions?.[1]).toContain("only when that exact rendered block is present in your assigned task");
+    expect(nativeInstructions?.[1]).toContain("every native child that can author graph content");
+    expect(nativeInstructions?.[1]).not.toContain("Personal graph presentation preferences:");
+    expect(nativeInstructions?.[1]).not.toContain("Decision-useful center");
+  });
+
+  it("retries a presentation instruction reload after a transient failure", async () => {
+    let resourceLoaderOptions: { appendSystemPromptOverride(base: string[]): string[] } | undefined;
+    const reload = vi.fn().mockRejectedValueOnce(new Error("reload failed")).mockResolvedValueOnce(undefined);
+    const session = {
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload,
+    };
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+    }, { loadModule: async () => ({
+      ...runScopeApi(), SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async (options: { resourceLoaderOptions: typeof resourceLoaderOptions }) => {
+        resourceLoaderOptions = options.resourceLoaderOptions;
+        return { modelRegistry: { find: vi.fn() } };
+      }),
+      createAgentSessionFromServices: vi.fn(async () => ({ session })),
+    }) as never });
+    const context = runContext(11, "token");
+    const attached: HarnessRunContext = {
+      ...context,
+      personalPresentation: {
+        attachment: { interactionNodeId: 11, versionInteractionNodeId: 90, rootLayerId: 91 },
+        graph: {
+          nodeId: 90, rootLayerId: 91,
+          rootAction: { id: 92, sourceNodeId: 90, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: 91, state: "accepted" },
+          layers: [{
+            layer: { id: 91, nodes: [93], edges: [], state: "accepted" },
+            nodes: [{ id: 93, kind: "presentation-preference", icon: "compass", title: "Decision-useful center", detail: "Foreground the conclusion.", state: "accepted" }],
+            edges: [], actions: [],
+          }],
+        },
+      },
+    };
+
+    await expect(harness.complete(attached)).rejects.toThrow("reload failed");
+    expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])).toEqual(["base"]);
+    await expect(harness.complete(attached)).resolves.toBeUndefined();
+    expect(reload).toHaveBeenCalledTimes(2);
+    expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).toContain("If you are the root agent");
+    expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).toContain("Never include that block in an unrelated delegate's task");
+    expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).not.toContain("Personal graph presentation preferences:");
+    expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).not.toContain("Decision-useful center");
+  });
+
+  it("rotates the native Prime session when the durable presentation pin changes", async () => {
+    const firstDispose = vi.fn();
+    const firstSession = {
+      sessionFile: "/tmp/prime-v1.jsonl",
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: firstDispose, reload: vi.fn(async () => undefined),
+    };
+    const secondSession = {
+      sessionFile: "/tmp/prime-neutral.jsonl",
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload: vi.fn(async () => undefined),
+    };
+    const createAgentSessionFromServices = vi.fn()
+      .mockResolvedValueOnce({ session: firstSession })
+      .mockResolvedValueOnce({ session: secondSession });
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+    }, { loadModule: async () => ({
+      ...runScopeApi(), SessionManager: { create: vi.fn(() => ({})), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionFromServices,
+    }) as never });
+    const first = presentationRunContext(11, "first-token", 90);
+
+    await harness.complete(first);
+    await harness.complete(first);
+    await harness.complete(runContext(12, "second-token"));
+
+    expect(firstSession.promptAndWait).toHaveBeenCalledTimes(2);
+    expect(firstDispose).toHaveBeenCalledOnce();
+    expect(secondSession.promptAndWait).toHaveBeenCalledOnce();
+    expect(createAgentSessionFromServices).toHaveBeenCalledTimes(2);
+    expect(harness.state()).toEqual({
+      primeAgentSessionFile: "/tmp/prime-neutral.jsonl",
+      primeAgentSessionPersonalPresentationVersionId: null,
+    });
+  });
+
+  it("reloads native propagation instructions when restoring a matching presentation pin", async () => {
+    let resourceLoaderOptions: { appendSystemPromptOverride(base: string[]): string[] } | undefined;
+    const session = {
+      sessionFile: "/tmp/saved-v1.jsonl",
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload: vi.fn(async () => undefined),
+    };
+    const open = vi.fn(() => "saved-v1-session");
+    const createAgentSessionFromServices = vi.fn(async () => ({ session }));
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+      savedState: {
+        primeAgentSessionFile: "/tmp/saved-v1.jsonl",
+        primeAgentSessionPersonalPresentationVersionId: 90,
+      },
+    }, { loadModule: async () => ({
+      ...runScopeApi(), SessionManager: { create: vi.fn(), open },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async (options: { resourceLoaderOptions: typeof resourceLoaderOptions }) => {
+        resourceLoaderOptions = options.resourceLoaderOptions;
+        return { modelRegistry: { find: vi.fn() } };
+      }),
+      createAgentSessionFromServices,
+    }) as never });
+    const attached = presentationRunContext(11, "token", 90);
+
+    await harness.complete(attached);
+    await harness.complete(attached);
+
+    expect(open).toHaveBeenCalledWith("/tmp/saved-v1.jsonl");
+    expect(createAgentSessionFromServices).toHaveBeenCalledOnce();
+    expect(session.reload).toHaveBeenCalledOnce();
+    expect(session.promptAndWait).toHaveBeenCalledTimes(2);
+    const nativeInstructions = resourceLoaderOptions?.appendSystemPromptOverride(["base"]);
+    expect(nativeInstructions?.[1]).toContain("If you are the root agent");
+    expect(nativeInstructions?.[1]).not.toContain("Decision-useful center");
+    expect(harness.state()).toEqual({
+      primeAgentSessionFile: "/tmp/saved-v1.jsonl",
+      primeAgentSessionPersonalPresentationVersionId: 90,
+    });
+  });
+
+  it("does not prompt a restored session when force shutdown wins its instruction reload", async () => {
+    let markReloadStarted!: () => void;
+    let releaseReload!: () => void;
+    const reloadStarted = new Promise<void>((resolve) => { markReloadStarted = resolve; });
+    const reloadGate = new Promise<void>((resolve) => { releaseReload = resolve; });
+    const nativeDispose = vi.fn();
+    const session = {
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: nativeDispose,
+      reload: vi.fn(async () => {
+        markReloadStarted();
+        await reloadGate;
+      }),
+    };
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+      savedState: {
+        primeAgentSessionFile: "/tmp/saved-v1.jsonl",
+        primeAgentSessionPersonalPresentationVersionId: 90,
+      },
+    }, { loadModule: async () => ({
+      ...runScopeApi(), SessionManager: { create: vi.fn(), open: vi.fn(() => ({})) },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionFromServices: vi.fn(async () => ({ session })),
+    }) as never });
+
+    const completing = harness.complete(presentationRunContext(11, "token", 90));
+    await reloadStarted;
+    harness.forceShutdown();
+    releaseReload();
+
+    await expect(completing).rejects.toThrow("Prime Agent harness is shutting down");
+    expect(session.promptAndWait).not.toHaveBeenCalled();
+    expect(nativeDispose).toHaveBeenCalledOnce();
+  });
+
+  it("disposes a replacement session created after force shutdown wins a rotation", async () => {
+    let markReplacementStarted!: () => void;
+    let releaseReplacement!: () => void;
+    const replacementStarted = new Promise<void>((resolve) => { markReplacementStarted = resolve; });
+    const replacementGate = new Promise<void>((resolve) => { releaseReplacement = resolve; });
+    const firstSession = {
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload: vi.fn(async () => undefined),
+    };
+    const replacementDispose = vi.fn();
+    const replacementSession = {
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: replacementDispose,
+    };
+    const createAgentSessionFromServices = vi.fn()
+      .mockResolvedValueOnce({ session: firstSession })
+      .mockImplementationOnce(async () => {
+        markReplacementStarted();
+        await replacementGate;
+        return { session: replacementSession };
+      });
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+    }, { loadModule: async () => ({
+      ...runScopeApi(), SessionManager: { create: vi.fn(() => ({})), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionFromServices,
+    }) as never });
+    await harness.complete(presentationRunContext(11, "first-token", 90));
+
+    const rotating = harness.complete(runContext(12, "second-token"));
+    await replacementStarted;
+    harness.forceShutdown();
+    releaseReplacement();
+
+    await expect(rotating).rejects.toThrow("Prime Agent harness is shutting down");
+    expect(replacementSession.promptAndWait).not.toHaveBeenCalled();
+    expect(replacementDispose).toHaveBeenCalledOnce();
+  });
+
+  it("does not resume legacy Prime state whose presentation pin is unknown", async () => {
+    const session = {
+      sessionFile: "/tmp/fresh.jsonl",
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload: vi.fn(async () => undefined),
+    };
+    const create = vi.fn(() => "fresh-session");
+    const open = vi.fn(() => "legacy-session");
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+      savedState: { primeAgentSessionFile: "/tmp/legacy.jsonl" },
+    }, { loadModule: async () => ({
+      ...runScopeApi(), SessionManager: { create, open },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionFromServices: vi.fn(async () => ({ session })),
+    }) as never });
+
+    await harness.complete(runContext(11, "token"));
+
+    expect(open).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith("/tmp/project");
+    expect(session.promptAndWait).toHaveBeenCalledOnce();
   });
 
   it("delivers the same ordered normalized context to Prime and its native children", async () => {
@@ -1407,6 +1781,25 @@ function attachedRunContext(nodeId: number, token: string): HarnessRunContext {
   };
 }
 
+function presentationRunContext(nodeId: number, token: string, versionId: number): HarnessRunContext {
+  return {
+    ...runContext(nodeId, token),
+    personalPresentation: {
+      attachment: { interactionNodeId: nodeId, versionInteractionNodeId: versionId, rootLayerId: 91 },
+      graph: {
+        nodeId: versionId,
+        rootLayerId: 91,
+        rootAction: { id: 92, sourceNodeId: versionId, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: 91, state: "accepted" },
+        layers: [{
+          layer: { id: 91, nodes: [93], edges: [], state: "accepted" },
+          nodes: [{ id: 93, kind: "presentation-preference", icon: "compass", title: "Decision-useful center", detail: "Foreground the conclusion.", state: "accepted" }],
+          edges: [], actions: [],
+        }],
+      },
+    },
+  };
+}
+
 async function createHarness(session: PrimeAgentSessionFixture): Promise<PrimeAgentHarness> {
   return PrimeAgentHarness.create({
     threadId: 7,
@@ -1549,6 +1942,8 @@ function familyRunContext(
     { providerId: "openai-personal", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt-shared", adapterImplementationVersion: "1" },
     { providerId: "openai-work", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt-shared", adapterImplementationVersion: "1" },
     { providerId: "anthropic-work", adapterId: "anthropic-api", accessContract: "secret@1", modelId: "claude-root", adapterImplementationVersion: "1" },
+    { providerId: "openrouter-work", adapterId: "openrouter", accessContract: "secret@1", modelId: "qwen-root", adapterImplementationVersion: "1" },
+    { providerId: "vercel-work", adapterId: "vercel-ai-router", accessContract: "secret@1", modelId: "gemini-root", adapterImplementationVersion: "1" },
   ] as const;
   const orchestrator = routes[orchestratorIndex];
   if (orchestrator === undefined) throw new Error("invalid test orchestrator");
@@ -1564,6 +1959,14 @@ function familyRunContext(
     "anthropic-work": {
       kind: "secret", contract: "secret@1", providerId: "anthropic-work", adapterId: "anthropic-api",
       adapterImplementationVersion: "1", endpoint: "https://anthropic-work.test/v1", fields: { "api-key": "secret-anthropic-work" },
+    },
+    "openrouter-work": {
+      kind: "secret", contract: "secret@1", providerId: "openrouter-work", adapterId: "openrouter",
+      adapterImplementationVersion: "1", endpoint: "https://openrouter-work.test/v1", fields: { "api-key": "secret-openrouter-work" },
+    },
+    "vercel-work": {
+      kind: "secret", contract: "secret@1", providerId: "vercel-work", adapterId: "vercel-ai-router",
+      adapterImplementationVersion: "1", endpoint: "https://vercel-work.test/v1", fields: { "api-key": "secret-vercel-work" },
     },
   } as const;
   const base = runContext(nodeId, token, trace);
@@ -1583,7 +1986,12 @@ function familyRunContext(
   };
 }
 
-function singleAdapterRunContext(nodeId: number, adapterId: string): HarnessRunContext {
+function singleAdapterRunContext(
+  nodeId: number,
+  adapterId: string,
+  modelCapabilities?: { readonly contextWindow: number; readonly maxOutputTokens: number },
+  endpoint = `https://provider-${nodeId}.test/v1`,
+): HarnessRunContext {
   const base = runContext(nodeId, `token-${nodeId}`);
   const route = {
     providerId: `provider-${nodeId}`,
@@ -1598,8 +2006,11 @@ function singleAdapterRunContext(nodeId: number, adapterId: string): HarnessRunC
     providerId: route.providerId,
     adapterId,
     adapterImplementationVersion: "1",
-    endpoint: `https://provider-${nodeId}.test/v1`,
+    endpoint,
     fields: { "api-key": `secret-${nodeId}` },
+    ...(modelCapabilities === undefined ? {} : {
+      modelCapabilities: { [route.modelId]: modelCapabilities },
+    }),
   } as const;
   return {
     ...base,

@@ -4,7 +4,7 @@ use crate::{
     AcceptedGraphClosure, CompletionState, CurrentProjectionEvent, CurrentProjectionPage,
     CurrentTransitionReceipt, GraphError, GraphNode, GraphWriter, InteractionContextAction,
     InteractionContextDraft, InteractionContextTarget, InteractionInputNode, InteractionInvocation,
-    NodeId, ProjectId, TemporalFeatureConfig, ThreadId,
+    NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, TemporalFeatureConfig, ThreadId,
     graph::{InteractionScope, model::require_nonempty},
     interaction_input_digest,
     storage::{
@@ -69,6 +69,7 @@ impl GraphDatabase {
         text: &str,
         invocation: Option<InteractionInvocation>,
     ) -> Result<GraphNode, GraphError> {
+        reject_reserved_profile_thread(thread_id)?;
         if invocation.is_none() {
             require_nonempty(text, "text")?;
         }
@@ -88,6 +89,7 @@ impl GraphDatabase {
         text: &str,
         contexts: &[InteractionContextDraft],
     ) -> Result<(GraphNode, Vec<InteractionContextAction>), GraphError> {
+        reject_reserved_profile_thread(thread_id)?;
         if text.trim().is_empty()
             && !contexts
                 .iter()
@@ -120,6 +122,56 @@ impl GraphDatabase {
     }
 
     pub async fn create_identified_interaction_with_context(
+        &self,
+        project_id: Option<ProjectId>,
+        thread_id: ThreadId,
+        text: &str,
+        input_identity: &str,
+        input_digest: &str,
+        contexts: &[InteractionContextDraft],
+    ) -> Result<(GraphNode, Vec<InteractionContextAction>), GraphError> {
+        reject_reserved_profile_thread(thread_id)?;
+        self.create_identified_interaction_with_context_inner(
+            project_id,
+            thread_id,
+            text,
+            input_identity,
+            input_digest,
+            contexts,
+        )
+        .await
+    }
+
+    pub async fn create_personal_presentation_interaction(
+        &self,
+        text: &str,
+        input_identity: &str,
+        input_digest: &str,
+    ) -> Result<GraphNode, GraphError> {
+        if !input_identity.starts_with("relayer.personal-presentation:") {
+            return Err(GraphError::validation(
+                "invalid_personal_presentation_identity",
+                "inputIdentity",
+                "A personal-presentation interaction needs the reserved identity prefix.",
+            ));
+        }
+        let thread_id = ThreadId::new(PERSONAL_PRESENTATION_PROFILE_THREAD_ID)
+            .expect("the reserved profile thread identity is positive");
+        let (node, actions) = self
+            .create_identified_interaction_with_context_inner(
+                None,
+                thread_id,
+                text,
+                input_identity,
+                input_digest,
+                &[],
+            )
+            .await?;
+        debug_assert!(actions.is_empty());
+        Ok(node)
+    }
+
+    async fn create_identified_interaction_with_context_inner(
         &self,
         project_id: Option<ProjectId>,
         thread_id: ThreadId,
@@ -392,4 +444,15 @@ async fn initialize_completion_scope(
     CurrentTable::new(connection)
         .initialize(scope.root_node_id, !scope.read_only, &entitlement, &digest)
         .await
+}
+
+fn reject_reserved_profile_thread(thread_id: ThreadId) -> Result<(), GraphError> {
+    if thread_id.value() == PERSONAL_PRESENTATION_PROFILE_THREAD_ID {
+        return Err(GraphError::validation(
+            "reserved_personal_presentation_thread",
+            "threadId",
+            "The personal-presentation profile thread is reserved for its dedicated control boundary.",
+        ));
+    }
+    Ok(())
 }

@@ -2,6 +2,11 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 
+/// Standalone graph thread reserved for product-owned personal-presentation
+/// versions. Ordinary interaction creation rejects this identity; only the
+/// dedicated profile creation boundary may use it.
+pub const PERSONAL_PRESENTATION_PROFILE_THREAD_ID: i64 = i64::MAX;
+
 macro_rules! integer_id {
     ($name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]

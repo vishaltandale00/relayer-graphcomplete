@@ -29,6 +29,56 @@ fn authored_layout(nodes: impl IntoIterator<Item = NodeId>) -> Option<LayerLayou
     ))
 }
 
+#[tokio::test]
+async fn personal_presentation_thread_is_reserved_from_ordinary_creation() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let reserved = thread(PERSONAL_PRESENTATION_PROFILE_THREAD_ID);
+    let ordinary = database
+        .create_interaction(None, reserved, "ordinary")
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        ordinary,
+        GraphError::Validation {
+            code: "reserved_personal_presentation_thread",
+            ..
+        }
+    ));
+    let imported = database
+        .begin_imported_conversation(&ImportedConversationStage {
+            import_id: "reserved-import".into(),
+            source_sha256: "sha256:test".into(),
+            project_id: None,
+            thread_id: reserved,
+            created_at: "2026-08-28T00:00:00Z".into(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        imported,
+        GraphError::Validation {
+            code: "reserved_personal_presentation_thread",
+            ..
+        }
+    ));
+
+    let digest = interaction_input_digest("profile", &[]).unwrap();
+    let profile = database
+        .create_personal_presentation_interaction(
+            "profile",
+            "relayer.personal-presentation:personal-presentation-v0",
+            &digest,
+        )
+        .await
+        .unwrap();
+    let ordinary = database
+        .create_interaction(None, thread(1), "ordinary")
+        .await
+        .unwrap();
+    let ordinary_writer = database.writer_for_subgraph(ordinary.id).await.unwrap();
+    assert!(ordinary_writer.get_node(profile.id).await.is_err());
+}
+
 async fn setup(project_id: Option<ProjectId>, thread_id: ThreadId) -> (GraphDatabase, GraphNode) {
     let database = GraphDatabase::in_memory().await.unwrap();
     let interaction = database
@@ -36,6 +86,18 @@ async fn setup(project_id: Option<ProjectId>, thread_id: ThreadId) -> (GraphData
         .await
         .unwrap();
     (database, interaction)
+}
+
+async fn personal_presentation_interaction(
+    database: &GraphDatabase,
+    text: &str,
+    identity: &str,
+) -> GraphNode {
+    let digest = interaction_input_digest(text, &[]).unwrap();
+    database
+        .create_personal_presentation_interaction(text, identity, &digest)
+        .await
+        .unwrap()
 }
 
 fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
@@ -512,6 +574,154 @@ async fn accept_single_node(
         .unwrap();
     writer.complete(interaction.id).await.unwrap();
     layer
+}
+
+#[tokio::test]
+async fn personal_presentation_attachment_is_control_owned_one_shot_and_hidden_from_completion() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    let version = personal_presentation_interaction(
+        &database,
+        "Personal presentation version V1",
+        "relayer.personal-presentation:test-v1",
+    )
+    .await;
+    let version_writer = database.writer_for_subgraph(version.id).await.unwrap();
+    let preference = version_writer
+        .submit_node(&NodeDraft {
+            client_key: "decision-useful-center".into(),
+            kind: "presentation-preference".into(),
+            icon: "compass".into(),
+            title: "Decision-useful center".into(),
+            detail: "Foreground the conclusion or current status.".into(),
+        })
+        .await
+        .unwrap();
+    let preference_root = accept_single_node(&version_writer, version.clone(), preference).await;
+    database
+        .publish_personal_presentation_version(version.id)
+        .await
+        .unwrap();
+    assert!(matches!(
+        database
+            .attach_personal_presentation(version.id, version.id)
+            .await,
+        Err(GraphError::NotFound(_))
+    ));
+    assert!(
+        database
+            .personal_presentation_attachment(version.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let target = database
+        .create_interaction(Some(project(1)), thread(1), "Explain the queue")
+        .await
+        .unwrap();
+    let first = database
+        .attach_personal_presentation(target.id, version.id)
+        .await
+        .unwrap();
+    let replay = database
+        .attach_personal_presentation(target.id, version.id)
+        .await
+        .unwrap();
+    assert_eq!(first, replay);
+    assert_eq!(first.interaction_node_id, target.id);
+    assert_eq!(first.version_interaction_node_id, version.id);
+    assert_eq!(first.root_layer_id, preference_root.id);
+
+    let resolved = database
+        .personal_presentation_attachment(target.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(resolved.attachment, first);
+    assert_eq!(resolved.graph.root_layer_id, preference_root.id);
+    assert_eq!(
+        resolved.graph.layers[0].nodes[0].kind,
+        "presentation-preference"
+    );
+
+    let fixture = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(file.path())
+                .foreign_keys(true),
+        )
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE personal_presentation_versions SET retired=1 WHERE version_interaction_node_id=?1",
+    )
+    .bind(version.id.value())
+    .execute(&fixture)
+    .await
+    .unwrap();
+    assert_eq!(
+        database
+            .attach_personal_presentation(target.id, version.id)
+            .await
+            .unwrap(),
+        first
+    );
+    let new_target = database
+        .create_interaction(Some(project(1)), thread(1), "New interaction")
+        .await
+        .unwrap();
+    assert!(matches!(
+        database
+            .attach_personal_presentation(new_target.id, version.id)
+            .await,
+        Err(GraphError::Validation {
+            code: "personal_presentation_version_retired",
+            ..
+        })
+    ));
+
+    let target_writer = database.writer_for_subgraph(target.id).await.unwrap();
+    let answer = node(&target_writer, "answer").await;
+    accept_single_node(&target_writer, target.clone(), answer).await;
+    let response = database
+        .accepted_graph_closure(target.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        response
+            .layers
+            .iter()
+            .all(|layer| layer.layer.id != preference_root.id)
+    );
+
+    let other_version = personal_presentation_interaction(
+        &database,
+        "Personal presentation version V2",
+        "relayer.personal-presentation:test-v2",
+    )
+    .await;
+    let other_writer = database
+        .writer_for_subgraph(other_version.id)
+        .await
+        .unwrap();
+    let other_preference = node(&other_writer, "other-preference").await;
+    accept_single_node(&other_writer, other_version.clone(), other_preference).await;
+    database
+        .publish_personal_presentation_version(other_version.id)
+        .await
+        .unwrap();
+    let replacement = database
+        .attach_personal_presentation(target.id, other_version.id)
+        .await
+        .unwrap_err();
+    assert!(
+        replacement
+            .to_string()
+            .contains("already pins another personal presentation version")
+    );
 }
 
 #[tokio::test]

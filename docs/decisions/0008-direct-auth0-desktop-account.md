@@ -74,11 +74,13 @@ user on this optional step.
 
 After onboarding, a quiet account control is anchored to the bottom-right of the
 application viewport rather than participating in sidebar layout. Its ordinary
-label never includes Stable or Preview. Release channel remains visible only in
-Account settings and diagnostics, where it explains callback selection. Account
-settings retain manual sign-in and logout. No account state gates projects,
-threads, interactions, providers, models, harnesses, permissions, updates, or
-exports after the user resolves the onboarding choice.
+label never includes Stable or Preview. While signed out, clicking `Sign in`
+starts the browser flow directly; an existing or uncertain account opens Account
+settings instead. That panel contains only concise account status and the
+applicable sign-in or logout action. Release channel is not part of account UX;
+main-owned diagnostics retain callback selection. No account state gates
+projects, threads, interactions, providers, models, harnesses, permissions,
+updates, or exports after the user resolves the onboarding choice.
 
 Default tests use local fake Auth0 and loopback servers. They do not contact the
 production tenant.

@@ -797,9 +797,15 @@ export class HarnessHost {
     } catch (error) {
       if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) throw error;
     }
-    const [interaction, interactionInput] = await Promise.all([
+    const expectedPersonalPresentationVersionId = traceContext?.personalPresentationVersionId;
+    const [interaction, interactionInput, personalPresentation] = await Promise.all([
       graph.getNode(interactionNodeId),
       graph.getInteractionInput(),
+      graph.getPersonalPresentation().catch((error: unknown) => {
+        if (error instanceof GraphApiError && error.status === 404 && error.code === "personal_presentation_not_attached"
+          && expectedPersonalPresentationVersionId === undefined) return undefined;
+        throw error;
+      }),
     ]);
     if (origin.kind === "invoke") {
       if (interaction.leasedActionId !== origin.actionId) {
@@ -817,12 +823,19 @@ export class HarnessHost {
         );
       }
     }
+    if (expectedPersonalPresentationVersionId !== undefined
+      && personalPresentation?.attachment.versionInteractionNodeId !== expectedPersonalPresentationVersionId) {
+      throw new Error("Attached personal presentation does not match the pinned trace version");
+    }
     const scope = new ActiveHarnessGraphScope(capability);
     const support = session.harness.traceSupport?.() ?? NO_HARNESS_TRACE_SUPPORT;
     const trace = this.traceStore?.start({
       threadId,
       interactionNodeId,
       ...(traceContext === undefined ? {} : { productInteractionId: traceContext.productInteractionId }),
+      ...(traceContext?.personalPresentationVersionId === undefined ? {} : {
+        personalPresentationVersionId: traceContext.personalPresentationVersionId,
+      }),
       implementation: session.descriptor.configuration.implementation,
       configurationName: session.descriptor.configuration.name,
       support,
@@ -888,6 +901,7 @@ export class HarnessHost {
         origin,
         inputGraph: interaction,
         interactionInput,
+        ...(personalPresentation === undefined ? {} : { personalPresentation }),
         graph: scope,
         ...(completionBroker === undefined ? {} : { completionBroker }),
         approvals,
@@ -971,6 +985,11 @@ export class HarnessHost {
   ): Promise<HarnessTraceDescriptor> {
     if (this.traceStore === undefined) throw new Error("Candidate trace capture is disabled for this harness host");
     return this.traceStore.export(productInteractionId, targetDirectory, correlation);
+  }
+
+  candidateTracePersonalPresentationVersionId(productInteractionId: number): number | undefined {
+    if (this.traceStore === undefined) return undefined;
+    return this.traceStore.personalPresentationVersionId(productInteractionId);
   }
 
   cancel(threadId: number, completionId?: GraphId): boolean {
@@ -1976,7 +1995,16 @@ function validateExecutionAccess(
 
 function freezeExecutionAccess(access: HarnessExecutionAccess): HarnessExecutionAccess {
   if (access.kind === "secret") {
-    return Object.freeze({ ...access, fields: Object.freeze({ ...access.fields }) });
+    const modelCapabilities = access.modelCapabilities === undefined
+      ? undefined
+      : Object.freeze(Object.fromEntries(Object.entries(access.modelCapabilities).map(([modelId, capabilities]) => (
+        [modelId, Object.freeze({ ...capabilities })]
+      ))));
+    return Object.freeze({
+      ...access,
+      fields: Object.freeze({ ...access.fields }),
+      ...(modelCapabilities === undefined ? {} : { modelCapabilities }),
+    });
   }
   return Object.freeze({ ...access, environment: Object.freeze({ ...access.environment }) });
 }
@@ -2162,11 +2190,20 @@ function isNativeExecutionHandle(value: Promise<void> | NativeExecutionHandle): 
 function readTraceContext(value: unknown): HarnessCompletionTraceContext | undefined {
   if (!isRecord(value) || value.traceContext === undefined) return undefined;
   if (!isRecord(value.traceContext)) throw new Error("Harness completion contains an invalid trace context");
-  const { productInteractionId } = value.traceContext;
+  const { productInteractionId, personalPresentationVersionId } = value.traceContext;
   if (typeof productInteractionId !== "number" || !Number.isSafeInteger(productInteractionId) || productInteractionId < 1) {
     throw new Error("Harness completion trace context requires a positive product interaction id");
   }
-  return { productInteractionId };
+  if (personalPresentationVersionId !== undefined
+    && (typeof personalPresentationVersionId !== "number"
+      || !Number.isSafeInteger(personalPresentationVersionId)
+      || personalPresentationVersionId < 1)) {
+    throw new Error("Harness completion trace context personal presentation version must be a positive integer");
+  }
+  return {
+    productInteractionId,
+    ...(personalPresentationVersionId === undefined ? {} : { personalPresentationVersionId }),
+  };
 }
 
 function disabledTraceDescriptor(): HarnessTraceDescriptor {

@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { InteractionInput } from "@relayer/graph-client";
+import type { InteractionInput, ResolvedPersonalPresentation } from "@relayer/graph-client";
 import { HarnessExecutionFailure, HarnessHost, startHarnessHost, type HarnessInvokedCompletion } from "../src/host.js";
 import { nativeExecutionHandle } from "../src/completion-execution.js";
 import { PrimeAgentHarness } from "../src/implementations/prime-agent.js";
@@ -49,9 +49,24 @@ const interactionInput = (nodeId = 1, contexts: InteractionInput["contexts"] = [
   interaction: graphNode(nodeId),
   contexts,
 });
+const personalPresentation = (interactionNodeId: number, versionInteractionNodeId: number, preference: boolean): ResolvedPersonalPresentation => ({
+  attachment: { interactionNodeId, versionInteractionNodeId, rootLayerId: versionInteractionNodeId + 1 },
+  graph: {
+    nodeId: versionInteractionNodeId,
+    rootLayerId: versionInteractionNodeId + 1,
+    rootAction: { id: versionInteractionNodeId + 2, sourceNodeId: versionInteractionNodeId, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: versionInteractionNodeId + 1, state: "accepted" },
+    layers: [{
+      layer: { id: versionInteractionNodeId + 1, nodes: [versionInteractionNodeId + 3], edges: [], state: "accepted" },
+      nodes: [{ id: versionInteractionNodeId + 3, kind: preference ? "presentation-preference" : "personal-presentation-manifest", icon: preference ? "compass" : "settings", title: preference ? "Decision-useful center" : "Neutral", detail: preference ? "Foreground the conclusion." : "No guidance.", state: "accepted" }],
+      edges: [], actions: [],
+    }],
+  },
+});
 const graphReadResponse = (url: string, nodeId = 1, contexts: InteractionInput["contexts"] = [], leasedActionId?: number) => new Response(
-  JSON.stringify(url.endsWith("/input") ? interactionInput(nodeId, contexts) : { node: graphNode(nodeId, leasedActionId) }),
-  { status: 200, headers: { "content-type": "application/json" } },
+  JSON.stringify(url.endsWith("/personal-presentation")
+    ? { error: { code: "personal_presentation_not_attached" } }
+    : url.endsWith("/input") ? interactionInput(nodeId, contexts) : { node: graphNode(nodeId, leasedActionId) }),
+  { status: url.endsWith("/personal-presentation") ? 404 : 200, headers: { "content-type": "application/json" } },
 );
 const testConfiguration: HarnessConfiguration = {
   schemaVersion: 1,
@@ -239,6 +254,8 @@ describe("HarnessHost", () => {
     let restoredState: HarnessSessionState | undefined;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
       ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : url.endsWith("/personal-presentation")
+        ? new Response(JSON.stringify(personalPresentation(1, 90, true)), { status: 200, headers: { "content-type": "application/json" } })
       : graphReadResponse(url)));
 
     try {
@@ -258,11 +275,18 @@ describe("HarnessHost", () => {
       });
       await failing.initialize();
       await failing.createSession(descriptor);
-      await expect(failing.complete(descriptor.threadId, 1, capability, undefined, undefined, { productInteractionId: 7 })).rejects.toThrow("model failed");
-      await failing.exportCandidateTrace(7, join(directory, "failed-export"), {
+      await expect(failing.complete(descriptor.threadId, 1, capability, undefined, undefined, {
+        productInteractionId: 7,
+        personalPresentationVersionId: 90,
+      })).rejects.toThrow("model failed");
+      const exportedTrace = await failing.exportCandidateTrace(7, join(directory, "failed-export"), {
         runId: "run", executionId: "execution", interactionId: "7", harnessConfigurationName: "test-default",
       });
-      expect(JSON.parse(await readFile(join(directory, "failed-export", "manifest.json"), "utf8"))).toMatchObject({ status: "failed" });
+      expect(exportedTrace).toMatchObject({ status: "failed", personalPresentationVersionId: 90 });
+      expect(JSON.parse(await readFile(join(directory, "failed-export", "manifest.json"), "utf8"))).toMatchObject({
+        status: "failed",
+        personalPresentationVersionId: 90,
+      });
       await expect(failing.createSession({ ...descriptor, configuration: { ...testConfiguration, name: "other" } })).rejects.toThrow("already pinned");
 
       const restored = new HarnessHost({
@@ -729,12 +753,46 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("fails closed when an attributed personal presentation is missing or mismatched", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-personal-presentation-pin-"));
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => ({ async complete() {}, state: emptyState }) },
+    });
+    await host.initialize();
+    await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+    try {
+      vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+        ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+        : graphReadResponse(url)));
+      await expect(host.complete(1, 1, graph(), undefined, undefined, {
+        productInteractionId: 7,
+        personalPresentationVersionId: 90,
+      })).rejects.toMatchObject({ code: "personal_presentation_not_attached" });
+
+      vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+        ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+        : url.endsWith("/personal-presentation")
+          ? new Response(JSON.stringify(personalPresentation(1, 91, true)), { status: 200, headers: { "content-type": "application/json" } })
+          : graphReadResponse(url)));
+      await expect(host.complete(1, 1, graph(), undefined, undefined, {
+        productInteractionId: 7,
+        personalPresentationVersionId: 90,
+      })).rejects.toThrow("does not match the pinned trace version");
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("supplies a distinct run scope without rebuilding the harness", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-advance-"));
     const adopted: { url: string; token: string; nodeId: number }[] = [];
     const accepted = new Set<number>();
     const scopes: { acquireCapability(): unknown }[] = [];
     const inputs: InteractionInput[] = [];
+    const personalPresentations: Array<ResolvedPersonalPresentation | undefined> = [];
     const leasedActionIds: Array<number | null | undefined> = [];
     const models: unknown[] = [];
     let revocationRequests = 0;
@@ -750,6 +808,12 @@ describe("HarnessHost", () => {
       if (url.endsWith("/api/control/capabilities")) {
         revocationRequests += 1;
         return new Response(JSON.stringify({ revoked: true }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.endsWith("/personal-presentation")) {
+        return new Response(JSON.stringify(personalPresentation(nodeId, nodeId === 1 ? 90 : 100, nodeId === 1)), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${nodeId === 1 ? "first-token" : "second-token"}`);
       const contexts = nodeId === 1 ? [{
@@ -770,6 +834,7 @@ describe("HarnessHost", () => {
             async complete(context) {
               scopes.push(context.graph);
               inputs.push(context.interactionInput);
+              personalPresentations.push(context.personalPresentation);
               leasedActionIds.push(context.inputGraph.leasedActionId);
               models.push(context.model);
               adopted.push(context.graph.acquireCapability());
@@ -799,6 +864,9 @@ describe("HarnessHost", () => {
         annotations: ["first", "second"],
       }]));
       expect(inputs[1]).toEqual(interactionInput(2));
+      expect(personalPresentations.map((value) => value?.attachment.versionInteractionNodeId)).toEqual([90, 100]);
+      expect(personalPresentations[0]?.graph.layers[0]?.nodes[0]?.kind).toBe("presentation-preference");
+      expect(personalPresentations[1]?.graph.layers[0]?.nodes[0]?.kind).toBe("personal-presentation-manifest");
       expect(leasedActionIds).toEqual([77, undefined]);
       expect(inputs[0]!.interaction).not.toHaveProperty("leasedActionId");
       expect(revocationRequests).toBe(0);
