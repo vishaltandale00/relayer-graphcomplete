@@ -8,7 +8,7 @@ Each predecessor mechanism-proof lane used an already-running Chrome instance wi
 
 The lane-specific `predecessorLiveProof` fields record only outcomes stated by each hashed live receipt. Deterministic implementation tests separately cover the `deterministicProof` fields; they are not represented as live observations.
 
-Across those two evidence classes, the delivered routes cover existing-state observation, benign bounded actions, harness-owned cleanup, honest endpoint failure, and Ask denial at the enclosing native MCP tool or IPython cell. No inner browser-action taxonomy was introduced. Only the Codex and Prime live receipts explicitly record a reversed test-page action; Claude's committed deterministic coverage exercises its bounded read, navigate, click, and fill batch instead.
+Across those two evidence classes, the delivered routes cover existing-state observation, benign bounded actions, harness-owned cleanup, honest endpoint failure, and Ask denial at the enclosing native MCP tool or IPython cell. No inner browser-action taxonomy was introduced. Only the Codex and Prime live receipts explicitly record a reversed test-page action; Claude's committed deterministic tests cover bounded read, navigate, click, and fill operations across separate valid calls instead.
 
 Claude Ask currently leaves its coarse MCP tool outside `allowedTools`, so the native tool never runs. Codex uses the existing generic MCP approval bridge and Prime uses its existing cell approval/confinement. Auto and Full retain their existing harness translations.
 
@@ -19,7 +19,7 @@ Claude Ask currently leaves its coarse MCP tool outside `allowedTools`, so the n
 The manifest carries a stable snapshot identifier, every reviewed path's SHA-256, and their aggregate digest. On the delivery pull request, CI reads the synthetic merge's second parent and requires the inventory to equal the assembly-base-to-head diff, excluding only the self-referential manifest. Future CI recognizes the snapshot identifier in its base, locates the commit that introduced it (including a squash-merge commit), and validates that immutable historical tree instead of comparing unrelated later changes with issue #257's fixed assembly base.
 
 - Codex helper identity/version, explicit loopback arguments, packaged ASAR presence, native approval labels, cancellation, and Codex-local failure isolation;
-- Claude target selection, bounded payloads and operations, terminal-click ordering, disabled-action rejection, final fill-value verification, managed SDK export admission, navigation failure, cancellation, sanitized errors, native Ask/Auto/Full translation, and socket-only cleanup;
+- Claude target selection, bounded payloads and operations, terminal-click and terminal-fill ordering, disabled-action rejection, final fill-value verification, managed SDK export admission, navigation failure, cancellation, sanitized errors, native Ask/Auto/Full translation, and socket-only cleanup;
 - Prime archive/tree/three-target dependency closures, required root/dist skill assets, configuration discovery, production preflight, and unchanged permission profiles;
 - packaged presence of each harness-owned route alongside the ordinary GraphComplete runtime.
 
