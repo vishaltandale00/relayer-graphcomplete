@@ -3,7 +3,10 @@
 import { createProviderAdapterRegistry } from "./provider-adapter-contract.mjs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { withManagedCodexPath } from "../../shared/codex-runtime-environment.mjs";
+import {
+  withConventionalPathKey,
+  withManagedCodexPath,
+} from "../../shared/codex-runtime-environment.mjs";
 import { anthropicApiDescriptor } from "./implementations/anthropic-api.mjs";
 import { claudeSubscriptionDescriptor } from "./implementations/claude-subscription.mjs";
 import { codexSubscriptionDescriptor } from "./implementations/codex-subscription.mjs";
@@ -69,7 +72,7 @@ const PRODUCTION_RUNTIME_DEPENDENCIES = Object.freeze({
         ...managedRuntimeEnvironment(context.environment),
         CODEX_HOME: codexHome,
         RELAYER_CODEX_BINARY: managedRuntime.executable,
-      }, managedRuntime.executable),
+      }, managedRuntime.executable, { platform: context.platform }),
     };
   },
   claude: async (definition, context, managedRuntime) => {
@@ -80,10 +83,10 @@ const PRODUCTION_RUNTIME_DEPENDENCIES = Object.freeze({
       managedRuntime,
       executable: managedRuntime.executable,
       moduleUrl: managedRuntime.moduleUrl,
-      environment: {
+      environment: withConventionalPathKey({
         ...managedRuntimeEnvironment(context.environment),
         CLAUDE_CONFIG_DIR: claudeHome,
-      },
+      }, { platform: context.platform }),
     };
   },
 });

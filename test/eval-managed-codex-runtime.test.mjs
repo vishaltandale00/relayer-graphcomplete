@@ -76,5 +76,11 @@ describe("Eval managed Codex runtime", () => {
     }, executable, { platform: "linux" })).toEqual({
       PATH: "/runtime/vendor/target/codex-path:/usr/bin",
     });
+    expect(withManagedCodexPath({
+      PATH: "C:\\ambiguous\\bin",
+      Path: "C:\\Windows\\System32",
+    }, "C:\\runtime\\vendor\\target\\bin\\codex.exe", { platform: "win32" })).toEqual({
+      Path: expect.stringMatching(/^.*codex-path;C:\\Windows\\System32$/),
+    });
   });
 });

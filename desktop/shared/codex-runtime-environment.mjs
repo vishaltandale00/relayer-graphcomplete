@@ -7,14 +7,25 @@ export function managedCodexHelperDirectory(executable) {
   return resolve(dirname(executable), "..", "codex-path");
 }
 
-export function withManagedCodexPath(environment, executable, { platform = process.platform } = {}) {
+export function withConventionalPathKey(environment, { platform = process.platform } = {}) {
   const result = { ...environment };
   const pathKeys = Object.keys(result).filter((key) => key.toLowerCase() === "path");
-  const existing = pathKeys.map((key) => result[key]).find((value) => typeof value === "string") ?? "";
+  const conventionalKey = platform === "win32" ? "Path" : "PATH";
+  const existing = typeof result[conventionalKey] === "string"
+    ? result[conventionalKey]
+    : pathKeys.map((key) => result[key]).find((value) => typeof value === "string");
   for (const key of pathKeys) delete result[key];
+  if (typeof existing === "string") result[conventionalKey] = existing;
+  return result;
+}
+
+export function withManagedCodexPath(environment, executable, { platform = process.platform } = {}) {
+  const result = withConventionalPathKey(environment, { platform });
+  const pathKey = platform === "win32" ? "Path" : "PATH";
+  const existing = result[pathKey] ?? "";
   const delimiter = platform === "win32" ? ";" : ":";
   const helper = managedCodexHelperDirectory(executable);
   const entries = existing.split(delimiter).filter((entry) => entry !== "" && entry !== helper);
-  result.PATH = [helper, ...entries].join(delimiter);
+  result[pathKey] = [helper, ...entries].join(delimiter);
   return result;
 }

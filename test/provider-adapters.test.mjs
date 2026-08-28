@@ -130,6 +130,46 @@ describe("authoritative provider adapter registry", () => {
       .rejects.toThrow("requires the claude managed runtime");
   });
 
+  it("uses one conventional Windows Path for Claude authentication", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-provider-claude-windows-path-"));
+    const dependencies = await productionProviderRuntimeDependencies({
+      id: "claude-work", adapterId: "claude-subscription",
+    }, {
+      runtimeRoot: root,
+      managedRuntime: claudeRuntime,
+      platform: "win32",
+      environment: {
+        PATH: "C:\\ambiguous\\bin",
+        Path: "C:\\Windows\\System32;C:\\Program Files\\nodejs",
+      },
+    });
+    let spawnedEnvironment;
+    const spawnProcess = vi.fn(() => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = vi.fn();
+      queueMicrotask(() => {
+        child.stdout.emit("data", JSON.stringify({ loggedIn: true }));
+        child.emit("exit", 0);
+      });
+      return child;
+    });
+    const runtime = new ClaudeCliManagedRuntime({
+      environment: dependencies.environment,
+      executable: dependencies.executable,
+      spawnProcess: (...args) => {
+        spawnedEnvironment = args[2].env;
+        return spawnProcess(...args);
+      },
+    });
+
+    await expect(runtime.account()).resolves.toMatchObject({ status: "connected" });
+    expect(spawnedEnvironment.Path).toBe("C:\\Windows\\System32;C:\\Program Files\\nodejs");
+    expect(spawnedEnvironment).not.toHaveProperty("PATH");
+    expect(Object.keys(spawnedEnvironment).filter((key) => key.toLowerCase() === "path")).toEqual(["Path"]);
+  });
+
   it("preserves the legacy Codex home only for the migrated default definition across restarts", async () => {
     const profile = await mkdtemp(join(tmpdir(), "relayer-legacy-codex-home-"));
     const runtimeRoot = join(profile, "provider-runtimes");

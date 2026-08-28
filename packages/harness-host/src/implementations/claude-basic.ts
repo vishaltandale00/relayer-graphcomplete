@@ -13,7 +13,7 @@ import { buildLayeredNavigationPrompt } from "./codex-basic.js";
 export const CLAUDE_BASIC_KEY = "claude.basic";
 
 const SAFE_SUBPROCESS_ENVIRONMENT = new Set([
-  "PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC",
+  "PATH", "Path", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC",
   "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SHELL",
 ]);
 const CLAUDE_MANAGED_RUNTIME_ENVIRONMENT = new Set([
@@ -46,6 +46,7 @@ export interface ClaudeBasicDependencies {
   readonly query?: ClaudeSdkQuery;
   readonly loadSdk?: (moduleUrl: string) => Promise<ClaudeSdkModule>;
   readonly clientModuleUrl?: string;
+  readonly platform?: NodeJS.Platform;
 }
 
 interface ClaudeRuntimeDescriptor {
@@ -125,7 +126,7 @@ export class ClaudeBasicHarness implements Harness {
     signal?: AbortSignal,
   ): Promise<{ text: string; sessionId?: string }> {
     const runtime = claudeRuntime(access);
-    const environment = executionEnvironment(access, runtime.environment, graph);
+    const environment = executionEnvironment(access, runtime.environment, graph, this.dependencies.platform);
     const permissionMode = claudePermissionMode(this.context.permissionBinding.approvalMode);
     const abortController = new AbortController();
     const abort = () => abortController.abort(signal?.reason ?? new Error("Claude completion was cancelled"));
@@ -218,13 +219,17 @@ function executionEnvironment(
   access: HarnessExecutionAccess,
   runtimeEnvironment: Readonly<Record<string, string>>,
   graph: GraphCapability,
+  platform = process.platform,
 ): Record<string, string> {
   const environment = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => (
     entry[1] !== undefined && SAFE_SUBPROCESS_ENVIRONMENT.has(entry[0])
   )));
-  Object.assign(environment, Object.fromEntries(Object.entries(runtimeEnvironment).filter(([key]) => (
+  const managedEnvironment = Object.fromEntries(Object.entries(runtimeEnvironment).filter(([key]) => (
     CLAUDE_MANAGED_RUNTIME_ENVIRONMENT.has(key)
-  ))));
+  )));
+  normalizePathKey(environment, platform);
+  normalizePathKey(managedEnvironment, platform);
+  Object.assign(environment, managedEnvironment);
   if (access.kind === "secret") {
     const apiKey = access.fields["api-key"];
     if (!apiKey) throw new Error("claude.basic requires the provider API key");
@@ -238,6 +243,15 @@ function executionEnvironment(
   environment.RELAYER_GRAPH_TOKEN = graph.token;
   environment.RELAYER_NODE_ID = String(graph.nodeId);
   return environment;
+}
+
+function normalizePathKey(environment: Record<string, string>, platform: NodeJS.Platform): void {
+  const pathKeys = Object.keys(environment).filter((key) => key.toLowerCase() === "path");
+  const conventionalKey = platform === "win32" ? "Path" : "PATH";
+  const existing = environment[conventionalKey]
+    ?? pathKeys.map((key) => environment[key]).find((value) => value !== undefined);
+  for (const key of pathKeys) delete environment[key];
+  if (existing !== undefined) environment[conventionalKey] = existing;
 }
 
 async function collectClaudeResult(

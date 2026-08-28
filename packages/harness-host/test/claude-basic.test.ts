@@ -190,6 +190,26 @@ describe("ClaudeBasicHarness", () => {
     expect(call?.options.env.RELAYER_GRAPH_TOKEN).toBe("token");
   });
 
+  it("preserves one conventional Windows Path for Claude SDK Bash execution", async () => {
+    let call: Parameters<ClaudeSdkQuery>[0] | undefined;
+    const harness = new ClaudeBasicHarness(factoryContext("ask"), {
+      platform: "win32",
+      query: sdkQuery([
+        { type: "result", subtype: "success", result: "done", session_id: "session-1" },
+      ], (input) => { call = input; }),
+    });
+
+    await harness.complete(runContext(managedAccess({ environment: {
+      PATH: "C:\\ambiguous\\bin",
+      Path: "C:\\Windows\\System32;C:\\Program Files\\nodejs",
+      CLAUDE_CONFIG_DIR: "C:\\Relayer\\claude-home",
+    } })));
+
+    expect(call?.options.env.Path).toBe("C:\\Windows\\System32;C:\\Program Files\\nodejs");
+    expect(call?.options.env).not.toHaveProperty("PATH");
+    expect(Object.keys(call?.options.env ?? {}).filter((key) => key.toLowerCase() === "path")).toEqual(["Path"]);
+  });
+
   it("resumes a session only for repeated turns through the same provider definition", async () => {
     const calls: Parameters<ClaudeSdkQuery>[0][] = [];
     const harness = new ClaudeBasicHarness(factoryContext("ask"), {
