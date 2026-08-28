@@ -226,6 +226,10 @@ export type HarnessExecutionAccess =
       readonly adapterImplementationVersion: string;
       readonly endpoint: string;
       readonly fields: Readonly<Record<string, string>>;
+      readonly modelCapabilities?: Readonly<Record<string, Readonly<{
+        readonly contextWindow: number;
+        readonly maxOutputTokens: number;
+      }>>>;
       readonly runtime?: HarnessManagedRuntimeAccess;
     }
   | ({

@@ -462,7 +462,7 @@ describe("PrimeAgentHarness", () => {
     expect(session.promptAndWait).not.toHaveBeenCalled();
   });
 
-  it("uses explicit conservative transport metadata for every product-visible API adapter", async () => {
+  it("uses discovered per-model token capabilities with a conservative fallback", async () => {
     const scopes: ControlledRunScope[] = [];
     const session = {
       promptAndWait: vi.fn(async (_text: string, options: { modelScope: ControlledRunScope }) => { options.modelScope.revoke(); }),
@@ -484,8 +484,19 @@ describe("PrimeAgentHarness", () => {
     }) as never });
 
     for (const [index, adapterId] of ["openai-api", "anthropic-api", "openrouter", "vercel-ai-router"].entries()) {
-      await harness.complete(singleAdapterRunContext(40 + index, adapterId));
+      await harness.complete(singleAdapterRunContext(
+        40 + index,
+        adapterId,
+        adapterId === "openrouter"
+          ? { contextWindow: 196_608, maxOutputTokens: 131_072 }
+          : undefined,
+      ));
     }
+    await harness.complete(singleAdapterRunContext(
+      44,
+      "openrouter",
+      { contextWindow: 32_768, maxOutputTokens: 2_048 },
+    ));
 
     expect(scopes.map(({ input }) => ({
       api: input.root.api,
@@ -498,9 +509,31 @@ describe("PrimeAgentHarness", () => {
     }))).toEqual([
       { api: "openai-responses", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "anthropic-messages", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "openai-completions", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 196_608, maxTokens: 16_384, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "openai-completions", compat: { vercelGatewayRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 2_048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
     ]);
+  });
+
+  it("keeps a small discovered context on Prime's compatible conservative envelope", async () => {
+    const session = {
+      promptAndWait: vi.fn(async () => undefined),
+      waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const harness = await createHarness(session);
+
+    await expect(harness.complete(singleAdapterRunContext(
+      45,
+      "openrouter",
+      { contextWindow: 4_095, maxOutputTokens: 3_685 },
+    ))).resolves.toBeUndefined();
+    expect(session.promptAndWait).toHaveBeenCalledOnce();
+    expect(session.promptAndWait.mock.calls[0]?.[1]?.modelScope.root).toMatchObject({
+      contextWindow: 32_768,
+      maxTokens: 3_685,
+    });
   });
 
   it("opens saved Prime Agent state and forwards cancellation", async () => {
@@ -1381,7 +1414,11 @@ function familyRunContext(
   };
 }
 
-function singleAdapterRunContext(nodeId: number, adapterId: string): HarnessRunContext {
+function singleAdapterRunContext(
+  nodeId: number,
+  adapterId: string,
+  modelCapabilities?: { readonly contextWindow: number; readonly maxOutputTokens: number },
+): HarnessRunContext {
   const base = runContext(nodeId, `token-${nodeId}`);
   const route = {
     providerId: `provider-${nodeId}`,
@@ -1398,6 +1435,9 @@ function singleAdapterRunContext(nodeId: number, adapterId: string): HarnessRunC
     adapterImplementationVersion: "1",
     endpoint: `https://provider-${nodeId}.test/v1`,
     fields: { "api-key": `secret-${nodeId}` },
+    ...(modelCapabilities === undefined ? {} : {
+      modelCapabilities: { [route.modelId]: modelCapabilities },
+    }),
   } as const;
   return {
     ...base,

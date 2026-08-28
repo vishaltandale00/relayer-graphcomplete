@@ -1035,21 +1035,41 @@ function validatePrimeAgentAccess(route: HarnessAdmittedModelRoute, access: Harn
 function primeAgentModel(route: HarnessAdmittedModelRoute, access: Extract<HarnessExecutionAccess, { kind: "secret" }>): PrimeAgentModel {
   const mapping = PRIME_ADAPTERS[route.adapterId];
   if (mapping === undefined) throw new Error(`prime.agent does not support provider adapter ${route.adapterId}`);
+  const capabilities = access.modelCapabilities !== undefined
+    && Object.hasOwn(access.modelCapabilities, route.modelId)
+    ? access.modelCapabilities[route.modelId]
+    : undefined;
+  const hasDiscoveredTokenCapabilities = capabilities !== undefined
+    && Number.isSafeInteger(capabilities.contextWindow)
+    && capabilities.contextWindow > 0
+    && Number.isSafeInteger(capabilities.maxOutputTokens)
+    && capabilities.maxOutputTokens > 0;
+  const supportsPrimeReserve = hasDiscoveredTokenCapabilities && capabilities.contextWindow > 16_384;
   return Object.freeze({
     id: route.modelId,
     name: route.modelId,
     api: mapping.api,
     provider: nativePrimeProviderId(route),
     baseUrl: access.endpoint,
-    // The v1 Relayer route does not carry capability or pricing metadata. Keep
-    // the transport model deliberately conservative and never infer from IDs.
+    // Use exact provider-discovered limits when the execution lease carries
+    // them. Keep the legacy conservative values when discovery has no limits;
+    // model IDs are never used to infer capabilities.
     reasoning: false,
     input: Object.freeze(["text"] as const),
     // Prime requires numeric prices; zero is an unknown-cost sentinel here.
     // Relayer billing never treats this transport metadata as authoritative.
     cost: Object.freeze({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
-    contextWindow: 32_768,
-    maxTokens: 4_096,
+    // Smaller discovered windows cannot support Prime's fixed compaction
+    // reserve. Keep the established conservative context envelope for those
+    // models instead of introducing an execution-only compatibility failure.
+    contextWindow: supportsPrimeReserve ? capabilities.contextWindow : 32_768,
+    // Prime compaction reserves 16,384 tokens for the next turn. Never request
+    // more than that reserve, while preserving providers with a lower cap.
+    maxTokens: supportsPrimeReserve
+      ? Math.min(capabilities.maxOutputTokens, capabilities.contextWindow, 16_384)
+      : hasDiscoveredTokenCapabilities
+        ? Math.min(capabilities.maxOutputTokens, 4_096)
+        : 4_096,
     ...(mapping.compat === undefined ? {} : { compat: mapping.compat }),
   });
 }
