@@ -20,7 +20,11 @@ import {
 } from "../desktop/main/services/desktop-harness-configuration.mjs";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
 import { createCanaryEvidenceLog } from "../desktop/main/services/canary-evidence-log.mjs";
-import { createDesktopUpdater, resolveUpdateChannel } from "../desktop/main/services/updater.mjs";
+import {
+  createDesktopUpdater,
+  desktopUpdateSupportsSystem,
+  resolveUpdateChannel,
+} from "../desktop/main/services/updater.mjs";
 import { claimPrimaryDesktopInstance } from "../desktop/main/single-instance.mjs";
 import {
   DESKTOP_UPDATE_BASE_URL,
@@ -1663,6 +1667,43 @@ describe("desktop skeleton", () => {
     expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
   });
 
+  it("suppresses macOS updates below the manifest's Darwin kernel floor", async () => {
+    const updateInfo = { version: "0.3.0", minimumSystemVersion: "22.4.0" };
+    const unsupportedHosts = [
+      { macOS: "13.0", release: "22.1.0" },
+      { macOS: "13.1", release: "22.2.0" },
+      { macOS: "13.2", release: "22.3.0" },
+    ];
+    for (const { release } of unsupportedHosts) {
+      expect(desktopUpdateSupportsSystem(updateInfo, { platform: "darwin", release })).toBe(false);
+    }
+    expect(desktopUpdateSupportsSystem(updateInfo, { platform: "darwin", release: "22.4.0" })).toBe(true);
+    expect(desktopUpdateSupportsSystem(updateInfo, { platform: "darwin", release: "23.0.0" })).toBe(true);
+    expect(desktopUpdateSupportsSystem({}, { platform: "darwin", release: "22.3.0" })).toBe(false);
+    expect(desktopUpdateSupportsSystem(updateInfo, { platform: "darwin", release: "unknown" })).toBe(false);
+    expect(desktopUpdateSupportsSystem(updateInfo, { platform: "win32", release: "10.0.0" })).toBe(true);
+
+    const updaterForRelease = (release) => {
+      const autoUpdater = Object.assign(new EventEmitter(), {
+        checkForUpdates: vi.fn(async () => undefined),
+        downloadUpdate: vi.fn(async () => undefined),
+        setFeedURL: vi.fn(),
+        quitAndInstall: vi.fn(),
+      });
+      createDesktopUpdater({
+        autoUpdater,
+        app: { isPackaged: true, getVersion: () => "0.2.0" },
+        emit: vi.fn(),
+        updateBaseUrl: DESKTOP_UPDATE_BASE_URL,
+        platform: "darwin",
+        release,
+      });
+      return autoUpdater;
+    };
+    expect(updaterForRelease("22.3.0").isUpdateSupported(updateInfo)).toBe(false);
+    expect(updaterForRelease("22.4.0").isUpdateSupported(updateInfo)).toBe(true);
+  });
+
   it("records packaged canary updater states as restart-safe JSON lines", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-canary-log-"));
     const outputPath = join(directory, "update.jsonl");
@@ -2055,7 +2096,8 @@ describe("desktop skeleton", () => {
       appId: "ai.relayer.desktop",
       version: "0.2.0",
       architecture: "arm64",
-      minimumMacOSVersion: "13.0.0",
+      minimumMacOSVersion: "13.3.0",
+      minimumUpdateSystemVersion: "22.4.0",
       channelName: "preview",
       providerChannel: "beta",
       manifestName: "beta-mac.yml",
@@ -2072,7 +2114,7 @@ describe("desktop skeleton", () => {
       afterSign: "desktop/release/verify-macos-app.mjs",
       mac: {
         identity: "VISHAL TANDALE (NZ253AL7U6)",
-        minimumSystemVersion: "13.0.0",
+        minimumSystemVersion: "13.3.0",
         hardenedRuntime: true,
         notarize: true,
       },
@@ -2278,6 +2320,8 @@ describe("desktop skeleton", () => {
         },
         createBlockMap: async ({ outputPath }) => writeFile(outputPath, "blockmap-fixture"),
       });
+      const finalizedManifest = await readFile(join(directory, names.manifest), "utf8");
+      expect(finalizedManifest).toContain("minimumSystemVersion: 22.4.0");
       const written = await writeDesktopReleaseEvidence({ distRoot: directory, contract });
       expect(written.receipt).toMatchObject({
         version: "0.2.0",
@@ -2290,6 +2334,13 @@ describe("desktop skeleton", () => {
       await expect(verifyDesktopReleaseEvidence({ distRoot: directory, contract })).resolves.toMatchObject({
         names: { receipt: names.receipt, checksums: names.checksums },
       });
+      await writeFile(
+        join(directory, names.manifest),
+        finalizedManifest.replace("minimumSystemVersion: 22.4.0", "minimumSystemVersion: 22.3.0"),
+      );
+      await expect(verifyDesktopReleaseEvidence({ distRoot: directory, contract }))
+        .rejects.toThrow("minimum system version");
+      await writeFile(join(directory, names.manifest), finalizedManifest);
       await writeFile(join(directory, names.checksums), "tampered\n");
       await expect(verifyDesktopReleaseEvidence({ distRoot: directory, contract })).rejects.toThrow("checksum manifest");
     } finally {
@@ -2371,6 +2422,7 @@ describe("desktop skeleton", () => {
 
     const manifestText = [
       `version: ${version}`,
+      `minimumSystemVersion: ${DESKTOP_RELEASE.minimumUpdateSystemVersion}`,
       "files:",
       `  - url: ${zip.name}`,
       `    sha512: ${zip.sha512}`,
@@ -2385,6 +2437,15 @@ describe("desktop skeleton", () => {
       "",
     ].join("\n");
     const preparedManifest = preparePreviewManifest({ manifestText, version, artifactEvidence: evidence });
+    expect(preparedManifest).toContain(`minimumSystemVersion: ${DESKTOP_RELEASE.minimumUpdateSystemVersion}`);
+    expect(() => preparePreviewManifest({
+      manifestText: manifestText.replace(
+        `minimumSystemVersion: ${DESKTOP_RELEASE.minimumUpdateSystemVersion}\n`,
+        "minimumSystemVersion: 22.3.0\n",
+      ),
+      version,
+      artifactEvidence: evidence,
+    })).toThrow("minimum system version");
     expect(preparedManifest).toContain(`releases/${version}/${zip.name}`);
     expect(preparedManifest).toContain(`releases/${version}/${dmg.name}`);
     expect(preparedManifest).toContain("relayerManagedRuntimes:");
@@ -2608,6 +2669,7 @@ describe("desktop skeleton", () => {
       await Promise.all([...contents].map(([name, content]) => writeFile(join(directory, name), content)));
       await writeFile(join(directory, "beta-mac.yml"), [
         `version: ${version}`,
+        `minimumSystemVersion: ${DESKTOP_RELEASE.minimumUpdateSystemVersion}`,
         "files:",
         `  - url: ${zip.name}`,
         `    sha512: ${zip.sha512}`,

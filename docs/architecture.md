@@ -214,7 +214,7 @@ Invoke preparation supplies the accepted source interaction/action pair to graph
 
 ## Desktop release boundary
 
-Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of any selected harness, provider, or GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates target Apple Silicon and Intel macOS 13 or newer plus Windows x64 and begin at version `0.2.0`.
+Relayer Desktop owns its packaging, signing, notarization, update channels, and product-facing update lifecycle independently of any selected harness, provider, or GraphComplete execution. The production desktop identity is `ai.relayer.desktop`; unsigned development packages use `ai.relayer.desktop.development`. Signed candidates target Apple Silicon and Intel macOS 13.3 or newer plus Windows x64 and begin at version `0.2.0`.
 
 Optional packaged harnesses are admitted through an exact runtime contract rather
 than filesystem discovery. Prime Agent is installed from four checked-in,
