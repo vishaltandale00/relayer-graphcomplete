@@ -140,7 +140,7 @@ describe("issue 257 browser harness evidence", () => {
       .toBe(manifest.harnesses.codex.browserRuntimeSourceSha256);
     expect(createHash("sha256").update(await integratedHeadBytes("packages/harness-host/src/implementations/claude-basic-browser.ts", sourceRevision)).digest("hex"))
       .toBe(manifest.harnesses.claude.browserRuntimeSourceSha256);
-    expect(manifest.assemblyMergeBase).toBe("9188a8123b7c40436f0100d124c24103a768d32d");
+    expect(manifest.assemblyMergeBase).toBe("ead15b0791504da68a3588ad1fcf2ef15092df96");
     expect(await changedSourceFiles(manifest.assemblyMergeBase, sourceRevision))
       .toEqual([...manifest.integratedSource.files].sort());
     expect(await sourceFileSha256(manifest.integratedSource.files, sourceRevision))
@@ -190,5 +190,41 @@ describe("issue 257 browser harness evidence", () => {
     expect(Object.values(manifest.scope).every((value) => value === false)).toBe(true);
     expect(manifest.profileKind).toBe("dedicated-non-default");
     expect(manifest.endpointKind).toBe("explicit-loopback-cdp");
+  });
+
+  it("records live observation and a restored reversible action for every delivered harness", async () => {
+    const manifest = JSON.parse(await readFile(join(evidenceRoot, "manifest.json"), "utf8"));
+    for (const [name, harness] of Object.entries(manifest.harnesses)) {
+      expect(harness.predecessorLiveProof.preseededMarkerObserved, name).toBe(true);
+      expect(harness.predecessorLiveProof.reversibleActionRestored, name).toBe(true);
+    }
+    const claudeProof = manifest.harnesses.claude.reversibleActionProof;
+    expect(claudeProof).toMatchObject({
+      commentUrl: "https://github.com/vishaltandale00/relayer-graphcomplete/issues/250#issuecomment-5453178329",
+      commentBodyPlusLfSha256: "fbf74feacc426a979025b60963008722e9408c245dd1056ddedd4deaa68eaeda",
+      receiptPath: "docs/evidence/issue-257-browser-harnesses/claude-live-reversible-action.md",
+    });
+    const receiptBody = await readFile(join(repositoryRoot, claudeProof.receiptPath), "utf8");
+    expect(createHash("sha256").update(receiptBody).update("\n").digest("hex"))
+      .toBe(claudeProof.commentBodyPlusLfSha256);
+    const receiptMatch = receiptBody.match(/```json\n(?<json>[\s\S]+?)\n```/);
+    expect(receiptMatch?.groups?.json).toBeDefined();
+    const receipt = JSON.parse(receiptMatch.groups.json);
+    expect(receipt).toMatchObject({
+      preseededMarkerObserved: true,
+      sdkMcpHandlerInvoked: true,
+      reversibleActionObserved: true,
+      reversibleActionRestored: true,
+      chromeAliveAfterCleanup: true,
+    });
+    expect(receipt.initialValueSha256).toBe(receipt.restoredValueSha256);
+    expect(receipt.changedValueSha256).not.toBe(receipt.initialValueSha256);
+    expect(manifest.harnesses.claude.predecessorLiveProof).toMatchObject({
+      preseededMarkerObserved: receipt.preseededMarkerObserved,
+      sdkMcpHandlerInvoked: receipt.sdkMcpHandlerInvoked,
+      reversibleActionObserved: receipt.reversibleActionObserved,
+      reversibleActionRestored: receipt.reversibleActionRestored,
+      chromeAliveAfterCleanup: receipt.chromeAliveAfterCleanup,
+    });
   });
 });

@@ -8,7 +8,7 @@ Each predecessor mechanism-proof lane used an already-running Chrome instance wi
 
 The lane-specific `predecessorLiveProof` fields record only outcomes stated by each hashed live receipt. Deterministic implementation tests separately cover the `deterministicProof` fields; they are not represented as live observations.
 
-Across those two evidence classes, the delivered routes cover existing-state observation, benign bounded actions, harness-owned cleanup, honest endpoint failure, and Ask denial at the enclosing native MCP tool or IPython cell. No inner browser-action taxonomy was introduced. Only the Codex and Prime live receipts explicitly record a reversed test-page action; Claude's committed deterministic tests cover bounded read, navigate, click, and fill operations across separate valid calls instead.
+Across those two evidence classes, the delivered routes cover existing-state observation, benign bounded actions, harness-owned cleanup, honest endpoint failure, and Ask denial at the enclosing native MCP tool or IPython cell. No inner browser-action taxonomy was introduced. Each harness now has a live receipt that explicitly records a reversed test-page action; [Claude's addendum](claude-live-reversible-action.md) binds the production SDK MCP handler to a pre-seeded marker, an observed value change, and restoration while leaving Chrome alive.
 
 Claude Ask currently leaves its coarse MCP tool outside `allowedTools`, so the native tool never runs. Codex uses the existing generic MCP approval bridge and Prime uses its existing cell approval/confinement. Auto and Full retain their existing harness translations.
 

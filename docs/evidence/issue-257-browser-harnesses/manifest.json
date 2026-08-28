@@ -2,11 +2,11 @@
   "schemaVersion": 2,
   "issue": 257,
   "historicalProofBase": "61de23d527210b8a0d5972e3d12bb6b80a1b59e2",
-  "assemblyMergeBase": "9188a8123b7c40436f0100d124c24103a768d32d",
+  "assemblyMergeBase": "ead15b0791504da68a3588ad1fcf2ef15092df96",
   "integratedSource": {
     "algorithm": "sha256-of-sorted-path-nul-file-sha256-lf",
-    "snapshotId": "issue-257-browser-harnesses-v5",
-    "sha256": "5094be2c8a2d66735b1576f58917deafc3e3161d6f71a99d89d37da2e2f0a176",
+    "snapshotId": "issue-257-browser-harnesses-v7",
+    "sha256": "3213797078a561afe7c3577e679e180545d62447891e08a68b6324f1a22629fa",
     "files": [
       ".github/workflows/ci.yml",
       "README.md",
@@ -22,6 +22,7 @@
       "desktop/packaging/eval-electron-builder.mjs",
       "desktop/packaging/verify-bundled-app-server.mjs",
       "desktop/shared/managed-runtime-requirements.mjs",
+      "docs/evidence/issue-257-browser-harnesses/claude-live-reversible-action.md",
       "docs/evidence/issue-257-browser-harnesses/README.md",
       "docs/prd/index.html",
       "package-lock.json",
@@ -50,7 +51,7 @@
     ],
     "fileSha256": {
       ".github/workflows/ci.yml": "cce4652280aa81796c1ee2e71df609843201554a12a7600258f6651221f3b2e1",
-      "README.md": "366eb41f919a15cdd92d100a9e11613398155fa8118a33f54ead3d91efea29ba",
+      "README.md": "8035abafb1a4680ed3e4db07e927ff7ede2585399466e4444e44dcc95bb27e5b",
       "crates/relayer-app-server/src/runtime.rs": "7dce523c69b599ef29f3efbef2d332b33e4cb90185ffa375067b1bd51bf88720",
       "desktop/eval-main/index.mjs": "982d4871f57c96945a18c903f3c6cc7bebaae046b806b5d355aa2e46293d877f",
       "desktop/main/index.mjs": "8bd679e5896be1352eb1bc2a3abfddd779c2c582a683807a49b1c1d5a54a80d1",
@@ -63,8 +64,9 @@
       "desktop/packaging/eval-electron-builder.mjs": "9e3a4e206beeede788e94e8e6fdf6b58ec5a664657dd43433049bd4677612b77",
       "desktop/packaging/verify-bundled-app-server.mjs": "065d0c19b21aafe5786751cbc016cb4862a22ce79dba6826172b9a56884e923d",
       "desktop/shared/managed-runtime-requirements.mjs": "a05bc3afeb3b344b72e48f9e6fc5a599586b1a2d4c6f0afe43b21cef37b7c39c",
-      "docs/evidence/issue-257-browser-harnesses/README.md": "283175dc391b72c4005e9c74ce46125f450e73b082e13963f50aad00a5c2d666",
-      "docs/prd/index.html": "9a03c31ec7d5b75b15f712dfa4e7630d1365db3f4e472f905b608bc283b31801",
+      "docs/evidence/issue-257-browser-harnesses/claude-live-reversible-action.md": "a12dd134e18e7c74a4907e728c31edd6f59720e4989e251455648f9c4b3e6f04",
+      "docs/evidence/issue-257-browser-harnesses/README.md": "61fc6fe5e6d278fcf00acb81c8af50d329d698f84e5ba30e3e0a27b68ea609d2",
+      "docs/prd/index.html": "3cd087e92690c60e5479d5e6ee194e45386c90880c4daf2bdc84c934ab84e981",
       "package-lock.json": "f2ddae5b7d46206ac66f96af81cc3fbfcc5d5db57a0033cc8fa78ffc5e3c9709",
       "packages/harness-host/package.json": "10f934519885a74bdb478e445b32f19add1bcc12d811c16fb6773208d3617c1e",
       "packages/harness-host/src/implementations/claude-basic-browser.ts": "5bf3a789ecf85209bf318a999a004a9d800ad0b67e581301aaa5200a37b3352c",
@@ -77,7 +79,7 @@
       "packages/harness-host/test/codex-approvals.test.ts": "03732c833ec96f2b6d47782803c094e3d7ea5e1685c1e143fffd02636dcfe148",
       "packages/harness-host/test/codex-basic.test.ts": "4457693221eab27968dfaf480a05b4feb88315f49e53ecffd18bad22661ee947",
       "packages/harness-host/test/prime-agent.test.ts": "ff069fd114e21afcb8742236ab16ad24d3e9e974024a60a8c13389963af39923",
-      "test/browser-harness-evidence.test.mjs": "d990ab3675b3d3902e5235c7c5c8ffa521628f1c707f665a1139b4fa4a514486",
+      "test/browser-harness-evidence.test.mjs": "cd8ecacd6c55d6612b3424f6b94d747d26d7787a5cea2dab887e7074d561f561",
       "test/codex-browser-runtime.test.mjs": "a4dda079955a0ea3c4534e701abc42aef894b131a09210ca856bc1863ca5e02e",
       "test/desktop-shell.test.mjs": "9e9749cd057be08b255f8e9584eb2727c5cd139f0cc0d7d898984ae66e948ec6",
       "test/managed-runtime-installer.test.mjs": "3465fa5fb4c1f8c49a2940e1b2b2a0d221291e0cfd9aeaa97b2f3b64a95d9eaa",
@@ -133,9 +135,16 @@
         "commentUrl": "https://github.com/vishaltandale00/relayer-graphcomplete/issues/250#issuecomment-5448833579",
         "commentBodyPlusLfSha256": "9e70d873e30660bfc9ac37d1a851a283fa0c2d1dd783980543af0401e61087c4"
       },
+      "reversibleActionProof": {
+        "commentUrl": "https://github.com/vishaltandale00/relayer-graphcomplete/issues/250#issuecomment-5453178329",
+        "commentBodyPlusLfSha256": "fbf74feacc426a979025b60963008722e9408c245dd1056ddedd4deaa68eaeda",
+        "receiptPath": "docs/evidence/issue-257-browser-harnesses/claude-live-reversible-action.md"
+      },
       "predecessorLiveProof": {
         "preseededMarkerObserved": true,
         "sdkMcpHandlerInvoked": true,
+        "reversibleActionObserved": true,
+        "reversibleActionRestored": true,
         "socketClosed": true,
         "chromeAliveAfterCleanup": true,
         "askEnclosingToolExecuted": false
