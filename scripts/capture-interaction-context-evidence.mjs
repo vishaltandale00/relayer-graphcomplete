@@ -299,7 +299,6 @@ async function run() {
       title: "Interaction context verification",
       initialMessage: "Show the deterministic task system.",
       projectId: project.id,
-      permissionProfileId: "auto",
       harnessId: "fixture-task-system",
       modelSelection,
     }),
