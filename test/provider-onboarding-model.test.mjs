@@ -172,4 +172,15 @@ describe("provider onboarding renderer state", () => {
     await expect(first).resolves.toBe("continued");
     expect(state.current()).toBeNull();
   });
+
+  it("hands an owned Connect submission off to its managed-login connection", () => {
+    const state = createProviderConnectionCancellationState();
+    expect(state.begin("request-1")).toBe(true);
+
+    expect(state.transition("request-2", "authorization-2")).toBe(false);
+    expect(state.current()).toBe("request-1");
+    expect(state.transition("request-1", "authorization-1")).toBe(true);
+    expect(state.current()).toBe("authorization-1");
+    expect(state.matches("authorization-1")).toBe(true);
+  });
 });

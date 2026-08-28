@@ -83,6 +83,11 @@ export function createProviderConnectionCancellationState() {
     matches(value) {
       return connectionId !== null && connectionId === value;
     },
+    transition(from, to) {
+      if (connectionId === null || connectionId !== String(from || "")) return false;
+      connectionId = String(to || "");
+      return true;
+    },
     complete(value) {
       if (value === undefined || connectionId === value) connectionId = null;
     },

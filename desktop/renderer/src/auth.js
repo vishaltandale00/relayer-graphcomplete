@@ -247,7 +247,7 @@ async function connectSelectedProvider(event) {
       { connectionId },
     ));
     if (!connectionCancellation.matches(connectionId)) return;
-    if (result.status === "pending") connectionCancellation.begin(result.connectionId);
+    if (result.status === "pending" && !connectionCancellation.transition(connectionId, result.connectionId)) return;
     while (result.status === "pending" && connectionCancellation.matches(result.connectionId)) {
       setStatus("Complete sign-in in your browser. Relayer will continue automatically.");
       await new Promise((resolve) => setTimeout(resolve, 750));
