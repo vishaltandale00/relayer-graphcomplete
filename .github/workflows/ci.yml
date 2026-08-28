@@ -30,12 +30,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Apple Silicon is the only release target today. Intel macOS and
+          # Windows x64 are parked, not abandoned: re-add them here when either
+          # becomes a release target again.
           - target: macos-arm64
             runner: macos-15
-          - target: macos-x64
-            runner: macos-15-intel
-          - target: windows-x64
-            runner: windows-2025
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -50,7 +49,11 @@ jobs:
           RELAYER_DESKTOP_TARGET: ${{ matrix.target }}
 
   ladybug-windows-qualification:
-    name: Ladybug packaged qualification (windows-x64)
+    # Parked while Windows is not a release target. The pinned-source setup below
+    # is preserved verbatim so re-enabling is a one-line change. This job has never
+    # published a receipt; see docs/evidence/issue-261-ladybug-qualification.md.
+    if: ${{ false }}
+    name: Ladybug packaged qualification (windows-x64) (blocked)
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
