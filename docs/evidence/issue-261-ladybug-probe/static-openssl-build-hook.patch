@@ -1,0 +1,48 @@
+--- a/build.rs
++++ b/build.rs
+@@ -11,6 +11,10 @@ fn link_mode() -> &'static str {
+     }
+ }
+ 
++fn openssl_static_root() -> Option<PathBuf> {
++    env::var_os("LBUG_OPENSSL_STATIC_ROOT").map(PathBuf::from)
++}
++
+ fn get_target() -> String {
+     env::var("PROFILE").unwrap()
+ }
+@@ -40,7 +44,13 @@ fn link_libraries(link_bundled_deps: bool) {
+             println!("cargo:rustc-link-lib=dylib=stdc++");
+         }
+ 
+-        // liblbug.a requires OpenSSL — try pkg-config for the lib path, then emit link directives
++        // liblbug.a requires OpenSSL. Prefer an explicitly pinned static prefix.
++        if let Some(root) = openssl_static_root() {
++            println!("cargo:rustc-link-search=native={}", root.join("lib").display());
++            println!("cargo:rustc-link-lib=static=ssl");
++            println!("cargo:rustc-link-lib=static=crypto");
++            return;
++        }
+         if let Ok(output) = std::process::Command::new("pkg-config")
+             .args(["--variable=libdir", "openssl"])
+             .output()
+@@ -296,6 +306,11 @@ fn build_from_source() -> (Vec<PathBuf>, Vec<PathBuf>) {
+         .define("BUILD_SHELL", "OFF")
+         .define("BUILD_SINGLE_FILE_HEADER", "OFF")
+         .define("AUTO_UPDATE_GRAMMAR", "OFF");
++    if let Some(root) = openssl_static_root() {
++        build
++            .define("OPENSSL_ROOT_DIR", root)
++            .define("OPENSSL_USE_STATIC_LIBS", "TRUE");
++    }
+     if cfg!(windows) {
+         build.generator("Ninja");
+         build.cxxflag("/EHsc");
+@@ -377,6 +392,7 @@ fn main() {
+     }
+ 
+     let manifest_dir = manifest_dir();
++    println!("cargo:rerun-if-env-changed=LBUG_OPENSSL_STATIC_ROOT");
+     let mut bundled = false;
+     let link_bundled_deps = false;
+     let mut include_paths = vec![manifest_dir.join("include")];

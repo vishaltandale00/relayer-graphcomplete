@@ -16,6 +16,9 @@ export function createDesktopBuilderConfig(
   const release = contract.release;
   const target = contract;
   const serverTarget = environment.RELAYER_DESKTOP_RUST_TARGET || target.rustTarget;
+  const cargoTargetRoot = environment.RELAYER_CARGO_TARGET_DIR
+    ? resolve(environment.RELAYER_CARGO_TARGET_DIR)
+    : resolve(repositoryRoot, "target");
   if (!release && environment.CI === "true" && !argv.includes("--dir")) {
     throw new Error("Distributable desktop builds require the explicit signed release contract.");
   }
@@ -70,8 +73,8 @@ export function createDesktopBuilderConfig(
       ...PACKAGED_PROVIDER_MODULES.map((modulePath) => `main/${modulePath}`),
     ],
     extraResources: [
-      { from: resolve(repositoryRoot, `target/${serverTarget}/release/relayer-app-server${target.platform === "win32" ? ".exe" : ""}`), to: `bin/relayer-app-server${target.platform === "win32" ? ".exe" : ""}` },
-      { from: resolve(repositoryRoot, `target/${serverTarget}/release/relayer-graph-server${target.platform === "win32" ? ".exe" : ""}`), to: `bin/relayer-graph-server${target.platform === "win32" ? ".exe" : ""}` },
+      { from: resolve(cargoTargetRoot, `${serverTarget}/release/relayer-app-server${target.platform === "win32" ? ".exe" : ""}`), to: `bin/relayer-app-server${target.platform === "win32" ? ".exe" : ""}` },
+      { from: resolve(cargoTargetRoot, `${serverTarget}/release/relayer-graph-server${target.platform === "win32" ? ".exe" : ""}`), to: `bin/relayer-graph-server${target.platform === "win32" ? ".exe" : ""}` },
       { from: resolve(repositoryRoot, "harnesses/codex-basic.yaml"), to: "harnesses/codex-basic.yaml" },
       { from: resolve(repositoryRoot, "harnesses/claude-basic.yaml"), to: "harnesses/claude-basic.yaml" },
       { from: resolve(repositoryRoot, "harnesses/prime-agent-basic.yaml"), to: "harnesses/prime-agent-basic.yaml" },

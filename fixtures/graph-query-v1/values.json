@@ -1,0 +1,86 @@
+{
+  "queryContractVersion": 1,
+  "canonicalTypeOrder": ["null", "boolean", "integer", "float", "string", "node", "layer", "relationship", "path", "list", "record"],
+  "cases": [
+    {
+      "id": "all-wire-types",
+      "values": [
+        { "type": "null" },
+        { "type": "boolean", "value": false },
+        { "type": "integer", "value": "42" },
+        { "type": "float", "value": 42.5 },
+        { "type": "string", "value": "queue" },
+        { "type": "node", "id": "content:1", "kind": "Content", "properties": [{ "name": "kind", "value": { "type": "string", "value": "concept" } }, { "name": "icon", "value": { "type": "string", "value": "list-tree" } }, { "name": "title", "value": { "type": "string", "value": "Queue" } }, { "name": "detail", "value": { "type": "string", "value": "Pending work" } }, { "name": "state", "value": { "type": "string", "value": "accepted" } }] },
+        { "type": "layer", "id": "layer:101", "kind": "Layer", "properties": [{ "name": "state", "value": { "type": "string", "value": "accepted" } }, { "name": "layout_version", "value": { "type": "integer", "value": "1" } }] },
+        { "type": "relationship", "id": "edge:201", "kind": "CONNECTED", "start": "content:1", "end": "content:2", "directed": false, "properties": [{ "name": "state", "value": { "type": "string", "value": "accepted" } }] },
+        { "type": "path", "vertices": [{ "type": "node", "id": "content:1", "kind": "Content", "properties": [] }, { "type": "node", "id": "content:2", "kind": "Content", "properties": [] }], "relationships": [{ "type": "relationship", "id": "edge:201", "kind": "CONNECTED", "start": "content:1", "end": "content:2", "directed": false, "properties": [] }] },
+        { "type": "list", "elementType": { "kind": "string" }, "values": [{ "type": "string", "value": "Queue" }, { "type": "string", "value": "Worker" }] },
+        { "type": "record", "fields": [{ "name": "title", "value": { "type": "string", "value": "Queue" } }, { "name": "count", "value": { "type": "integer", "value": "1" } }] }
+      ]
+    },
+    {
+      "id": "i64-extrema",
+      "values": [
+        { "type": "integer", "value": "-9223372036854775808" },
+        { "type": "integer", "value": "0" },
+        { "type": "integer", "value": "9223372036854775807" }
+      ],
+      "rejectedSpellings": ["+1", "01", "-0", " 1", "1.0", "9223372036854775808"]
+    },
+    {
+      "id": "negative-zero",
+      "input": { "type": "float", "valueSource": "-0.0" },
+      "canonical": { "type": "float", "value": 0.0 }
+    },
+    {
+      "id": "nested-record-list-path",
+      "value": {
+        "type": "record",
+        "fields": [
+          { "name": "labels", "value": { "type": "list", "elementType": { "kind": "string" }, "values": [{ "type": "string", "value": "Queue" }, { "type": "string", "value": "Worker" }] } },
+          { "name": "route", "value": { "type": "path", "vertices": [{ "type": "layer", "id": "layer:101", "kind": "Layer", "properties": [] }, { "type": "node", "id": "content:1", "kind": "Content", "properties": [] }], "relationships": [{ "type": "relationship", "id": "membership:101:0:1", "kind": "CONTAINS", "start": "layer:101", "end": "content:1", "directed": true, "properties": [] }] } }
+        ]
+      }
+    },
+    {
+      "id": "typed-empty-list-parameter",
+      "value": { "type": "list", "elementType": { "kind": "string" }, "values": [] },
+      "assertion": "An empty list remains typed; an unconstrained [] query literal is rejected."
+    },
+    {
+      "id": "typed-empty-nested-list",
+      "value": { "type": "list", "elementType": { "kind": "list", "elementType": { "kind": "record", "fields": [{ "name": "title", "type": { "kind": "string" } }] } }, "values": [] }
+    },
+    {
+      "id": "homogeneous-record-list",
+      "value": { "type": "list", "elementType": { "kind": "record", "fields": [{ "name": "title", "type": { "kind": "string" } }, { "name": "counts", "type": { "kind": "list", "elementType": { "kind": "integer" } } }] }, "values": [
+        { "type": "record", "fields": [{ "name": "title", "value": { "type": "string", "value": "Queue" } }, { "name": "counts", "value": { "type": "list", "elementType": { "kind": "integer" }, "values": [{ "type": "integer", "value": "1" }] } }] },
+        { "type": "record", "fields": [{ "name": "title", "value": { "type": "string", "value": "Worker" } }, { "name": "counts", "value": { "type": "list", "elementType": { "kind": "integer" }, "values": [] } }] }
+      ] }
+    },
+    {
+      "id": "property-absence-null-matrix",
+      "matrix": [
+        { "propertyState": "absent", "isAbsent": true, "isNull": false, "ordinaryComparison": "unknown", "projected": { "type": "null" } },
+        { "propertyState": "present-null", "isAbsent": false, "isNull": true, "ordinaryComparison": "unknown", "projected": { "type": "null" } },
+        { "propertyState": "present-value", "isAbsent": false, "isNull": false, "ordinaryComparison": "typed", "projected": { "type": "string", "value": "value" } }
+      ]
+    },
+    {
+      "id": "canonical-order-ties",
+      "rows": [
+        { "projected": [{ "type": "string", "value": "same" }], "matchedIdentityTuple": ["content:1"] },
+        { "projected": [{ "type": "string", "value": "same" }], "matchedIdentityTuple": ["content:2"] }
+      ],
+      "expectedOrder": [["content:1"], ["content:2"]]
+    }
+  ],
+  "normalizationErrors": [
+    { "id": "reject-nan", "input": "NaN", "expectedError": { "code": "invalid_engine_value", "phase": "normalize" } },
+    { "id": "reject-positive-infinity", "input": "+Infinity", "expectedError": { "code": "invalid_engine_value", "phase": "normalize" } },
+    { "id": "reject-negative-infinity", "input": "-Infinity", "expectedError": { "code": "invalid_engine_value", "phase": "normalize" } },
+    { "id": "reject-engine-heterogeneous-list", "input": [{ "type": "string", "value": "Queue" }, { "type": "integer", "value": "1" }], "expectedError": { "code": "heterogeneous_list", "phase": "normalize" } },
+    { "id": "reject-record-shape-list", "descriptor": { "kind": "record", "fields": [{ "name": "title", "type": { "kind": "string" } }] }, "input": [{ "type": "record", "fields": [{ "name": "title", "value": { "type": "string", "value": "Queue" } }] }, { "type": "record", "fields": [{ "name": "title", "value": { "type": "string", "value": "Worker" } }, { "name": "extra", "value": { "type": "boolean", "value": true } }] }], "expectedError": { "code": "heterogeneous_list", "phase": "normalize" } },
+    { "id": "reject-duplicate-record-field", "fields": ["x", "x"], "expectedError": { "code": "duplicate_record_field", "phase": "normalize" } }
+  ]
+}

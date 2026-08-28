@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "scope": "issue-261-local-packaged-qualification",
+  "capturedOn": "2026-08-28",
+  "sourceCommit": "23a2d3d176d4e29330a3154d071b365881abf017",
+  "buildIsolation": "clean-detached-worktree-and-empty-cargo-target",
+  "dependencyIsolation": "locked-offline-npm-ci-and-generated-assets",
+  "target": "macos-x64",
+  "rustTarget": "x86_64-apple-darwin",
+  "hostArchitecture": "arm64",
+  "executionMode": "rosetta",
+  "application": "Relayer Dev.app",
+  "binary": "Contents/Resources/bin/relayer-graph-server",
+  "binarySha256": "9311a8f54c003d546a73d5852cb914bf0f3722cbb13e91377a9b3d06ce9d7875",
+  "binaryArchitectures": ["x86_64"],
+  "lbug": { "version": "0.18.0", "extensions": [] },
+  "nativeMode": "fully-static-ladybug-and-openssl",
+  "dynamicLibraries": [
+    "/usr/lib/libc++.1.dylib",
+    "/usr/lib/libiconv.2.dylib",
+    "/usr/lib/libSystem.B.dylib"
+  ],
+  "minimumMacOSVersion": "13.3",
+  "inputSha256": {
+    "Cargo.lock": "3863c0c54b3ccc93646c871fa48dc5ea5e9844dd792322b4e1c2cc0be70bad68",
+    "crates/relayer-graph-server/Cargo.toml": "7d81099599d06b13f0e008e1ccc3a9affc1a620554c2caafed31ea83f76370cd",
+    "crates/relayer-graph-server/src/main.rs": "7227d1cb82eeee058251a2c34d2bee705d704539114a93f7d6895303b6fbd0cc",
+    "desktop/packaging/build-development.mjs": "6a7d463543f67daf1a60a8bad113d02e77326c268071a896ee619eed1d50aee1",
+    "desktop/shared/target.mjs": "22f6642c47c722929a8928f39871d30616a05abc2ff5ffecdc3c69d9ae81b861",
+    "scripts/capture-ladybug-packaged-lifecycle.mjs": "6dde260e114e4f422ca43729693de5956c457b2e119ad1def7ad6deccc7c176d",
+    "scripts/prepare-ladybug-source.mjs": "1b53cdd1b040a69498738bd2cec0e91133af316a0d4140171a3e761f65170f47",
+    "vendor/ladybug/source-build-manifest.json": "5053264de045e00730133a89eec09ef719be59a2b639e11226a305e94be7d88f"
+  },
+  "preparedReceiptSha256": {
+    "source-receipt.json": "48ab7e907c539bb4077c8e3081f9c3760433ffb0650d3356a7ab16684183e3c9",
+    "cargo-build-env.json": "525749a53f1793012512589d195e6d78e89c9b59111dd327d3875ff0bb4247bc"
+  },
+  "preparedSourceSha256": {
+    "ladybugCoreTree": "c90c2bd925e72dcc6c9e51c17b1a150589e719c949d364ded4a98389f0aabe62"
+  },
+  "lifecycleTimeoutMs": 15000,
+  "cleanProfileCreated": true,
+  "lockContentionRejected": true,
+  "cleanShutdown": true,
+  "restartReopenedPersistedMarker": true,
+  "storageVersion": 42,
+  "lockFailure": "Could not set lock on file : /var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-ladybug-packaged-XmKnGn/ladybug (Lock is held by PID 56839)",
+  "limitations": [
+    "local macos-x64 Rosetta execution only",
+    "unsigned development package",
+    "not release-ready licensing evidence"
+  ]
+}

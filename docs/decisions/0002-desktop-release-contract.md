@@ -4,7 +4,7 @@ Status: accepted
 
 ## Decision
 
-Relayer Desktop ships directly for Apple Silicon and Intel on macOS 13 or newer and for Windows x64. The production application is `Relayer` with application ID `ai.relayer.desktop`; unsigned local packages use `Relayer Dev` and `ai.relayer.desktop.development` so they can coexist safely.
+Relayer Desktop ships directly for Apple Silicon and Intel on macOS 13.3 or newer and for Windows x64. The production application is `Relayer` with application ID `ai.relayer.desktop`; unsigned local packages use `Relayer Dev` and `ai.relayer.desktop.development` so they can coexist safely.
 
 The first production release is `0.2.0`. Desktop versions use numeric `major.minor.patch` syntax. Preview and Stable are channels for the same signed application, not prerelease version suffixes or separately signed products. Each target has independent pointers and immutable artifacts:
 
@@ -25,7 +25,7 @@ The signed-candidate workflow may be run manually from `main` without changing t
 - The original `0.1.0` Relayer build and the new desktop share product continuity; `0.2.0` is the first new signed seed and `0.2.1` is the first update proof.
 - Preview and Stable cannot be installed side by side, while `Relayer Dev` can coexist with either.
 - A Preview user cannot downgrade to an older Stable version. Stable promotion therefore follows a successful Preview canary and uses monotonically increasing numeric versions.
-- macOS 12-or-older and Windows Arm support require separate release decisions and validation.
+- macOS 13.2-or-older and Windows Arm support require separate release decisions and validation.
 - Intel macOS is built and canaried on GitHub's `macos-15-intel` runner while that hosted x64 environment remains available; a physical Intel Mac remains the strongest final hardware check.
 - Windows Stable promotion requires an interactive-session canary proving installer signature, installation, visible application launch, Preview discovery, installation, and signed relaunch into the exact candidate.
 - A target with incomplete signing authority remains disabled. It does not block another target. Preview needs proven signing; Stable additionally needs target canary evidence.

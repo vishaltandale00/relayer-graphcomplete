@@ -20,6 +20,9 @@ export async function finalizeDesktopUpdateArtifact({
   createBlockMap = ({ inputPath, outputPath }) => buildBlockMap(inputPath, "gzip", outputPath),
 } = {}) {
   if (!contract?.release) throw new Error("Update artifact finalization requires the signed release contract.");
+  if (contract.platform !== "darwin" || !contract.minimumUpdateSystemVersion) {
+    throw new Error("macOS update artifact finalization requires the minimum update system version.");
+  }
   const names = desktopReleaseArtifactNames(contract);
   const zipPath = join(distRoot, names.zip);
   const dmgPath = join(distRoot, names.dmg);
@@ -79,6 +82,7 @@ export async function finalizeDesktopUpdateArtifact({
     const finalizedZip = finalizedArtifacts.find((artifact) => artifact.name === names.zip);
     manifest.path = names.zip;
     manifest.sha512 = finalizedZip.sha512;
+    manifest.minimumSystemVersion = contract.minimumUpdateSystemVersion;
     await writeFile(temporaryManifestPath, stringifyYaml(manifest), {
       encoding: "utf8",
       mode: 0o644,

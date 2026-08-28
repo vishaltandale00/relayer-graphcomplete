@@ -1,0 +1,11 @@
+[package]
+name = "ladybug-issue-261-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+lbug = "=0.19.1"
+tempfile = "3"
+
+[workspace]

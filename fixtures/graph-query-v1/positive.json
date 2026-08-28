@@ -1,0 +1,472 @@
+{
+  "queryContractVersion": 1,
+  "datasetId": "canonical-supergraph",
+  "cases": [
+    {
+      "id": "whole-target-scan",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "MATCH (n:Content) RETURN n.title AS title ORDER BY title LIMIT 5",
+      "parameters": {},
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "n", "label": "Content", "occurrence": 0 }], "relationships": [] }],
+        "predicates": [],
+        "projection": { "distinct": false, "columns": [{ "name": "title", "expression": { "kind": "property", "binding": "n", "name": "title", "valueType": "string" } }] },
+        "aggregation": null,
+        "ordering": [{ "column": "title", "direction": "asc", "nulls": "last" }],
+        "limit": { "kind": "literal", "value": 5 },
+        "maxTraversalHops": 0,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": {
+        "queryContractVersion": 1,
+        "columns": ["title"],
+        "rows": [
+          [{ "type": "string", "value": "Evidence" }],
+          [{ "type": "string", "value": "Explain queue" }],
+          [{ "type": "string", "value": "Queue" }],
+          [{ "type": "string", "value": "Result" }],
+          [{ "type": "string", "value": "Worker" }]
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "id": "thread-selector",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "MATCH (n:Content) WHERE n.title = $title RETURN n.title AS title",
+      "parameters": { "title": { "type": "string", "value": "Queue" } },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "n", "label": "Content", "occurrence": 0 }], "relationships": [] }],
+        "predicates": [{ "kind": "propertyComparison", "left": { "binding": "n", "name": "title", "valueType": "string" }, "operator": "eq", "right": { "kind": "parameter", "name": "title", "valueType": "string" } }],
+        "projection": { "distinct": false, "columns": [{ "name": "title", "expression": { "kind": "property", "binding": "n", "name": "title", "valueType": "string" } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 0,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["title"], "rows": [[{ "type": "string", "value": "Queue" }]], "truncated": false },
+      "authorityAssertion": "selector is intersected with the completion-bound permit; it is not authority"
+    },
+    {
+      "id": "project-selector",
+      "target": { "scope": "project", "id": 7 },
+      "query": "MATCH (n:Content) RETURN count(n) AS count",
+      "parameters": {},
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "n", "label": "Content", "occurrence": 0 }], "relationships": [] }],
+        "predicates": [],
+        "projection": { "distinct": false, "columns": [{ "name": "count", "expression": { "kind": "aggregate", "function": "count", "distinct": false, "argument": { "kind": "binding", "name": "n", "valueType": "node" }, "valueType": "integer" } }] },
+        "aggregation": { "groups": [], "aggregates": ["count"] },
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 0,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["count"], "rows": [[{ "type": "integer", "value": "6" }]], "truncated": false }
+    },
+    {
+      "id": "one-hop-connected",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "MATCH p = (a:Content)-[r:CONNECTED]-(b:Content) WHERE a.title = $title RETURN p AS path",
+      "parameters": { "title": { "type": "string", "value": "Queue" } },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{
+          "pathBinding": "p",
+          "nodes": [{ "binding": "a", "label": "Content", "occurrence": 0 }, { "binding": "b", "label": "Content", "occurrence": 1 }],
+          "relationships": [{ "binding": "r", "type": "CONNECTED", "direction": "undirected", "from": "a", "to": "b" }]
+        }],
+        "predicates": [{ "kind": "propertyComparison", "left": { "binding": "a", "name": "title", "valueType": "string" }, "operator": "eq", "right": { "kind": "parameter", "name": "title", "valueType": "string" } }],
+        "projection": { "distinct": false, "columns": [{ "name": "path", "expression": { "kind": "binding", "name": "p", "valueType": "path" } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 1,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": {
+        "queryContractVersion": 1,
+        "columns": ["path"],
+        "rows": [[{
+          "type": "path",
+          "vertices": [
+            { "type": "node", "id": "content:1", "kind": "Content", "properties": [{ "name": "kind", "value": { "type": "string", "value": "concept" } }, { "name": "icon", "value": { "type": "string", "value": "list-tree" } }, { "name": "title", "value": { "type": "string", "value": "Queue" } }, { "name": "detail", "value": { "type": "string", "value": "Pending work" } }, { "name": "state", "value": { "type": "string", "value": "accepted" } }] },
+            { "type": "node", "id": "content:2", "kind": "Content", "properties": [{ "name": "kind", "value": { "type": "string", "value": "concept" } }, { "name": "icon", "value": { "type": "string", "value": "cpu" } }, { "name": "title", "value": { "type": "string", "value": "Worker" } }, { "name": "detail", "value": { "type": "string", "value": "Claims work" } }, { "name": "state", "value": { "type": "string", "value": "accepted" } }] }
+          ],
+          "relationships": [{ "type": "relationship", "id": "edge:201", "kind": "CONNECTED", "start": "content:1", "end": "content:2", "directed": false, "properties": [{ "name": "state", "value": { "type": "string", "value": "accepted" } }] }]
+        }]],
+        "truncated": false
+      }
+    },
+    {
+      "id": "two-hop-connected",
+      "target": { "scope": "project", "id": 7 },
+      "query": "MATCH (a:Content)-[:CONNECTED]-(b:Content)-[:CONNECTED]-(c:Content) WHERE a.title = $title RETURN c.title AS title",
+      "parameters": { "title": { "type": "string", "value": "Queue" } },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{
+          "pathBinding": null,
+          "nodes": [{ "binding": "a", "label": "Content", "occurrence": 0 }, { "binding": "b", "label": "Content", "occurrence": 1 }, { "binding": "c", "label": "Content", "occurrence": 2 }],
+          "relationships": [{ "binding": null, "type": "CONNECTED", "direction": "undirected", "from": "a", "to": "b" }, { "binding": null, "type": "CONNECTED", "direction": "undirected", "from": "b", "to": "c" }]
+        }],
+        "predicates": [{ "kind": "propertyComparison", "left": { "binding": "a", "name": "title", "valueType": "string" }, "operator": "eq", "right": { "kind": "parameter", "name": "title", "valueType": "string" } }],
+        "projection": { "distinct": false, "columns": [{ "name": "title", "expression": { "kind": "property", "binding": "c", "name": "title", "valueType": "string" } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 2,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["title"], "rows": [[{ "type": "string", "value": "Result" }]], "truncated": false }
+    },
+    {
+      "id": "layer-action-path",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "MATCH p = (l:Layer)-[m:CONTAINS]->(n:Content)-[a:EXPANDS]->(child:Layer) WHERE l.state = $state RETURN p AS path",
+      "parameters": { "state": { "type": "string", "value": "accepted" } },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{
+          "pathBinding": "p",
+          "nodes": [{ "binding": "l", "label": "Layer", "occurrence": 0 }, { "binding": "n", "label": "Content", "occurrence": 1 }, { "binding": "child", "label": "Layer", "occurrence": 2 }],
+          "relationships": [{ "binding": "m", "type": "CONTAINS", "direction": "forward", "from": "l", "to": "n" }, { "binding": "a", "type": "EXPANDS", "direction": "forward", "from": "n", "to": "child" }]
+        }],
+        "predicates": [{ "kind": "propertyComparison", "left": { "binding": "l", "name": "state", "valueType": "string" }, "operator": "eq", "right": { "kind": "parameter", "name": "state", "valueType": "string" } }],
+        "projection": { "distinct": false, "columns": [{ "name": "path", "expression": { "kind": "binding", "name": "p", "valueType": "path" } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 2,
+        "requiresOccurrenceConstraint": true
+      },
+      "expectedResult": {
+        "queryContractVersion": 1,
+        "columns": ["path"],
+        "rows": [[{
+          "type": "path",
+          "vertices": [
+            { "type": "layer", "id": "layer:101", "kind": "Layer", "properties": [{ "name": "state", "value": { "type": "string", "value": "accepted" } }, { "name": "layout_version", "value": { "type": "integer", "value": "1" } }] },
+            { "type": "node", "id": "content:1", "kind": "Content", "properties": [{ "name": "kind", "value": { "type": "string", "value": "concept" } }, { "name": "icon", "value": { "type": "string", "value": "list-tree" } }, { "name": "title", "value": { "type": "string", "value": "Queue" } }, { "name": "detail", "value": { "type": "string", "value": "Pending work" } }, { "name": "state", "value": { "type": "string", "value": "accepted" } }] },
+            { "type": "layer", "id": "layer:103", "kind": "Layer", "properties": [{ "name": "state", "value": { "type": "string", "value": "accepted" } }, { "name": "layout_version", "value": { "type": "integer", "value": "1" } }] }
+          ],
+          "relationships": [
+            { "type": "relationship", "id": "membership:101:0:1", "kind": "CONTAINS", "start": "layer:101", "end": "content:1", "directed": true, "properties": [{ "name": "order", "value": { "type": "integer", "value": "0" } }, { "name": "x", "value": { "type": "float", "value": 0.2 } }, { "name": "y", "value": { "type": "float", "value": 0.5 } }] },
+            { "type": "relationship", "id": "action:301", "kind": "EXPANDS", "start": "content:1", "end": "layer:103", "directed": true, "properties": [{ "name": "source_layer_id", "value": { "type": "string", "value": "layer:101" } }, { "name": "label", "value": { "type": "string", "value": "Deep dive" } }, { "name": "variant", "value": { "type": "string", "value": "card" } }, { "name": "icon", "value": { "type": "string", "value": "zoom-in" } }, { "name": "description", "value": { "type": "string", "value": "Develop the queue" } }, { "name": "relation", "value": { "type": "string", "value": "expand" } }, { "name": "state", "value": { "type": "string", "value": "accepted" } }] }
+          ]
+        }]],
+        "truncated": false
+      }
+    },
+    {
+      "id": "reused-content-occurrence",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "MATCH (l:Layer)-[:CONTAINS]->(n:Content)-[a:REFERENCES]->(target:Layer) WHERE l.layout_version = $version RETURN l AS source, a AS action",
+      "parameters": { "version": { "type": "integer", "value": "1" } },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "l", "label": "Layer", "occurrence": 0 }, { "binding": "n", "label": "Content", "occurrence": 1 }, { "binding": "target", "label": "Layer", "occurrence": 2 }], "relationships": [{ "binding": null, "type": "CONTAINS", "direction": "forward", "from": "l", "to": "n" }, { "binding": "a", "type": "REFERENCES", "direction": "forward", "from": "n", "to": "target" }] }],
+        "predicates": [{ "kind": "propertyComparison", "left": { "binding": "l", "name": "layout_version", "valueType": "integer" }, "operator": "eq", "right": { "kind": "parameter", "name": "version", "valueType": "integer" } }],
+        "projection": { "distinct": false, "columns": [{ "name": "source", "expression": { "kind": "binding", "name": "l", "valueType": "layer" } }, { "name": "action", "expression": { "kind": "binding", "name": "a", "valueType": "relationship" } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 2,
+        "requiresOccurrenceConstraint": true
+      },
+      "expectedResult": {
+        "queryContractVersion": 1,
+        "columns": ["source", "action"],
+        "rows": [[
+          { "type": "layer", "id": "layer:102", "kind": "Layer", "properties": [{ "name": "state", "value": { "type": "string", "value": "accepted" } }, { "name": "layout_version", "value": { "type": "integer", "value": "1" } }] },
+          { "type": "relationship", "id": "action:302", "kind": "REFERENCES", "start": "content:1", "end": "layer:103", "directed": true, "properties": [{ "name": "source_layer_id", "value": { "type": "string", "value": "layer:102" } }, { "name": "label", "value": { "type": "string", "value": "Supporting result" } }, { "name": "variant", "value": { "type": "string", "value": "pill" } }, { "name": "relation", "value": { "type": "string", "value": "reference" } }, { "name": "state", "value": { "type": "string", "value": "accepted" } }] }
+        ]],
+        "truncated": false
+      },
+      "forbiddenFalseMatch": { "sourceLayerId": "layer:101", "actionId": "action:302" }
+    },
+    {
+      "id": "membership-placement",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "MATCH (l:Layer)-[m:CONTAINS]->(n:Content) WHERE n.title = $title RETURN m.order AS order, m.x AS x, m.y AS y ORDER BY order",
+      "parameters": { "title": { "type": "string", "value": "Queue" } },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "l", "label": "Layer", "occurrence": 0 }, { "binding": "n", "label": "Content", "occurrence": 1 }], "relationships": [{ "binding": "m", "type": "CONTAINS", "direction": "forward", "from": "l", "to": "n" }] }],
+        "predicates": [{ "kind": "propertyComparison", "left": { "binding": "n", "name": "title", "valueType": "string" }, "operator": "eq", "right": { "kind": "parameter", "name": "title", "valueType": "string" } }],
+        "projection": { "distinct": false, "columns": [{ "name": "order", "expression": { "kind": "property", "binding": "m", "name": "order", "valueType": "integer" } }, { "name": "x", "expression": { "kind": "property", "binding": "m", "name": "x", "valueType": "float" } }, { "name": "y", "expression": { "kind": "property", "binding": "m", "name": "y", "valueType": "float" } }] },
+        "aggregation": null,
+        "ordering": [{ "column": "order", "direction": "asc", "nulls": "last" }],
+        "limit": null,
+        "maxTraversalHops": 1,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["order", "x", "y"], "rows": [[{ "type": "integer", "value": "0" }, { "type": "float", "value": 0.2 }, { "type": "float", "value": 0.5 }], [{ "type": "integer", "value": "0" }, { "type": "float", "value": 0.25 }, { "type": "float", "value": 0.25 }]], "truncated": false }
+    },
+    {
+      "id": "connected-no-double-count",
+      "target": { "scope": "project", "id": 7 },
+      "query": "MATCH (a:Content)-[r:CONNECTED]-(b:Content) RETURN count(r) AS count",
+      "parameters": {},
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "a", "label": "Content", "occurrence": 0 }, { "binding": "b", "label": "Content", "occurrence": 1 }], "relationships": [{ "binding": "r", "type": "CONNECTED", "direction": "undirected", "from": "a", "to": "b" }] }],
+        "predicates": [],
+        "projection": { "distinct": false, "columns": [{ "name": "count", "expression": { "kind": "aggregate", "function": "count", "distinct": false, "argument": { "kind": "binding", "name": "r", "valueType": "relationship" }, "valueType": "integer" } }] },
+        "aggregation": { "groups": [], "aggregates": ["count"] },
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 1,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["count"], "rows": [[{ "type": "integer", "value": "3" }]], "truncated": false },
+      "contractAssertions": ["connected-is-canonical", "connected-no-double-count"]
+    },
+    {
+      "id": "explicit-order-null-last",
+      "target": { "scope": "project", "id": 7 },
+      "query": "MATCH (l:Layer) RETURN l.layout_version AS version ORDER BY version ASC NULLS LAST",
+      "parameters": {},
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "l", "label": "Layer", "occurrence": 0 }], "relationships": [] }],
+        "predicates": [],
+        "projection": { "distinct": false, "columns": [{ "name": "version", "expression": { "kind": "property", "binding": "l", "name": "layout_version", "valueType": "integer" } }] },
+        "aggregation": null,
+        "ordering": [{ "column": "version", "direction": "asc", "nulls": "last" }],
+        "limit": null,
+        "maxTraversalHops": 0,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["version"], "rows": [[{ "type": "integer", "value": "1" }], [{ "type": "integer", "value": "1" }], [{ "type": "integer", "value": "1" }], [{ "type": "integer", "value": "1" }], [{ "type": "null" }]], "truncated": false }
+    },
+    {
+      "id": "implicit-canonical-order",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "MATCH (n:Content) RETURN n.title AS title",
+      "parameters": {},
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "n", "label": "Content", "occurrence": 0 }], "relationships": [] }],
+        "predicates": [],
+        "projection": { "distinct": false, "columns": [{ "name": "title", "expression": { "kind": "property", "binding": "n", "name": "title", "valueType": "string" } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 0,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["title"], "rows": [[{ "type": "string", "value": "Evidence" }], [{ "type": "string", "value": "Explain queue" }], [{ "type": "string", "value": "Queue" }], [{ "type": "string", "value": "Result" }], [{ "type": "string", "value": "Worker" }]], "truncated": false },
+      "permutationInvariant": true
+    },
+    {
+      "id": "property-absence",
+      "target": { "scope": "project", "id": 7 },
+      "query": "MATCH (l:Layer) WHERE l.layout_version IS ABSENT RETURN l AS layer",
+      "parameters": {},
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "l", "label": "Layer", "occurrence": 0 }], "relationships": [] }],
+        "predicates": [{ "kind": "absenceTest", "property": { "binding": "l", "name": "layout_version", "valueType": "integer" }, "negated": false }],
+        "projection": { "distinct": false, "columns": [{ "name": "layer", "expression": { "kind": "binding", "name": "l", "valueType": "layer" } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 0,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["layer"], "rows": [[{ "type": "layer", "id": "layer:104", "kind": "Layer", "properties": [{ "name": "state", "value": { "type": "string", "value": "accepted" } }] }]], "truncated": false }
+    },
+    {
+      "id": "distinct-list-record-comparisons-comment-semicolon",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "// all scalar comparisons and structured projection\nMATCH (n:Content) WHERE n.title = $title AND n.title <> $other AND n.title > $low AND n.title >= $title AND n.title < $high AND n.title <= $title RETURN DISTINCT [n.title, n.kind] AS pair, {title: n.title, kind: n.kind} AS item, [[n.title], []] AS nested;",
+      "parameters": { "title": { "type": "string", "value": "Queue" }, "other": { "type": "string", "value": "Worker" }, "low": { "type": "string", "value": "A" }, "high": { "type": "string", "value": "Z" } },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "n", "label": "Content", "occurrence": 0 }], "relationships": [] }],
+        "predicates": [
+          { "kind": "propertyComparison", "left": { "binding": "n", "name": "title", "valueType": "string" }, "operator": "eq", "right": { "kind": "parameter", "name": "title", "valueType": "string" } },
+          { "kind": "propertyComparison", "left": { "binding": "n", "name": "title", "valueType": "string" }, "operator": "ne", "right": { "kind": "parameter", "name": "other", "valueType": "string" } },
+          { "kind": "propertyComparison", "left": { "binding": "n", "name": "title", "valueType": "string" }, "operator": "gt", "right": { "kind": "parameter", "name": "low", "valueType": "string" } },
+          { "kind": "propertyComparison", "left": { "binding": "n", "name": "title", "valueType": "string" }, "operator": "gte", "right": { "kind": "parameter", "name": "title", "valueType": "string" } },
+          { "kind": "propertyComparison", "left": { "binding": "n", "name": "title", "valueType": "string" }, "operator": "lt", "right": { "kind": "parameter", "name": "high", "valueType": "string" } },
+          { "kind": "propertyComparison", "left": { "binding": "n", "name": "title", "valueType": "string" }, "operator": "lte", "right": { "kind": "parameter", "name": "title", "valueType": "string" } }
+        ],
+        "projection": { "distinct": true, "columns": [{ "name": "pair", "expression": { "kind": "list", "elementType": { "kind": "string" }, "items": [{ "kind": "property", "binding": "n", "name": "title", "valueType": "string" }, { "kind": "property", "binding": "n", "name": "kind", "valueType": "string" }] } }, { "name": "item", "expression": { "kind": "record", "fields": [{ "name": "title", "expression": { "kind": "property", "binding": "n", "name": "title", "valueType": "string" } }, { "name": "kind", "expression": { "kind": "property", "binding": "n", "name": "kind", "valueType": "string" } }] } }, { "name": "nested", "expression": { "kind": "list", "elementType": { "kind": "list", "elementType": { "kind": "string" } }, "items": [{ "kind": "list", "elementType": { "kind": "string" }, "items": [{ "kind": "property", "binding": "n", "name": "title", "valueType": "string" }] }, { "kind": "list", "elementType": { "kind": "string" }, "items": [] }] } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 0,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["pair", "item", "nested"], "rows": [[{ "type": "list", "elementType": { "kind": "string" }, "values": [{ "type": "string", "value": "Queue" }, { "type": "string", "value": "concept" }] }, { "type": "record", "fields": [{ "name": "title", "value": { "type": "string", "value": "Queue" } }, { "name": "kind", "value": { "type": "string", "value": "concept" } }] }, { "type": "list", "elementType": { "kind": "list", "elementType": { "kind": "string" } }, "values": [{ "type": "list", "elementType": { "kind": "string" }, "values": [{ "type": "string", "value": "Queue" }] }, { "type": "list", "elementType": { "kind": "string" }, "values": [] }] }]], "truncated": false }
+    },
+    {
+      "id": "aggregate-allowlist",
+      "target": { "scope": "project", "id": 7 },
+      "query": "MATCH (l:Layer)-[m:CONTAINS]->(n:Content) RETURN count(*) AS count_all, count(DISTINCT m) AS count, min(m.order) AS min, max(m.order) AS max, sum(m.order) AS sum, avg(m.order) AS avg, collect(m.order) AS orders",
+      "parameters": {},
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "l", "label": "Layer", "occurrence": 0 }, { "binding": "n", "label": "Content", "occurrence": 1 }], "relationships": [{ "binding": "m", "type": "CONTAINS", "direction": "forward", "from": "l", "to": "n" }] }],
+        "predicates": [],
+        "projection": { "distinct": false, "columns": [
+          { "name": "count_all", "expression": { "kind": "aggregate", "function": "count", "distinct": false, "argument": { "kind": "all" }, "valueType": "integer" } },
+          { "name": "count", "expression": { "kind": "aggregate", "function": "count", "distinct": true, "argument": { "kind": "binding", "name": "m", "valueType": "relationship" }, "valueType": "integer" } },
+          { "name": "min", "expression": { "kind": "aggregate", "function": "min", "distinct": false, "argument": { "kind": "property", "binding": "m", "name": "order", "valueType": "integer" }, "valueType": "integer" } },
+          { "name": "max", "expression": { "kind": "aggregate", "function": "max", "distinct": false, "argument": { "kind": "property", "binding": "m", "name": "order", "valueType": "integer" }, "valueType": "integer" } },
+          { "name": "sum", "expression": { "kind": "aggregate", "function": "sum", "distinct": false, "argument": { "kind": "property", "binding": "m", "name": "order", "valueType": "integer" }, "valueType": "integer" } },
+          { "name": "avg", "expression": { "kind": "aggregate", "function": "avg", "distinct": false, "argument": { "kind": "property", "binding": "m", "name": "order", "valueType": "integer" }, "valueType": "float" } },
+          { "name": "orders", "expression": { "kind": "aggregate", "function": "collect", "distinct": false, "argument": { "kind": "property", "binding": "m", "name": "order", "valueType": "integer" }, "valueType": "list" } }
+        ] },
+        "aggregation": { "groups": [], "aggregates": ["count", "count", "min", "max", "sum", "avg", "collect"] },
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 1,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["count_all", "count", "min", "max", "sum", "avg", "orders"], "rows": [[{ "type": "integer", "value": "8" }, { "type": "integer", "value": "8" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "1" }, { "type": "integer", "value": "3" }, { "type": "float", "value": 0.375 }, { "type": "list", "elementType": { "kind": "integer" }, "values": [{ "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "0" }, { "type": "integer", "value": "1" }, { "type": "integer", "value": "1" }, { "type": "integer", "value": "1" }] }]], "truncated": false }
+    },
+    {
+      "id": "reverse-directed-limit-parameter-null-test",
+      "target": { "scope": "project", "id": 7 },
+      "query": "MATCH (n)<-[m:CONTAINS]-(l) WHERE m.x IS NOT NULL AND m.y > $floor RETURN n.title AS title ORDER BY title DESC NULLS FIRST LIMIT $limit",
+      "parameters": { "floor": { "type": "float", "value": 0.0 }, "limit": { "type": "integer", "value": "2" } },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "n", "label": "Content", "occurrence": 0 }, { "binding": "l", "label": "Layer", "occurrence": 1 }], "relationships": [{ "binding": "m", "type": "CONTAINS", "direction": "reverse-text-normalized-forward", "from": "l", "to": "n" }] }],
+        "predicates": [{ "kind": "nullTest", "property": { "binding": "m", "name": "x", "valueType": "float" }, "negated": true }, { "kind": "propertyComparison", "left": { "binding": "m", "name": "y", "valueType": "float" }, "operator": "gt", "right": { "kind": "parameter", "name": "floor", "valueType": "float" } }],
+        "projection": { "distinct": false, "columns": [{ "name": "title", "expression": { "kind": "property", "binding": "n", "name": "title", "valueType": "string" } }] },
+        "aggregation": null,
+        "ordering": [{ "column": "title", "direction": "desc", "nulls": "first" }],
+        "limit": { "kind": "parameter", "name": "limit", "valueType": "integer" },
+        "maxTraversalHops": 1,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["title"], "rows": [[{ "type": "string", "value": "Worker" }], [{ "type": "string", "value": "Result" }]], "truncated": true }
+    },
+    {
+      "id": "reverse-directed-path",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "MATCH p = (n:Content)<-[m:CONTAINS]-(l:Layer) WHERE n.title = $title RETURN p AS path LIMIT 1",
+      "parameters": { "title": { "type": "string", "value": "Queue" } },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": "p", "nodes": [{ "binding": "n", "label": "Content", "occurrence": 0 }, { "binding": "l", "label": "Layer", "occurrence": 1 }], "relationships": [{ "binding": "m", "type": "CONTAINS", "direction": "reverse-text-normalized-forward", "from": "l", "to": "n" }] }],
+        "predicates": [{ "kind": "propertyComparison", "left": { "binding": "n", "name": "title", "valueType": "string" }, "operator": "eq", "right": { "kind": "parameter", "name": "title", "valueType": "string" } }],
+        "projection": { "distinct": false, "columns": [{ "name": "path", "expression": { "kind": "binding", "name": "p", "valueType": "path" } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": { "kind": "literal", "value": 1 },
+        "maxTraversalHops": 1,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["path"], "rows": [[{ "type": "path", "vertices": [{ "type": "node", "id": "content:1", "kind": "Content", "properties": [{ "name": "kind", "value": { "type": "string", "value": "concept" } }, { "name": "icon", "value": { "type": "string", "value": "list-tree" } }, { "name": "title", "value": { "type": "string", "value": "Queue" } }, { "name": "detail", "value": { "type": "string", "value": "Pending work" } }, { "name": "state", "value": { "type": "string", "value": "accepted" } }] }, { "type": "layer", "id": "layer:101", "kind": "Layer", "properties": [{ "name": "state", "value": { "type": "string", "value": "accepted" } }, { "name": "layout_version", "value": { "type": "integer", "value": "1" } }] }], "relationships": [{ "type": "relationship", "id": "membership:101:0:1", "kind": "CONTAINS", "start": "layer:101", "end": "content:1", "directed": true, "properties": [{ "name": "order", "value": { "type": "integer", "value": "0" } }, { "name": "x", "value": { "type": "float", "value": 0.2 } }, { "name": "y", "value": { "type": "float", "value": 0.5 } }] }] }]], "truncated": true }
+    },
+    {
+      "id": "disconnected-contains-navigation-no-occurrence-constraint",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "MATCH (l:Layer)-[:CONTAINS]->(member:Content), (source:Content)-[:EXPANDS]->(target:Layer) WHERE member.title = $member AND source.title = $source RETURN member.title AS member, target AS target",
+      "parameters": { "member": { "type": "string", "value": "Evidence" }, "source": { "type": "string", "value": "Queue" } },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [
+          { "pathBinding": null, "nodes": [{ "binding": "l", "label": "Layer", "occurrence": 0 }, { "binding": "member", "label": "Content", "occurrence": 1 }], "relationships": [{ "binding": null, "type": "CONTAINS", "direction": "forward", "from": "l", "to": "member" }] },
+          { "pathBinding": null, "nodes": [{ "binding": "source", "label": "Content", "occurrence": 0 }, { "binding": "target", "label": "Layer", "occurrence": 1 }], "relationships": [{ "binding": null, "type": "EXPANDS", "direction": "forward", "from": "source", "to": "target" }] }
+        ],
+        "predicates": [
+          { "kind": "propertyComparison", "left": { "binding": "member", "name": "title", "valueType": "string" }, "operator": "eq", "right": { "kind": "parameter", "name": "member", "valueType": "string" } },
+          { "kind": "propertyComparison", "left": { "binding": "source", "name": "title", "valueType": "string" }, "operator": "eq", "right": { "kind": "parameter", "name": "source", "valueType": "string" } }
+        ],
+        "projection": { "distinct": false, "columns": [{ "name": "member", "expression": { "kind": "property", "binding": "member", "name": "title", "valueType": "string" } }, { "name": "target", "expression": { "kind": "binding", "name": "target", "valueType": "layer" } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 1,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["member", "target"], "rows": [[{ "type": "string", "value": "Evidence" }, { "type": "layer", "id": "layer:103", "kind": "Layer", "properties": [{ "name": "state", "value": { "type": "string", "value": "accepted" } }, { "name": "layout_version", "value": { "type": "integer", "value": "1" } }] }]], "truncated": false },
+      "occurrenceAssertion": "CONTAINS.to and EXPANDS.from are different Content bindings, so no occurrence join is applied"
+    },
+    {
+      "id": "root-action-query",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "MATCH (interaction:Content)-[a:EXPANDS]->(root:Layer) WHERE interaction.kind = $kind RETURN a AS action",
+      "parameters": { "kind": { "type": "string", "value": "user-interaction" } },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "interaction", "label": "Content", "occurrence": 0 }, { "binding": "root", "label": "Layer", "occurrence": 1 }], "relationships": [{ "binding": "a", "type": "EXPANDS", "direction": "forward", "from": "interaction", "to": "root" }] }],
+        "predicates": [{ "kind": "propertyComparison", "left": { "binding": "interaction", "name": "kind", "valueType": "string" }, "operator": "eq", "right": { "kind": "parameter", "name": "kind", "valueType": "string" } }],
+        "projection": { "distinct": false, "columns": [{ "name": "action", "expression": { "kind": "binding", "name": "a", "valueType": "relationship" } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 1,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["action"], "rows": [[{ "type": "relationship", "id": "action:306", "kind": "EXPANDS", "start": "content:6", "end": "layer:101", "directed": true, "properties": [{ "name": "label", "value": { "type": "string", "value": "Response" } }, { "name": "variant", "value": { "type": "string", "value": "pill" } }, { "name": "relation", "value": { "type": "string", "value": "expand" } }, { "name": "state", "value": { "type": "string", "value": "accepted" } }] }]], "truncated": false }
+    },
+    {
+      "id": "reverse-edge-reuse-no-match",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "MATCH p = (a:Content)-[out:CONNECTED]-(b:Content)-[back:CONNECTED]-(a) WHERE a.title = $title RETURN p AS path",
+      "parameters": { "title": { "type": "string", "value": "Queue" } },
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": "p", "nodes": [{ "binding": "a", "label": "Content", "occurrence": 0 }, { "binding": "b", "label": "Content", "occurrence": 1 }, { "binding": "a", "label": "Content", "occurrence": 2 }], "relationships": [{ "binding": "out", "type": "CONNECTED", "direction": "undirected", "from": "a", "to": "b" }, { "binding": "back", "type": "CONNECTED", "direction": "undirected", "from": "b", "to": "a" }] }],
+        "predicates": [{ "kind": "propertyComparison", "left": { "binding": "a", "name": "title", "valueType": "string" }, "operator": "eq", "right": { "kind": "parameter", "name": "title", "valueType": "string" } }],
+        "projection": { "distinct": false, "columns": [{ "name": "path", "expression": { "kind": "binding", "name": "p", "valueType": "path" } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": null,
+        "maxTraversalHops": 2,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["path"], "rows": [], "truncated": false },
+      "noMatchReason": "relationship_unique_trail forbids reusing one CONNECTED identity in reverse"
+    },
+    {
+      "id": "structural-candidate-source",
+      "target": { "scope": "thread", "id": 41 },
+      "query": "MATCH (n:Content) RETURN n.kind AS kind LIMIT 1",
+      "parameters": {},
+      "expectedPlan": {
+        "queryContractVersion": 1,
+        "candidateSource": "structural",
+        "patterns": [{ "pathBinding": null, "nodes": [{ "binding": "n", "label": "Content", "occurrence": 0 }], "relationships": [] }],
+        "predicates": [],
+        "projection": { "distinct": false, "columns": [{ "name": "kind", "expression": { "kind": "property", "binding": "n", "name": "kind", "valueType": "string" } }] },
+        "aggregation": null,
+        "ordering": [],
+        "limit": { "kind": "literal", "value": 1 },
+        "maxTraversalHops": 0,
+        "requiresOccurrenceConstraint": false
+      },
+      "expectedResult": { "queryContractVersion": 1, "columns": ["kind"], "rows": [[{ "type": "string", "value": "concept" }]], "truncated": true }
+    }
+  ]
+}

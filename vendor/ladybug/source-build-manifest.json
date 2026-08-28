@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "core": {
+    "name": "LadybugDB",
+    "version": "0.18.0",
+    "tag": "v0.18.0",
+    "commit": "0cda4fffcebb4a52cc24198462901ad28e2d5b66",
+    "source": "rust-binding-crate/lbug-src",
+    "embeddedTreeSha256": "c90c2bd925e72dcc6c9e51c17b1a150589e719c949d364ded4a98389f0aabe62"
+  },
+  "rustBinding": {
+    "crate": "lbug",
+    "version": "0.18.0",
+    "archive": "lbug-0.18.0.crate",
+    "url": "https://static.crates.io/crates/lbug/lbug-0.18.0.crate",
+    "sha256": "f52ee74966e323212747aa22fa8c01f73f1cbbb996187c3b08cbf96ff9f67562",
+    "buildScriptSha256": "e315b80ae287c6679609dbf44bbe67bfe3b864f90c0be279380edba3ac936064",
+    "sourceBasisCommit": "ea283cd1bf5473cd5c233944e3b281eb0d758a45",
+    "sourceBasisDirty": true
+  },
+  "openssl": {
+    "version": "3.5.8",
+    "archive": "openssl-3.5.8.tar.gz",
+    "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz",
+    "sha256": "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2",
+    "license": "Apache-2.0",
+    "endOfLife": "2030-04-08"
+  },
+  "extensions": [],
+  "build": {
+    "nativeMode": "fully-static-ladybug-and-openssl",
+    "minimumMacOSVersion": "13.3",
+    "cargoNetworkMode": "offline",
+    "environmentMustBeUnset": [
+      "LBUG_GITHUB_REPOSITORY",
+      "LBUG_INCLUDE_DIR",
+      "LBUG_LIBRARY_DIR",
+      "LBUG_PRECOMPILED_RUN_ID",
+      "LBUG_RUST_BUILD_FROM_SOURCE",
+      "LBUG_SHARED"
+    ],
+    "bindingPatch": null,
+    "corePatch": null,
+    "platformLinkAdapter": {
+      "ownership": "relayer",
+      "ladybugSourcePatched": false,
+      "targets": [
+        {
+          "rustTarget": "aarch64-apple-darwin",
+          "libraryDirectory": "openssl-prefix/lib",
+          "staticLibraries": ["ssl", "crypto"]
+        },
+        {
+          "rustTarget": "x86_64-apple-darwin",
+          "libraryDirectory": "openssl-prefix/lib",
+          "staticLibraries": ["ssl", "crypto"]
+        },
+        {
+          "rustTarget": "x86_64-pc-windows-msvc",
+          "libraryDirectory": "openssl-prefix/lib",
+          "staticLibraries": ["libssl", "libcrypto"]
+        }
+      ]
+    },
+    "targets": {
+      "aarch64-apple-darwin": {
+        "supported": true,
+        "opensslConfigureTarget": "darwin64-arm64-cc",
+        "buildTool": "make"
+      },
+      "x86_64-apple-darwin": {
+        "supported": true,
+        "opensslConfigureTarget": "darwin64-x86_64-cc",
+        "buildTool": "make"
+      },
+      "x86_64-pc-windows-msvc": {
+        "supported": true,
+        "opensslConfigureTarget": "VC-WIN64A",
+        "buildTool": "nmake"
+      }
+    }
+  },
+  "runtime": {
+    "ladybugLibraryKind": "static",
+    "packagedLadybugLibrary": null,
+    "requiredPackagedRpath": null,
+    "externalOpenSSLLibraries": false
+  },
+  "licenseReceipt": {
+    "bindingManifestDeclares": "MIT",
+    "bindingArchiveContainsLicenseFile": false,
+    "coreRepositoryDeclares": "MIT",
+    "opensslSourceContainsLicenseFile": true,
+    "completeForDistribution": false,
+    "nativeInventory": "vendor/ladybug/native-inventory.json",
+    "remainingObligation": "Obtain a reviewed upstream license file for the lbug binding before packaging."
+  }
+}

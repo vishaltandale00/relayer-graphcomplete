@@ -221,7 +221,7 @@ npm run desktop:pack
 
 Desktop packaging and release metadata are target-aware. On macOS it packages Electron plus the Rust product and graph servers for Apple Silicon or Intel; on Windows x64 it packages the corresponding `.exe` services. Native Claude and Codex runtimes are installed from integrity-verified vendor npm artifacts only when a compatible provider is connected, rather than being carried in the application bundle. Each target has independent Preview and Stable artifacts and feed pointers under `desktop/macos/arm64`, `desktop/macos/x64`, or `desktop/windows/x64`.
 
-The accepted desktop release contract starts at version `0.2.0`, supports Apple Silicon and Intel on macOS 13 or newer plus Windows x64, and uses the existing Relayer Developer ID identity on macOS and Azure Artifact Signing on Windows. Signed candidates fail closed unless the worktree is clean and target-specific signing, provenance, and the sealed update URL are present. Build a signed candidate without publishing it with `RELAYER_DESKTOP_TARGET` set to `macos-arm64`, `macos-x64`, or `windows-x64`:
+The accepted desktop release contract starts at version `0.2.0`, supports Apple Silicon and Intel on macOS 13.3 or newer plus Windows x64, and uses the existing Relayer Developer ID identity on macOS and Azure Artifact Signing on Windows. Signed candidates fail closed unless the worktree is clean and target-specific signing, provenance, and the sealed update URL are present. Build a signed candidate without publishing it with `RELAYER_DESKTOP_TARGET` set to `macos-arm64`, `macos-x64`, or `windows-x64`:
 
 ```sh
 npm run desktop:dist:preview

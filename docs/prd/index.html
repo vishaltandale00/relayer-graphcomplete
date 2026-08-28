@@ -585,7 +585,7 @@ type CompleteResult =
 <td>Desktop updater and distributable packaging</td>
 <td><span class="delivery-status partial">Partial — Stable verified</span></td>
 <td>The protected CI workflow signed, notarized, and published immutable Apple Silicon releases. The releases are <code>0.2.2</code>, <code>0.2.3</code>, and <code>0.2.4</code>. A remote Mac mini completed the visible updates through <code>0.2.4</code>. Workflow <code>32105585844</code> promoted the exact Preview bytes to Stable. The installed app used the live Stable feed and showed <strong>Up to date</strong>.</td>
-<td>The macOS 13-through-current support matrix, corrupt hosted artifact behavior, and update deferral around active Complete commits remain unverified. Automatic application downgrade is prohibited. A failed later-version SQLite migration is a separate persistence-recovery requirement, not an updater rollback mechanism. Section 15C.2 contains the exact proof and remaining boundary.</td>
+<td>The macOS 13.3-through-current support matrix, corrupt hosted artifact behavior, and update deferral around active Complete commits remain unverified. Automatic application downgrade is prohibited. A failed later-version SQLite migration is a separate persistence-recovery requirement, not an updater rollback mechanism. Section 15C.2 contains the exact proof and remaining boundary.</td>
 </tr>
 <tr class="requirement-row status-deferred">
 <td>Relayer login and additional providers</td>
@@ -1169,7 +1169,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <td><span class="delivery-status partial">Partial — Stable verified</span></td>
 <td>One updater test covers checks, availability, progress, readiness, installation, retry, channel persistence, and downgrade protection. It does not use network access. Release tests cover identity, version, channel, manifests, ZIP reconstruction, hashes, receipts, tampering, tags, publication, retry, promotion, and replacement rejection. The desktop suite keeps these flows in one file with 10 tests.</td>
 <td><code>UPD-002-E1</code> through <code>UPD-002-E6</code> cover six release events. These include signed launch, empty-feed behavior, the failed canary, corrected updates, Stable promotion, and Stable feed use. The screenshots show the inspected visible states. Machine-readable receipts connect the candidate, canary, manifest, and public artifact hashes.</td>
-<td>The macOS 13-through-current support matrix, active-Complete restart deferral, and corrupt hosted artifact behavior remain undone. A real later-version migration and failed-migration recovery now belong to the app-server persistence track and are not claimed by updater evidence.</td>
+<td>The macOS 13.3-through-current support matrix, active-Complete restart deferral, and corrupt hosted artifact behavior remain undone. A real later-version migration and failed-migration recovery now belong to the app-server persistence track and are not claimed by updater evidence.</td>
 </tr>
 </tbody></table>
 <h4><code>SET-001-E1</code> — full-page Settings</h4>
@@ -1505,7 +1505,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <li><strong>Artifact host:</strong> Each target uses its own path under <code>https://updates.relayerlabs.ai/desktop</code>. Versioned artifacts are immutable. Target channel metadata is written last.</li>
 <li><strong>Signing automation:</strong> Release builds use the existing Developer ID Application identity for Apple team <code>NZ253AL7U6</code>. Notarization credentials come from the local environment or a protected GitHub environment. The repository must not contain these secrets.</li>
 <li><strong>Update prompt timing:</strong> use the existing compact sidebar indicator; downloading is user-triggered, and restart remains explicitly deferrable.</li>
-<li><strong>Minimum supported macOS:</strong> V1 supports Apple Silicon and Intel on macOS 13 or newer. Release evidence validates target identity and architecture.</li>
+<li><strong>Minimum supported macOS:</strong> V1 supports Apple Silicon and Intel on macOS 13.3 or newer. Release evidence validates target identity and architecture.</li>
 <li><strong>Windows status:</strong> <span class="delivery-status deferred">Blocked</span> The Windows pipeline is disabled. The exact publisher variable is missing. Azure signing and the interactive AVD canary are not verified. Windows does not block macOS publication.</li>
 <li><strong>Release recovery:</strong> Remove a bad channel pointer before more installations. Alternatively, publish a newer correction. Do not downgrade application code automatically. An older binary can be incompatible with newer data. SQLite migration recovery is a separate app-server contract. Recognized migrations run in a transaction. Relayer validates the new schema before startup. A future N→N+1 test must prove that the prior database stays recoverable after a forced failure.</li>
 </ol>
@@ -1619,7 +1619,7 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <p>Protected workflow <code>32535133480</code> promoted the exact Intel Preview bytes after validating the committed canary. Stable and Preview manifests share SHA-256 <code>90f004148a1d045a002c704e91a2cfdf377d728343f76fb0e5ee254567243341</code>.</p>
 <p>Machine-readable receipt: <code>assets/evidence/desktop/macos-x64-0.2.12-to-0.2.13/stable-promotion-macos-x64-0.2.13.json</code>.</p>
 <p>This slice completes Preview distribution, the previous-version update canary, and the first Stable promotion. The full desktop distribution requirement is still partial.</p>
-<p>The macOS 13-through-current test matrix is not complete. Tests for a corrupt hosted artifact and restart deferral are also not complete. The initial SQLite schema and fail-closed validation exist. A later-version migration and a forced-failure recovery test remain open.</p>
+<p>The macOS 13.3-through-current test matrix is not complete. Tests for a corrupt hosted artifact and restart deferral are also not complete. The initial SQLite schema and fail-closed validation exist. A later-version migration and a forced-failure recovery test remain open.</p>
 <h2 data-prd-layer="Contracts" data-prd-order="11">11. Graph engine and local graph API</h2>
 <p>The graph engine is the only component that opens graph storage or validates graph writes. The Rust app server uses the graph server and persistent harness host. It does not introduce another graph implementation.</p>
 <h3>11.1 Runtime components and delivery grouping</h3>
@@ -1800,6 +1800,31 @@ GET  /api/graph/nodes/:id/output
 <li>#56 owns chronological Back and Forward behavior. #36 does not define navigation history.</li>
 <li>Prime Agent owns recursive agent execution. Other harnesses execute directly. GraphComplete owns graph semantics and acceptance.</li>
 </ul>
+<h3>11.9 Graph search v1 contract</h3>
+<p><strong>Goal:</strong> Let authorized agents query accepted graph structure without known record identifiers.</p>
+<p><strong>Primary issue:</strong> <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/52">#52 Add graph search functionality</a>.</p>
+<p><strong>Current status:</strong> The product contract is settled. The Issue #261 feasibility gate rejects the upstream Ladybug artifacts as shipped. The approved product decision raises the minimum supported macOS version to 13.3. At that floor, exact Ladybug 0.18.0 uses pinned static OpenSSL and Relayer-owned link metadata without a fork. The complete positive v1 corpus and graph-server lifecycle pass locally on both macOS targets. Windows native proof and binding-license bytes remain unresolved, so #262 and later delivery nodes stay blocked. The graph-search contract stays unchanged.</p>
+<h4>Product requirements</h4>
+<ul>
+<li>Graph search uses Ladybug from its first enabled product path. SQLite search fallback is forbidden.</li>
+<li>SQLite remains the canonical typed write store initially. Ladybug is one shared derived search store.</li>
+<li>Projection order and readiness are independent for each project or standalone thread.</li>
+<li>A successful submission is acknowledged only after its complete Ladybug projection is searchable.</li>
+<li>This is acknowledgement-level freshness. The product does not claim cross-database physical ACID.</li>
+<li>Queries select a thread or project dataset. Rust intersects that selector with the completion-bound read permit.</li>
+<li>The public language is a bounded read-only GQL/Cypher-shaped profile, not full Cypher or ISO GQL.</li>
+<li>V1 supports whole-target scans plus fixed one-hop and two-hop patterns.</li>
+<li>Content, layers, connections, membership, expansions, and references form one searchable supergraph.</li>
+<li>Drafts, <code>interaction.context</code>, and unresolved invokes never enter the searchable topology.</li>
+<li>Queries return typed scalar, graph, list, record, and path values with deterministic ordering.</li>
+<li>The default result cap is five rows. The hard cap is eight rows and 16 KiB.</li>
+<li>Rows are never partially truncated. A single oversized row returns a typed error.</li>
+<li>Output limits do not replace traversal, expansion, intermediate-row, time, or cancellation budgets.</li>
+<li>Incompatible Ladybug stores rebuild from SQLite before an atomic validated swap.</li>
+<li>V1 uses pinned official Ladybug components and narrow hooks. It does not require a permanent fork.</li>
+<li>Vector retrieval and making Ladybug canonical for writes are deferred.</li>
+</ul>
+<p>The <a href="../graph-query-v1.md">versioned graph-query contract</a> freezes grammar, values, topology, limits, errors, and compatibility.</p>
 <h2 data-prd-layer="Contracts" data-prd-order="12">12. Complete and harness-host contract</h2>
 <h3>12.1 Canonical input and accepted output</h3>
 <pre><code class="language-ts">type CompleteInputGraph = NodeReference;
@@ -2575,7 +2600,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
     Q --&gt; R[&quot;Publish immutable artifacts and checksums&quot;]
     R --&gt; M[&quot;Publish stable update manifest last&quot;]
 </code></pre>
-<p>V1 targets Apple Silicon and Intel on macOS 13 or newer, plus Windows x64. Each target has independent artifacts, Preview and Stable pointers, and target-specific canary evidence.</p>
+<p>V1 targets Apple Silicon and Intel on macOS 13.3 or newer, plus Windows x64. Each target has independent artifacts, Preview and Stable pointers, and target-specific canary evidence.</p>
 <h3>14.5 Distribution and update acceptance</h3>
 <p>macOS distribution uses a notarized DMG for first install and a signed ZIP plus channel metadata for Electron updates. Windows x64 will use a signed NSIS installer once signing is unblocked. Artifacts are content-addressed and immutable. A mutable channel manifest is published only after its target-specific artifact, signature, checksum, platform trust proof, and smoke evidence are available.</p>
 <p>Before promotion, a clean machine must pass these product checks:</p>
@@ -2652,6 +2677,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 <li>no-folder and project-backed threads;</li>
 <li>non-Git folders, local Git checkout, new worktree, and fork-to-worktree;</li>
 <li>graph messages, corrective or explanatory annotations through attached context, authored node actions, recursive subthreads, turn navigation, stop, retry, and local persistence;</li>
+<li>bounded read-only graph search over accepted content, layers, relationships, and paths through one shared Ladybug store;</li>
 <li>Rust graph core/API, opaque session-token enforcement, and TypeScript/Python graph clients;</li>
 <li>persistent Node harness host, packaged <code>codex.basic</code> configurations, and explicit compatibility for each supported provider and harness;</li>
 <li>exact empty-project Complete evaluation, followed by multi-turn, interaction, grounding, recursive-work, and hard-task capability suites;</li>
@@ -2675,7 +2701,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 <ul>
 <li>engine indexing and compaction implementation behind the stable read/write contract;</li>
 <li>whether loopback HTTP is reachable from every supported Codex sandbox or the packaged product needs HTTP over a Unix-domain socket;</li>
-<li>graph search/retrieval policy and when embeddings are worth adding;</li>
+<li>whether a later vector candidate source provides enough value to extend the structural search contract;</li>
 <li>thresholds and calibration examples beyond the fixed first six-fact LLM-judge rubric;</li>
 <li>when multiple real harness ablations justify a generalized signed configuration manifest;</li>
 <li>default maximum number of Relayer-managed worktrees, whether the limit is global or per project, and the limit-reached cleanup flow;</li>
