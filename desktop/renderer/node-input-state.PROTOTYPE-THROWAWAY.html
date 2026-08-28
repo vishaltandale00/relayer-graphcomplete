@@ -1,0 +1,799 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PROTOTYPE — THROWAWAY: Node input state model</title>
+  <link rel="icon" href="./assets/relayer-logo.svg">
+  <link rel="stylesheet" href="./styles.css">
+  <style>
+    body{--inspector:360px}.prototype-flag{margin-left:auto;color:var(--warning);font-size:9px;text-transform:uppercase;letter-spacing:.08em}.prototype-sidebar-note{padding:8px;color:var(--faint);font-size:9px;line-height:1.4}.prototype-sidebar-note strong{color:var(--warning)}.prototype-thread{background:var(--hover)}
+    .prototype-workspace{padding-right:12px}.prototype-workspace .environment-panel{display:none}.prototype-workspace.workspace-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:36px auto minmax(0,1fr)}.prototype-workspace .thread-header,.prototype-workspace .interaction-banner{grid-column:1}.prototype-workspace .thread-workspace{grid-column:1;grid-template-columns:minmax(0,1fr) var(--inspector)}
+    .prototype-stage{display:block!important;min-height:360px}.prototype-edge{stroke:#4a4f55;stroke-width:1.5}.prototype-node{border:0;background:transparent}.prototype-node:nth-of-type(1){left:24%;top:29%}.prototype-node:nth-of-type(2){left:62%;top:25%}.prototype-node:nth-of-type(3){left:76%;top:58%}.prototype-node:nth-of-type(4){left:42%;top:68%}.prototype-node:nth-of-type(5){left:16%;top:72%}.prototype-node .copy small{display:block;margin-top:3px;color:var(--faint);font-size:8px}.prototype-node.committed .glyph:after{content:"";position:absolute;width:8px;height:8px;margin:31px 0 0 31px;border:2px solid var(--bg);border-radius:50%;background:var(--green)}
+    .prototype-inspector .inspector-content{padding-bottom:80px}.prototype-inspector .node-content{font-size:11px}.prototype-inspector .node-heading{margin-bottom:12px}.node-input-field{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}.node-input-field:first-child{margin-top:12px}.node-input-field.active{border-top-color:var(--line-strong)}.node-input-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.node-input-heading strong{color:var(--text);font-size:12px}.node-input-state{flex:none;color:var(--faint);font-size:8px;text-transform:uppercase;letter-spacing:.06em}.node-input-field.committed .node-input-state{color:var(--green)}.node-input-field.active .node-input-state{color:var(--blue)}.node-input-field>p{margin:5px 0 0}.node-input-rail-group{margin-top:16px}.node-input-rail-title{margin:0 0 6px;color:var(--faint);font-size:8px;text-transform:uppercase;letter-spacing:.08em}.node-input-rail{display:flex;gap:10px;margin:0 -3px;padding:0 3px 9px;overflow-x:auto;scroll-snap-type:x proximity}.node-input-rail .node-input-field{flex:0 0 286px;margin:0;padding:13px;border:1px solid var(--line);border-radius:10px;background:var(--panel);scroll-snap-align:start}.node-input-rail .node-input-field.active{border-color:var(--blue)}.action-meta{display:block;margin-top:2px;color:var(--faint);font-size:8px}.control{display:grid;gap:7px;margin-top:10px}.control textarea{width:100%;min-height:72px;resize:none;border:1px solid var(--line);border-radius:8px;background:var(--raised);padding:9px;outline:0}.control textarea:focus{border-color:var(--line-strong)}.choice{display:flex;gap:8px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--raised)}.image-option-list{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x proximity}.choice-banner{position:relative;display:block;flex:0 0 220px;padding:0;overflow:hidden;scroll-snap-align:start}.choice-banner input{position:absolute;top:9px;right:9px;z-index:2}.option-image{display:block;height:92px;border-bottom:1px solid var(--line);background-color:#20252a;background-size:cover}.option-image.editorial{background-image:linear-gradient(140deg,rgba(13,15,17,.08),rgba(13,15,17,.72)),linear-gradient(115deg,#d19b68 0 32%,#5f7388 32% 58%,#213247 58%)}.option-image.product{background-image:radial-gradient(circle at 68% 35%,#b7d6cf 0 10%,transparent 11%),linear-gradient(145deg,#203744,#4f7780 52%,#d2b68b)}.option-image.people{background-image:radial-gradient(circle at 35% 38%,#e9c7aa 0 12%,transparent 13%),radial-gradient(circle at 68% 45%,#c89274 0 11%,transparent 12%),linear-gradient(155deg,#384155,#98705f)}.option-label{display:block;padding:9px 10px;color:var(--text);font-weight:650}.choice-banner:has(input:checked){border-color:var(--blue);box-shadow:inset 0 0 0 1px var(--blue)}.editor-actions,.utility-actions,.composer-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}.primary,.secondary,.danger,.tab,.step{min-height:30px;padding:0 9px;border:1px solid var(--line);border-radius:7px;background:var(--raised);color:var(--text);font-size:10px}.primary{border:0;background:#eceeef;color:#111315;font-weight:700}.icon-action{width:26px;min-height:26px;padding:0;display:grid;place-items:center}.icon-action svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.danger{border-color:#694545;background:#26191a;color:#f0b0b0}.error{min-height:15px;margin-top:7px;color:var(--danger);font-size:9px}.subtle,.empty{color:var(--muted);font-size:9px}.empty{font-style:italic}.status{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:9px}.status:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--faint)}.status.running:before{background:var(--blue)}.status.accepted:before{background:var(--green)}.status.failed:before,.status.cancelled:before{background:var(--danger)}
+    .composer-context-tray{display:block!important}.attachments{display:flex;gap:7px;overflow-x:auto}.attachment{position:relative;min-width:190px;max-width:280px;padding:8px 30px 8px 10px;border:1px solid var(--line);border-radius:999px;background:var(--raised);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.attachment strong{display:block;overflow:hidden;text-overflow:ellipsis;font-size:9px}.attachment>div:last-of-type{overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:9px}.attachment code{display:none}.attachment button{position:absolute;right:4px;top:4px;width:26px;height:26px;border:0;border-radius:50%;background:transparent;color:var(--muted)}.attachment button:hover{background:var(--hover);color:var(--text)}.prototype-composer-tools{position:absolute;right:13px;bottom:62px;z-index:10}.attempt-card,.history-card,.slot{margin-top:7px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--raised);font-size:9px}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.panel-head h2,.panel-head h3{margin:0}
+    .prototype-lab{position:fixed;left:calc(var(--sidebar) + 18px);right:calc(var(--inspector) + 30px);bottom:76px;z-index:45;max-height:48vh;overflow:auto;border:1px solid var(--line-strong);border-radius:12px;background:rgba(20,23,25,.97);box-shadow:0 22px 70px rgba(0,0,0,.55);padding:11px}.prototype-lab.collapsed{max-height:none;width:min(560px,calc(100vw - 40px));right:auto}.prototype-lab.collapsed>*:not(.lab-head),.prototype-lab.collapsed .lab-instrument{display:none}.lab-head,.lab-instrument{display:flex;align-items:center;gap:9px}.lab-head strong{font-size:10px}.lab-head span{color:var(--muted);font-size:9px}.lab-head>#toggleLab{margin-left:auto}.lab-head .utility-actions{gap:4px;margin:0}.tabs{display:flex;gap:4px;overflow:auto;margin-top:9px}.tab{white-space:nowrap}.tab[aria-selected="true"]{border-color:var(--blue);background:#182332}.walkthrough{margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}.walkthrough h2{font-size:11px}.step-list{display:flex;gap:5px;overflow:auto;margin-top:7px}.step{flex:none;text-align:left}.step.done{color:var(--green)}.step.next{border-color:var(--blue);box-shadow:0 0 0 2px rgba(128,174,248,.11)}
+    .prototype-state{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:9px}.panel{min-width:0;padding:9px;border:1px solid var(--line);border-radius:9px;background:var(--panel);font-size:9px}.panel h3{margin:0 0 6px;font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}.rows{display:grid;gap:5px}.row{display:grid;grid-template-columns:84px minmax(0,1fr);gap:6px;padding-bottom:4px;border-bottom:1px solid var(--line)}.row dt{color:var(--faint)}.row dd{margin:0;overflow-wrap:anywhere}.wide{grid-column:span 2}.change{grid-column:1/-1;padding:7px 9px;border-left:2px solid var(--blue);background:#182332;color:#cbdcf4}.verdict{grid-column:1/-1;border-style:dashed}.verdict h2{margin:0;font-size:11px}.verdict ul{display:flex;flex-wrap:wrap;gap:5px 20px;margin:7px 0 0;padding-left:18px;color:var(--muted);font-size:9px}.verdict li{max-width:310px}code{font:8px ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+    @media(max-width:1100px){.prototype-workspace .thread-workspace{grid-template-columns:minmax(0,1fr)}.prototype-inspector{position:absolute;right:12px;top:0;bottom:0;z-index:20;width:340px}.prototype-lab{right:18px}.prototype-state{grid-template-columns:1fr 1fr}}@media(max-width:760px){.prototype-lab{left:12px;right:12px}.prototype-state{grid-template-columns:1fr}.wide{grid-column:auto}.prototype-inspector{width:calc(100% - 24px)}}
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <button class="titlebar-toggle" title="Collapse sidebar" aria-label="Collapse sidebar"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3" width="15" height="14" rx="3"></rect><path d="M7.5 3v14"></path></svg></button>
+      <div class="sidebar-title"><div class="logo" role="img" aria-label="Relayer"></div><strong>Relayer</strong></div>
+      <div class="sidebar-content"><button class="new-thread-button"><span>＋</span> New thread <kbd>⌘N</kbd></button><div class="side-section"><div class="section-label">Chats</div><div class="entry-list"><button class="entry prototype-thread"><span class="entry-icon">›_</span><span>Launch planning</span></button><button class="entry"><span class="entry-icon">›_</span><span>Follow-up research</span></button></div></div><div class="prototype-sidebar-note"><strong>Throwaway #219</strong><br>State-model review inside the production workspace shell.</div></div>
+      <div class="sidebar-footer"><button class="footer-button">⚙<span>Settings</span></button></div>
+    </aside>
+    <main class="main-area"><section class="thread-view"><div class="workspace-layout prototype-workspace">
+      <header class="thread-header"><nav class="history-navigation"><button disabled>←</button><button disabled>→</button></nav><div class="thread-title-group"><div class="thread-title-copy"><h2>Launch planning</h2></div></div><span class="prototype-flag">Prototype · throwaway</span></header>
+      <div class="interaction-banner"><span class="interaction-icon">›_</span><div class="interaction-copy"><p>Build a launch plan that accounts for rollout risk and channel constraints.</p></div><div class="turn-picker"><div class="turn-stepper"><button disabled>←</button><button class="turn-picker-button">Turn 1 of 1</button><button disabled>→</button></div></div><span class="interaction-status interaction-status-accepted">Accepted</span></div>
+      <div class="thread-workspace"><div class="graph-column"><nav class="workspace-breadcrumb"><button class="action-chip">Launch plan</button></nav><div class="graph-stage prototype-stage"><svg id="edgeCanvas" viewBox="0 0 1000 600" preserveAspectRatio="none"><line class="prototype-edge" x1="240" y1="174" x2="620" y2="150"></line><line class="prototype-edge" x1="240" y1="174" x2="760" y2="348"></line><line class="prototype-edge" x1="240" y1="174" x2="420" y2="408"></line><line class="prototype-edge" x1="240" y1="174" x2="160" y2="432"></line></svg><div id="nodes"></div><div class="graph-hint">Select a node to open its input actions · Graph remains free of draft badges</div><div class="graph-controls"><button>−</button><output>100%</output><button>+</button><button class="graph-fit">Fit</button><button>⌾</button></div></div>
+        <div class="thread-composer-shell"><section class="composer-context-tray"><div class="attachments" id="attachments"></div></section><div class="thread-composer"><p class="composer-retry-message hidden" id="composerError"></p><textarea id="rootText" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions"><button class="model-button"><span>✦</span><span>GPT-5.6</span><span>⌄</span></button><button class="send-button" id="send" title="Send">↑</button></div></div></div>
+      </div>
+      <aside class="inspector prototype-inspector"><div class="inspector-header"><span>Node details</span><div class="inspector-header-actions"><span class="status" id="lockStatus"></span><button class="icon-button">×</button></div></div><div class="inspector-content"><div class="node-heading"><div class="node-icon">✦</div><div><small>RECOMMENDATION</small><h2 id="selectedNodeTitle">Select a node</h2></div></div><div class="node-content"><p id="editorOccurrence">Choose a graph node to inspect its input actions.</p><div id="editor"></div></div></div></aside></div>
+    </div></section></main>
+  </div>
+
+  <section class="prototype-lab collapsed" id="prototypeLab">
+    <div class="lab-head"><strong>State-model lab</strong><span id="threadLabel"></span><div class="lab-instrument"><button class="secondary" id="reverse">Reverse order</button><button class="secondary" id="compare">Compare</button><span id="runningActions"></span></div><button class="secondary" id="toggleLab">Show state-model lab</button></div>
+    <nav class="tabs" id="tabs" aria-label="Prototype modes"></nav><section class="walkthrough" id="walkthrough"></section>
+    <section class="prototype-state"><div class="change" id="lastChange" aria-live="polite"></div>
+      <article class="panel">
+        <h3>Durable thread draft</h3>
+        <div class="rows" id="draftState"></div>
+      </article>
+      <article class="panel">
+        <h3>Local staged editor</h3>
+        <div class="rows" id="stageState"></div>
+      </article>
+      <article class="panel">
+        <h3>Persistence simulation</h3>
+        <div class="utility-actions">
+          <button class="secondary" id="saveSnapshot">Save durable snapshot</button>
+          <button class="secondary" id="reloadSnapshot">Reload / simulate restart</button>
+        </div>
+        <div class="rows" id="snapshotState"></div>
+      </article>
+      <article class="panel wide">
+        <h3>Immutable attempts and current root / children</h3>
+        <div id="attemptState"></div>
+      </article>
+      <article class="panel">
+        <h3>Restored editable copy</h3>
+        <div id="restoredState"></div>
+      </article>
+      <article class="panel wide">
+        <h3>Read-only successful history</h3>
+        <div id="historyState"></div>
+      </article>
+      <article class="panel">
+        <h3>Canonical order check</h3>
+        <div id="comparisonState"></div>
+      </article>
+    <section class="panel verdict">
+      <h2>Human verdict to record on #219</h2>
+      <ul>
+        <li>Is Node Details → Commit / Undo → composer detach understandable without graph badges?</li>
+        <li>Do two same-node actions and one reused action remain visibly distinct?</li>
+        <li>Is staged versus committed state clear enough?</li>
+        <li>Do unordered children and empty-root Send feel natural?</li>
+        <li>Are restored failure input and successful read-only history distinguishable and trustworthy?</li>
+        <li>What contract change, if any, is needed before production work?</li>
+      </ul>
+    </section>
+    </section>
+  </section>
+
+  <script>
+    // Pure state-model module. It intentionally has no DOM access.
+    const InputStateModel = (() => {
+      const fixtures = Object.freeze({
+        occurrences: Object.freeze([
+          {
+            key: "101/201/301", presentingInteractionNodeId: 101, presentingLayerId: 201,
+            actionId: 301, sourceNodeId: 501, nodeTitle: "Launch recommendation",
+            label: "Add launch constraint", control: "text",
+            prompt: "What constraint must the launch plan respect?"
+          },
+          {
+            key: "101/201/302", presentingInteractionNodeId: 101, presentingLayerId: 201,
+            actionId: 302, sourceNodeId: 501, nodeTitle: "Launch recommendation",
+            label: "Choose risk posture", control: "single_select",
+            prompt: "Which risk posture should shape the plan?",
+            options: [
+              { key: "cautious", label: "Cautious" },
+              { key: "balanced", label: "Balanced" },
+              { key: "aggressive", label: "Aggressive" }
+            ]
+          },
+          {
+            key: "101/201/401", presentingInteractionNodeId: 101, presentingLayerId: 201,
+            actionId: 401, sourceNodeId: 502, nodeTitle: "Rollout channels",
+            label: "Select launch channels", control: "multi_select", minimumSelections: 2,
+            prompt: "Which channels should be included?",
+            options: [
+              { key: "email", label: "Lifecycle email" },
+              { key: "in_app", label: "In-app education" },
+              { key: "sales", label: "Sales enablement" }
+            ]
+          },
+          {
+            key: "101/201/501", presentingInteractionNodeId: 101, presentingLayerId: 201,
+            actionId: 501, sourceNodeId: 503, nodeTitle: "Visual direction",
+            label: "Choose a campaign direction", control: "single_select", presentation: "image_banner",
+            prompt: "Which visual direction should anchor the launch?",
+            optionArt: { editorial: "editorial", product: "product", people: "people" },
+            options: [
+              { key: "editorial", label: "Editorial confidence" },
+              { key: "product", label: "Product clarity" },
+              { key: "people", label: "Human momentum" }
+            ]
+          },
+          {
+            key: "101/201/601", presentingInteractionNodeId: 101, presentingLayerId: 201,
+            actionId: 601, sourceNodeId: 504, nodeTitle: "Campaign calibration", inputLayout: "horizontal_scroll",
+            inputRow: "Message",
+            label: "Set the proof point", control: "text",
+            prompt: "What single proof point must the campaign establish?"
+          },
+          {
+            key: "101/201/602", presentingInteractionNodeId: 101, presentingLayerId: 201,
+            actionId: 602, sourceNodeId: 504, nodeTitle: "Campaign calibration", inputLayout: "horizontal_scroll",
+            inputRow: "Message",
+            label: "Choose the audience", control: "single_select",
+            prompt: "Who should the first wave persuade?",
+            options: [
+              { key: "operators", label: "Operators" },
+              { key: "leaders", label: "Team leaders" },
+              { key: "buyers", label: "Economic buyers" }
+            ]
+          },
+          {
+            key: "101/201/603", presentingInteractionNodeId: 101, presentingLayerId: 201,
+            actionId: 603, sourceNodeId: 504, nodeTitle: "Campaign calibration", inputLayout: "horizontal_scroll",
+            inputRow: "Evidence",
+            label: "Select evidence", control: "multi_select", minimumSelections: 2,
+            prompt: "Which evidence types should support the claim?",
+            options: [
+              { key: "metrics", label: "Usage metrics" },
+              { key: "quotes", label: "Customer quotes" },
+              { key: "demo", label: "Product demonstration" }
+            ]
+          },
+          {
+            key: "101/201/604", presentingInteractionNodeId: 101, presentingLayerId: 201,
+            actionId: 604, sourceNodeId: 504, nodeTitle: "Campaign calibration", inputLayout: "horizontal_scroll",
+            inputRow: "Evidence",
+            label: "Choose the evidence lead", control: "single_select",
+            prompt: "Which evidence type should lead the narrative?",
+            options: [
+              { key: "metric_lead", label: "Lead with metrics" },
+              { key: "story_lead", label: "Lead with a customer story" },
+              { key: "demo_lead", label: "Lead with the demonstration" }
+            ]
+          },
+          {
+            key: "101/202/301", presentingInteractionNodeId: 101, presentingLayerId: 202,
+            actionId: 301, sourceNodeId: 501, nodeTitle: "Launch recommendation (reused)",
+            label: "Add launch constraint", control: "text",
+            prompt: "What constraint must the launch plan respect?"
+          }
+        ])
+      });
+
+      const clone = value => structuredClone(value);
+      const occurrence = key => fixtures.occurrences.find(item => item.key === key);
+      const emptyValue = item => item.control === "text" ? "" : [];
+      const displayValue = (item, value) => {
+        if (item.control === "text") return value || "(blank)";
+        const selected = new Set(value || []);
+        return item.options.filter(option => selected.has(option.key)).map(option => option.label).join(", ") || "(none)";
+      };
+      const submittedValue = child => child.modelVisible.control === "text"
+        ? child.modelVisible.value.text
+        : child.modelVisible.value.selected.map(option => option.label).join(", ");
+      const canonicalChildren = slots => Object.values(slots)
+        .sort((a, b) => a.occurrenceKey.localeCompare(b.occurrenceKey))
+        .map(slot => {
+          const selected = new Set(Array.isArray(slot.value) ? slot.value : []);
+          return {
+            privateAuthority: {
+              occurrenceKey: slot.occurrenceKey,
+              presentingInteractionNodeId: slot.presentingInteractionNodeId,
+              presentingLayerId: slot.presentingLayerId,
+              actionId: slot.actionId,
+              derivedSourceNodeId: slot.sourceNodeId
+            },
+            modelVisible: {
+              prompt: slot.prompt,
+              control: slot.control,
+              ...(slot.control === "text" ? {} : { options: clone(slot.options) }),
+              ...(slot.minimumSelections ? { minimumSelections: slot.minimumSelections } : {}),
+              value: slot.control === "text"
+                ? { text: slot.value }
+                : { selected: slot.options.filter(option => selected.has(option.key)).map(option => clone(option)) }
+            }
+          };
+        });
+      const normalizedModelInput = children => children
+        .map(child => clone(child.modelVisible))
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+      const canonicalText = children => JSON.stringify(children);
+      const makeThread = (id, label) => ({
+        id, label, rootText: "", slots: {}, displayOrder: [], locked: false,
+        currentAttemptId: null, attempts: [], history: [], restoredFrom: null, nextAttempt: 1,
+        error: ""
+      });
+      const initialState = () => ({
+        activeThreadId: "thread-a",
+        threads: {
+          "thread-a": makeThread("thread-a", "Launch planning"),
+          "thread-b": makeThread("thread-b", "Follow-up research")
+        },
+        selectedOccurrenceKey: null,
+        stage: null,
+        savedSnapshot: null,
+        comparison: null,
+        lastChange: "Prototype ready. Open an input action or start a guided walkthrough.",
+        activeMode: "free",
+        walkthroughStep: 0
+      });
+      const thread = state => state.threads[state.activeThreadId];
+      const validate = (item, value) => {
+        if (item.control === "text") return value.trim() ? "" : "Enter non-whitespace text before Commit.";
+        if (item.control === "single_select") return value.length === 1 ? "" : "Choose exactly one option before Commit.";
+        const minimum = item.minimumSelections || 0;
+        return value.length >= minimum ? "" : `Choose at least ${minimum} options before Commit.`;
+      };
+      const slotFrom = (item, value) => ({
+        occurrenceKey: item.key,
+        presentingInteractionNodeId: item.presentingInteractionNodeId,
+        presentingLayerId: item.presentingLayerId,
+        actionId: item.actionId,
+        sourceNodeId: item.sourceNodeId,
+        nodeTitle: item.nodeTitle,
+        label: item.label,
+        prompt: item.prompt,
+        control: item.control,
+        options: clone(item.options || []),
+        ...(item.minimumSelections ? { minimumSelections: item.minimumSelections } : {}),
+        value: clone(value)
+      });
+      const withChange = (state, message) => ({ ...state, lastChange: message });
+
+      function reduce(previous, action) {
+        if (action.type === "RESET") {
+          const fresh = initialState();
+          fresh.activeMode = action.mode || previous.activeMode;
+          return withChange(fresh, action.message || "Scenario reset to a known starting state.");
+        }
+        const state = clone(previous);
+        const current = thread(state);
+        switch (action.type) {
+          case "SET_MODE":
+            state.activeMode = action.mode;
+            state.walkthroughStep = 0;
+            return withChange(state, action.mode === "free" ? "Free play selected." : "Walkthrough selected. Press Start to reset its state.");
+          case "ADVANCE_WALKTHROUGH":
+            state.walkthroughStep += 1;
+            return state;
+          case "SELECT_THREAD":
+            state.activeThreadId = action.threadId;
+            state.selectedOccurrenceKey = null;
+            state.stage = null;
+            return withChange(state, `Switched to ${state.threads[action.threadId].label}. Its committed draft is independent.`);
+          case "SELECT_OCCURRENCE": {
+            const item = occurrence(action.key);
+            const committed = current.slots[action.key];
+            state.selectedOccurrenceKey = action.key;
+            state.stage = {
+              threadId: state.activeThreadId,
+              occurrenceKey: action.key,
+              value: committed ? clone(committed.value) : emptyValue(item),
+              dirty: false,
+              error: ""
+            };
+            return withChange(state, `Opened “${item.label}” from exact occurrence ${item.key}.`);
+          }
+          case "STAGE":
+            if (!state.stage || current.locked) return withChange(state, "Staging is unavailable while this submitted snapshot is locked.");
+            state.stage.value = clone(action.value);
+            state.stage.dirty = true;
+            state.stage.error = "";
+            return withChange(state, "Changed only the local staged value. The durable attachment is unchanged.");
+          case "TOGGLE_OPTION": {
+            if (!state.stage || current.locked) return withChange(state, "Selection is unavailable while this submitted snapshot is locked.");
+            const selected = new Set(state.stage.value);
+            selected.has(action.key) ? selected.delete(action.key) : selected.add(action.key);
+            state.stage.value = [...selected];
+            state.stage.dirty = true;
+            state.stage.error = "";
+            return withChange(state, "Changed only the local staged selection.");
+          }
+          case "COMMIT": {
+            if (!state.stage || current.locked) return withChange(state, "Nothing can be committed while the submitted snapshot is locked.");
+            const item = occurrence(state.stage.occurrenceKey);
+            const error = validate(item, state.stage.value);
+            if (error) {
+              state.stage.error = error;
+              return withChange(state, "Commit was blocked by this action's own validation.");
+            }
+            current.slots[item.key] = slotFrom(item, state.stage.value);
+            if (!current.displayOrder.includes(item.key)) current.displayOrder.push(item.key);
+            state.stage.dirty = false;
+            state.stage.error = "";
+            current.error = "";
+            return withChange(state, `Committed one durable slot for ${item.key}. Any earlier value in that exact slot was replaced.`);
+          }
+          case "UNDO": {
+            if (!state.stage) return withChange(state, "Open an action before using Undo.");
+            const committed = current.slots[state.stage.occurrenceKey];
+            const item = occurrence(state.stage.occurrenceKey);
+            state.stage.value = committed ? clone(committed.value) : emptyValue(item);
+            state.stage.dirty = false;
+            state.stage.error = "";
+            return withChange(state, committed ? "Undo restored the last committed value." : "Undo restored the empty value because this occurrence is detached.");
+          }
+          case "DETACH":
+            if (current.locked) return withChange(state, "Detach is unavailable while the submitted snapshot is locked.");
+            delete current.slots[action.key];
+            current.displayOrder = current.displayOrder.filter(key => key !== action.key);
+            if (state.stage?.occurrenceKey === action.key) {
+              state.stage.value = emptyValue(occurrence(action.key));
+              state.stage.dirty = false;
+            }
+            return withChange(state, `Detached occurrence ${action.key}. Reopening it now starts empty.`);
+          case "SET_ROOT_TEXT":
+            if (current.locked) return withChange(state, "The submitted root is locked while running.");
+            current.rootText = action.value;
+            current.error = "";
+            return withChange(state, "Updated the thread's unsent root text.");
+          case "REVERSE_DISPLAY":
+            current.displayOrder.reverse();
+            return withChange(state, "Reversed composer display order only. Canonical child order did not change.");
+          case "COMPARE_ORDERS": {
+            const first = current.displayOrder.map(key => current.slots[key]).filter(Boolean);
+            const second = [...first].reverse();
+            const a = canonicalChildren(Object.fromEntries(first.map(slot => [slot.occurrenceKey, slot])));
+            const b = canonicalChildren(Object.fromEntries(second.map(slot => [slot.occurrenceKey, slot])));
+            const modelA = normalizedModelInput(a);
+            const modelB = normalizedModelInput(b);
+            state.comparison = {
+              displayA: first.map(slot => slot.occurrenceKey),
+              displayB: second.map(slot => slot.occurrenceKey),
+              authorityCanonicalA: canonicalText(a),
+              authorityCanonicalB: canonicalText(b),
+              modelCanonicalA: canonicalText(modelA),
+              modelCanonicalB: canonicalText(modelB),
+              equal: canonicalText(a) === canonicalText(b) && canonicalText(modelA) === canonicalText(modelB)
+            };
+            return withChange(state, state.comparison.equal ? "Different attachment orders produced equivalent canonical input." : "Canonical input differed — this would contradict the contract.");
+          }
+          case "SEND": {
+            if (current.locked) return withChange(state, "This attempt is already running; duplicate Send did not create another root.");
+            const slots = current.slots;
+            if (!current.rootText.trim() && Object.keys(slots).length === 0) {
+              current.error = "Enter root text or commit at least one input attachment.";
+              return withChange(state, "Send was blocked because both root text and committed input were empty.");
+            }
+            const sequence = current.nextAttempt++;
+            const attempt = {
+              id: `${current.id}-attempt-${sequence}`,
+              rootId: `${current.id}-root-${sequence}`,
+              rootText: current.rootText,
+              submittedInputs: canonicalChildren(slots),
+              status: "running",
+              restored: false
+            };
+            current.attempts.push(attempt);
+            current.currentAttemptId = attempt.id;
+            current.locked = true;
+            current.error = "";
+            current.restoredFrom = null;
+            return withChange(state, `Created new immutable ${attempt.rootId} and ${attempt.submittedInputs.length} direct input child record(s), then locked the snapshot.`);
+          }
+          case "FINISH_ATTEMPT": {
+            const attempt = current.attempts.find(item => item.id === current.currentAttemptId);
+            if (!attempt) return withChange(state, "There is no running attempt to finish.");
+            attempt.status = action.status;
+            current.locked = false;
+            current.currentAttemptId = null;
+            if (action.status === "accepted") {
+              current.history.push(clone(attempt));
+              current.slots = {};
+              current.displayOrder = [];
+              current.rootText = "";
+              current.restoredFrom = null;
+              state.stage = null;
+              state.selectedOccurrenceKey = null;
+              return withChange(state, `Accepted ${attempt.rootId}. Submitted values are now read-only only under this consuming interaction.`);
+            }
+            attempt.restored = true;
+            current.slots = Object.fromEntries(attempt.submittedInputs.map(child => {
+              const key = child.privateAuthority.occurrenceKey;
+              const item = occurrence(key);
+              const value = child.modelVisible.control === "text"
+                ? child.modelVisible.value.text
+                : child.modelVisible.value.selected.map(option => option.key);
+              return [key, slotFrom(item, value)];
+            }));
+            current.displayOrder = attempt.submittedInputs.map(child => child.privateAuthority.occurrenceKey);
+            current.rootText = attempt.rootText;
+            current.restoredFrom = attempt.id;
+            state.stage = null;
+            state.selectedOccurrenceKey = null;
+            return withChange(state, `${action.status === "failed" ? "Terminal failure" : "Pre-acceptance cancellation"} kept ${attempt.rootId} immutable and restored a copied editable draft.`);
+          }
+          case "SAVE_SNAPSHOT":
+            state.savedSnapshot = { activeThreadId: state.activeThreadId, threads: clone(state.threads), savedAt: action.savedAt || "guided walkthrough" };
+            return withChange(state, "Saved only durable thread state. The local staged editor was intentionally excluded.");
+          case "RELOAD_SNAPSHOT":
+            if (!state.savedSnapshot) return withChange(state, "Save a durable snapshot before simulating restart.");
+            state.threads = clone(state.savedSnapshot.threads);
+            state.activeThreadId = state.savedSnapshot.activeThreadId;
+            state.selectedOccurrenceKey = null;
+            state.stage = null;
+            state.comparison = null;
+            return withChange(state, "Simulated restart restored committed thread drafts and discarded uncommitted staged edits.");
+          default:
+            return withChange(state, `Unknown prototype action: ${action.type}`);
+        }
+      }
+
+      return { fixtures, initialState, reduce, occurrence, displayValue, submittedValue, canonicalChildren, normalizedModelInput };
+    })();
+
+    const walkthroughs = {
+      free: { title: "Free play", description: "Drive any action in any order. The full relevant state below updates after every click.", steps: [] },
+      compose: {
+        title: "1. Compose across nodes",
+        description: "Commit across nodes, revisit, stage an edit, Undo it, replace a value, then detach another attachment.",
+        steps: [
+          ["Open constraint", { type: "SELECT_OCCURRENCE", key: "101/201/301" }],
+          ["Stage deadline", { type: "STAGE", value: "Ship before the conference" }],
+          ["✓ Commit constraint", { type: "COMMIT" }],
+          ["Open channels", { type: "SELECT_OCCURRENCE", key: "101/201/401" }],
+          ["Select email", { type: "TOGGLE_OPTION", key: "email" }],
+          ["Select in-app", { type: "TOGGLE_OPTION", key: "in_app" }],
+          ["✓ Commit channels", { type: "COMMIT" }],
+          ["Reopen constraint", { type: "SELECT_OCCURRENCE", key: "101/201/301" }],
+          ["Stage a replacement", { type: "STAGE", value: "Do not move the billing date" }],
+          ["Undo staged edit", { type: "UNDO" }],
+          ["Stage final replacement", { type: "STAGE", value: "Preserve the migration window" }],
+          ["✓ Replace committed slot", { type: "COMMIT" }],
+          ["Detach channels", { type: "DETACH", key: "101/201/401" }]
+        ]
+      },
+      sameNode: {
+        title: "2. Same-node identity",
+        description: "Commit two actions owned by one node. Their exact action IDs keep the slots independent.",
+        steps: [
+          ["Open constraint (action 301)", { type: "SELECT_OCCURRENCE", key: "101/201/301" }],
+          ["Stage constraint", { type: "STAGE", value: "Keep support load flat" }],
+          ["✓ Commit action 301", { type: "COMMIT" }],
+          ["Open risk posture (action 302)", { type: "SELECT_OCCURRENCE", key: "101/201/302" }],
+          ["Choose balanced", { type: "STAGE", value: ["balanced"] }],
+          ["✓ Commit action 302", { type: "COMMIT" }]
+        ]
+      },
+      restart: {
+        title: "3. Thread and restart",
+        description: "Committed values survive thread switching and snapshot reload. An uncommitted staged edit does not.",
+        steps: [
+          ["Open constraint in Launch planning", { type: "SELECT_OCCURRENCE", key: "101/201/301" }],
+          ["Stage durable value", { type: "STAGE", value: "Launch in September" }],
+          ["✓ Commit", { type: "COMMIT" }],
+          ["Save durable snapshot", { type: "SAVE_SNAPSHOT" }],
+          ["Stage but do not commit", { type: "STAGE", value: "THIS SHOULD DISAPPEAR" }],
+          ["Switch to Follow-up research", { type: "SELECT_THREAD", threadId: "thread-b" }],
+          ["Switch back", { type: "SELECT_THREAD", threadId: "thread-a" }],
+          ["Reload / simulate restart", { type: "RELOAD_SNAPSHOT" }],
+          ["Reopen committed action", { type: "SELECT_OCCURRENCE", key: "101/201/301" }]
+        ]
+      },
+      unordered: {
+        title: "4. Unordered Send",
+        description: "Reverse composer order and compare both materializations. Canonical submitted input must remain equal.",
+        steps: [
+          ["Open constraint", { type: "SELECT_OCCURRENCE", key: "101/201/301" }],
+          ["Stage constraint", { type: "STAGE", value: "No weekend launch" }],
+          ["✓ Commit constraint", { type: "COMMIT" }],
+          ["Open risk", { type: "SELECT_OCCURRENCE", key: "101/201/302" }],
+          ["Choose cautious", { type: "STAGE", value: ["cautious"] }],
+          ["✓ Commit risk", { type: "COMMIT" }],
+          ["Reverse display order", { type: "REVERSE_DISPLAY" }],
+          ["Compare both orders", { type: "COMPARE_ORDERS" }]
+        ]
+      },
+      emptyRoot: {
+        title: "5. Empty root",
+        description: "Commit child input and Send with no root message. The child makes the interaction valid.",
+        steps: [
+          ["Open risk", { type: "SELECT_OCCURRENCE", key: "101/201/302" }],
+          ["Choose aggressive", { type: "STAGE", value: ["aggressive"] }],
+          ["✓ Commit", { type: "COMMIT" }],
+          ["Send empty root", { type: "SEND" }]
+        ]
+      },
+      recovery: {
+        title: "6. Failure and cancellation",
+        description: "Each pre-acceptance terminal outcome preserves its immutable root, restores a copied draft, and resend creates another root.",
+        steps: [
+          ["Open constraint", { type: "SELECT_OCCURRENCE", key: "101/201/301" }],
+          ["Stage value", { type: "STAGE", value: "Keep the launch reversible" }],
+          ["✓ Commit", { type: "COMMIT" }],
+          ["Send attempt 1", { type: "SEND" }],
+          ["Simulate terminal failure", { type: "FINISH_ATTEMPT", status: "failed" }],
+          ["Resend as attempt 2", { type: "SEND" }],
+          ["Cancel before acceptance", { type: "FINISH_ATTEMPT", status: "cancelled" }],
+          ["Resend as attempt 3", { type: "SEND" }]
+        ]
+      },
+      success: {
+        title: "7. Success",
+        description: "Acceptance clears the editable draft and freezes input under the consuming interaction. A reused presentation starts as a separate empty slot.",
+        steps: [
+          ["Open original occurrence", { type: "SELECT_OCCURRENCE", key: "101/201/301" }],
+          ["Stage value", { type: "STAGE", value: "Coordinate with customer success" }],
+          ["✓ Commit", { type: "COMMIT" }],
+          ["Send", { type: "SEND" }],
+          ["Accept graph result", { type: "FINISH_ATTEMPT", status: "accepted" }],
+          ["Open reused occurrence", { type: "SELECT_OCCURRENCE", key: "101/202/301" }]
+        ]
+      },
+      imageOptions: {
+        title: "8. Image options",
+        description: "Choose one visual direction from a horizontal rail of image-banner options embedded in the node detail.",
+        steps: [
+          ["Open visual direction", { type: "SELECT_OCCURRENCE", key: "101/201/501" }],
+          ["Choose product clarity", { type: "STAGE", value: ["product"] }],
+          ["✓ Commit visual direction", { type: "COMMIT" }]
+        ]
+      },
+      actionRail: {
+        title: "9. Input rail",
+        description: "One node contains three independent input fields in a horizontal scrollable rail; each field keeps its own occurrence and commit state.",
+        steps: [
+          ["Open campaign calibration", { type: "SELECT_OCCURRENCE", key: "101/201/601" }],
+          ["Stage proof point", { type: "STAGE", value: "Teams ship launch plans in half the time" }],
+          ["✓ Commit proof point", { type: "COMMIT" }],
+          ["Open audience field", { type: "SELECT_OCCURRENCE", key: "101/201/602" }],
+          ["Choose team leaders", { type: "STAGE", value: ["leaders"] }],
+          ["✓ Commit audience", { type: "COMMIT" }]
+        ]
+      }
+    };
+
+    let state = InputStateModel.initialState();
+    const $ = selector => document.querySelector(selector);
+    const escapeHtml = value => String(value).replace(/[&<>"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char]));
+    const activeThread = () => state.threads[state.activeThreadId];
+
+    function dispatch(action, walkthrough = false) {
+      state = InputStateModel.reduce(state, action);
+      if (walkthrough) state = InputStateModel.reduce(state, { type: "ADVANCE_WALKTHROUGH" });
+      render();
+    }
+
+    function setMode(mode) {
+      state = InputStateModel.reduce(state, { type: "SET_MODE", mode });
+      render();
+    }
+
+    function startWalkthrough() {
+      const mode = state.activeMode;
+      state = InputStateModel.reduce(state, { type: "RESET", mode, message: `${walkthroughs[mode].title} reset. Press the highlighted first step.` });
+      render();
+    }
+
+    function renderTabs() {
+      $("#tabs").innerHTML = Object.entries(walkthroughs).map(([key, item]) =>
+        `<button class="tab" aria-selected="${state.activeMode === key}" data-mode="${key}">${escapeHtml(item.title)}</button>`
+      ).join("");
+      document.querySelectorAll("[data-mode]").forEach(button => button.onclick = () => setMode(button.dataset.mode));
+    }
+
+    function renderWalkthrough() {
+      const item = walkthroughs[state.activeMode];
+      const steps = item.steps.map(([label, action], index) => {
+        const status = index < state.walkthroughStep ? "done" : index === state.walkthroughStep ? "next" : "";
+        return `<button class="secondary step ${status}" data-step="${index}" ${index !== state.walkthroughStep ? "disabled" : ""}>${index + 1}. ${escapeHtml(label)}</button>`;
+      }).join("");
+      $("#walkthrough").innerHTML = `<div class="panel-head"><div><h2>${escapeHtml(item.title)}</h2><div class="subtle">${escapeHtml(item.description)}</div></div>${state.activeMode === "free" ? "" : '<button class="primary" id="startWalkthrough">Start / reset</button>'}</div><div class="step-list">${steps || '<span class="empty">Use the controls below in any order.</span>'}</div>`;
+      if (state.activeMode !== "free") {
+        $("#startWalkthrough").onclick = startWalkthrough;
+        document.querySelectorAll("[data-step]").forEach(button => {
+          button.onclick = () => dispatch(item.steps[Number(button.dataset.step)][1], true);
+        });
+      }
+    }
+
+    function renderNodes() {
+      const groups = new Map();
+      for (const item of InputStateModel.fixtures.occurrences) {
+        const group = groups.get(item.nodeTitle) || [];
+        group.push(item);
+        groups.set(item.nodeTitle, group);
+      }
+      $("#nodes").innerHTML = [...groups.entries()].map(([title, items]) => `
+        <button class="graph-node prototype-node ${items.some(item => state.selectedOccurrenceKey === item.key) ? "selected" : ""} ${items.some(item => activeThread().slots[item.key]) ? "committed" : ""}" data-node-occurrence="${items[0].key}">
+          <span class="glyph">${items[0].sourceNodeId === 502 ? "⌘" : "✦"}</span>
+          <span class="copy"><b>${escapeHtml(title.replace(" (reused)", ""))}</b><small>${items.length} input action${items.length === 1 ? "" : "s"}</small></span>
+        </button>`).join("");
+      document.querySelectorAll("[data-node-occurrence]").forEach(button => button.onclick = () => dispatch({ type: "SELECT_OCCURRENCE", key: button.dataset.nodeOccurrence }));
+    }
+
+    function horizontalScrollState() {
+      return new Map([...document.querySelectorAll("[data-scroll-key]")].map(element => [element.dataset.scrollKey, element.scrollLeft]));
+    }
+
+    function restoreHorizontalScrollState(scrollState) {
+      for (const element of document.querySelectorAll("[data-scroll-key]")) {
+        element.scrollLeft = scrollState.get(element.dataset.scrollKey) || 0;
+      }
+    }
+
+    function dispatchForOccurrence(key, action) {
+      const scrollState = horizontalScrollState();
+      if (!state.stage || state.stage.occurrenceKey !== key) {
+        state = InputStateModel.reduce(state, { type: "SELECT_OCCURRENCE", key });
+      }
+      state = InputStateModel.reduce(state, action);
+      render();
+      restoreHorizontalScrollState(scrollState);
+    }
+
+    function renderEditor() {
+      const current = activeThread();
+      if (!state.stage || !state.selectedOccurrenceKey) {
+        $("#selectedNodeTitle").textContent = "Select a node";
+        $("#editorOccurrence").textContent = "Choose a graph node to inspect its content and inputs.";
+        $("#editor").innerHTML = '<p class="empty">Input controls are part of the node detail grammar. Draft state stays out of the graph.</p>';
+        return;
+      }
+      const selectedItem = InputStateModel.occurrence(state.selectedOccurrenceKey);
+      const nodeItems = InputStateModel.fixtures.occurrences.filter(candidate => candidate.nodeTitle === selectedItem.nodeTitle);
+      $("#selectedNodeTitle").textContent = selectedItem.nodeTitle.replace(" (reused)", "");
+      $("#editorOccurrence").textContent = `Accepted node ${selectedItem.sourceNodeId} · presented in layer ${selectedItem.presentingLayerId}`;
+
+      const fieldsForNode = nodeItems.map((item, index) => {
+        const committed = current.slots[item.key];
+        const active = state.stage?.occurrenceKey === item.key;
+        const value = active ? state.stage.value : committed?.value ?? (item.control === "text" ? "" : []);
+        const selected = new Set(Array.isArray(value) ? value : []);
+        let control;
+        if (item.control === "text") {
+          control = `<textarea data-input-text="${item.key}" aria-label="${escapeHtml(item.prompt)}" placeholder="Add a constraint…" ${current.locked ? "disabled" : ""}>${escapeHtml(value)}</textarea>`;
+        } else if (item.presentation === "image_banner") {
+          control = `<div class="image-option-list" data-scroll-key="options:${item.key}">${item.options.map(option => `<label class="choice choice-banner"><input data-input-choice="${item.key}" type="radio" name="inlineChoice${index}" value="${option.key}" ${selected.has(option.key) ? "checked" : ""} ${current.locked ? "disabled" : ""}><span class="option-image ${item.optionArt[option.key]}" aria-hidden="true"></span><span class="option-label">${escapeHtml(option.label)}</span></label>`).join("")}</div>`;
+        } else {
+          control = item.options.map(option => `<label class="choice"><input data-input-choice="${item.key}" type="${item.control === "single_select" ? "radio" : "checkbox"}" name="inlineChoice${index}" value="${option.key}" ${selected.has(option.key) ? "checked" : ""} ${current.locked ? "disabled" : ""}><span>${escapeHtml(option.label)}</span></label>`).join("");
+        }
+        const stateLabel = active && state.stage.dirty ? "Staged" : committed ? "Committed" : "Input";
+        return `<section class="node-input-field ${active ? "active" : ""} ${committed ? "committed" : ""}">
+          <div class="node-input-heading"><strong>${escapeHtml(item.label)}</strong><span class="node-input-state">${stateLabel}</span></div>
+          <p>${escapeHtml(item.prompt)}</p><div class="control">${control}</div>
+          <div class="editor-actions"><button class="primary icon-action" data-inline-commit="${item.key}" title="Commit" aria-label="Commit" ${current.locked ? "disabled" : ""}><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"></path></svg></button><button class="secondary icon-action" data-inline-undo="${item.key}" title="Undo" aria-label="Undo" ${current.locked ? "disabled" : ""}><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5 3 9l4 4"></path><path d="M3 9h8.5a5 5 0 0 1 5 5"></path></svg></button></div>
+          <div class="error" role="alert">${active ? escapeHtml(state.stage.error) : ""}</div>
+          ${committed ? `<div class="subtle">Saved: ${escapeHtml(InputStateModel.displayValue(item, committed.value))}</div>` : ""}
+        </section>`;
+      });
+      const fields = fieldsForNode.join("");
+      if (selectedItem.inputLayout === "horizontal_scroll") {
+        const rowNames = [...new Set(nodeItems.map(item => item.inputRow || "Inputs"))];
+        const rows = rowNames.map(rowName => {
+          const rowFields = nodeItems.map((item, index) => ({ item, field: fieldsForNode[index] })).filter(entry => (entry.item.inputRow || "Inputs") === rowName).map(entry => entry.field).join("");
+          return `<section class="node-input-rail-group"><h3 class="node-input-rail-title">${escapeHtml(rowName)}</h3><div class="node-input-rail" data-scroll-key="inputs:${selectedItem.nodeTitle}:${rowName}" aria-label="${escapeHtml(rowName)} input fields">${rowFields}</div></section>`;
+        }).join("");
+        $("#editor").innerHTML = `<p>This recommendation can be refined before the next interaction. Complete any relevant fields below.</p>${rows}`;
+      } else {
+        $("#editor").innerHTML = `<p>This recommendation can be refined before the next interaction. Complete any relevant fields below.</p>${fields}`;
+      }
+
+      document.querySelectorAll("[data-input-text]").forEach(input => input.oninput = event => {
+        const key = event.target.dataset.inputText;
+        const selectionStart = event.target.selectionStart;
+        const selectionEnd = event.target.selectionEnd;
+        dispatchForOccurrence(key, { type: "STAGE", value: event.target.value });
+        const restored = document.querySelector(`[data-input-text="${key}"]`);
+        restored.focus();
+        restored.setSelectionRange(selectionStart, selectionEnd);
+      });
+      document.querySelectorAll("[data-input-choice]").forEach(input => input.onchange = event => {
+        const key = event.target.dataset.inputChoice;
+        const item = InputStateModel.occurrence(key);
+        dispatchForOccurrence(key, item.control === "single_select"
+          ? { type: "STAGE", value: [event.target.value] }
+          : { type: "TOGGLE_OPTION", key: event.target.value });
+      });
+      document.querySelectorAll("[data-inline-commit]").forEach(button => button.onclick = () => dispatchForOccurrence(button.dataset.inlineCommit, { type: "COMMIT" }));
+      document.querySelectorAll("[data-inline-undo]").forEach(button => button.onclick = () => dispatchForOccurrence(button.dataset.inlineUndo, { type: "UNDO" }));
+    }
+
+    function renderComposer() {
+      const current = activeThread();
+      $("#threadLabel").textContent = `${current.label} · ${current.id}`;
+      $("#lockStatus").textContent = current.locked ? "Locked snapshot" : "Editable draft";
+      $("#lockStatus").className = `status ${current.locked ? "running" : ""}`;
+      $("#rootText").value = current.rootText;
+      $("#rootText").disabled = current.locked;
+      $("#attachments").innerHTML = current.displayOrder.length ? current.displayOrder.map(key => {
+        const slot = current.slots[key];
+        const item = InputStateModel.occurrence(key);
+        return `<div class="attachment"><div class="attachment-top"><strong>${escapeHtml(slot.label)}</strong><button data-detach="${key}" ${current.locked ? "disabled" : ""}>Detach</button></div><div>${escapeHtml(InputStateModel.displayValue(item, slot.value))}</div><code>${key}</code></div>`;
+      }).join("") : '<div class="empty">No committed input attached.</div>';
+      $("#send").disabled = current.locked;
+      $("#reverse").disabled = current.displayOrder.length < 2;
+      $("#compare").disabled = current.displayOrder.length < 2;
+      $("#composerError").textContent = current.error;
+      $("#composerError").classList.toggle("hidden", !current.error);
+      document.querySelectorAll("[data-detach]").forEach(button => button.onclick = () => dispatch({ type: "DETACH", key: button.dataset.detach }));
+      const attempt = current.attempts.find(item => item.id === current.currentAttemptId);
+      $("#runningActions").innerHTML = attempt ? `<span class="status running">${attempt.rootId}</span><span class="composer-actions"><button class="danger" id="failAttempt">Fail</button><button class="danger" id="cancelAttempt">Cancel</button><button class="primary" id="acceptAttempt">Accept</button></span>` : "";
+      if (attempt) {
+        $("#failAttempt").onclick = () => dispatch({ type: "FINISH_ATTEMPT", status: "failed" });
+        $("#cancelAttempt").onclick = () => dispatch({ type: "FINISH_ATTEMPT", status: "cancelled" });
+        $("#acceptAttempt").onclick = () => dispatch({ type: "FINISH_ATTEMPT", status: "accepted" });
+      }
+    }
+
+    const row = (label, value) => `<div class="row"><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`;
+    function renderLedger() {
+      const current = activeThread();
+      $("#draftState").innerHTML = [
+        row("Thread", escapeHtml(`${current.label} (${current.id})`)),
+        row("Root text", current.rootText ? escapeHtml(current.rootText) : '<span class="empty">empty</span>'),
+        row("Committed slots", String(Object.keys(current.slots).length)),
+        row("Display order", current.displayOrder.length ? `<code>${escapeHtml(current.displayOrder.join(" → "))}</code>` : '<span class="empty">none</span>'),
+        row("Locked", String(current.locked))
+      ].join("") + Object.values(current.slots).map(slot => `<div class="slot"><strong>${escapeHtml(slot.label)}</strong><div>${escapeHtml(InputStateModel.displayValue(InputStateModel.occurrence(slot.occurrenceKey), slot.value))}</div><code>interaction ${slot.presentingInteractionNodeId} · layer ${slot.presentingLayerId} · action ${slot.actionId}</code></div>`).join("");
+      $("#stageState").innerHTML = state.stage ? [
+        row("Occurrence", `<code>${escapeHtml(state.stage.occurrenceKey)}</code>`),
+        row("Value", escapeHtml(InputStateModel.displayValue(InputStateModel.occurrence(state.stage.occurrenceKey), state.stage.value))),
+        row("Dirty", String(state.stage.dirty)),
+        row("Durable?", "No — until ✓ Commit")
+      ].join("") : '<p class="empty">No local editor is open.</p>';
+      $("#snapshotState").innerHTML = state.savedSnapshot ? [
+        row("Saved at", escapeHtml(state.savedSnapshot.savedAt)),
+        row("Saved threads", String(Object.keys(state.savedSnapshot.threads).length)),
+        row("Includes staged edit?", "No")
+      ].join("") : '<p class="empty">No durable snapshot saved yet.</p>';
+      $("#attemptState").innerHTML = current.attempts.length ? current.attempts.map(attempt => `<div class="attempt-card"><div class="panel-head"><strong>${escapeHtml(attempt.rootId)}</strong><span class="status ${attempt.status}">${attempt.status}</span></div><div>Root text: ${attempt.rootText ? escapeHtml(attempt.rootText) : '<span class="empty">empty</span>'}</div><div>Direct input children: ${attempt.submittedInputs.length}</div>${attempt.submittedInputs.map(child => `<div class="slot"><strong>Model-visible semantic snapshot</strong><div>${escapeHtml(child.modelVisible.prompt)}</div><div>${escapeHtml(child.modelVisible.control)} · ${escapeHtml(InputStateModel.submittedValue(child))}</div>${child.modelVisible.options ? `<div class="subtle">Frozen options: ${escapeHtml(child.modelVisible.options.map(option => `${option.key} = ${option.label}`).join(", "))}</div>` : ""}<strong>Private authority / provenance</strong><code>${escapeHtml(child.privateAuthority.occurrenceKey)} · source node ${child.privateAuthority.derivedSourceNodeId}</code></div>`).join("")}<div class="subtle">Immutable attempt · restored copy: ${attempt.restored}</div></div>`).join("") : '<p class="empty">No Send attempts yet.</p>';
+      $("#restoredState").innerHTML = current.restoredFrom ? `<p>Editable draft copied from <code>${escapeHtml(current.restoredFrom)}</code>.</p><p>The failed/cancelled root above stayed immutable. Resend will allocate <strong>${escapeHtml(current.id)}-root-${current.nextAttempt}</strong>.</p>` : '<p class="empty">No recovered draft. Failure or cancellation before acceptance will create one.</p>';
+      $("#historyState").innerHTML = current.history.length ? current.history.map(attempt => `<div class="history-card"><div class="panel-head"><strong>${escapeHtml(attempt.rootId)}</strong><span class="status accepted">read-only success</span></div><div>Consuming interaction only</div>${attempt.submittedInputs.map(child => `<div class="slot"><strong>${escapeHtml(child.modelVisible.prompt)}</strong><div>${escapeHtml(InputStateModel.submittedValue(child))}</div><code>${escapeHtml(child.privateAuthority.occurrenceKey)}</code></div>`).join("")}</div>`).join("") : '<p class="empty">No accepted history yet.</p>';
+      const comparison = state.comparison;
+      $("#comparisonState").innerHTML = comparison ? `<p><strong>${comparison.equal ? "Equivalent ✓" : "Different ✕"}</strong></p>${row("Display A", `<code>${escapeHtml(comparison.displayA.join(" → "))}</code>`)}${row("Display B", `<code>${escapeHtml(comparison.displayB.join(" → "))}</code>`)}${row("Authority A", `<code>${escapeHtml(comparison.authorityCanonicalA)}</code>`)}${row("Authority B", `<code>${escapeHtml(comparison.authorityCanonicalB)}</code>`)}${row("Model input A", `<code>${escapeHtml(comparison.modelCanonicalA)}</code>`)}${row("Model input B", `<code>${escapeHtml(comparison.modelCanonicalB)}</code>`)}` : '<p class="empty">Commit at least two inputs, then Compare both orders.</p>';
+    }
+
+    function render() {
+      renderTabs();
+      renderWalkthrough();
+      renderNodes();
+      renderEditor();
+      renderComposer();
+      renderLedger();
+      $("#lastChange").innerHTML = `<strong>What just changed:</strong> ${escapeHtml(state.lastChange)}`;
+    }
+
+    $("#rootText").oninput = event => dispatch({ type: "SET_ROOT_TEXT", value: event.target.value });
+    $("#send").onclick = () => dispatch({ type: "SEND" });
+    $("#reverse").onclick = () => dispatch({ type: "REVERSE_DISPLAY" });
+    $("#compare").onclick = () => dispatch({ type: "COMPARE_ORDERS" });
+    $("#saveSnapshot").onclick = () => dispatch({ type: "SAVE_SNAPSHOT", savedAt: new Date().toLocaleTimeString() });
+    $("#reloadSnapshot").onclick = () => dispatch({ type: "RELOAD_SNAPSHOT" });
+    $("#toggleLab").onclick = () => {
+      const collapsed = $("#prototypeLab").classList.toggle("collapsed");
+      $("#toggleLab").textContent = collapsed ? "Show state-model lab" : "Hide instrumentation";
+    };
+
+    const threadSwitcher = document.createElement("div");
+    threadSwitcher.className = "utility-actions lab-instrument";
+    threadSwitcher.innerHTML = '<button class="secondary" data-thread="thread-a">Launch planning</button><button class="secondary" data-thread="thread-b">Follow-up research</button>';
+    $("#threadLabel").parentElement.append(threadSwitcher);
+    threadSwitcher.querySelectorAll("[data-thread]").forEach(button => button.onclick = () => dispatch({ type: "SELECT_THREAD", threadId: button.dataset.thread }));
+
+    render();
+  </script>
+</body>
+</html>
