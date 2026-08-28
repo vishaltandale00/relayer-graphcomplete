@@ -233,6 +233,7 @@ describe("ClaudeBasicHarness", () => {
         [{ type: "result", subtype: "success", result: "first", session_id: "session-1" }],
         [{ type: "result", subtype: "success", result: "second", session_id: "session-1" }],
       ], (input) => calls.push(input)),
+      browserSdk: browserSdk(),
     });
     const access = managedAccess();
 
@@ -272,6 +273,7 @@ describe("ClaudeBasicHarness", () => {
         result: "Decision-useful center means Foreground the conclusion and material tradeoffs.",
         session_id: "session-1",
       }]),
+      browserSdk: browserSdk(),
     });
 
     await harness.complete({
@@ -293,6 +295,7 @@ describe("ClaudeBasicHarness", () => {
       query: sdkQuery([{
         type: "result", subtype: "success", result: text, session_id: "session-1",
       }]),
+      browserSdk: browserSdk(),
     });
 
     await harness.complete({
@@ -339,6 +342,7 @@ describe("ClaudeBasicHarness", () => {
       claudeSessionProviderDefinitionId: "claude-work",
     }), {
       query: sdkQuery([{ type: "result", subtype: "success", result: "done", session_id: "legacy-session" }], (input) => { call = input; }),
+      browserSdk: browserSdk(),
     });
 
     await harness.complete(runContext(managedAccess()));
