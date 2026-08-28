@@ -648,16 +648,23 @@ async fn canonical_context_occurrence(
     ))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CanonicalInputActionOccurrenceRequest {
+    destination_thread_id: ThreadId,
+    occurrence: relayer_graph_core::PresentingInputOccurrence,
+}
+
 async fn canonical_input_action_occurrence(
     State(state): State<ServerState>,
     headers: HeaderMap,
-    Json(occurrence): Json<relayer_graph_core::PresentingInputOccurrence>,
+    Json(input): Json<CanonicalInputActionOccurrenceRequest>,
 ) -> Result<Json<GraphAction>, ApiError> {
     require_bearer(&headers, &state.control_token)?;
     Ok(Json(
         state
             .graph
-            .canonical_input_action_occurrence(&occurrence)
+            .canonical_input_action_occurrence(input.destination_thread_id, &input.occurrence)
             .await?,
     ))
 }
@@ -3585,6 +3592,55 @@ mod tests {
         })
         .to_string();
         let app = router(ServerState::new(graph, "control"));
+        let canonical_body = |destination_thread_id| {
+            json!({
+                "destinationThreadId": destination_thread_id,
+                "occurrence": {
+                    "presentingInteractionNodeId": presenting.id,
+                    "presentingLayerId": layer.id,
+                    "actionId": action.id
+                }
+            })
+            .to_string()
+        };
+        let canonical = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/input-action-occurrences/canonical")
+                    .header("authorization", "Bearer control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(canonical_body(73)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(canonical.status(), StatusCode::OK);
+        let wrong_thread = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/input-action-occurrences/canonical")
+                    .header("authorization", "Bearer control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(canonical_body(74)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(wrong_thread.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let wrong_thread_body: Value = serde_json::from_slice(
+            &to_bytes(wrong_thread.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            wrong_thread_body["error"]["code"],
+            "input_occurrence_not_visible"
+        );
         let response = app
             .clone()
             .oneshot(

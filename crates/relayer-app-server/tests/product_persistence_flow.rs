@@ -736,6 +736,107 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
 }
 
 #[tokio::test]
+async fn input_draft_commit_binds_graph_visibility_to_the_destination_product_thread() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-input-draft-thread-scope-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let seed_app = open_app(&database, &root).await;
+    let thread = response_json(
+        seed_app
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({ "initialMessage": "Destination thread" })),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+
+    let observed = Arc::new(Mutex::new(None));
+    let observed_request = observed.clone();
+    let graph = Router::new().route(
+        "/api/control/input-action-occurrences/canonical",
+        axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+            let observed_request = observed_request.clone();
+            async move {
+                *observed_request.lock().unwrap() = Some(body);
+                axum::Json(json!({
+                    "id": 301,
+                    "sourceNodeId": 401,
+                    "sourceLayerId": 201,
+                    "kind": "input",
+                    "label": "Add constraint",
+                    "variant": "pill",
+                    "control": "text",
+                    "prompt": "What constraint applies?",
+                    "state": "accepted"
+                }))
+            }
+        }),
+    );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion": 1,
+            "configurations": [{
+                "configuration": {
+                    "schemaVersion": 1, "name": "codex-basic", "implementation": "test",
+                    "implementationVersion": 1, "permissionBindings": {"ask": {}},
+                    "settings": {}
+                },
+                "digest": "sha256:test"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let app = open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
+    let occurrence = json!({
+        "presentingInteractionNodeId": 101,
+        "presentingLayerId": 201,
+        "actionId": 301
+    });
+    let committed = app
+        .oneshot(api_request(
+            "PUT",
+            &format!("/api/threads/{thread_id}/input-draft/attachments"),
+            Some(json!({
+                "occurrence": occurrence,
+                "value": {"text": "Keep support load flat"},
+                "expectedRevision": 0
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(committed.status(), StatusCode::OK);
+    assert_eq!(
+        observed.lock().unwrap().clone().unwrap(),
+        json!({
+            "destinationThreadId": thread_id,
+            "occurrence": occurrence
+        })
+    );
+
+    graph_task.abort();
+    harness_task.abort();
+    let _ = fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn eval_annotations_are_scoped_append_only_and_durable() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -5820,6 +5921,212 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
             )
         );
     }
+    pool.close().await;
+
+    drop(resumed);
+    graph_task.abort();
+    harness_task.abort();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn interrupted_submitted_input_without_graph_acceptance_restores_without_provider_replay() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relayer-submitted-input-restart-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("product.sqlite3");
+    let offline = open_app(&database, &root).await;
+    let thread = response_json(
+        offline
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({"initialMessage":"Seed"})),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    seed_explicit_test_model_default(&database, thread_id).await;
+
+    let pool = sqlite_pool(&database).await;
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+    let interaction_id = sqlx::query(
+        "INSERT INTO interactions(
+            thread_id,sequence,text,created_at,graph_node_id,completion_status,
+            harness_configuration_name,harness_configuration_digest,permission_profile_id,
+            effective_execution_digest,effective_permission_receipt_json,input_identity,input_digest
+         ) VALUES (?1,2,'Use the committed answer',?2,77,'running','codex-basic','sha256:test',
+            'auto','sha256:execution','{}','send-restart-input','sha256:input')",
+    )
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    let (family_id, family_revision): (i64, i64) =
+        sqlx::query_as("SELECT id,revision FROM model_families ORDER BY id LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query(
+        "INSERT INTO interaction_attempts(
+            interaction_id,attempt_number,started_at,family_id,family_revision,
+            harness_configuration_name,harness_configuration_revision,harness_configuration_digest,
+            provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,
+            outcome,effect_boundary
+         ) VALUES (?1,1,?2,?3,?4,'codex-basic',1,'sha256:test',
+            'codex','test-adapter',1,'test-model','managed-runtime@1','running','unknown')",
+    )
+    .bind(interaction_id)
+    .bind(&created_at)
+    .bind(family_id)
+    .bind(family_revision)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO action_input_drafts(thread_id,revision,updated_at) VALUES (?1,2,?2)")
+        .bind(thread_id)
+        .bind(&created_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO interaction_submitted_input_attempts(
+            interaction_id,thread_id,draft_revision,authority_digest,semantic_digest,state,
+            graph_root_node_id,created_at,bound_at
+         ) VALUES (?1,?2,1,'sha256:input','sha256:semantic','running',77,?3,?3)",
+    )
+    .bind(interaction_id)
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO interaction_submitted_input_attachments(
+            interaction_id,presenting_interaction_node_id,presenting_layer_id,action_id,
+            source_node_id,action_json,value_json,committed_at
+         ) VALUES (?1,10,20,30,40,?2,?3,?4)",
+    )
+    .bind(interaction_id)
+    .bind(json!({"control":"text","prompt":"Answer"}).to_string())
+    .bind(json!({"text":"committed"}).to_string())
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion":1,"configurations":[{"configuration":{
+                "schemaVersion":1,"name":"codex-basic","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},
+                "modelCompatibility":[{"providerId":"codex"}],
+                "executionAccessContracts":["managed-runtime@1"],
+                "settings":{"model":"test-model"}
+            },"digest":"sha256:test"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let graph = Router::new()
+        .route(
+            "/api/control/interactions/77",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":77,"invocation":null,
+                    "inputIdentity":"send-restart-input","inputDigest":"sha256:input"
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/77/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::delete(|| async { axum::Json(json!({"revoked":true})) }),
+        );
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = provider_calls.clone();
+    let harness = Router::new().route(
+        &format!("/sessions/{thread_id}/complete"),
+        axum::routing::post(move || {
+            let observed_provider_calls = observed_provider_calls.clone();
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                axum::Json(json!({"output":{"nodeId":77}}))
+            }
+        }),
+    );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(harness).await;
+    let resumed =
+        open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
+            .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let pool = sqlite_pool(&database).await;
+    let (status, error): (String, Option<String>) =
+        sqlx::query_as("SELECT completion_status,completion_error FROM interactions WHERE id=?1")
+            .bind(interaction_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "failed");
+    assert!(error.unwrap().contains("input draft was restored"));
+    let attempt_state: String = sqlx::query_scalar(
+        "SELECT state FROM interaction_submitted_input_attempts WHERE interaction_id=?1",
+    )
+    .bind(interaction_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(attempt_state, "failed");
+    let attempt_receipt: (String, Option<String>, String, Option<String>) = sqlx::query_as(
+        "SELECT outcome,failure_category,effect_boundary,finished_at
+         FROM interaction_attempts WHERE interaction_id=?1",
+    )
+    .bind(interaction_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(attempt_receipt.0, "execution_failed");
+    assert_eq!(attempt_receipt.1.as_deref(), Some("application_restart"));
+    assert_eq!(attempt_receipt.2, "unknown");
+    assert!(attempt_receipt.3.is_some());
+    let restored: (i64, String) = sqlx::query_as(
+        "SELECT COUNT(*),MAX(value_json) FROM action_input_attachments WHERE thread_id=?1",
+    )
+    .bind(thread_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(restored, (1, json!({"text":"committed"}).to_string()));
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     pool.close().await;
 
     drop(resumed);

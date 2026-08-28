@@ -134,6 +134,7 @@ fn context(id: &str, annotations: &[&str]) -> ExportInteractionContext {
 fn receipt(status: ExportCompletionStatus) -> ExportCompletionReceipt {
     ExportCompletionReceipt {
         status,
+        attempt_outcome: None,
         harness_configuration_name: Some("codex-basic".into()),
         harness_configuration_digest: Some(format!("sha256:{}", "a".repeat(64))),
         model_selection: Some(ExportModelSelection {
@@ -471,6 +472,25 @@ fn preserves_actual_completion_status_without_inventing_acceptance() {
         );
         assert_eq!(serde_json::to_value(status).unwrap(), wire_name);
     }
+
+    let mut cancelled = records();
+    let ConversationExportRecord::Turn(turn) = &mut cancelled[1] else {
+        unreachable!()
+    };
+    turn.completion.status = ExportCompletionStatus::Stopped;
+    turn.completion.attempt_outcome = Some(ExportAttemptOutcome::Cancelled);
+    turn.accepted_view = None;
+    let encoded = serde_json::to_value(&cancelled[1]).unwrap();
+    assert_eq!(encoded["completion"]["status"], "stopped");
+    assert_eq!(encoded["completion"]["attemptOutcome"], "cancelled");
+    let decoded: ConversationExportRecord = serde_json::from_value(encoded).unwrap();
+    let ConversationExportRecord::Turn(decoded) = decoded else {
+        unreachable!()
+    };
+    assert_eq!(
+        decoded.completion.attempt_outcome,
+        Some(ExportAttemptOutcome::Cancelled)
+    );
 
     let mut accepted_without_view = records();
     let ConversationExportRecord::Turn(turn) = &mut accepted_without_view[1] else {

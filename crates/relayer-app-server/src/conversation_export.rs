@@ -201,10 +201,22 @@ pub enum ExportCompletionStatus {
     Stopped,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportAttemptOutcome {
+    Running,
+    Accepted,
+    ModelFailed,
+    ExecutionFailed,
+    Cancelled,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportCompletionReceipt {
     pub status: ExportCompletionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_outcome: Option<ExportAttemptOutcome>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness_configuration_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

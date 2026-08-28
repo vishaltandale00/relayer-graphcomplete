@@ -543,6 +543,7 @@ impl GraphDatabase {
 
     pub async fn canonical_input_action_occurrence(
         &self,
+        destination_thread_id: crate::ThreadId,
         occurrence: &PresentingInputOccurrence,
     ) -> Result<crate::GraphAction, GraphError> {
         let scope = {
@@ -559,6 +560,13 @@ impl GraphDatabase {
                     other => other,
                 })?
         };
+        if scope.thread_id != destination_thread_id {
+            return Err(GraphError::validation(
+                "input_occurrence_not_visible",
+                "occurrence",
+                "Remove an occurrence unavailable to this thread scope.",
+            ));
+        }
         let mut connection = self.storage.acquire().await?;
         ActionTable::new(&mut connection)
             .canonical_input_occurrence(&scope, occurrence)

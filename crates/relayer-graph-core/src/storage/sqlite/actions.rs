@@ -39,6 +39,12 @@ struct ActionRow {
     state: String,
 }
 
+macro_rules! action_projection {
+    () => {
+        "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records"
+    };
+}
+
 impl<'connection> ActionTable<'connection> {
     pub(crate) fn new(connection: &'connection mut SqliteConnection) -> Self {
         Self { connection }
@@ -50,7 +56,7 @@ impl<'connection> ActionTable<'connection> {
         id: ActionId,
     ) -> Result<Option<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
+            concat!(action_projection!(), " WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))"),
         )
         .bind(id.value())
         .bind(scope.project_id.map(ProjectId::value))
@@ -174,7 +180,7 @@ impl<'connection> ActionTable<'connection> {
     ) -> Result<Vec<ActionRecord>, GraphError> {
         let rows = match (owner, accepted_only) {
             (Some(owner), _) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE source_node_id=?1 AND owner_interaction_id=?2 AND type_id!='interaction.context' AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+                concat!(action_projection!(), " WHERE source_node_id=?1 AND owner_interaction_id=?2 AND type_id!='interaction.context' AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id"),
             )
             .bind(source.value())
             .bind(owner.value())
@@ -183,7 +189,7 @@ impl<'connection> ActionTable<'connection> {
             .fetch_all(&mut *self.connection)
             .await?,
             (None, true) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE source_node_id=?1 AND type_id!='interaction.context' AND state='accepted' AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3)) ORDER BY id",
+                concat!(action_projection!(), " WHERE source_node_id=?1 AND type_id!='interaction.context' AND state='accepted' AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3)) ORDER BY id"),
             )
             .bind(source.value())
             .bind(scope.project_id.map(ProjectId::value))
@@ -191,7 +197,7 @@ impl<'connection> ActionTable<'connection> {
             .fetch_all(&mut *self.connection)
             .await?,
             (None, false) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE source_node_id=?1 AND type_id!='interaction.context' AND (state='accepted' OR owner_interaction_id=?2) AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+                concat!(action_projection!(), " WHERE source_node_id=?1 AND type_id!='interaction.context' AND (state='accepted' OR owner_interaction_id=?2) AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id"),
             )
             .bind(source.value())
             .bind(scope.root_node_id.value())
@@ -210,7 +216,7 @@ impl<'connection> ActionTable<'connection> {
         client_key: &str,
     ) -> Result<Option<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE owner_interaction_id=?1 AND source_node_id=?2 AND client_key=?3 AND type_id!='interaction.context'",
+            concat!(action_projection!(), " WHERE owner_interaction_id=?1 AND source_node_id=?2 AND client_key=?3 AND type_id!='interaction.context'"),
         )
         .bind(owner.value())
         .bind(source.value())
@@ -246,7 +252,7 @@ impl<'connection> ActionTable<'connection> {
         layer: LayerId,
     ) -> Result<Vec<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE owner_interaction_id=?1 AND type_id!='interaction.context' AND source_layer_id=?2 AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+            concat!(action_projection!(), " WHERE owner_interaction_id=?1 AND type_id!='interaction.context' AND source_layer_id=?2 AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id"),
         )
         .bind(scope.root_node_id.value())
         .bind(layer.value())

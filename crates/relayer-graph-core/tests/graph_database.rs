@@ -3134,11 +3134,14 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
         ]
     );
     let canonical = database
-        .canonical_input_action_occurrence(&PresentingInputOccurrence {
-            presenting_interaction_node_id: interaction.id,
-            presenting_layer_id: layer.id,
-            action_id: accepted.actions[0].id,
-        })
+        .canonical_input_action_occurrence(
+            thread(88),
+            &PresentingInputOccurrence {
+                presenting_interaction_node_id: interaction.id,
+                presenting_layer_id: layer.id,
+                action_id: accepted.actions[0].id,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(canonical.input.unwrap().prompt, "Describe the evidence");
@@ -3191,6 +3194,78 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
             .iter()
             .any(|issue| issue.code == "input_action_minimum_invalid")
     );
+
+    let unsupported: ActionDraft = serde_json::from_value(serde_json::json!({
+        "clientKey": "unsupported-input",
+        "sourceNodeId": source.id,
+        "sourceLayerId": layer.id,
+        "kind": "input",
+        "label": "Unsupported input",
+        "variant": "pill",
+        "targetLayerId": null,
+        "interactionText": null,
+        "control": "slider",
+        "prompt": "Choose a value"
+    }))
+    .unwrap();
+    let error = writer.add_action(&unsupported).await.unwrap_err();
+    let GraphError::ValidationIssues { issues, .. } = error else {
+        panic!("expected a stable unsupported-control validation issue");
+    };
+    assert!(issues.iter().any(|issue| {
+        issue.code == "input_action_control_unsupported" && issue.path == "control"
+    }));
+}
+
+#[tokio::test]
+async fn canonical_input_occurrence_requires_the_destination_graph_thread() {
+    let (database, interaction) = setup(Some(project(89)), thread(89)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let source = node(&writer, "thread-bound-input-source").await;
+    let layer = single_node_layer(&writer, "thread-bound-input-layer", &source).await;
+    let action = writer
+        .add_action(&ActionDraft {
+            client_key: "thread-bound-input".into(),
+            source_node_id: source.id,
+            source_layer_id: Some(layer.id),
+            kind: ActionKind::Input,
+            relation: None,
+            label: "Bound input".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: Some(InputAction {
+                control: InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+            }),
+        })
+        .await
+        .unwrap();
+    root_expand(&writer, &interaction, &layer).await;
+    writer.complete(interaction.id).await.unwrap();
+    let occurrence = PresentingInputOccurrence {
+        presenting_interaction_node_id: interaction.id,
+        presenting_layer_id: layer.id,
+        action_id: action.id,
+    };
+
+    database
+        .canonical_input_action_occurrence(thread(89), &occurrence)
+        .await
+        .unwrap();
+    let error = database
+        .canonical_input_action_occurrence(thread(90), &occurrence)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation { code, path, .. }
+            if code == "input_occurrence_not_visible" && path == "occurrence"
+    ));
 }
 
 #[tokio::test]

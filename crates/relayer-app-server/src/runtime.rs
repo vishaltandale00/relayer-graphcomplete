@@ -1683,6 +1683,7 @@ impl RuntimeClient {
 
     pub(crate) async fn canonical_input_action_occurrence(
         &self,
+        destination_thread_id: i64,
         occurrence: &relayer_graph_core::PresentingInputOccurrence,
     ) -> Result<relayer_graph_core::GraphAction, RuntimeError> {
         let response = self
@@ -1693,7 +1694,10 @@ impl RuntimeClient {
             )
             .bearer_auth(&self.graph_control_token)
             .timeout(CONTROL_REQUEST_TIMEOUT)
-            .json(occurrence)
+            .json(&serde_json::json!({
+                "destinationThreadId": destination_thread_id,
+                "occurrence": occurrence,
+            }))
             .send()
             .await?;
         let value = response_json(response, StatusCode::OK).await?;

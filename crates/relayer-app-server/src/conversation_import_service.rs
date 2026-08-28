@@ -582,6 +582,7 @@ mod tests {
             origin: ExportTurnOrigin::User,
             completion: ExportCompletionReceipt {
                 status: ExportCompletionStatus::Failed,
+                attempt_outcome: None,
                 harness_configuration_name: Some("codex-basic".into()),
                 harness_configuration_digest: None,
                 model_selection: None,

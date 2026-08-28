@@ -85,17 +85,18 @@ pub(super) async fn commit(
     Json(request): Json<CommitActionInputRequest>,
 ) -> Result<Json<ActionInputDraftResponse>, ApiError> {
     authorize_write(&state, &headers)?;
+    let thread_id = ThreadId::try_from(thread_id)?;
     let runtime = state.runtime.as_ref().ok_or_else(|| {
         ApiError::internal("graph runtime is unavailable for input occurrence validation")
     })?;
     let action = runtime
-        .canonical_input_action_occurrence(&request.occurrence)
+        .canonical_input_action_occurrence(thread_id.value(), &request.occurrence)
         .await?;
     Ok(Json(
         state
             .product
             .commit_action_input_attachment(
-                ThreadId::try_from(thread_id)?,
+                thread_id,
                 &request.occurrence,
                 &action,
                 &request.value,

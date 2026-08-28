@@ -300,6 +300,7 @@ mod tests {
                 origin: ExportTurnOrigin::User,
                 completion: ExportCompletionReceipt {
                     status: ExportCompletionStatus::NotStarted,
+                    attempt_outcome: None,
                     harness_configuration_name: None,
                     harness_configuration_digest: None,
                     model_selection: None,
@@ -345,6 +346,7 @@ mod tests {
         admitted_plan.digest = admitted_model_plan_digest(&admitted_plan).unwrap();
         ExportCompletionReceipt {
             status: ExportCompletionStatus::Accepted,
+            attempt_outcome: None,
             harness_configuration_name: Some("codex-basic".into()),
             harness_configuration_digest: None,
             model_selection: Some(ExportModelSelection {
@@ -1069,6 +1071,7 @@ mod tests {
                     origin: ExportTurnOrigin::User,
                     completion: ExportCompletionReceipt {
                         status,
+                        attempt_outcome: None,
                         harness_configuration_name: Some("codex-basic".into()),
                         harness_configuration_digest: None,
                         model_selection: None,
@@ -1336,6 +1339,7 @@ mod tests {
                 },
                 completion: ExportCompletionReceipt {
                     status: ExportCompletionStatus::NotStarted,
+                    attempt_outcome: None,
                     harness_configuration_name: None,
                     harness_configuration_digest: None,
                     model_selection: None,

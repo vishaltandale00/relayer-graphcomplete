@@ -71,6 +71,54 @@ impl SqliteProductStore {
         Ok(result.rows_affected())
     }
 
+    pub(crate) async fn fail_interrupted_submitted_input(
+        &self,
+        interaction_id: InteractionId,
+        harness_configuration_name: &str,
+        error: &str,
+    ) -> Result<bool, StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let finished_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time is before unix epoch")
+            .as_millis()
+            .to_string();
+        sqlx::query(
+            "UPDATE interaction_attempts
+             SET finished_at=?1,outcome='execution_failed',failure_category='application_restart',effect_boundary='unknown'
+             WHERE interaction_id=?2 AND outcome='running'",
+        )
+        .bind(&finished_at)
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        let result = sqlx::query(
+            "UPDATE interactions
+             SET completion_status='failed',
+                 harness_configuration_name=COALESCE(harness_configuration_name,?1),
+                 completion_error=?2
+             WHERE id=?3
+               AND completion_status IN ('not_started','running','submitted','waiting_for_approval')
+               AND EXISTS (
+                 SELECT 1 FROM interaction_submitted_input_attempts
+                 WHERE interaction_id=interactions.id
+                   AND state NOT IN ('accepted','failed','stopped')
+               )
+               AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+        )
+        .bind(harness_configuration_name)
+        .bind(error)
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        if result.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        transaction.commit().await?;
+        Ok(true)
+    }
+
     pub(crate) async fn get_interaction(
         &self,
         interaction_id: InteractionId,
