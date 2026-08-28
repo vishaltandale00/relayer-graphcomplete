@@ -37,6 +37,7 @@ const SAFE_SUBPROCESS_ENVIRONMENT = new Set([
 const CODEX_MANAGED_RUNTIME_ENVIRONMENT = new Set([
   ...SAFE_SUBPROCESS_ENVIRONMENT, "HOME", "USERPROFILE", "CODEX_HOME", "RELAYER_CODEX_BINARY",
 ]);
+const UNDERLYING_TASK_GUIDANCE = `Complete the underlying user task in the working directory. Use ordinary Codex workspace tools, reasoning, and native delegation as needed; the graph is the presentation of the work, not a substitute for doing it. Author graph content from the work you actually performed and the evidence you actually observed. If you reach a genuine blocker that you cannot resolve, present that blocker and its evidence instead of presenting planned work as completed.`;
 
 export interface CodexBasicDependencies {
   readonly runAppServerTurn?: (options: CodexAppServerTurnOptions) => ReturnType<typeof runCodexAppServerTurn>;
@@ -304,7 +305,9 @@ Codex native subagents are available when useful. Subagents may directly author,
     const launcherClause = this.dependencies.graphAuthoringLauncherPath ? " do not resolve the launcher or Node.js from PATH," : "";
     const launcherArgumentsClause = this.dependencies.graphAuthoringLauncherPath ? " with no arguments" : "";
     const pinnedExecutionClause = this.pinnedExecutionClause();
-    return `You are the basic Relayer graph harness. Answer the current user interaction by authoring and accepting a useful graph layer.
+    return `You are the basic Relayer graph harness. ${UNDERLYING_TASK_GUIDANCE}
+
+Answer the current user interaction by authoring and accepting a useful graph layer that truthfully presents the completed work or genuine blocker.
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -380,7 +383,9 @@ export function buildLayeredNavigationPrompt(
   const authoringInstructions = graphAuthoringLauncherPath === undefined
     ? `Write a temporary .mjs file outside the project checkout and run it with Node.js. Import RelayerGraphClient, NodeObject, EdgeObject, and LayerObject from ${clientModuleUrl}, then use RelayerGraphClient.fromEnv(). Author in whatever order fits the task. Keep each object's generated clientKey stable when retrying the same rejected submit; create a new object only for a genuinely new graph record. Submit each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.`
     : `Run exactly ${graphAuthoringCommand(graphAuthoringLauncherPath)} with no arguments, including the displayed double quotes, and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM; do not resolve the launcher or Node.js from PATH, never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. Request Codex sandbox escalation for this exact launcher command; Relayer preauthorizes only this pinned internal launcher, which applies its own narrower graph sandbox. The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:\n${clientModuleUrl}\n${pinnedExecutionClause(graphAuthoringLauncherPath)}`;
-  return `You are the Relayer layered-navigation harness. Your task is to answer the current user interaction with a useful graph. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
+  return `You are the Relayer layered-navigation harness. ${UNDERLYING_TASK_GUIDANCE}
+
+After doing the underlying work, answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -417,7 +422,7 @@ ${RELAYER_ICON_NAMES.join(", ")}
 
 Action variants are "chip", "pill", "wide", or "card". A card requires description; other variants do not accept one. Do not author HTML, CSS, colors, dimensions, or style fields.
 
-The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue, edit the same program and rerun it with the same clientKey values; stable keys make the whole-program rerun update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. A model turn ending is not completion. The task is complete only when the final graph.submit call succeeds.`;
+The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue, edit the same program and rerun it with the same clientKey values; stable keys make the whole-program rerun update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. A model turn ending is not completion. A successful graph.submit call is required to complete the GraphComplete response, but it does not by itself complete the underlying user task. Do not submit a plan as though it were completed work. Before final submission, verify that requested workspace effects have actually occurred and represent their real results in the graph.`;
 }
 
 function graphAuthoringCommand(launcher: string | undefined): string {
@@ -430,7 +435,7 @@ function graphAuthoringCommand(launcher: string | undefined): string {
 
 function pinnedExecutionClause(launcher: string | undefined): string {
   if (launcher === undefined) return "";
-  return `In this pinned mode, the launcher heredoc is the only permitted shell action. Do not run sed, rg, cat, find, or any other inspection command. If the authored program fails, repair it only from the returned error and rerun the same launcher heredoc. LayerLayoutObject accepts exactly one argument: the placements array, for example new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)]). Its version is already fixed at 1; never pass a version argument and never assign layout.version.`;
+  return `In this pinned mode, the launcher heredoc is the only permitted shell action for graph authoring. Do not run sed, rg, cat, find, or any other inspection command through the launcher or from the authored graph program. If the authored program fails, repair it only from the returned error and rerun the same launcher heredoc. This restriction applies only to the graph-authoring path: complete the underlying user task with ordinary Codex workspace tools under the configured permission policy. LayerLayoutObject accepts exactly one argument: the placements array, for example new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)]). Its version is already fixed at 1; never pass a version argument and never assign layout.version.`;
 }
 
 function traceCodexAppServerNotification(context: HarnessRunContext, method: string, params: unknown, state: CodexTraceState): void {
