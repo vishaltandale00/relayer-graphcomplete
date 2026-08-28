@@ -1494,7 +1494,7 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
         graph_database.clone(),
         "graph-control",
     ));
-    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (graph_url, graph_task) = serve_test_app_with_current_graph_contract(graph).await;
     let (harness_url, harness_task) = serve_test_app(Router::new()).await;
     let catalog = root.join("catalog.json");
     fs::write(
@@ -5195,7 +5195,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 22);
+    assert_eq!(applied_migrations, 23);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -5265,7 +5265,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
         "DROP TABLE threads",
         "DROP TABLE projects",
         "CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,path TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
-        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto',conversation_import_id TEXT)",
+        "CREATE TABLE threads (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,harness_configuration_name TEXT NOT NULL DEFAULT 'codex-basic',permission_profile_id TEXT NOT NULL DEFAULT 'auto',conversation_import_id TEXT,surface TEXT NOT NULL DEFAULT 'conversation' CHECK(surface IN ('conversation', 'personal_presentation_profile')),personal_presentation_version_key TEXT REFERENCES personal_presentation_versions(version_key) ON DELETE RESTRICT)",
         "CREATE TABLE interactions (id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,text TEXT NOT NULL,created_at TEXT NOT NULL,graph_node_id INTEGER,completion_status TEXT NOT NULL DEFAULT 'not_started',harness_configuration_name TEXT,harness_configuration_digest TEXT,completion_output_json TEXT,completion_error TEXT,permission_profile_id TEXT NOT NULL DEFAULT 'auto',effective_execution_digest TEXT,effective_permission_receipt_json TEXT,model_provider_id TEXT,provider_model_id TEXT,model_family_id INTEGER,input_identity TEXT,input_digest TEXT)",
         "CREATE UNIQUE INDEX projects_path_partial ON projects(path) WHERE id > 0",
         "CREATE UNIQUE INDEX interactions_sequence_partial ON interactions(thread_id,sequence) WHERE id > 0",
@@ -5298,7 +5298,8 @@ async fn persists_project_thread_and_interaction_across_restart() {
     assert!(
         partial_index_error
             .to_string()
-            .contains("missing its required unique index")
+            .contains("missing its required unique index"),
+        "{partial_index_error}"
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -6291,6 +6292,19 @@ fn permission_catalog() -> std::path::PathBuf {
 }
 
 async fn serve_test_app(
+    app: Router,
+) -> (String, tokio::task::JoinHandle<Result<(), std::io::Error>>) {
+    let app = app.route(
+        "/api/control/personal-presentation",
+        axum::routing::get(|| async { axum::Json(json!({ "schemaVersion": 0 })) }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(axum::serve(listener, app).into_future());
+    (format!("http://{address}/"), task)
+}
+
+async fn serve_test_app_with_current_graph_contract(
     app: Router,
 ) -> (String, tokio::task::JoinHandle<Result<(), std::io::Error>>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

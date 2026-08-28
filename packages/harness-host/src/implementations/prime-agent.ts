@@ -20,6 +20,11 @@ import type {
   JsonObject,
 } from "../types.js";
 import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
+import {
+  personalPresentationNativeInstructions,
+  personalPresentationPrompt,
+  personalPresentationTraceValues,
+} from "./personal-presentation-guidance.js";
 
 export const PRIME_AGENT_KEY = "prime.agent";
 
@@ -38,11 +43,21 @@ interface PrimeAgentSession {
   /** Graceful native teardown: drains stateful resources before calling dispose(). */
   disposeAsync?(): Promise<void>;
   subscribe?(listener: (event: unknown) => void): () => void;
+  reload?(): Promise<void>;
 }
 
 interface PrimeAgentSessionManagerFactory {
   create(cwd: string): unknown;
   open(path: string): unknown;
+}
+
+interface PrimeAgentSessionHandle {
+  readonly session: PrimeAgentSession;
+  readonly nativeDispose: () => void;
+  disposeInProgress: boolean;
+  disposeCompleted: boolean;
+  guardInstalled: boolean;
+  disposePromise?: Promise<void>;
 }
 
 interface PrimeAgentModule {
@@ -206,6 +221,7 @@ interface PrimeAgentExecutionScope {
   readonly orchestrator: HarnessAdmittedModelRoute;
   readonly routeByNativeModel: ReadonlyMap<string, HarnessAdmittedModelRoute>;
   readonly sensitiveValues: readonly string[];
+  readonly presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>;
 }
 
 const PRIME_ADAPTERS: Readonly<Record<string, PrimeAdapterMapping>> = Object.freeze({
@@ -219,20 +235,26 @@ export class PrimeAgentHarness implements Harness {
   private forceShutdownStarted = false;
   private gracefullyDisposed = false;
   private gracefulDisposePromise: Promise<void> | undefined;
-  private nativeDisposeInProgress = false;
-  private nativeDisposeCompleted = false;
-  private disposeGuardInstalled = false;
-  private readonly nativeSessionDispose: () => void;
+  private sessionHandle: PrimeAgentSessionHandle | undefined;
+  private sessionPersonalPresentationVersionId: number | null | undefined;
+  private readonly presentationInstructions: { current: string };
 
   private constructor(
     private readonly context: HarnessFactoryContext,
-    private readonly session: PrimeAgentSession,
     private readonly primeAgent: PrimeAgentModule,
     private readonly permission: PrimeAgentPermission,
     private readonly workspaceRoot: string,
     private readonly createKernelBoundary: PrimeAgentDependencies["createKernelBoundary"],
+    private readonly createSession: (sessionManager: unknown) => Promise<PrimeAgentSession>,
+    private readonly createSessionManager: () => unknown,
+    private readonly savedSessionFile: string | undefined,
+    savedPresentationVersionId: number | null | undefined,
+    presentationInstructions: { current: string },
+    sessionHandle?: PrimeAgentSessionHandle,
   ) {
-    this.nativeSessionDispose = session.dispose.bind(session);
+    this.sessionHandle = sessionHandle;
+    this.sessionPersonalPresentationVersionId = savedPresentationVersionId;
+    this.presentationInstructions = presentationInstructions;
   }
 
   static async create(context: HarnessFactoryContext, dependencies: PrimeAgentDependencies = {}): Promise<PrimeAgentHarness> {
@@ -250,39 +272,75 @@ export class PrimeAgentHarness implements Harness {
       return capabilityResponse(run.graph.acquireCapability());
     });
     const savedSessionFile = context.savedState?.primeAgentSessionFile;
-    const sessionManager = typeof savedSessionFile === "string"
-      ? primeAgent.SessionManager.open(savedSessionFile)
-      : primeAgent.SessionManager.create(workspaceRoot);
-    const services = await primeAgent.createAgentSessionServices({ cwd: workspaceRoot, telemetryDisabled: true });
+    const savedPresentationVersionId = context.savedState?.primeAgentSessionPersonalPresentationVersionId;
+    const validSavedPresentationVersion = savedPresentationVersionId === undefined
+      || savedPresentationVersionId === null
+      || (typeof savedPresentationVersionId === "number"
+        && Number.isSafeInteger(savedPresentationVersionId)
+        && savedPresentationVersionId > 0);
+    const parsedSavedPresentationVersionId: number | null | undefined = validSavedPresentationVersion
+      && (savedPresentationVersionId === null || typeof savedPresentationVersionId === "number")
+      ? savedPresentationVersionId
+      : undefined;
+    const presentationInstructions = { current: "" };
+    const services = await primeAgent.createAgentSessionServices({
+      cwd: workspaceRoot,
+      telemetryDisabled: true,
+      resourceLoaderOptions: {
+        appendSystemPromptOverride: (base: string[]) => presentationInstructions.current === ""
+          ? [...base]
+          : [...base, presentationInstructions.current],
+      },
+    });
     const prewarmIpythonKernel = permission.profile === "full"
       ? configuration.prewarmIpythonKernel
       : false;
-    const { session } = await primeAgent.createAgentSessionFromServices({
-      services,
-      sessionManager,
-      tools: ["ipython"],
-      hostRequestHandlers: { "relayer.graph.current": graphCurrent },
-      telemetryDisabled: true,
-      ...(configuration.thinkingLevel === undefined ? {} : { thinkingLevel: configuration.thinkingLevel }),
-      ...(configuration.rlmMaxDepth === undefined ? {} : { rlmMaxDepth: configuration.rlmMaxDepth }),
-      ...(prewarmIpythonKernel === undefined ? {} : { prewarmIpythonKernel }),
-    });
-    if (typeof session.waitForRlmQuiescence !== "function") {
-      await session.dispose();
-      throw new Error("Installed Prime Agent package does not expose recursive quiescence");
-    }
+    const createSession = async (sessionManager: unknown): Promise<PrimeAgentSession> => {
+      const { session } = await primeAgent.createAgentSessionFromServices({
+        services,
+        sessionManager,
+        tools: ["ipython"],
+        hostRequestHandlers: { "relayer.graph.current": graphCurrent },
+        telemetryDisabled: true,
+        ...(configuration.thinkingLevel === undefined ? {} : { thinkingLevel: configuration.thinkingLevel }),
+        ...(configuration.rlmMaxDepth === undefined ? {} : { rlmMaxDepth: configuration.rlmMaxDepth }),
+        ...(prewarmIpythonKernel === undefined ? {} : { prewarmIpythonKernel }),
+      });
+      if (typeof session.waitForRlmQuiescence !== "function") {
+        session.dispose();
+        throw new Error("Installed Prime Agent package does not expose recursive quiescence");
+      }
+      return session;
+    };
+    const restorableSessionFile = typeof savedSessionFile === "string"
+      && parsedSavedPresentationVersionId !== undefined
+      ? savedSessionFile
+      : undefined;
+    const createSessionManager = () => primeAgent.SessionManager.create(workspaceRoot);
+    const initialSessionManager = restorableSessionFile === undefined
+      ? createSessionManager()
+      : primeAgent.SessionManager.open(restorableSessionFile);
+    const initialSession = primeSessionHandle(await createSession(initialSessionManager));
     return new PrimeAgentHarness(
       context,
-      session,
       primeAgent,
       permission,
       workspaceRoot,
       dependencies.createKernelBoundary,
+      createSession,
+      createSessionManager,
+      restorableSessionFile,
+      restorableSessionFile === undefined ? undefined : parsedSavedPresentationVersionId,
+      presentationInstructions,
+      initialSession,
     );
   }
 
   async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
+    const candidateSession = this.sessionFor(context);
+    const session = candidateSession instanceof Promise ? await candidateSession : candidateSession;
+    this.throwIfShuttingDown();
     const execution = createPrimeAgentModelScope(context, this.primeAgent);
     const runContext: PrimeAgentRunContext = Object.freeze({ graph: context.graph });
     const permissions = createPrimeAgentPermissionScopes({
@@ -294,18 +352,21 @@ export class PrimeAgentHarness implements Harness {
       createKernelBoundary: this.createKernelBoundary,
     });
     const childStreams = new Map<string, HarnessTraceStream>();
-    const unsubscribe = this.session.subscribe?.((event) => tracePrimeEvent(context, event, childStreams, execution));
+    const unsubscribe = session.subscribe?.((event) => tracePrimeEvent(context, event, childStreams, execution));
     const runtimeProvenance = primeRuntimeProvenance(process.env.RELAYER_PRIME_RUNTIME_PROVENANCE);
     if (runtimeProvenance) context.trace.emit({
       type: "provider.event",
       data: { provider: "prime-agent", event: { type: "runtime.provenance", ...runtimeProvenance } },
     });
     const prompt = this.prompt(context);
-    context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
+    context.trace.emit({
+      type: "prompt",
+      data: { text: this.prompt(context, false), interactionNodeId: context.inputGraph.id },
+    });
     let abortOutcome: Promise<OperationOutcome<void>> | undefined;
     const abort = () => {
       if (abortOutcome !== undefined) return;
-      abortOutcome = operationOutcome(() => this.session.abort());
+      abortOutcome = operationOutcome(() => session.abort());
     };
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
@@ -318,12 +379,12 @@ export class PrimeAgentHarness implements Harness {
         if (settledAbort !== undefined && !settledAbort.ok) throw settledAbort.error;
         signal.throwIfAborted();
       }
-      promptOutcome = await operationOutcome(() => this.session.promptAndWait(prompt, {
+      promptOutcome = await operationOutcome(() => session.promptAndWait(prompt, {
         runContext,
         modelScope: execution.modelScope,
         ...permissions,
       }));
-      quiescenceOutcome = await operationOutcome(() => this.session.waitForRlmQuiescence());
+      quiescenceOutcome = await operationOutcome(() => session.waitForRlmQuiescence());
       signal?.removeEventListener("abort", abort);
       settledAbort = await abortOutcome;
     } finally {
@@ -351,28 +412,25 @@ export class PrimeAgentHarness implements Harness {
   }
 
   state(): HarnessSessionState {
-    return this.session.sessionFile === undefined ? {} : { primeAgentSessionFile: this.session.sessionFile };
+    const sessionFile = this.sessionHandle?.session.sessionFile;
+    return sessionFile === undefined || this.sessionPersonalPresentationVersionId === undefined
+      ? {}
+      : {
+          primeAgentSessionFile: sessionFile,
+          primeAgentSessionPersonalPresentationVersionId: this.sessionPersonalPresentationVersionId,
+        };
   }
 
   dispose(): Promise<void> {
     if (this.gracefulDisposePromise !== undefined) return this.gracefulDisposePromise;
-    if (this.nativeDisposeCompleted) return Promise.resolve();
-    this.installNativeDisposeGuard();
+    if (this.sessionHandle?.disposeCompleted === true) return Promise.resolve();
     this.gracefulDisposePromise = Promise.resolve()
       .then(async () => {
-        if (this.nativeDisposeCompleted) return;
-        if (this.session.disposeAsync !== undefined) await this.session.disposeAsync();
-        else if (!this.nativeDisposeCompleted) this.disposeNativeOnce();
-        if (!this.nativeDisposeCompleted && this.session.disposeAsync !== undefined) {
-          // A conforming disposeAsync drains resources and owns native disposal.
-          // Mark the harness terminal even if it does not call the guarded
-          // synchronous boundary itself.
-          this.nativeDisposeCompleted = true;
-        }
+        if (this.sessionHandle !== undefined) await this.disposeSession(this.sessionHandle);
         this.gracefullyDisposed = true;
       })
       .catch((error: unknown) => {
-        if (!this.nativeDisposeCompleted) throw error;
+        if (this.sessionHandle?.disposeCompleted !== true) throw error;
       });
     return this.gracefulDisposePromise;
   }
@@ -380,39 +438,131 @@ export class PrimeAgentHarness implements Harness {
   forceShutdown(): void {
     if (this.forceShutdownStarted || this.gracefullyDisposed) return;
     this.forceShutdownStarted = true;
-    this.installNativeDisposeGuard();
+    const handle = this.sessionHandle;
+    if (handle === undefined) return;
+    this.installNativeDisposeGuard(handle);
     try {
-      void this.session.abort().catch(() => undefined);
+      void handle.session.abort().catch(() => undefined);
     } catch {
       // Force disposal must continue even if a nonconforming provider throws
       // synchronously instead of returning a rejected abort promise.
     }
-    this.disposeNativeOnce();
+    this.disposeNativeOnce(handle);
   }
 
-  private installNativeDisposeGuard(): void {
-    if (this.disposeGuardInstalled) return;
-    this.disposeGuardInstalled = true;
-    this.session.dispose = () => this.disposeNativeOnce();
+  private sessionFor(context: HarnessRunContext): PrimeAgentSession | Promise<PrimeAgentSession> {
+    this.throwIfShuttingDown();
+    const versionId = context.personalPresentation?.attachment.versionInteractionNodeId ?? null;
+    const instructions = personalPresentationNativeInstructions(context);
+    if (this.sessionHandle !== undefined
+      && this.sessionPersonalPresentationVersionId === versionId) {
+      if (instructions === this.presentationInstructions.current) return this.sessionHandle.session;
+      return this.reloadPresentationInstructions(this.sessionHandle.session, versionId, instructions);
+    }
+    if (this.sessionHandle !== undefined
+      && this.sessionPersonalPresentationVersionId === undefined) {
+      if (instructions === this.presentationInstructions.current) {
+        this.sessionPersonalPresentationVersionId = versionId;
+        return this.sessionHandle.session;
+      }
+      return this.reloadPresentationInstructions(this.sessionHandle.session, versionId, instructions);
+    }
+    return this.rotateSession(context, versionId);
   }
 
-  private disposeNativeOnce(): void {
-    if (this.nativeDisposeInProgress || this.nativeDisposeCompleted) return;
-    this.nativeDisposeInProgress = true;
+  private reloadPresentationInstructions(
+    session: PrimeAgentSession,
+    versionId: number | null,
+    instructions: string,
+  ): Promise<PrimeAgentSession> {
+    const reload = session.reload;
+    if (reload === undefined) {
+      throw new Error("Installed Prime Agent package cannot refresh interaction-scoped presentation instructions");
+    }
+    const previousInstructions = this.presentationInstructions.current;
+    this.presentationInstructions.current = instructions;
+    return reload.call(session).then(() => {
+      this.sessionPersonalPresentationVersionId = versionId;
+      return session;
+    }, (error: unknown) => {
+      this.presentationInstructions.current = previousInstructions;
+      throw error;
+    });
+  }
+
+  private async rotateSession(
+    context: HarnessRunContext,
+    versionId: number | null,
+  ): Promise<PrimeAgentSession> {
+    this.throwIfShuttingDown();
+    const previousHandle = this.sessionHandle;
+    if (previousHandle !== undefined) await this.disposeSession(previousHandle);
+    this.throwIfShuttingDown();
+    if (this.sessionHandle === previousHandle) this.sessionHandle = undefined;
+    this.presentationInstructions.current = personalPresentationNativeInstructions(context);
+    const resumeSavedSession = this.savedSessionFile !== undefined
+      && this.sessionPersonalPresentationVersionId === versionId;
+    const sessionManager = resumeSavedSession
+      ? this.primeAgent.SessionManager.open(this.savedSessionFile!)
+      : this.createSessionManager();
+    const session = await this.createSession(sessionManager);
+    const replacement = primeSessionHandle(session);
+    if (this.isShuttingDown()) {
+      await this.disposeSession(replacement);
+      throw new Error("Prime Agent harness is shutting down");
+    }
+    this.sessionHandle = replacement;
+    this.sessionPersonalPresentationVersionId = versionId;
+    return session;
+  }
+
+  private async disposeSession(handle: PrimeAgentSessionHandle): Promise<void> {
+    if (handle.disposePromise !== undefined) return handle.disposePromise;
+    handle.disposePromise = Promise.resolve().then(async () => {
+      if (handle.disposeCompleted) return;
+      this.installNativeDisposeGuard(handle);
+      if (handle.session.disposeAsync !== undefined) await handle.session.disposeAsync();
+      else this.disposeNativeOnce(handle);
+      if (!handle.disposeCompleted) handle.disposeCompleted = true;
+    }).catch((error: unknown) => {
+      if (!handle.disposeCompleted) throw error;
+    });
+    return handle.disposePromise;
+  }
+
+  private isShuttingDown(): boolean {
+    return this.forceShutdownStarted || this.gracefulDisposePromise !== undefined;
+  }
+
+  private throwIfShuttingDown(): void {
+    if (this.isShuttingDown()) throw new Error("Prime Agent harness is shutting down");
+  }
+
+  private installNativeDisposeGuard(handle: PrimeAgentSessionHandle): void {
+    if (handle.guardInstalled) return;
+    handle.guardInstalled = true;
+    handle.session.dispose = () => this.disposeNativeOnce(handle);
+  }
+
+  private disposeNativeOnce(handle: PrimeAgentSessionHandle): void {
+    if (handle.disposeInProgress || handle.disposeCompleted) return;
+    handle.disposeInProgress = true;
     try {
-      this.nativeSessionDispose();
-      this.nativeDisposeCompleted = true;
+      handle.nativeDispose();
+      handle.disposeCompleted = true;
     } finally {
-      this.nativeDisposeInProgress = false;
+      handle.disposeInProgress = false;
     }
   }
 
-  private prompt(context: HarnessRunContext): string {
+  private prompt(context: HarnessRunContext, includePersonalPresentation = true): string {
     const interaction = context.inputGraph;
     if (this.context.configuration.settings.promptProfile === "layered-navigation-v1") {
-      return this.layeredNavigationPrompt(context);
+      return this.layeredNavigationPrompt(context, includePersonalPresentation);
     }
     return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response.
+
+${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -427,8 +577,6 @@ graph = await GraphSession.current()
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. Never rely on generated client keys in authored code.
 
-${GRAPH_PRESENTATION_GUIDANCE}
-
 Author nodes, edges, layers, and useful expand, reference, or invoke actions. For supporting evidence or reusable context, use await graph.add_navigate_action(node, "View evidence", evidence_layer, relation="reference", source_layer=response_layer, client_key="node-evidence") after submitting the referenced layer. The visible response layer must contain 1 to 8 connected nodes. Finish the root execution only by calling:
 
 Import NodePlacementObject and LayerLayoutObject from relayer_graph. Every new layer requires a version-1 LayerLayoutObject with exactly one NodePlacementObject(node, x, y) per member node. Coordinates are normalized numbers from 0 through 1 and express semantic relative position independently of the viewport. Place a one-node layer at (0.5, 0.5). Keep flow or time moving consistently, anchor hierarchy with a parent or summary, group related nodes, align comparisons, and avoid accidental overlap or edge crossings. Do not derive coordinates from pixels, window size, or inspector state.
@@ -438,9 +586,11 @@ await graph.submit(${interaction.id})
 If a graph call fails, edit and rerun the same authoring code with the same client_key values so it updates the same drafts instead of creating duplicates. Do not add fake navigation merely to make abandoned drafts reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with await graph.discard_layer(layer); this preserves that layer as stopped history without discarding its graph objects. A model turn ending is not completion. If graph.submit() has not succeeded, continue working or report the blocking graph error.`;
   }
 
-  private layeredNavigationPrompt(context: HarnessRunContext): string {
+  private layeredNavigationPrompt(context: HarnessRunContext, includePersonalPresentation: boolean): string {
     const interaction = context.inputGraph;
     return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
+
+${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -461,8 +611,6 @@ Navigation has two meanings:
 - relation="expand" continues the explanation with a more detailed layer. Expansion must not point back to an expansion ancestor.
 - relation="reference" opens supporting evidence or context. References may reuse an accepted layer, may point to other reference layers, and may revisit a layer.
 
-${GRAPH_PRESENTATION_GUIDANCE}
-
 The interaction node must have one root navigate action with relation="expand" and no source_layer. Every action on a response node must include source_layer: the LayerObject in which you are authoring that action. Expansion layers may author expand, reference, or invoke actions. A layer reached as a reference may author only reference actions. Do not create both expand and reference actions to the same new target layer.
 
 Examples:
@@ -479,6 +627,16 @@ Layer edges are exactly what the user sees and are undirected. Use supported Rel
 
 The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue, edit the same authoring code, and rerun it with the same client_key values; stable keys make the whole-program rerun update the same drafts instead of creating duplicates. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with await graph.discard_layer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. A model turn ending is not completion. The task is complete only when the final graph.submit call succeeds.`;
   }
+}
+
+function primeSessionHandle(session: PrimeAgentSession): PrimeAgentSessionHandle {
+  return {
+    session,
+    nativeDispose: session.dispose.bind(session),
+    disposeInProgress: false,
+    disposeCompleted: false,
+    guardInstalled: false,
+  };
 }
 
 function primeRuntimeProvenance(serialized: string | undefined): JsonObject | undefined {
@@ -522,19 +680,19 @@ function tracePrimeEvent(
 ): void {
   if (!isRecord(value) || typeof value.type !== "string") return;
   const event = value as Record<string, unknown>;
-  context.trace.emit({ type: "provider.event", data: { provider: "prime-agent", event: safePrimeEvent(event, execution.routeByNativeModel, execution.sensitiveValues) } });
+  context.trace.emit({ type: "provider.event", data: { provider: "prime-agent", event: safePrimeEvent(event, execution.routeByNativeModel, execution.sensitiveValues, execution.presentationTraceValues) } });
   if (event.type === "turn_start") {
     context.trace.emit({ type: "model.call.started", data: { provider: "prime-agent", eventType: event.type, ...traceRoute(execution.orchestrator) } });
   } else if (event.type === "turn_end") {
     context.trace.emit({ type: "model.call.completed", data: { provider: "prime-agent", eventType: event.type, status: "completed", ...traceRoute(execution.orchestrator) } });
   } else if (event.type === "tool_execution_start") {
-    context.trace.emit({ type: "tool.call.started", data: safePrimeToolEvent(event, execution.sensitiveValues) });
+    context.trace.emit({ type: "tool.call.started", data: safePrimeToolEvent(event, execution.sensitiveValues, execution.presentationTraceValues) });
   } else if (event.type === "tool_execution_end") {
-    context.trace.emit({ type: "tool.call.completed", data: safePrimeToolEvent(event, execution.sensitiveValues) });
+    context.trace.emit({ type: "tool.call.completed", data: safePrimeToolEvent(event, execution.sensitiveValues, execution.presentationTraceValues) });
   } else if (event.type === "message_end") {
-    tracePrimeMessage(context, event.message, execution.routeByNativeModel, execution.sensitiveValues);
+    tracePrimeMessage(context, event.message, execution.routeByNativeModel, execution.sensitiveValues, execution.presentationTraceValues);
   } else if (event.type === "rlm_child_update") {
-    tracePrimeChild(context, event.child, childStreams, execution.routeByNativeModel, execution.sensitiveValues);
+    tracePrimeChild(context, event.child, childStreams, execution.routeByNativeModel, execution.sensitiveValues, execution.presentationTraceValues);
   }
 }
 
@@ -543,6 +701,7 @@ function tracePrimeMessage(
   value: unknown,
   routes: ReadonlyMap<string, HarnessAdmittedModelRoute>,
   sensitiveValues: readonly string[],
+  presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>,
 ): void {
   if (!isRecord(value)) return;
   const role = typeof value.role === "string" ? value.role : "unknown";
@@ -553,7 +712,7 @@ function tracePrimeMessage(
       type: "message",
       data: {
         role,
-        text: sanitizePrimeTraceValue(text.join("\n"), sensitiveValues) as string,
+        text: sanitizePrimeTraceValue(text.join("\n"), sensitiveValues, presentationTraceValues, true) as string,
         ...(route === undefined ? {} : traceRoute(route)),
       },
     });
@@ -570,6 +729,7 @@ function tracePrimeChild(
   childStreams: Map<string, HarnessTraceStream>,
   routes: ReadonlyMap<string, HarnessAdmittedModelRoute>,
   sensitiveValues: readonly string[],
+  presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>,
 ): void {
   if (!isRecord(value) || typeof value.id !== "string") return;
   let stream = childStreams.get(value.id);
@@ -588,7 +748,7 @@ function tracePrimeChild(
     data: {
       provider: "prime-agent",
       eventType: "rlm_child_update",
-      child: redactTraceData(safePrimeChild(value, routes, sensitiveValues)),
+      child: redactTraceData(safePrimeChild(value, routes, sensitiveValues, presentationTraceValues)),
     },
   });
   const status = typeof value.status === "string" ? value.status : "";
@@ -602,16 +762,17 @@ function safePrimeEvent(
   event: Record<string, unknown>,
   routes: ReadonlyMap<string, HarnessAdmittedModelRoute>,
   sensitiveValues: readonly string[],
+  presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>,
 ): JsonObject {
   const type = typeof event.type === "string" ? event.type : "unknown";
   if (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") {
-    return redactTraceData({ type, message: safePrimeMessage(event.message, routes, sensitiveValues) }) as JsonObject;
+    return redactTraceData({ type, message: safePrimeMessage(event.message, routes, sensitiveValues, presentationTraceValues) }) as JsonObject;
   }
   if (event.type === "rlm_child_update") {
-    return redactTraceData({ type, child: safePrimeChild(event.child, routes, sensitiveValues) }) as JsonObject;
+    return redactTraceData({ type, child: safePrimeChild(event.child, routes, sensitiveValues, presentationTraceValues) }) as JsonObject;
   }
   if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
-    return { type, ...safePrimeToolEvent(event, sensitiveValues) };
+    return { type, ...safePrimeToolEvent(event, sensitiveValues, presentationTraceValues) };
   }
   return { type };
 }
@@ -620,6 +781,7 @@ function safePrimeMessage(
   value: unknown,
   routes: ReadonlyMap<string, HarnessAdmittedModelRoute>,
   sensitiveValues: readonly string[],
+  presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>,
 ): unknown {
   if (!isRecord(value)) return value;
   const content = Array.isArray(value.content)
@@ -632,27 +794,51 @@ function safePrimeMessage(
     usage: value.usage,
     content,
     ...(route === undefined ? {} : traceRoute(route)),
-  }, sensitiveValues);
+  }, sensitiveValues, presentationTraceValues, true);
 }
 
-function safePrimeToolEvent(event: Record<string, unknown>, sensitiveValues: readonly string[]): JsonObject {
+function safePrimeToolEvent(
+  event: Record<string, unknown>,
+  sensitiveValues: readonly string[],
+  presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>,
+): JsonObject {
   return redactTraceData(sanitizePrimeTraceValue({
     toolCallId: event.toolCallId,
     toolName: event.toolName,
     args: event.args,
     result: event.result,
     isError: event.isError,
-  }, sensitiveValues)) as JsonObject;
+  }, sensitiveValues, presentationTraceValues, false)) as JsonObject;
 }
 
-function sanitizePrimeTraceValue(value: unknown, sensitiveValues: readonly string[]): unknown {
+function sanitizePrimeTraceValue(
+  value: unknown,
+  sensitiveValues: readonly string[],
+  presentationTraceValues?: ReturnType<typeof personalPresentationTraceValues>,
+  includePresentationFragments = false,
+): unknown {
   if (typeof value === "string") {
-    return sensitiveValues.reduce((sanitized, secret) => sanitized.split(secret).join("[redacted-provider-access]"), value);
+    const accessRedacted = sensitiveValues.reduce(
+      (sanitized, secret) => sanitized.split(secret).join("[redacted-provider-access]"),
+      value,
+    );
+    if (presentationTraceValues === undefined) return accessRedacted;
+    const presentationValues = includePresentationFragments
+      ? [presentationTraceValues.exactBlock, ...presentationTraceValues.fragments]
+      : [presentationTraceValues.exactBlock];
+    return presentationValues.reduce(
+      (sanitized, traceValue) => sanitized.split(traceValue).join("[redacted-personal-presentation]"),
+      accessRedacted,
+    );
   }
-  if (Array.isArray(value)) return value.map((child) => sanitizePrimeTraceValue(child, sensitiveValues));
+  if (Array.isArray(value)) return value.map((child) => sanitizePrimeTraceValue(
+    child, sensitiveValues, presentationTraceValues, includePresentationFragments,
+  ));
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.entries(value).flatMap(([key, child]) => (
-    /^(?:endpoint|base[_-]?url)$/i.test(key) ? [] : [[key, sanitizePrimeTraceValue(child, sensitiveValues)]]
+    /^(?:endpoint|base[_-]?url)$/i.test(key) ? [] : [[key, sanitizePrimeTraceValue(
+      child, sensitiveValues, presentationTraceValues, includePresentationFragments,
+    )]]
   )));
 }
 
@@ -660,12 +846,18 @@ function safePrimeChild(
   value: unknown,
   routes: ReadonlyMap<string, HarnessAdmittedModelRoute>,
   sensitiveValues: readonly string[],
+  presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>,
 ): unknown {
   if (!isRecord(value)) return value;
   const allowed = ["id", "parentId", "sessionName", "label", "status", "durationMs", "answerPreview", "toolUseCount", "tokenCount", "recap", "activity", "error"];
   const safe = Object.fromEntries(allowed.flatMap((key) => value[key] === undefined ? [] : [[key, value[key]]]));
   const route = traceRouteForValue(value, routes);
-  return sanitizePrimeTraceValue({ ...safe, ...(route === undefined ? {} : traceRoute(route)) }, sensitiveValues);
+  return sanitizePrimeTraceValue(
+    { ...safe, ...(route === undefined ? {} : traceRoute(route)) },
+    sensitiveValues,
+    presentationTraceValues,
+    true,
+  );
 }
 
 function traceRouteForValue(value: Record<string, unknown>, routes: ReadonlyMap<string, HarnessAdmittedModelRoute>): HarnessAdmittedModelRoute | undefined {
@@ -962,6 +1154,7 @@ function createPrimeAgentModelScope(context: HarnessRunContext, primeAgent: Prim
   const routeByNativeModel = new Map<string, HarnessAdmittedModelRoute>();
   const requestAccessByNativeModel = new Map<string, PrimeAgentRequestAccess>();
   const sensitiveValues = new Set<string>();
+  const presentationTraceValues = personalPresentationTraceValues(context);
   const models = plan.roster.map((route) => {
     const access = bundle.byProviderId[route.providerId];
     if (access === undefined) throw new Error(`prime.agent is missing upfront access for provider ${route.providerId}`);
@@ -1006,6 +1199,7 @@ function createPrimeAgentModelScope(context: HarnessRunContext, primeAgent: Prim
     orchestrator: plan.orchestrator,
     routeByNativeModel,
     sensitiveValues: Object.freeze([...sensitiveValues].filter((value) => value !== "")),
+    presentationTraceValues,
   });
 }
 

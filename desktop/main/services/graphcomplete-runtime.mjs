@@ -371,6 +371,11 @@ export class GraphCompleteRuntimeService {
     return this.harnessHost.host.exportCandidateTrace(productInteractionId, targetDirectory, correlation);
   }
 
+  candidateTracePersonalPresentationVersionId(productInteractionId) {
+    if (!this.harnessHost) return undefined;
+    return this.harnessHost.host.candidateTracePersonalPresentationVersionId(productInteractionId);
+  }
+
   close() {
     this.closing = true;
     this.resolveCloseSignal();

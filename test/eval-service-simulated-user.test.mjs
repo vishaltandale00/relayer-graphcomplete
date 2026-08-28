@@ -15,6 +15,7 @@ import {
 
 import {
   EvalService,
+  evalModelSelectionRequest,
   judgeArtifactEvidenceForExecution,
   judgeArtifactForExecution,
   presentationGradeFromTurns,
@@ -24,6 +25,24 @@ import {
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const directories = [];
 const originalFetch = globalThis.fetch;
+
+it("carries the selected Eval model into every product interaction request", () => {
+  const selected = {
+    familyId: 7,
+    providerId: "codex",
+    modelId: "gpt-5.6-sol",
+    harnessId: "codex-layered-personal-presentation-v1",
+  };
+  expect(evalModelSelectionRequest(selected)).toEqual({
+    modelSelection: {
+      familyId: 7,
+      providerId: "codex",
+      modelId: "gpt-5.6-sol",
+    },
+  });
+  expect(evalModelSelectionRequest(null)).toEqual({});
+  expect(evalModelSelectionRequest(selected, false)).toEqual({});
+});
 
 afterEach(async () => {
   globalThis.fetch = originalFetch;
@@ -70,6 +89,68 @@ describe("EvalService simulated-user result persistence", () => {
       scoreCeiling: 8,
       scoreScaleMaximum: 8,
     });
+  });
+
+  it("omits product model selection for every turn of a configuration-owned harness", async () => {
+    const { directory, stateFile } = await testPaths();
+    const configurationPath = join(directory, "configuration-owned-fixture.yaml");
+    await writeFile(configurationPath, [
+      "schemaVersion: 1",
+      "name: fixture-task-system",
+      "implementation: fixture.task-system",
+      "implementationVersion: 1",
+      "permissionBindings:",
+      "  ask: {}",
+      "  auto: {}",
+      "  full: {}",
+      "executionAccessContracts: [managed-runtime@1]",
+      "settings:",
+      "  model: fixture-owned-model",
+      "",
+    ].join("\n"));
+    const productBodies = [];
+    const interactions = [
+      { id: "interaction-1", sequence: 1, graphNodeId: 1, completionStatus: "accepted", completionOutput: acceptedOutput(), completionError: null, text: "first" },
+      { id: "interaction-2", sequence: 2, graphNodeId: 2, completionStatus: "accepted", completionOutput: acceptedOutput(), completionError: null, text: "second" },
+    ];
+    globalThis.fetch = vi.fn(async (url, options = {}) => {
+      const path = new URL(url).pathname;
+      if (path === "/api/model-settings") {
+        return jsonResponse({
+          defaults: { harnessId: "fixture-task-system", familyId: 7 },
+          harnesses: [{ id: "fixture-task-system", available: true, settings: { model: "fixture-owned-model" } }],
+          providers: [{ id: "openai", adapterId: "openai-api", connected: true, models: [{ id: "test-model", visible: true, available: true }] }],
+          families: [{ id: 7, enabled: true, position: 0, members: [{ position: 0, providerId: "openai", modelId: "test-model" }] }],
+        });
+      }
+      if (path === "/api/threads" && options.method === "POST") {
+        productBodies.push(JSON.parse(options.body));
+        return jsonResponse({ id: "thread-1", rootInteractionId: "interaction-1" });
+      }
+      if (path === "/api/threads/thread-1/interactions" && options.method === "POST") {
+        productBodies.push(JSON.parse(options.body));
+        return jsonResponse({ id: "interaction-2" });
+      }
+      if (path === "/api/threads/thread-1") {
+        return jsonResponse({ id: "thread-1", interactions });
+      }
+      return jsonResponse({ error: `Unexpected fake product request: ${options.method || "GET"} ${path}` }, 404);
+    });
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+    }).open();
+
+    await waitForCompletedRun(service, (await service.createRun({
+      testCaseIds: ["empty-project.task-system.two-turn"],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).id);
+
+    expect(productBodies).toHaveLength(2);
+    expect(productBodies[0]).not.toHaveProperty("modelSelection");
+    expect(productBodies[1]).not.toHaveProperty("modelSelection");
   });
 
   it("bounds the host-authored artifact evidence packet", () => {
@@ -324,6 +405,38 @@ describe("EvalService simulated-user result persistence", () => {
     });
   });
 
+  it("keeps the pinned presentation version when candidate trace export throws", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    globalThis.fetch = fakeAcceptedProduct();
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      candidateTraceRequired: true,
+      candidateTraceAttributionLoader: async () => 90,
+      candidateTraceExporter: async () => {
+        throw new Error("Trace export failed before reaching the trace store.");
+      },
+    }).open();
+
+    const completed = await waitForCompletedRun(
+      service,
+      (await service.createRun({
+        ...simulatedUserSelection(),
+        judgeConfigurationName: "deterministic-graph-contract",
+      })).id,
+    );
+
+    expect(completed.executions[0].turns[0]).toMatchObject({
+      personalPresentationVersionId: 90,
+      candidateTrace: {
+        status: "failed",
+        personalPresentationVersionId: 90,
+        error: "Trace export failed before reaching the trace store.",
+      },
+    });
+  });
+
   it("keeps presentation judging independent when an outcome gate fails", async () => {
     const { stateFile, configurationPath } = await testPaths();
     globalThis.fetch = fakeAcceptedProduct();
@@ -491,6 +604,35 @@ function fakeAcceptedProduct() {
   };
   return vi.fn(async (url, options = {}) => {
     const path = new URL(url).pathname;
+    if (path === "/api/model-settings" && (options.method === undefined || options.method === "GET")) {
+      return jsonResponse({
+        defaults: { harnessId: "fixture-task-system", familyId: 1 },
+        harnesses: [
+          {
+            id: "fixture-task-system",
+            available: true,
+            modelCompatibility: [{ providerId: "codex" }],
+          },
+          {
+            id: "prime-agent-basic",
+            available: true,
+            modelRules: { allow: [{ adapterId: "openai-api", modelIdRegex: ".*" }], deny: [] },
+          },
+        ],
+        providers: [{
+          id: "openai",
+          adapterId: "openai-api",
+          connected: true,
+          models: [{ id: "test-model", visible: true, available: true }],
+        }],
+        families: [{
+          id: 1,
+          enabled: true,
+          position: 0,
+          members: [{ position: 0, providerId: "openai", modelId: "test-model" }],
+        }],
+      });
+    }
     if (path === "/api/threads" && options.method === "POST") {
       return jsonResponse({ id: "thread-1", rootInteractionId: interaction.id });
     }

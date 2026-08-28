@@ -71,6 +71,24 @@ export interface CompletionOutput {
   readonly rootLayer: ResolvedLayer;
 }
 
+export interface AcceptedGraphClosure {
+  readonly nodeId: GraphId;
+  readonly rootAction: GraphAction;
+  readonly rootLayerId: GraphId;
+  readonly layers: readonly ResolvedLayer[];
+}
+
+export interface PersonalPresentationAttachment {
+  readonly interactionNodeId: GraphId;
+  readonly versionInteractionNodeId: GraphId;
+  readonly rootLayerId: GraphId;
+}
+
+export interface ResolvedPersonalPresentation {
+  readonly attachment: PersonalPresentationAttachment;
+  readonly graph: AcceptedGraphClosure;
+}
+
 export interface InteractionContext {
   readonly type: "interaction.context";
   readonly targetNode: InteractionInputNode;

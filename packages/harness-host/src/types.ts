@@ -1,4 +1,4 @@
-import type { CompletionOutput, GraphCapability, GraphId, GraphNode, InteractionInput } from "@relayer/graph-client";
+import type { CompletionOutput, GraphCapability, GraphId, GraphNode, InteractionInput, ResolvedPersonalPresentation } from "@relayer/graph-client";
 import type { HarnessApprovalChannel } from "./approval-coordinator.js";
 
 export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
@@ -167,6 +167,7 @@ export interface HarnessTraceSink {
 
 export interface HarnessCompletionTraceContext {
   readonly productInteractionId: number;
+  readonly personalPresentationVersionId?: number;
 }
 
 export interface HarnessTraceDescriptor {
@@ -181,6 +182,7 @@ export interface HarnessTraceDescriptor {
   readonly truncated?: boolean;
   readonly redactionCount?: number;
   readonly error?: string;
+  readonly personalPresentationVersionId?: number;
 }
 
 export interface HarnessGraphScope {
@@ -192,6 +194,8 @@ export interface HarnessRunContext {
   readonly inputGraph: GraphNode;
   /** Normalized model-visible input resolved from inputGraph; excludes context occurrence authority. */
   readonly interactionInput: InteractionInput;
+  /** Control-attached hidden graph resolved from this exact interaction pointer. */
+  readonly personalPresentation?: ResolvedPersonalPresentation;
   readonly graph: HarnessGraphScope;
   readonly approvals: HarnessApprovalChannel;
   /** Immutable admitted family plan. Its orchestrator is also exposed through model. */

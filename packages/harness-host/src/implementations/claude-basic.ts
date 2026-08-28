@@ -16,6 +16,7 @@ import {
   type ClaudeBasicBrowserDependencies,
   type ClaudeBrowserSdk,
 } from "./claude-basic-browser.js";
+import { personalPresentationTraceValues } from "./personal-presentation-guidance.js";
 
 export const CLAUDE_BASIC_KEY = "claude.basic";
 
@@ -69,6 +70,7 @@ export class ClaudeBasicHarness implements Harness {
   private readonly clientModuleUrl: string;
   private sessionId: string | undefined;
   private sessionProviderDefinitionId: string | undefined;
+  private sessionPersonalPresentationVersionId: number | null | undefined;
 
   constructor(
     private readonly context: HarnessFactoryContext,
@@ -77,12 +79,21 @@ export class ClaudeBasicHarness implements Harness {
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
     const savedSessionId = context.savedState?.claudeSessionId;
     const savedProviderDefinitionId = context.savedState?.claudeSessionProviderDefinitionId;
-    // State written before provider-scoped Claude sessions cannot prove which
-    // credentials created the session. Ignore it instead of risking a resume
-    // through a different provider definition.
-    if (typeof savedSessionId === "string" && typeof savedProviderDefinitionId === "string") {
+    const savedPresentationVersionId = context.savedState?.claudeSessionPersonalPresentationVersionId;
+    const validSavedPresentationVersion = savedPresentationVersionId === undefined
+      || savedPresentationVersionId === null
+      || (typeof savedPresentationVersionId === "number"
+        && Number.isSafeInteger(savedPresentationVersionId)
+        && savedPresentationVersionId > 0);
+    // State without a provider definition cannot prove which credentials created
+    // the session. Provider-scoped legacy state is loaded only so the first turn
+    // can detect its unknown presentation version and rotate the native session.
+    if (typeof savedSessionId === "string"
+      && typeof savedProviderDefinitionId === "string"
+      && validSavedPresentationVersion) {
       this.sessionId = savedSessionId;
       this.sessionProviderDefinitionId = savedProviderDefinitionId;
+      this.sessionPersonalPresentationVersionId = savedPresentationVersionId;
     }
   }
 
@@ -97,18 +108,33 @@ export class ClaudeBasicHarness implements Harness {
       throw new Error("claude.basic requires execution access for the selected provider definition");
     }
     const providerDefinitionId = context.model.providerId;
+    const personalPresentationVersionId = context.personalPresentation?.attachment.versionInteractionNodeId ?? null;
     if (this.sessionProviderDefinitionId !== providerDefinitionId) {
       this.sessionId = undefined;
       this.sessionProviderDefinitionId = undefined;
+      this.sessionPersonalPresentationVersionId = undefined;
+    }
+    if (this.sessionId !== undefined
+      && this.sessionPersonalPresentationVersionId !== personalPresentationVersionId) {
+      this.sessionId = undefined;
+      this.sessionProviderDefinitionId = undefined;
+      this.sessionPersonalPresentationVersionId = undefined;
     }
     const graph = context.graph.acquireCapability();
     const prompt = this.prompt(context);
-    await context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
+    await context.trace.emit({
+      type: "prompt",
+      data: { text: this.prompt(context, false), interactionNodeId: context.inputGraph.id },
+    });
     const result = await this.run(prompt, context.model.modelId, graph, context.access, signal);
-    await context.trace.emit({ type: "message", data: { role: "assistant", text: result.text } });
+    await context.trace.emit({
+      type: "message",
+      data: { role: "assistant", text: redactPersonalPresentationResult(context, result.text) },
+    });
     if (result.sessionId) {
       this.sessionId = result.sessionId;
       this.sessionProviderDefinitionId = providerDefinitionId;
+      this.sessionPersonalPresentationVersionId = personalPresentationVersionId;
     }
   }
 
@@ -120,11 +146,14 @@ export class ClaudeBasicHarness implements Harness {
   }
 
   state(): HarnessSessionState {
-    return this.sessionId === undefined || this.sessionProviderDefinitionId === undefined
+    return this.sessionId === undefined
+      || this.sessionProviderDefinitionId === undefined
+      || this.sessionPersonalPresentationVersionId === undefined
       ? {}
       : {
           claudeSessionId: this.sessionId,
           claudeSessionProviderDefinitionId: this.sessionProviderDefinitionId,
+          claudeSessionPersonalPresentationVersionId: this.sessionPersonalPresentationVersionId,
         };
   }
 
@@ -176,9 +205,23 @@ export class ClaudeBasicHarness implements Harness {
     }
   }
 
-  private prompt(context: HarnessRunContext): string {
-    return buildLayeredNavigationPrompt(context, this.clientModuleUrl);
+  private prompt(context: HarnessRunContext, includePersonalPresentation = true): string {
+    return buildLayeredNavigationPrompt(
+      context,
+      this.clientModuleUrl,
+      undefined,
+      includePersonalPresentation,
+    );
   }
+}
+
+function redactPersonalPresentationResult(context: HarnessRunContext, text: string): string {
+  const traceValues = personalPresentationTraceValues(context);
+  if (traceValues === undefined) return text;
+  return [traceValues.exactBlock, ...traceValues.fragments].reduce(
+    (sanitized, value) => sanitized.split(value).join("[redacted-personal-presentation]"),
+    text,
+  );
 }
 
 export function claudePermissionMode(value: unknown): "default" | "acceptEdits" | "bypassPermissions" {

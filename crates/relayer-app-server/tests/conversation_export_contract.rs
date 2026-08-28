@@ -267,6 +267,11 @@ fn serializes_exactly_header_and_turn_records_and_round_trips() {
             .collect::<Vec<ConversationExportRecord>>(),
         records
     );
+    assert!(lines.iter().all(|line| {
+        !line.contains("personalPresentation")
+            && !line.contains("personal-presentation")
+            && !line.contains("Decision-useful center")
+    }));
     assert!(
         serde_json::from_str::<ConversationExportRecord>(r#"{"recordType":"artifact"}"#).is_err()
     );

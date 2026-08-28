@@ -12,7 +12,7 @@ const THREAD_COLUMNS: &str = r#"
     FROM threads t
 "#;
 
-const VISIBLE_THREAD: &str = "(t.conversation_import_id IS NULL OR EXISTS(SELECT 1 FROM conversation_imports ci WHERE ci.id=t.conversation_import_id AND ci.state='published'))";
+const VISIBLE_THREAD: &str = "t.surface='conversation' AND (t.conversation_import_id IS NULL OR EXISTS(SELECT 1 FROM conversation_imports ci WHERE ci.id=t.conversation_import_id AND ci.state='published'))";
 
 impl SqliteProductStore {
     pub(crate) async fn list_threads(&self) -> Result<Vec<Thread>, StorageError> {
@@ -25,9 +25,19 @@ impl SqliteProductStore {
         fetch_thread(&mut connection, id).await
     }
 
+    #[cfg(test)]
     pub(crate) async fn insert_thread_with_initial_interaction(
         &self,
         record: NewThreadRecord<'_>,
+    ) -> Result<Thread, StorageError> {
+        self.insert_thread_with_initial_interaction_and_personal_presentation(record, None)
+            .await
+    }
+
+    pub(crate) async fn insert_thread_with_initial_interaction_and_personal_presentation(
+        &self,
+        record: NewThreadRecord<'_>,
+        personal_presentation_version_key: Option<&str>,
     ) -> Result<Thread, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some(selection) = record.model_selection {
@@ -40,13 +50,14 @@ impl SqliteProductStore {
             catalog::validate_model_selection_on(&mut transaction, &command).await?;
         }
         let thread = sqlx::query(
-            "INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (?1,?2,?3,?3,?4,?5)",
+            "INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id,personal_presentation_version_key) VALUES (?1,?2,?3,?3,?4,?5,?6)",
         )
         .bind(record.title)
         .bind(record.project_id.map(ProjectId::value))
         .bind(record.timestamp)
         .bind(record.harness_configuration_name)
         .bind(record.permission_profile_id)
+        .bind(personal_presentation_version_key)
         .execute(&mut *transaction)
         .await?;
         let thread_id = ThreadId::from_database(thread.last_insert_rowid());

@@ -11,7 +11,129 @@ pub(crate) async fn run(pool: &SqlitePool) -> Result<(), GraphError> {
 
 #[cfg(test)]
 mod tests {
-    use sqlx::{Connection, SqliteConnection};
+    use super::MIGRATOR;
+    use crate::*;
+    use sqlx::{Connection, Row, SqliteConnection, migrate::Migrator, sqlite::SqlitePoolOptions};
+    use std::borrow::Cow;
+
+    #[tokio::test]
+    async fn schema_9_graph_reopens_and_accepts_a_personal_presentation_attachment() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let url = format!("sqlite://{}", file.path().display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        let pre_personal_presentation = Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version <= 9)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        };
+        pre_personal_presentation.run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO nodes(id,project_id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key,input_identity,input_digest) VALUES (1,NULL,1,'user-interaction','user','Legacy','Legacy interaction','accepted',NULL,NULL,'legacy-1','sha256:legacy')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        let database = GraphDatabase::open(file.path()).await.unwrap();
+        let mut connection = database.storage.acquire().await.unwrap();
+        let legacy_title: String = sqlx::query("SELECT title FROM nodes WHERE id=1")
+            .fetch_one(&mut *connection)
+            .await
+            .unwrap()
+            .get("title");
+        assert_eq!(legacy_title, "Legacy");
+        drop(connection);
+
+        let version_text = "Personal presentation version V1";
+        let version_digest = interaction_input_digest(version_text, &[]).unwrap();
+        let version = database
+            .create_personal_presentation_interaction(
+                version_text,
+                "relayer.personal-presentation:migration-v1",
+                &version_digest,
+            )
+            .await
+            .unwrap();
+        let writer = database.writer_for_subgraph(version.id).await.unwrap();
+        let preference = writer
+            .submit_node(&NodeDraft {
+                client_key: "decision-useful-center".into(),
+                kind: "presentation-preference".into(),
+                icon: "compass".into(),
+                title: "Decision-useful center".into(),
+                detail: "Foreground the conclusion.".into(),
+            })
+            .await
+            .unwrap();
+        let root = writer
+            .submit_layer(&LayerDraft {
+                client_key: "root".into(),
+                nodes: vec![preference.id],
+                edges: vec![],
+                layout: Some(LayerLayout::v1(vec![NodePlacement {
+                    node_id: preference.id,
+                    x: 0.5,
+                    y: 0.5,
+                }])),
+                size_justification: None,
+            })
+            .await
+            .unwrap();
+        writer
+            .add_action(&ActionDraft {
+                client_key: "response".into(),
+                source_node_id: version.id,
+                source_layer_id: None,
+                kind: ActionKind::Navigate,
+                relation: Some(NavigateRelation::Expand),
+                label: "Response".into(),
+                variant: ActionVariant::default(),
+                icon: None,
+                description: None,
+                target_layer_id: Some(root.id),
+                interaction_text: None,
+            })
+            .await
+            .unwrap();
+        writer.complete(version.id).await.unwrap();
+        database
+            .publish_personal_presentation_version(version.id)
+            .await
+            .unwrap();
+        let target = database
+            .create_interaction(None, ThreadId::new(2).unwrap(), "Current interaction")
+            .await
+            .unwrap();
+        let attachment = database
+            .attach_personal_presentation(target.id, version.id)
+            .await
+            .unwrap();
+        database.storage.close().await;
+
+        let reopened = GraphDatabase::open(file.path()).await.unwrap();
+        let mut connection = reopened.storage.acquire().await.unwrap();
+        let preserved: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes WHERE id=1")
+            .fetch_one(&mut *connection)
+            .await
+            .unwrap();
+        assert_eq!(preserved, 1);
+        drop(connection);
+        let resolved = reopened
+            .personal_presentation_attachment(target.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.attachment, attachment);
+        assert_eq!(resolved.graph.root_layer_id, root.id);
+    }
 
     #[tokio::test]
     async fn action_presentation_migration_defaults_existing_actions_to_pill() {

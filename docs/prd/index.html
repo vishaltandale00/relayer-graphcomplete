@@ -1915,7 +1915,27 @@ settings:
 <h3>4.2 Result states</h3>
 <p>Each Complete call ends in one explicit state: accepted, stopped, or failed. An accepted result contains the resolved first layer. A stopped or failed result contains a retry decision and a short user-facing message.</p>
 <p>A model turn ending is not acceptance. Only <code>graph.submit(interactionNode)</code> can accept the response graph.</p>
-<h3>4.3 Current proof boundary</h3>
+<h3>4.3 Personal presentation profile</h3>
+<p>Relayer owns one hidden, versioned personal presentation graph that guides how supported harnesses author response graphs. This guidance is a preference, not a mandatory output schema. Explicit user instructions take precedence. Graph integrity remains deterministic, and a flat accepted answer remains valid.</p>
+<p>Each version is an ordinary immutable accepted GraphComplete completion in one dedicated product-owned profile thread. Neutral V0 contains no renderable preference. Active V1 contains exactly two <code>presentation-preference</code> nodes with authored layout and their ordinary graph relationship:</p>
+<ul>
+<li><strong>Decision-useful center:</strong> foreground the conclusion or current status, the reasoning that materially affects it, and the most important tradeoffs or limitations.</li>
+<li><strong>Adaptive progressive disclosure:</strong> keep information central when it is necessary for immediate understanding. Use graph actions when supporting evidence, implementation detail, or secondary context materially improves understanding or helps the user proceed. Do not add branches that repeat or decorate the central explanation.</li>
+</ul>
+<p>Interaction creation atomically pins one published, non-retired version through a control-owned attachment. The attachment references the accepted profile completion rather than copying it. Preparation, retry, recovery, and resumed provider sessions reuse the stored pin. Changing the active version affects only interactions created afterward. Invalid, missing, retired, mismatched, duplicate, or cross-scope versions fail before provider execution. Historical interactions without an attachment remain readable.</p>
+<p>The harness deterministically renders the pinned graph after generic GraphComplete guidance and before the task input. The root and provider-native children that can author graph content receive the same rendered guidance; unrelated delegates do not. Model and provider capabilities cannot create, replace, remove, or mutate the attachment or published preference graph.</p>
+<p>The attachment is not a response edge, action, context occurrence, or accepted response record. It never enters completion closure, root-action counting, graph navigation, visible topology, Node Details, ordinary history, or conversation export. Execution traces and Eval artifacts retain only the pinned version interaction ID. V0 and V1 use the existing terse case, layered Codex configuration, matrix, artifact format, production renderer, and screenshot-grounded presentation judge. They add no pairwise judge, new metric, layer-count gate, or paid default test.</p>
+<h4>Personal presentation verification checkpoints</h4>
+<ul>
+<li><strong>PPG-001 — graph authority and integrity:</strong> graph-core migration, publication, attachment, immutability, scope, and capability tests exercise the Rust storage and control seams through <code>npm run check</code>.</li>
+<li><strong>PPG-002 — product pinning and recovery:</strong> product persistence and runtime tests cover atomic active/explicit selection, idempotent preparation, later activation, retry, restart, and provider-session continuity through <code>npm run check</code>.</li>
+<li><strong>PPG-003 — harness guidance:</strong> renderer-ordering and Codex/Claude/Prime propagation tests cover V0 neutrality, exact V1 guidance, and root/native-child delivery. They cover explicit-null removal when a resumed session changes to V0. Run them through <code>npm run check</code>.</li>
+<li><strong>PPG-004 — hidden surfaces and attribution:</strong> completion, export, trace, artifact, and renderer-contract tests prove that preference infrastructure stays hidden. They keep the version ID attributable. Run them through <code>npm run check</code>.</li>
+<li><strong>PPG-005 — controlled visual comparison:</strong> the opt-in <code>RELAYER_EVAL_AUTORUN_PERSONAL_PRESENTATION=1</code> Relayer Eval run compares V0 and V1. It holds every non-preference input constant and records both existing presentation judgments.</li>
+<li><strong>PPG-006 — active product path:</strong> after reviewing PPG-005, run the opt-in product-default Eval on the exact reviewed commit. It must show a V1-pinned accepted graph. No preference attachment, version, prompt, graph record, badge, or control may appear in the ordinary workspace.</li>
+</ul>
+<p><strong>Required assembled verification:</strong> run <code>npm run check</code> and <code>npm run build</code>. Paid live evaluation remains opt-in and is required only for PPG-005 and PPG-006 evidence, never for the default suite.</p>
+<h3>4.4 Current proof boundary</h3>
 <ul>
 <li><strong>Implemented:</strong> Electron starts the Rust services and persistent harness host. The app server creates interactions and persists terminal results.</li>
 <li><strong>Deterministic product proof:</strong> one Electron smoke accepts and renders a graph, exercises four turns, restores navigation, and opens read-only Eval review.</li>

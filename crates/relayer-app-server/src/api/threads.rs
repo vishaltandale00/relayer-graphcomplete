@@ -237,6 +237,12 @@ pub(super) async fn create(
                 .product
                 .harness_uses_configuration_model(&harness_configuration_name)
                 .await?);
+    let personal_presentation_version_key = match state.runtime.as_ref() {
+        Some(runtime) if runtime.supports_personal_presentation() => runtime
+            .personal_presentation_version_key(&harness_configuration_name)?
+            .map(str::to_owned),
+        _ => None,
+    };
     if let Some(selection) = model_selection.as_ref() {
         state
             .product
@@ -250,6 +256,7 @@ pub(super) async fn create(
             project_id,
             initial_message: request.initial_message,
             harness_configuration_name,
+            personal_presentation_version_key,
             permission_profile_id,
             model_selection,
             allow_unselected_model,
@@ -1439,6 +1446,16 @@ async fn prepare_and_claim_interaction(
             },
         );
     let durable_input = state.product.interaction_input(interaction.id).await?;
+    let personal_presentation = if runtime.supports_personal_presentation() {
+        state
+            .product
+            .prepare_personal_presentation_pin(interaction.id, None)
+            .await?
+            .as_ref()
+            .map(crate::runtime::PersonalPresentationExecution::from)
+    } else {
+        None
+    };
     let command = CompleteInteraction {
         project_id: thread.project_id.map(ProjectId::value),
         product_interaction_id: interaction.id.value(),
@@ -1464,6 +1481,7 @@ async fn prepare_and_claim_interaction(
             .as_ref()
             .map(|input| input.contexts.as_slice())
             .unwrap_or(&[]),
+        personal_presentation: personal_presentation.as_ref(),
     };
     let mut binding_attempt = 0;
     let prepared = loop {
