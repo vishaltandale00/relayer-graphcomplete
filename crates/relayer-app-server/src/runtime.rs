@@ -1205,7 +1205,7 @@ impl RuntimeClient {
                     "inputIdentity": format!("relayer.personal-presentation:{version_key}"),
                     "inputDigest": digest,
                     "contexts": [],
-                    "mintCapability": true,
+                    "mintCapability": false,
                     "personalPresentationProfile": true,
                 }),
                 &self.graph_control_token,
@@ -1214,20 +1214,21 @@ impl RuntimeClient {
             )
             .await?;
         let node_id = created.node.id;
-        let graph_token = created.graph_token;
+        // An already materialized version is an immutable accepted completion. Reuse its stored
+        // materialization without activating execution authority on a terminal completion.
+        if let Some(output) = self.completion_output(node_id).await? {
+            let closure = self.accepted_graph_closure(node_id).await?;
+            self.publish_personal_presentation_version(node_id).await?;
+            return Ok(MaterializedPersonalPresentationVersion {
+                interaction_node_id: node_id,
+                root_layer_id: closure.root_layer_id.value(),
+                output,
+                #[cfg(test)]
+                closure,
+            });
+        }
+        let graph_token = self.mint_capability(node_id).await?;
         let operation = async {
-            if let Some(output) = self.completion_output(node_id).await? {
-                let closure = self.accepted_graph_closure(node_id).await?;
-                self.publish_personal_presentation_version(node_id).await?;
-                return Ok(MaterializedPersonalPresentationVersion {
-                    interaction_node_id: node_id,
-                    root_layer_id: closure.root_layer_id.value(),
-                    output,
-                    #[cfg(test)]
-                    closure,
-                });
-            }
-
             let mut nodes = Vec::with_capacity(definition.nodes.len());
             for node in definition.nodes {
                 let value = self
@@ -1609,6 +1610,18 @@ impl RuntimeClient {
             .send()
             .await?;
         response_json(response, StatusCode::OK).await
+    }
+
+    async fn mint_capability(&self, node_id: i64) -> Result<String, RuntimeError> {
+        let response: RemintCapabilityResponse = self
+            .post(
+                self.graph_url.join("api/control/capabilities")?,
+                &serde_json::json!({"nodeId": node_id}),
+                &self.graph_control_token,
+                StatusCode::OK,
+            )
+            .await?;
+        Ok(response.graph_token)
     }
 
     async fn revoke_capability(&self, graph_token: &str) -> Result<(), RuntimeError> {
