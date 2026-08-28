@@ -150,4 +150,26 @@ describe("provider onboarding renderer state", () => {
     expect(onboardingContinued).toBe(true);
     expect(state.current()).toBeNull();
   });
+
+  it("ignores a duplicate Connect submission without replacing the first winner", async () => {
+    let resolveFirst;
+    const firstResponse = new Promise((resolve) => { resolveFirst = resolve; });
+    const state = createProviderConnectionCancellationState();
+    const submit = (connectionId) => {
+      if (!state.begin(connectionId)) return Promise.resolve("ignored");
+      return firstResponse.then(() => {
+        if (!state.matches(connectionId)) return "discarded";
+        state.complete(connectionId);
+        return "continued";
+      });
+    };
+
+    const first = submit("connection-1");
+    await expect(submit("connection-2")).resolves.toBe("ignored");
+    expect(state.current()).toBe("connection-1");
+    resolveFirst();
+
+    await expect(first).resolves.toBe("continued");
+    expect(state.current()).toBeNull();
+  });
 });

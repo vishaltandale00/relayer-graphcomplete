@@ -72,7 +72,10 @@ export function createProviderConnectionCancellationState() {
   let connectionId = null;
   return Object.freeze({
     begin(value) {
-      connectionId = String(value || "");
+      const next = String(value || "");
+      if (connectionId !== null) return connectionId === next;
+      connectionId = next;
+      return true;
     },
     current() {
       return connectionId;

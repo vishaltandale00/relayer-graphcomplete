@@ -236,10 +236,10 @@ async function connectSelectedProvider(event) {
   connectionValues = currentFormValues();
   const errors = providerConnectionErrors(selectedDescriptor, connectionValues, providerStatus.definitions);
   if (Object.keys(errors).length) return showProviderForm(selectedDescriptor.adapterId, { showErrors: true });
+  const connectionId = crypto.randomUUID().toLowerCase();
+  if (!connectionCancellation.begin(connectionId)) return;
   setBusy(true);
   setStatus(`Preparing ${selectedDescriptor.label} runtime and connecting…`);
-  const connectionId = crypto.randomUUID().toLowerCase();
-  connectionCancellation.begin(connectionId);
   try {
     let result = await desktop.providers.connect(providerCreationPayload(
       selectedDescriptor,
