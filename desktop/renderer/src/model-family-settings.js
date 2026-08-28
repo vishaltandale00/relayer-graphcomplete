@@ -3,6 +3,7 @@ import {
   copySystemFamily,
   createFamilyVisibilityGate,
   createModelFamilyDraft,
+  defaultHarnessIsSelectable,
   defaultHarnessError,
   MAX_MODELS_PER_FAMILY,
   modelMember,
@@ -171,7 +172,7 @@ export async function refreshModelSettings({ preserveIndex = true, preserveEdit 
 function harnessOptions() {
   const selectable = usableDefaultHarnesses(settings);
   const selected = settings.harnesses.find((harness) => harness.id === settings.defaults.harnessId);
-  const invalidDefault = selected?.usableNow === true
+  const invalidDefault = defaultHarnessIsSelectable(settings, settings.defaults.harnessId)
     ? ""
     : `<option value="${escapeHtmlAttribute(settings.defaults.harnessId)}" selected disabled>${escapeHtml(selected?.label ?? settings.defaults.harnessId)} (unavailable)</option>`;
   return `${invalidDefault}${selectable.map((harness) => {

@@ -174,13 +174,25 @@ export function defaultHarnessError(settings) {
     && !harnessUsesConfigurationModel(settings, selected.id)) {
     return "No currently connected provider and eligible model can use this harness.";
   }
+  if (!defaultHarnessIsSelectable(settings, selected.id)) {
+    return "No eligible model in the default family can use this harness.";
+  }
   return null;
 }
 
 export function usableDefaultHarnesses(settings) {
-  return settings.harnesses.filter((harness) => (
-    harness.usableNow === true || harnessUsesConfigurationModel(settings, harness.id)
-  ));
+  return settings.harnesses.filter((harness) => defaultHarnessIsSelectable(settings, harness.id));
+}
+
+export function defaultHarnessIsSelectable(settings, harnessId) {
+  const harness = settings.harnesses.find((item) => item.id === harnessId);
+  if (!harness) return false;
+  if (harnessUsesConfigurationModel(settings, harness.id)) return true;
+  if (harness.usableNow !== true) return false;
+  const familyId = settings.defaults?.familyId;
+  return familyId == null || (harness.usableFamilyIds ?? []).some(
+    (usableFamilyId) => String(usableFamilyId) === String(familyId),
+  );
 }
 
 export function availableModels(providerCatalog, providerId) {
