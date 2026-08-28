@@ -515,6 +515,99 @@ async fn accept_single_node(
 }
 
 #[tokio::test]
+async fn personal_presentation_attachment_is_control_owned_one_shot_and_hidden_from_completion() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let version = database
+        .create_interaction(None, thread(900), "Personal presentation version V1")
+        .await
+        .unwrap();
+    let version_writer = database.writer_for_subgraph(version.id).await.unwrap();
+    let preference = version_writer
+        .submit_node(&NodeDraft {
+            client_key: "decision-useful-center".into(),
+            kind: "presentation-preference".into(),
+            icon: "compass".into(),
+            title: "Decision-useful center".into(),
+            detail: "Foreground the conclusion or current status.".into(),
+        })
+        .await
+        .unwrap();
+    let preference_root = accept_single_node(&version_writer, version.clone(), preference).await;
+    database
+        .publish_personal_presentation_version(thread(900), version.id)
+        .await
+        .unwrap();
+
+    let target = database
+        .create_interaction(Some(project(1)), thread(1), "Explain the queue")
+        .await
+        .unwrap();
+    let first = database
+        .attach_personal_presentation(target.id, version.id)
+        .await
+        .unwrap();
+    let replay = database
+        .attach_personal_presentation(target.id, version.id)
+        .await
+        .unwrap();
+    assert_eq!(first, replay);
+    assert_eq!(first.interaction_node_id, target.id);
+    assert_eq!(first.version_interaction_node_id, version.id);
+    assert_eq!(first.root_layer_id, preference_root.id);
+
+    let resolved = database
+        .personal_presentation_attachment(target.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(resolved.attachment, first);
+    assert_eq!(resolved.graph.root_layer_id, preference_root.id);
+    assert_eq!(
+        resolved.graph.layers[0].nodes[0].kind,
+        "presentation-preference"
+    );
+
+    let target_writer = database.writer_for_subgraph(target.id).await.unwrap();
+    let answer = node(&target_writer, "answer").await;
+    accept_single_node(&target_writer, target.clone(), answer).await;
+    let response = database
+        .accepted_graph_closure(target.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        response
+            .layers
+            .iter()
+            .all(|layer| layer.layer.id != preference_root.id)
+    );
+
+    let other_version = database
+        .create_interaction(None, thread(900), "Personal presentation version V2")
+        .await
+        .unwrap();
+    let other_writer = database
+        .writer_for_subgraph(other_version.id)
+        .await
+        .unwrap();
+    let other_preference = node(&other_writer, "other-preference").await;
+    accept_single_node(&other_writer, other_version.clone(), other_preference).await;
+    database
+        .publish_personal_presentation_version(thread(900), other_version.id)
+        .await
+        .unwrap();
+    let replacement = database
+        .attach_personal_presentation(target.id, other_version.id)
+        .await
+        .unwrap_err();
+    assert!(
+        replacement
+            .to_string()
+            .contains("already pins another personal presentation version")
+    );
+}
+
+#[tokio::test]
 async fn interaction_context_is_control_authored_ordered_and_excluded_from_completion() {
     let database = GraphDatabase::in_memory().await.unwrap();
     let source = database

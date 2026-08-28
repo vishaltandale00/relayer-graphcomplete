@@ -53,6 +53,18 @@ pub fn router(state: ServerState) -> Router {
         )
         .route("/api/control/interactions/{id}/output", get(control_output))
         .route(
+            "/api/control/personal-presentation",
+            get(personal_presentation_contract),
+        )
+        .route(
+            "/api/control/personal-presentation/versions",
+            post(publish_personal_presentation_version),
+        )
+        .route(
+            "/api/control/interactions/{id}/personal-presentation",
+            get(control_personal_presentation).post(attach_personal_presentation),
+        )
+        .route(
             "/api/control/interactions/{id}/layers/{layer_id}",
             get(control_layer),
         )
@@ -92,6 +104,10 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/graph/nodes/{id}", get(get_node))
         .route("/api/graph/nodes/{id}/neighbors", get(neighbors))
         .route("/api/graph/input", get(interaction_input))
+        .route(
+            "/api/graph/personal-presentation",
+            get(graph_personal_presentation),
+        )
         .route("/api/graph/edges", post(create_edge))
         .route("/api/graph/layers", post(submit_layer))
         .route("/api/graph/layers/{id}", get(get_layer))
@@ -170,6 +186,78 @@ async fn accepted_closure(
         )
     })?;
     Ok(Json(closure))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AttachPersonalPresentationRequest {
+    version_interaction_node_id: NodeId,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PublishPersonalPresentationVersionRequest {
+    profile_thread_id: ThreadId,
+    version_interaction_node_id: NodeId,
+}
+
+async fn personal_presentation_contract(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(json!({"schemaVersion": 1})))
+}
+
+async fn publish_personal_presentation_version(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<PublishPersonalPresentationVersionRequest>,
+) -> Result<Json<relayer_graph_core::PublishedPersonalPresentationVersion>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .publish_personal_presentation_version(
+                input.profile_thread_id,
+                input.version_interaction_node_id,
+            )
+            .await?,
+    ))
+}
+
+async fn attach_personal_presentation(
+    State(state): State<ServerState>,
+    Path(id): Path<NodeId>,
+    headers: HeaderMap,
+    Json(input): Json<AttachPersonalPresentationRequest>,
+) -> Result<Json<relayer_graph_core::PersonalPresentationAttachment>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .attach_personal_presentation(id, input.version_interaction_node_id)
+            .await?,
+    ))
+}
+
+async fn control_personal_presentation(
+    State(state): State<ServerState>,
+    Path(id): Path<NodeId>,
+    headers: HeaderMap,
+) -> Result<Json<relayer_graph_core::ResolvedPersonalPresentation>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    state
+        .graph
+        .personal_presentation_attachment(id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                json!({"error":{"code":"personal_presentation_not_attached","message":"This interaction has no personal presentation attachment."}}),
+            )
+        })
 }
 
 async fn health() -> Json<Value> {
@@ -556,6 +644,23 @@ async fn interaction_input(
             .interaction_input()
             .await?,
     ))
+}
+async fn graph_personal_presentation(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<relayer_graph_core::ResolvedPersonalPresentation>, ApiError> {
+    let node_id = session(&state, &headers)?;
+    state
+        .graph
+        .personal_presentation_attachment(node_id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                json!({"error":{"code":"personal_presentation_not_attached","message":"This interaction has no personal presentation attachment."}}),
+            )
+        })
 }
 async fn create_edge(
     State(state): State<ServerState>,
@@ -1029,6 +1134,129 @@ mod tests {
             x: 0.5,
             y: 0.5,
         }]))
+    }
+
+    #[tokio::test]
+    async fn personal_presentation_attachment_requires_control_authority_and_resolves_graph() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let version = graph
+            .create_interaction(
+                None,
+                ThreadId::new(900).unwrap(),
+                "Personal presentation V1",
+            )
+            .await
+            .unwrap();
+        let version_writer = graph.writer_for_subgraph(version.id).await.unwrap();
+        let preference = version_writer
+            .submit_node(&NodeDraft {
+                client_key: "decision-useful-center".into(),
+                kind: "presentation-preference".into(),
+                icon: "compass".into(),
+                title: "Decision-useful center".into(),
+                detail: "Foreground the conclusion or current status.".into(),
+            })
+            .await
+            .unwrap();
+        let layer = version_writer
+            .submit_layer(&LayerDraft {
+                client_key: "root".into(),
+                nodes: vec![preference.id],
+                edges: vec![],
+                layout: authored_layout(preference.id),
+                size_justification: None,
+            })
+            .await
+            .unwrap();
+        version_writer
+            .add_action(&ActionDraft {
+                client_key: "response".into(),
+                source_node_id: version.id,
+                source_layer_id: None,
+                kind: ActionKind::Navigate,
+                relation: Some(relayer_graph_core::NavigateRelation::Expand),
+                label: "Personal presentation".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: Some(layer.id),
+                interaction_text: None,
+            })
+            .await
+            .unwrap();
+        version_writer.complete(version.id).await.unwrap();
+        graph
+            .publish_personal_presentation_version(ThreadId::new(900).unwrap(), version.id)
+            .await
+            .unwrap();
+        let target = graph
+            .create_interaction(ProjectId::new(41), ThreadId::new(73).unwrap(), "Question")
+            .await
+            .unwrap();
+        let app = router(ServerState::new(graph, "control"));
+        let body = json!({"versionInteractionNodeId": version.id}).to_string();
+
+        let denied = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/control/interactions/{}/personal-presentation",
+                        target.id.value()
+                    ))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+        let attached = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/control/interactions/{}/personal-presentation",
+                        target.id.value()
+                    ))
+                    .header("authorization", "Bearer control")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(attached.status(), StatusCode::OK);
+
+        let resolved = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/control/interactions/{}/personal-presentation",
+                        target.id.value()
+                    ))
+                    .header("authorization", "Bearer control")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resolved.status(), StatusCode::OK);
+        let resolved: Value =
+            serde_json::from_slice(&to_bytes(resolved.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            resolved["attachment"]["versionInteractionNodeId"],
+            version.id.value()
+        );
+        assert_eq!(resolved["graph"]["rootLayerId"], layer.id.value());
+        assert_eq!(
+            resolved["graph"]["layers"][0]["nodes"][0]["kind"],
+            "presentation-preference"
+        );
     }
 
     #[tokio::test]

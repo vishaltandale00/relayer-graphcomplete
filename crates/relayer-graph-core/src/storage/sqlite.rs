@@ -5,6 +5,7 @@ pub(crate) mod edges;
 pub(crate) mod layers;
 pub(crate) mod migrations;
 pub(crate) mod nodes;
+pub(crate) mod personal_presentation;
 
 use std::{path::Path, str::FromStr, time::Duration};
 

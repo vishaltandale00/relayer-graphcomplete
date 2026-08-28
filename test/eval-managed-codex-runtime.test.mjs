@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createEvalManagedCodexRuntime } from "../desktop/eval-main/managed-codex-runtime.mjs";
+import {
+  createEvalCodexExecutionLease,
+  createEvalManagedCodexRuntime,
+} from "../desktop/eval-main/managed-codex-runtime.mjs";
 import {
   managedCodexHelperDirectory,
   withManagedCodexPath,
@@ -66,6 +69,25 @@ describe("Eval managed Codex runtime", () => {
     expect(await runtime.resolve()).toBe(first);
     expect(ensure).toHaveBeenCalledOnce();
     expect(first.environment.PATH).toBe("/managed/installations/current/vendor/target/codex-path:/usr/bin");
+  });
+
+  it("leases exact Codex managed-runtime access to the Eval harness broker", async () => {
+    const resolveRuntime = vi.fn(async () => ({
+      executable: "/managed/codex",
+      environment: Object.freeze({ PATH: "/managed/codex-path:/usr/bin" }),
+    }));
+    const acquire = createEvalCodexExecutionLease(resolveRuntime);
+    const lease = await acquire("codex");
+    expect(lease).toMatchObject({
+      definition: { id: "codex", adapterId: "codex-subscription", accessContract: "managed-runtime@1" },
+      descriptor: { adapterId: "codex-subscription", accessContract: "managed-runtime@1", implementationVersion: "1" },
+    });
+    await expect(lease.runtime.executionAccess()).resolves.toEqual({
+      kind: "managed-runtime",
+      environment: { PATH: "/managed/codex-path:/usr/bin" },
+    });
+    await expect(acquire("other")).rejects.toThrow("no execution adapter");
+    await expect(lease.release()).resolves.toBeUndefined();
   });
 
   it("normalizes and deduplicates the helper PATH", () => {

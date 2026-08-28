@@ -119,6 +119,23 @@ async fn reconcile_interrupted_interaction(
                     source_action_id,
                 }
             });
+        let personal_presentation = if runtime.supports_personal_presentation() {
+            let requested = runtime
+                .personal_presentation_version_key(&thread.harness_configuration_name)
+                .map_err(StartupReconciliationError::from_runtime)?;
+            Some(crate::runtime::PersonalPresentationExecution::from(
+                &storage
+                    .prepare_personal_presentation_pin(
+                        interaction.id,
+                        requested,
+                        &startup_timestamp(),
+                    )
+                    .await
+                    .map_err(StartupReconciliationError::retryable)?,
+            ))
+        } else {
+            None
+        };
         let prepared = runtime
             .prepare(&crate::runtime::CompleteInteraction {
                 project_id: thread.project_id.map(ProjectId::value),
@@ -145,6 +162,7 @@ async fn reconcile_interrupted_interaction(
                     .as_ref()
                     .map(|input| input.contexts.as_slice())
                     .unwrap_or(&[]),
+                personal_presentation: personal_presentation.as_ref(),
             })
             .await
             .map_err(StartupReconciliationError::from_runtime)?;
@@ -409,18 +427,44 @@ impl RelayerAppServer {
         let permission_catalog = PermissionCatalog::load(&config.permission_catalog).await?;
         let storage = SqliteProductStore::open(&config.database_path).await?;
         let runtime = match &config.runtime {
-            Some(runtime) => Some(
-                RuntimeClient::open(
+            Some(runtime) => {
+                let mut client = RuntimeClient::open(
                     &runtime.graph_url,
                     &runtime.harness_url,
                     runtime.graph_control_token.clone(),
                     runtime.harness_control_token.clone(),
                     &runtime.harness_configurations,
                 )
-                .await?,
-            ),
+                .await?;
+                client.detect_personal_presentation_support().await?;
+                Some(client)
+            }
             None => None,
         };
+        if let Some(runtime) = &runtime
+            && runtime.supports_personal_presentation()
+        {
+            let profile = storage.personal_presentation_profile().await?;
+            for version in profile.versions {
+                let materialized = runtime
+                    .ensure_personal_presentation_version(
+                        profile.thread_id.checked_abs().ok_or_else(|| {
+                            anyhow::anyhow!("invalid personal presentation profile identity")
+                        })?,
+                        &version.version_key,
+                    )
+                    .await?;
+                storage
+                    .publish_personal_presentation_version(
+                        &version.version_key,
+                        materialized.interaction_node_id,
+                        materialized.root_layer_id,
+                        &materialized.output,
+                        &startup_timestamp(),
+                    )
+                    .await?;
+            }
+        }
         let default_harness_configuration = config
             .runtime
             .as_ref()

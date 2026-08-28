@@ -23,7 +23,10 @@ import { inspectCodexBrowserMcpRuntime } from "../main/services/codex-browser-mc
 import { RelayerAppServerService } from "../main/services/relayer-app-server.mjs";
 import { claimPrimaryDesktopInstance } from "../main/single-instance.mjs";
 import { confirmManagedRuntimeQuit } from "../main/managed-runtimes/quit-guard.mjs";
-import { createEvalManagedCodexRuntime } from "./managed-codex-runtime.mjs";
+import {
+  createEvalCodexExecutionLease,
+  createEvalManagedCodexRuntime,
+} from "./managed-codex-runtime.mjs";
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(desktopDirectory, "..");
@@ -74,6 +77,9 @@ const managedCodexRuntime = createEvalManagedCodexRuntime({
   developmentExecutable: developmentCodexBinary,
   enableMaintenance: app.isPackaged,
 });
+const acquireEvalProviderExecution = createEvalCodexExecutionLease(
+  () => managedCodexRuntime.resolve(),
+);
 
 let dashboardWindow;
 const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => dashboardWindow });
@@ -93,6 +99,7 @@ const graphRuntime = new GraphCompleteRuntimeService({
   codexBasicClientModuleUrl: graphClientModuleUrl,
   ...(codexBrowserMcpInspection.available ? { codexBrowserMcpRuntime: codexBrowserMcpInspection } : {}),
   resolveCodexRuntime: () => managedCodexRuntime.resolve(),
+  acquireProviderExecution: acquireEvalProviderExecution,
   candidateTrace: {
     directory: join(userDataDirectory, "eval-data", "candidate-trace-spool"),
     policy: {

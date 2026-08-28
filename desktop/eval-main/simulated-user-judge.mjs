@@ -18,6 +18,10 @@ export const LOCAL_SIMULATED_USER_JUDGE_CONFIGURATION = Object.freeze({
 
 export const LOCAL_SIMULATED_USER_AUTORUN_ENV = "RELAYER_EVAL_AUTORUN_H3_SIMULATED_USER";
 export const LOCAL_SIMULATED_USER_AUTORUN_FLAG = "--relayer-eval-autorun-h3-simulated-user";
+export const PERSONAL_PRESENTATION_AUTORUN_ENV = "RELAYER_EVAL_AUTORUN_PERSONAL_PRESENTATION";
+export const PERSONAL_PRESENTATION_AUTORUN_FLAG = "--relayer-eval-autorun-personal-presentation";
+export const PRODUCT_PRESENTATION_AUTORUN_ENV = "RELAYER_EVAL_AUTORUN_PRODUCT_PRESENTATION";
+export const PRODUCT_PRESENTATION_AUTORUN_FLAG = "--relayer-eval-autorun-product-presentation";
 
 export function resolveLocalSimulatedUserAutorun({
   environment = process.env,
@@ -25,10 +29,49 @@ export function resolveLocalSimulatedUserAutorun({
   packaged = false,
   availableHarnessConfigurationNames,
 } = {}) {
+  const personalPresentationEnabled = environment[PERSONAL_PRESENTATION_AUTORUN_ENV] === "1"
+    || commandLineArguments.includes(PERSONAL_PRESENTATION_AUTORUN_FLAG);
+  const productPresentationEnabled = environment[PRODUCT_PRESENTATION_AUTORUN_ENV] === "1"
+    || commandLineArguments.includes(PRODUCT_PRESENTATION_AUTORUN_FLAG);
   const enabled = environment[LOCAL_SIMULATED_USER_AUTORUN_ENV] === "1"
     || commandLineArguments.includes(LOCAL_SIMULATED_USER_AUTORUN_FLAG);
-  if (!enabled) return null;
-  if (packaged) throw new Error("The simulated-user H3 autorun is available only in a local development checkout.");
+  if (!enabled && !personalPresentationEnabled && !productPresentationEnabled) return null;
+  if ([enabled, personalPresentationEnabled, productPresentationEnabled].filter(Boolean).length > 1) {
+    throw new Error("Select only one local simulated-user autorun.");
+  }
+  if (packaged) throw new Error("The simulated-user autorun is available only in a local development checkout.");
+  if (productPresentationEnabled) {
+    const harnessConfigurationNames = ["codex-basic"];
+    const availableHarnesses = availableHarnessConfigurationNames === undefined
+      ? null
+      : new Set(availableHarnessConfigurationNames);
+    if (availableHarnesses !== null && !availableHarnesses.has("codex-basic")) {
+      throw new Error("The product presentation autorun requires codex-basic.");
+    }
+    return {
+      testCaseIds: ["empty-project.task-system.single-turn"],
+      harnessConfigurationNames,
+      judgeConfigurationName: "simulated-user-sol-high",
+    };
+  }
+  if (personalPresentationEnabled) {
+    const harnessConfigurationNames = [
+      "codex-layered-personal-presentation-v0",
+      "codex-layered-personal-presentation-v1",
+    ];
+    const availableHarnesses = availableHarnessConfigurationNames === undefined
+      ? null
+      : new Set(availableHarnessConfigurationNames);
+    if (availableHarnesses !== null
+      && harnessConfigurationNames.some((name) => !availableHarnesses.has(name))) {
+      throw new Error("The personal presentation autorun requires both V0 and V1 Eval configurations.");
+    }
+    return {
+      testCaseIds: ["empty-project.task-system.single-turn"],
+      harnessConfigurationNames,
+      judgeConfigurationName: "simulated-user-sol-high",
+    };
+  }
   const requestedHarnesses = [
     "codex-layered-navigation-luna",
     "prime-agent-layered-navigation-luna",

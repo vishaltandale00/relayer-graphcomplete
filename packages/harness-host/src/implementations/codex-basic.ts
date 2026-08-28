@@ -4,6 +4,7 @@ import { isAbsolute } from "node:path";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import { redactTraceData } from "../trace.js";
 import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
+import { personalPresentationNativeInstructions, personalPresentationPrompt } from "./personal-presentation-guidance.js";
 import {
   runCodexAppServerTurn,
   type CodexAppServerSpawn,
@@ -133,7 +134,7 @@ export class CodexBasicHarness implements Harness {
         environment,
         codexPathOverride: resolvedRuntime.executable,
         ...(this.codexThreadId === undefined ? {} : { savedThreadId: this.codexThreadId }),
-        threadParams: this.threadParams(model),
+        threadParams: this.threadParams(model, context),
         turnParams: this.turnParams(sandboxPolicy, model),
         prompt,
         approvals: context.approvals,
@@ -255,8 +256,9 @@ export class CodexBasicHarness implements Harness {
     return context.model.modelId;
   }
 
-  private threadParams(model: string | undefined): JsonObject {
+  private threadParams(model: string | undefined, context: HarnessRunContext): JsonObject {
     const { settings, permission } = this.resolved;
+    const presentationInstructions = personalPresentationNativeInstructions(context);
     const config: Record<string, JsonObject[keyof JsonObject]> = {};
     if (settings.skipGitRepoCheck !== undefined) config.skip_git_repo_check = settings.skipGitRepoCheck;
     if (settings.webSearchMode !== undefined) config.web_search = settings.webSearchMode;
@@ -289,6 +291,7 @@ export class CodexBasicHarness implements Harness {
       ...(permission.approvalsReviewer === undefined ? {} : { approvalsReviewer: permission.approvalsReviewer }),
       ...(model === undefined ? {} : { model }),
       ...(Object.keys(config).length === 0 ? {} : { config }),
+      developerInstructions: presentationInstructions === "" ? null : presentationInstructions,
       serviceName: "relayer_graphcomplete",
     };
   }
@@ -338,6 +341,8 @@ Codex native subagents are available when useful. Subagents may directly author,
 
 Answer the current user interaction by authoring and accepting a useful graph layer that truthfully presents the completed work or genuine blocker.
 
+${GRAPH_PRESENTATION_GUIDANCE}${personalPresentationPrompt(context)}
+
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
 ${renderInteractionInput(context.interactionInput)}
@@ -370,8 +375,6 @@ Relayer graph affordances:
 - A node can open a more detailed child layer. Submit the stable-keyed child LayerObject, then attach it with await graph.addAction(node, { kind: "navigate", relation: "expand", sourceLayer: layer, label: "Useful label", target: childLayer, variant: "pill", clientKey: "node-detail" }).
 - A node can open supporting evidence or reusable context. Submit the stable-keyed target LayerObject, then attach it with await graph.addAction(node, { kind: "navigate", relation: "reference", sourceLayer: layer, label: "View evidence", target: evidenceLayer, variant: "pill", clientKey: "node-evidence" }).
 - A node can offer a useful follow-up interaction with await graph.addAction(node, { kind: "invoke", sourceLayer: layer, label: "Useful label", interactionText: "A useful follow-up", variant: "chip", clientKey: "node-follow-up" }).
-
-${GRAPH_PRESENTATION_GUIDANCE}
 
 Every action uses Relayer's renderer-independent presentation grammar. You author its order, kind and payload, label, optional supported icon, and one of these variants:
 - "chip": the most compact inline action;
@@ -428,6 +431,8 @@ export function buildLayeredNavigationPrompt(
 
 After doing the underlying work, answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
+${GRAPH_PRESENTATION_GUIDANCE}${context === undefined ? "" : personalPresentationPrompt(context)}
+
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
 ${normalizedInput}
@@ -443,8 +448,6 @@ The current interaction may carry an invoke lease created by the product. Before
 Navigation has two meanings:
 - "expand" continues the explanation with a more detailed layer. Expansion must not point back to an expansion ancestor.
 - "reference" opens supporting evidence or context. References may reuse an accepted layer, may point to other reference layers, and may revisit a layer.
-
-${GRAPH_PRESENTATION_GUIDANCE}
 
 The interaction node must have one root navigate action with relation: "expand" and no sourceLayer. Every action on a response node must include sourceLayer: the LayerObject in which you are authoring that action. Expansion layers may author expand, reference, or invoke actions. A layer reached as a reference may author only reference actions. Do not create both expand and reference actions to the same new target layer.
 
@@ -810,7 +813,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
     throw new Error(`Unsupported codex.basic implementation version: ${selected.implementationVersion}`);
   }
   const configuration = selected.settings;
-  const allowed = new Set(["model", "modelReasoningEffort", "webSearchMode", "skipGitRepoCheck", "additionalDirectories", "promptProfile"]);
+  const allowed = new Set(["model", "modelReasoningEffort", "webSearchMode", "skipGitRepoCheck", "additionalDirectories", "promptProfile", "personalPresentationVersion"]);
   const unknown = Object.keys(configuration).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new Error(`Unknown codex.basic configuration field: ${unknown.join(", ")}`);
 
@@ -820,6 +823,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
   const skipGitRepoCheck = optionalBoolean(configuration.skipGitRepoCheck, "skipGitRepoCheck");
   const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
   const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1", "layered-navigation-multi-agent-v1"] as const, "promptProfile");
+  optionalEnum(configuration.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1"] as const, "personalPresentationVersion");
   const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);
 
   return {

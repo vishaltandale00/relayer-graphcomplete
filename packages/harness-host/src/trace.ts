@@ -52,6 +52,7 @@ export interface HarnessTraceStartInput {
   readonly threadId: number;
   readonly interactionNodeId: number;
   readonly productInteractionId?: number;
+  readonly personalPresentationVersionId?: number;
   readonly implementation: string;
   readonly configurationName: string;
   readonly support: HarnessTraceSupport;
@@ -413,6 +414,7 @@ class BufferedHarnessTrace implements ActiveHarnessTrace, HarnessTraceSink {
         threadId: input.threadId,
         interactionNodeId: input.interactionNodeId,
         ...(input.productInteractionId === undefined ? {} : { productInteractionId: input.productInteractionId }),
+        ...(input.personalPresentationVersionId === undefined ? {} : { personalPresentationVersionId: input.personalPresentationVersionId }),
         configurationName: input.configurationName,
       },
     });
@@ -539,6 +541,9 @@ class BufferedHarnessTrace implements ActiveHarnessTrace, HarnessTraceSink {
           ...(this.truncated ? { truncated: true } : {}),
           ...(this.redactionCount > 0 ? { redactionCount: this.redactionCount } : {}),
           ...(reason === undefined ? {} : { error: reason }),
+          ...(this.input.personalPresentationVersionId === undefined ? {} : {
+            personalPresentationVersionId: this.input.personalPresentationVersionId,
+          }),
         };
         const manifest: JsonObject = {
           schemaVersion: 1,
@@ -553,6 +558,7 @@ class BufferedHarnessTrace implements ActiveHarnessTrace, HarnessTraceSink {
           threadId: this.input.threadId,
           interactionNodeId: this.input.interactionNodeId,
           productInteractionId: this.input.productInteractionId ?? null,
+          personalPresentationVersionId: this.input.personalPresentationVersionId ?? null,
           declaredCoverage: redactTraceData(this.input.support),
           achievedCoverage: redactTraceData(achievedCoverage),
           policy: redactTraceData(this.policy),

@@ -32,6 +32,7 @@ The Node runtime is split into explicit workspace packages: `@relayer/graph-clie
 
 - The selected harness owns model execution and any provider-native delegation it uses. Codex may use native subagents and Prime Agent may use its native RLM children; GraphComplete does not add another scheduler.
 - GraphComplete owns graph records, active-interaction write authority, validation, accepted-history integrity, and explicit submission. Accepted records are immutable except for ADR 0005's exact one-shot leased-invoke target transition.
+- Relayer owns a hidden, versioned personal-presentation profile. Each execution atomically pins one accepted profile completion through a control-only attachment; the harness renders it without adding preference records to visible response topology or exports. See [ADR 0008](docs/decisions/0008-personal-presentation-graph-attachments.md).
 - Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
 - The Node harness host owns live per-thread harness objects and provider-session resume state, not graph rules or product lifecycle.
 - Provider adapters own authentication, model discovery, and provider-specific execution details. Product records use stable provider, model, harness, and permission identifiers.
@@ -194,6 +195,21 @@ npm run eval-app:dev
 The default `fixture-task-system` harness is deterministic and does not call inference, so the complete Eval UX can be exercised safely. `codex-basic` and `codex-basic-high` are also selectable for live internal runs. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Packaged Eval builds still omit those internal options. Build the unsigned internal application with `npm run eval-app:pack`.
 
 The candidate catalog includes twelve deep calibration cases: seven coding cases, including three evaluator-owned greenfield products, and five research, planning, creative, and forecasting cases. They are a graph-presentation calibration corpus for recursive-judge tuning and human labeling, not the full verifiable-work benchmark. Each materializes an isolated Git workspace and records a sealed reference, lightweight deterministic completion gates, and an outcome rubric separately from graph-presentation judgment. Coding fixtures begin with a failing behavioral contract; open-research fixtures provide no curated source bundle and require the candidate to leave a durable deliverable and source trail. A passing completion gate does not claim that the implementation or artifact is substantively good. Candidate cases remain calibration-only until human review promotes them.
+
+To run the paid, opt-in personal-presentation comparison through the real Eval
+application, use an isolated profile and an explicitly trusted managed Codex
+binary:
+
+```sh
+RELAYER_EVAL_USER_DATA_DIR=/absolute/path/to/isolated-profile \
+RELAYER_CODEX_BINARY=/absolute/path/to/managed/codex \
+RELAYER_EVAL_AUTORUN_PERSONAL_PRESENTATION=1 \
+./node_modules/.bin/electron desktop/eval-main/index.mjs
+```
+
+The autorun holds the case, judge, model selection, and harness settings fixed,
+then executes only the checked-in V0 and V1 configurations. It remains disabled
+by default and outside `npm run check`.
 
 The public Relayer and internal Relayer Eval builds use distinct application identifiers, entry points, data profiles, and dashboard assets. They share the graph runtime, harness host, app server, product records, API contracts, and production workspace. See [ADR 0003](docs/decisions/0003-shared-product-eval-workspace.md).
 

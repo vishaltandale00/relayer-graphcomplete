@@ -9,6 +9,10 @@ import {
   LOCAL_SIMULATED_USER_JUDGE_CONFIGURATION,
   LOCAL_SIMULATED_USER_AUTORUN_ENV,
   LOCAL_SIMULATED_USER_AUTORUN_FLAG,
+  PERSONAL_PRESENTATION_AUTORUN_ENV,
+  PERSONAL_PRESENTATION_AUTORUN_FLAG,
+  PRODUCT_PRESENTATION_AUTORUN_ENV,
+  PRODUCT_PRESENTATION_AUTORUN_FLAG,
   buildAcceptedReviewTopology,
   createLocalSimulatedUserJudgeRunner,
   createReviewSessionController,
@@ -72,6 +76,54 @@ describe("local Electron simulated-user judge adapter", () => {
       arguments: [],
       packaged: true,
     })).toThrow("only in a local development checkout");
+    const personalSelection = {
+      testCaseIds: ["empty-project.task-system.single-turn"],
+      harnessConfigurationNames: [
+        "codex-layered-personal-presentation-v0",
+        "codex-layered-personal-presentation-v1",
+      ],
+      judgeConfigurationName: "simulated-user-sol-high",
+    };
+    expect(resolveLocalSimulatedUserAutorun({
+      environment: { [PERSONAL_PRESENTATION_AUTORUN_ENV]: "1" },
+      arguments: [],
+    })).toEqual(personalSelection);
+    expect(resolveLocalSimulatedUserAutorun({
+      environment: {},
+      arguments: [PERSONAL_PRESENTATION_AUTORUN_FLAG],
+      availableHarnessConfigurationNames: personalSelection.harnessConfigurationNames,
+    })).toEqual(personalSelection);
+    expect(() => resolveLocalSimulatedUserAutorun({
+      environment: { [PERSONAL_PRESENTATION_AUTORUN_ENV]: "1" },
+      arguments: [],
+      availableHarnessConfigurationNames: personalSelection.harnessConfigurationNames.slice(0, 1),
+    })).toThrow("requires both V0 and V1");
+    const productSelection = {
+      testCaseIds: ["empty-project.task-system.single-turn"],
+      harnessConfigurationNames: ["codex-basic"],
+      judgeConfigurationName: "simulated-user-sol-high",
+    };
+    expect(resolveLocalSimulatedUserAutorun({
+      environment: { [PRODUCT_PRESENTATION_AUTORUN_ENV]: "1" },
+      arguments: [],
+      availableHarnessConfigurationNames: ["codex-basic"],
+    })).toEqual(productSelection);
+    expect(resolveLocalSimulatedUserAutorun({
+      environment: {},
+      arguments: [PRODUCT_PRESENTATION_AUTORUN_FLAG],
+    })).toEqual(productSelection);
+    expect(() => resolveLocalSimulatedUserAutorun({
+      environment: { [PRODUCT_PRESENTATION_AUTORUN_ENV]: "1" },
+      arguments: [],
+      availableHarnessConfigurationNames: [],
+    })).toThrow("requires codex-basic");
+    expect(() => resolveLocalSimulatedUserAutorun({
+      environment: {
+        [PERSONAL_PRESENTATION_AUTORUN_ENV]: "1",
+        [PRODUCT_PRESENTATION_AUTORUN_ENV]: "1",
+      },
+      arguments: [],
+    })).toThrow("Select only one");
   });
 
   it("returns existing ordered PNG tiles to MCP without duplicating screenshot capture", async () => {

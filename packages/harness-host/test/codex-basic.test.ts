@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadHarnessConfiguration } from "../src/configuration.js";
 import { createNoopHarnessTraceSink, HarnessTraceStore } from "../src/trace.js";
 import type { CodexAppServerTurnOptions } from "../src/implementations/codex-app-server.js";
-import { CodexBasicHarness, type CodexBasicDependencies } from "../src/implementations/codex-basic.js";
+import { buildLayeredNavigationPrompt, CodexBasicHarness, type CodexBasicDependencies } from "../src/implementations/codex-basic.js";
 import type { HarnessConfiguration, HarnessRunContext, HarnessTraceEvent, HarnessTraceEventInput, HarnessTracePolicy, HarnessTraceSink } from "../src/types.js";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
@@ -36,6 +36,41 @@ const codexBasicConfiguration: HarnessConfiguration = {
 };
 
 describe("CodexBasicHarness", () => {
+  it("renders V1 after generic guidance and leaves neutral V0 at baseline", () => {
+    const baseline = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
+    const neutral = buildLayeredNavigationPrompt(personalPresentationRunContext(false), "@relayer/graph-client");
+    const treatment = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client");
+
+    expect(neutral).toBe(baseline);
+    expect(treatment).toContain("Personal graph presentation preferences:");
+    expect(treatment).toContain("Decision-useful center: The user prefers central layers");
+    expect(treatment).toContain("every native child that can author graph content");
+    expect(treatment.indexOf("Graph presentation guidance:")).toBeLessThan(
+      treatment.indexOf("Personal graph presentation preferences:"),
+    );
+    expect(treatment.indexOf("Personal graph presentation preferences:")).toBeLessThan(
+      treatment.indexOf("Normalized interaction input:"),
+    );
+  });
+
+  it("injects V1 into native Codex child instructions and explicitly clears it for V0", async () => {
+    const submitted: CodexAppServerTurnOptions[] = [];
+    const harness = harnessFixture("auto", async (options) => {
+      submitted.push(options);
+      options.onThreadId("thread-1");
+      return { threadId: "thread-1", turnId: "turn-1", status: "completed" };
+    });
+
+    await harness.complete(personalPresentationRunContext(true));
+    await harness.complete(personalPresentationRunContext(false));
+
+    expect(submitted[0]?.threadParams.developerInstructions).toContain("Personal graph presentation preferences:");
+    expect(submitted[0]?.threadParams.developerInstructions).toContain("Decision-useful center");
+    expect(submitted[0]?.threadParams.developerInstructions).toContain("every native child that can author graph content");
+    expect(submitted[1]?.savedThreadId).toBe("thread-1");
+    expect(submitted[1]?.threadParams.developerInstructions).toBeNull();
+  });
+
   it("requires an explicit Codex executable before submitting an app-server turn", async () => {
     const runAppServerTurn = vi.fn(async () => ({
       threadId: "unreachable",
@@ -169,6 +204,7 @@ describe("CodexBasicHarness", () => {
       sandbox: "workspace-write",
       model: "gpt-test",
       config: { skip_git_repo_check: true, web_search: "disabled" },
+      developerInstructions: null,
       serviceName: "relayer_graphcomplete",
     });
     expect(submitted?.turnParams).toMatchObject({
@@ -903,6 +939,36 @@ function runContext(id: number, token: string, trace: HarnessTraceSink = createN
     },
     trace,
     approvals: { request: async () => { throw new Error("unused approval channel"); } },
+  };
+}
+
+function personalPresentationRunContext(preference: boolean): HarnessRunContext {
+  const context = runContext(1, "token");
+  const versionInteractionNodeId = preference ? 90 : 100;
+  const rootLayerId = versionInteractionNodeId + 1;
+  return {
+    ...context,
+    personalPresentation: {
+      attachment: { interactionNodeId: 1, versionInteractionNodeId, rootLayerId },
+      graph: {
+        nodeId: versionInteractionNodeId,
+        rootLayerId,
+        rootAction: { id: rootLayerId + 1, sourceNodeId: versionInteractionNodeId, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: rootLayerId, state: "accepted" },
+        layers: [{
+          layer: { id: rootLayerId, nodes: [rootLayerId + 2], edges: [], state: "accepted" },
+          nodes: [{
+            id: rootLayerId + 2,
+            kind: preference ? "presentation-preference" : "personal-presentation-manifest",
+            icon: preference ? "compass" : "settings",
+            title: preference ? "Decision-useful center" : "Neutral personal presentation",
+            detail: preference ? "The user prefers central layers that are immediately decision-useful." : "No additional guidance.",
+            state: "accepted",
+          }],
+          edges: [],
+          actions: [],
+        }],
+      },
+    },
   };
 }
 

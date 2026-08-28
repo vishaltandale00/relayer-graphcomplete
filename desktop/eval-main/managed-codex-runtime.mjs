@@ -49,3 +49,36 @@ export function createEvalManagedCodexRuntime({
       : Promise.resolve(Object.freeze({ removed: Object.freeze([]), failures: Object.freeze([]) })),
   });
 }
+
+export function createEvalCodexExecutionLease(resolveRuntime) {
+  if (typeof resolveRuntime !== "function") {
+    throw new TypeError("Eval Codex execution access requires a runtime resolver.");
+  }
+  return async (providerId) => {
+    if (providerId !== "codex") throw new Error(`Eval has no execution adapter for ${providerId}.`);
+    return Object.freeze({
+      definition: Object.freeze({
+        id: "codex",
+        adapterId: "codex-subscription",
+        accessContract: "managed-runtime@1",
+      }),
+      descriptor: Object.freeze({
+        adapterId: "codex-subscription",
+        accessContract: "managed-runtime@1",
+        implementationVersion: "1",
+      }),
+      runtime: Object.freeze({
+        async executionAccess({ signal } = {}) {
+          signal?.throwIfAborted();
+          const runtime = await resolveRuntime();
+          signal?.throwIfAborted();
+          return Object.freeze({
+            kind: "managed-runtime",
+            environment: runtime.environment,
+          });
+        },
+      }),
+      release: async () => {},
+    });
+  };
+}

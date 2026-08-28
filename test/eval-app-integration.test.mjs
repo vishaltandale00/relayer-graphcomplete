@@ -156,6 +156,7 @@ describe("Relayer Eval application service", () => {
     expect(completed.executions.every((execution) => execution.promotable)).toBe(true);
     expect(completed.executions.flatMap((execution) => execution.turns).every((turn) => (
       turn.candidateTrace.status === "complete"
+      && Number.isSafeInteger(turn.candidateTrace.personalPresentationVersionId)
       && turn.candidateTrace.ref.endsWith("candidate-trace/manifest.json")
       && turn.candidateTrace.sha256.startsWith("sha256:")
     ))).toBe(true);
@@ -164,13 +165,16 @@ describe("Relayer Eval application service", () => {
     const selectedTrace = await evalService.candidateTraceContext(selected.id, selected.turns[0].interactionId);
     expect(selectedTrace.manifest).toMatchObject({
       format: "relayer-harness-trace-v1",
+      personalPresentationVersionId: selected.turns[0].candidateTrace.personalPresentationVersionId,
       correlation: { runId: completed.id, executionId: selected.id },
     });
+    expect(JSON.stringify(selectedTrace.manifest)).not.toContain("Decision-useful center");
     expect(selectedTrace.events.map((event) => event.type)).toEqual(expect.arrayContaining(["prompt", "message", "run.completed"]));
     const bundle = JSON.parse(await readFile(join(dataDirectory, "eval-data", completed.bundleRef), "utf8"));
     expect(bundle.run.executions[0].turns[0].candidateTrace).toMatchObject({
       status: "complete",
       format: "relayer-harness-trace-v1",
+      personalPresentationVersionId: selected.turns[0].candidateTrace.personalPresentationVersionId,
       ref: selected.turns[0].candidateTrace.ref,
     });
     const context = evalService.reviewContext(selected.id);

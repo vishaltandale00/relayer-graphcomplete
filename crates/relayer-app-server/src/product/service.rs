@@ -31,6 +31,7 @@ pub(crate) struct CreateThreadCommand {
     pub(crate) project_id: Option<ProjectId>,
     pub(crate) initial_message: String,
     pub(crate) harness_configuration_name: String,
+    pub(crate) personal_presentation_version_key: Option<String>,
     pub(crate) permission_profile_id: String,
     pub(crate) model_selection: Option<InteractionModelSelection>,
     pub(crate) allow_unselected_model: bool,
@@ -128,6 +129,17 @@ pub(crate) struct ProductService {
 }
 
 impl ProductService {
+    pub(crate) async fn prepare_personal_presentation_pin(
+        &self,
+        interaction_id: InteractionId,
+        requested_version_key: Option<&str>,
+    ) -> Result<crate::storage::PersonalPresentationPin, ProductError> {
+        self.storage
+            .prepare_personal_presentation_pin(interaction_id, requested_version_key, &now())
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn update_harness_model_rules(
         &self,
         command: super::UpdateHarnessModelRulesCommand,
@@ -1049,15 +1061,18 @@ impl ProductService {
             .collect::<String>();
         let timestamp = now();
         self.storage
-            .insert_thread_with_initial_interaction(NewThreadRecord {
-                title: &title,
-                project_id: command.project_id,
-                initial_message: message,
-                harness_configuration_name: &command.harness_configuration_name,
-                permission_profile_id: &command.permission_profile_id,
-                model_selection: command.model_selection.as_ref(),
-                timestamp: &timestamp,
-            })
+            .insert_thread_with_initial_interaction_and_personal_presentation(
+                NewThreadRecord {
+                    title: &title,
+                    project_id: command.project_id,
+                    initial_message: message,
+                    harness_configuration_name: &command.harness_configuration_name,
+                    permission_profile_id: &command.permission_profile_id,
+                    model_selection: command.model_selection.as_ref(),
+                    timestamp: &timestamp,
+                },
+                command.personal_presentation_version_key.as_deref(),
+            )
             .await
             .map_err(Into::into)
     }

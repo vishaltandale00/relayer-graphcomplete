@@ -321,7 +321,9 @@ mod tests {
         assert_eq!(first_thread_history.len(), 1);
         assert_eq!(first_thread_history[0].source_interaction_id.value(), 1);
         assert_eq!(first_thread_history[0].result_interaction_id.value(), 2);
-        let interaction_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM interactions")
+        let interaction_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM interactions i JOIN threads t ON t.id=i.thread_id WHERE t.surface='conversation'",
+        )
             .fetch_one(&reopened.pool)
             .await
             .unwrap();

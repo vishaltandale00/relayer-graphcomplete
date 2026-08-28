@@ -12,6 +12,8 @@ pub use graph::{
     ImportedTurn, ImportedTurnReceipt, InteractionContext, InteractionContextAction,
     InteractionContextDraft, InteractionContextTarget, InteractionInput, InteractionInputNode,
     InteractionInvocation, LayerDraft, LayerId, LayerLayout, NavigateRelation, NodeDraft, NodeId,
-    NodePlacement, ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState, ResolvedLayer,
-    ThreadId, interaction_input_digest, is_supported_icon, normalize_icon_name, resolve_icon_name,
+    NodePlacement, PersonalPresentationAttachment, ProjectId, PublishedPersonalPresentationVersion,
+    RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState, ResolvedLayer,
+    ResolvedPersonalPresentation, ThreadId, interaction_input_digest, is_supported_icon,
+    normalize_icon_name, resolve_icon_name,
 };

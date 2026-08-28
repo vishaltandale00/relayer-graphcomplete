@@ -39,6 +39,7 @@ import {
   selectStandalonePermissionProfile,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
+import { firstAvailableSelection } from "../renderer/src/model-picker-model.js";
 import {
   buildAcceptedReviewTopology,
   gradeAcceptedReviewTopology,
@@ -1278,6 +1279,7 @@ export class EvalService {
           ? copy(permissionResolution)
           : null,
         effectiveExecutionDigest: interaction.effectiveExecutionDigest,
+        modelSelection: copy(interaction.modelSelection || null),
         effectivePermissionReceipt: copy(interaction.effectivePermissionReceipt),
         status: interaction.completionStatus,
         prompt: interaction.text,
@@ -1506,11 +1508,10 @@ export class EvalService {
 
   async #createAndRunThread({ execution, title, prompts, projectId = null, permissionProfileId = "auto", afterTurn = async () => {} }) {
     if (!Array.isArray(prompts) || prompts.length === 0) throw new Error(`Eval thread ${title} has no prompts.`);
-    const modelSelection = execution.harnessConfiguration?.implementation === "claude.basic"
-      ? await this.#productRequest(`/api/model-selection/default?harnessId=${encodeURIComponent(execution.harnessConfigurationName)}`)
-      : null;
-    if (execution.harnessConfiguration?.implementation === "claude.basic" && modelSelection === null) {
-      throw new Error("claude-basic has no connected compatible model; connect Claude or Anthropic before running this matrix cell.");
+    const modelSettings = await this.#productRequest("/api/model-settings");
+    const selectedModel = firstAvailableSelection(modelSettings, execution.harnessConfigurationName);
+    if (execution.harnessConfiguration.modelRules && selectedModel === null) {
+      throw new Error(`Eval has no available model for ${execution.harnessConfigurationName}.`);
     }
     const thread = await this.#productRequest("/api/threads", {
       method: "POST",
@@ -1519,7 +1520,13 @@ export class EvalService {
         initialMessage: prompts[0],
         harnessConfigurationName: execution.harnessConfigurationName,
         permissionProfileId,
-        ...(modelSelection === null ? {} : { modelSelection }),
+        ...(selectedModel === null ? {} : {
+          modelSelection: {
+            familyId: selectedModel.familyId,
+            providerId: selectedModel.providerId,
+            modelId: selectedModel.modelId,
+          },
+        }),
         ...(projectId === null ? {} : { projectId }),
       },
     });

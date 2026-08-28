@@ -114,6 +114,39 @@ function runContext(access: HarnessRunContext["access"]): HarnessRunContext {
   };
 }
 
+function personalPresentationRunContext(
+  access: HarnessRunContext["access"],
+  preference: boolean,
+): HarnessRunContext {
+  const context = runContext(access);
+  const versionInteractionNodeId = preference ? 90 : 100;
+  const rootLayerId = versionInteractionNodeId + 1;
+  return {
+    ...context,
+    personalPresentation: {
+      attachment: { interactionNodeId: 4, versionInteractionNodeId, rootLayerId },
+      graph: {
+        nodeId: versionInteractionNodeId,
+        rootLayerId,
+        rootAction: { id: rootLayerId + 1, sourceNodeId: versionInteractionNodeId, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: rootLayerId, state: "accepted" },
+        layers: [{
+          layer: { id: rootLayerId, nodes: [rootLayerId + 2], edges: [], state: "accepted" },
+          nodes: [{
+            id: rootLayerId + 2,
+            kind: preference ? "presentation-preference" : "personal-presentation-manifest",
+            icon: preference ? "compass" : "settings",
+            title: preference ? "Decision-useful center" : "Neutral personal presentation",
+            detail: preference ? "Foreground the conclusion and material tradeoffs." : "No additional guidance.",
+            state: "accepted",
+          }],
+          edges: [],
+          actions: [],
+        }],
+      },
+    },
+  };
+}
+
 describe("ClaudeBasicHarness", () => {
   it("maps product approval modes onto supported Claude SDK permission modes", () => {
     expect(claudePermissionMode("ask")).toBe("default");
@@ -188,6 +221,27 @@ describe("ClaudeBasicHarness", () => {
       allowedTools: ["Bash"],
       mcpServers: { relayer_browser: expect.anything() },
     });
+  });
+
+  it("renders each pinned presentation version into the Claude root prompt", async () => {
+    const calls: Parameters<ClaudeSdkQuery>[0][] = [];
+    const harness = new ClaudeBasicHarness(factoryContext("ask"), {
+      query: sequentialSdkQuery([
+        [{ type: "result", subtype: "success", result: "first", session_id: "session-1" }],
+        [{ type: "result", subtype: "success", result: "second", session_id: "session-1" }],
+      ], (input) => calls.push(input)),
+    });
+    const access = managedAccess();
+
+    await harness.complete(personalPresentationRunContext(access, true));
+    await harness.complete(personalPresentationRunContext(access, false));
+
+    expect(calls[0]?.prompt).toContain("Personal graph presentation preferences:");
+    expect(calls[0]?.prompt).toContain("Decision-useful center: Foreground the conclusion and material tradeoffs.");
+    expect(calls[0]?.prompt).toContain("An explicit user presentation request takes precedence");
+    expect(calls[0]?.options.allowedTools).toEqual(["Bash"]);
+    expect(calls[1]?.prompt).not.toContain("Personal graph presentation preferences:");
+    expect(calls[1]?.options.resume).toBe("session-1");
   });
 
   it("uses definition-scoped runtime state and explicit bypass only for full access", async () => {

@@ -1,0 +1,42 @@
+schemaVersion: 1
+name: codex-layered-personal-presentation-v1
+implementation: codex.basic
+implementationVersion: 1
+revision: 1
+permissionBindings:
+  ask:
+    sandboxMode: workspace-write
+    approvalPolicy: on-request
+    approvalsReviewer: user
+    networkAccessEnabled: true
+  auto:
+    sandboxMode: workspace-write
+    approvalPolicy: on-request
+    approvalsReviewer: auto_review
+    networkAccessEnabled: true
+  full:
+    sandboxMode: danger-full-access
+    approvalPolicy: never
+modelCompatibility:
+  - providerId: codex
+modelRules:
+  allow:
+    - adapterId: codex-subscription
+      modelIdRegex: ".*"
+    - adapterId: openai-api
+      modelIdRegex: ".*"
+    - adapterId: openrouter
+      modelIdRegex: ".*"
+    - adapterId: vercel-ai-router
+      modelIdRegex: ".*"
+  deny: []
+executionAccessContracts: [managed-runtime@1, secret@1]
+modelDefaults:
+  familyPolicy:
+    id: codex-default-family
+    version: 2
+settings:
+  modelReasoningEffort: medium
+  promptProfile: layered-navigation-multi-agent-v1
+  skipGitRepoCheck: true
+  personalPresentationVersion: personal-presentation-v1

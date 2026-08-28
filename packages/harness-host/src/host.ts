@@ -635,16 +635,29 @@ export class HarnessHost {
     } catch (error) {
       if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) throw error;
     }
-    const [interaction, interactionInput] = await Promise.all([
+    const expectedPersonalPresentationVersionId = traceContext?.personalPresentationVersionId;
+    const [interaction, interactionInput, personalPresentation] = await Promise.all([
       graph.getNode(interactionNodeId),
       graph.getInteractionInput(),
+      graph.getPersonalPresentation().catch((error: unknown) => {
+        if (error instanceof GraphApiError && error.status === 404 && error.code === "personal_presentation_not_attached"
+          && expectedPersonalPresentationVersionId === undefined) return undefined;
+        throw error;
+      }),
     ]);
+    if (expectedPersonalPresentationVersionId !== undefined
+      && personalPresentation?.attachment.versionInteractionNodeId !== expectedPersonalPresentationVersionId) {
+      throw new Error("Attached personal presentation does not match the pinned trace version");
+    }
     const scope = new ActiveHarnessGraphScope(capability);
     const support = session.harness.traceSupport?.() ?? NO_HARNESS_TRACE_SUPPORT;
     const trace = this.traceStore?.start({
       threadId,
       interactionNodeId,
       ...(traceContext === undefined ? {} : { productInteractionId: traceContext.productInteractionId }),
+      ...(traceContext?.personalPresentationVersionId === undefined ? {} : {
+        personalPresentationVersionId: traceContext.personalPresentationVersionId,
+      }),
       implementation: session.descriptor.configuration.implementation,
       configurationName: session.descriptor.configuration.name,
       support,
@@ -709,6 +722,7 @@ export class HarnessHost {
       await session.harness.complete({
         inputGraph: interaction,
         interactionInput,
+        ...(personalPresentation === undefined ? {} : { personalPresentation }),
         graph: scope,
         approvals,
         trace: observedTrace,
@@ -1897,11 +1911,20 @@ function isAbortSignal(value: unknown): value is AbortSignal {
 function readTraceContext(value: unknown): HarnessCompletionTraceContext | undefined {
   if (!isRecord(value) || value.traceContext === undefined) return undefined;
   if (!isRecord(value.traceContext)) throw new Error("Harness completion contains an invalid trace context");
-  const { productInteractionId } = value.traceContext;
+  const { productInteractionId, personalPresentationVersionId } = value.traceContext;
   if (typeof productInteractionId !== "number" || !Number.isSafeInteger(productInteractionId) || productInteractionId < 1) {
     throw new Error("Harness completion trace context requires a positive product interaction id");
   }
-  return { productInteractionId };
+  if (personalPresentationVersionId !== undefined
+    && (typeof personalPresentationVersionId !== "number"
+      || !Number.isSafeInteger(personalPresentationVersionId)
+      || personalPresentationVersionId < 1)) {
+    throw new Error("Harness completion trace context personal presentation version must be a positive integer");
+  }
+  return {
+    productInteractionId,
+    ...(personalPresentationVersionId === undefined ? {} : { personalPresentationVersionId }),
+  };
 }
 
 function disabledTraceDescriptor(): HarnessTraceDescriptor {

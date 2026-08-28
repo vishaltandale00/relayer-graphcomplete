@@ -597,11 +597,13 @@ describe("PrimeAgentHarness", () => {
 
   it("uses the separate layered-navigation prompt profile", async () => {
     let prompt = "";
+    let resourceLoaderOptions: { appendSystemPromptOverride(base: string[]): string[] } | undefined;
     const session = {
       promptAndWait: vi.fn(async (text: string) => { prompt = text; }),
       waitForRlmQuiescence: vi.fn(async () => undefined),
       abort: vi.fn(async () => undefined),
       dispose: vi.fn(),
+      reload: vi.fn(async () => undefined),
     };
     const harness = await PrimeAgentHarness.create({
       threadId: 7,
@@ -616,11 +618,31 @@ describe("PrimeAgentHarness", () => {
       ...runScopeApi(),
       SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
       createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
+      createAgentSessionServices: vi.fn(async (options: { resourceLoaderOptions: typeof resourceLoaderOptions }) => {
+        resourceLoaderOptions = options.resourceLoaderOptions;
+        return { modelRegistry: { find: vi.fn() } };
+      }),
       createAgentSessionFromServices: vi.fn(async () => ({ session })),
     }) as never });
 
-    await harness.complete(runContext(11, "token"));
+    const context = runContext(11, "token");
+    await harness.complete({
+      ...context,
+      personalPresentation: {
+        attachment: { interactionNodeId: 11, versionInteractionNodeId: 90, rootLayerId: 91 },
+        graph: {
+          nodeId: 90,
+          rootLayerId: 91,
+          rootAction: { id: 92, sourceNodeId: 90, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: 91, state: "accepted" },
+          layers: [{
+            layer: { id: 91, nodes: [93], edges: [], state: "accepted" },
+            nodes: [{ id: 93, kind: "presentation-preference", icon: "compass", title: "Decision-useful center", detail: "Foreground the conclusion and material tradeoffs.", state: "accepted" }],
+            edges: [],
+            actions: [],
+          }],
+        },
+      },
+    });
 
     expect(prompt).toContain('relation="expand"');
     expect(prompt).toContain('relation="reference"');
@@ -644,6 +666,15 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("rerun it with the same client_key values");
     expect(prompt).toContain("Do not add fake navigate or reference actions");
     expect(prompt).toContain("await graph.discard_layer(layer)");
+    expect(prompt).toContain("Decision-useful center: Foreground the conclusion and material tradeoffs.");
+    expect(prompt).toContain("Apply the same pinned preferences to the root agent and every native child that can author graph content");
+    expect(prompt.indexOf("Graph presentation requirements")).toBeLessThan(prompt.indexOf("Personal graph presentation preferences"));
+    expect(prompt.indexOf("Personal graph presentation preferences")).toBeLessThan(prompt.indexOf('"message": "Question"'));
+    expect(session.reload).toHaveBeenCalledOnce();
+    const nativeInstructions = resourceLoaderOptions?.appendSystemPromptOverride(["base prompt"]);
+    expect(nativeInstructions).toHaveLength(2);
+    expect(nativeInstructions?.[1]).toContain("Decision-useful center: Foreground the conclusion and material tradeoffs.");
+    expect(nativeInstructions?.[1]).toContain("every native child that can author graph content");
   });
 
   it("delivers the same ordered normalized context to Prime and its native children", async () => {

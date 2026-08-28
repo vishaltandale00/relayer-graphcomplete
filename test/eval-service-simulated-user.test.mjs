@@ -491,6 +491,35 @@ function fakeAcceptedProduct() {
   };
   return vi.fn(async (url, options = {}) => {
     const path = new URL(url).pathname;
+    if (path === "/api/model-settings" && (options.method === undefined || options.method === "GET")) {
+      return jsonResponse({
+        defaults: { harnessId: "fixture-task-system", familyId: 1 },
+        harnesses: [
+          {
+            id: "fixture-task-system",
+            available: true,
+            modelCompatibility: [{ providerId: "codex" }],
+          },
+          {
+            id: "prime-agent-basic",
+            available: true,
+            modelRules: { allow: [{ adapterId: "openai-api", modelIdRegex: ".*" }], deny: [] },
+          },
+        ],
+        providers: [{
+          id: "openai",
+          adapterId: "openai-api",
+          connected: true,
+          models: [{ id: "test-model", visible: true, available: true }],
+        }],
+        families: [{
+          id: 1,
+          enabled: true,
+          position: 0,
+          members: [{ position: 0, providerId: "openai", modelId: "test-model" }],
+        }],
+      });
+    }
     if (path === "/api/threads" && options.method === "POST") {
       return jsonResponse({ id: "thread-1", rootInteractionId: interaction.id });
     }
