@@ -1,5 +1,6 @@
 import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relayer/graph-client";
 import { createHash } from "node:crypto";
+import { isAbsolute } from "node:path";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import { redactTraceData } from "../trace.js";
 import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
@@ -45,6 +46,11 @@ export interface CodexBasicDependencies {
   readonly clientModuleUrl?: string;
   readonly graphAuthoringLauncherPath?: string;
   readonly codexPathOverride?: string;
+  readonly browserMcpRuntime?: {
+    readonly executable: string;
+    readonly script: string;
+    readonly connectionArgs: readonly string[];
+  };
   readonly resolveCodexRuntime?: () => Promise<{
     readonly executable: string;
     readonly environment: Readonly<Record<string, string>>;
@@ -102,6 +108,7 @@ export class CodexBasicHarness implements Harness {
     const resolved = parseCodexBasicConfiguration(context);
     this.resolved = resolved;
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
+    validateBrowserMcpRuntime(dependencies.browserMcpRuntime);
     const codexThreadId = context.savedState?.codexThreadId;
     this.codexThreadId = typeof codexThreadId === "string" ? codexThreadId : undefined;
   }
@@ -253,6 +260,22 @@ export class CodexBasicHarness implements Harness {
     const config: Record<string, JsonObject[keyof JsonObject]> = {};
     if (settings.skipGitRepoCheck !== undefined) config.skip_git_repo_check = settings.skipGitRepoCheck;
     if (settings.webSearchMode !== undefined) config.web_search = settings.webSearchMode;
+    const browserMcpRuntime = this.dependencies.browserMcpRuntime;
+    if (browserMcpRuntime !== undefined) {
+      config.features = { tool_call_mcp_elicitation: false };
+      config.mcp_servers = {
+        "chrome-devtools": {
+          command: browserMcpRuntime.executable,
+          args: [browserMcpRuntime.script, ...browserMcpRuntime.connectionArgs],
+          env: { ELECTRON_RUN_AS_NODE: "1" },
+          enabled: true,
+          required: true,
+          startup_timeout_sec: 20,
+          tool_timeout_sec: 20,
+          default_tools_approval_mode: "prompt",
+        },
+      };
+    }
     return {
       cwd: this.context.workingDirectory,
       approvalPolicy: permission.approvalPolicy,
@@ -367,6 +390,18 @@ If a graph call rejects an object or graph.submit reports a repairable issue, ed
 
   private pinnedExecutionClause(): string {
     return pinnedExecutionClause(this.dependencies.graphAuthoringLauncherPath);
+  }
+}
+
+function validateBrowserMcpRuntime(runtime: CodexBasicDependencies["browserMcpRuntime"]): void {
+  if (runtime === undefined) return;
+  if (!isAbsolute(runtime.executable) || !isAbsolute(runtime.script)) {
+    throw new Error("codex.basic browser MCP runtime requires absolute executable and script paths");
+  }
+  if (!Array.isArray(runtime.connectionArgs)
+    || runtime.connectionArgs.length === 0
+    || runtime.connectionArgs.some((argument) => typeof argument !== "string" || argument.trim() === "")) {
+    throw new Error("codex.basic browser MCP runtime requires non-empty connection arguments");
   }
 }
 

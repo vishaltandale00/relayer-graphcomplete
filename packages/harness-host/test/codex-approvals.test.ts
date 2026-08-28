@@ -593,6 +593,44 @@ describe("Codex approval bridge", () => {
     });
   });
 
+  it.each([
+    ["approve_once", "Allow"],
+    ["deny", "Cancel"],
+  ] as const)("maps pinned Codex 0.147 MCP %s through its exact Allow/Cancel labels", async (decision, label) => {
+    const fixture = bridgeFixture(decision);
+    fixture.items.set("tool-1", {
+      type: "mcpToolCall",
+      id: "tool-1",
+      server: "chrome-devtools",
+      tool: "evaluate_script",
+      arguments: { pageId: 1, function: "() => document.title" },
+      readOnlyHint: false,
+    });
+
+    const result = await answerCodexServerRequest(serverRequest("item/tool/requestUserInput", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "tool-1",
+      isBlocking: true,
+      questions: [{
+        id: "mcp_tool_call_approval_call-1",
+        header: "Approve app tool call?",
+        question: "Allow chrome-devtools.evaluate_script?",
+        isOther: false,
+        isSecret: false,
+        options: [
+          { label: "Allow", description: "Run the tool and continue." },
+          { label: "Cancel", description: "Cancel this tool call." },
+        ],
+      }],
+    }), fixture.context);
+
+    expect(result).toEqual({
+      answers: { "mcp_tool_call_approval_call-1": { answers: [label] } },
+    });
+    expect(fixture.request).toHaveBeenCalledOnce();
+  });
+
   it("maps legacy command and patch decisions without provider session grants", async () => {
     const approved = bridgeFixture("approve_always");
     await expect(answerCodexServerRequest(serverRequest("execCommandApproval", {

@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "issue": 257,
+  "implementationBase": "61de23d527210b8a0d5972e3d12bb6b80a1b59e2",
+  "profileKind": "dedicated-non-default",
+  "endpointKind": "explicit-loopback-cdp",
+  "harnesses": {
+    "codex": {
+      "implementation": "codex.basic",
+      "provedCodexVersion": "0.147.0",
+      "helper": {
+        "package": "chrome-devtools-mcp",
+        "version": "1.8.0",
+        "integrity": "sha512-Wrm9z0/5WbVs778apjWgYRkpe9bvYQWjK2zVRwqoPAtz1IHQ5+GvotM07UGXJcfrA0rj6Gt1Pnn5+w/Tf1nU4w=="
+      },
+      "configurationSha256": {
+        "codex-basic.yaml": "68074ddba762296f1e1ce3efcbc3fd81b293db43c912cf6fd69420d8134ee00d",
+        "codex-basic-high.yaml": "6b5f4da66ae04d715bb04de3148ae744b05fb00add0ea353ab7604019ed8b9b5"
+      },
+      "browserRuntimeSourceSha256": "2e95fd710b8a373a41f43ece4496fd284c7e3c6231cbb2753d110afc852589d0",
+      "liveProof": {
+        "preseededMarkerObserved": true,
+        "reversibleActionRestored": true,
+        "helperClosed": true,
+        "chromeAliveAfterCleanup": true,
+        "askEnclosingToolExecuted": false,
+        "unavailableEndpointFailedHonestly": true
+      }
+    },
+    "claude": {
+      "implementation": "claude.basic",
+      "provedSdkVersion": "0.3.250",
+      "provedClaudeCodeVersion": "2.1.250",
+      "configurationSha256": {
+        "claude-basic.yaml": "05fbc6f5c50337595f020b1b2171fbd7a52ae58047a0166878573ea0cd8775da"
+      },
+      "browserRuntimeSourceSha256": "69eb51a4a9a2ea9031b4213e8da06043c41c052587b8ddf12bf57c322bc7b27f",
+      "liveProof": {
+        "preseededMarkerObserved": true,
+        "reversibleActionRestored": true,
+        "socketClosed": true,
+        "chromeAliveAfterCleanup": true,
+        "askEnclosingToolExecuted": false,
+        "unavailableEndpointFailedHonestly": true
+      }
+    },
+    "prime": {
+      "implementation": "prime.agent",
+      "sourceCommit": "bfd41d7786a9177aed5f609f9db3fec2f308a326",
+      "archiveSha256": "a1bcc855b83e0d6f7d2f08f803f24d36c771d7ca1a4835a79ecb57e23f51a281",
+      "runtimeTreeSha256": "0ace2791829f84f1449ad7a1c53c5645d92257706bbea9e00c02c63c2ab0ca81",
+      "browserHelperSha256": "a0c2320561b5722cc0dae68d71df1c049373a3b657c29e74d722cc880227c377",
+      "configurationSha256": {
+        "prime-agent-basic.yaml": "55e720e4628a3cab25e149a80325b804f247830b0bc00e5c472400d382fb9775",
+        "prime-agent-deep.yaml": "b91e705d99197419deecd5455ce4715b05246f8cc927dc5ba88c1eb4b50acad7"
+      },
+      "targetClosureSha256": {
+        "darwin-arm64": "6fd251fc85f715a4cc1aa18813dd0818f8c0b010ae88e3f58135293933287de2",
+        "darwin-x64": "317a3739e81420dd8c482312078588eccb35ff2af967dccbd5c5b7f0f819c782",
+        "win32-x64": "78b385100afa98def93114544834f4a364f6806c34e92376aec66e3b38c4b920"
+      },
+      "liveProof": {
+        "preseededMarkerObserved": true,
+        "reversibleActionRestored": true,
+        "clientsClosed": true,
+        "chromeAliveAfterCleanup": true,
+        "askEnclosingCellExecuted": false,
+        "unavailableEndpointFailedHonestly": true
+      }
+    }
+  },
+  "privacy": {
+    "containsCookies": false,
+    "containsTokens": false,
+    "containsCredentials": false,
+    "containsPrivateUrls": false,
+    "containsPageBodies": false,
+    "containsTabInventory": false,
+    "containsBrowserProfileBytes": false
+  },
+  "scope": {
+    "relayerBrowserApi": false,
+    "relayerBrowserCapabilityFlag": false,
+    "relayerBrowserActionClassifier": false,
+    "relayerBrowserPermissionMode": false,
+    "relayerBrowserBroker": false,
+    "relayerBrowserReceipt": false,
+    "relayerCredentialStore": false,
+    "relayerBrowserSetupUi": false,
+    "universalBrowserConformance": false
+  }
+}

@@ -784,7 +784,7 @@ describe("desktop skeleton", () => {
           message: "Prime Agent Ask and Auto require macOS. Choose another available harness on this device.",
         },
         diagnostics: {
-          sourceCommit: "2f4977eceb39e228b78241bd8084eb82b43efe6b",
+          sourceCommit: "bfd41d7786a9177aed5f609f9db3fec2f308a326",
           packages: [{ name: "@earendil-works/pi-coding-agent", version: "0.8.1" }],
         },
       }],
@@ -808,7 +808,7 @@ describe("desktop skeleton", () => {
       expect(catalog.unavailableConfigurations).toEqual([expect.objectContaining({
         name: "prime-agent-basic",
         reason: expect.objectContaining({ code: "prime_agent_boundary_unsupported" }),
-        diagnostics: expect.objectContaining({ sourceCommit: "2f4977eceb39e228b78241bd8084eb82b43efe6b" }),
+        diagnostics: expect.objectContaining({ sourceCommit: "bfd41d7786a9177aed5f609f9db3fec2f308a326" }),
       })]);
       expect(suppliedToken).toBe(`${session.graphControlToken}\n`);
       expect(invocations[0].args).not.toContain("--control-token");
@@ -2186,8 +2186,11 @@ describe("desktop skeleton", () => {
       ]);
       const packagedRuntimeEntries = () => [
         "main/single-instance.mjs",
+        "main/services/codex-browser-mcp-runtime.mjs",
+        "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
         "node_modules/@relayer/graph-client/dist/index.js",
         "node_modules/@relayer/harness-host/dist/index.js",
+        "node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js",
         "node_modules/@relayer/eval-runner/dist/index.js",
       ];
       const verifyPrimeAgent = async () => ({ sourceCommit: "fixture", packages: 4 });
@@ -2215,6 +2218,18 @@ describe("desktop skeleton", () => {
         listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/@relayer/graph-client/dist/index.js"),
         verifyPrimeAgent,
       })).rejects.toThrow("missing node_modules/@relayer/graph-client/dist/index.js");
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
+        listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"),
+        verifyPrimeAgent,
+      })).rejects.toThrow("missing node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js");
+      await expect(verifyBundledAppServer(appPath, {
+        execute: async () => ({ stdout: "arm64\n", stderr: "" }),
+        expectedArchitecture: "arm64",
+        listPackageEntries: () => packagedRuntimeEntries().filter((entry) => entry !== "node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js"),
+        verifyPrimeAgent,
+      })).rejects.toThrow("missing node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js");
       await expect(verifyBundledAppServer(appPath, {
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
         expectedArchitecture: "arm64",

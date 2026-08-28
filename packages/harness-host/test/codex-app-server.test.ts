@@ -175,6 +175,68 @@ describe("Codex app-server transport", () => {
     expect(JSON.stringify(fake.messages)).not.toContain("acceptForSession");
   });
 
+  it("returns pinned Codex MCP denial as Cancel for the exact enclosing tool call", async () => {
+    const request = vi.fn(async () => ({
+      requestId: "request-1",
+      decision: "deny" as const,
+      actor: "user" as const,
+      decidedAt: "2026-08-20T15:00:00.000Z",
+      rationale: "No.",
+    }));
+    const fake = new FakeCodexProcess((message) => {
+      handshake(fake, message);
+      if (message.method === "turn/start") {
+        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
+        queueMicrotask(() => {
+          fake.notify("item/started", {
+            threadId: "thread-new",
+            turnId: "turn-1",
+            item: {
+              type: "mcpToolCall",
+              id: "tool-1",
+              server: "chrome-devtools",
+              tool: "evaluate_script",
+              arguments: { pageId: 1, function: "() => document.title" },
+              readOnlyHint: false,
+            },
+          });
+          fake.serverRequest("mcp-provider-1", "item/tool/requestUserInput", {
+            threadId: "thread-new",
+            turnId: "turn-1",
+            itemId: "tool-1",
+            isBlocking: true,
+            questions: [{
+              id: "mcp_tool_call_approval_call-1",
+              header: "Approve app tool call?",
+              question: "Allow chrome-devtools.evaluate_script?",
+              isOther: false,
+              isSecret: false,
+              options: [
+                { label: "Allow", description: "Run the tool and continue." },
+                { label: "Cancel", description: "Cancel this tool call." },
+              ],
+            }],
+          });
+        });
+      }
+      if (message.id === "mcp-provider-1" && message.result !== undefined) {
+        queueMicrotask(() => completeTurn(fake));
+      }
+    });
+
+    await runCodexAppServerTurn(options(fake, { approvals: { request } }));
+
+    expect(request).toHaveBeenCalledOnce();
+    expect(fake.messages).toContainEqual({
+      id: "mcp-provider-1",
+      result: {
+        answers: {
+          "mcp_tool_call_approval_call-1": { answers: ["Cancel"] },
+        },
+      },
+    });
+  });
+
   it("bridges a permission approval without item/started and completes the same turn", async () => {
     const request = vi.fn(async () => ({
       requestId: "request-1",

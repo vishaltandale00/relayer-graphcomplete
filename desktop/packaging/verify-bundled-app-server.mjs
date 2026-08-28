@@ -51,8 +51,11 @@ export async function verifyBundledAppServer(
   const packagedEntries = new Set(listPackageEntries(join(resourcesPath, "app.asar")).map(normalizeAsarEntry));
   for (const entry of [
     "main/single-instance.mjs",
+    "main/services/codex-browser-mcp-runtime.mjs",
+    "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
     "node_modules/@relayer/graph-client/dist/index.js",
     "node_modules/@relayer/harness-host/dist/index.js",
+    "node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js",
     "node_modules/@relayer/eval-runner/dist/index.js",
   ]) {
     if (!packagedEntries.has(entry)) throw new Error(`Bundled Relayer runtime is missing ${entry}.`);
@@ -154,7 +157,13 @@ export async function verifyPackagedPrimeAgent(
     "node_modules/@earendil-works/pi-coding-agent/dist/core/run-model-scope.js",
     "node_modules/@earendil-works/pi-coding-agent/dist/core/run-tool-authority.js",
     "node_modules/@earendil-works/pi-coding-agent/dist/core/run-kernel-boundary.js",
+    "node_modules/@earendil-works/pi-coding-agent/dist/skills/browser/SKILL.md",
+    "node_modules/@earendil-works/pi-coding-agent/dist/skills/browser/pyproject.toml",
+    "node_modules/@earendil-works/pi-coding-agent/dist/skills/browser/src/browser/__init__.py",
     "node_modules/@earendil-works/pi-coding-agent/skills/agent-message/SKILL.md",
+    "node_modules/@earendil-works/pi-coding-agent/skills/browser/SKILL.md",
+    "node_modules/@earendil-works/pi-coding-agent/skills/browser/pyproject.toml",
+    "node_modules/@earendil-works/pi-coding-agent/skills/browser/src/browser/__init__.py",
     "node_modules/@earendil-works/pi-ai/dist/providers/anthropic.js",
     "node_modules/@earendil-works/pi-ai/dist/providers/openai-completions.js",
     "node_modules/@earendil-works/pi-ai/dist/providers/openai-responses.js",

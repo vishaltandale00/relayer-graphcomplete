@@ -4,7 +4,9 @@ import {
   claudePermissionMode,
   createClaudeBasicFactory,
   type ClaudeSdkQuery,
+  type ClaudeSdkModule,
 } from "../src/implementations/claude-basic.js";
+import { CLAUDE_BROWSER_TOOL } from "../src/implementations/claude-basic-browser.js";
 import { createNoopHarnessTraceSink } from "../src/trace.js";
 import type { HarnessExecutionAccess, HarnessFactoryContext, HarnessRunContext } from "../src/types.js";
 import { expectGraphPresentationGuidance } from "./graph-presentation-guidance-assertions.js";
@@ -37,6 +39,15 @@ function sdkQuery(
       for (const message of messages) yield message;
     })();
   }) as ClaudeSdkQuery;
+}
+
+function browserSdk(): Pick<ClaudeSdkModule, "tool" | "createSdkMcpServer"> {
+  return {
+    tool: ((name: string, description: string, inputSchema: unknown, handler: unknown) => ({
+      name, description, inputSchema, handler,
+    })) as ClaudeSdkModule["tool"],
+    createSdkMcpServer: ((options: unknown) => ({ type: "sdk", options })) as ClaudeSdkModule["createSdkMcpServer"],
+  };
 }
 
 function sequentialSdkQuery(
@@ -116,6 +127,7 @@ describe("ClaudeBasicHarness", () => {
     vi.stubEnv("CLAUDE_CONFIG_DIR", "/ambient/claude-home");
     const calls: Parameters<ClaudeSdkQuery>[0][] = [];
     const loadSdk = vi.fn(async () => ({
+      ...browserSdk(),
       query: sdkQuery([
         { type: "system", subtype: "init", session_id: "session-1" },
         { type: "result", subtype: "success", result: "done", session_id: "session-1" },
@@ -140,11 +152,12 @@ describe("ClaudeBasicHarness", () => {
       expect(options).toMatchObject({
         cwd: "/tmp",
         model: "claude-sonnet-4",
-        allowedTools: ["Bash"],
+        allowedTools: ["Bash", CLAUDE_BROWSER_TOOL],
         permissionMode: "acceptEdits",
         pathToClaudeCodeExecutable: "/managed/claude",
       });
       expect(options.allowDangerouslySkipPermissions).toBeUndefined();
+      expect(options.mcpServers).toHaveProperty("relayer_browser");
       expect(options.env.ANTHROPIC_API_KEY).toBe("secret");
       expect(options.env.ANTHROPIC_BASE_URL).toBe("https://gateway.test/anthropic");
       expect(options.env.CLAUDE_CONFIG_DIR).toBe("/isolated/anthropic-work");
@@ -161,11 +174,20 @@ describe("ClaudeBasicHarness", () => {
   });
 
   it("allows injecting query directly through the public factory seam", async () => {
-    const query = sdkQuery([{ type: "result", subtype: "success", result: "done", session_id: "session-1" }]);
-    const factory = createClaudeBasicFactory({ query });
+    let call: Parameters<ClaudeSdkQuery>[0] | undefined;
+    const query = sdkQuery(
+      [{ type: "result", subtype: "success", result: "done", session_id: "session-1" }],
+      (input) => { call = input; },
+    );
+    const factory = createClaudeBasicFactory({ query, browserSdk: browserSdk() });
     const harness = await factory(factoryContext("ask"));
     await expect(harness.complete(runContext(managedAccess()))).resolves.toBeUndefined();
     expect(harness.state()).toMatchObject({ claudeSessionId: "session-1" });
+    expect(call?.options).toMatchObject({
+      permissionMode: "default",
+      allowedTools: ["Bash"],
+      mcpServers: { relayer_browser: expect.anything() },
+    });
   });
 
   it("uses definition-scoped runtime state and explicit bypass only for full access", async () => {
@@ -175,6 +197,7 @@ describe("ClaudeBasicHarness", () => {
       claudeSessionProviderDefinitionId: "claude-work",
     }), {
       query: sdkQuery([{ type: "result", subtype: "success", result: "done", session_id: "prior" }], (input) => { call = input; }),
+      browserSdk: browserSdk(),
     });
     await harness.complete(runContext(managedAccess({ environment: {
       CLAUDE_CONFIG_DIR: "/isolated",
@@ -188,6 +211,8 @@ describe("ClaudeBasicHarness", () => {
       allowDangerouslySkipPermissions: true,
       pathToClaudeCodeExecutable: "/managed/claude",
     });
+    expect(call?.options.allowedTools).toEqual(["Bash"]);
+    expect(call?.options.mcpServers).toHaveProperty("relayer_browser");
     expect(call?.options.env.CLAUDE_CONFIG_DIR).toBe("/isolated");
     expect(call?.options.env).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(call?.options.env.RELAYER_GRAPH_TOKEN).toBe("token");
@@ -200,6 +225,7 @@ describe("ClaudeBasicHarness", () => {
       query: sdkQuery([
         { type: "result", subtype: "success", result: "done", session_id: "session-1" },
       ], (input) => { call = input; }),
+      browserSdk: browserSdk(),
     });
 
     await harness.complete(runContext(managedAccess({ environment: {
@@ -220,6 +246,7 @@ describe("ClaudeBasicHarness", () => {
         [{ type: "result", subtype: "success", result: "first", session_id: "session-1" }],
         [{ type: "result", subtype: "success", result: "second", session_id: "session-1" }],
       ], (input) => calls.push(input)),
+      browserSdk: browserSdk(),
     });
     const access = secretAccess();
 
@@ -244,6 +271,7 @@ describe("ClaudeBasicHarness", () => {
         { type: "system", subtype: "init", session_id: "replacement" },
         { type: "result", subtype: "success", result: "done", session_id: "replacement" },
       ], (input) => { call = input; }),
+      browserSdk: browserSdk(),
     });
 
     await harness.complete(runContext(next));
@@ -259,6 +287,7 @@ describe("ClaudeBasicHarness", () => {
     let call: Parameters<ClaudeSdkQuery>[0] | undefined;
     const harness = new ClaudeBasicHarness(factoryContext("ask", { claudeSessionId: "legacy" }), {
       query: sdkQuery([{ type: "result", subtype: "success", result: "done" }], (input) => { call = input; }),
+      browserSdk: browserSdk(),
     });
 
     await harness.complete(runContext(secretAccess()));
@@ -270,6 +299,7 @@ describe("ClaudeBasicHarness", () => {
   it("requires an explicit managed executable and SDK module for every provider access kind", async () => {
     const harness = new ClaudeBasicHarness(factoryContext("ask"), {
       query: sdkQuery([{ type: "result", subtype: "success", result: "done" }]),
+      browserSdk: browserSdk(),
     });
     await expect(harness.complete(runContext(managedAccess({ executable: undefined })))).rejects.toThrow(/explicit managed Claude runtime/);
     await expect(harness.complete(runContext(managedAccess({ moduleUrl: undefined })))).rejects.toThrow(/explicit managed Claude runtime/);
@@ -285,7 +315,7 @@ describe("ClaudeBasicHarness", () => {
       });
       yield { type: "result", subtype: "success", result: "unreachable" };
     })()) as ClaudeSdkQuery;
-    const harness = new ClaudeBasicHarness(factoryContext("ask"), { query });
+    const harness = new ClaudeBasicHarness(factoryContext("ask"), { query, browserSdk: browserSdk() });
     const controller = new AbortController();
     const completion = harness.complete(runContext(managedAccess()), controller.signal);
     await vi.waitFor(() => expect(sdkSignal).toBeDefined());
@@ -299,6 +329,7 @@ describe("ClaudeBasicHarness", () => {
       query: (() => (async function* () {
         throw new Error("upstream rejected sk-secret customer@example.test");
       })()) as ClaudeSdkQuery,
+      browserSdk: browserSdk(),
     });
     const completion = harness.complete(runContext(secretAccess({ fields: { "api-key": "sk-secret" } })));
     await expect(completion).rejects.toThrow("Claude Agent SDK completion failed.");
@@ -310,6 +341,7 @@ describe("ClaudeBasicHarness", () => {
       query: sdkQuery([{
         type: "result", subtype: "error_during_execution", errors: ["customer@example.test sk-secret"],
       }]),
+      browserSdk: browserSdk(),
     });
     await expect(harness.complete(runContext(secretAccess()))).rejects.toThrow("Claude Agent SDK completion failed.");
     await expect(harness.complete(runContext(secretAccess()))).rejects.not.toThrow(/customer@example\.test|sk-secret/);

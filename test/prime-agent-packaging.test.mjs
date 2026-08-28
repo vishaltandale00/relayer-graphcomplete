@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -54,7 +54,7 @@ describe("Prime Agent packaged runtime", () => {
     const lockfile = JSON.parse(await readFile(join(repositoryRoot, "package-lock.json"), "utf8"));
     const desktopManifest = JSON.parse(await readFile(join(repositoryRoot, "desktop", "package.json"), "utf8"));
 
-    expect(manifest.source.commit).toBe("2f4977eceb39e228b78241bd8084eb82b43efe6b");
+    expect(manifest.source.commit).toBe("bfd41d7786a9177aed5f609f9db3fec2f308a326");
     expect(manifest.runtimeContract.modelScopeAccess).toBe("upfront-request-access@1");
     expect(manifest.packages).toHaveLength(4);
     for (const entry of manifest.packages) {
@@ -71,6 +71,25 @@ describe("Prime Agent packaged runtime", () => {
     expect(JSON.stringify(lockfile)).not.toContain("prime-agent/packages/");
   });
 
+  it("discovers the browser route through Prime's bundled Python skill semantics", async () => {
+    const { loadSkillsFromDir } = await import("@earendil-works/pi-coding-agent");
+    const packageRoot = resolve(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "..");
+    const { skills } = loadSkillsFromDir({ dir: join(packageRoot, "skills"), source: "builtin" });
+    const browser = skills.find(({ name }) => name === "browser");
+
+    expect(browser).toMatchObject({
+      name: "browser",
+      kind: "python",
+      python: { importName: "browser" },
+    });
+    for (const name of ["prime-agent-basic.yaml", "prime-agent-deep.yaml"]) {
+      const configuration = await readFile(join(repositoryRoot, "harnesses", name), "utf8");
+      expect(configuration).toContain("ask:\n    boundary: workspace-write@1");
+      expect(configuration).toContain("auto:\n    boundary: workspace-write@1");
+      expect(configuration).toContain("full: {}");
+    }
+  });
+
   it("admits only the exact runtime API, production configs, and Python client", async () => {
     await expect(inspectPrimeAgentRuntime({
       appPath: repositoryRoot,
@@ -81,7 +100,7 @@ describe("Prime Agent packaged runtime", () => {
       architecture: "arm64",
     })).resolves.toMatchObject({
       available: true,
-      sourceCommit: "2f4977eceb39e228b78241bd8084eb82b43efe6b",
+      sourceCommit: "bfd41d7786a9177aed5f609f9db3fec2f308a326",
       configurationNames: ["prime-agent-basic", "prime-agent-deep"],
     });
 
@@ -103,7 +122,7 @@ describe("Prime Agent packaged runtime", () => {
       code: "prime_agent_api_incompatible",
       message: "This Relayer build cannot use the packaged Prime Agent API. Update Relayer.",
       diagnostics: {
-        sourceCommit: "2f4977eceb39e228b78241bd8084eb82b43efe6b",
+        sourceCommit: "bfd41d7786a9177aed5f609f9db3fec2f308a326",
         packages: expect.arrayContaining([{ name: "@earendil-works/pi-coding-agent", version: "0.8.1" }]),
       },
     });

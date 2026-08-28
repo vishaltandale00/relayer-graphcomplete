@@ -1087,7 +1087,7 @@ describe("PrimeAgentHarness", () => {
   it("records only validated package provenance in execution traces", async () => {
     const previous = process.env.RELAYER_PRIME_RUNTIME_PROVENANCE;
     process.env.RELAYER_PRIME_RUNTIME_PROVENANCE = JSON.stringify({
-      sourceCommit: "2f4977eceb39e228b78241bd8084eb82b43efe6b",
+      sourceCommit: "bfd41d7786a9177aed5f609f9db3fec2f308a326",
       packages: ["agent-core", "ai", "coding-agent", "tui"].map((name) => ({
         name: `@earendil-works/pi-${name}`,
         version: "0.8.1",
@@ -1106,7 +1106,7 @@ describe("PrimeAgentHarness", () => {
       await harness.complete(runContext(11, "token", trace.sink));
       const serialized = JSON.stringify(trace.events);
       expect(serialized).toContain("runtime.provenance");
-      expect(serialized).toContain("2f4977eceb39e228b78241bd8084eb82b43efe6b");
+      expect(serialized).toContain("bfd41d7786a9177aed5f609f9db3fec2f308a326");
       expect(serialized).toContain("@earendil-works/pi-coding-agent");
       expect(serialized).not.toContain("must-not-trace");
     } finally {
@@ -1118,7 +1118,7 @@ describe("PrimeAgentHarness", () => {
   it("omits runtime provenance when the package set is duplicated", async () => {
     const previous = process.env.RELAYER_PRIME_RUNTIME_PROVENANCE;
     process.env.RELAYER_PRIME_RUNTIME_PROVENANCE = JSON.stringify({
-      sourceCommit: "2f4977eceb39e228b78241bd8084eb82b43efe6b",
+      sourceCommit: "bfd41d7786a9177aed5f609f9db3fec2f308a326",
       packages: Array.from({ length: 4 }, () => ({
         name: "@earendil-works/pi-ai",
         version: "0.8.1",
