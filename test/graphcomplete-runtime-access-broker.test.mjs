@@ -273,4 +273,38 @@ describe("desktop provider execution access broker", () => {
     });
     await acquired.release();
   });
+
+  it("preserves exact provider-native request access on a managed subscription lease", async () => {
+    const fixture = providerLease({
+      providerId: "codex-work",
+      adapterId: "codex-subscription",
+      accessContract: "managed-runtime@1",
+      resolved: {
+        kind: "managed-runtime",
+        runtimeId: "codex",
+        version: "1.2.3",
+        executable: "/managed/codex",
+        environment: { CODEX_HOME: "/isolated/codex-work" },
+        nativeRequestAccess: {
+          kind: "secret",
+          contract: "secret@1",
+          apiKey: "oauth-access-token",
+        },
+      },
+    });
+    const broker = createProviderExecutionAccessBroker(async () => fixture.lease);
+
+    const acquired = await broker.acquire(
+      { providerId: "codex-work", adapterId: "codex-subscription", modelId: "gpt-5.4" },
+      ["managed-runtime@1"],
+      new AbortController().signal,
+    );
+
+    expect(acquired.access.nativeRequestAccess).toEqual({
+      kind: "secret",
+      contract: "secret@1",
+      apiKey: "oauth-access-token",
+    });
+    await acquired.release();
+  });
 });

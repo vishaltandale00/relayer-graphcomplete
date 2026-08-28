@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { InteractionInput, ResolvedPersonalPresentation } from "@relayer/graph-client";
 import { HarnessExecutionFailure, HarnessHost, startHarnessHost } from "../src/host.js";
+import { loadHarnessConfiguration } from "../src/configuration.js";
 import { PrimeAgentHarness } from "../src/implementations/prime-agent.js";
 import type {
   Harness,
@@ -73,6 +74,56 @@ const legacyConfiguration = (configuration: HarnessConfiguration) => {
 };
 
 describe("HarnessHost", () => {
+  it.each([
+    ["codex-basic", "codex"],
+    ["claude-basic", "claude"],
+    ["prime-agent-basic", "prime-agent"],
+  ])("resumes the exact shipped %s session under renamed product harness %s", async (priorName, currentName) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-renamed-harness-state-"));
+    const stateFile = join(directory, "sessions.json");
+    const prior = await loadHarnessConfiguration(join(process.cwd(), "harnesses", `${priorName}.yaml`));
+    const current = await loadHarnessConfiguration(join(process.cwd(), "harnesses", `${currentName}.yaml`));
+    await writeFile(stateFile, JSON.stringify({
+      schemaVersion: 6,
+      sessions: [{
+        threadId: 1,
+        configuration: prior,
+        permissionProfileId: "auto",
+        workingDirectory: directory,
+        state: { providerSessionId: "existing-session" },
+      }],
+    }), { mode: 0o600 });
+    let restoredState: HarnessSessionState | undefined;
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const host = new HarnessHost({
+      stateFile,
+      controlToken: "control",
+      implementations: {
+        [current.implementation]: (context) => {
+          restoredState = context.savedState;
+          return { async complete() {}, state: () => context.savedState ?? emptyState() };
+        },
+      },
+    });
+    try {
+      await host.initialize();
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: current,
+        workingDirectory: directory,
+      });
+      expect(restoredState).toEqual({ providerSessionId: "existing-session" });
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).toMatchObject({
+        sessions: [{ configuration: current, state: { providerSessionId: "existing-session" } }],
+      });
+    } finally {
+      warning.mockRestore();
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("classifies and preserves partial streamed output without making the attempt replayable", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-partial-output-"));
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")

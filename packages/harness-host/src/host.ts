@@ -285,7 +285,7 @@ export class HarnessHost {
     }
     const prior = this.saved.get(descriptor.threadId);
     const priorUpgrade = prior !== undefined
-      && productCodexUpgradeMatches(prior.configuration, descriptor.configuration);
+      && knownProductUpgradeMatches(prior.configuration, descriptor.configuration);
     const priorMatches = prior !== undefined && (sameHarnessExecutionConfiguration(prior.configuration, descriptor.configuration)
       || priorUpgrade);
     if (prior !== undefined && (!priorMatches
@@ -294,18 +294,18 @@ export class HarnessHost {
       throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${prior.configuration.name}`);
     }
     if (priorUpgrade) {
-      console.warn(`Migrating retired product Codex configuration for harness thread ${descriptor.threadId} during registration`);
+      console.warn(migrationWarning(prior!.configuration.name, descriptor.configuration.name, descriptor.threadId));
     }
     const legacy = this.legacySaved.get(descriptor.threadId);
     const legacyUpgrade = legacy !== undefined
-      && legacyProductCodexUpgradeMatches(legacy.configuration, descriptor.configuration);
+      && knownLegacyProductUpgradeMatches(legacy.configuration, descriptor.configuration);
     const legacyAccepted = legacy !== undefined
       && descriptor.permissionProfileId === legacyPermissionProfileId(descriptor.configuration)
       && (sameLegacyHarnessConfiguration(legacy.configuration, descriptor.configuration)
         || legacyUpgrade)
       && legacy.workingDirectory === descriptor.workingDirectory;
     if (legacyAccepted && legacyUpgrade) {
-      console.warn(`Migrating deferred product Codex configuration for harness thread ${descriptor.threadId} during registration`);
+      console.warn(migrationWarning(legacy!.configuration.name, descriptor.configuration.name, descriptor.threadId, true));
     }
     const legacyState = legacyAccepted ? legacy.state : undefined;
     const savedState = prior?.state ?? legacyState;
@@ -1377,6 +1377,38 @@ function productCodexUpgradeMatches(
   return migrated !== prior && sameHarnessExecutionConfiguration(migrated, current);
 }
 
+function knownProductUpgradeMatches(
+  prior: HarnessConfiguration,
+  current: HarnessConfiguration,
+): boolean {
+  if (productCodexUpgradeMatches(prior, current)) return true;
+  let candidate: HarnessConfiguration | undefined;
+  if (current.name === "codex") {
+    const priorProduct = prior.name === "codex-basic" && prior.revision === 3
+      ? prior
+      : migratedProductCodexConfiguration(prior);
+    if (priorProduct.name === "codex-basic" && priorProduct.revision === 3) {
+      candidate = parseHarnessConfiguration({ ...priorProduct, name: "codex", revision: 4 });
+    }
+  } else if (current.name === "claude"
+    && prior.name === "claude-basic" && prior.revision === 1
+    && prior.implementation === "claude.basic" && prior.implementationVersion === 1) {
+    candidate = parseHarnessConfiguration({ ...prior, name: "claude", revision: 2 });
+  } else if (current.name === "prime-agent"
+    && prior.name === "prime-agent-basic" && prior.revision === 1
+    && prior.implementation === "prime.agent" && prior.implementationVersion === 1
+    && stableJson(prior.executionAccessContracts) === stableJson(["secret@1"])) {
+    candidate = parseHarnessConfiguration({
+      ...prior,
+      name: "prime-agent",
+      revision: 2,
+      modelRules: current.modelRules,
+      executionAccessContracts: ["managed-runtime@1", "secret@1"],
+    });
+  }
+  return candidate !== undefined && sameHarnessExecutionConfiguration(candidate, current);
+}
+
 function migratedLegacyProductCodexConfiguration(
   configuration: Omit<HarnessConfiguration, "permissionBindings">,
 ): Omit<HarnessConfiguration, "permissionBindings"> {
@@ -1407,6 +1439,26 @@ function legacyProductCodexUpgradeMatches(
 ): boolean {
   const migrated = migratedLegacyProductCodexConfiguration(prior);
   return migrated !== prior && sameLegacyHarnessConfiguration(migrated, current);
+}
+
+function knownLegacyProductUpgradeMatches(
+  prior: Omit<HarnessConfiguration, "permissionBindings">,
+  current: HarnessConfiguration,
+): boolean {
+  if (legacyProductCodexUpgradeMatches(prior, current)) return true;
+  const candidate = { ...prior, permissionBindings: current.permissionBindings };
+  try {
+    return knownProductUpgradeMatches(parseHarnessConfiguration(candidate), current);
+  } catch {
+    return false;
+  }
+}
+
+function migrationWarning(prior: string, current: string, threadId: number, deferred = false): string {
+  if (current === "codex-basic") {
+    return `Migrating ${deferred ? "deferred" : "retired"} product Codex configuration for harness thread ${threadId} during registration`;
+  }
+  return `Migrating ${deferred ? "deferred " : ""}product harness ${prior} to ${current} for harness thread ${threadId} during registration`;
 }
 
 function preAccessContractThreadId(value: unknown): number | undefined {
@@ -1736,7 +1788,14 @@ function freezeExecutionAccess(access: HarnessExecutionAccess): HarnessExecution
       ...(modelCapabilities === undefined ? {} : { modelCapabilities }),
     });
   }
-  return Object.freeze({ ...access, environment: Object.freeze({ ...access.environment }) });
+  const nativeRequestAccess = access.nativeRequestAccess === undefined
+    ? undefined
+    : Object.freeze({ ...access.nativeRequestAccess });
+  return Object.freeze({
+    ...access,
+    environment: Object.freeze({ ...access.environment }),
+    ...(nativeRequestAccess === undefined ? {} : { nativeRequestAccess }),
+  });
 }
 
 function freezeAccessBundle(byProviderId: Readonly<Record<string, HarnessExecutionAccess>>): HarnessExecutionAccessBundle {

@@ -375,6 +375,7 @@ impl SqliteProductStore {
                 }
             }
         }
+        migrate_known_product_harness_names(&mut transaction, runtime_harnesses).await?;
         retire_absent_product_codex_high(&mut transaction, runtime_harnesses).await?;
         sqlx::query(
             "UPDATE product_model_preferences SET default_harness_configuration_name=?1 WHERE singleton=1 AND defaults_modified=0",
@@ -2598,6 +2599,92 @@ async fn retire_absent_product_codex_high(
     Ok(())
 }
 
+async fn migrate_known_product_harness_names(
+    connection: &mut SqliteConnection,
+    runtime_harnesses: &[RuntimeProductHarness],
+) -> Result<(), StorageError> {
+    const RENAMES: &[(&str, &str, u32, &str)] = &[
+        (
+            "codex-basic",
+            "codex",
+            3,
+            "sha256:dc1f5bbd3bb36295ea6d874daf6cfe8384cb41e219bdb837a944358505afbe49",
+        ),
+        (
+            "claude-basic",
+            "claude",
+            1,
+            "sha256:c9f3b29e07c7cc18c3155510260d858d2e7582a223894019b5fbe4279b4cb87e",
+        ),
+        (
+            "prime-agent-basic",
+            "prime-agent",
+            1,
+            "sha256:75cf842d1139295fc91df6684293364f5bc6d0677774267bee88d459f794b344",
+        ),
+    ];
+    let runtime_names = runtime_harnesses
+        .iter()
+        .map(|harness| harness.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    for (prior, replacement, prior_revision, prior_digest) in RENAMES {
+        if !runtime_names.contains(replacement) || runtime_names.contains(prior) {
+            continue;
+        }
+        let exact_prior: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM product_harnesses
+                WHERE configuration_name=?1
+                  AND model_rules_modified=0
+                  AND runtime_configuration_revision=?2
+                  AND runtime_configuration_digest=?3
+            )",
+        )
+        .bind(prior)
+        .bind(*prior_revision)
+        .bind(prior_digest)
+        .fetch_one(&mut *connection)
+        .await?;
+        if !exact_prior {
+            continue;
+        }
+        sqlx::query(
+            "UPDATE threads SET harness_configuration_name=?1 WHERE harness_configuration_name=?2",
+        )
+        .bind(replacement)
+        .bind(prior)
+        .execute(&mut *connection)
+        .await?;
+        sqlx::query(
+            "UPDATE interactions
+             SET graph_node_id=NULL,completion_status='submitted',
+                 harness_configuration_name=?1,harness_configuration_digest=NULL,
+                 effective_execution_digest=NULL,effective_permission_receipt_json=NULL,
+                 completion_output_json=NULL,completion_error=NULL
+             WHERE harness_configuration_name=?2
+               AND completion_status IN ('not_started','running','submitted','waiting_for_approval')",
+        )
+        .bind(replacement)
+        .bind(prior)
+        .execute(&mut *connection)
+        .await?;
+        sqlx::query(
+            "UPDATE product_model_preferences SET default_harness_configuration_name=?1 WHERE singleton=1 AND default_harness_configuration_name=?2",
+        )
+        .bind(replacement)
+        .bind(prior)
+        .execute(&mut *connection)
+        .await?;
+        sqlx::query(
+            "UPDATE product_harnesses SET product_visible=0,available=0,unavailable_reason_code='harness_retired',unavailable_reason_message='This product harness has been retired.' WHERE configuration_name=?1",
+        )
+        .bind(prior)
+        .execute(&mut *connection)
+        .await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod provider_definition_tests {
     use super::*;
@@ -2628,6 +2715,89 @@ mod provider_definition_tests {
             runtime_available: true,
             unavailable_reason: None,
         }
+    }
+
+    fn shipped_runtime_harness(id: &str, revision: u32, digest: &str) -> RuntimeProductHarness {
+        RuntimeProductHarness {
+            configuration_revision: revision,
+            configuration_digest: digest.into(),
+            execution_access_contracts: vec!["managed-runtime@1".into(), "secret@1".into()],
+            ..runtime_harness(id)
+        }
+    }
+
+    #[tokio::test]
+    async fn desktop_catalog_migrates_only_exact_known_product_harness_names() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-product-harness-rename-{}-{}.sqlite3",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let prior = [
+            (
+                "codex-basic",
+                3,
+                "sha256:dc1f5bbd3bb36295ea6d874daf6cfe8384cb41e219bdb837a944358505afbe49",
+            ),
+            (
+                "claude-basic",
+                1,
+                "sha256:c9f3b29e07c7cc18c3155510260d858d2e7582a223894019b5fbe4279b4cb87e",
+            ),
+            (
+                "prime-agent-basic",
+                1,
+                "sha256:75cf842d1139295fc91df6684293364f5bc6d0677774267bee88d459f794b344",
+            ),
+        ];
+        for (position, (name, revision, digest)) in prior.iter().enumerate() {
+            sqlx::query("INSERT INTO product_harnesses(configuration_name,label,product_visible,available,configuration_revision,configuration_digest,runtime_configuration_revision,runtime_configuration_digest) VALUES (?1,?1,1,1,?2,?3,?2,?3) ON CONFLICT(configuration_name) DO UPDATE SET product_visible=1,available=1,configuration_revision=excluded.configuration_revision,configuration_digest=excluded.configuration_digest,runtime_configuration_revision=excluded.runtime_configuration_revision,runtime_configuration_digest=excluded.runtime_configuration_digest")
+                .bind(name).bind(*revision).bind(digest).execute(&store.pool).await.unwrap();
+            sqlx::query("INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (?1,?2,'1','1',?3,'auto')")
+                .bind(position as i64 + 1).bind(name).bind(name).execute(&store.pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO product_harnesses(configuration_name,label,product_visible,available,configuration_revision,configuration_digest,runtime_configuration_revision,runtime_configuration_digest) VALUES ('prime-agent-basic-custom','Custom',1,1,1,'sha256:custom',1,'sha256:custom')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (4,'Custom','1','1','prime-agent-basic-custom','auto')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("UPDATE product_model_preferences SET default_harness_configuration_name='prime-agent-basic',defaults_modified=1 WHERE singleton=1")
+            .execute(&store.pool).await.unwrap();
+
+        store
+            .initialize_model_catalog(
+                "codex",
+                &[
+                    shipped_runtime_harness("codex", 4, "sha256:new-codex"),
+                    shipped_runtime_harness("claude", 2, "sha256:new-claude"),
+                    shipped_runtime_harness("prime-agent", 2, "sha256:new-prime"),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let threads: Vec<String> = sqlx::query_scalar(
+            "SELECT harness_configuration_name FROM threads WHERE id BETWEEN 1 AND 4 ORDER BY id",
+        )
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
+        let default_harness: String = sqlx::query_scalar("SELECT default_harness_configuration_name FROM product_model_preferences WHERE singleton=1")
+            .fetch_one(&store.pool).await.unwrap();
+        let retired: Vec<(String, bool)> = sqlx::query_as("SELECT configuration_name,product_visible FROM product_harnesses WHERE configuration_name IN ('codex-basic','claude-basic','prime-agent-basic') ORDER BY configuration_name")
+            .fetch_all(&store.pool).await.unwrap();
+
+        assert_eq!(
+            threads,
+            vec!["codex", "claude", "prime-agent", "prime-agent-basic-custom"]
+        );
+        assert_eq!(default_harness, "prime-agent");
+        assert!(retired.iter().all(|(_, visible)| !visible));
+        drop(store);
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test]

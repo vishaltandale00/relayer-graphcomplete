@@ -1,5 +1,7 @@
-export const DEFAULT_DESKTOP_HARNESS_CONFIGURATION = "codex-basic";
-const INTERNAL_ONLY_HARNESS_CONFIGURATIONS = new Set(["codex-basic-high"]);
+export const DEFAULT_DESKTOP_HARNESS_CONFIGURATION = "codex";
+const INTERNAL_ONLY_HARNESS_CONFIGURATIONS = new Set([
+  "codex-basic", "codex-basic-high", "claude-basic", "prime-agent-basic", "prime-agent-deep",
+]);
 
 export function resolveDesktopHarnessConfiguration({
   isPackaged,

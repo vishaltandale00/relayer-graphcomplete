@@ -110,11 +110,11 @@ describe("desktop skeleton", () => {
       .toBe(DEFAULT_DESKTOP_HARNESS_CONFIGURATION);
     expect(resolveDesktopHarnessConfiguration({
       isPackaged: false,
-      environment: { RELAYER_DESKTOP_HARNESS_CONFIGURATION: "prime-agent-basic" },
-    })).toBe("prime-agent-basic");
+      environment: { RELAYER_DESKTOP_HARNESS_CONFIGURATION: "prime-agent" },
+    })).toBe("prime-agent");
     expect(resolveDesktopHarnessConfiguration({
       isPackaged: true,
-      environment: { RELAYER_DESKTOP_HARNESS_CONFIGURATION: "prime-agent-basic" },
+      environment: { RELAYER_DESKTOP_HARNESS_CONFIGURATION: "prime-agent" },
     })).toBe(DEFAULT_DESKTOP_HARNESS_CONFIGURATION);
     expect(() => resolveDesktopHarnessConfiguration({
       isPackaged: false,
@@ -220,7 +220,7 @@ describe("desktop skeleton", () => {
     expect(rendererMain).toContain('bindComposerKeydown($("#newThreadPrompt"), () => {');
     expect(rendererMain).toContain('openNewThreadModelPicker("model")');
     expect(desktopMain).toContain("RelayerAppServerService");
-    expect(desktopMain).toContain('allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-")');
+    expect(desktopMain).toContain('allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration === "prime-agent"');
     expect(desktopMain).toContain("productServer.start()");
     expect(desktopMain).toContain("productServer.close()");
     expect(desktopMain).not.toContain("startModelCatalogRefreshServer");
@@ -2083,7 +2083,7 @@ describe("desktop skeleton", () => {
     // application updater above and by Preview publication.
     expect(builder.mac.extendInfo).toBeUndefined();
     expect(builder.extraResources).toContainEqual(expect.objectContaining({
-      to: "harnesses/claude-basic.yaml",
+      to: "harnesses/claude.yaml",
     }));
     expect(builder.files).toEqual(expect.arrayContaining(
       Object.values(ACTIVE_PROVIDER_ADAPTER_MODULES).map((modulePath) => `main/${modulePath}`),

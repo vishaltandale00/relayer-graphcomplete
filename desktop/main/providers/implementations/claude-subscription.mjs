@@ -1,6 +1,7 @@
 import {
   ManagedRuntimeCredentialAdapter,
   ManagedRuntimeModelCatalogAdapter,
+  PrimeProfileCredentialAdapter,
 } from "./managed-subscription-adapter.mjs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -108,12 +109,19 @@ export const claudeSubscriptionDescriptor = Object.freeze({
   endpointEditableDuringCreation: false,
   connection: { mode: "managed-login", fields: [] },
   catalog: { source: "code-manifest" },
-  create: ({ definition, runtimeFactory, discoverModels, environment, managedRuntime: runtimeDescriptor, spawnProcess }) => {
+  create: ({ definition, runtimeFactory, discoverModels, environment, managedRuntime: runtimeDescriptor, spawnProcess, primeSubscriptionProfile }) => {
     const managedRuntime = requireManagedRuntime(runtimeDescriptor, "claude");
     const effectiveRuntimeFactory = runtimeFactory ?? (() => new ClaudeCliManagedRuntime({
       environment, executable: managedRuntime.executable, spawnProcess,
     }));
-    const credentials = new ManagedRuntimeCredentialAdapter({ definition, runtimeFactory: effectiveRuntimeFactory });
+    const credentials = primeSubscriptionProfile
+      ? new PrimeProfileCredentialAdapter({
+        definition,
+        profile: primeSubscriptionProfile,
+        environment,
+        fallbackRuntimeFactory: effectiveRuntimeFactory,
+      })
+      : new ManagedRuntimeCredentialAdapter({ definition, runtimeFactory: effectiveRuntimeFactory });
     const catalog = new ManagedRuntimeModelCatalogAdapter({
       definition,
       credentials,
@@ -128,9 +136,18 @@ export const claudeSubscriptionDescriptor = Object.freeze({
         const account = await credentials.account({ signal });
         if (account?.status !== "connected") throw new Error("Claude subscription is not connected.");
         if (!credentials.runtime) throw new Error("Claude managed runtime is unavailable.");
+        let nativeRequestAccess;
+        if (typeof credentials.nativeRequestAccess === "function") {
+          try {
+            nativeRequestAccess = await credentials.nativeRequestAccess({ signal });
+          } catch (error) {
+            if (signal?.aborted) throw error;
+          }
+        }
         return Object.freeze({
           kind: "managed-runtime",
           ...managedRuntimeExecutionDetails(managedRuntime, credentials.runtime.environment),
+          ...(nativeRequestAccess ? { nativeRequestAccess } : {}),
         });
       },
       close: () => credentials.close(),

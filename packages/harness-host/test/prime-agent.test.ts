@@ -482,8 +482,86 @@ describe("PrimeAgentHarness", () => {
       accessBundle: { byProviderId: { [route.providerId]: managedAccess } },
     } satisfies HarnessRunContext;
 
-    await expect(harness.complete(invalid)).rejects.toThrow("does not support provider adapter codex-subscription");
+    await expect(harness.complete(invalid)).rejects.toThrow("requires exact provider-native subscription access");
     expect(session.promptAndWait).not.toHaveBeenCalled();
+  });
+
+  it("uses exact Codex and Claude subscription request access in one Prime family", async () => {
+    const scopes: ControlledRunScope[] = [];
+    const session = {
+      promptAndWait: vi.fn(async (_text: string, options: { modelScope: ControlledRunScope }) => {
+        for (const model of options.modelScope.input.models) options.modelScope.resolve(model);
+        options.modelScope.revoke();
+      }),
+      waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7,
+      workingDirectory: "/tmp/project",
+      ...fullPermission,
+      configuration,
+    }, { loadModule: async () => ({
+      ...controlledRunScopeApi(scopes),
+      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => ({})),
+      createAgentSessionFromServices: vi.fn(async () => ({ session })),
+    }) as never });
+    const routes = [
+      { providerId: "codex-work", adapterId: "codex-subscription", accessContract: "managed-runtime@1", modelId: "gpt-5.4", adapterImplementationVersion: "1" },
+      { providerId: "codex-personal", adapterId: "codex-subscription", accessContract: "managed-runtime@1", modelId: "gpt-5.4", adapterImplementationVersion: "1" },
+      { providerId: "claude-personal", adapterId: "claude-subscription", accessContract: "managed-runtime@1", modelId: "sonnet", adapterImplementationVersion: "1" },
+    ] as const;
+    const access = {
+      "codex-work": {
+        kind: "managed-runtime", contract: "managed-runtime@1", providerId: "codex-work",
+        adapterId: "codex-subscription", adapterImplementationVersion: "1", runtimeId: "codex",
+        version: "1.2.3", executable: "/managed/codex", environment: { CODEX_HOME: "/isolated/codex-work" },
+        nativeRequestAccess: {
+          kind: "secret", contract: "secret@1", apiKey: "codex-oauth-access",
+        },
+      },
+      "claude-personal": {
+        kind: "managed-runtime", contract: "managed-runtime@1", providerId: "claude-personal",
+        adapterId: "claude-subscription", adapterImplementationVersion: "1", runtimeId: "claude",
+        version: "2.3.4", executable: "/managed/claude", moduleUrl: "file:///managed/claude/sdk.mjs",
+        environment: { CLAUDE_CONFIG_DIR: "/isolated/claude-personal" },
+        nativeRequestAccess: {
+          kind: "secret", contract: "secret@1", apiKey: "claude-oauth-access",
+        },
+      },
+      "codex-personal": {
+        kind: "managed-runtime", contract: "managed-runtime@1", providerId: "codex-personal",
+        adapterId: "codex-subscription", adapterImplementationVersion: "1", runtimeId: "codex",
+        version: "1.2.3", executable: "/managed/codex", environment: { CODEX_HOME: "/isolated/codex-personal" },
+        nativeRequestAccess: {
+          kind: "secret", contract: "secret@1", apiKey: "codex-personal-oauth-access",
+        },
+      },
+    } as const;
+    const base = runContext(31, "token");
+    const context = {
+      ...base,
+      model: { providerId: routes[0].providerId, adapterId: routes[0].adapterId, modelId: routes[0].modelId },
+      modelPlan: {
+        familyId: 31, familyRevision: 1, orchestrator: routes[0], roster: routes,
+        harnessPolicyDigest: "sha256:subscription-policy", digest: "sha256:subscription-family",
+      },
+      access: access["codex-work"],
+      accessBundle: { byProviderId: access },
+    } satisfies HarnessRunContext;
+
+    await harness.complete(context);
+
+    expect(scopes[0]!.input.models).toMatchObject([
+      { provider: `relayer-codex-subscription-${Buffer.from("codex-work").toString("base64url")}`, id: "gpt-5.4", api: "openai-codex-responses" },
+      { provider: `relayer-codex-subscription-${Buffer.from("codex-personal").toString("base64url")}`, id: "gpt-5.4", api: "openai-codex-responses" },
+      { provider: `relayer-claude-subscription-${Buffer.from("claude-personal").toString("base64url")}`, id: "sonnet", api: "anthropic-messages" },
+    ]);
+    expect(scopes[0]!.input.requestAccess.map(({ access: request }) => request.apiKey))
+      .toEqual(["codex-oauth-access", "codex-personal-oauth-access", "claude-oauth-access"]);
   });
 
   it("uses discovered per-model token capabilities with a conservative fallback", async () => {

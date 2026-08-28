@@ -741,7 +741,8 @@ type CompleteResult =
 <p>Relayer uses one implicit local profile. First launch opens Agent setup and, after a valid configuration is saved, opens the normal New thread window. An optional Relayer account offer may appear only after that local workspace is usable. Folder, project, and account choice are not blocking onboarding steps.</p>
 <p>The setup surface is one focused <strong>Agent login</strong> card. Codex and API key are presented as horizontal login-method choices, followed by the credential and model controls for the selected method. The form should not split setup into equal Harness and Agent login columns or stack alternative methods into a long vertical option list.</p>
 <p>Agent setup does not require a harness choice. After connection, the New Thread composer presents Model as the primary execution control. Its Advanced tab contains compatible harness configurations.</p>
-<p>The packaged application includes <code>codex-basic</code> as its Codex product harness. <code>codex-basic-high</code> remains available only to internal Eval and code workflows. Prime Agent configurations remain development targets until a clean installation can load the upstream package.</p>
+<p>The packaged product harnesses are <code>codex</code>, <code>claude</code>, and <code>prime-agent</code>. Their internal implementation keys are <code>codex.basic</code>, <code>claude.basic</code>, and <code>prime.agent</code>.</p>
+<p><code>codex-basic-high</code> and <code>prime-agent-deep</code> remain available only to internal Eval and code workflows. They are not product-visible.</p>
 <h3>2.2 Login methods</h3>
 <h4>Codex</h4>
 <ul>
@@ -750,6 +751,17 @@ type CompleteResult =
 <li>Successful authentication populates compatible model choices.</li>
 <li>Expired or revoked authentication returns the user to Agent setup without losing projects, threads, or graphs.</li>
 </ul>
+<h4>Subscription reuse in Prime Agent</h4>
+<ul>
+<li>A Codex or Claude subscription connection is authenticated once and is usable by both its basic harness and <code>prime-agent</code> without a second harness-specific login.</li>
+<li>Relayer provider definitions remain authoritative. Prime uses an isolated Relayer-owned profile derived from the selected definition and never consults the user's ambient Prime profile.</li>
+<li>Credential entries are namespaced by stable provider-definition ID. Every admitted model route uses the same ID, preventing account overwrite or substitution.</li>
+<li>Prime owns root and recursive child execution, including mixed Codex and Claude families. GraphComplete continues to own graph authority and explicit acceptance.</li>
+<li>Connection, startup backfill, refresh, reconnect, disconnect, and recovery synchronize derived Prime access before a new Prime attempt can acquire it. If safe backfill is unavailable, Basic remains usable and only Prime access for that exact definition fails closed through the existing reconnect surface.</li>
+<li>Tokens, refresh material, account identifiers, profile contents, and provider-private failures never enter prompts, traces, receipts, logs, diagnostics, graph state, or exports.</li>
+</ul>
+<p><strong>Acceptance checkpoints:</strong> <code>PRIME-SUB-001</code> one login; <code>PRIME-SUB-002</code> exact account; <code>PRIME-SUB-003</code> multiple-account isolation; <code>PRIME-SUB-004</code> mixed family; <code>PRIME-SUB-005</code> existing-user backfill.</p>
+<p><code>PRIME-SUB-006</code> covers recovery; <code>PRIME-SUB-007</code> disconnect; <code>PRIME-SUB-008</code> secret boundaries; <code>PRIME-SUB-009</code> product catalog; and <code>PRIME-SUB-010</code> exact known-state migration.</p>
 <h4>API key</h4>
 <ul>
 <li>Choosing API key reveals a provider selector.</li>

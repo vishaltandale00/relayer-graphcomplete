@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
@@ -28,6 +28,7 @@ import {
   CLAUDE_SUBSCRIPTION_MODELS,
   ClaudeCliManagedRuntime,
 } from "../desktop/main/providers/implementations/claude-subscription.mjs";
+import { CodexCredentialAdapter } from "../desktop/main/credentials/codex-credential-adapter.mjs";
 
 const expectedAdapters = [
   "codex-subscription",
@@ -57,6 +58,26 @@ function runtimeForAdapter(adapterId) {
 }
 
 describe("authoritative provider adapter registry", () => {
+  it("backfills Prime access from an existing isolated Codex connection without login", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "relayer-codex-backfill-"));
+    try {
+      await writeFile(join(codexHome, "auth.json"), JSON.stringify({
+        tokens: { access_token: "existing-access", refresh_token: "must-not-escape" },
+      }));
+      const credentials = new CodexCredentialAdapter({ environment: { CODEX_HOME: codexHome } });
+      credentials.start = vi.fn(async () => {});
+      credentials.request = vi.fn(async () => ({ account: { type: "chatgpt" } }));
+
+      const access = await credentials.nativeRequestAccess();
+
+      expect(access).toEqual({ kind: "secret", contract: "secret@1", apiKey: "existing-access" });
+      expect(credentials.request).toHaveBeenCalledWith("account/read", { refreshToken: true }, expect.any(Number), undefined);
+      expect(JSON.stringify(access)).not.toContain("refresh");
+    } finally {
+      await rm(codexHome, { recursive: true, force: true });
+    }
+  });
+
   it("contains exactly the six initial production adapters with valid contracts", async () => {
     expect(ACTIVE_PROVIDER_ADAPTER_IDS).toEqual(expectedAdapters);
     expect(productionProviderAdapterRegistry.list().map(({ adapterId }) => adapterId)).toEqual(expectedAdapters);
@@ -742,6 +763,80 @@ describe("managed subscription isolation", () => {
     });
     await expect(claude.executionAccess()).resolves.toEqual({
       kind: "managed-runtime", ...claudeRuntime, environment: claudeEnvironment,
+    });
+  });
+
+  it("attaches exact definition-scoped subscription access without exposing refresh credentials", async () => {
+    const codexEnvironment = {
+      CODEX_HOME: "/isolated/codex-work",
+      RELAYER_CODEX_BINARY: codexRuntime.executable,
+    };
+    const codex = productionProviderAdapterRegistry.create({
+      id: "codex-work", adapterId: "codex-subscription", label: "Codex Work", endpoint: null,
+    }, { environment: codexEnvironment, managedRuntime: codexRuntime });
+    codex.credentials.account = async () => ({ status: "connected", account: { id: "work" } });
+    codex.credentials.nativeRequestAccess = vi.fn(async () => ({
+      kind: "secret", contract: "secret@1", apiKey: "codex-access",
+    }));
+
+    const access = await codex.executionAccess();
+
+    expect(access.nativeRequestAccess).toEqual({
+      kind: "secret", contract: "secret@1", apiKey: "codex-access",
+    });
+    expect(JSON.stringify(access)).not.toContain("refresh");
+    expect(codex.credentials.nativeRequestAccess).toHaveBeenCalledOnce();
+  });
+
+  it("uses Prime's existing profile for Claude subscription login and execution", async () => {
+    const profile = {
+      account: vi.fn(async (id) => ({ status: "connected", account: { provider: "anthropic", id } })),
+      login: vi.fn(async () => ({ loginId: "prime-login", authUrl: "https://login.example.test/claude" })),
+      logout: vi.fn(async () => ({ status: "disconnected", account: null })),
+      nativeRequestAccess: vi.fn(async () => ({ kind: "secret", contract: "secret@1", apiKey: "claude-access" })),
+    };
+    const environment = { CLAUDE_CONFIG_DIR: "/isolated/claude-work" };
+    const claude = productionProviderAdapterRegistry.create({
+      id: "claude-work", adapterId: "claude-subscription", label: "Claude Work", endpoint: null,
+    }, { managedRuntime: claudeRuntime, environment, primeSubscriptionProfile: profile });
+
+    await expect(claude.credentials.login()).resolves.toMatchObject({ loginId: "prime-login" });
+    await expect(claude.executionAccess()).resolves.toEqual({
+      kind: "managed-runtime",
+      ...claudeRuntime,
+      environment,
+      nativeRequestAccess: { kind: "secret", contract: "secret@1", apiKey: "claude-access" },
+    });
+    await claude.credentials.logout();
+
+    expect(profile.login).toHaveBeenCalledWith(expect.objectContaining({ id: "claude-work" }), undefined);
+    expect(profile.nativeRequestAccess).toHaveBeenCalledWith("claude-work", "claude-subscription", { signal: undefined });
+    expect(profile.logout).toHaveBeenCalledWith("claude-work", undefined);
+  });
+
+  it("keeps an existing Claude Basic connection healthy when Prime backfill is unavailable", async () => {
+    const profile = {
+      account: vi.fn(async () => ({ status: "disconnected", account: null })),
+      login: vi.fn(),
+      logout: vi.fn(async () => ({ status: "disconnected", account: null })),
+      nativeRequestAccess: vi.fn(async () => { throw new Error("backfill unavailable"); }),
+    };
+    const environment = { CLAUDE_CONFIG_DIR: "/isolated/legacy" };
+    const claude = productionProviderAdapterRegistry.create({
+      id: "claude-legacy", adapterId: "claude-subscription", label: "Claude Legacy", endpoint: null,
+    }, {
+      managedRuntime: claudeRuntime,
+      environment,
+      primeSubscriptionProfile: profile,
+      runtimeFactory: async () => ({
+        environment,
+        account: async () => ({ status: "connected", account: {} }),
+        close: async () => {},
+      }),
+    });
+
+    await expect(claude.executionAccess()).resolves.toEqual({
+      kind: "managed-runtime", ...claudeRuntime, environment,
     });
   });
 

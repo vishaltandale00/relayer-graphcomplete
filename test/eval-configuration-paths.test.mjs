@@ -91,12 +91,12 @@ describe("Eval harness configuration availability", () => {
   it("keeps the layered Codex harness product-facing and the high variant internal", async () => {
     const evalPackaging = await readFile(new URL("../desktop/packaging/eval-electron-builder.mjs", import.meta.url), "utf8");
     const productPackaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
-    const codexBasic = await loadHarnessConfigurations([
-      resolve(repositoryRoot, "harnesses/codex-basic.yaml"),
+    const codexProduct = await loadHarnessConfigurations([
+      resolve(repositoryRoot, "harnesses/codex.yaml"),
     ]);
 
-    expect(DEFAULT_DESKTOP_HARNESS_CONFIGURATION).toBe("codex-basic");
-    expect(codexBasic.get("codex-basic")?.settings).toMatchObject({
+    expect(DEFAULT_DESKTOP_HARNESS_CONFIGURATION).toBe("codex");
+    expect(codexProduct.get("codex")?.settings).toMatchObject({
       promptProfile: "layered-navigation-multi-agent-v1",
     });
     expect(evalPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses"), to: "harnesses", filter: ["*.yaml"] }');
@@ -107,8 +107,10 @@ describe("Eval harness configuration availability", () => {
     expect(evalPackaging).toContain('"shared/codex-runtime-environment.mjs"');
     expect(evalPackaging).toContain('"shared/managed-runtime-requirements.mjs"');
     expect(evalPackaging).toContain('"shared/target.mjs"');
-    expect(productPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses/codex-basic.yaml"), to: "harnesses/codex-basic.yaml" }');
-    expect(productPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses/claude-basic.yaml"), to: "harnesses/claude-basic.yaml" }');
+    expect(productPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses/codex.yaml"), to: "harnesses/codex.yaml" }');
+    expect(productPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses/claude.yaml"), to: "harnesses/claude.yaml" }');
+    expect(productPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses/prime-agent.yaml"), to: "harnesses/prime-agent.yaml" }');
+    expect(productPackaging).not.toContain("prime-agent-deep.yaml");
     expect(productPackaging).not.toContain("codex-basic-high.yaml");
     expect(productPackaging).not.toContain("codex-multi-agent-layered-navigation.yaml");
     expect(productPackaging).not.toContain("codex-layered-navigation-luna.yaml");

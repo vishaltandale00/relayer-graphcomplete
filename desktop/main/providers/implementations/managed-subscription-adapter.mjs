@@ -28,6 +28,48 @@ export class ManagedRuntimeCredentialAdapter extends CredentialAdapter {
   }
 }
 
+export class PrimeProfileCredentialAdapter extends CredentialAdapter {
+  constructor({ definition, profile, environment, fallbackRuntimeFactory }) {
+    super(definition.id);
+    if (!profile) throw new Error(`${definition.adapterId} requires a Prime subscription profile.`);
+    this.definition = definition;
+    this.profile = profile;
+    this.runtime = Object.freeze({ environment: Object.freeze({ ...(environment ?? {}) }) });
+    this.fallbackRuntimeFactory = fallbackRuntimeFactory;
+    this.fallbackRuntime = null;
+    this.fallbackUsed = false;
+  }
+
+  async account(options) {
+    let account;
+    try {
+      account = await this.profile.account(this.definition.id, options);
+    } catch {
+      account = { status: "unavailable", account: null };
+    }
+    if (account?.status === "connected" || typeof this.fallbackRuntimeFactory !== "function") return account;
+    this.fallbackRuntime ??= await this.fallbackRuntimeFactory(this.definition);
+    const fallback = await this.fallbackRuntime.account(options);
+    this.fallbackUsed ||= fallback?.status === "connected";
+    return fallback;
+  }
+  async login(options) { return this.profile.login(this.definition, options); }
+  async logout(options) {
+    const account = await this.profile.logout(this.definition.id, options);
+    if (this.fallbackUsed) await this.fallbackRuntime?.logout?.(options);
+    this.fallbackUsed = false;
+    return account;
+  }
+  async nativeRequestAccess(options) {
+    return this.profile.nativeRequestAccess(this.definition.id, this.definition.adapterId, options);
+  }
+  async close() {
+    const fallback = this.fallbackRuntime;
+    this.fallbackRuntime = null;
+    await fallback?.close?.();
+  }
+}
+
 export class ManagedRuntimeModelCatalogAdapter extends ModelCatalogAdapter {
   constructor({ definition, credentials, discoverModels }) {
     super({ providerId: definition.id, providerLabel: definition.label });

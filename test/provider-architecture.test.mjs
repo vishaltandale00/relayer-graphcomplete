@@ -72,7 +72,10 @@ describe("provider adapter architecture", () => {
       if (importsProviderImplementation || hidesImplementationImportFromTheParser) violations.push(relative);
     }
     expect(violations).toEqual([]);
-    expect(implementationFiles).toEqual(new Set([...concreteAdapters, ...supportModules]));
+    expect(implementationFiles).toEqual(new Set([
+      ...concreteAdapters,
+      ...[...supportModules].filter((file) => isInside(implementationDirectory, file)),
+    ]));
     const productionComposition = await readFile(resolve(desktopRoot, "main/index.mjs"), "utf8");
     expect(productionComposition).not.toMatch(/definition\.adapterId\s*===/u);
   });

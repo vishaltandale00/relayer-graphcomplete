@@ -89,13 +89,30 @@ function validatedManagedRuntime(value) {
     || (value.runtimeId === "claude" && !nonEmptyString(value.moduleUrl))) {
     throw new Error("Provider adapter returned an invalid managed runtime descriptor.");
   }
+  const nativeRequestAccess = value.nativeRequestAccess === undefined
+    ? undefined
+    : validatedNativeRequestAccess(value.nativeRequestAccess);
   return Object.freeze({
     runtimeId: value.runtimeId,
     version: value.version,
     executable: value.executable,
     ...(value.moduleUrl === undefined ? {} : { moduleUrl: value.moduleUrl }),
     environment: Object.freeze({ ...value.environment }),
+    ...(nativeRequestAccess === undefined ? {} : { nativeRequestAccess }),
   });
+}
+
+function validatedNativeRequestAccess(value) {
+  if (value === null
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || value.kind !== "secret"
+    || value.contract !== "secret@1"
+    || !nonEmptyString(value.apiKey)
+    || Object.keys(value).some((key) => !["kind", "contract", "apiKey"].includes(key))) {
+    throw new Error("Provider adapter returned invalid provider-native request access.");
+  }
+  return Object.freeze({ kind: "secret", contract: "secret@1", apiKey: value.apiKey });
 }
 
 function validatedExecutionAccess(resolved, definition, descriptor) {
@@ -132,9 +149,15 @@ function validatedExecutionAccess(resolved, definition, descriptor) {
       resolved.executable,
       resolved.moduleUrl,
     ].some((value) => value !== undefined);
+    const nativeRequestAccess = resolved.nativeRequestAccess === undefined
+      ? undefined
+      : validatedNativeRequestAccess(resolved.nativeRequestAccess);
     const runtime = hasRuntimeDescriptor
       ? validatedManagedRuntime(resolved)
-      : Object.freeze({ environment: Object.freeze({ ...resolved.environment }) });
+      : Object.freeze({
+        environment: Object.freeze({ ...resolved.environment }),
+        ...(nativeRequestAccess === undefined ? {} : { nativeRequestAccess }),
+      });
     return Object.freeze({
       kind: "managed-runtime",
       contract: definition.accessContract,
