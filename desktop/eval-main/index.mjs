@@ -5,7 +5,7 @@ import { delimiter, join, resolve } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
-import { codexBinaryPath, nativeBinaryName } from "../shared/target.mjs";
+import { nativeBinaryName } from "../shared/target.mjs";
 
 import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 import { evalHarnessConfigurationPaths } from "./configuration-paths.mjs";
@@ -21,6 +21,8 @@ import {
 import { GraphCompleteRuntimeService } from "../main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../main/services/relayer-app-server.mjs";
 import { claimPrimaryDesktopInstance } from "../main/single-instance.mjs";
+import { confirmManagedRuntimeQuit } from "../main/managed-runtimes/quit-guard.mjs";
+import { createEvalManagedCodexRuntime } from "./managed-codex-runtime.mjs";
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(desktopDirectory, "..");
@@ -50,10 +52,13 @@ if (!app.isPackaged) {
 const graphClientModuleUrl = app.isPackaged
   ? pathToFileURL(join(process.resourcesPath, "graph-client", "index.js")).href
   : undefined;
-const bundledCodexBinary = codexBinaryPath({
-  packaged: app.isPackaged,
-  resourcesPath: process.resourcesPath,
-  repositoryRoot,
+const developmentCodexBinary = !app.isPackaged && process.env.RELAYER_CODEX_BINARY
+  ? resolve(process.env.RELAYER_CODEX_BINARY)
+  : undefined;
+const managedCodexRuntime = createEvalManagedCodexRuntime({
+  root: join(userDataDirectory, "managed-runtimes"),
+  developmentExecutable: developmentCodexBinary,
+  enableMaintenance: app.isPackaged,
 });
 
 let dashboardWindow;
@@ -72,7 +77,7 @@ const graphRuntime = new GraphCompleteRuntimeService({
   configurationPaths,
   additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory },
   codexBasicClientModuleUrl: graphClientModuleUrl,
-  codexPathOverride: bundledCodexBinary,
+  resolveCodexRuntime: () => managedCodexRuntime.resolve(),
   candidateTrace: {
     directory: join(userDataDirectory, "eval-data", "candidate-trace-spool"),
     policy: {
@@ -89,6 +94,7 @@ let productServer;
 let evalService;
 let stopping = false;
 let stopPromise;
+let quitFlowPromise;
 let localAutorunStarted = false;
 
 function windowSecurity(window, trustedOrigin = null) {
@@ -418,6 +424,13 @@ function registerEvalIpc() {
 }
 
 async function start() {
+  const pruning = await managedCodexRuntime.pruneInactiveInstallations();
+  if (pruning.failures.length) {
+    console.error("Retired managed runtime cleanup failed:", new AggregateError(
+      pruning.failures.map(({ error }) => error),
+      "One or more retired managed runtimes could not be removed.",
+    ));
+  }
   const runtimeSession = await graphRuntime.start();
   productServer = new RelayerAppServerService({
     userDataDirectory,
@@ -439,6 +452,7 @@ async function start() {
   });
   const productSession = await productServer.start();
   const simulatedUserJudgeRunner = createLocalSimulatedUserJudgeRunner({
+    resolveCodexRuntime: () => managedCodexRuntime.resolve(),
     loadLayer: ({ threadId, turnId, layerId }) => productRequest(productSession, (
       `/api/threads/${encodeURIComponent(threadId)}`
       + `/interactions/${encodeURIComponent(turnId)}`
@@ -542,9 +556,14 @@ if (primaryInstance) {
   app.on("before-quit", (event) => {
     if (stopping) return;
     event.preventDefault();
-    stopping = true;
-    void stop().catch((error) => console.error("Relayer Eval shutdown failed:", error)).finally(() => {
+    if (quitFlowPromise) return;
+    quitFlowPromise = (async () => {
+      if (!await confirmManagedRuntimeQuit({ installer: managedCodexRuntime, dialog, parent: dashboardWindow })) return;
+      stopping = true;
+      await stop().catch((error) => console.error("Relayer Eval shutdown failed:", error));
       app.quit();
+    })().finally(() => {
+      if (!stopping) quitFlowPromise = undefined;
     });
   });
 }

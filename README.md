@@ -19,7 +19,7 @@ Pre-alpha product and executable runtime. The repository now includes:
 - a Rust SQLx/SQLite graph core and async loopback server with interaction-scoped capability tokens;
 - object-based TypeScript and Python clients for nodes, undirected edges, layers, actions, and submission;
 - a persistent Node harness host that loads named file-backed configurations, caches one harness object per thread, persists opaque provider resume state without graph credentials, and supports cancellation and deterministic disposal;
-- a graph-tool `codex.basic` harness using the OpenAI Codex TypeScript SDK;
+- graph-tool `codex.basic` and `claude.basic` harnesses using Relayer's Codex app-server bridge and the Claude Agent SDK respectively;
 - a `prime.agent` harness that passes the current graph scope through Prime Agent's run-scoped IPython host context;
 - an inference-free evaluation that starts the real Rust server and Node host and checks two interactions in one empty-project thread;
 - a separate internal Relayer Eval desktop application that runs test-case × harness matrices through the product app server and opens their threads in the production graph/chat workspace;
@@ -75,10 +75,10 @@ The default run is deterministic and makes no inference calls. It launches the R
 npm run eval:basic
 ```
 
-The opt-in live path requires the runner to select one or more named harness configurations. This command loads `harnesses/codex-basic.yaml`, resolves its `codex.basic` implementation, reuses the local Codex login, and then runs the structured judge:
+The opt-in live path requires the runner to select one or more named harness configurations and receive an explicit managed Codex executable path through `RELAYER_CODEX_BINARY`. This command loads `harnesses/codex-basic.yaml`, resolves its `codex.basic` implementation, reuses the matching Codex login, and then runs the structured judge:
 
 ```sh
-npm run eval:basic:live -- --configuration codex-basic
+RELAYER_CODEX_BINARY=/absolute/path/to/managed/codex npm run eval:basic:live -- --configuration codex-basic
 ```
 
 Selecting two configurations expands the same harness-agnostic case into two executions in one test run. `codex-basic` and `codex-basic-high` both select the `codex.basic` implementation with different settings:
@@ -187,7 +187,7 @@ Build an unsigned development application for the host platform (Apple Silicon o
 npm run desktop:pack
 ```
 
-Desktop packaging and release metadata are target-aware. On macOS it packages Electron plus the Rust product and graph servers for Apple Silicon or Intel; on Windows x64 it packages the corresponding `.exe` services and Codex binary. Each target has independent Preview and Stable artifacts and feed pointers under `desktop/macos/arm64`, `desktop/macos/x64`, or `desktop/windows/x64`.
+Desktop packaging and release metadata are target-aware. On macOS it packages Electron plus the Rust product and graph servers for Apple Silicon or Intel; on Windows x64 it packages the corresponding `.exe` services. Native Claude and Codex runtimes are installed from integrity-verified vendor npm artifacts only when a compatible provider is connected, rather than being carried in the application bundle. Each target has independent Preview and Stable artifacts and feed pointers under `desktop/macos/arm64`, `desktop/macos/x64`, or `desktop/windows/x64`.
 
 The accepted desktop release contract starts at version `0.2.0`, supports Apple Silicon and Intel on macOS 13 or newer plus Windows x64, and uses the existing Relayer Developer ID identity on macOS and Azure Artifact Signing on Windows. Signed candidates fail closed unless the worktree is clean and target-specific signing, provenance, and the sealed update URL are present. Build a signed candidate without publishing it with `RELAYER_DESKTOP_TARGET` set to `macos-arm64`, `macos-x64`, or `windows-x64`:
 

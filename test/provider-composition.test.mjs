@@ -33,6 +33,62 @@ describe("injectable production provider composition", () => {
     await composition.close();
   });
 
+  it("recovers an unavailable API provider through the existing explicit refresh surface", async () => {
+    const published = [];
+    let runtimeReady = false;
+    const prepareRuntime = vi.fn(async () => { runtimeReady = true; });
+    const create = vi.fn(({ definition }) => {
+      if (!runtimeReady) throw new Error("managed runtime unavailable");
+      return {
+        providerId: definition.id,
+        discover: async () => ({
+          provider: { id: definition.id, label: definition.label, status: "available" },
+          models: [{
+            id: "recovered-model", executionModel: "recovered-model", label: "Recovered", description: "",
+            visible: true, availability: "available", unavailableReason: null, availabilityNotice: null,
+            isDefault: true, replacementModelId: null, upgradeInfo: null, supportedEfforts: [],
+            defaultEffort: null, inputModalities: ["text"], supportsPersonality: false,
+            serviceTiers: [], defaultServiceTier: null,
+          }],
+          systemFamily: { id: definition.id, label: definition.label, modelIds: ["recovered-model"] },
+        }),
+        close: vi.fn(async () => {}),
+      };
+    });
+    const composition = createProviderComposition({
+      registry: createProviderAdapterRegistry([{
+        adapterId: "recoverable-api", implementationVersion: "1", label: "Recoverable API",
+        accessContract: "secret@1", defaultEndpoint: "https://recover.example/v1",
+        connection: { mode: "secret-fields", fields: [{ id: "key", label: "Key", kind: "secret" }] },
+        create,
+      }]),
+      definitionStore: { async load() { return [{
+        id: "recoverable", adapterId: "recoverable-api", label: "Recoverable", endpoint: "https://recover.example/v1",
+        accessContract: "secret@1", credentialReference: "provider:recoverable", lifecycleState: "active",
+      }]; } },
+      credentialStore: { async get() { return { key: "opaque" }; }, async listReferences() { return ["provider:recoverable"]; } },
+      prepareRuntime,
+      publishCatalog: async (snapshot) => { published.push(snapshot); },
+      modelCatalogOptions: { backgroundIntervalMs: 60_000 },
+    });
+
+    await composition.start();
+    expect(published.at(-1)).toMatchObject({ providerId: "recoverable", connected: false });
+    expect(prepareRuntime).not.toHaveBeenCalled();
+    await composition.modelCatalog.explicitRefresh("recoverable");
+    expect(prepareRuntime).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(published.at(-1)).toMatchObject({
+      providerId: "recoverable",
+      connected: true,
+      models: [{ id: "recovered-model" }],
+    });
+    const lease = await composition.providerDefinitions.acquireExecution("recoverable");
+    expect(lease.runtime.providerId).toBe("recoverable");
+    await lease.release();
+    await composition.close();
+  });
+
   it("does not instantiate or refresh a tombstoned legacy provider", async () => {
     const create = vi.fn(() => { throw new Error("tombstoned provider must not be instantiated"); });
     const composition = createProviderComposition({

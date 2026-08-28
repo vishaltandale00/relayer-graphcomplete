@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createProviderConnectionCancellationState,
   providerOnboardingCompletionIntent,
   reconcileProviderOnboardingState,
   resumableProviderDefinitions,
@@ -124,5 +125,62 @@ describe("provider onboarding renderer state", () => {
     setProviderOnboardingControlsBusy(controls, false);
     expect(controls.map(({ disabled }) => disabled)).toEqual([false, true, false]);
     expect(controls.every(({ dataset }) => dataset.onboardingDisabledBeforeBusy === undefined)).toBe(true);
+  });
+
+  it("keeps the original connection live when Cancel reaches the provider after commit begins", async () => {
+    let finishConnection;
+    const connection = new Promise((resolve) => { finishConnection = resolve; });
+    const state = createProviderConnectionCancellationState();
+    state.begin("connection-1");
+    let onboardingContinued = false;
+    const connecting = connection.then(() => {
+      if (!state.matches("connection-1")) return;
+      state.complete("connection-1");
+      onboardingContinued = true;
+    });
+
+    await expect(state.cancel(async () => ({ cancelled: false }))).resolves.toEqual({
+      cancelled: false,
+      connectionId: "connection-1",
+    });
+    expect(state.current()).toBe("connection-1");
+    finishConnection();
+    await connecting;
+
+    expect(onboardingContinued).toBe(true);
+    expect(state.current()).toBeNull();
+  });
+
+  it("ignores a duplicate Connect submission without replacing the first winner", async () => {
+    let resolveFirst;
+    const firstResponse = new Promise((resolve) => { resolveFirst = resolve; });
+    const state = createProviderConnectionCancellationState();
+    const submit = (connectionId) => {
+      if (!state.begin(connectionId)) return Promise.resolve("ignored");
+      return firstResponse.then(() => {
+        if (!state.matches(connectionId)) return "discarded";
+        state.complete(connectionId);
+        return "continued";
+      });
+    };
+
+    const first = submit("connection-1");
+    await expect(submit("connection-2")).resolves.toBe("ignored");
+    expect(state.current()).toBe("connection-1");
+    resolveFirst();
+
+    await expect(first).resolves.toBe("continued");
+    expect(state.current()).toBeNull();
+  });
+
+  it("hands an owned Connect submission off to its managed-login connection", () => {
+    const state = createProviderConnectionCancellationState();
+    expect(state.begin("request-1")).toBe(true);
+
+    expect(state.transition("request-2", "authorization-2")).toBe(false);
+    expect(state.current()).toBe("request-1");
+    expect(state.transition("request-1", "authorization-1")).toBe(true);
+    expect(state.current()).toBe("authorization-1");
+    expect(state.matches("authorization-1")).toBe(true);
   });
 });

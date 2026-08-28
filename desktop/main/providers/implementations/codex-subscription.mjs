@@ -1,5 +1,6 @@
 import { CodexCredentialAdapter } from "../../credentials/codex-credential-adapter.mjs";
 import { CodexModelCatalogAdapter } from "../../models/codex-model-catalog-adapter.mjs";
+import { managedRuntimeExecutionDetails, requireManagedRuntime } from "./managed-runtime-contract.mjs";
 
 export const codexSubscriptionDescriptor = Object.freeze({
   adapterId: "codex-subscription",
@@ -10,7 +11,11 @@ export const codexSubscriptionDescriptor = Object.freeze({
   endpointEditableDuringCreation: false,
   connection: { mode: "managed-login", fields: [] },
   catalog: { source: "provider-discovery" },
-  create: ({ definition, environment, onAccountChanged, spawnProcess, shutdownTimeoutMs }) => {
+  create: ({ definition, environment, managedRuntime: runtimeDescriptor, onAccountChanged, spawnProcess, shutdownTimeoutMs }) => {
+    const managedRuntime = requireManagedRuntime(runtimeDescriptor, "codex");
+    if (environment?.RELAYER_CODEX_BINARY !== managedRuntime.executable) {
+      throw new Error("Codex credential launch requires the provisioned managed runtime executable.");
+    }
     const credentials = new CodexCredentialAdapter({
       providerDefinitionId: definition.id,
       environment,
@@ -32,8 +37,7 @@ export const codexSubscriptionDescriptor = Object.freeze({
         if (account?.status !== "connected") throw new Error("Codex subscription is not connected.");
         return Object.freeze({
           kind: "managed-runtime",
-          executable: credentials.executable,
-          environment: Object.freeze({ ...credentials.environment }),
+          ...managedRuntimeExecutionDetails(managedRuntime, credentials.environment),
         });
       },
       close: () => credentials.close(),

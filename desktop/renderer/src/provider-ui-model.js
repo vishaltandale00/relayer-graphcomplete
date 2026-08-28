@@ -99,8 +99,9 @@ export function firstRunGateState({ hasCompletedOnboarding, providers, defaultRe
   return { blocked: false, reason: null };
 }
 
-export function providerCreationPayload(descriptor, values) {
+export function providerCreationPayload(descriptor, values, { connectionId } = {}) {
   return {
+    ...(connectionId ? { connectionId } : {}),
     adapterId: descriptor.adapterId,
     label: values.label.trim(),
     endpoint: descriptor.endpointEditableDuringCreation

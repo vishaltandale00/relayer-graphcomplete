@@ -7,7 +7,7 @@ import { productHarnessImplementations, type HarnessFactory } from "@relayer/har
 import type { CompletionOutput } from "@relayer/graph-client";
 import { taskSystemFixtureConfiguration, taskSystemFixtureFactory } from "../src/fixtures/task-system.js";
 import { expandTestRun } from "../src/run-plan.js";
-import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type ReplayRepairEvidence } from "../src/runtime-basic.js";
+import { basicEvalCaseId, basicEvalFacts, basicEvalPrompt, basicEvalPythonPath, basicJudgePrompt, checkBasicFacts, checkBasicOutput, checkNodeNavigation, checkReplayRepairOutput, executionDirectory, judgeVisibleGraph, parseReportedReplayRepairEvidence, renderArtifact, runBasicRuntimeEval, selectStandalonePermissionProfile, startGraphAuditProxy, type BasicJudgeThreadFactory, type ReplayRepairEvidence } from "../src/runtime-basic.js";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -357,6 +357,49 @@ describe("first runtime evaluation", () => {
     expect(html).toContain("title.textContent=node.title");
     expect(html).toContain("110+placement.x*740");
   }, 15_000);
+
+  it("uses the explicit managed Codex executable for every structured judge turn", async () => {
+    const outputDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-managed-judge-")); temporary.push(outputDirectory);
+    const execution = {
+      ...fixtureExecution(),
+      judgeConfiguration: { name: "codex-structured" as const },
+    };
+    const starts: { codexPathOverride: string | undefined; workingDirectory: string | undefined }[] = [];
+    const judgeThreadFactory: BasicJudgeThreadFactory = {
+      start(codexOptions, threadOptions) {
+        starts.push({
+          codexPathOverride: codexOptions.codexPathOverride,
+          workingDirectory: threadOptions.workingDirectory,
+        });
+        return {
+          async run() {
+            return {
+              finalResponse: JSON.stringify({
+                factIds: basicEvalFacts.map(({ id }) => id),
+                graphUseful: true,
+                detailsUseful: true,
+                problems: [],
+                verdict: "pass",
+              }),
+            };
+          },
+        };
+      },
+    };
+
+    const artifact = await runBasicRuntimeEval({
+      outputDirectory,
+      execution,
+      implementations,
+      judgeCodexPathOverride: "/managed/codex/bin/codex",
+      judgeThreadFactory,
+    });
+
+    expect(artifact.passed).toBe(true);
+    expect(starts).toHaveLength(2);
+    expect(starts.every(({ codexPathOverride }) => codexPathOverride === "/managed/codex/bin/codex")).toBe(true);
+    expect(starts.every(({ workingDirectory }) => typeof workingDirectory === "string")).toBe(true);
+  });
 
   it("reports a controlled failure when the graph server cannot be executed", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-eval-spawn-error-")); temporary.push(directory);

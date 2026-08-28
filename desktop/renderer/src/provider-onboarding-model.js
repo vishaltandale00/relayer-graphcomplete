@@ -67,3 +67,41 @@ export function setProviderOnboardingControlsBusy(controls, busy) {
     }
   }
 }
+
+export function createProviderConnectionCancellationState() {
+  let connectionId = null;
+  return Object.freeze({
+    begin(value) {
+      const next = String(value || "");
+      if (connectionId !== null) return connectionId === next;
+      connectionId = next;
+      return true;
+    },
+    current() {
+      return connectionId;
+    },
+    matches(value) {
+      return connectionId !== null && connectionId === value;
+    },
+    transition(from, to) {
+      if (connectionId === null || connectionId !== String(from || "")) return false;
+      connectionId = String(to || "");
+      return true;
+    },
+    complete(value) {
+      if (value === undefined || connectionId === value) connectionId = null;
+    },
+    async cancel(cancelConnection) {
+      const attemptedConnectionId = connectionId;
+      if (!attemptedConnectionId) return Object.freeze({ cancelled: false, connectionId: null });
+      try {
+        const result = await cancelConnection(attemptedConnectionId);
+        const cancelled = result?.cancelled === true;
+        if (cancelled && connectionId === attemptedConnectionId) connectionId = null;
+        return Object.freeze({ cancelled, connectionId: attemptedConnectionId });
+      } catch (error) {
+        return Object.freeze({ cancelled: false, connectionId: attemptedConnectionId, error });
+      }
+    },
+  });
+}

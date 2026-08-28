@@ -87,6 +87,7 @@ export interface SimulatedUserJudgeRunOptions {
     | IncrementalReviewStore<LayerReview, NodeReview, TurnReview>
     | RecursivePresentationReviewStore;
   readonly environment?: Readonly<Record<string, string | undefined>>;
+  readonly codexPathOverride?: string;
   readonly workingDirectory?: string;
   readonly artifact?: JudgeArtifactContext;
   readonly artifactEvidence?: JudgeArtifactEvidence;
@@ -182,6 +183,7 @@ export async function runSimulatedUserJudge(
       [SIMULATED_USER_MCP_TOKEN_ENV]: mcp.bearerToken,
     });
     const codexOptions: CodexOptions = {
+      ...(options.codexPathOverride === undefined ? {} : { codexPathOverride: options.codexPathOverride }),
       env: environment,
       config: {
         features: {

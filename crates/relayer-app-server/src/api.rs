@@ -125,6 +125,10 @@ pub(crate) fn router(
             get(model_settings::provider_onboarding_status),
         )
         .route(
+            "/api/provider-onboarding/default",
+            axum::routing::post(model_settings::complete_default_onboarding),
+        )
+        .route(
             "/api/model-settings/defaults",
             axum::routing::put(model_settings::update_defaults),
         )

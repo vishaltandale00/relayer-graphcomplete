@@ -31,6 +31,50 @@ const codexBasicConfiguration: HarnessConfiguration = {
 };
 
 describe("CodexBasicHarness", () => {
+  it("requires an explicit Codex executable before submitting an app-server turn", async () => {
+    const runAppServerTurn = vi.fn(async () => ({
+      threadId: "unreachable",
+      turnId: "unreachable",
+      status: "completed" as const,
+    }));
+    const harness = new CodexBasicHarness(context("auto"), { runAppServerTurn });
+
+    await expect(harness.complete(runContext(1, "token")))
+      .rejects.toThrow("codex.basic requires an explicit managed Codex executable");
+
+    expect(runAppServerTurn).not.toHaveBeenCalled();
+  });
+
+  it("can resolve an explicit managed runtime lazily for internal Eval", async () => {
+    const runAppServerTurn = vi.fn(async (options: CodexAppServerTurnOptions) => {
+      options.onThreadId("eval-thread");
+      return { threadId: "eval-thread", turnId: "turn-1", status: "completed" as const };
+    });
+    const resolveCodexRuntime = vi.fn(async () => ({
+      executable: "/managed/eval/codex",
+      environment: { PATH: "/managed/eval/codex-path:/usr/bin" },
+    }));
+    const harness = new CodexBasicHarness(context("auto"), { runAppServerTurn, resolveCodexRuntime });
+
+    await harness.complete(runContext(1, "token"));
+
+    expect(resolveCodexRuntime).toHaveBeenCalledOnce();
+    expect(runAppServerTurn).toHaveBeenCalledWith(expect.objectContaining({
+      codexPathOverride: "/managed/eval/codex",
+      environment: expect.objectContaining({ PATH: "/managed/eval/codex-path:/usr/bin" }),
+    }));
+  });
+
+  it("does not retain a force-shutdown controller when lazy executable resolution fails", async () => {
+    const harness = new CodexBasicHarness(context("auto"), {
+      resolveCodexRuntime: async () => { throw new Error("managed runtime unavailable"); },
+    });
+
+    await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("managed runtime unavailable");
+
+    expect((harness as unknown as { activeForceShutdowns: Set<AbortController> }).activeForceShutdowns.size).toBe(0);
+  });
+
   it("force-disposes the active provider turn exactly once", async () => {
     let submitted: CodexAppServerTurnOptions | undefined;
     const harness = harnessFixture("auto", (options) => {
@@ -156,6 +200,7 @@ describe("CodexBasicHarness", () => {
             settings: { ...codexBasicConfiguration.settings, ...(promptProfile ? { promptProfile } : {}) },
           },
         }, {
+          codexPathOverride: "/managed/codex",
           graphAuthoringLauncherPath: "/immutable/runtime/graph-authoring-launcher",
           runAppServerTurn: async (options) => {
             submittedPrompt = options.prompt;
@@ -187,6 +232,7 @@ describe("CodexBasicHarness", () => {
 
   it("rejects a shell-active graph-authoring launcher path", async () => {
     const harness = new CodexBasicHarness(context("auto"), {
+      codexPathOverride: "/managed/codex",
       graphAuthoringLauncherPath: "/immutable/runtime/$(touch marker)",
       runAppServerTurn: async () => ({ threadId: "unused", turnId: "unused", status: "completed" }),
     });
@@ -204,6 +250,7 @@ describe("CodexBasicHarness", () => {
           settings: { ...codexBasicConfiguration.settings, ...(promptProfile ? { promptProfile } : {}) },
         },
       }, {
+        codexPathOverride: "/managed/codex",
         runAppServerTurn: async (options) => {
           submittedPrompt = options.prompt;
           submittedEnvironment = options.environment;
@@ -236,7 +283,7 @@ describe("CodexBasicHarness", () => {
         name: "codex-layered-navigation-luna",
         settings: { ...codexBasicConfiguration.settings, promptProfile: "layered-navigation-v1" },
       },
-    }, { runAppServerTurn: async (options) => {
+    }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
       submittedPrompt = options.prompt;
       options.onThreadId("layered-thread");
       return { threadId: "layered-thread", turnId: "turn-1", status: "completed" };
@@ -285,7 +332,7 @@ describe("CodexBasicHarness", () => {
         name: `codex-${promptProfile}`,
         settings: { ...codexBasicConfiguration.settings, promptProfile },
       },
-    }, { runAppServerTurn: async (options) => {
+    }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
       prompts.push(options.prompt);
       options.onThreadId("layered-thread");
       return { threadId: "layered-thread", turnId: "turn-1", status: "completed" };
@@ -328,7 +375,7 @@ describe("CodexBasicHarness", () => {
       permissionBinding: configuration.permissionBindings.auto!,
       workingDirectory: repositoryRoot,
       configuration,
-    }, { runAppServerTurn: async (options) => {
+    }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
       submitted = options;
       options.onThreadId("selected-model-thread");
       return { threadId: "selected-model-thread", turnId: "turn-1", status: "completed" };
@@ -419,6 +466,33 @@ describe("CodexBasicHarness", () => {
     }
   });
 
+  it("uses the managed Codex runtime attached to secret provider access", async () => {
+    let submitted: CodexAppServerTurnOptions | undefined;
+    const harness = new CodexBasicHarness(context("auto"), {
+      runAppServerTurn: async (options) => {
+        submitted = options;
+        options.onThreadId("api-thread");
+        return { threadId: "api-thread", turnId: "turn-1", status: "completed" };
+      },
+    });
+
+    await harness.complete({
+      ...runContext(1, "token"),
+      model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" },
+      access: {
+        kind: "secret", contract: "secret@1", providerId: "openai-work", adapterId: "openai-api",
+        adapterImplementationVersion: "1", endpoint: "https://api.openai.test/v1", fields: { "api-key": "selected-secret" },
+        runtime: {
+          runtimeId: "codex", version: "0.147.0", executable: "/managed/codex",
+          environment: { CODEX_HOME: "/isolated/codex-home", RELAYER_CODEX_BINARY: "/managed/codex" },
+        },
+      },
+    });
+
+    expect(submitted?.codexPathOverride).toBe("/managed/codex");
+    expect(submitted?.environment.CODEX_HOME).toBe("/isolated/codex-home");
+  });
+
   it("allows only Codex runtime keys from managed access and preserves graph authority", async () => {
     let submitted: CodexAppServerTurnOptions | undefined;
     const harness = harnessFixture("auto", async (options) => {
@@ -454,7 +528,7 @@ describe("CodexBasicHarness", () => {
       permissionBinding: codexBasicConfiguration.permissionBindings.auto!,
       workingDirectory: process.cwd(),
       configuration: codexBasicConfiguration,
-    }, { runAppServerTurn });
+    }, { codexPathOverride: "/managed/codex", runAppServerTurn });
 
     await expect(harness.complete({
       ...runContext(1, "token"),
@@ -732,7 +806,10 @@ function harnessFixture(
   permissionProfileId: "ask" | "auto" | "full",
   runAppServerTurn: NonNullable<CodexBasicDependencies["runAppServerTurn"]>,
 ): CodexBasicHarness {
-  return new CodexBasicHarness(context(permissionProfileId), { runAppServerTurn });
+  return new CodexBasicHarness(context(permissionProfileId), {
+    codexPathOverride: "/managed/codex",
+    runAppServerTurn,
+  });
 }
 
 function runContext(id: number, token: string, trace: HarnessTraceSink = createNoopHarnessTraceSink()): HarnessRunContext {
@@ -756,6 +833,9 @@ function codexAccess() {
     providerId: "codex",
     adapterId: "codex-subscription",
     adapterImplementationVersion: "1",
+    runtimeId: "codex",
+    version: "0.147.0",
+    executable: "/managed/codex",
     environment: {},
   };
 }

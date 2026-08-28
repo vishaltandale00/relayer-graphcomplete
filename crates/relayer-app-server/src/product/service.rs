@@ -446,6 +446,62 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn complete_default_provider_onboarding(
+        &self,
+        provider_id: &super::ProviderId,
+        app_default_harness_id: &str,
+        permission_available_harnesses: &HashSet<String>,
+    ) -> Result<Option<super::ProviderOnboardingCompletion>, ProductError> {
+        let projection = self
+            .provider_onboarding_projection(
+                provider_id,
+                app_default_harness_id,
+                permission_available_harnesses,
+            )
+            .await?;
+        let mut candidates = projection
+            .harnesses
+            .iter()
+            .filter(|harness| harness.selectable)
+            .filter_map(|harness| {
+                harness
+                    .managed_family_candidate
+                    .as_ref()
+                    .map(|family| (harness, family))
+            })
+            .collect::<Vec<_>>();
+        let Some((_, policy)) = candidates.first().copied() else {
+            return Ok(None);
+        };
+        if candidates.iter().any(|(_, candidate)| {
+            candidate.policy_id != policy.policy_id
+                || candidate.policy_version != policy.policy_version
+        }) {
+            return Ok(None);
+        }
+        candidates.sort_by(|(left, _), (right, _)| left.id.cmp(&right.id));
+        let (harness, policy) = candidates
+            .iter()
+            .copied()
+            .find(|(harness, _)| harness.id == projection.app_default_harness_id)
+            .unwrap_or(candidates[0]);
+        self.complete_provider_onboarding(
+            &super::CompleteProviderOnboardingCommand {
+                provider_id: provider_id.clone(),
+                harness_id: harness.id.clone(),
+                expected_projection_revision: projection.projection_revision,
+                family: super::ProviderOnboardingFamilyIntent::Managed {
+                    policy_id: policy.policy_id.clone(),
+                    policy_version: policy.policy_version,
+                },
+            },
+            app_default_harness_id,
+            permission_available_harnesses,
+        )
+        .await
+        .map(Some)
+    }
+
     pub(crate) async fn provider_onboarding_status(
         &self,
         permission_available_harnesses: &HashSet<String>,
@@ -2136,7 +2192,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn staged_codex_provider_requires_explicit_managed_default_then_policy_migrates_it() {
+    async fn staged_codex_provider_uses_its_managed_default_then_policy_migrates_it() {
         let (path, storage, service) = managed_policy_service(1).await;
         let (definition, snapshot) = staged_codex_catalog();
         service
@@ -2156,36 +2212,15 @@ mod tests {
             .await
             .unwrap();
         assert!(!status.complete);
-        let projection = service
-            .provider_onboarding_projection(
+        let completion = service
+            .complete_default_provider_onboarding(
                 &ProviderId::parse("onboarding-codex").unwrap(),
                 "codex-basic",
                 &permissions,
             )
             .await
             .unwrap();
-        let candidate = projection
-            .harnesses
-            .iter()
-            .find(|harness| harness.id == "codex-basic")
-            .and_then(|harness| harness.managed_family_candidate.clone())
-            .unwrap();
-        service
-            .complete_provider_onboarding(
-                &crate::product::CompleteProviderOnboardingCommand {
-                    provider_id: ProviderId::parse("onboarding-codex").unwrap(),
-                    harness_id: "codex-basic".into(),
-                    expected_projection_revision: projection.projection_revision,
-                    family: crate::product::ProviderOnboardingFamilyIntent::Managed {
-                        policy_id: candidate.policy_id,
-                        policy_version: candidate.policy_version,
-                    },
-                },
-                "codex-basic",
-                &permissions,
-            )
-            .await
-            .unwrap();
+        assert!(completion.is_some());
         let first = service.model_settings().await.unwrap();
         let first_default = first
             .defaults

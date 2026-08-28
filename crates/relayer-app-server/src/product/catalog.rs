@@ -368,6 +368,8 @@ pub(crate) struct ModelSettingsDefaults {
     pub(crate) harness_id: String,
     pub(crate) provider_id: ProviderId,
     pub(crate) family_id: Option<ModelFamilyId>,
+    #[serde(skip_serializing)]
+    pub(crate) modified: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

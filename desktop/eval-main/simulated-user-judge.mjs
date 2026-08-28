@@ -236,10 +236,12 @@ export function gradeAcceptedReviewTopology(topology, { requireGrandchild = fals
 export function createLocalSimulatedUserJudgeRunner({
   loadLayer,
   openReviewSession,
+  resolveCodexRuntime,
   runJudge = runSimulatedUserJudge,
   configuration = LOCAL_SIMULATED_USER_JUDGE_CONFIGURATION,
 }) {
-  if (typeof loadLayer !== "function" || typeof openReviewSession !== "function" || typeof runJudge !== "function") {
+  if (typeof loadLayer !== "function" || typeof openReviewSession !== "function"
+    || typeof resolveCodexRuntime !== "function" || typeof runJudge !== "function") {
     throw new Error("Local simulated-user judge integration is incomplete.");
   }
   const selectedConfiguration = structuredClone(configuration);
@@ -293,6 +295,7 @@ export function createLocalSimulatedUserJudgeRunner({
       });
       let record;
       try {
+        const codexRuntime = await resolveCodexRuntime();
         record = await runJudge({
           executionId: String(context.execution.id),
           originalRequest: context.request.text,
@@ -303,6 +306,8 @@ export function createLocalSimulatedUserJudgeRunner({
           workingDirectory: context.artifact?.workingDirectory || context.artifactDirectory,
           artifactEvidence: context.artifactEvidence,
           additionalDirectories: [],
+          codexPathOverride: codexRuntime.executable,
+          environment: codexRuntime.environment,
         });
       } catch (error) {
         return persistJudgeArtifacts({

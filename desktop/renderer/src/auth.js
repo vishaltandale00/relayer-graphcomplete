@@ -1,10 +1,12 @@
 import {
+  completeDefaultProviderOnboarding,
   completeProviderOnboarding,
   loadProviderOnboardingProjection,
 } from "./model-settings-api.js";
 import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload } from "./provider-ui-model.js";
 import {
   providerOnboardingCompletionIntent,
+  createProviderConnectionCancellationState,
   reconcileProviderOnboardingState,
   resumableProviderDefinitions,
   setProviderOnboardingControlsBusy,
@@ -27,7 +29,7 @@ let onboardingHarness;
 let onboardingFamilyIntent;
 let onboardingProjection;
 let bound = false;
-let pendingConnectionId = null;
+const connectionCancellation = createProviderConnectionCancellationState();
 let refreshProductAfterOnboarding = async () => {};
 
 export function setProviderOnboardingCompletionHandler(handler) {
@@ -45,7 +47,15 @@ function setStatus(message = "", kind = "") {
 function setBusy(busy) {
   const card = $(".provider-setup-card");
   card?.setAttribute("aria-busy", String(Boolean(busy)));
-  setProviderOnboardingControlsBusy($$("button,input,select,textarea", card), busy);
+  setProviderOnboardingControlsBusy(
+    $$("button,input,select,textarea", card).filter((control) => control.id !== "cancelProviderConnection"),
+    busy,
+  );
+}
+
+function setConnectionCancellationAvailable(available) {
+  const cancel = $("#cancelProviderConnection");
+  if (cancel) cancel.disabled = !available;
 }
 
 function currentFormValues() {
@@ -59,6 +69,7 @@ function currentFormValues() {
 }
 
 function showProviderOptions() {
+  setConnectionCancellationAvailable(true);
   selectedDescriptor = null;
   connectionValues = null;
   $("#providerSetupOptions").classList.remove("hidden");
@@ -82,6 +93,7 @@ function showProviderOptions() {
 }
 
 function showProviderForm(adapterId, { showErrors = false } = {}) {
+  setConnectionCancellationAvailable(true);
   selectedDescriptor = normalizeProviderDescriptor(
     providerStatus.adapters.find((descriptor) => descriptor.adapterId === adapterId),
   );
@@ -199,6 +211,10 @@ function renderOnboardingChoices({ focus } = {}) {
 
 async function prepareFamilyStep(definition, { preserveIntent = false } = {}) {
   if (!productApiAvailable) return completeOnboarding();
+  if (!preserveIntent) {
+    const declaredDefault = await completeDefaultProviderOnboarding(definition.id);
+    if (declaredDefault) return completeOnboarding();
+  }
   const previous = preserveIntent ? { harnessId: onboardingHarness, family: onboardingFamilyIntent } : null;
   onboardingProjection = await loadProviderOnboardingProjection(definition.id);
   const reconciled = reconcileProviderOnboardingState(onboardingProjection, previous);
@@ -220,23 +236,35 @@ async function connectSelectedProvider(event) {
   connectionValues = currentFormValues();
   const errors = providerConnectionErrors(selectedDescriptor, connectionValues, providerStatus.definitions);
   if (Object.keys(errors).length) return showProviderForm(selectedDescriptor.adapterId, { showErrors: true });
+  const connectionId = crypto.randomUUID().toLowerCase();
+  if (!connectionCancellation.begin(connectionId)) return;
   setBusy(true);
-  setStatus("Connecting and discovering models…");
+  setStatus(`Preparing ${selectedDescriptor.label} runtime and connecting…`);
   try {
-    let result = await desktop.providers.connect(providerCreationPayload(selectedDescriptor, connectionValues));
-    pendingConnectionId = result.status === "pending" ? result.connectionId : null;
-    while (result.status === "pending" && pendingConnectionId === result.connectionId) {
+    let result = await desktop.providers.connect(providerCreationPayload(
+      selectedDescriptor,
+      connectionValues,
+      { connectionId },
+    ));
+    if (!connectionCancellation.matches(connectionId)) return;
+    if (result.status === "pending" && !connectionCancellation.transition(connectionId, result.connectionId)) return;
+    while (result.status === "pending" && connectionCancellation.matches(result.connectionId)) {
       setStatus("Complete sign-in in your browser. Relayer will continue automatically.");
       await new Promise((resolve) => setTimeout(resolve, 750));
-      if (pendingConnectionId !== result.connectionId) return;
+      if (!connectionCancellation.matches(result.connectionId)) return;
       result = await desktop.providers.completeConnection(result.connectionId);
     }
     if (result.status !== "connected") return;
-    pendingConnectionId = null;
+    connectionCancellation.complete();
+    // Provider state has committed. Cancel no longer has a reversible operation
+    // to target, so do not accept it while defaults and product state refresh.
+    setConnectionCancellationAvailable(false);
     connectedDefinition = result.providerDefinition;
     providerStatus = await desktop.providers.status();
     await prepareFamilyStep(connectedDefinition);
   } catch (error) {
+    if (!connectionCancellation.matches(connectionId) && error.message === "Provider connection was cancelled.") return;
+    connectionCancellation.complete();
     setStatus(error.message, "error");
     showProviderForm(selectedDescriptor.adapterId);
   } finally {
@@ -251,9 +279,23 @@ function bindProviderSetup() {
   $("#providerSetupBack").onclick = showProviderOptions;
   $("#providerFamilyBack").onclick = showProviderOptions;
   $("#cancelProviderConnection").onclick = async () => {
-    const connectionId = pendingConnectionId;
-    pendingConnectionId = null;
-    if (connectionId) await desktop.providers.cancelConnection(connectionId).catch(() => {});
+    if (!connectionCancellation.current()) {
+      setBusy(false);
+      showProviderOptions();
+      return;
+    }
+    const result = await connectionCancellation.cancel((connectionId) => (
+      desktop.providers.cancelConnection(connectionId)
+    ));
+    if (result.error) {
+      setStatus("Relayer could not confirm cancellation. The provider connection is still running.", "error");
+      return;
+    }
+    if (!result.cancelled) {
+      setConnectionCancellationAvailable(false);
+      setStatus("Provider connection is finishing and can no longer be cancelled.");
+      return;
+    }
     setBusy(false);
     showProviderOptions();
   };

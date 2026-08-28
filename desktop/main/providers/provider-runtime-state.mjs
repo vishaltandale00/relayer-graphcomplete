@@ -3,10 +3,10 @@ import { isAbsolute, relative, resolve } from "node:path";
 
 const PROVIDER_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 
-function managedRuntimeEligibility(registry, definition) {
+function definitionRuntimeStateEligibility(registry, definition) {
   try {
     const descriptor = registry.get(definition?.adapterId);
-    return descriptor.accessContract === "managed-runtime@1"
+    return descriptor.definitionRuntimeState === true
       && definition?.accessContract === descriptor.accessContract;
   } catch {
     return null;
@@ -14,7 +14,7 @@ function managedRuntimeEligibility(registry, definition) {
 }
 
 export function providerRuntimeDirectory(runtimeRoot, definition, registry) {
-  if (managedRuntimeEligibility(registry, definition) !== true) return null;
+  if (definitionRuntimeStateEligibility(registry, definition) !== true) return null;
   if (typeof definition?.id !== "string" || !PROVIDER_ID.test(definition.id)) {
     throw new Error("Managed provider runtime cleanup requires a stable provider definition id.");
   }
@@ -40,7 +40,7 @@ export function createProviderRuntimeStateRemover({ runtimeRoot, registry, remov
   remover.reconcile = async (definitions) => {
     const retained = new Set(definitions.flatMap((definition) => {
       if (definition.lifecycleState === "tombstoned") return [];
-      const eligibility = managedRuntimeEligibility(registry, definition);
+      const eligibility = definitionRuntimeStateEligibility(registry, definition);
       // Preserve state owned by an adapter missing from this build. A later build may restore it.
       return eligibility === true || eligibility === null ? [definition.id] : [];
     }));

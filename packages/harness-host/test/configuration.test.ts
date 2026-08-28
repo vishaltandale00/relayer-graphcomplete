@@ -63,6 +63,9 @@ describe("harness configuration", () => {
 
   it("admits every production Claude subscription alias through the checked-in harness", async () => {
     const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/claude-basic.yaml"));
+    expect(configuration.modelDefaults).toEqual({
+      familyPolicy: { id: "claude-default-family", version: 1 },
+    });
     for (const modelId of ["sonnet", "opus", "fable"]) {
       expect(harnessAllowsModel(configuration.modelRules, {
         adapterId: "claude-subscription",
