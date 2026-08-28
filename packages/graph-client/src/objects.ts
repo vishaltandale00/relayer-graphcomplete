@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { GraphAction, GraphEdge, GraphId, GraphLayer, GraphNode, NavigateRelation } from "./types.js";
+import type { GraphAction, GraphEdge, GraphId, GraphLayer, GraphNode, InputControl, InputOption, NavigateRelation } from "./types.js";
 
 export class NodeObject {
   readonly clientKey: string;
@@ -80,9 +80,22 @@ export interface InvokeActionFields {
   ref?: GraphAction;
 }
 
+export interface InputActionFields {
+  readonly kind: "input";
+  readonly label: string;
+  readonly control: InputControl;
+  readonly prompt: string;
+  readonly options?: readonly InputOption[];
+  readonly minimumSelections?: number;
+  readonly sourceLayer: LayerReference;
+  clientKey?: string;
+  ref?: GraphAction;
+}
+
 export type NavigateActionObject = NavigateActionFields & ActionPresentationObject;
 export type InvokeActionObject = InvokeActionFields & ActionPresentationObject;
-export type ActionObject = NavigateActionObject | InvokeActionObject;
+export type InputActionObject = InputActionFields & ActionPresentationObject;
+export type ActionObject = NavigateActionObject | InvokeActionObject | InputActionObject;
 export type NodeReference = NodeObject | GraphNode | GraphId;
 export type EdgeReference = EdgeObject | GraphEdge | GraphId;
 export type LayerReference = LayerObject | GraphLayer | GraphId;

@@ -1,8 +1,9 @@
 use sqlx::{FromRow, SqliteConnection};
 
 use crate::{
-    ActionDraft, ActionId, ActionKind, ActionVariant, GraphAction, GraphError, LayerId,
-    NavigateRelation, NodeId, ProjectId, RecordState, graph::InteractionScope,
+    ActionDraft, ActionId, ActionKind, ActionVariant, GraphAction, GraphError, InputAction,
+    InputControl, InputOption, LayerId, NavigateRelation, NodeId, ProjectId, RecordState,
+    graph::InteractionScope,
 };
 
 pub(crate) struct ActionTable<'connection> {
@@ -31,6 +32,10 @@ struct ActionRow {
     description: Option<String>,
     target_layer_id: Option<i64>,
     interaction_text: Option<String>,
+    input_control: Option<String>,
+    input_prompt: Option<String>,
+    input_options_json: Option<String>,
+    input_minimum_selections: Option<i64>,
     state: String,
 }
 
@@ -45,7 +50,7 @@ impl<'connection> ActionTable<'connection> {
         id: ActionId,
     ) -> Result<Option<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
+            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
         )
         .bind(id.value())
         .bind(scope.project_id.map(ProjectId::value))
@@ -65,7 +70,7 @@ impl<'connection> ActionTable<'connection> {
     ) -> Result<Vec<ActionRecord>, GraphError> {
         let rows = match (owner, accepted_only) {
             (Some(owner), _) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE source_node_id=?1 AND owner_interaction_id=?2 AND type_id!='interaction.context' AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE source_node_id=?1 AND owner_interaction_id=?2 AND type_id!='interaction.context' AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
             )
             .bind(source.value())
             .bind(owner.value())
@@ -74,7 +79,7 @@ impl<'connection> ActionTable<'connection> {
             .fetch_all(&mut *self.connection)
             .await?,
             (None, true) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE source_node_id=?1 AND type_id!='interaction.context' AND state='accepted' AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3)) ORDER BY id",
+                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE source_node_id=?1 AND type_id!='interaction.context' AND state='accepted' AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3)) ORDER BY id",
             )
             .bind(source.value())
             .bind(scope.project_id.map(ProjectId::value))
@@ -82,7 +87,7 @@ impl<'connection> ActionTable<'connection> {
             .fetch_all(&mut *self.connection)
             .await?,
             (None, false) => sqlx::query_as::<_, ActionRow>(
-                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE source_node_id=?1 AND type_id!='interaction.context' AND (state='accepted' OR owner_interaction_id=?2) AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+                "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE source_node_id=?1 AND type_id!='interaction.context' AND (state='accepted' OR owner_interaction_id=?2) AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
             )
             .bind(source.value())
             .bind(scope.root_node_id.value())
@@ -101,7 +106,7 @@ impl<'connection> ActionTable<'connection> {
         client_key: &str,
     ) -> Result<Option<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE owner_interaction_id=?1 AND source_node_id=?2 AND client_key=?3 AND type_id!='interaction.context'",
+            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE owner_interaction_id=?1 AND source_node_id=?2 AND client_key=?3 AND type_id!='interaction.context'",
         )
         .bind(owner.value())
         .bind(source.value())
@@ -137,7 +142,7 @@ impl<'connection> ActionTable<'connection> {
         layer: LayerId,
     ) -> Result<Vec<ActionRecord>, GraphError> {
         sqlx::query_as::<_, ActionRow>(
-            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state FROM actions WHERE owner_interaction_id=?1 AND type_id!='interaction.context' AND source_layer_id=?2 AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
+            "SELECT id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records WHERE owner_interaction_id=?1 AND type_id!='interaction.context' AND source_layer_id=?2 AND ((?3 IS NOT NULL AND project_id=?3) OR (?3 IS NULL AND project_id IS NULL AND thread_id=?4)) ORDER BY id",
         )
         .bind(scope.root_node_id.value())
         .bind(layer.value())
@@ -302,10 +307,9 @@ impl<'connection> ActionTable<'connection> {
         .bind(&draft.client_key)
         .execute(&mut *self.connection)
         .await?;
-        Ok(draft_action(
-            valid_action_id(result.last_insert_rowid())?,
-            draft,
-        ))
+        let id = valid_action_id(result.last_insert_rowid())?;
+        self.replace_input_payload(id, draft.input.as_ref()).await?;
+        Ok(draft_action(id, draft))
     }
 
     pub(crate) async fn update_draft(
@@ -327,7 +331,30 @@ impl<'connection> ActionTable<'connection> {
             .bind(id.value())
             .execute(&mut *self.connection)
             .await?;
+        self.replace_input_payload(id, draft.input.as_ref()).await?;
         Ok(draft_action(id, draft))
+    }
+
+    async fn replace_input_payload(
+        &mut self,
+        id: ActionId,
+        input: Option<&InputAction>,
+    ) -> Result<(), GraphError> {
+        sqlx::query("DELETE FROM input_action_payloads WHERE action_id=?1")
+            .bind(id.value())
+            .execute(&mut *self.connection)
+            .await?;
+        if let Some(input) = input {
+            sqlx::query("INSERT INTO input_action_payloads(action_id,control,prompt,options_json,minimum_selections) VALUES (?1,?2,?3,?4,?5)")
+                .bind(id.value())
+                .bind(input.control.as_str())
+                .bind(&input.prompt)
+                .bind(serde_json::to_string(&input.options).map_err(|error| GraphError::Internal(error.to_string()))?)
+                .bind(input.minimum_selections.map(|value| value as i64))
+                .execute(&mut *self.connection)
+                .await?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn accept_owned(
@@ -348,6 +375,31 @@ impl TryFrom<ActionRow> for ActionRecord {
     type Error = GraphError;
 
     fn try_from(row: ActionRow) -> Result<Self, Self::Error> {
+        let input = match (
+            row.input_control,
+            row.input_prompt,
+            row.input_options_json,
+            row.input_minimum_selections,
+        ) {
+            (None, None, None, None) => None,
+            (Some(control), Some(prompt), Some(options), minimum) => Some(InputAction {
+                control: InputControl::parse(&control)?,
+                prompt,
+                options: serde_json::from_str::<Vec<InputOption>>(&options)
+                    .map_err(|error: serde_json::Error| GraphError::Internal(error.to_string()))?,
+                minimum_selections: minimum
+                    .map(|value| {
+                        usize::try_from(value)
+                            .map_err(|error| GraphError::Internal(error.to_string()))
+                    })
+                    .transpose()?,
+            }),
+            _ => {
+                return Err(GraphError::Internal(
+                    "database returned a partial input action payload".into(),
+                ));
+            }
+        };
         Ok(Self {
             action: GraphAction {
                 id: valid_action_id(row.id)?,
@@ -365,6 +417,7 @@ impl TryFrom<ActionRow> for ActionRecord {
                 description: row.description,
                 target_layer_id: row.target_layer_id.map(valid_layer_id).transpose()?,
                 interaction_text: row.interaction_text,
+                input,
                 state: RecordState::parse(&row.state)?,
             },
         })
@@ -384,6 +437,7 @@ fn draft_action(id: ActionId, draft: &ActionDraft) -> GraphAction {
         description: draft.description.clone(),
         target_layer_id: draft.target_layer_id,
         interaction_text: draft.interaction_text.clone(),
+        input: draft.input.clone(),
         state: RecordState::Draft,
     }
 }

@@ -614,6 +614,7 @@ fn seed_imported_action_ids(
             let expected_kind = match action.kind {
                 ActionKind::Navigate => ExportActionKind::Navigate,
                 ActionKind::Invoke => ExportActionKind::Invoke,
+                ActionKind::Input => ExportActionKind::Input,
                 ActionKind::InteractionContext => continue,
             };
             if imported_action.kind != expected_kind {
@@ -748,6 +749,7 @@ fn export_action(
     let kind = match action.kind {
         ActionKind::Navigate => ExportActionKind::Navigate,
         ActionKind::Invoke => ExportActionKind::Invoke,
+        ActionKind::Input => ExportActionKind::Input,
         ActionKind::InteractionContext => {
             return Err(ConversationExportBuildError::Invalid(
                 "interaction context actions are not exported as graph actions".into(),
@@ -1127,6 +1129,7 @@ mod tests {
             description: None,
             target_layer_id: Some(LayerId::new(4).unwrap()),
             interaction_text: Some("Continue from here".into()),
+            input: None,
             state: RecordState::Accepted,
         };
 

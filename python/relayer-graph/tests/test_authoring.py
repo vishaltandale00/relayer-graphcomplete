@@ -148,6 +148,38 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
             [request[2]["clientKey"] for request in Handler.requests[-2:]],
             ["ask-again", "ask-again"],
         )
+
+    async def test_input_action_is_sent_as_structured_authoring_data(self):
+        await self.client.add_input_action(
+            7,
+            "Choose evidence",
+            "Which evidence should be emphasized?",
+            control="multi_select",
+            source_layer=8,
+            client_key="evidence-input",
+            options=(("logs", "Logs"), ("traces", "Traces")),
+            minimum_selections=1,
+        )
+        self.assertEqual(
+            Handler.requests[-1][2],
+            {
+                "clientKey": "evidence-input",
+                "sourceNodeId": 7,
+                "sourceLayerId": 8,
+                "kind": "input",
+                "label": "Choose evidence",
+                "control": "multi_select",
+                "prompt": "Which evidence should be emphasized?",
+                "options": [
+                    {"key": "logs", "label": "Logs"},
+                    {"key": "traces", "label": "Traces"},
+                ],
+                "minimumSelections": 1,
+                "variant": "pill",
+                "icon": None,
+                "description": None,
+            },
+        )
         self.assertEqual(
             {key: Handler.requests[-1][2][key] for key in ("variant", "icon", "description")},
             {"variant": "pill", "icon": None, "description": None},

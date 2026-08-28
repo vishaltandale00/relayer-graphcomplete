@@ -482,6 +482,7 @@ async fn root_expand(
             description: None,
             target_layer_id: Some(target.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap()
@@ -507,6 +508,7 @@ async fn accepted_invoke(
             description: None,
             target_layer_id: None,
             interaction_text: Some("Continue this answer".into()),
+            input: None,
         })
         .await
         .unwrap();
@@ -536,6 +538,7 @@ async fn navigate(
             description: None,
             target_layer_id: Some(target.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap()
@@ -569,6 +572,7 @@ async fn accept_single_node(
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -839,6 +843,7 @@ async fn interaction_context_is_control_authored_ordered_and_excluded_from_compl
             description: None,
             target_layer_id: Some(answer_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap_err();
@@ -862,6 +867,7 @@ async fn interaction_context_is_control_authored_ordered_and_excluded_from_compl
             description: None,
             target_layer_id: Some(answer_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .expect("context control identity must not consume an LM client key");
@@ -1097,6 +1103,7 @@ async fn root_action_replay_updates_same_key_and_rejects_a_different_key_without
             description: None,
             target_layer_id: Some(first_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap_err();
@@ -1127,6 +1134,7 @@ async fn root_action_replay_updates_same_key_and_rejects_a_different_key_without
             description: None,
             target_layer_id: Some(first_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -1157,6 +1165,7 @@ async fn concurrent_root_action_writes_allow_exactly_one_client_key() {
         description: None,
         target_layer_id: Some(layer.id),
         interaction_text: None,
+        input: None,
     };
     let first_draft = draft("first-root");
     let second_draft = draft("second-root");
@@ -1225,6 +1234,7 @@ async fn accepts_connected_layer_and_returns_exact_view() {
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -1510,6 +1520,7 @@ async fn accepts_recursive_navigate_subgraph() {
             description: None,
             target_layer_id: Some(nested.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -1526,6 +1537,7 @@ async fn accepts_recursive_navigate_subgraph() {
             description: None,
             target_layer_id: Some(root.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -1834,6 +1846,7 @@ async fn reference_layers_cannot_author_expand_or_invoke_actions() {
             description: None,
             target_layer_id: Some(child_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap_err();
@@ -2164,6 +2177,7 @@ async fn action_keys_are_scoped_to_their_source_nodes() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Ask about the first node".into()),
+            input: None,
         })
         .await
         .unwrap();
@@ -2180,6 +2194,7 @@ async fn action_keys_are_scoped_to_their_source_nodes() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Ask about the second node".into()),
+            input: None,
         })
         .await
         .unwrap();
@@ -2207,6 +2222,7 @@ async fn invoke_actions_reject_whitespace_only_interaction_text() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("  \n\t".into()),
+            input: None,
         })
         .await
         .unwrap_err();
@@ -2237,6 +2253,7 @@ async fn invoke_actions_cannot_author_resolution_targets() {
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: Some("Continue".into()),
+            input: None,
         })
         .await
         .unwrap_err();
@@ -2295,6 +2312,7 @@ async fn action_presentation_grammar_round_trips_in_authored_order() {
                 description: description.map(str::to_owned),
                 target_layer_id: None,
                 interaction_text: Some(format!("Run {key}")),
+                input: None,
             })
             .await
             .unwrap();
@@ -2332,6 +2350,136 @@ async fn action_presentation_grammar_round_trips_in_authored_order() {
 }
 
 #[tokio::test]
+async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
+    let (database, interaction) = setup(Some(project(88)), thread(88)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let source = node(&writer, "input-source").await;
+    let layer = single_node_layer(&writer, "input-layer", &source).await;
+
+    let cases = [
+        InputAction {
+            control: InputControl::Text,
+            prompt: "Describe the evidence".into(),
+            options: vec![],
+            minimum_selections: None,
+        },
+        InputAction {
+            control: InputControl::SingleSelect,
+            prompt: "Choose a direction".into(),
+            options: vec![
+                InputOption {
+                    key: "left".into(),
+                    label: "Left".into(),
+                },
+                InputOption {
+                    key: "right".into(),
+                    label: "Right".into(),
+                },
+            ],
+            minimum_selections: None,
+        },
+        InputAction {
+            control: InputControl::MultiSelect,
+            prompt: "Choose signals".into(),
+            options: vec![
+                InputOption {
+                    key: "logs".into(),
+                    label: "Logs".into(),
+                },
+                InputOption {
+                    key: "traces".into(),
+                    label: "Traces".into(),
+                },
+            ],
+            minimum_selections: Some(2),
+        },
+    ];
+    for (index, input) in cases.into_iter().enumerate() {
+        writer
+            .add_action(&ActionDraft {
+                client_key: format!("input-{index}"),
+                source_node_id: source.id,
+                source_layer_id: Some(layer.id),
+                kind: ActionKind::Input,
+                relation: None,
+                label: format!("Input {index}"),
+                variant: ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: None,
+                interaction_text: None,
+                input: Some(input),
+            })
+            .await
+            .unwrap();
+    }
+    root_expand(&writer, &interaction, &layer).await;
+    writer.complete(interaction.id).await.unwrap();
+    let accepted = writer.get_layer(layer.id).await.unwrap();
+    assert_eq!(
+        accepted
+            .actions
+            .iter()
+            .filter_map(|action| action.input.as_ref().map(|input| input.control))
+            .collect::<Vec<_>>(),
+        vec![
+            InputControl::Text,
+            InputControl::SingleSelect,
+            InputControl::MultiSelect,
+        ]
+    );
+
+    let (database, interaction) = setup(None, thread(89)).await;
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let source = node(&writer, "bad-input-source").await;
+    let layer = single_node_layer(&writer, "bad-input-layer", &source).await;
+    let error = writer
+        .add_action(&ActionDraft {
+            client_key: "bad-input".into(),
+            source_node_id: source.id,
+            source_layer_id: Some(layer.id),
+            kind: ActionKind::Input,
+            relation: None,
+            label: "Bad input".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: Some(InputAction {
+                control: InputControl::MultiSelect,
+                prompt: "Choose".into(),
+                options: vec![
+                    InputOption {
+                        key: "same".into(),
+                        label: "One".into(),
+                    },
+                    InputOption {
+                        key: "same".into(),
+                        label: "Two".into(),
+                    },
+                ],
+                minimum_selections: Some(3),
+            }),
+        })
+        .await
+        .unwrap_err();
+    let GraphError::ValidationIssues { issues, .. } = error else {
+        panic!("expected ordered validation issues");
+    };
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue.code == "input_action_option_key_duplicate")
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue.code == "input_action_minimum_invalid")
+    );
+}
+
+#[tokio::test]
 async fn action_presentation_errors_are_repairable() {
     let (database, interaction) = setup(Some(project(1)), thread(1)).await;
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
@@ -2350,6 +2498,7 @@ async fn action_presentation_errors_are_repairable() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Try it".into()),
+            input: None,
         })
         .await
         .unwrap_err();
@@ -2375,6 +2524,7 @@ async fn action_presentation_errors_are_repairable() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Try it".into()),
+            input: None,
         })
         .await
         .unwrap_err();
@@ -2497,6 +2647,7 @@ async fn completion_rejects_an_edge_accepted_by_a_concurrent_interaction() {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -2547,6 +2698,7 @@ async fn accepted_layers_keep_their_original_action_snapshot() {
             description: None,
             target_layer_id: Some(viewer_layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();
@@ -2738,6 +2890,7 @@ async fn lease_issuance_rejects_invalid_authority_kind_and_scope() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Continue".into()),
+            input: None,
         })
         .await
         .unwrap();

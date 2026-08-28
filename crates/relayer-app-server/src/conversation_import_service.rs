@@ -446,6 +446,7 @@ fn import_action(action: ExportAction) -> ImportedAction {
         kind: match action.kind {
             ExportActionKind::Navigate => "navigate",
             ExportActionKind::Invoke => "invoke",
+            ExportActionKind::Input => "input",
         }
         .into(),
         relation: action.relation.map(|relation| {

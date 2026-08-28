@@ -4,7 +4,7 @@ from .authoring import (ActionVariant, EdgeObject, GraphAuthoringClient, GraphEd
                         GraphLayer, GraphNode, InteractionContext, InteractionInput,
                         InteractionInputNode,
                         LayerLayout, LayerLayoutObject,
-                        LayerObject, NavigateRelation, NodeObject, NodePlacement,
+                        InputControl, InputOption, LayerObject, NavigateRelation, NodeObject, NodePlacement,
                         NodePlacementObject, RelayerGraphClient)
 from .exceptions import (APIError, AuthenticationError, ConfigurationError, NotFound,
                          RelayerGraphError, TransportError, ValidationError,
@@ -23,7 +23,7 @@ __all__ = [
     "NodeObject", "EdgeObject", "LayerObject", "NodePlacementObject", "LayerLayoutObject",
     "GraphNode", "GraphEdge", "GraphLayer", "InteractionContext", "InteractionInput", "InteractionInputNode",
     "NodePlacement", "LayerLayout",
-    "ActionVariant", "NavigateRelation",
+    "ActionVariant", "NavigateRelation", "InputControl", "InputOption",
     "RelayerGraphError", "ConfigurationError", "TransportError", "APIError",
     "AuthenticationError", "NotFound", "ValidationError", "ValidationIssue",
     "RELAYER_ICON_NAMES", "RELAYER_ICON_ALIASES", "normalize_relayer_icon_name",

@@ -7,7 +7,10 @@ mod layer;
 mod node;
 mod record_state;
 
-pub use action::{ActionDraft, ActionKind, ActionVariant, GraphAction, NavigateRelation};
+pub use action::{
+    ActionDraft, ActionKind, ActionVariant, GraphAction, InputAction, InputControl, InputOption,
+    NavigateRelation,
+};
 pub use context::{
     InteractionContext, InteractionContextAction, InteractionContextDraft,
     InteractionContextTarget, InteractionInput, InteractionInputNode, interaction_input_digest,
