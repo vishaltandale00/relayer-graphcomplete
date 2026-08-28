@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.mjs";
 import {
   captureLadybugPackagedLifecycle,
+  npmEnvironmentForDesktopTarget,
   parseLadybugLockContention,
   parseDynamicLibraries,
   parseMinimumMacOSVersion,
@@ -25,6 +26,12 @@ import {
 const execFileAsync = promisify(execFile);
 
 describe("Ladybug packaged lifecycle qualification", () => {
+  it("installs the dependency closure for the packaged architecture", () => {
+    expect(npmEnvironmentForDesktopTarget(
+      { PATH: "/bin" },
+      { platform: "darwin", architecture: "x64" },
+    )).toEqual({ PATH: "/bin", npm_config_platform: "darwin", npm_config_arch: "x64" });
+  });
   it("recognizes lock contention across the pinned Ladybug message variants", () => {
     expect(parseLadybugLockContention(
       "IO exception: Could not set lock on file : /tmp/db (Lock is held by PID 42)",

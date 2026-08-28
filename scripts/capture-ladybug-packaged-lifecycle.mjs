@@ -55,6 +55,14 @@ export function parseLadybugLockContention(output) {
   return match[0];
 }
 
+export function npmEnvironmentForDesktopTarget(environment, target) {
+  return {
+    ...environment,
+    npm_config_platform: target.platform,
+    npm_config_arch: target.architecture,
+  };
+}
+
 function parseArguments(arguments_) {
   const options = {};
   for (let index = 0; index < arguments_.length; index += 2) {
@@ -411,6 +419,7 @@ export async function captureLadybugPackagedLifecycle({
     }
     await execFileAsync("npm", ["ci", "--ignore-scripts", "--offline"], {
       cwd: checkout,
+      env: npmEnvironmentForDesktopTarget(environment, target),
       maxBuffer: 10 * 1024 * 1024,
     });
     await execFileAsync("npm", ["run", "prepare:renderer"], { cwd: checkout, maxBuffer: 10 * 1024 * 1024 });
