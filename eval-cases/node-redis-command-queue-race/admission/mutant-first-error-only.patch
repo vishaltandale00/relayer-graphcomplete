@@ -1,0 +1,20 @@
+diff --git a/index.js b/index.js
+index fe79c5f..8af0123 100644
+--- a/index.js
++++ b/index.js
+@@ -220,7 +220,14 @@ RedisClient.prototype.create_stream = function () {
+     });
+ 
+     this.stream.on('error', function (err) {
+-        self.on_error(err);
++        // Mutant: the first failure is ordered, but later connection epochs
++        // fall back to the vulnerable synchronous interleaving.
++        if (!self.deferred_error_once) {
++            self.deferred_error_once = true;
++            process.nextTick(function () { self.on_error(err); });
++        } else {
++            self.on_error(err);
++        }
+     });
+ 
+     this.stream.once('close', function (hadError) {

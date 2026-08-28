@@ -1,0 +1,30 @@
+diff --git a/index.js b/index.js
+index fe79c5f..75229cb 100644
+--- a/index.js
++++ b/index.js
+@@ -874,6 +874,9 @@ RedisClient.prototype.internal_send_command = function (command_obj) {
+         command = this.options.rename_commands[command];
+     }
+     // Always use 'Multi bulk commands', but if passed any Buffer args, then do multiple writes, one for each arg.
++    // Admit the command before writing so a synchronous socket error can reject
++    // the exact in-flight command instead of leaving it behind after cleanup.
++    this.command_queue.push(command_obj);
+     // This means that using Buffers in commands is going to be slower, so use Strings if you don't already have a Buffer.
+     command_str = '*' + (len + 1) + '\r\n$' + command.length + '\r\n' + command + '\r\n';
+ 
+@@ -907,12 +910,10 @@ RedisClient.prototype.internal_send_command = function (command_obj) {
+     // Handle `CLIENT REPLY ON|OFF|SKIP`
+     // This has to be checked after call_on_write
+     /* istanbul ignore else: TODO: Remove this as soon as we test Redis 3.2 on travis */
+-    if (this.reply === 'ON') {
+-        this.command_queue.push(command_obj);
+-    } else {
++    if (this.reply !== 'ON') {
+         // Do not expect a reply
+-        // Does this work in combination with the pub sub mode?
+-        if (command_obj.callback) {
++        // A synchronous connection error may already have flushed this entry.
++        if (this.command_queue.pop() === command_obj && command_obj.callback) {
+             utils.reply_in_order(this, command_obj.callback, null, undefined, this.command_queue);
+         }
+         if (this.reply === 'SKIP') {

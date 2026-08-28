@@ -35,6 +35,11 @@ import {
   gradeCalibrationWorkspace,
   materializeFrontierProjectFixture,
   materializeH3ProjectFixture,
+  gradeNodeRedisWorkspace,
+  materializeNodeRedisProjectFixture,
+  nodeRedisAutonomousCases,
+  nodeRedisAutonomousCaseIds,
+  NODE_REDIS_UPSTREAM_COMMIT,
   projectDeterministicChecksToOutcome,
   selectStandalonePermissionProfile,
 } from "@relayer/eval-runner";
@@ -73,6 +78,11 @@ export const evalCases = Object.freeze([
     caseSnapshot: entry.catalogSnapshot,
     caseSnapshotDigest: entry.snapshotDigest,
   })),
+  ...nodeRedisAutonomousCases.map((entry) => Object.freeze({
+    ...entry.definition,
+    caseSnapshot: entry.catalogSnapshot,
+    caseSnapshotDigest: entry.snapshotDigest,
+  })),
   ...frontierAutonomousCases.map((entry) => Object.freeze({
     ...entry.definition,
     caseSnapshot: entry.catalogSnapshot,
@@ -90,7 +100,7 @@ const h3CaseIds = new Set([
   H3_AUTONOMOUS_FIX_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
 ]);
-const projectCaseIds = new Set([...h3CaseIds, ...frontierAutonomousCaseIds, ...calibrationAutonomousCaseIds]);
+const projectCaseIds = new Set([...h3CaseIds, ...nodeRedisAutonomousCaseIds, ...frontierAutonomousCaseIds, ...calibrationAutonomousCaseIds]);
 
 export const evalJudges = Object.freeze([
   Object.freeze({ id: "deterministic-graph-contract", name: "Deterministic graph contract" }),
@@ -153,6 +163,11 @@ function mandatoryGateReceipt(gate, checks) {
     "functional-behavior": ["behavior-lower-boundary", "behavior-upper-boundary", "behavior-decimal-number", "behavior-integer-numeric-string", "behavior-decimal-numeric-string", "behavior-custom-fallback"],
     "regression-safety": ["implementation-build", "implementation-typecheck", "implementation-focused-tests"],
     "scoped-clean-commit": ["focused-files", "meaningful-commit", "implementation-clean"],
+    "queue-cleanup": ["fault-injection-observed", "failed-command-rejected-once", "queue-clean-before-reconnect"],
+    "reconnect-integrity": ["reconnect-reply-order", "offline-queue-replayed-in-order", "reconnect-queue-drained", "single-failure-callbacks-settle"],
+    "repeated-failure-safety": ["repeated-faults-observed", "fault-command-matrix-observed", "repeated-failures-rejected-independently", "repeated-reconnects-start-clean", "ordered-replies-after-recovery", "no-command-reply-misassociation", "callbacks-settle-without-hang"],
+    "reply-mode-regression": ["client-reply-modes-preserved"],
+    "node-redis-scoped-clean-commit": ["candidate-regression-passes", "focused-source-and-tests", "dependency-safe-scope", "meaningful-commit", "implementation-clean"],
     "read-only-workspace": ["baseline-head", "zero-diff"],
     "independent-reproduction": ["diagnosis-reproduces-seeded-failure"],
     "hidden-behavior": ["validation-build", "hidden-behavior"],
@@ -344,14 +359,18 @@ function completeExecutionLifecycle(execution, status = "complete") {
   };
 }
 
-function validateFixtureAgainstCaseSnapshot(execution, fixture) {
+export function validateFixtureAgainstCaseSnapshot(execution, fixture) {
   const workspace = execution.caseSnapshot?.artifacts?.workspace;
   if (!workspace) return;
   const actualRevision = fixture.sourceRevision ?? (fixture.seededTree ? `git-tree:${fixture.seededTree}` : null);
-  if (workspace.source !== fixture.repositoryUrl || workspace.revision !== actualRevision) {
+  const requiresExactEnvironment = nodeRedisAutonomousCaseIds.has(execution.testCaseId);
+  if (workspace.source !== fixture.repositoryUrl
+    || workspace.revision !== actualRevision
+    || (requiresExactEnvironment && workspace.environmentDigest !== fixture.environmentDigest)) {
     throw new Error(
       `Materialized fixture identity does not match case ${execution.testCaseId}: `
-      + `${fixture.repositoryUrl || "<missing>"}/${actualRevision || "<missing>"}.`,
+      + `${fixture.repositoryUrl || "<missing>"}/${actualRevision || "<missing>"}/`
+      + `${fixture.environmentDigest || "<missing-environment>"}.`,
     );
   }
 }
@@ -501,6 +520,8 @@ export class EvalService {
     workspaceGrader = gradeH3Workspace,
     frontierProjectFixtureMaterializer = materializeFrontierProjectFixture,
     frontierWorkspaceGrader = gradeFrontierProjectWorkspace,
+    nodeRedisProjectFixtureMaterializer = materializeNodeRedisProjectFixture,
+    nodeRedisWorkspaceGrader = gradeNodeRedisWorkspace,
     calibrationFixtureMaterializer = materializeCalibrationFixture,
     calibrationWorkspaceGrader = gradeCalibrationWorkspace,
     acceptedTopologyBuilder = buildAcceptedReviewTopology,
@@ -523,6 +544,8 @@ export class EvalService {
     this.workspaceGrader = workspaceGrader;
     this.frontierProjectFixtureMaterializer = frontierProjectFixtureMaterializer;
     this.frontierWorkspaceGrader = frontierWorkspaceGrader;
+    this.nodeRedisProjectFixtureMaterializer = nodeRedisProjectFixtureMaterializer;
+    this.nodeRedisWorkspaceGrader = nodeRedisWorkspaceGrader;
     this.calibrationFixtureMaterializer = calibrationFixtureMaterializer;
     this.calibrationWorkspaceGrader = calibrationWorkspaceGrader;
     this.acceptedTopologyBuilder = acceptedTopologyBuilder;
@@ -1458,6 +1481,7 @@ export class EvalService {
     );
     const workspaceDirectory = join(executionDirectory, "workspace");
     const isH3 = h3CaseIds.has(definition.id);
+    const isNodeRedis = nodeRedisAutonomousCaseIds.has(definition.id);
     const isCalibration = calibrationAutonomousCaseIds.has(definition.id);
     const fixture = isH3
       ? await this.projectFixtureMaterializer({
@@ -1465,7 +1489,11 @@ export class EvalService {
         workspaceDirectory,
         platform: this.platform,
       })
-      : isCalibration ? await this.calibrationFixtureMaterializer({
+      : isNodeRedis ? await this.nodeRedisProjectFixtureMaterializer({
+        cacheDirectory: join(dirname(this.stateFile), "fixtures", `node-redis-${NODE_REDIS_UPSTREAM_COMMIT}`),
+        workspaceDirectory,
+        platform: this.platform,
+      }) : isCalibration ? await this.calibrationFixtureMaterializer({
         caseId: definition.id,
         workspaceDirectory,
         platform: this.platform,
@@ -1509,7 +1537,9 @@ export class EvalService {
           if (threadDefinition.mutationPolicy === "read-only" || promptIndex === threadDefinition.prompts.length - 1) {
             workspaceChecks.set(String(interactionId), isH3
               ? await this.workspaceGrader({ workspaceDirectory, grade: threadDefinition.workspaceGrade })
-              : isCalibration
+              : isNodeRedis
+                ? await this.nodeRedisWorkspaceGrader({ workspaceDirectory })
+                : isCalibration
                 ? await this.calibrationWorkspaceGrader({ caseId: definition.id, workspaceDirectory, baseRevision: fixture.seededCommit })
                 : await this.frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory }));
           }

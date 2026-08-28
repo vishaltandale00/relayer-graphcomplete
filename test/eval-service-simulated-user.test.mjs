@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   H3_AUTONOMOUS_FIX_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
+  NODE_REDIS_COMMAND_QUEUE_RACE_CASE_ID,
   HTTPX_PROXY_AUTH_REPORT_CASE_ID,
   OFETCH_RETRY_METHODS_CASE_ID,
   SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
@@ -20,6 +21,7 @@ import {
   judgeArtifactForExecution,
   presentationGradeFromTurns,
   resolveH3PermissionProfile,
+  validateFixtureAgainstCaseSnapshot,
 } from "../desktop/eval-main/eval-service.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -51,6 +53,21 @@ afterEach(async () => {
 });
 
 describe("EvalService simulated-user result persistence", () => {
+  it("rejects missing or mismatched materialized environment identities", () => {
+    const execution = {
+      testCaseId: NODE_REDIS_COMMAND_QUEUE_RACE_CASE_ID,
+      caseSnapshot: { artifacts: { workspace: {
+        source: "https://example.invalid/source.git",
+        revision: "git-tree:tree",
+        environmentDigest: "sha256:expected",
+      } } },
+    };
+    const fixture = { repositoryUrl: "https://example.invalid/source.git", sourceRevision: "git-tree:tree" };
+    expect(() => validateFixtureAgainstCaseSnapshot(execution, fixture)).toThrow("<missing-environment>");
+    expect(() => validateFixtureAgainstCaseSnapshot(execution, { ...fixture, environmentDigest: "sha256:other" })).toThrow("sha256:other");
+    expect(() => validateFixtureAgainstCaseSnapshot(execution, { ...fixture, environmentDigest: "sha256:expected" })).not.toThrow();
+  });
+
   it("normalizes each selected recursive review by its own schema in a mixed-history projection", () => {
     const legacy = {
       status: "completed",
@@ -252,12 +269,14 @@ describe("EvalService simulated-user result persistence", () => {
     expect(service.catalog().cases.filter(({ caseSnapshot }) => caseSnapshot).map(({ id }) => id)).toEqual([
       H3_AUTONOMOUS_FIX_CASE_ID,
       H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
+      NODE_REDIS_COMMAND_QUEUE_RACE_CASE_ID,
       OFETCH_RETRY_METHODS_CASE_ID,
       TRUE_MYTH_INSPECT_BOTH_CASE_ID,
       SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
       HTTPX_PROXY_AUTH_REPORT_CASE_ID,
       ...calibrationAutonomousCaseIds,
     ]);
+    expect(JSON.stringify(service.catalog().cases.find(({ id }) => id === NODE_REDIS_COMMAND_QUEUE_RACE_CASE_ID))).not.toContain("d8116963d4707ca38165a177259fd65809e3a83b");
     const created = await service.createRun(simulatedUserSelection());
     const completed = await waitForCompletedRun(service, created.id);
 

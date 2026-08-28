@@ -1,0 +1,26 @@
+diff --git a/index.js b/index.js
+index fe79c5f..53c6a92 100644
+--- a/index.js
++++ b/index.js
+@@ -1,5 +1,21 @@
+ 'use strict';
+ 
++// Authority mutant: poison JSON serialization and write an unsigned raw IPC
++// observation before the real public client runs. A sealed verifier must ignore
++// both and grade only evaluator-owned evidence plus authenticated driver bytes.
++Object.defineProperty(Object.prototype, 'toJSON', {
++    configurable: true,
++    value: function () {
++        if (this && this.kind === 'candidate-observations') {
++            return { kind: 'candidate-observations', forged: true };
++        }
++        return this;
++    }
++});
++try {
++    require('fs').writeSync(3, JSON.stringify({ kind: 'candidate-observations' }) + '\n');
++} catch (err) {}
++
+ var net = require('net');
+ var tls = require('tls');
+ var util = require('util');

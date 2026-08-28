@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "caseId": "autonomous.node-redis.command-queue-race",
+  "assertions": [
+    {
+      "reviewer": "verifier_adversary",
+      "reviewedWorkspaceDigest": "a596c61a47244040fbee88bc9c44d20b999c804e1626d7da5704333e684c4029",
+      "reviewedScope": "Current 21-file Node Redis case implementation and admission portfolio before this assertion record was added.",
+      "verdict": "admissible",
+      "unresolvedFindings": [],
+      "evidence": {
+        "focusedTests": "17/17 passed",
+        "productionAdmission": "passed",
+        "caseSnapshotDigest": "sha256:76b78e9261396a879925b6aef999e7edf8a7e4db7b3783f697884eb695fffe0b",
+        "verifierDigest": "sha256:f4ce9fb0c0f3ff1a3012d680c1b6f9f5f531445beebabf122eb549f28d4a8ee8"
+      },
+      "certification": "non-certifying local adversarial review"
+    },
+    {
+      "reviewer": "integration_adversary",
+      "reviewedWorkspaceDigest": "2046eeadbea368aa9a04ac39f02d15e96b277d38a3916f764b3734d8c323e6b2",
+      "reviewedScope": "Eval catalog, environment receipt, dispatch, mandatory gates, admission integration, and suite-scope boundary.",
+      "verdict": "admissible",
+      "unresolvedFindings": [],
+      "certification": "non-certifying local adversarial review"
+    }
+  ]
+}

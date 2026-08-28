@@ -12,6 +12,11 @@ import {
   H3_SEEDED_TREE,
   H3_UPSTREAM_COMMIT,
   H3_UPSTREAM_TREE,
+  NODE_REDIS_COMMAND_QUEUE_RACE_CASE_ID,
+  NODE_REDIS_REPOSITORY_URL,
+  NODE_REDIS_UPSTREAM_COMMIT,
+  NODE_REDIS_UPSTREAM_TREE,
+  nodeRedisCommandQueueRaceCase,
   taskSystemFixtureFactory,
 } from "@relayer/eval-runner";
 import { afterEach, describe, expect, it } from "vitest";
@@ -65,6 +70,7 @@ describe("Relayer Eval application service", () => {
     services.push(product);
     const productSession = await product.start();
     const workspaceGrades = [];
+    const nodeRedisGrades = [];
     const acceptedTopologyGrades = [];
     const evalService = await new EvalService({
       stateFile: join(dataDirectory, "eval-data", "test-runs.json"),
@@ -111,6 +117,49 @@ describe("Relayer Eval application service", () => {
             .map((name) => ({ name: `workspace:${name}`, passed: true, detail: `${name} passed.` }));
         }
         return [{ name: `workspace:${grade}`, passed: true, detail: `${grade} policy passed.` }];
+      },
+      nodeRedisProjectFixtureMaterializer: async ({ workspaceDirectory }) => {
+        await mkdir(workspaceDirectory, { recursive: true });
+        return {
+          schemaVersion: 1,
+          fixtureId: NODE_REDIS_COMMAND_QUEUE_RACE_CASE_ID,
+          workspaceDirectory,
+          repositoryUrl: NODE_REDIS_REPOSITORY_URL,
+          upstreamCommit: NODE_REDIS_UPSTREAM_COMMIT,
+          upstreamTree: NODE_REDIS_UPSTREAM_TREE,
+          sourceRevision: `git-tree:${NODE_REDIS_UPSTREAM_TREE}`,
+          nodeVersion: "22.23.2",
+          npmVersion: "10.9.8",
+          architecture: "arm64",
+          packageManager: "npm@10.9.8",
+          environmentDigest: nodeRedisCommandQueueRaceCase.snapshot.artifacts.workspace.environmentDigest,
+          installedExactRuntimeDependencies: true,
+        };
+      },
+      nodeRedisWorkspaceGrader: async () => {
+        nodeRedisGrades.push("graded");
+        return [
+          "candidate-regression-passes",
+          "fault-injection-observed",
+          "failed-command-rejected-once",
+          "queue-clean-before-reconnect",
+          "reconnect-reply-order",
+          "offline-queue-replayed-in-order",
+          "reconnect-queue-drained",
+          "single-failure-callbacks-settle",
+          "repeated-faults-observed",
+          "fault-command-matrix-observed",
+          "repeated-failures-rejected-independently",
+          "repeated-reconnects-start-clean",
+          "ordered-replies-after-recovery",
+          "no-command-reply-misassociation",
+          "callbacks-settle-without-hang",
+          "client-reply-modes-preserved",
+          "focused-source-and-tests",
+          "dependency-safe-scope",
+          "meaningful-commit",
+          "implementation-clean",
+        ].map((name) => ({ name: `workspace:node-redis:${name}`, passed: true, detail: `${name} passed.` }));
       },
       acceptedTopologyGrader: (topology, { requireGrandchild = false } = {}) => {
         acceptedTopologyGrades.push({
@@ -291,6 +340,26 @@ describe("Relayer Eval application service", () => {
       ["read-only-workspace", "independent-reproduction"],
     ]);
     expect(autonomousCompleted.executions.every((execution) => execution.presentationGrade.status === "unjudged")).toBe(true);
+
+    const nodeRedisCreated = await evalService.createRun({
+      testCaseIds: [NODE_REDIS_COMMAND_QUEUE_RACE_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const nodeRedisCompleted = await waitForCompletedRun(evalService, nodeRedisCreated.id);
+    expect(nodeRedisCompleted.status).toBe("passed");
+    expect(nodeRedisGrades).toEqual(["graded"]);
+    const nodeRedisExecution = nodeRedisCompleted.executions[0];
+    expect(nodeRedisExecution.turns).toHaveLength(1);
+    expect(nodeRedisExecution.caseSnapshot.id).toBe(NODE_REDIS_COMMAND_QUEUE_RACE_CASE_ID);
+    expect(nodeRedisExecution.caseSnapshot.artifacts.reference.sealedPath).toBeUndefined();
+    expect(nodeRedisExecution.outcomeGrade.mandatoryGates.map((gate) => [gate.gateId, gate.passed])).toEqual([
+      ["queue-cleanup", true],
+      ["reconnect-integrity", true],
+      ["repeated-failure-safety", true],
+      ["reply-mode-regression", true],
+      ["node-redis-scoped-clean-commit", true],
+    ]);
   }, 20_000);
 });
 

@@ -1,0 +1,14 @@
+diff --git a/index.js b/index.js
+index fe79c5f..98ab1b2 100644
+--- a/index.js
++++ b/index.js
+@@ -367,6 +367,9 @@ RedisClient.prototype.on_connect = function () {
+ 
+ RedisClient.prototype.on_ready = function () {
+     var self = this;
++    // Mutant: hides the stale entry at reconnect but never settles its callback.
++    this.command_queue.clear();
++
+ 
+     debug('on_ready called ' + this.address + ' id ' + this.connection_id);
+     this.ready = true;
