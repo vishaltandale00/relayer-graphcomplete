@@ -98,8 +98,9 @@ system `libiconv`, libc++, and libSystem, embedded OpenSSL 3.5.8, and had SHA-25
 
 The checked-in source manifest and preparation utility now own and receipt the OpenSSL source and
 emit a static-only prefix plus offline Cargo environment. That resolves the native dependency
-design locally. The actual packaged graph-server lifecycle now passes on macOS arm64. macOS Intel
-still needs native replay, while Windows has the separate static-link blocker below.
+design locally. The actual packaged graph-server lifecycle now passes on macOS arm64. The Intel
+source route reaches the final link but fails on Ladybug's unavailable `___cpu_model` reference.
+Windows has the separate static-link blocker below.
 
 The unmodified Windows binding emits `ssl` and `crypto` link names, while the pinned OpenSSL MSVC
 build installs `libssl.lib` and `libcrypto.lib` and supplies no verified static-library search path.
@@ -140,6 +141,11 @@ Windows shared archives. The pinned source build and full contract probe were ex
 arm64. Cross-target packaged launch, signing, and release evidence remain unproven; source and API
 inspection are not substitutes for those runtime boundaries.
 
+The Intel attempt is retained in `issue-261-ladybug-intel-link-blocker.txt`. It used an exact clean
+checkout, offline lockfile install, empty Cargo target, x86_64 static OpenSSL, and Rosetta. Ladybug's
+`base_csv_reader.cpp` selects `__builtin_cpu_supports("avx2")` for Apple Clang, producing an unresolved
+`___cpu_model` reference. Resolving it requires an upstream source fix or an approved equivalent shim.
+
 The original focused probe and historical cancellation falsifier are in
 `issue-261-ladybug-probe/`. The exact-envelope corpus probe, captured output, lockfile, coverage,
 and digest receipt are in `issue-261-ladybug-contract-probe/`. The source-build observation is in
@@ -163,7 +169,7 @@ Binding sources excluding Cargo manifests and the added vendored core match the 
 | Golden corpus or approved lowering | Passed locally | All 20 positive cases deep-compare exactly through documented contract-private lowerings. |
 | Lossless v1 value round-trip | Passed locally | Exact tagged envelopes cover scalar, null, list, record, node, layer, relationship, and path values. |
 | Application-owned offline load | Passed arm64 | Exact unmodified source and static OpenSSL build/run with network denied, then travel inside the bundled graph server without non-system dylibs. |
-| Three packaged development targets | Blocked | The exact-source macOS arm64 lifecycle passes; Intel needs native replay; unmodified lbug has a concrete MSVC static-library name/search-path blocker. Distribution is also blocked by missing binding license bytes. |
+| Three packaged development targets | Blocked | The exact-source macOS arm64 lifecycle passes; Intel fails on Ladybug's unresolved `___cpu_model`; Windows fails on the MSVC static-library name/search-path gap. Distribution is also blocked by missing binding license bytes. |
 | Pinned source build at product floor | Passed arm64 | Exact Ladybug 0.19.1 and OpenSSL 3.5.8 build at the approved macOS 13.3 floor with no fork or external dylib. |
 | Packaged launch, restart, lock, shutdown | Passed arm64 | The bundled `relayer-graph-server` creates a clean store, rejects a bounded competing lock, exits cleanly, and reopens its persisted marker. |
 | Cancellation and budgets | Partial pass | Allowed two-hop timeout/interrupt pass; #263 still owns deterministic budget counters and an outer process deadline. |
@@ -176,8 +182,8 @@ Binding sources excluding Cargo manifests and the added vendored core match the 
 Keep the product contract unchanged and hold Issues #262 onward. Pinned static OpenSSL and the
 macOS 13.3 product floor are settled; deterministic updater tests preserve the last compatible
 release for macOS 13.0–13.2. The actual packaged graph-server lifecycle passes locally on macOS
-arm64. Run the same pinned source/package boundary natively on macOS Intel. Windows needs a narrow
-upstream binding link-resolution hook or an explicitly approved equivalent before native replay.
+arm64. Intel needs an upstream Apple-Clang CPU-detection fix or an explicitly approved equivalent.
+Windows needs a narrow upstream binding link-resolution hook or an explicitly approved equivalent.
 
 The repository already has macOS arm64, macOS Intel, and Windows x64 hosted package runners in
 `.github/workflows/ci.yml`. They cannot certify this unpushed worktree. Windows Authenticode is
