@@ -907,6 +907,22 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
     }
     assert_eq!(decode_export_jsonl(&jsonl).unwrap(), fixture);
 
+    let encoded = String::from_utf8(jsonl.clone()).unwrap();
+    let unsupported_control_jsonl =
+        encoded.replacen("\"control\":\"single_select\"", "\"control\":\"slider\"", 1);
+    let ExportReadError::Contract(error) =
+        decode_export_jsonl(unsupported_control_jsonl.as_bytes()).unwrap_err()
+    else {
+        panic!("unknown controls must reach contract validation")
+    };
+    assert_eq!(error.code, "input_action_control_unsupported");
+    let unsupported_control = unsupported_control_jsonl
+        .lines()
+        .enumerate()
+        .map(|(index, line)| decode_export_record_line(line.as_bytes(), index + 1).unwrap())
+        .collect::<Vec<_>>();
+    assert_rejected_with_parity(&unsupported_control, "input_action_control_unsupported");
+
     let mut unresolved = fixture.clone();
     let ConversationExportRecord::Turn(turn) = &mut unresolved[2] else {
         unreachable!()

@@ -408,6 +408,9 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                         crate::conversation_export::ExportInputControl::MultiSelect => {
                             relayer_graph_core::InputControl::MultiSelect
                         }
+                        crate::conversation_export::ExportInputControl::Unsupported => {
+                            unreachable!("conversation input controls are validated before import")
+                        }
                     },
                     prompt: submitted.action.prompt,
                     options: submitted
