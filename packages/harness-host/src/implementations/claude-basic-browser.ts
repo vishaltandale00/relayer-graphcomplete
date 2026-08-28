@@ -25,8 +25,8 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("fill"), selector, value: z.string().max(MAX_VALUE_LENGTH) }).strict(),
 ]);
 const operations = z.array(operation).min(1).max(MAX_OPERATIONS).refine(
-  (items) => items.every((item, index) => item.type !== "click" || index === items.length - 1),
-  { message: "click must be the final browser operation" },
+  (items) => items.every((item, index) => !isTerminalOperation(item) || index === items.length - 1),
+  { message: "click and fill must be the final browser operation" },
 );
 const requestSchema = {
   target: targetSelector.optional(),
@@ -95,7 +95,7 @@ export function createClaudeBasicBrowserServer(
   const endpoint = validateLoopbackEndpoint(dependencies.cdpEndpoint ?? DEFAULT_CDP_ENDPOINT);
   const tool = sdk.tool(
     CLAUDE_BROWSER_TOOL_NAME,
-    "Use the user's already-running Chrome through its loopback DevTools endpoint. Runs one bounded batch of navigation, text observation, click, and fill operations. Click must be the final operation because it may navigate; use a later call to reattach before continuing. If Chrome has multiple pages, select exactly one by targetId, URL substring, or title substring. It never starts or stops Chrome.",
+    "Use the user's already-running Chrome through its loopback DevTools endpoint. Runs one bounded batch of navigation, text observation, click, and fill operations. Click and fill must be the final operation because either may navigate; use a later call to reattach before continuing. If Chrome has multiple pages, select exactly one by targetId, URL substring, or title substring. It never starts or stops Chrome.",
     requestSchema,
     async (input, extra) => {
       const signal = signalFromExtra(extra);
@@ -113,7 +113,7 @@ export function createClaudeBasicBrowserServer(
   return sdk.createSdkMcpServer({
     name: CLAUDE_BROWSER_SERVER_NAME,
     version: "1.0.0",
-    instructions: "This server attaches only to the code-owned loopback Chrome DevTools endpoint. Use one run call for a bounded related interaction. Click must be final in a call; if it navigates, reattach with a later call before continuing. A single open page needs no target selector; multiple pages require a selector that matches exactly one. Chrome must already be running with remote debugging enabled.",
+    instructions: "This server attaches only to the code-owned loopback Chrome DevTools endpoint. Use one run call for a bounded related interaction. Click and fill must be final in a call; if either navigates, reattach with a later call before continuing. A single open page needs no target selector; multiple pages require a selector that matches exactly one. Chrome must already be running with remote debugging enabled.",
     tools: [tool],
   });
 }
@@ -125,7 +125,7 @@ async function runBrowserOperations(
   signal?: AbortSignal,
 ): Promise<{ readonly operations: readonly unknown[] }> {
   throwIfAborted(signal);
-  if (request.operations.some((item, index) => item.type === "click" && index !== request.operations.length - 1)) {
+  if (request.operations.some((item, index) => isTerminalOperation(item) && index !== request.operations.length - 1)) {
     throw new BrowserFailure("invalid-request");
   }
   const target = await discoverTarget(endpoint, dependencies, request.target, signal);
@@ -207,6 +207,10 @@ async function runBrowserOperations(
   } finally {
     client.close();
   }
+}
+
+function isTerminalOperation(item: { readonly type: string }): boolean {
+  return item.type === "click" || item.type === "fill";
 }
 
 async function discoverTarget(

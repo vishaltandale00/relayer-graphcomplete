@@ -204,7 +204,6 @@ describe("claude.basic browser MCP tool", () => {
     const result = await handler({ operations: [
       { type: "read_text", selector: "#marker" },
       { type: "navigate", url: "https://example.test/next" },
-      { type: "fill", selector: "#name", value: "Ada" },
       { type: "click", selector: "#continue" },
     ] }, {});
 
@@ -212,17 +211,16 @@ describe("claude.basic browser MCP tool", () => {
     expect(JSON.parse(result.content[0]!.text)).toMatchObject({ operations: [
       { type: "read_text", text: "existing-session-marker", truncated: false },
       { type: "navigate", url: "https://example.test/next" },
-      { type: "fill", filled: true },
       { type: "click", clicked: true },
     ] });
     expect(socket.sent.map((entry) => entry.method)).toEqual([
-      "Runtime.evaluate", "Page.enable", "Page.setLifecycleEventsEnabled", "Page.navigate", "Runtime.evaluate", "Runtime.evaluate",
+      "Runtime.evaluate", "Page.enable", "Page.setLifecycleEventsEnabled", "Page.navigate", "Runtime.evaluate",
     ]);
     expect(socket.closed).toBe(true);
     expect(server).toMatchObject({
       name: "relayer_browser",
       version: "1.0.0",
-      instructions: expect.stringContaining("Click must be final"),
+      instructions: expect.stringContaining("Click and fill must be final"),
     });
   });
 
@@ -293,6 +291,43 @@ describe("claude.basic browser MCP tool", () => {
       content: [{ text: "The browser request is not supported." }],
     });
     expect(socket.sent).toHaveLength(0);
+  });
+
+  it("requires fill to be terminal and sends no later command when its DOM events navigate", async () => {
+    const socket = new FakeSocket();
+    const input = new DomInputElement();
+    socket.evaluateExpression = (expression) => evaluateInDom(expression, input);
+    const { handler, inputSchema } = fixture({ socket });
+    const request = {
+      operations: [
+        { type: "fill", selector: "#name", value: "Ada" },
+        { type: "read_text", selector: "body" },
+      ],
+    };
+
+    expect(z.object(inputSchema).safeParse(request)).toMatchObject({ success: false });
+    await expect(handler(request, {})).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: "The browser request is not supported." }],
+    });
+    expect(socket.sent).toHaveLength(0);
+
+    const navigatingSocket = new FakeSocket();
+    const navigatingInput = new DomInputElement();
+    let navigationTriggered = false;
+    navigatingInput.onDispatch = () => {
+      navigationTriggered = true;
+      navigatingSocket.emitProtocol("Page.frameNavigated", { frame: { id: "replacement-frame" } });
+    };
+    navigatingSocket.evaluateExpression = (expression) => evaluateInDom(expression, navigatingInput);
+    const navigating = fixture({ socket: navigatingSocket });
+
+    await expect(navigating.handler({
+      operations: [{ type: "fill", selector: "#name", value: "Ada" }],
+    }, {})).resolves.not.toHaveProperty("isError");
+    expect(navigationTriggered).toBe(true);
+    expect(navigatingSocket.sent.map((entry) => entry.method)).toEqual(["Runtime.evaluate"]);
+    expect(navigatingSocket.closed).toBe(true);
   });
 
   it("truncates highly escaped page text before CDP serializes the response", async () => {
