@@ -1296,102 +1296,174 @@ fn validate_submitted_inputs(
             ));
         }
         previous_sort_key = Some(sort_key);
-        require_string(
-            &submitted.action.prompt,
-            format!("{submitted_path}.action.prompt"),
-        )?;
-        if submitted.action.prompt.len() > 2_000 {
+        if submitted.action.prompt.trim().is_empty() {
+            return Err(ExportValidationError::new(
+                "input_action_prompt_required",
+                format!("{submitted_path}.action.prompt"),
+                "Supply a non-whitespace prompt.",
+            ));
+        } else if submitted.action.prompt.len() > 2_000 {
             return Err(ExportValidationError::new(
                 "input_action_prompt_too_long",
                 format!("{submitted_path}.action.prompt"),
-                "Input action prompt exceeds 2,000 UTF-8 bytes.",
+                "Shorten the UTF-8 prompt to 2,000 bytes.",
+            ));
+        }
+        if matches!(
+            submitted.action.control,
+            ExportInputControl::SingleSelect | ExportInputControl::MultiSelect
+        ) && submitted.action.options.is_empty()
+        {
+            return Err(ExportValidationError::new(
+                "input_action_options_required",
+                format!("{submitted_path}.action.options"),
+                "Supply 1 through 50 options for a select.",
+            ));
+        }
+        if submitted.action.control == ExportInputControl::Text
+            && !submitted.action.options.is_empty()
+        {
+            return Err(ExportValidationError::new(
+                "input_action_options_unexpected",
+                format!("{submitted_path}.action.options"),
+                "Remove options from a text action.",
             ));
         }
         if submitted.action.options.len() > 50 {
             return Err(ExportValidationError::new(
                 "input_action_option_count",
                 format!("{submitted_path}.action.options"),
-                "Input actions support at most 50 options.",
+                "Keep the option count in 1..=50.",
             ));
         }
         let mut option_keys = HashSet::new();
         for (option_index, option) in submitted.action.options.iter().enumerate() {
-            require_string(
-                &option.key,
-                format!("{submitted_path}.action.options[{option_index}].key"),
-            )?;
-            require_string(
-                &option.label,
-                format!("{submitted_path}.action.options[{option_index}].label"),
-            )?;
-            if option.key.trim() != option.key
+            if option.key.is_empty()
+                || option.key.trim() != option.key
                 || option.key.contains('\0')
                 || option.key.len() > 128
             {
                 return Err(ExportValidationError::new(
                     "input_action_option_key_invalid",
                     format!("{submitted_path}.action.options[{option_index}].key"),
-                    "Input option keys must be trimmed, NUL-free, and at most 128 UTF-8 bytes.",
+                    "Use a nonempty, trimmed, NUL-free key of at most 128 bytes.",
                 ));
             }
-            if option.label.len() > 512 {
+            if option.label.trim().is_empty() {
+                return Err(ExportValidationError::new(
+                    "input_action_option_label_required",
+                    format!("{submitted_path}.action.options[{option_index}].label"),
+                    "Supply a non-whitespace label.",
+                ));
+            } else if option.label.len() > 512 {
                 return Err(ExportValidationError::new(
                     "input_action_option_label_too_long",
                     format!("{submitted_path}.action.options[{option_index}].label"),
-                    "Input option labels must be at most 512 UTF-8 bytes.",
+                    "Shorten the UTF-8 label to 512 bytes.",
                 ));
             }
             if !option_keys.insert(&option.key) {
                 return Err(ExportValidationError::new(
-                    "input_option_key_duplicate",
+                    "input_action_option_key_duplicate",
                     format!("{submitted_path}.action.options[{option_index}].key"),
-                    "Input option keys must be unique within one action snapshot.",
+                    "Give every option an exact unique key.",
                 ));
             }
         }
-        match (&submitted.action.control, &submitted.value) {
-            (ExportInputControl::Text, ExportSubmittedInputValue::Text { text })
-                if submitted.action.options.is_empty()
-                    && submitted.action.minimum_selections.is_none()
-                    && !text.trim().is_empty() => {}
-            (
-                ExportInputControl::SingleSelect,
-                ExportSubmittedInputValue::Selected { selected },
-            ) if !submitted.action.options.is_empty()
-                && selected.len() == 1
-                && submitted.action.minimum_selections.is_none()
-                && selected.iter().all(|selected| {
+        match submitted.action.control {
+            ExportInputControl::Text => {
+                if submitted.action.minimum_selections.is_some() {
+                    return Err(ExportValidationError::new(
+                        "input_action_minimum_unexpected",
+                        format!("{submitted_path}.action.minimumSelections"),
+                        "Remove it unless the control is multi-select.",
+                    ));
+                }
+                match &submitted.value {
+                    ExportSubmittedInputValue::Text { text } if !text.trim().is_empty() => {}
+                    ExportSubmittedInputValue::Text { .. } => {
+                        return Err(ExportValidationError::new(
+                            "input_text_blank",
+                            format!("{submitted_path}.value"),
+                            "Enter non-whitespace text or detach the input.",
+                        ));
+                    }
+                    ExportSubmittedInputValue::Selected { .. } => {
+                        return Err(ExportValidationError::new(
+                            "input_action_snapshot_mismatch",
+                            submitted_path,
+                            "Refresh the accepted action and recommit its value.",
+                        ));
+                    }
+                }
+            }
+            ExportInputControl::SingleSelect | ExportInputControl::MultiSelect => {
+                if submitted.action.control == ExportInputControl::SingleSelect
+                    && submitted.action.minimum_selections.is_some()
+                {
+                    return Err(ExportValidationError::new(
+                        "input_action_minimum_unexpected",
+                        format!("{submitted_path}.action.minimumSelections"),
+                        "Remove it unless the control is multi-select.",
+                    ));
+                }
+                if let Some(minimum) = submitted.action.minimum_selections
+                    && (minimum == 0 || minimum as usize > submitted.action.options.len())
+                {
+                    return Err(ExportValidationError::new(
+                        "input_action_minimum_invalid",
+                        format!("{submitted_path}.action.minimumSelections"),
+                        "Use an integer in 1..=options.length.",
+                    ));
+                }
+                let ExportSubmittedInputValue::Selected { selected } = &submitted.value else {
+                    return Err(ExportValidationError::new(
+                        "input_action_snapshot_mismatch",
+                        submitted_path,
+                        "Refresh the accepted action and recommit its value.",
+                    ));
+                };
+                if selected
+                    .iter()
+                    .map(|option| &option.key)
+                    .collect::<HashSet<_>>()
+                    .len()
+                    != selected.len()
+                {
+                    return Err(ExportValidationError::new(
+                        "input_option_duplicate",
+                        format!("{submitted_path}.value"),
+                        "Remove repeated multi-select keys.",
+                    ));
+                }
+                if !selected.iter().all(|selected| {
                     submitted
                         .action
                         .options
                         .iter()
                         .any(|option| option == selected)
-                }) => {}
-            (ExportInputControl::MultiSelect, ExportSubmittedInputValue::Selected { selected })
-                if !submitted.action.options.is_empty()
-                    && !selected.is_empty()
-                    && submitted.action.minimum_selections.is_none_or(|minimum| {
-                        minimum > 0 && minimum as usize <= selected.len()
-                    })
-                    && selected.iter().all(|selected| {
-                        submitted
-                            .action
-                            .options
-                            .iter()
-                            .any(|option| option == selected)
-                    })
-                    && selected
-                        .iter()
-                        .map(|option| &option.key)
-                        .collect::<HashSet<_>>()
-                        .len()
-                        == selected.len() => {}
-            _ => {
-                return Err(ExportValidationError::new(
-                    "submitted_input_shape_invalid",
-                    submitted_path,
-                    "Submitted value must match its frozen control and option snapshot.",
-                ));
+                }) {
+                    return Err(ExportValidationError::new(
+                        "input_option_unknown",
+                        format!("{submitted_path}.value"),
+                        "Select only keys from the accepted action snapshot.",
+                    ));
+                }
+                let count_valid = match submitted.action.control {
+                    ExportInputControl::SingleSelect => selected.len() == 1,
+                    ExportInputControl::MultiSelect => submitted
+                        .action
+                        .minimum_selections
+                        .is_none_or(|minimum| selected.len() >= minimum as usize),
+                    ExportInputControl::Text => unreachable!(),
+                };
+                if !count_valid {
+                    return Err(ExportValidationError::new(
+                        "input_selection_count",
+                        format!("{submitted_path}.value"),
+                        "Meet that action's exact selection count or minimum.",
+                    ));
+                }
             }
         }
     }

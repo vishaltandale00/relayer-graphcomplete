@@ -920,7 +920,7 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
         .find(|input| input.action.control == ExportInputControl::SingleSelect)
         .unwrap();
     single.action.minimum_selections = Some(1);
-    assert_rejected_with_parity(&invalid_single_minimum, "submitted_input_shape_invalid");
+    assert_rejected_with_parity(&invalid_single_minimum, "input_action_minimum_unexpected");
 
     let single_only = || {
         let mut records = fixture.clone();
@@ -938,6 +938,20 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
     turn.submitted_inputs[0].action.prompt = "p".repeat(2_001);
     assert_rejected_with_parity(&oversized_prompt, "input_action_prompt_too_long");
 
+    let mut blank_prompt = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut blank_prompt[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.prompt = "  ".into();
+    assert_rejected_with_parity(&blank_prompt, "input_action_prompt_required");
+
+    let mut missing_options = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut missing_options[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options.clear();
+    assert_rejected_with_parity(&missing_options, "input_action_options_required");
+
     let mut too_many_options = single_only();
     let ConversationExportRecord::Turn(turn) = &mut too_many_options[2] else {
         unreachable!()
@@ -954,10 +968,73 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
     turn.submitted_inputs[0].action.options[0].key = " untrimmed".into();
     assert_rejected_with_parity(&invalid_key, "input_action_option_key_invalid");
 
+    let mut duplicate_key = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut duplicate_key[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options[1].key =
+        turn.submitted_inputs[0].action.options[0].key.clone();
+    assert_rejected_with_parity(&duplicate_key, "input_action_option_key_duplicate");
+
+    let mut blank_label = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut blank_label[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options[0].label = "\t".into();
+    assert_rejected_with_parity(&blank_label, "input_action_option_label_required");
+
     let mut oversized_label = single_only();
     let ConversationExportRecord::Turn(turn) = &mut oversized_label[2] else {
         unreachable!()
     };
     turn.submitted_inputs[0].action.options[0].label = "l".repeat(513);
     assert_rejected_with_parity(&oversized_label, "input_action_option_label_too_long");
+
+    let multi_only = || {
+        let mut records = fixture.clone();
+        let ConversationExportRecord::Turn(turn) = &mut records[2] else {
+            unreachable!()
+        };
+        turn.submitted_inputs
+            .retain(|input| input.action.control == ExportInputControl::MultiSelect);
+        records
+    };
+    let mut invalid_minimum = multi_only();
+    let ConversationExportRecord::Turn(turn) = &mut invalid_minimum[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.minimum_selections = Some(3);
+    assert_rejected_with_parity(&invalid_minimum, "input_action_minimum_invalid");
+
+    let mut duplicate_selection = multi_only();
+    let ConversationExportRecord::Turn(turn) = &mut duplicate_selection[2] else {
+        unreachable!()
+    };
+    let duplicate = turn.submitted_inputs[0].action.options[0].clone();
+    let ExportSubmittedInputValue::Selected { selected } = &mut turn.submitted_inputs[0].value
+    else {
+        unreachable!()
+    };
+    selected.push(duplicate);
+    assert_rejected_with_parity(&duplicate_selection, "input_option_duplicate");
+
+    let mut unknown_selection = multi_only();
+    let ConversationExportRecord::Turn(turn) = &mut unknown_selection[2] else {
+        unreachable!()
+    };
+    let known = turn.submitted_inputs[0].action.options[1].clone();
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Selected {
+        selected: vec![option("missing", "Missing"), known],
+    };
+    assert_rejected_with_parity(&unknown_selection, "input_option_unknown");
+
+    let mut too_few_selections = multi_only();
+    let ConversationExportRecord::Turn(turn) = &mut too_few_selections[2] else {
+        unreachable!()
+    };
+    let selected = turn.submitted_inputs[0].action.options[0].clone();
+    turn.submitted_inputs[0].value = ExportSubmittedInputValue::Selected {
+        selected: vec![selected],
+    };
+    assert_rejected_with_parity(&too_few_selections, "input_selection_count");
 }

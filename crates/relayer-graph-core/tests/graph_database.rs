@@ -2636,8 +2636,7 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
         panic!("expected a stable option-payload validation issue");
     };
     assert!(issues.iter().any(|issue| {
-        issue.code == "input_action_option_payload_unexpected"
-            && issue.path == "options[0].imageUrl"
+        issue.code == "input_action_payload_unexpected" && issue.path == "options[0].imageUrl"
     }));
 }
 
