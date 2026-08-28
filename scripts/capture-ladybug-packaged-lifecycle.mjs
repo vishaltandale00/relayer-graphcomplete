@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { cp, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.mjs";
@@ -54,9 +55,153 @@ export function parseMachOArchitectures(output) {
   return architectures;
 }
 
+function requireBufferRange(bytes, offset, length, label) {
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset + length > bytes.length) {
+    throw new Error(`packaged graph server has an invalid PE ${label}`);
+  }
+}
+
+function peCString(bytes, offset, maximumLength) {
+  requireBufferRange(bytes, offset, 1, "import name");
+  const end = bytes.indexOf(0, offset);
+  if (end === -1 || end >= offset + maximumLength) {
+    throw new Error("packaged graph server has an unterminated PE import name");
+  }
+  return bytes.toString("ascii", offset, end);
+}
+
+export function inspectPortableExecutable(bytes) {
+  if (!Buffer.isBuffer(bytes)) throw new Error("PE inspection requires executable bytes");
+  requireBufferRange(bytes, 0, 0x40, "DOS header");
+  if (bytes.toString("ascii", 0, 2) !== "MZ") {
+    throw new Error("packaged graph server is not a PE executable");
+  }
+  const peOffset = bytes.readUInt32LE(0x3c);
+  requireBufferRange(bytes, peOffset, 24, "COFF header");
+  if (bytes.toString("ascii", peOffset, peOffset + 4) !== "PE\0\0") {
+    throw new Error("packaged graph server has no PE signature");
+  }
+  const machine = bytes.readUInt16LE(peOffset + 4);
+  const architecture = new Map([
+    [0x8664, "x86_64"],
+    [0xaa64, "arm64"],
+  ]).get(machine);
+  if (!architecture) throw new Error(`unsupported packaged PE machine: 0x${machine.toString(16)}`);
+  const sectionCount = bytes.readUInt16LE(peOffset + 6);
+  const optionalHeaderSize = bytes.readUInt16LE(peOffset + 20);
+  const optionalHeader = peOffset + 24;
+  requireBufferRange(bytes, optionalHeader, optionalHeaderSize, "optional header");
+  const magic = bytes.readUInt16LE(optionalHeader);
+  if (magic !== 0x20b) throw new Error(`unsupported packaged PE optional header: 0x${magic.toString(16)}`);
+  const dataDirectoryOffset = 112;
+  if (optionalHeaderSize < dataDirectoryOffset + 16) {
+    throw new Error("packaged graph server omits the PE import directory");
+  }
+  const numberOfDataDirectories = bytes.readUInt32LE(optionalHeader + dataDirectoryOffset - 4);
+  const dataDirectory = (index) => {
+    if (numberOfDataDirectories <= index || optionalHeaderSize < dataDirectoryOffset + (index + 1) * 8) {
+      return { rva: 0, size: 0 };
+    }
+    return {
+      rva: bytes.readUInt32LE(optionalHeader + dataDirectoryOffset + index * 8),
+      size: bytes.readUInt32LE(optionalHeader + dataDirectoryOffset + index * 8 + 4),
+    };
+  };
+  const sizeOfHeaders = bytes.readUInt32LE(optionalHeader + 60);
+  const sectionTable = optionalHeader + optionalHeaderSize;
+  requireBufferRange(bytes, sectionTable, sectionCount * 40, "section table");
+  const sections = Array.from({ length: sectionCount }, (_, index) => {
+    const offset = sectionTable + index * 40;
+    return {
+      virtualSize: bytes.readUInt32LE(offset + 8),
+      virtualAddress: bytes.readUInt32LE(offset + 12),
+      rawSize: bytes.readUInt32LE(offset + 16),
+      rawOffset: bytes.readUInt32LE(offset + 20),
+    };
+  });
+  for (const section of sections) {
+    if (section.rawSize > 0) {
+      requireBufferRange(bytes, section.rawOffset, section.rawSize, "section raw data");
+    }
+  }
+  const fileRangeForRva = (rva, label) => {
+    if (rva < sizeOfHeaders) {
+      requireBufferRange(bytes, rva, 1, label);
+      return { offset: rva, maximumLength: Math.min(sizeOfHeaders, bytes.length) - rva };
+    }
+    const section = sections.find(({ virtualAddress, virtualSize, rawSize }) => (
+      rva >= virtualAddress && rva < virtualAddress + Math.max(virtualSize, rawSize)
+    ));
+    if (!section) throw new Error(`packaged graph server has an unmapped PE ${label}`);
+    const delta = rva - section.virtualAddress;
+    if (delta >= section.rawSize) {
+      throw new Error(`packaged graph server maps PE ${label} into a virtual-only section range`);
+    }
+    const offset = section.rawOffset + delta;
+    requireBufferRange(bytes, offset, 1, label);
+    return { offset, maximumLength: section.rawSize - delta };
+  };
+  const imports = [];
+  const parseImports = ({ rva, size }, { descriptorSize, label, nameField, validateDescriptor }) => {
+    if (rva === 0 && size === 0) return;
+    if (rva === 0 || size < descriptorSize) throw new Error(`packaged graph server has an invalid PE ${label}`);
+    const { offset: importOffset, maximumLength } = fileRangeForRva(rva, label);
+    if (size > maximumLength) throw new Error(`packaged graph server has an oversized PE ${label}`);
+    const maximumDescriptors = Math.floor(size / descriptorSize);
+    let terminated = false;
+    for (let index = 0; index < maximumDescriptors; index += 1) {
+      const descriptor = importOffset + index * descriptorSize;
+      requireBufferRange(bytes, descriptor, descriptorSize, `${label} descriptor`);
+      const fields = Array.from(
+        { length: descriptorSize / 4 },
+        (_, field) => bytes.readUInt32LE(descriptor + field * 4),
+      );
+      if (fields.every((value) => value === 0)) {
+        terminated = true;
+        break;
+      }
+      validateDescriptor?.(fields);
+      if (fields[nameField] === 0) throw new Error(`packaged graph server has a nameless PE ${label} descriptor`);
+      const name = fileRangeForRva(fields[nameField], `${label} name`);
+      imports.push(peCString(bytes, name.offset, name.maximumLength));
+    }
+    if (!terminated) throw new Error(`packaged graph server has an unterminated PE ${label}`);
+  };
+  parseImports(dataDirectory(1), {
+    descriptorSize: 20,
+    label: "import directory",
+    nameField: 3,
+  });
+  parseImports(dataDirectory(13), {
+    descriptorSize: 32,
+    label: "delay-import directory",
+    nameField: 1,
+    validateDescriptor: (fields) => {
+      if ((fields[0] & 1) !== 1) {
+        throw new Error("packaged graph server uses unsupported VA-based PE delay imports");
+      }
+    },
+  });
+  return { architecture, imports };
+}
+
+export function verifyNoBundledWindowsNativeLibraries(libraries) {
+  const forbidden = libraries.filter((library) => {
+    const name = String(library).split(/[\\/]/u).at(-1);
+    return (
+      /^(?:lib)?(?:lbug|ladybug)(?:[-._].*)?\.dll$/iu.test(name)
+      || /^lib(?:ssl|crypto)(?:[-._].*)?\.dll$/iu.test(name)
+    );
+  });
+  if (forbidden.length > 0) {
+    throw new Error(`packaged graph server imports forbidden native libraries: ${forbidden.join(", ")}`);
+  }
+  return libraries;
+}
+
 export function parseLadybugLockContention(output) {
   const match = String(output).match(/Could not set lock on file[^\r\n]*/u);
-  if (!match || !/(?:Resource temporarily unavailable|Lock is held by PID \d+)/u.test(match[0])) {
+  if (!match || !/(?:Resource temporarily unavailable|Lock is held by PID \d+|\(Error: 33\))/u.test(match[0])) {
     throw new Error(`failure was not Ladybug lock contention: ${output}`);
   }
   return match[0];
@@ -97,11 +242,17 @@ async function findApplications(directory, output = []) {
   return output;
 }
 
-async function packagedApplicationBuiltAfter(directory, startedAt) {
-  const candidates = await findApplications(directory);
+export async function packagedApplicationBuiltAfter(directory, startedAt, target) {
+  const candidates = target.platform === "win32"
+    ? [join(directory, "win-unpacked")]
+    : await findApplications(directory);
   const current = [];
   for (const path of candidates) {
-    if ((await stat(path)).mtimeMs >= startedAt) current.push(path);
+    try {
+      if ((await stat(path)).mtimeMs >= startedAt) current.push(path);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
   }
   if (current.length !== 1) {
     throw new Error(`expected one newly packaged application, found ${current.length}`);
@@ -377,8 +528,11 @@ export async function captureLadybugPackagedLifecycle({
   }
   await execFileAsync("git", ["cat-file", "-e", `${sourceCommit}^{commit}`]);
   const target = desktopTargetFromEnvironment(environment);
-  if (target.platform !== "darwin") {
-    throw new Error("the local #261 packaged Ladybug proof supports only macOS targets");
+  if (target.platform !== "darwin" && target.platform !== "win32") {
+    throw new Error("the #261 packaged Ladybug proof supports only macOS and Windows targets");
+  }
+  if (target.platform === "win32" && (process.platform !== "win32" || process.arch !== "x64")) {
+    throw new Error("the windows-x64 Ladybug proof requires native win32 x64 execution");
   }
   const manifest = await loadLadybugSourceManifest();
   if (manifest.rustBinding.version !== "0.18.0" || manifest.extensions.length !== 0) {
@@ -464,13 +618,14 @@ export async function captureLadybugPackagedLifecycle({
         `${path} differs from the exact source commit`,
       );
     }
-    await execFileAsync("npm", ["ci", "--ignore-scripts", "--offline"], {
+    const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+    await execFileAsync(npmCommand, ["ci", "--ignore-scripts", "--offline"], {
       cwd: checkout,
       env: npmEnvironmentForDesktopTarget(environment, target),
       maxBuffer: 10 * 1024 * 1024,
     });
-    await execFileAsync("npm", ["run", "prepare:renderer"], { cwd: checkout, maxBuffer: 10 * 1024 * 1024 });
-    await execFileAsync("npm", ["run", "build:packages"], { cwd: checkout, maxBuffer: 10 * 1024 * 1024 });
+    await execFileAsync(npmCommand, ["run", "prepare:renderer"], { cwd: checkout, maxBuffer: 10 * 1024 * 1024 });
+    await execFileAsync(npmCommand, ["run", "build:packages"], { cwd: checkout, maxBuffer: 10 * 1024 * 1024 });
     const startedAt = Date.now() - 1_000;
     await buildDesktop({
       environment: {
@@ -481,28 +636,44 @@ export async function captureLadybugPackagedLifecycle({
       repositoryRoot: checkout,
       dependencyRoot: checkout,
     });
-    const appPath = await packagedApplicationBuiltAfter(join(checkout, "desktop", "dist"), startedAt);
-  const executable = join(appPath, "Contents", "Resources", "bin", "relayer-graph-server");
+    const appPath = await packagedApplicationBuiltAfter(
+      join(checkout, "desktop", "dist"),
+      startedAt,
+      target,
+    );
+  const binary = target.platform === "win32"
+    ? "resources/bin/relayer-graph-server.exe"
+    : "Contents/Resources/bin/relayer-graph-server";
+  const executable = join(appPath, ...binary.split("/"));
   const binarySha256 = createHash("sha256").update(await readFile(executable)).digest("hex");
-  const binaryArchitectures = parseMachOArchitectures(
-    (await execFileAsync("/usr/bin/lipo", ["-archs", executable])).stdout,
-  );
+  let binaryArchitectures;
+  let libraries;
+  let minimumMacOSVersion = null;
+  if (target.platform === "win32") {
+    const inspected = inspectPortableExecutable(await readFile(executable));
+    binaryArchitectures = [inspected.architecture];
+    libraries = verifyNoBundledWindowsNativeLibraries(inspected.imports);
+  } else {
+    binaryArchitectures = parseMachOArchitectures(
+      (await execFileAsync("/usr/bin/lipo", ["-archs", executable])).stdout,
+    );
+    libraries = parseDynamicLibraries((await execFileAsync("/usr/bin/otool", ["-L", executable])).stdout);
+    verifySystemOnlyDynamicLibraries(libraries);
+    const loadCommands = (await execFileAsync("/usr/bin/otool", ["-l", executable])).stdout;
+    verifyNoRuntimePaths(loadCommands);
+    minimumMacOSVersion = parseMinimumMacOSVersion(loadCommands);
+    if (minimumMacOSVersion !== manifest.build.minimumMacOSVersion) {
+      throw new Error(
+        `packaged graph server minimum macOS is ${minimumMacOSVersion}, expected ${manifest.build.minimumMacOSVersion}`,
+      );
+    }
+  }
   const expectedArchitecture = target.architecture === "x64" ? "x86_64" : target.architecture;
   assert.deepEqual(
     binaryArchitectures,
     [expectedArchitecture],
     `packaged graph server architecture differs from ${target.key}`,
   );
-  const libraries = parseDynamicLibraries((await execFileAsync("/usr/bin/otool", ["-L", executable])).stdout);
-  verifySystemOnlyDynamicLibraries(libraries);
-  const loadCommands = (await execFileAsync("/usr/bin/otool", ["-l", executable])).stdout;
-  verifyNoRuntimePaths(loadCommands);
-  const minimumMacOSVersion = parseMinimumMacOSVersion(loadCommands);
-  if (minimumMacOSVersion !== manifest.build.minimumMacOSVersion) {
-    throw new Error(
-      `packaged graph server minimum macOS is ${minimumMacOSVersion}, expected ${manifest.build.minimumMacOSVersion}`,
-    );
-  }
   const lifecycleTimeoutMs = qualificationLifecycleTimeout(target);
   const lifecycle = await provePackagedLadybugLifecycle(executable, { commandTimeout: lifecycleTimeoutMs });
   const inputPaths = [
@@ -524,7 +695,9 @@ export async function captureLadybugPackagedLifecycle({
   })));
   const result = {
     schemaVersion: 1,
-    scope: "issue-261-local-packaged-qualification",
+    scope: environment.CI === "true"
+      ? "issue-261-hosted-packaged-qualification"
+      : "issue-261-local-packaged-qualification",
     capturedOn: new Date().toISOString().slice(0, 10),
     sourceCommit,
     buildIsolation: "clean-detached-worktree-and-empty-cargo-target",
@@ -534,20 +707,20 @@ export async function captureLadybugPackagedLifecycle({
     hostArchitecture: process.arch,
     executionMode: process.arch === target.architecture ? "native" : "rosetta",
     application: basename(appPath),
-    binary: "Contents/Resources/bin/relayer-graph-server",
+    binary,
     binarySha256,
     binaryArchitectures,
     lbug: { version: manifest.rustBinding.version, extensions: manifest.extensions },
     nativeMode: manifest.build.nativeMode,
     dynamicLibraries: libraries,
-    minimumMacOSVersion,
+    ...(minimumMacOSVersion ? { minimumMacOSVersion } : {}),
     inputSha256,
     preparedReceiptSha256,
     preparedSourceSha256,
     lifecycleTimeoutMs,
     ...lifecycle,
     limitations: [
-      `local ${target.key} ${process.arch === target.architecture ? "native" : "Rosetta"} execution only`,
+      `${environment.CI === "true" ? "hosted" : "local"} ${target.key} ${process.arch === target.architecture ? "native" : "Rosetta"} execution only`,
       "unsigned development package",
       "not release-ready licensing evidence",
     ],
@@ -566,18 +739,22 @@ export async function captureLadybugPackagedLifecycle({
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === new URL(import.meta.url).pathname) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const options = parseArguments(process.argv.slice(2));
   if (!options["source-output"] || !options["source-commit"]) {
     throw new Error(
-      "usage: capture-ladybug-packaged-lifecycle.mjs --source-output <prepared-directory> --source-commit <40-hex>",
+      "usage: capture-ladybug-packaged-lifecycle.mjs --source-output <prepared-directory> "
+      + "--source-commit <40-hex> [--receipt-output <path>]",
     );
   }
   if (options.application) {
     throw new Error("packaged Ladybug evidence must build a fresh application; --application is not supported");
   }
-  console.log(JSON.stringify(await captureLadybugPackagedLifecycle({
+  const receipt = await captureLadybugPackagedLifecycle({
     sourceOutput: options["source-output"],
     sourceCommit: options["source-commit"],
-  }), null, 2));
+  });
+  const receiptJson = `${JSON.stringify(receipt, null, 2)}\n`;
+  if (options["receipt-output"]) await writeFile(resolve(options["receipt-output"]), receiptJson);
+  console.log(receiptJson.trimEnd());
 }

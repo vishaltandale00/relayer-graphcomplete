@@ -183,10 +183,14 @@ Binding sources excluding Cargo manifests and the added vendored core match the 
 Keep the product contract unchanged and hold Issues #262 onward. Pinned static OpenSSL and the
 macOS 13.3 product floor are settled; deterministic updater tests preserve the last compatible
 release for macOS 13.0–13.2. The 0.18.0 graph-server lifecycle passes locally on both macOS targets.
-Windows still needs a native build and lifecycle replay of the checked-in link adapter.
+Windows proof is commit-scoped and exists only when the dedicated hosted job publishes a successful
+receipt for that exact source commit.
 
-The repository already has macOS arm64, macOS Intel, and Windows x64 hosted package runners in
-`.github/workflows/ci.yml`. They cannot certify this unpushed worktree. Windows Authenticode is
-also disabled in the signed workflow, independently of this qualification. Finally, obtain reviewed upstream license bytes for the
+The ordinary macOS arm64, macOS Intel, and Windows x64 package jobs in `.github/workflows/ci.yml`
+compile the qualification-only Ladybug dependency out, so their green status does not certify this
+gate. A dedicated Windows job now prepares the pinned source and static OpenSSL closure, builds the
+exact PR commit with `ladybug_qualification`, inspects the packaged PE imports, and replays the same
+create/lock/shutdown/reopen lifecycle used on macOS. Windows Authenticode is also disabled in the
+signed workflow, independently of this qualification. Finally, obtain reviewed upstream license bytes for the
 `lbug` binding or an explicit legal disposition; the fail-closed release-ready receipt must remain
 red until then. These are proof limits, not reasons to weaken packaging, signing, or license gates.

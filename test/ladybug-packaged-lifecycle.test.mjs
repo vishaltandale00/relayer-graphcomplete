@@ -9,7 +9,9 @@ import { describe, expect, it } from "vitest";
 import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.mjs";
 import {
   captureLadybugPackagedLifecycle,
+  inspectPortableExecutable,
   npmEnvironmentForDesktopTarget,
+  packagedApplicationBuiltAfter,
   parseMachOArchitectures,
   qualificationLifecycleTimeout,
   parseLadybugLockContention,
@@ -17,6 +19,7 @@ import {
   parseMinimumMacOSVersion,
   validatePreparedLadybugSource,
   verifyNoRuntimePaths,
+  verifyNoBundledWindowsNativeLibraries,
   verifySystemOnlyDynamicLibraries,
 } from "../scripts/capture-ladybug-packaged-lifecycle.mjs";
 import {
@@ -90,6 +93,51 @@ function verifyReceiptShape(receipt, targetExpectation) {
 }
 
 describe("Ladybug packaged lifecycle qualification", () => {
+  function minimalPe({
+    machine = 0x8664,
+    imports = ["KERNEL32.dll"],
+    delayImports = [],
+    rawSize = 0x600,
+  } = {}) {
+    const bytes = Buffer.alloc(0x900);
+    bytes.write("MZ", 0, "ascii");
+    bytes.writeUInt32LE(0x80, 0x3c);
+    bytes.write("PE\0\0", 0x80, "ascii");
+    bytes.writeUInt16LE(machine, 0x84);
+    bytes.writeUInt16LE(1, 0x86);
+    bytes.writeUInt16LE(0xf0, 0x94);
+    const optional = 0x98;
+    bytes.writeUInt16LE(0x20b, optional);
+    bytes.writeUInt32LE(0x200, optional + 60);
+    bytes.writeUInt32LE(16, optional + 108);
+    bytes.writeUInt32LE(0x1000, optional + 120);
+    bytes.writeUInt32LE((imports.length + 1) * 20, optional + 124);
+    if (delayImports.length > 0) {
+      bytes.writeUInt32LE(0x1200, optional + 112 + 13 * 8);
+      bytes.writeUInt32LE((delayImports.length + 1) * 32, optional + 116 + 13 * 8);
+    }
+    const section = optional + 0xf0;
+    bytes.write(".rdata", section, "ascii");
+    bytes.writeUInt32LE(0x700, section + 8);
+    bytes.writeUInt32LE(0x1000, section + 12);
+    bytes.writeUInt32LE(rawSize, section + 16);
+    bytes.writeUInt32LE(0x200, section + 20);
+    let nameOffset = 0x300;
+    for (let index = 0; index < imports.length; index += 1) {
+      bytes.writeUInt32LE(0x1000 + nameOffset - 0x200, 0x200 + index * 20 + 12);
+      bytes.write(`${imports[index]}\0`, nameOffset, "ascii");
+      nameOffset += Buffer.byteLength(imports[index]) + 1;
+    }
+    nameOffset = 0x500;
+    for (let index = 0; index < delayImports.length; index += 1) {
+      bytes.writeUInt32LE(1, 0x400 + index * 32);
+      bytes.writeUInt32LE(0x1000 + nameOffset - 0x200, 0x400 + index * 32 + 4);
+      bytes.write(`${delayImports[index]}\0`, nameOffset, "ascii");
+      nameOffset += Buffer.byteLength(delayImports[index]) + 1;
+    }
+    return bytes;
+  }
+
   it("gives every cold packaged launch one recorded bounded window", () => {
     expect(qualificationLifecycleTimeout({ architecture: "arm64" }, "arm64")).toBe(15_000);
     expect(qualificationLifecycleTimeout({ architecture: "x64" }, "arm64")).toBe(15_000);
@@ -107,6 +155,9 @@ describe("Ladybug packaged lifecycle qualification", () => {
     expect(parseLadybugLockContention(
       "IO exception: Could not set lock on file : /tmp/db: Resource temporarily unavailable",
     )).toContain("Resource temporarily unavailable");
+    expect(parseLadybugLockContention(
+      "IO exception: Could not set lock on file C:\\profile\\ladybug (Error: 33)",
+    )).toContain("Error: 33");
     expect(() => parseLadybugLockContention("permission denied")).toThrow("not Ladybug lock contention");
   });
   it("requires a full immutable source commit before preparing a package", async () => {
@@ -114,6 +165,11 @@ describe("Ladybug packaged lifecycle qualification", () => {
       sourceOutput: "/tmp/not-read-for-invalid-commit",
       sourceCommit: "61ee3b3",
     })).rejects.toThrow("exact 40-character source commit");
+  });
+
+  it("executes the capture CLI entrypoint", async () => {
+    await expect(execFileAsync(process.execPath, ["scripts/capture-ladybug-packaged-lifecycle.mjs"]))
+      .rejects.toMatchObject({ stderr: expect.stringContaining("usage: capture-ladybug-packaged-lifecycle.mjs") });
   });
 
   it("binds both isolated macOS captures to their exact committed qualification inputs", async () => {
@@ -226,6 +282,52 @@ describe("Ladybug packaged lifecycle qualification", () => {
          path @loader_path (offset 12)
 `)).toThrow("forbidden LC_RPATH");
     expect(verifyNoRuntimePaths("Load command 10\n      cmd LC_BUILD_VERSION\n")).toBeUndefined();
+  });
+
+  it("reads x64 architecture and native imports from a packaged PE", () => {
+    expect(inspectPortableExecutable(minimalPe({
+      imports: ["KERNEL32.dll", "VCRUNTIME140.dll"],
+      delayImports: ["USER32.dll"],
+    }))).toEqual({
+      architecture: "x86_64",
+      imports: ["KERNEL32.dll", "VCRUNTIME140.dll", "USER32.dll"],
+    });
+    expect(() => inspectPortableExecutable(Buffer.from("not a PE"))).toThrow("invalid PE DOS header");
+    expect(() => inspectPortableExecutable(minimalPe({ machine: 0x14c }))).toThrow("unsupported packaged PE machine");
+    const pe32 = minimalPe();
+    pe32.writeUInt16LE(0x10b, 0x98);
+    expect(() => inspectPortableExecutable(pe32)).toThrow("unsupported packaged PE optional header");
+    expect(() => inspectPortableExecutable(minimalPe({ rawSize: 0x800 })))
+      .toThrow("invalid PE section raw data");
+    expect(() => inspectPortableExecutable(minimalPe({ rawSize: 0x100 })))
+      .toThrow("virtual-only section range");
+  });
+
+  it("rejects dynamic Ladybug and OpenSSL imports on Windows", () => {
+    expect(verifyNoBundledWindowsNativeLibraries(["KERNEL32.dll", "VCRUNTIME140.dll"]))
+      .toEqual(["KERNEL32.dll", "VCRUNTIME140.dll"]);
+    expect(() => verifyNoBundledWindowsNativeLibraries(["lbug.dll"]))
+      .toThrow("forbidden native libraries");
+    expect(() => verifyNoBundledWindowsNativeLibraries(["libladybug.dll"]))
+      .toThrow("forbidden native libraries");
+    expect(() => verifyNoBundledWindowsNativeLibraries(["libcrypto-3-x64.dll"]))
+      .toThrow("forbidden native libraries");
+    const delayed = inspectPortableExecutable(minimalPe({ delayImports: ["libssl-3-x64.dll"] }));
+    expect(() => verifyNoBundledWindowsNativeLibraries(delayed.imports))
+      .toThrow("forbidden native libraries");
+  });
+
+  it("requires a newly created Windows unpacked application", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-ladybug-win-app-"));
+    try {
+      await expect(packagedApplicationBuiltAfter(root, Date.now() - 1_000, { platform: "win32" }))
+        .rejects.toThrow("found 0");
+      await mkdir(join(root, "win-unpacked"));
+      await expect(packagedApplicationBuiltAfter(root, Date.now() - 1_000, { platform: "win32" }))
+        .resolves.toBe(join(root, "win-unpacked"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("passes locked offline Cargo arguments only for qualification packaging", async () => {
