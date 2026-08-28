@@ -17,6 +17,7 @@ const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-interaction-context-li
 const configurationPath = join(repositoryRoot, "harnesses", "fixture-task-system.yaml");
 const graphServerBinary = join(repositoryRoot, "target", "debug", "relayer-graph-server");
 const appServerBinary = join(repositoryRoot, "target", "debug", "relayer-app-server");
+const INITIAL_EDITOR_VALUE = "Queue order";
 const EDITOR_VALUE = "Queue order controls which task is claimed next.";
 const SECOND_DRAFT_VALUE = "Keep worker capacity visible while prioritizing work.";
 const EDITOR_SELECTION = { start: 6, end: 31, direction: "backward" };
@@ -421,7 +422,12 @@ async function run() {
   await waitForAcceptedInteractions(thread.id, 1);
   await openThreadWindow(thread.id);
 
-  await stageContext(EDITOR_VALUE);
+  await stageContext(INITIAL_EDITOR_VALUE);
+  await waitFor("initial node draft save", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.[0]?.text === INITIAL_EDITOR_VALUE
+      && response.drafts[0].revision >= 1;
+  });
   const dockGeometry = await evaluate(`(() => {
     const inspector = document.querySelector('#inspector').getBoundingClientRect();
     const content = document.querySelector('#inspectorContent').getBoundingClientRect();
@@ -441,7 +447,69 @@ async function run() {
     || !dockGeometry.graphUnobstructed || !dockGeometry.composerStable) {
     throw new Error(`Node Details dock geometry is invalid: ${JSON.stringify(dockGeometry)}`);
   }
+  window.setContentSize(900, 600);
+  await waitForPaint();
+  const responsiveGeometry = await evaluate(`(() => {
+    const inspector = document.querySelector('#inspector').getBoundingClientRect();
+    const content = document.querySelector('#inspectorContent').getBoundingClientRect();
+    const dock = document.querySelector('#nodeContextDock').getBoundingClientRect();
+    const textarea = document.querySelector('#contextAnnotationEditor').getBoundingClientRect();
+    const actions = document.querySelector('.node-context-dock-actions').getBoundingClientRect();
+    return {
+      ratio: dock.height / inspector.height,
+      contentScrollableAbove: content.bottom <= dock.top + 1,
+      textareaContained: textarea.top >= dock.top && textarea.bottom <= dock.bottom,
+      controlsContained: actions.top >= dock.top && actions.bottom <= dock.bottom,
+    };
+  })()`);
+  if (responsiveGeometry.ratio < 0.25 || responsiveGeometry.ratio > 0.42
+    || !responsiveGeometry.contentScrollableAbove
+    || !responsiveGeometry.textareaContained
+    || !responsiveGeometry.controlsContained) {
+    throw new Error(`Responsive Node Details dock geometry is invalid: ${JSON.stringify(responsiveGeometry)}`);
+  }
+  window.webContents.setZoomFactor(1.5);
+  await waitForPaint();
+  const largeTextControlsFit = await evaluate(`(() => {
+    const dock = document.querySelector('#nodeContextDock').getBoundingClientRect();
+    const textarea = document.querySelector('#contextAnnotationEditor').getBoundingClientRect();
+    const actions = document.querySelector('.node-context-dock-actions').getBoundingClientRect();
+    return textarea.top >= dock.top && textarea.bottom <= dock.bottom
+      && actions.top >= dock.top && actions.bottom <= dock.bottom;
+  })()`);
+  if (!largeTextControlsFit) throw new Error("Large-text scaling clipped the Node Details editor.");
+  window.webContents.setZoomFactor(1);
+  window.setContentSize(1280, 820);
+  await waitForPaint();
+
+  let releaseSelectionSave;
+  let heldSelectionSave = false;
+  const selectionSaveFilter = { urls: [`${productSession.origin}/api/threads/*/context-drafts/*`] };
+  window.webContents.session.webRequest.onBeforeRequest(selectionSaveFilter, (details, callback) => {
+    if (!heldSelectionSave && details.method === "PUT") {
+      heldSelectionSave = true;
+      releaseSelectionSave = () => callback({});
+      return;
+    }
+    callback({});
+  });
+  await setValue("#contextAnnotationEditor", EDITOR_VALUE);
   await clickNode("Two-worker pool");
+  await waitFor("selection waiting on the current draft save", () => heldSelectionSave);
+  const selectionWhileSaveHeld = await evaluate(`(() => ({
+    title: document.querySelector('#detailTitle')?.textContent,
+    editorVisible: Boolean(document.querySelector('#contextAnnotationEditor')),
+    editorDisabled: document.querySelector('#contextAnnotationEditor')?.disabled,
+  }))()`);
+  if (JSON.stringify(selectionWhileSaveHeld) !== JSON.stringify({
+    title: "Incoming queue",
+    editorVisible: true,
+    editorDisabled: true,
+  })) {
+    throw new Error(`Node selection changed before its draft saved: ${JSON.stringify(selectionWhileSaveHeld)}`);
+  }
+  releaseSelectionSave();
+  window.webContents.session.webRequest.onBeforeRequest(selectionSaveFilter, null);
   await waitFor("undrafted worker node without an editor", () => evaluate(`
     document.querySelector('#detailTitle')?.textContent === 'Two-worker pool'
       && !document.querySelector('#contextAnnotationEditor')
@@ -465,9 +533,9 @@ async function run() {
   });
   await setValue("#contextAnnotationEditor", SECOND_DRAFT_VALUE);
   await waitFor("inline Node Details autosave failure", () => evaluate(`(() => {
-    const status = document.querySelector('#nodeContextDock .node-context-dock-status');
-    return status?.getAttribute('role') === 'alert'
-      && status.textContent.startsWith('Not saved:')
+    const error = document.querySelector('#nodeContextDock .node-context-dock-error');
+    return !error?.classList.contains('hidden')
+      && error.textContent.startsWith('Not saved:')
       && document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(SECOND_DRAFT_VALUE)};
   })()`));
   window.webContents.session.webRequest.onBeforeRequest(autosaveFailureFilter, null);
@@ -484,6 +552,40 @@ async function run() {
     document.querySelector('#detailTitle')?.textContent === 'Incoming queue'
       && document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(EDITOR_VALUE)}
       && document.querySelector('#nodeContextDock')?.contains(document.querySelector('#contextAnnotationEditor'))
+  `));
+  await setValue("#threadPrompt", "Composer remains available while the draft dock is closed.");
+  await click("#closeInspector");
+  await waitFor("closed draft dock does not disable Send", () => evaluate(`
+    document.querySelector('#inspector')?.classList.contains('hidden')
+      && !document.querySelector('#contextAnnotationEditor')
+      && !document.querySelector('#sendInteraction')?.disabled
+  `));
+  await setValue("#threadPrompt", "");
+  await clickNode("Incoming queue");
+  await waitFor("draft editor restored after closing Node Details", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(EDITOR_VALUE)}
+  `));
+  await evaluate("document.querySelector('#contextAnnotationEditor').focus()");
+  window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Tab" });
+  window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Tab" });
+  await waitFor("keyboard reaches the named discard control", () => evaluate(`
+    document.activeElement?.getAttribute('aria-label') === 'Discard annotation draft for Incoming queue'
+  `));
+  await setValue("#threadPrompt", "Composer remains available after view navigation.");
+  await click("#detailActions .action-control");
+  await waitFor("view navigation hides the occurrence-bound draft dock", () => evaluate(`
+    document.querySelectorAll('.graph-node').length === 2
+      && !document.querySelector('#contextAnnotationEditor')
+      && !document.querySelector('#sendInteraction')?.disabled
+  `));
+  await setValue("#threadPrompt", "");
+  await click("#historyBack");
+  await waitFor("return to the source occurrence", () => evaluate(`
+    document.querySelectorAll('.graph-node').length === 3
+  `));
+  await clickNode("Incoming queue");
+  await waitFor("source occurrence restores its draft dock", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(EDITOR_VALUE)}
   `));
   const initialEditor = await evaluate(`(() => {
     const editor = document.querySelector('#contextAnnotationEditor');
@@ -598,24 +700,37 @@ async function run() {
   await clickNode("Incoming queue");
   const restoredEditor = await waitFor("saved draft restoration in the editor", () => evaluate(`(() => {
     const editor = document.querySelector('#contextAnnotationEditor');
-    const status = document.querySelector('.node-context-dock-status')?.textContent;
-    return status === 'Saved' ? { value: editor?.value, status } : false;
+    return editor ? { value: editor.value } : false;
   })()`));
   if (restoredEditor.value !== EDITOR_VALUE) {
     throw new Error(`Restart restored the wrong draft text: ${JSON.stringify(restoredEditor)}`);
   }
 
   let rejectedConfirm = false;
+  let rejectConfirmRequest;
   const confirmFailureFilter = { urls: [`${productSession.origin}/api/threads/*/context-drafts/*/confirm*`] };
   window.webContents.session.webRequest.onBeforeRequest(confirmFailureFilter, (details, callback) => {
     if (!rejectedConfirm) {
       rejectedConfirm = true;
-      callback({ cancel: true });
+      rejectConfirmRequest = () => callback({ cancel: true });
       return;
     }
     callback({});
   });
   await click("[aria-label='Confirm annotation']");
+  await waitFor("confirmation request held for selection race", () => Boolean(rejectConfirmRequest));
+  await clickNode("Two-worker pool");
+  const selectionDuringConfirm = await evaluate(`(() => ({
+    title: document.querySelector('#detailTitle')?.textContent,
+    editorVisible: Boolean(document.querySelector('#contextAnnotationEditor')),
+  }))()`);
+  if (JSON.stringify(selectionDuringConfirm) !== JSON.stringify({
+    title: "Incoming queue",
+    editorVisible: true,
+  })) {
+    throw new Error(`Selection escaped a pending confirm: ${JSON.stringify(selectionDuringConfirm)}`);
+  }
+  rejectConfirmRequest();
   await waitFor("inline Node Details confirmation failure", () => evaluate(`(() => {
     const error = document.querySelector('#nodeContextDock [role="alert"]');
     const editor = document.querySelector('#contextAnnotationEditor');

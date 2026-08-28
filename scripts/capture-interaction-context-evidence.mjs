@@ -306,13 +306,12 @@ async function run() {
       && !document.querySelector('#inspector')?.classList.contains('hidden')
       && !document.querySelector('#attachNodeContext')?.classList.contains('hidden')
   `));
-  await captureStep(
-    "1. Open Node Details for any visible node; the + control connects it to the next interaction",
-    "#inspector",
-  );
-
   await click("#attachNodeContext");
   await waitFor("new context annotation editor", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
+  await captureStep(
+    "1. The selected node's + opens an annotation editor in the bottom third of Node Details",
+    "#inspector",
+  );
   await setValue("#contextAnnotationEditor", "Queue order controls which task is claimed next.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("first collapsed context pill", () => evaluate(`
@@ -335,7 +334,7 @@ async function run() {
   await waitFor("second ordered annotation", () => evaluate(`
     document.querySelectorAll('.composer-context-annotations li').length === 2
   `));
-  const previewBeforeEdit = await evaluate(`(() => {
+  const explicitPreview = await evaluate(`(() => {
     const preview = document.querySelector('.composer-context-preview')?.getBoundingClientRect();
     const inspector = document.querySelector('#inspector')?.getBoundingClientRect();
     return preview && inspector ? {
@@ -344,55 +343,18 @@ async function run() {
       avoidsInspector: preview.right < inspector.left,
     } : null;
   })()`);
-  if (!previewBeforeEdit?.avoidsInspector) {
-    throw new Error(`Composer context preview overlaps Node Details: ${JSON.stringify(previewBeforeEdit)}`);
+  if (!explicitPreview?.avoidsInspector) {
+    throw new Error(`Composer context preview overlaps Node Details: ${JSON.stringify(explicitPreview)}`);
   }
-  const longAnnotation = "Queue ordering is the key bottleneck. Compare the oldest pending items with current worker capacity, preserve their original priority, and call out any work that has remained stalled across multiple interactions.";
-  await click("[aria-label='Edit annotation 1 for Incoming queue']");
-  await setValue("#contextAnnotationEditor", longAnnotation);
-  const previewDuringEdit = await waitFor("fixed long annotation editor", () => evaluate(`(() => {
-    const preview = document.querySelector('.composer-context-preview')?.getBoundingClientRect();
-    const editor = document.querySelector('#contextAnnotationEditor');
-    if (!preview || !editor || editor.scrollHeight <= editor.clientHeight) return null;
-    const initialScrollTop = editor.scrollTop;
-    editor.scrollTop = editor.scrollHeight;
-    return {
-      width: preview.width,
-      height: preview.height,
-      editorOverflow: getComputedStyle(editor).overflowY,
-      editorScrolled: editor.scrollTop > initialScrollTop,
-    };
-  })()`));
-  if (Math.abs(previewDuringEdit.width - previewBeforeEdit.width) >= 1
-    || Math.abs(previewDuringEdit.height - previewBeforeEdit.height) >= 1
-    || previewDuringEdit.editorOverflow !== "auto"
-    || !previewDuringEdit.editorScrolled) {
-    throw new Error(`Long annotation edit changed preview geometry: ${JSON.stringify({ previewBeforeEdit, previewDuringEdit })}`);
-  }
-  await click("[aria-label='Confirm annotation']");
-  await waitFor("edited annotation confirmation collapsed", () => evaluate(`
-    document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
-      && !document.querySelector('.composer-context-preview')
-  `));
-  await click("[aria-label='Show Incoming queue annotations']");
-  await waitFor("edited ordered annotations", () => evaluate(`(() => {
-    const values = [...document.querySelectorAll('.composer-context-annotations li > span')]
-      .map((element) => element.textContent);
-    return JSON.stringify(values) === JSON.stringify([
-      ${JSON.stringify("Queue ordering is the key bottleneck. Compare the oldest pending items with current worker capacity, preserve their original priority, and call out any work that has remained stalled across multiple interactions.")},
-      'Prioritize worker availability when reasoning.',
-    ]);
-  })()`));
-  await click("[aria-label='Edit annotation 2 for Incoming queue']");
   await captureStep(
-    "2. Editing stays inside the fixed popover and keeps an explicit trash control available",
+    "2. Confirmed annotations stay read-only in an explicitly opened compact preview",
     ".composer-context-preview",
   );
-  await click("[aria-label='Delete annotation being edited for Incoming queue']");
-  await waitFor("annotation deleted while editing", () => evaluate(`(() => {
+  await click("[aria-label='Delete annotation 2 for Incoming queue']");
+  await waitFor("second annotation deleted from the explicit preview", () => evaluate(`(() => {
     const values = [...document.querySelectorAll('.composer-context-annotations li > span')]
       .map((element) => element.textContent);
-    return JSON.stringify(values) === JSON.stringify([${JSON.stringify(longAnnotation)}]);
+    return JSON.stringify(values) === JSON.stringify(['Queue order controls which task is claimed next.']);
   })()`));
   await click("#attachNodeContext");
   await setValue("#contextAnnotationEditor", "Prioritize worker availability when reasoning.");
@@ -463,7 +425,7 @@ async function run() {
   `));
   const secondContext = secondDetail.interactions[1].contexts?.[0];
   if (JSON.stringify(secondContext?.annotations) !== JSON.stringify([
-    longAnnotation,
+    "Queue order controls which task is claimed next.",
     "Prioritize worker availability when reasoning.",
   ])) throw new Error(`Message+context annotations were not durably ordered: ${JSON.stringify(secondContext)}`);
   await click("#interactionContextPill");
@@ -579,13 +541,12 @@ async function run() {
     },
     assertions: {
       nodeDetailsOpened: true,
-      multipleAnnotationsAddedEditedAndOrdered: true,
+      multipleAnnotationsAddedAndOrdered: true,
       compactComposerPopoverVisible: true,
       compactComposerPopoverAvoidsNodeDetails: true,
       multipleNodePillStripScrolls: true,
-      editPreservesPopoverDimensions: true,
-      longAnnotationEditorScrolls: true,
-      annotationDeletedWhileEditing: true,
+      confirmedPreviewIsReadOnly: true,
+      annotationDeletedFromExplicitPreview: true,
       messageAndContextSent: true,
       historyPillAndPopoverVisible: true,
       historicalTargetNodeReopened: true,

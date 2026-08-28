@@ -753,9 +753,10 @@ async function run() {
   await evaluate(`window.__contextDraftWarningFetchProbe.holdNextDraftSave = true`);
   const heldDraftText = "This draft save is intentionally held while the override is cancelled.";
   await setField("#contextAnnotationEditor", heldDraftText);
-  await clickNode(confirmedOccurrence.node.title);
-  await waitFor("draft dock hidden after node selection changed", () => evaluate(
-    `!document.querySelector('#contextAnnotationEditor')`,
+  await click("#closeInspector");
+  await waitFor("draft dock hidden after Node Details closed", () => evaluate(
+    `document.querySelector('#inspector')?.classList.contains('hidden')
+      && !document.querySelector('#contextAnnotationEditor')`,
   ));
   await setPrompt("Do not send after I cancel the pending draft-save override.");
   await click("#sendInteraction", { focus: true });

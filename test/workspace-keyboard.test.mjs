@@ -4,8 +4,6 @@ import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspac
 import {
   COMPOSER_MAX_HEIGHT,
   COMPOSER_MIN_HEIGHT,
-  CONTEXT_EDITOR_MAX_HEIGHT,
-  CONTEXT_EDITOR_MIN_HEIGHT,
   applyComposerCapabilities,
   applyContextEditor,
   applyMountedContextEditorInput,
@@ -31,7 +29,9 @@ import {
   contextEditorPresentation,
   contextEditorIdentity,
   durableContextEditorForDraft,
-  contextDraftStatusPresentation,
+  nodeContextDockError,
+  nodeContextDraftForSelection,
+  saveContextDraftBeforeSelection,
   contextConfirmationDestination,
   contextStagingDisabledFor,
   createComposerDraftScopeState,
@@ -41,7 +41,6 @@ import {
   historicalContextSelectionOptions,
   handleComposerKeydown,
   resizeComposerTextarea,
-  resizeContextEditorTextarea,
   syncMountedContextEditorControls,
   interactionContextPayload,
   interactionSendIntent,
@@ -185,14 +184,6 @@ describe("product workspace keyboard behavior", () => {
     })).rejects.toThrow("offline");
   });
 
-  it("never presents a failed context-draft save as saved", () => {
-    expect(contextDraftStatusPresentation({ status: "saved" }).text).toBe("Saved");
-    expect(contextDraftStatusPresentation({ status: "error", error: "disk full" })).toEqual({
-      className: "composer-context-draft-status status-error",
-      text: "Not saved: disk full",
-    });
-  });
-
   it("binds a durable draft to the selected node-details editor identity", () => {
     const target = { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 };
     const targetNode = { id: 7, title: "Incoming queue" };
@@ -232,6 +223,60 @@ describe("product workspace keyboard behavior", () => {
       .toBeNull();
   });
 
+  it("restores a dock draft only for the selected source occurrence", () => {
+    const node = { id: 7, title: "Queue" };
+    const target = { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 };
+    const draft = { id: "draft-queue", target, text: "Keep FIFO", status: "saved" };
+
+    expect(nodeContextDraftForSelection(draft, node, target)).toBe(draft);
+    expect(nodeContextDraftForSelection(draft, node, {
+      ...target,
+      sourceLayerId: 6,
+    })).toBeNull();
+    expect(nodeContextDraftForSelection(draft, { ...node, id: 8 }, target)).toBeNull();
+  });
+
+  it("waits for a durable save before allowing a node selection transition", async () => {
+    const draft = {
+      revision: null,
+      status: "unsaved",
+      text: "Before selection changes",
+    };
+    const controller = {
+      update: vi.fn((_threadId, _nodeId, value) => {
+        draft.text = value;
+        return draft;
+      }),
+      draftForNode: vi.fn(() => draft),
+      flush: vi.fn(async () => {
+        expect(draft.text).toBe("Before selection changes");
+        draft.revision = 1;
+        draft.status = "saved";
+      }),
+    };
+    const editor = {
+      ownerThreadId: "thread-a",
+      nodeId: 7,
+      value: "Before selection changes",
+      durable: true,
+    };
+
+    await expect(saveContextDraftBeforeSelection({
+      controller,
+      editor,
+      textarea: { value: "Before selection changes", disabled: false },
+    })).resolves.toBe(true);
+    expect(controller.flush).toHaveBeenCalledOnce();
+
+    draft.status = "error";
+    draft.revision = null;
+    controller.flush.mockImplementationOnce(async () => {});
+    await expect(saveContextDraftBeforeSelection({ controller, editor, textarea: null }))
+      .resolves.toBe(false);
+    expect(nodeContextDockError(editor, { status: "error", error: "disk full" }))
+      .toBe("Not saved: disk full");
+  });
+
   it("mounts the annotation editor only in the bottom of Node Details", async () => {
     const markup = productWorkspaceMarkup();
     const detailContent = markup.indexOf('id="inspectorContent"');
@@ -249,7 +294,8 @@ describe("product workspace keyboard behavior", () => {
     expect(composerTray).not.toContain("contextAnnotationEditor");
 
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
-    expect(styles).toContain(".node-context-dock{height:33.333%");
+    expect(styles).toContain(".node-context-dock{height:33.333%;min-height:0");
+    expect(styles).toContain(".inspector:has(.node-context-dock:not(.hidden)) .inspector-content{min-height:0}");
     expect(styles).toContain(".node-context-dock textarea{min-height:0;flex:1;resize:none;overflow:auto");
     expect(styles).toContain("@media(forced-colors:active){.node-context-dock");
     expect(styles).toContain("@media(prefers-reduced-motion:reduce)");
@@ -482,7 +528,6 @@ describe("product workspace keyboard behavior", () => {
 
   it("locks already-mounted draft controls and rejects a racing input event", () => {
     const controls = {
-      cancel: { disabled: false },
       remove: { disabled: false },
       confirm: { disabled: false },
     };
@@ -491,7 +536,6 @@ describe("product workspace keyboard behavior", () => {
       disabled: false,
       parentElement: {
         querySelector: (selector) => ({
-          '[aria-label="Cancel annotation edit"]': controls.cancel,
           '[aria-label^="Discard annotation draft"]': controls.remove,
           '[aria-label="Confirm annotation"]': controls.confirm,
         }[selector]),
@@ -504,7 +548,6 @@ describe("product workspace keyboard behavior", () => {
     );
     expect(textarea.disabled).toBe(true);
     expect(controls).toEqual({
-      cancel: { disabled: true },
       remove: { disabled: true },
       confirm: { disabled: true },
     });
@@ -757,34 +800,19 @@ describe("product workspace keyboard behavior", () => {
     }]);
   });
 
-  it("keeps compact context counts and long annotation editors bounded", () => {
+  it("keeps compact context counts grammatically stable", () => {
     expect(contextAnnotationCountLabel(0)).toBe("0 annotations");
     expect(contextAnnotationCountLabel(1)).toBe("1 annotation");
     expect(contextAnnotationCountLabel(7)).toBe("7 annotations");
-
-    const textarea = { scrollHeight: 64, style: {} };
-    resizeContextEditorTextarea(textarea);
-    expect(textarea.style).toMatchObject({ height: "64px", overflowY: "hidden" });
-
-    textarea.scrollHeight = CONTEXT_EDITOR_MAX_HEIGHT + 100;
-    resizeContextEditorTextarea(textarea);
-    expect(textarea.style).toMatchObject({
-      height: `${CONTEXT_EDITOR_MAX_HEIGHT}px`,
-      overflowY: "auto",
-    });
-
-    textarea.scrollHeight = 0;
-    resizeContextEditorTextarea(textarea);
-    expect(textarea.style.height).toBe(`${CONTEXT_EDITOR_MIN_HEIGHT}px`);
   });
 
-  it("keeps deletion available while an annotation is being edited", async () => {
+  it("keeps explicit confirmed previews read-only while retaining deletion", async () => {
     const [workspace, styles] = await Promise.all([
       readFile(new URL("../desktop/renderer/src/product-workspace/workspace.js", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8"),
     ]);
-    expect(workspace).toContain("Delete annotation being edited for ${node.title}");
-    expect(workspace).toContain("if (contextEditor.annotationIndex != null) controls.append(remove);");
+    expect(workspace).not.toContain("composer-context-inline-editor");
+    expect(workspace).toContain("Delete annotation ${index + 1} for ${openContext.node.title}");
     expect(styles).toContain(".composer-context-pills{display:flex;flex-wrap:nowrap;gap:7px;overflow-x:auto");
   });
 
