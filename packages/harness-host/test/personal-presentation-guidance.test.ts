@@ -69,4 +69,17 @@ Adaptive progressive disclosure: Reveal additional information according to its 
 
     expect(() => renderPersonalPresentationGuidance(invalid)).toThrow("root layer");
   });
+
+  it("canonicalizes whitespace without adding harness-owned graph validity rules", () => {
+    const padded = presentation([{
+      id: 93,
+      kind: "presentation-preference",
+      icon: "compass",
+      title: " Summary ",
+      detail: " Show a summary. ",
+      state: "accepted",
+    }]);
+
+    expect(renderPersonalPresentationGuidance(padded)).toContain("Summary: Show a summary.");
+  });
 });

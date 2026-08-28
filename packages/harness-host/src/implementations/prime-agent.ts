@@ -23,7 +23,7 @@ import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
 import {
   personalPresentationNativeInstructions,
   personalPresentationPrompt,
-  renderPersonalPresentationGuidance,
+  personalPresentationTraceValues,
 } from "./personal-presentation-guidance.js";
 
 export const PRIME_AGENT_KEY = "prime.agent";
@@ -212,6 +212,7 @@ interface PrimeAgentExecutionScope {
   readonly orchestrator: HarnessAdmittedModelRoute;
   readonly routeByNativeModel: ReadonlyMap<string, HarnessAdmittedModelRoute>;
   readonly sensitiveValues: readonly string[];
+  readonly presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>;
 }
 
 const PRIME_ADAPTERS: Readonly<Record<string, PrimeAdapterMapping>> = Object.freeze({
@@ -558,19 +559,19 @@ function tracePrimeEvent(
 ): void {
   if (!isRecord(value) || typeof value.type !== "string") return;
   const event = value as Record<string, unknown>;
-  context.trace.emit({ type: "provider.event", data: { provider: "prime-agent", event: safePrimeEvent(event, execution.routeByNativeModel, execution.sensitiveValues) } });
+  context.trace.emit({ type: "provider.event", data: { provider: "prime-agent", event: safePrimeEvent(event, execution.routeByNativeModel, execution.sensitiveValues, execution.presentationTraceValues) } });
   if (event.type === "turn_start") {
     context.trace.emit({ type: "model.call.started", data: { provider: "prime-agent", eventType: event.type, ...traceRoute(execution.orchestrator) } });
   } else if (event.type === "turn_end") {
     context.trace.emit({ type: "model.call.completed", data: { provider: "prime-agent", eventType: event.type, status: "completed", ...traceRoute(execution.orchestrator) } });
   } else if (event.type === "tool_execution_start") {
-    context.trace.emit({ type: "tool.call.started", data: safePrimeToolEvent(event, execution.sensitiveValues) });
+    context.trace.emit({ type: "tool.call.started", data: safePrimeToolEvent(event, execution.sensitiveValues, execution.presentationTraceValues) });
   } else if (event.type === "tool_execution_end") {
-    context.trace.emit({ type: "tool.call.completed", data: safePrimeToolEvent(event, execution.sensitiveValues) });
+    context.trace.emit({ type: "tool.call.completed", data: safePrimeToolEvent(event, execution.sensitiveValues, execution.presentationTraceValues) });
   } else if (event.type === "message_end") {
-    tracePrimeMessage(context, event.message, execution.routeByNativeModel, execution.sensitiveValues);
+    tracePrimeMessage(context, event.message, execution.routeByNativeModel, execution.sensitiveValues, execution.presentationTraceValues);
   } else if (event.type === "rlm_child_update") {
-    tracePrimeChild(context, event.child, childStreams, execution.routeByNativeModel, execution.sensitiveValues);
+    tracePrimeChild(context, event.child, childStreams, execution.routeByNativeModel, execution.sensitiveValues, execution.presentationTraceValues);
   }
 }
 
@@ -579,6 +580,7 @@ function tracePrimeMessage(
   value: unknown,
   routes: ReadonlyMap<string, HarnessAdmittedModelRoute>,
   sensitiveValues: readonly string[],
+  presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>,
 ): void {
   if (!isRecord(value)) return;
   const role = typeof value.role === "string" ? value.role : "unknown";
@@ -589,7 +591,7 @@ function tracePrimeMessage(
       type: "message",
       data: {
         role,
-        text: sanitizePrimeTraceValue(text.join("\n"), sensitiveValues) as string,
+        text: sanitizePrimeTraceValue(text.join("\n"), sensitiveValues, presentationTraceValues, true) as string,
         ...(route === undefined ? {} : traceRoute(route)),
       },
     });
@@ -606,6 +608,7 @@ function tracePrimeChild(
   childStreams: Map<string, HarnessTraceStream>,
   routes: ReadonlyMap<string, HarnessAdmittedModelRoute>,
   sensitiveValues: readonly string[],
+  presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>,
 ): void {
   if (!isRecord(value) || typeof value.id !== "string") return;
   let stream = childStreams.get(value.id);
@@ -624,7 +627,7 @@ function tracePrimeChild(
     data: {
       provider: "prime-agent",
       eventType: "rlm_child_update",
-      child: redactTraceData(safePrimeChild(value, routes, sensitiveValues)),
+      child: redactTraceData(safePrimeChild(value, routes, sensitiveValues, presentationTraceValues)),
     },
   });
   const status = typeof value.status === "string" ? value.status : "";
@@ -638,16 +641,17 @@ function safePrimeEvent(
   event: Record<string, unknown>,
   routes: ReadonlyMap<string, HarnessAdmittedModelRoute>,
   sensitiveValues: readonly string[],
+  presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>,
 ): JsonObject {
   const type = typeof event.type === "string" ? event.type : "unknown";
   if (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") {
-    return redactTraceData({ type, message: safePrimeMessage(event.message, routes, sensitiveValues) }) as JsonObject;
+    return redactTraceData({ type, message: safePrimeMessage(event.message, routes, sensitiveValues, presentationTraceValues) }) as JsonObject;
   }
   if (event.type === "rlm_child_update") {
-    return redactTraceData({ type, child: safePrimeChild(event.child, routes, sensitiveValues) }) as JsonObject;
+    return redactTraceData({ type, child: safePrimeChild(event.child, routes, sensitiveValues, presentationTraceValues) }) as JsonObject;
   }
   if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
-    return { type, ...safePrimeToolEvent(event, sensitiveValues) };
+    return { type, ...safePrimeToolEvent(event, sensitiveValues, presentationTraceValues) };
   }
   return { type };
 }
@@ -656,6 +660,7 @@ function safePrimeMessage(
   value: unknown,
   routes: ReadonlyMap<string, HarnessAdmittedModelRoute>,
   sensitiveValues: readonly string[],
+  presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>,
 ): unknown {
   if (!isRecord(value)) return value;
   const content = Array.isArray(value.content)
@@ -668,27 +673,51 @@ function safePrimeMessage(
     usage: value.usage,
     content,
     ...(route === undefined ? {} : traceRoute(route)),
-  }, sensitiveValues);
+  }, sensitiveValues, presentationTraceValues, true);
 }
 
-function safePrimeToolEvent(event: Record<string, unknown>, sensitiveValues: readonly string[]): JsonObject {
+function safePrimeToolEvent(
+  event: Record<string, unknown>,
+  sensitiveValues: readonly string[],
+  presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>,
+): JsonObject {
   return redactTraceData(sanitizePrimeTraceValue({
     toolCallId: event.toolCallId,
     toolName: event.toolName,
     args: event.args,
     result: event.result,
     isError: event.isError,
-  }, sensitiveValues)) as JsonObject;
+  }, sensitiveValues, presentationTraceValues, false)) as JsonObject;
 }
 
-function sanitizePrimeTraceValue(value: unknown, sensitiveValues: readonly string[]): unknown {
+function sanitizePrimeTraceValue(
+  value: unknown,
+  sensitiveValues: readonly string[],
+  presentationTraceValues?: ReturnType<typeof personalPresentationTraceValues>,
+  includePresentationFragments = false,
+): unknown {
   if (typeof value === "string") {
-    return sensitiveValues.reduce((sanitized, secret) => sanitized.split(secret).join("[redacted-provider-access]"), value);
+    const accessRedacted = sensitiveValues.reduce(
+      (sanitized, secret) => sanitized.split(secret).join("[redacted-provider-access]"),
+      value,
+    );
+    if (presentationTraceValues === undefined) return accessRedacted;
+    const presentationValues = includePresentationFragments
+      ? [presentationTraceValues.exactBlock, ...presentationTraceValues.fragments]
+      : [presentationTraceValues.exactBlock];
+    return presentationValues.reduce(
+      (sanitized, traceValue) => sanitized.split(traceValue).join("[redacted-personal-presentation]"),
+      accessRedacted,
+    );
   }
-  if (Array.isArray(value)) return value.map((child) => sanitizePrimeTraceValue(child, sensitiveValues));
+  if (Array.isArray(value)) return value.map((child) => sanitizePrimeTraceValue(
+    child, sensitiveValues, presentationTraceValues, includePresentationFragments,
+  ));
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.entries(value).flatMap(([key, child]) => (
-    /^(?:endpoint|base[_-]?url)$/i.test(key) ? [] : [[key, sanitizePrimeTraceValue(child, sensitiveValues)]]
+    /^(?:endpoint|base[_-]?url)$/i.test(key) ? [] : [[key, sanitizePrimeTraceValue(
+      child, sensitiveValues, presentationTraceValues, includePresentationFragments,
+    )]]
   )));
 }
 
@@ -696,12 +725,18 @@ function safePrimeChild(
   value: unknown,
   routes: ReadonlyMap<string, HarnessAdmittedModelRoute>,
   sensitiveValues: readonly string[],
+  presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>,
 ): unknown {
   if (!isRecord(value)) return value;
   const allowed = ["id", "parentId", "sessionName", "label", "status", "durationMs", "answerPreview", "toolUseCount", "tokenCount", "recap", "activity", "error"];
   const safe = Object.fromEntries(allowed.flatMap((key) => value[key] === undefined ? [] : [[key, value[key]]]));
   const route = traceRouteForValue(value, routes);
-  return sanitizePrimeTraceValue({ ...safe, ...(route === undefined ? {} : traceRoute(route)) }, sensitiveValues);
+  return sanitizePrimeTraceValue(
+    { ...safe, ...(route === undefined ? {} : traceRoute(route)) },
+    sensitiveValues,
+    presentationTraceValues,
+    true,
+  );
 }
 
 function traceRouteForValue(value: Record<string, unknown>, routes: ReadonlyMap<string, HarnessAdmittedModelRoute>): HarnessAdmittedModelRoute | undefined {
@@ -998,10 +1033,7 @@ function createPrimeAgentModelScope(context: HarnessRunContext, primeAgent: Prim
   const routeByNativeModel = new Map<string, HarnessAdmittedModelRoute>();
   const requestAccessByNativeModel = new Map<string, PrimeAgentRequestAccess>();
   const sensitiveValues = new Set<string>();
-  if (context.personalPresentation !== undefined) {
-    const renderedPresentation = renderPersonalPresentationGuidance(context.personalPresentation);
-    if (renderedPresentation !== "") sensitiveValues.add(renderedPresentation);
-  }
+  const presentationTraceValues = personalPresentationTraceValues(context);
   const models = plan.roster.map((route) => {
     const access = bundle.byProviderId[route.providerId];
     if (access === undefined) throw new Error(`prime.agent is missing upfront access for provider ${route.providerId}`);
@@ -1046,6 +1078,7 @@ function createPrimeAgentModelScope(context: HarnessRunContext, primeAgent: Prim
     orchestrator: plan.orchestrator,
     routeByNativeModel,
     sensitiveValues: Object.freeze([...sensitiveValues].filter((value) => value !== "")),
+    presentationTraceValues,
   });
 }
 

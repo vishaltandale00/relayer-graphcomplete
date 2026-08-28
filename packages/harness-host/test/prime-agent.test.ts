@@ -607,8 +607,21 @@ describe("PrimeAgentHarness", () => {
           child: {
             id: "graph-child",
             status: "completed",
-            answerPreview: "Personal graph presentation preferences:\n\nDecision-useful center: Foreground the conclusion and material tradeoffs.",
+            answerPreview: "Decision-useful center",
           },
+        });
+        listener?.({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Foreground the conclusion and material tradeoffs." }],
+          },
+        });
+        listener?.({
+          type: "tool_execution_start",
+          toolCallId: "unrelated-tool",
+          toolName: "ipython",
+          args: { label: "Decision-useful center" },
         });
       }),
       subscribe: vi.fn((next: (event: unknown) => void) => { listener = next; return vi.fn(); }),
@@ -690,8 +703,12 @@ describe("PrimeAgentHarness", () => {
     const tracedPrompt = trace.events.find((event) => event.type === "prompt")?.data.text;
     expect(tracedPrompt).not.toContain("Decision-useful center");
     expect(tracedPrompt).not.toContain("Personal graph presentation preferences");
-    expect(JSON.stringify(trace.events)).not.toContain("Foreground the conclusion and material tradeoffs.");
-    expect(JSON.stringify(trace.events)).toContain("[redacted-provider-access]");
+    const providerEchoes = trace.events.filter((event) => !JSON.stringify(event.data).includes("unrelated-tool"));
+    expect(JSON.stringify(providerEchoes)).not.toContain("Foreground the conclusion and material tradeoffs.");
+    expect(JSON.stringify(providerEchoes)).not.toContain("Decision-useful center");
+    expect(JSON.stringify(providerEchoes)).toContain("[redacted-personal-presentation]");
+    const unrelatedTool = trace.events.find((event) => event.type === "tool.call.started");
+    expect(JSON.stringify(unrelatedTool?.data)).toContain("Decision-useful center");
     expect(session.reload).toHaveBeenCalledOnce();
     const nativeInstructions = resourceLoaderOptions?.appendSystemPromptOverride(["base prompt"]);
     expect(nativeInstructions).toHaveLength(2);

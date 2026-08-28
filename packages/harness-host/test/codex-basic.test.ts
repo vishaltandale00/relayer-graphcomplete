@@ -806,6 +806,24 @@ describe("CodexBasicHarness", () => {
         status: "inProgress",
         prompt: "Research the implementation without authoring graph content.",
       } });
+      options.onNotification?.("item/completed", { item: {
+        id: "partial-echo",
+        type: "agentMessage",
+        text: `Applied Decision-useful center. ${preferenceDetail}`,
+      } });
+      options.onNotification?.("item/completed", { item: {
+        id: "unrelated-command",
+        type: "commandExecution",
+        aggregatedOutput: "Decision-useful center",
+      } });
+      options.onNotification?.("item/agentMessage/delta", {
+        itemId: "agent-delta",
+        delta: "Decision-useful center",
+      });
+      options.onNotification?.("item/commandExecution/outputDelta", {
+        itemId: "command-delta",
+        delta: "Decision-useful center",
+      });
       return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
     });
     const baseContext = personalPresentationRunContext(true);
@@ -820,7 +838,11 @@ describe("CodexBasicHarness", () => {
           ...presentation.graph,
           layers: [{
             ...firstLayer,
-            nodes: [{ ...firstNode, detail: preferenceDetail }],
+            nodes: [{
+              ...firstNode,
+              title: ` ${firstNode.title} `,
+              detail: ` ${preferenceDetail} `,
+            }],
           }],
         },
       },
@@ -828,10 +850,23 @@ describe("CodexBasicHarness", () => {
 
     await harness.complete({ ...context, trace: trace.sink });
 
-    const serialized = JSON.stringify(trace.events);
-    expect(serialized).not.toContain("Decision-useful center");
-    expect(serialized).not.toContain("The user prefers central layers that are immediately decision-useful.");
-    expect(serialized).not.toContain("OPENAI_API_KEY");
+    const echoEvents = trace.events.filter((event) => event.providerEventId !== "unrelated-command"
+      && event.data.method !== "item/commandExecution/outputDelta");
+    const serializedEchoes = JSON.stringify(echoEvents);
+    expect(serializedEchoes).not.toContain("Decision-useful center");
+    expect(serializedEchoes).not.toContain("The user prefers central layers that are immediately decision-useful.");
+    expect(serializedEchoes).not.toContain("OPENAI_API_KEY");
+    expect(serializedEchoes.match(/\[redacted-personal-presentation\]/g)?.length).toBeGreaterThanOrEqual(3);
+    const unrelatedCommand = trace.events.find((event) => event.type === "provider.event"
+      && event.providerEventId === "unrelated-command");
+    expect(JSON.stringify(unrelatedCommand?.data)).toContain("Decision-useful center");
+    const agentDelta = trace.events.find((event) => event.type === "provider.event"
+      && event.data.method === "item/agentMessage/delta");
+    expect(JSON.stringify(agentDelta?.data)).toContain("[redacted-personal-presentation]");
+    expect(JSON.stringify(agentDelta?.data)).not.toContain("Decision-useful center");
+    const commandDelta = trace.events.find((event) => event.type === "provider.event"
+      && event.data.method === "item/commandExecution/outputDelta");
+    expect(JSON.stringify(commandDelta?.data)).toContain("Decision-useful center");
     const graphChild = trace.events.find((event) => event.type === "tool.call.started"
       && event.data.providerItemId === "graph-child");
     expect(graphChild?.data.delegationPrompt).toContain("[redacted-personal-presentation]");

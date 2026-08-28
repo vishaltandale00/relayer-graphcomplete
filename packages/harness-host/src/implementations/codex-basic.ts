@@ -7,7 +7,7 @@ import { GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
 import {
   personalPresentationNativeInstructions,
   personalPresentationPrompt,
-  renderPersonalPresentationGuidance,
+  personalPresentationTraceValues,
 } from "./personal-presentation-guidance.js";
 import {
   runCodexAppServerTurn,
@@ -497,7 +497,11 @@ function pinnedExecutionClause(launcher: string | undefined): string {
 
 function traceCodexAppServerNotification(context: HarnessRunContext, method: string, params: unknown, state: CodexTraceState): void {
   const redactedParams = attachCommandExecutableAuthority(
-    redactTraceData(redactPersonalPresentationTraceData(context, params) as JsonValue),
+    redactTraceData(redactPersonalPresentationTraceData(
+      context,
+      params,
+      isPersonalPresentationEchoEvent(method, params),
+    ) as JsonValue),
     params,
   );
   const data = isRecord(redactedParams) ? redactedParams : {};
@@ -540,22 +544,41 @@ function traceCodexAppServerNotification(context: HarnessRunContext, method: str
   }
 }
 
-function redactPersonalPresentationTraceData(context: HarnessRunContext, value: unknown): unknown {
-  const presentation = context.personalPresentation;
-  if (presentation === undefined) return value;
-  const rendered = renderPersonalPresentationGuidance(presentation);
-  if (rendered === "") return value;
+function redactPersonalPresentationTraceData(
+  context: HarnessRunContext,
+  value: unknown,
+  includeFragments: boolean,
+): unknown {
+  const traceValues = personalPresentationTraceValues(context);
+  if (traceValues === undefined) return value;
   if (typeof value === "string") {
-    return value.split(rendered).join("[redacted-personal-presentation]");
+    const values = includeFragments
+      ? [traceValues.exactBlock, ...traceValues.fragments]
+      : [traceValues.exactBlock];
+    return values.reduce(
+      (sanitized, traceValue) => sanitized.split(traceValue).join("[redacted-personal-presentation]"),
+      value,
+    );
   }
   if (Array.isArray(value)) {
-    return value.map((child) => redactPersonalPresentationTraceData(context, child));
+    return value.map((child) => redactPersonalPresentationTraceData(context, child, includeFragments));
   }
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [
     key,
-    redactPersonalPresentationTraceData(context, child),
+    redactPersonalPresentationTraceData(context, child, includeFragments),
   ]));
+}
+
+function isPersonalPresentationEchoEvent(method: string, params: unknown): boolean {
+  const normalizedMethod = normalizeName(method);
+  if (normalizedMethod.includes("delta")
+    && (normalizedMethod.includes("agentmessage") || normalizedMethod.includes("reasoning"))) {
+    return true;
+  }
+  if (!isRecord(params) || !isRecord(params.item) || typeof params.item.type !== "string") return false;
+  return ["agentmessage", "reasoning", "collabtoolcall", "collabagenttoolcall"]
+    .includes(normalizeName(params.item.type));
 }
 
 function attachCommandExecutableAuthority(redactedParams: JsonValue, rawParams: unknown): JsonValue {
