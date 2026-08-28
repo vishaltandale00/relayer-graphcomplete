@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "passed": true,
-  "capturedAt": "2026-08-28T15:03:05.490Z",
-  "sourceCommit": "ef9405627358b2e8004b0f9eb1d7be92f843c6cb",
-  "workingTreeDirty": false,
+  "capturedAt": "2026-08-28T15:29:34.010Z",
+  "sourceCommit": "684bcf115b948cdf19ef27425305b2283f767efc",
+  "workingTreeDirty": true,
   "command": "npm run build && RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE=1 electron scripts/capture-interaction-context-evidence.mjs",
   "paidInferenceCalls": 0,
   "runtime": "real Electron BrowserWindow + production renderer + Rust app/graph servers + SQLite",
@@ -47,16 +47,16 @@
   "screenshots": [
     {
       "file": "grouped-composer.png",
-      "sha256": "737625c4e5bb3191736a1274a6c15971b391c3ed4c8f57c953e5e0fce16bf478"
+      "sha256": "4375dc7cb53e6a8e0d08b7045d7c0746ccf21f2a4a13e48e40a75b73d2c4bc2f"
     },
     {
       "file": "restarted-context.png",
-      "sha256": "5956f17bdcb1f8ef4089bc168d48da168796a8b8bba86ee72ab1130b22b83739"
+      "sha256": "5a1126bc0e42ea2b79cfd22741f88d59ebb4f366a7aec3c94e2562be55ef111a"
     }
   ],
   "video": {
     "file": "interaction-context.mp4",
-    "sha256": "5cbe675b6619e7682e9f737e543b676e6d28c72dfd40369d6ea6ef13093f5a4a",
+    "sha256": "2ae2f3a92543a49929db95712c153c61b16ee23f1a3fe8320652a0d6cf300ede",
     "durationSeconds": 94.433,
     "stream": {
       "codec_name": "h264",
