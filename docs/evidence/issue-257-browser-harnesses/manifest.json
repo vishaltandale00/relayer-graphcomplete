@@ -206,7 +206,7 @@
     "relayerBrowserPermissionMode": false,
     "relayerBrowserBroker": false,
     "relayerBrowserReceipt": false,
-    "relayerCredentialStore": false,
+    "relayerBrowserCredentialStore": false,
     "relayerBrowserSetupUi": false,
     "universalBrowserConformance": false
   }
