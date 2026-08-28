@@ -1411,6 +1411,7 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
             description: Some("Inspect /var/folders/project/tokenizer".into()),
             target_layer_id: None,
             interaction_text: Some("Continue from /var/folders/project/tokenizer".into()),
+            input: None,
         })
         .await
         .unwrap();
@@ -1469,6 +1470,7 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
                 description: None,
                 target_layer_id: Some(target_layer_id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -1486,6 +1488,7 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
             description: Some("Root /var/folders/project/tokenizer".into()),
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            input: None,
         })
         .await
         .unwrap();

@@ -307,6 +307,7 @@ pub enum ExportRecordState {
 pub enum ExportActionKind {
     Navigate,
     Invoke,
+    Input,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

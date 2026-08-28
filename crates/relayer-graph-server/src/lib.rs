@@ -1687,6 +1687,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -2476,6 +2477,7 @@ mod tests {
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Continue".into()),
+                input: None,
             })
             .await
             .unwrap();
@@ -2492,6 +2494,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -2607,6 +2610,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(result_layer.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -3001,6 +3005,7 @@ mod tests {
                 description: None,
                 target_layer_id: LayerId::new(layer_id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -3296,6 +3301,7 @@ mod tests {
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Continue from here".into()),
+                input: None,
             })
             .await
             .unwrap();
@@ -3312,6 +3318,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();

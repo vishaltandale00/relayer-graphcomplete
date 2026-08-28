@@ -43,9 +43,15 @@ export interface GraphLayer {
   readonly state: RecordState;
 }
 
-export type ActionKind = "navigate" | "invoke" | "interaction.context";
+export type ActionKind = "navigate" | "invoke" | "input" | "interaction.context";
 export type NavigateRelation = "expand" | "reference";
 export type ActionVariant = "chip" | "pill" | "wide" | "card";
+export type InputControl = "text" | "single_select" | "multi_select";
+
+export interface InputOption {
+  readonly key: string;
+  readonly label: string;
+}
 
 export interface GraphAction {
   readonly id: GraphId;
@@ -59,6 +65,10 @@ export interface GraphAction {
   readonly description?: string | null;
   readonly targetLayerId?: GraphId | null;
   readonly interactionText?: string | null;
+  readonly control?: InputControl;
+  readonly prompt?: string;
+  readonly options?: readonly InputOption[];
+  readonly minimumSelections?: number;
   readonly state: RecordState;
 }
 

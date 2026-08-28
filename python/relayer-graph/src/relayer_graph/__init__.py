@@ -4,7 +4,7 @@ from .authoring import (ActionVariant, CompletionInputGraph, EdgeObject, GraphAu
                         GraphLayer, GraphNode, InteractionContext, InteractionInput,
                         InteractionInputNode,
                         LayerLayout, LayerLayoutObject,
-                        LayerObject, NavigateRelation, NodeObject, NodePlacement,
+                        InputControl, InputOption, LayerObject, NavigateRelation, NodeObject, NodePlacement,
                         NodePlacementObject, RelayerGraphClient)
 from .exceptions import (APIError, AuthenticationError, ConfigurationError, NotFound,
                          RelayerGraphError, TransportError, ValidationError,
@@ -25,7 +25,7 @@ __all__ = [
     "NodeObject", "EdgeObject", "LayerObject", "NodePlacementObject", "LayerLayoutObject",
     "GraphNode", "GraphEdge", "GraphLayer", "InteractionContext", "InteractionInput", "InteractionInputNode",
     "NodePlacement", "LayerLayout",
-    "ActionVariant", "NavigateRelation",
+    "ActionVariant", "NavigateRelation", "InputControl", "InputOption",
     "CompletionInputGraph",
     "complete", "CompletionHandle", "CompletionCurrent", "CompletionCurrentSnapshot",
     "CompletionTerminalError",

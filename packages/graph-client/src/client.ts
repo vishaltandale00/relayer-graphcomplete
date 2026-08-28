@@ -101,7 +101,7 @@ export class RelayerGraphClient {
         icon: action.icon ?? null,
         description: action.description ?? null,
         targetLayerId: layerId(action.target),
-      } : {
+      } : action.kind === "invoke" ? {
         clientKey,
         sourceNodeId: nodeId(source),
         sourceLayerId: layerId(action.sourceLayer),
@@ -111,6 +111,19 @@ export class RelayerGraphClient {
         icon: action.icon ?? null,
         description: action.description ?? null,
         interactionText: action.interactionText,
+      } : {
+        clientKey,
+        sourceNodeId: nodeId(source),
+        sourceLayerId: layerId(action.sourceLayer),
+        kind: action.kind,
+        label: action.label,
+        variant: action.variant ?? "pill",
+        icon: action.icon ?? null,
+        description: action.description ?? null,
+        control: action.control,
+        prompt: action.prompt,
+        options: action.options ?? [],
+        ...(action.minimumSelections === undefined ? {} : { minimumSelections: action.minimumSelections }),
       }),
     });
     action.ref = body.action;

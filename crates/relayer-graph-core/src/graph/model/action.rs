@@ -7,8 +7,56 @@ use crate::{ActionId, GraphError, LayerId, NodeId, RecordState, ValidationIssue}
 pub enum ActionKind {
     Navigate,
     Invoke,
+    Input,
     #[serde(rename = "interaction.context")]
     InteractionContext,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InputControl {
+    Text,
+    SingleSelect,
+    MultiSelect,
+}
+
+impl InputControl {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::SingleSelect => "single_select",
+            Self::MultiSelect => "multi_select",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, GraphError> {
+        match value {
+            "text" => Ok(Self::Text),
+            "single_select" => Ok(Self::SingleSelect),
+            "multi_select" => Ok(Self::MultiSelect),
+            other => Err(GraphError::Internal(format!(
+                "unknown input control {other}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InputOption {
+    pub key: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InputAction {
+    pub control: InputControl,
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<InputOption>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_selections: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +149,7 @@ impl ActionKind {
         match self {
             Self::Navigate => "navigate",
             Self::Invoke => "invoke",
+            Self::Input => "input",
             Self::InteractionContext => "interaction.context",
         }
     }
@@ -109,6 +158,7 @@ impl ActionKind {
         match value {
             "navigate" => Ok(Self::Navigate),
             "invoke" => Ok(Self::Invoke),
+            "input" => Ok(Self::Input),
             "interaction.context" => Ok(Self::InteractionContext),
             other => Err(GraphError::Internal(format!("unknown action kind {other}"))),
         }
@@ -129,6 +179,8 @@ pub struct GraphAction {
     pub description: Option<String>,
     pub target_layer_id: Option<LayerId>,
     pub interaction_text: Option<String>,
+    #[serde(flatten)]
+    pub input: Option<InputAction>,
     pub state: RecordState,
 }
 
@@ -151,6 +203,8 @@ pub struct ActionDraft {
     pub description: Option<String>,
     pub target_layer_id: Option<LayerId>,
     pub interaction_text: Option<String>,
+    #[serde(default, flatten)]
+    pub input: Option<InputAction>,
 }
 
 impl ActionDraft {
@@ -207,6 +261,13 @@ impl ActionDraft {
             (_, None) => {}
         }
         let mut issues = Vec::new();
+        if self.kind != ActionKind::Input && self.input.is_some() {
+            issues.push(ValidationIssue::new(
+                "input_action_payload_unexpected",
+                "control",
+                "Remove input control fields from a non-input action.",
+            ));
+        }
         match self.kind {
             ActionKind::Navigate => {
                 if self.target_layer_id.is_none() {
@@ -258,6 +319,41 @@ impl ActionDraft {
                     ));
                 }
             }
+            ActionKind::Input => {
+                if self.target_layer_id.is_some() {
+                    issues.push(ValidationIssue::new(
+                        "input_action_payload_unexpected",
+                        "targetLayerId",
+                        "Remove targetLayerId from an input action.",
+                    ));
+                }
+                if self.relation.is_some() {
+                    issues.push(ValidationIssue::new(
+                        "input_action_payload_unexpected",
+                        "relation",
+                        "Remove relation from an input action.",
+                    ));
+                }
+                if self.interaction_text.is_some() {
+                    issues.push(ValidationIssue::new(
+                        "input_action_payload_unexpected",
+                        "interactionText",
+                        "Remove interactionText from an input action.",
+                    ));
+                }
+                let Some(input) = self.input.as_ref() else {
+                    issues.push(ValidationIssue::new(
+                        "input_action_control_unsupported",
+                        "control",
+                        "Use text, single_select, or multi_select.",
+                    ));
+                    if !issues.is_empty() {
+                        return Err(GraphError::validation_issues(issues));
+                    }
+                    unreachable!();
+                };
+                validate_input_action(input, &mut issues);
+            }
             ActionKind::InteractionContext => {
                 return Err(GraphError::validation(
                     "control_only_action",
@@ -270,5 +366,104 @@ impl ActionDraft {
             return Err(GraphError::validation_issues(issues));
         }
         Ok(canonical_icon)
+    }
+}
+
+fn validate_input_action(input: &InputAction, issues: &mut Vec<ValidationIssue>) {
+    if input.prompt.trim().is_empty() {
+        issues.push(ValidationIssue::new(
+            "input_action_prompt_required",
+            "prompt",
+            "Supply a non-whitespace prompt.",
+        ));
+    } else if input.prompt.len() > 2_000 {
+        issues.push(ValidationIssue::new(
+            "input_action_prompt_too_long",
+            "prompt",
+            "Shorten the UTF-8 prompt to 2,000 bytes.",
+        ));
+    }
+    match input.control {
+        InputControl::Text => {
+            if !input.options.is_empty() {
+                issues.push(ValidationIssue::new(
+                    "input_action_options_unexpected",
+                    "options",
+                    "Remove options from a text action.",
+                ));
+            }
+            if input.minimum_selections.is_some() {
+                issues.push(ValidationIssue::new(
+                    "input_action_minimum_unexpected",
+                    "minimumSelections",
+                    "Remove it unless the control is multi-select.",
+                ));
+            }
+        }
+        InputControl::SingleSelect | InputControl::MultiSelect => {
+            if input.options.is_empty() {
+                issues.push(ValidationIssue::new(
+                    "input_action_options_required",
+                    "options",
+                    "Supply 1 through 50 options for a select.",
+                ));
+            } else if input.options.len() > 50 {
+                issues.push(ValidationIssue::new(
+                    "input_action_option_count",
+                    "options",
+                    "Keep the option count in 1..=50.",
+                ));
+            }
+            let mut keys = std::collections::HashSet::new();
+            for (index, option) in input.options.iter().enumerate() {
+                if option.key.is_empty()
+                    || option.key.trim() != option.key
+                    || option.key.contains('\0')
+                    || option.key.len() > 128
+                {
+                    issues.push(ValidationIssue::new(
+                        "input_action_option_key_invalid",
+                        format!("options[{index}].key"),
+                        "Use a nonempty, trimmed, NUL-free key of at most 128 bytes.",
+                    ));
+                } else if !keys.insert(option.key.as_str()) {
+                    issues.push(ValidationIssue::new(
+                        "input_action_option_key_duplicate",
+                        format!("options[{index}].key"),
+                        "Give every option an exact unique key.",
+                    ));
+                }
+                if option.label.trim().is_empty() {
+                    issues.push(ValidationIssue::new(
+                        "input_action_option_label_required",
+                        format!("options[{index}].label"),
+                        "Supply a non-whitespace label.",
+                    ));
+                } else if option.label.len() > 512 {
+                    issues.push(ValidationIssue::new(
+                        "input_action_option_label_too_long",
+                        format!("options[{index}].label"),
+                        "Shorten the UTF-8 label to 512 bytes.",
+                    ));
+                }
+            }
+            match (input.control, input.minimum_selections) {
+                (InputControl::SingleSelect, Some(_)) => issues.push(ValidationIssue::new(
+                    "input_action_minimum_unexpected",
+                    "minimumSelections",
+                    "Remove it unless the control is multi-select.",
+                )),
+                (InputControl::MultiSelect, Some(minimum))
+                    if minimum == 0 || minimum > input.options.len() =>
+                {
+                    issues.push(ValidationIssue::new(
+                        "input_action_minimum_invalid",
+                        "minimumSelections",
+                        "Use an integer in 1..=options.length.",
+                    ));
+                }
+                _ => {}
+            }
+        }
     }
 }
