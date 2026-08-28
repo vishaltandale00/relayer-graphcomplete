@@ -16,6 +16,35 @@
     "vcsDirty": true
   },
   "extensions": [],
+  "pinnedSourceCandidate": {
+    "openssl": {
+      "version": "3.5.8",
+      "series": "3.5-LTS",
+      "source": "openssl-3.5.8.tar.gz",
+      "sha256": "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2",
+      "license": "Apache-2.0",
+      "endOfLife": "2030-04-08"
+    },
+    "observedTarget": "aarch64-apple-darwin",
+    "inferredTargets": [
+      "x86_64-apple-darwin"
+    ],
+    "bindingHookSha256": "d91ee35aecd6423dfcc43a982facab19597b7b0428e4b5b17cdb379bd7be36e2",
+    "sourceProbeLockSha256": "0b91deadfebe9ea44b26fd0f6e7ea814806f5ada772cad62412d914f9c495b24",
+    "macos13_0": {
+      "opensslStaticBuild": "passed",
+      "ladybugSourceBuild": "failed",
+      "failure": "std-format-requires-macos-13.3"
+    },
+    "macos13_3": {
+      "ladybugSourceBuild": "passed-with-narrow-binding-hook",
+      "binarySha256": "aea4e12adceea09977a9c4bd913f48beae2f68d0f4be16e1863330c29f693b39",
+      "imports": [
+        "/usr/lib/libc++.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    }
+  },
   "releaseArtifacts": [
     {
       "target": "aarch64-apple-darwin",
@@ -57,6 +86,7 @@
   "blockingFindings": [
     {
       "id": "external-openssl-runtime",
+      "candidate": "upstream-release-artifacts",
       "targets": [
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
@@ -65,6 +95,7 @@
     },
     {
       "id": "incomplete-native-license-receipts",
+      "candidate": "upstream-release-artifacts-and-source-candidate",
       "targets": [
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
@@ -73,6 +104,15 @@
     },
     {
       "id": "macos-minimum-version-mismatch",
+      "candidate": "upstream-release-artifacts",
+      "targets": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin"
+      ]
+    },
+    {
+      "id": "source-build-macos-13.0-incompatible",
+      "candidate": "pinned-source",
       "targets": [
         "aarch64-apple-darwin",
         "x86_64-apple-darwin"

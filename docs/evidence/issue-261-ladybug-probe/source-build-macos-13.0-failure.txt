@@ -1,0 +1,84 @@
+Pinned source experiment, observed on aarch64-apple-darwin
+Date: 2026-08-28
+Host: macOS 26.6.1 (25G76), Xcode 26.2 (17C52), Apple clang 17.0.0
+Tools: Rust/Cargo 1.94.0, CMake 4.3.1
+
+Inputs
+- OpenSSL 3.5.8 LTS: openssl-3.5.8.tar.gz
+- OpenSSL SHA-256: a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2
+- crates.io lbug 0.19.1 from the checked-in Cargo.lock
+- binding-only feasibility delta: static-openssl-build-hook.patch
+
+Layout/setup (the receipt records expected digests; these commands verify the actual input bytes)
+
+  export QUALIFICATION_ROOT=/absolute/temporary/qualification/root
+  export EVIDENCE_ROOT=/absolute/repository/docs/evidence/issue-261-ladybug-probe
+  test "$(shasum -a 256 $QUALIFICATION_ROOT/openssl-3.5.8.tar.gz | cut -d ' ' -f 1)" = \
+    a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2
+  test "$(shasum -a 256 $QUALIFICATION_ROOT/lbug-0.19.1.crate | cut -d ' ' -f 1)" = \
+    a7a032d5968ac2260545e8c5cf05a123559de2c6ba2bd0dde11c0ed958dfa172
+  tar -xzf $QUALIFICATION_ROOT/openssl-3.5.8.tar.gz -C $QUALIFICATION_ROOT
+  tar -xzf $QUALIFICATION_ROOT/lbug-0.19.1.crate -C $QUALIFICATION_ROOT
+  mv $QUALIFICATION_ROOT/lbug-0.19.1 $QUALIFICATION_ROOT/lbug-crate
+  cp -R $EVIDENCE_ROOT/source-build-probe $QUALIFICATION_ROOT/probe
+  patch -d $QUALIFICATION_ROOT/lbug-crate -p1 < \
+    $EVIDENCE_ROOT/static-openssl-build-hook.patch
+
+OpenSSL replay (paths abbreviated to $QUALIFICATION_ROOT)
+
+  cd $QUALIFICATION_ROOT/openssl-3.5.8
+  MACOSX_DEPLOYMENT_TARGET=13.0 ./Configure darwin64-arm64-cc no-shared no-tests \
+    no-apps no-docs no-module --prefix=$QUALIFICATION_ROOT/openssl-install \
+    --openssldir=$QUALIFICATION_ROOT/openssl-install/ssl -mmacosx-version-min=13.0
+  make -j8 build_sw
+  make install_sw
+
+Result: PASS. The prefix contained libssl.a and libcrypto.a and no OpenSSL dylib.
+
+Ladybug 13.0 replay
+
+  sandbox-exec -p '(version 1) (allow default) (deny network*)' env \
+    CARGO_NET_OFFLINE=true CARGO_TARGET_DIR=$QUALIFICATION_ROOT/target-13_0 \
+    LBUG_BUILD_FROM_SOURCE=1 LBUG_OPENSSL_STATIC_ROOT=$QUALIFICATION_ROOT/openssl-install \
+    MACOSX_DEPLOYMENT_TARGET=13.0 cargo build --manifest-path \
+    $QUALIFICATION_ROOT/probe/Cargo.toml --release --locked --offline
+
+Ladybug CMake configure result: PASS. It selected the exact static OpenSSL 3.5.8 prefix.
+Ladybug compile result: FAIL.
+
+Representative compiler diagnostic (the full Cargo stream was not retained):
+
+  libc++/include/__format/formatter_floating_point.h:60:30:
+  error: 'to_chars' is unavailable: introduced in macOS 13.3
+
+Ladybug 13.3 falsifier
+
+  sandbox-exec -p '(version 1) (allow default) (deny network*)' env \
+    CARGO_NET_OFFLINE=true CARGO_TARGET_DIR=$QUALIFICATION_ROOT/target-13_3 \
+    LBUG_BUILD_FROM_SOURCE=1 LBUG_OPENSSL_STATIC_ROOT=$QUALIFICATION_ROOT/openssl-install \
+    MACOSX_DEPLOYMENT_TARGET=13.3 cargo build --manifest-path \
+    $QUALIFICATION_ROOT/probe/Cargo.toml --release --locked --offline
+
+  sandbox-exec -p '(version 1) (allow default) (deny network*)' \
+    $QUALIFICATION_ROOT/target-13_3/release/lbug_static_probe
+  shasum -a 256 $QUALIFICATION_ROOT/target-13_3/release/lbug_static_probe
+  otool -L $QUALIFICATION_ROOT/target-13_3/release/lbug_static_probe
+  vtool -show-build $QUALIFICATION_ROOT/target-13_3/release/lbug_static_probe
+  nm -u $QUALIFICATION_ROOT/target-13_3/release/lbug_static_probe | \
+    rg 'SSL_|EVP_|BIO_|X509_'
+
+Result: PASS in 2m05s. The probe returned Ladybug version 0.19.1 and storage value 43.
+Binary SHA-256: aea4e12adceea09977a9c4bd913f48beae2f68d0f4be16e1863330c29f693b39
+otool imports: /usr/lib/libc++.1.dylib and /usr/lib/libSystem.B.dylib only
+vtool: minos 13.3, SDK 26.2
+Undefined SSL/EVP/BIO/X509 symbols: none
+
+Calibration
+- Static OpenSSL pass, 13.0 failure, and 13.3 success were observed only on macOS arm64.
+- The Intel consequence is inferred from the shared Apple SDK/libc++ availability contract.
+- The format-site statement is qualitative because the exploratory count was not retained as a
+  stable command with exclusions.
+- The binding patch is a feasibility hook and is not accepted product source.
+- Source-probe Cargo.lock SHA-256: 0b91deadfebe9ea44b26fd0f6e7ea814806f5ada772cad62412d914f9c495b24.
+- The validated temporary patch returns early in the static-prefix branch. Any upstreamed version
+  must preserve the later bundled-dependency branch rather than carrying that latent behavior.

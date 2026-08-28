@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -28,6 +29,46 @@ assert.equal(
   "a7a032d5968ac2260545e8c5cf05a123559de2c6ba2bd0dde11c0ed958dfa172",
 );
 assert.deepEqual(receipt.extensions, []);
+assert.deepEqual(receipt.pinnedSourceCandidate, {
+  openssl: {
+    version: "3.5.8",
+    series: "3.5-LTS",
+    source: "openssl-3.5.8.tar.gz",
+    sha256: "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2",
+    license: "Apache-2.0",
+    endOfLife: "2030-04-08",
+  },
+  observedTarget: "aarch64-apple-darwin",
+  inferredTargets: ["x86_64-apple-darwin"],
+  bindingHookSha256: "d91ee35aecd6423dfcc43a982facab19597b7b0428e4b5b17cdb379bd7be36e2",
+  sourceProbeLockSha256: "0b91deadfebe9ea44b26fd0f6e7ea814806f5ada772cad62412d914f9c495b24",
+  macos13_0: {
+    opensslStaticBuild: "passed",
+    ladybugSourceBuild: "failed",
+    failure: "std-format-requires-macos-13.3",
+  },
+  macos13_3: {
+    ladybugSourceBuild: "passed-with-narrow-binding-hook",
+    binarySha256: "aea4e12adceea09977a9c4bd913f48beae2f68d0f4be16e1863330c29f693b39",
+    imports: ["/usr/lib/libc++.1.dylib", "/usr/lib/libSystem.B.dylib"],
+  },
+});
+const bindingHook = await readFile(resolve(
+  root,
+  "docs/evidence/issue-261-ladybug-probe/static-openssl-build-hook.patch",
+));
+assert.equal(
+  createHash("sha256").update(bindingHook).digest("hex"),
+  receipt.pinnedSourceCandidate.bindingHookSha256,
+);
+const sourceProbeLock = await readFile(resolve(
+  root,
+  "docs/evidence/issue-261-ladybug-probe/source-build-probe/Cargo.lock",
+));
+assert.equal(
+  createHash("sha256").update(sourceProbeLock).digest("hex"),
+  receipt.pinnedSourceCandidate.sourceProbeLockSha256,
+);
 
 const requiredTargets = [
   "aarch64-apple-darwin",
@@ -60,11 +101,28 @@ for (const target of requiredTargets) {
   }
 }
 
-for (const finding of receipt.blockingFindings.filter(({ id }) => id !== "macos-minimum-version-mismatch")) {
+const macOnlyFindingIds = new Set([
+  "macos-minimum-version-mismatch",
+  "source-build-macos-13.0-incompatible",
+]);
+for (const finding of receipt.blockingFindings.filter(({ id }) => !macOnlyFindingIds.has(id))) {
   assert.deepEqual(finding.targets, requiredTargets);
 }
 assert.deepEqual(
+  receipt.blockingFindings.map(({ candidate, id }) => [id, candidate]),
+  [
+    ["external-openssl-runtime", "upstream-release-artifacts"],
+    ["incomplete-native-license-receipts", "upstream-release-artifacts-and-source-candidate"],
+    ["macos-minimum-version-mismatch", "upstream-release-artifacts"],
+    ["source-build-macos-13.0-incompatible", "pinned-source"],
+  ],
+);
+assert.deepEqual(
   receipt.blockingFindings.find(({ id }) => id === "macos-minimum-version-mismatch").targets,
+  requiredTargets.slice(0, 2),
+);
+assert.deepEqual(
+  receipt.blockingFindings.find(({ id }) => id === "source-build-macos-13.0-incompatible").targets,
   requiredTargets.slice(0, 2),
 );
 assert.deepEqual(
@@ -73,6 +131,7 @@ assert.deepEqual(
     "external-openssl-runtime",
     "incomplete-native-license-receipts",
     "macos-minimum-version-mismatch",
+    "source-build-macos-13.0-incompatible",
   ],
 );
 

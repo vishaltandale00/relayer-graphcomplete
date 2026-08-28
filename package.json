@@ -55,7 +55,7 @@
     "eval:basic": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js",
     "eval:basic:live": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --require-configuration --judge-configuration codex-structured",
     "eval:graph-repair:live": "npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --require-configuration --case graph-authoring.replay-repair --judge-configuration none",
-    "lint:ladybug-receipt": "cargo fmt --manifest-path docs/evidence/issue-261-ladybug-probe/Cargo.toml -- --check && node scripts/lint-ladybug-qualification-receipt.mjs",
+    "lint:ladybug-receipt": "cargo fmt --manifest-path docs/evidence/issue-261-ladybug-probe/Cargo.toml -- --check && rustfmt --edition 2021 --check docs/evidence/issue-261-ladybug-probe/source-build-probe/src/main.rs && node scripts/lint-ladybug-qualification-receipt.mjs",
     "desktop:pack": "node desktop/packaging/build-development.mjs",
     "eval-app:pack": "npm run build && node desktop/packaging/build-development.mjs --eval",
     "desktop:dist": "node desktop/release/build-release.mjs stable",
