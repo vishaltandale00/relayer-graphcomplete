@@ -1,0 +1,13 @@
+diff --git a/httpcore/_async/connection.py b/httpcore/_async/connection.py
+index 3aeb8ed..7648658 100644
+--- a/httpcore/_async/connection.py
++++ b/httpcore/_async/connection.py
+@@ -94,7 +94,7 @@ class AsyncHTTPConnection(AsyncConnectionInterface):
+                             stream=stream,
+                             keepalive_expiry=self._keepalive_expiry,
+                         )
+-                except Exception as exc:
++                except BaseException as exc:
+                     self._connect_failed = True
+                     raise exc
+             elif not self._connection.is_available():

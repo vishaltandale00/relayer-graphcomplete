@@ -1,0 +1,16 @@
+diff --git a/httpcore/_async/connection_pool.py b/httpcore/_async/connection_pool.py
+index 0320c6d..f22f200 100644
+--- a/httpcore/_async/connection_pool.py
++++ b/httpcore/_async/connection_pool.py
+@@ -170,5 +170,5 @@ class AsyncConnectionPool(AsyncRequestInterface):
+         # If the pool is currently full, attempt to close one idle connection.
+-        if len(self._pool) >= self._max_connections:
++        if len(self._pool) > self._max_connections:
+             for idx, connection in reversed(list(enumerate(self._pool))):
+                 if connection.is_idle():
+                     await connection.aclose()
+@@ -178,3 +178,3 @@ class AsyncConnectionPool(AsyncRequestInterface):
+         # If the pool is still full, then we cannot acquire a connection.
+-        if len(self._pool) >= self._max_connections:
++        if len(self._pool) > self._max_connections:
+             return False

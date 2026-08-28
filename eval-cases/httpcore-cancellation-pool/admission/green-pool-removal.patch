@@ -1,0 +1,14 @@
+diff --git a/httpcore/_async/connection_pool.py b/httpcore/_async/connection_pool.py
+index 0320c6d..e752a08 100644
+--- a/httpcore/_async/connection_pool.py
++++ b/httpcore/_async/connection_pool.py
+@@ -265,6 +265,9 @@ class AsyncConnectionPool(AsyncRequestInterface):
+             except BaseException as exc:
+                 with AsyncShieldCancellation():
+                     await self.response_closed(status)
++                    async with self._pool_lock:
++                        if connection in self._pool:
++                            self._pool.remove(connection)
+                 raise exc
+             else:
+                 break

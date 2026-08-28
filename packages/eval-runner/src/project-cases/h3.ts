@@ -175,7 +175,7 @@ export interface CommandResult {
 export type CommandRunner = (
   command: string,
   args: readonly string[],
-  options: { readonly cwd: string; readonly env?: Readonly<Record<string, string>> },
+  options: { readonly cwd: string; readonly env?: Readonly<Record<string, string>>; readonly timeoutMs?: number },
 ) => Promise<CommandResult>;
 
 export function h3VerifierDigest(): `sha256:${string}` {

@@ -2143,6 +2143,27 @@ settings:
 </tbody></table>
 <p>Each thread may contain multiple turns. An analytical follow-up may ask the harness to inspect more deeply, challenge its prior answer, or refine an accepted graph. A mutating follow-up that requires another commit must introduce a meaningful additional requirement. It must not reward an empty or cosmetic commit merely to satisfy turn count. The execution records each turn, repository state, commit boundary, and accepted graph independently. Earlier accepted turn displays remain immutable.</p>
 <p>The catalog verifies every object digest before use and garbage-collects only unreferenced materializations and runs according to an explicit retention policy. Checked-in case/config/judge JSON stays small enough to review normally in pull requests.</p>
+<h3>13.2.2 Real-repository verifier admission</h3>
+<p>The first admitted real-repository debugging pattern is <code>autonomous.httpcore.cancellation-poisoned-pool</code>. It binds the BSD-3-Clause HTTPCore 1.0.2 pre-fix commit <code>79fa6bf0dfcf3820d1ae7e52a2d268f33022c5a4</code>, tree <code>834aaf7041c78aa49597e691e6ce9fc41d6c0bc6</code>, CPython 3.12.2, and a hash-locked dependency set. The visible task requires cancellation during connection setup to release a one-connection pool slot, allow a later request, survive repeated cancellation, preserve regressions, and clean up. It does not prescribe the source patch.</p>
+<p>The evaluator supplies one code-owned <code>AsyncNetworkBackend</code> wrapper. It signals only after the public <code>connect_tcp</code> boundary is entered, then the evaluator cancels that exact request. Later connects use HTTPCore's public AnyIO backend against a real server bound to <code>127.0.0.1</code>. No live service, account, secret, ambient Python package, probabilistic timing, candidate-private hook, source-text match, or reference-patch comparison participates in qualification.</p>
+<p>The authority boundary is behavioral verifier admission, not hostile-code sandbox certification. Candidate bytes execute in an isolated Python worker with bounded processes, frozen evaluator entry points, separate loopback servers, and frozen upstream tests. The portfolio must reject the checked practical evaluator-hook mutants, but arbitrary process-internal sabotage remains an explicit unresolved limitation owned by future host execution isolation rather than by this case's source verifier.</p>
+<p>A candidate verifier is not admitted merely because one preferred fix passes. Admission requires all of the following:</p>
+<ol>
+<li>Define each observable promise, failure boundary, compatibility boundary, and authority boundary before qualification.</li>
+<li>Map every checkpoint to the smallest deterministic check at the real public seam.</li>
+<li>Observe behavior, durable state, or artifact output; never match source text or resemblance to a reference patch.</li>
+<li>Keep the untouched immutable fixture red for the intended reason.</li>
+<li>Keep at least two materially different reasonable solutions green.</li>
+<li>Reject adversarial shortcuts, including candidate-root and candidate-package evaluator hooks, one-shot recovery, exceeding the configured pool capacity, and clearing bookkeeping without closing the transport.</li>
+<li>Use a boundary matrix rather than one privileged request example.</li>
+<li>Keep mandatory qualification predicates separate from quality diagnostics.</li>
+<li>State delivery constraints in the visible task; do not enforce an undisclosed exact-file allowlist.</li>
+<li>Apply only committed candidate changes to a pristine verifier workspace.</li>
+<li>Record cancellation, slot release, later success, repetition, cleanup, regression safety, and committed cleanliness independently so one failure cannot hide another.</li>
+<li>Content-address the source tree, environment lock, task, reference, verifier, rubric, and complete case snapshot.</li>
+<li>Record adversarial review against the exact source digest and preserve unresolved findings.</li>
+</ol>
+<p>This case remains <code>candidate</code>. Its admission portfolio establishes verifier discrimination; it does not promote a harness, certify all HTTPCore cancellation behavior, or create the shared ten-case suite manifest.</p>
 <h3>13.3 Runner execution</h3>
 <p>Local commands are standardized target interfaces:</p>
 <pre><code class="language-sh">npm run eval -- --case empty-project.task-system.two-turn --configuration codex-basic

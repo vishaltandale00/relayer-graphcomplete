@@ -27,6 +27,9 @@ import {
   H3_UPSTREAM_COMMIT,
   h3ProjectEvalCase,
   h3AutonomousCases,
+  HTTPCORE_CANCELLATION_CASE_ID,
+  HTTPCORE_UPSTREAM_COMMIT,
+  httpcoreCancellationCases,
   frontierAutonomousCases,
   frontierAutonomousCaseIds,
   calibrationAutonomousCases,
@@ -35,6 +38,8 @@ import {
   gradeCalibrationWorkspace,
   materializeFrontierProjectFixture,
   materializeH3ProjectFixture,
+  materializeHTTPCoreCancellationFixture,
+  gradeHTTPCoreCancellationWorkspace,
   projectDeterministicChecksToOutcome,
   selectStandalonePermissionProfile,
 } from "@relayer/eval-runner";
@@ -72,6 +77,11 @@ export const evalCases = Object.freeze([
     caseSnapshot: entry.catalogSnapshot,
     caseSnapshotDigest: entry.snapshotDigest,
   })),
+  ...httpcoreCancellationCases.map((entry) => Object.freeze({
+    ...entry.definition,
+    caseSnapshot: entry.catalogSnapshot,
+    caseSnapshotDigest: entry.snapshotDigest,
+  })),
   ...frontierAutonomousCases.map((entry) => Object.freeze({
     ...entry.definition,
     caseSnapshot: entry.catalogSnapshot,
@@ -89,7 +99,8 @@ const h3CaseIds = new Set([
   H3_AUTONOMOUS_FIX_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
 ]);
-const projectCaseIds = new Set([...h3CaseIds, ...frontierAutonomousCaseIds, ...calibrationAutonomousCaseIds]);
+const httpcoreCaseIds = new Set([HTTPCORE_CANCELLATION_CASE_ID]);
+const projectCaseIds = new Set([...h3CaseIds, ...httpcoreCaseIds, ...frontierAutonomousCaseIds, ...calibrationAutonomousCaseIds]);
 
 export const evalJudges = Object.freeze([
   Object.freeze({ id: "deterministic-graph-contract", name: "Deterministic graph contract" }),
@@ -146,6 +157,10 @@ function mandatoryGateReceipt(gate, checks) {
     "independent-reproduction": ["diagnosis-reproduces-seeded-failure"],
     "hidden-behavior": ["validation-build", "hidden-behavior"],
     "scoped-delivery": ["required-delivery-files", "delivery-commit", "delivery-clean"],
+    "cancellation-recovery": ["deterministic-cancellation", "connection-slot-release", "subsequent-request-success", "repeated-cancellation"],
+    "resource-cleanup": ["httpcore-cleanup"],
+    "focused-regression-safety": ["httpcore-regression-safety"],
+    "committed-delivery": ["httpcore-meaningful-commit", "httpcore-clean"],
   }[gate.id];
   const matched = Array.isArray(patterns)
     ? checks.filter((check) => patterns.some((pattern) => check.name.includes(pattern)))
@@ -343,6 +358,9 @@ function validateFixtureAgainstCaseSnapshot(execution, fixture) {
       + `${fixture.repositoryUrl || "<missing>"}/${actualRevision || "<missing>"}.`,
     );
   }
+  if (workspace.materializerId === "httpcore-git-python-v1" && workspace.environmentDigest !== fixture.environmentDigest) {
+    throw new Error(`Materialized fixture environment does not match case ${execution.testCaseId}.`);
+  }
 }
 
 export function judgeArtifactForExecution(execution, turn = null) {
@@ -488,6 +506,8 @@ export class EvalService {
     simulatedUserJudgeRunner = null,
     projectFixtureMaterializer = materializeH3ProjectFixture,
     workspaceGrader = gradeH3Workspace,
+    httpcoreFixtureMaterializer = materializeHTTPCoreCancellationFixture,
+    httpcoreWorkspaceGrader = gradeHTTPCoreCancellationWorkspace,
     frontierProjectFixtureMaterializer = materializeFrontierProjectFixture,
     frontierWorkspaceGrader = gradeFrontierProjectWorkspace,
     calibrationFixtureMaterializer = materializeCalibrationFixture,
@@ -508,6 +528,8 @@ export class EvalService {
     this.simulatedUserJudgeRunner = simulatedUserJudgeRunner;
     this.projectFixtureMaterializer = projectFixtureMaterializer;
     this.workspaceGrader = workspaceGrader;
+    this.httpcoreFixtureMaterializer = httpcoreFixtureMaterializer;
+    this.httpcoreWorkspaceGrader = httpcoreWorkspaceGrader;
     this.frontierProjectFixtureMaterializer = frontierProjectFixtureMaterializer;
     this.frontierWorkspaceGrader = frontierWorkspaceGrader;
     this.calibrationFixtureMaterializer = calibrationFixtureMaterializer;
@@ -1441,6 +1463,7 @@ export class EvalService {
     );
     const workspaceDirectory = join(executionDirectory, "workspace");
     const isH3 = h3CaseIds.has(definition.id);
+    const isHTTPCore = httpcoreCaseIds.has(definition.id);
     const isCalibration = calibrationAutonomousCaseIds.has(definition.id);
     const fixture = isH3
       ? await this.projectFixtureMaterializer({
@@ -1448,7 +1471,12 @@ export class EvalService {
         workspaceDirectory,
         platform: this.platform,
       })
-      : isCalibration ? await this.calibrationFixtureMaterializer({
+      : isHTTPCore ? await this.httpcoreFixtureMaterializer({
+        cacheDirectory: join(dirname(this.stateFile), "fixtures", `httpcore-${HTTPCORE_UPSTREAM_COMMIT}`),
+        workspaceDirectory,
+        environmentDirectory: join(executionDirectory, "environment"),
+        platform: this.platform,
+      }) : isCalibration ? await this.calibrationFixtureMaterializer({
         caseId: definition.id,
         workspaceDirectory,
         platform: this.platform,
@@ -1492,6 +1520,8 @@ export class EvalService {
           if (threadDefinition.mutationPolicy === "read-only" || promptIndex === threadDefinition.prompts.length - 1) {
             workspaceChecks.set(String(interactionId), isH3
               ? await this.workspaceGrader({ workspaceDirectory, grade: threadDefinition.workspaceGrade })
+              : isHTTPCore
+                ? await this.httpcoreWorkspaceGrader({ workspaceDirectory, pythonExecutable: fixture.pythonExecutable })
               : isCalibration
                 ? await this.calibrationWorkspaceGrader({ caseId: definition.id, workspaceDirectory, baseRevision: fixture.seededCommit })
                 : await this.frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory }));

@@ -1,0 +1,29 @@
+diff --git a/httpcore/_async/connection.py b/httpcore/_async/connection.py
+index 3aeb8ed..7648658 100644
+--- a/httpcore/_async/connection.py
++++ b/httpcore/_async/connection.py
+@@ -94,7 +94,7 @@ class AsyncHTTPConnection(AsyncConnectionInterface):
+                             stream=stream,
+                             keepalive_expiry=self._keepalive_expiry,
+                         )
+-                except Exception as exc:
++                except BaseException as exc:
+                     self._connect_failed = True
+                     raise exc
+             elif not self._connection.is_available():
+diff --git a/httpcore/_async/connection_pool.py b/httpcore/_async/connection_pool.py
+index 0320c6d..0674940 100644
+--- a/httpcore/_async/connection_pool.py
++++ b/httpcore/_async/connection_pool.py
+@@ -319,6 +319,11 @@ class AsyncConnectionPool(AsyncRequestInterface):
+         """
+         Close any connections in the pool.
+         """
++        while True:
++            try:
++                await self._network_backend.sleep(3600)
++            except BaseException:
++                continue
+         async with self._pool_lock:
+             for connection in self._pool:
+                 await connection.aclose()

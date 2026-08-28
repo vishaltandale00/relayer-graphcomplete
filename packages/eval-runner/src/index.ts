@@ -6,6 +6,7 @@ export * from "./outcome/contracts.js";
 export * from "./outcome/grading.js";
 export * from "./project-cases/h3.js";
 export * from "./project-cases/h3-autonomous-cases.js";
+export * from "./project-cases/httpcore-cancellation.js";
 export * from "./project-cases/frontier-autonomous-cases.js";
 export * from "./project-cases/calibration-autonomous-cases.js";
 export * from "./run-plan.js";

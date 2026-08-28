@@ -6,6 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   H3_AUTONOMOUS_FIX_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
+  HTTPCORE_CANCELLATION_CASE_ID,
+  HTTPCORE_REPOSITORY_URL,
+  HTTPCORE_UPSTREAM_COMMIT,
+  HTTPCORE_UPSTREAM_TREE,
   HTTPX_PROXY_AUTH_REPORT_CASE_ID,
   OFETCH_RETRY_METHODS_CASE_ID,
   SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
@@ -32,6 +36,37 @@ afterEach(async () => {
 });
 
 describe("EvalService simulated-user result persistence", () => {
+  it("fails closed when the HTTPCore materializer environment does not match the immutable case", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    globalThis.fetch = fakeAcceptedProduct();
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      httpcoreFixtureMaterializer: async ({ workspaceDirectory, environmentDirectory }) => {
+        await mkdir(workspaceDirectory, { recursive: true });
+        await mkdir(environmentDirectory, { recursive: true });
+        return {
+          workspaceDirectory,
+          environmentDirectory,
+          pythonExecutable: join(environmentDirectory, "bin", "python"),
+          repositoryUrl: HTTPCORE_REPOSITORY_URL,
+          upstreamCommit: HTTPCORE_UPSTREAM_COMMIT,
+          seededTree: HTTPCORE_UPSTREAM_TREE,
+          sourceRevision: `git-tree:${HTTPCORE_UPSTREAM_TREE}`,
+          environmentDigest: "sha256:wrong-environment",
+        };
+      },
+    }).open();
+    const completed = await waitForCompletedRun(service, (await service.createRun({
+      testCaseIds: [HTTPCORE_CANCELLATION_CASE_ID],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).id);
+    expect(completed.status).toBe("error");
+    expect(completed.executions[0].error).toContain("Materialized fixture environment does not match");
+  });
+
   it("normalizes each selected recursive review by its own schema in a mixed-history projection", () => {
     const legacy = {
       status: "completed",
@@ -171,6 +206,7 @@ describe("EvalService simulated-user result persistence", () => {
     expect(service.catalog().cases.filter(({ caseSnapshot }) => caseSnapshot).map(({ id }) => id)).toEqual([
       H3_AUTONOMOUS_FIX_CASE_ID,
       H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
+      HTTPCORE_CANCELLATION_CASE_ID,
       OFETCH_RETRY_METHODS_CASE_ID,
       TRUE_MYTH_INSPECT_BOTH_CASE_ID,
       SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
