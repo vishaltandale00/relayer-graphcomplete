@@ -219,6 +219,17 @@ export interface HarnessManagedRuntimeAccess {
   readonly executable: string;
   readonly moduleUrl?: string;
   readonly environment: Readonly<Record<string, string>>;
+  /**
+   * Provider-native subscription access resolved from the exact Relayer
+   * provider definition. It is execution-scoped, never harness state, and lets
+   * recursive harnesses use their native subscription transport without
+   * consulting an ambient provider profile.
+   */
+  readonly nativeRequestAccess?: {
+    readonly kind: "secret";
+    readonly contract: "secret@1";
+    readonly apiKey: string;
+  };
 }
 
 export type HarnessExecutionAccess =
@@ -250,6 +261,11 @@ export type HarnessExecutionAccess =
           readonly executable?: never;
           readonly moduleUrl?: never;
           readonly environment: Readonly<Record<string, string>>;
+          readonly nativeRequestAccess?: {
+            readonly kind: "secret";
+            readonly contract: "secret@1";
+            readonly apiKey: string;
+          };
         }
     ));
 

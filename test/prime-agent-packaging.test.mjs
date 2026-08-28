@@ -109,7 +109,7 @@ describe("Prime Agent packaged runtime", () => {
       kind: "python",
       python: { importName: "browser" },
     });
-    for (const name of ["prime-agent-basic.yaml", "prime-agent-deep.yaml"]) {
+    for (const name of ["prime-agent.yaml", "prime-agent-deep.yaml"]) {
       const configuration = await readFile(join(repositoryRoot, "harnesses", name), "utf8");
       expect(configuration).toContain("ask:\n    boundary: workspace-write@1");
       expect(configuration).toContain("auto:\n    boundary: workspace-write@1");
@@ -156,7 +156,7 @@ describe("Prime Agent packaged runtime", () => {
     })).resolves.toMatchObject({
       available: true,
       sourceCommit: "f6130839ad3043f1cd3d5294fe03023035bfcd5c",
-      configurationNames: ["prime-agent-basic", "prime-agent-deep"],
+      configurationNames: ["prime-agent"],
     });
 
     const rejected = await inspectPrimeAgentRuntime({
@@ -187,7 +187,7 @@ describe("Prime Agent packaged runtime", () => {
   it("rejects manifests that duplicate configurations or weaken the runtime API", async () => {
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     for (const mutate of [
-      (candidate) => { candidate.harnessConfigurations = ["prime-agent-basic.yaml", "prime-agent-basic.yaml"]; },
+      (candidate) => { candidate.harnessConfigurations = ["prime-agent.yaml", "prime-agent.yaml"]; },
       (candidate) => { candidate.runtimeContract.constants = {}; },
       (candidate) => { candidate.runtimeContract.functions = []; },
       (candidate) => { candidate.runtimeContract.sessionFunctions = []; },
@@ -283,7 +283,8 @@ describe("Prime Agent packaged runtime", () => {
       await mkdir(join(resources, "harnesses"), { recursive: true });
       await mkdir(join(resources, "python", "relayer-graph", "src"), { recursive: true });
       await cp(manifestPath, join(resources, "prime-agent", "manifest.json"));
-      for (const name of ["prime-agent-basic.yaml", "prime-agent-deep.yaml"]) {
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      for (const name of manifest.harnessConfigurations) {
         await cp(join(repositoryRoot, "harnesses", name), join(resources, "harnesses", name));
       }
       await cp(
@@ -291,7 +292,6 @@ describe("Prime Agent packaged runtime", () => {
         join(resources, "python", "relayer-graph", "src", "relayer_graph"),
         { recursive: true },
       );
-      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
       const packagedEntries = new Set((await Promise.all(manifest.packages.map(async (entry) => {
         const prefix = `node_modules/${entry.name}/`;
         return (await packageFileEntries(
@@ -360,7 +360,7 @@ describe("Prime Agent packaged runtime", () => {
         targetKey: "darwin-arm64",
       })).rejects.toThrow("package metadata mismatch");
 
-      await writeFile(join(resources, "harnesses", "prime-agent-basic.yaml"), "mutated\n");
+      await writeFile(join(resources, "harnesses", "prime-agent.yaml"), "mutated\n");
       await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
         extractPackageFile,
         vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
@@ -375,7 +375,7 @@ describe("Prime Agent packaged runtime", () => {
         platform: "darwin",
         architecture: "arm64",
       })).resolves.toMatchObject({ available: false, code: "prime_agent_assets_missing" });
-      await rm(join(resources, "harnesses", "prime-agent-basic.yaml"));
+      await rm(join(resources, "harnesses", "prime-agent.yaml"));
       await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
         extractPackageFile,
         vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
@@ -505,7 +505,7 @@ describe("Prime Agent packaged runtime", () => {
         ),
       })).resolves.toMatchObject({
         available: true,
-        configurationNames: ["prime-agent-basic", "prime-agent-deep"],
+        configurationNames: ["prime-agent"],
       });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -531,7 +531,7 @@ describe("Prime Agent packaged runtime", () => {
     expect(JSON.stringify(rejected)).not.toContain("secret import detail");
   });
 
-  it("packages basic and deep without the development layered configuration", () => {
+  it("packages only the product Prime configuration", () => {
     const contract = resolveDesktopReleaseContract({
       environment: { RELAYER_DESKTOP_TARGET: "macos-arm64" },
       version: "0.2.14",
@@ -541,8 +541,8 @@ describe("Prime Agent packaged runtime", () => {
       argv: [],
     });
     const resources = config.extraResources.map(({ to }) => to);
-    expect(resources).toContain("harnesses/prime-agent-basic.yaml");
-    expect(resources).toContain("harnesses/prime-agent-deep.yaml");
+    expect(resources).toContain("harnesses/prime-agent.yaml");
+    expect(resources).not.toContain("harnesses/prime-agent-deep.yaml");
     expect(resources).not.toContain("harnesses/prime-agent-layered-navigation-luna.yaml");
     expect(resources).toContain("python/relayer-graph/src/relayer_graph");
     expect(resources).toContain("prime-agent/manifest.json");

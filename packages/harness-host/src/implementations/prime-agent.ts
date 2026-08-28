@@ -213,6 +213,7 @@ interface PrimeAgentModel {
 
 interface PrimeAdapterMapping {
   readonly api: string;
+  readonly baseUrl?: string;
   readonly compat?: Readonly<Record<string, unknown>>;
 }
 
@@ -229,6 +230,14 @@ const PRIME_ADAPTERS: Readonly<Record<string, PrimeAdapterMapping>> = Object.fre
   "anthropic-api": Object.freeze({ api: "anthropic-messages" }),
   openrouter: Object.freeze({ api: "openai-completions", compat: Object.freeze({ thinkingFormat: "openrouter", openRouterRouting: Object.freeze({}) }) }),
   "vercel-ai-router": Object.freeze({ api: "openai-completions", compat: Object.freeze({ vercelGatewayRouting: Object.freeze({}) }) }),
+  "codex-subscription": Object.freeze({
+    api: "openai-codex-responses",
+    baseUrl: "https://chatgpt.com/backend-api/codex",
+  }),
+  "claude-subscription": Object.freeze({
+    api: "anthropic-messages",
+    baseUrl: "https://api.anthropic.com",
+  }),
 });
 
 export class PrimeAgentHarness implements Harness {
@@ -1159,8 +1168,9 @@ function createPrimeAgentModelScope(context: HarnessRunContext, primeAgent: Prim
     const access = bundle.byProviderId[route.providerId];
     if (access === undefined) throw new Error(`prime.agent is missing upfront access for provider ${route.providerId}`);
     validatePrimeAgentAccess(route, access);
-    sensitiveValues.add(access.endpoint);
-    sensitiveValues.add(requiredApiKey(access));
+    const requestAccess = primeAgentRequestAccess(access);
+    sensitiveValues.add(requestAccess.apiKey);
+    if (access.kind === "secret") sensitiveValues.add(access.endpoint);
     const previous = providerRoutes.get(route.providerId);
     if (previous !== undefined
       && (previous.adapterId !== route.adapterId
@@ -1174,11 +1184,7 @@ function createPrimeAgentModelScope(context: HarnessRunContext, primeAgent: Prim
     if (allowedNativeModels.has(nativeIdentity)) throw new Error("prime.agent family maps to a duplicate native model");
     allowedNativeModels.add(nativeIdentity);
     routeByNativeModel.set(nativeIdentity, route);
-    requestAccessByNativeModel.set(nativeIdentity, Object.freeze({
-      kind: "secret",
-      contract: "secret@1",
-      apiKey: requiredApiKey(access),
-    }));
+    requestAccessByNativeModel.set(nativeIdentity, requestAccess);
     return model;
   });
   const rootIndex = plan.roster.findIndex((route) => admittedRouteIdentity(route) === orchestratorIdentity);
@@ -1203,12 +1209,9 @@ function createPrimeAgentModelScope(context: HarnessRunContext, primeAgent: Prim
   });
 }
 
-function validatePrimeAgentAccess(route: HarnessAdmittedModelRoute, access: HarnessExecutionAccess): asserts access is Extract<HarnessExecutionAccess, { kind: "secret" }> {
+function validatePrimeAgentAccess(route: HarnessAdmittedModelRoute, access: HarnessExecutionAccess): void {
   if (PRIME_ADAPTERS[route.adapterId] === undefined) {
     throw new Error(`prime.agent does not support provider adapter ${route.adapterId}`);
-  }
-  if (route.accessContract !== "secret@1" || access.kind !== "secret" || access.contract !== "secret@1") {
-    throw new Error(`prime.agent adapter ${route.adapterId} requires secret@1 access`);
   }
   if (route.adapterImplementationVersion !== "1") {
     throw new Error(`prime.agent does not support ${route.adapterId} implementation ${route.adapterImplementationVersion}`);
@@ -1218,6 +1221,18 @@ function validatePrimeAgentAccess(route: HarnessAdmittedModelRoute, access: Harn
     || access.adapterImplementationVersion !== route.adapterImplementationVersion) {
     throw new Error(`prime.agent access does not match admitted provider ${route.providerId}`);
   }
+  if (route.adapterId === "codex-subscription" || route.adapterId === "claude-subscription") {
+    if (route.accessContract !== "managed-runtime@1"
+      || access.kind !== "managed-runtime"
+      || access.contract !== "managed-runtime@1") {
+      throw new Error(`prime.agent adapter ${route.adapterId} requires managed-runtime@1 access`);
+    }
+    primeAgentRequestAccess(access);
+    return;
+  }
+  if (route.accessContract !== "secret@1" || access.kind !== "secret" || access.contract !== "secret@1") {
+    throw new Error(`prime.agent adapter ${route.adapterId} requires secret@1 access`);
+  }
   const fields = Object.keys(access.fields);
   if (fields.length !== 1 || fields[0] !== "api-key") {
     throw new Error(`prime.agent adapter ${route.adapterId} requires exactly the api-key secret field`);
@@ -1226,10 +1241,10 @@ function validatePrimeAgentAccess(route: HarnessAdmittedModelRoute, access: Harn
   requiredApiKey(access);
 }
 
-function primeAgentModel(route: HarnessAdmittedModelRoute, access: Extract<HarnessExecutionAccess, { kind: "secret" }>): PrimeAgentModel {
+function primeAgentModel(route: HarnessAdmittedModelRoute, access: HarnessExecutionAccess): PrimeAgentModel {
   const mapping = PRIME_ADAPTERS[route.adapterId];
   if (mapping === undefined) throw new Error(`prime.agent does not support provider adapter ${route.adapterId}`);
-  const capabilities = access.modelCapabilities !== undefined
+  const capabilities = access.kind === "secret" && access.modelCapabilities !== undefined
     && Object.hasOwn(access.modelCapabilities, route.modelId)
     ? access.modelCapabilities[route.modelId]
     : undefined;
@@ -1247,7 +1262,7 @@ function primeAgentModel(route: HarnessAdmittedModelRoute, access: Extract<Harne
     name: route.modelId,
     api: mapping.api,
     provider: nativePrimeProviderId(route),
-    baseUrl: primeAgentExecutionBaseUrl(route.adapterId, access.endpoint),
+    baseUrl: mapping.baseUrl ?? primeAgentExecutionBaseUrl(route.adapterId, secretEndpoint(access)),
     // Use exact provider-discovered limits when the execution lease carries
     // them. Keep the legacy conservative values when discovery has no limits;
     // model IDs are never used to infer capabilities.
@@ -1262,6 +1277,25 @@ function primeAgentModel(route: HarnessAdmittedModelRoute, access: Extract<Harne
       : 4_096,
     ...(mapping.compat === undefined ? {} : { compat: mapping.compat }),
   });
+}
+
+function primeAgentRequestAccess(access: HarnessExecutionAccess): PrimeAgentRequestAccess {
+  if (access.kind === "secret") {
+    return Object.freeze({ kind: "secret", contract: "secret@1", apiKey: requiredApiKey(access) });
+  }
+  const request = access.nativeRequestAccess;
+  if (request?.kind !== "secret"
+    || request.contract !== "secret@1"
+    || typeof request.apiKey !== "string"
+    || request.apiKey.trim() === "") {
+    throw new Error(`prime.agent adapter ${access.adapterId} requires exact provider-native subscription access`);
+  }
+  return Object.freeze({ kind: "secret", contract: "secret@1", apiKey: request.apiKey });
+}
+
+function secretEndpoint(access: HarnessExecutionAccess): string {
+  if (access.kind !== "secret") throw new Error(`prime.agent adapter ${access.adapterId} has no secret endpoint`);
+  return access.endpoint;
 }
 
 function primeAgentExecutionBaseUrl(adapterId: string, endpoint: string): string {

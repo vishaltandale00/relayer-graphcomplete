@@ -47,7 +47,7 @@ export class RelayerAppServerService {
     webDirectory,
     permissionCatalogPath,
     runtimeSession = null,
-    defaultHarnessConfiguration = "codex-basic",
+    defaultHarnessConfiguration = "codex",
     allowHarnessOverride = false,
     allowConversationImport = false,
     enableReadOnlySession = false,

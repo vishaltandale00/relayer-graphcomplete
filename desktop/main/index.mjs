@@ -13,6 +13,7 @@ import {
 import { createProviderComposition } from "./providers/provider-composition.mjs";
 import { createProviderDiagnosticsLog } from "./providers/provider-diagnostics-log.mjs";
 import { createProviderRuntimeStateRemover } from "./providers/provider-runtime-state.mjs";
+import { createPrimeSubscriptionProfile } from "./providers/prime-subscription-profile.mjs";
 import {
   createEncryptedCredentialStore,
 } from "./providers/provider-definition-store.mjs";
@@ -129,7 +130,7 @@ const defaultHarnessConfiguration = resolveDesktopHarnessConfiguration({
   isPackaged: app.isPackaged,
   environment: process.env,
 });
-if (defaultHarnessConfiguration.startsWith("prime-agent-")) requirePrimeAgentRuntime(primeAgentRuntime);
+if (defaultHarnessConfiguration === "prime-agent") requirePrimeAgentRuntime(primeAgentRuntime);
 
 let mainWindow;
 const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => mainWindow });
@@ -148,11 +149,11 @@ if (primaryInstance) {
     graphServerBinary: relayerGraphServerBinary,
     configurationPaths: [...new Set([
       defaultHarnessConfiguration,
-      "codex-basic",
-      "claude-basic",
+      "codex",
+      "claude",
       ...(primeAgentRuntime.available ? primeAgentRuntime.configurationNames : []),
     ])].map((name) => join(harnessDirectory, `${name}.yaml`)),
-    unavailableConfigurations: primeAgentRuntime.available ? [] : ["prime-agent-basic", "prime-agent-deep"].map((name) => ({
+    unavailableConfigurations: primeAgentRuntime.available ? [] : ["prime-agent"].map((name) => ({
       name,
       reason: { code: primeAgentRuntime.code, message: primeAgentRuntime.message },
       diagnostics: primeAgentRuntime.diagnostics,
@@ -308,7 +309,7 @@ if (primaryInstance) {
       permissionCatalogPath,
       runtimeSession,
       defaultHarnessConfiguration,
-      allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-"),
+      allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration === "prime-agent",
       exportProducer: {
         desktopVersion: app.getVersion(),
         buildCommit: metadata.relayerReleaseSourceCommit || "development",
@@ -327,19 +328,39 @@ if (primaryInstance) {
     const publishCatalog = (snapshot, { signal } = {}) => (
       productServer.publishProviderCatalog(snapshot, { signal })
     );
-    providerComposition = createProviderComposition({
-      registry: productionProviderAdapterRegistry,
-      definitionStore: productServer.providerDefinitionStore(),
+    const providerCredentialStore = createEncryptedCredentialStore({
+      path: join(userDataPath, "provider-credentials.json"),
+      encrypt: async (value) => safeStorage.encryptString(value).toString("base64"),
+      decrypt: async (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
+    });
+    const primeSubscriptionProfile = createPrimeSubscriptionProfile({
       credentialStore: createEncryptedCredentialStore({
-        path: join(userDataPath, "provider-credentials.json"),
+        path: join(userDataPath, "prime-subscription-credentials.json"),
         encrypt: async (value) => safeStorage.encryptString(value).toString("base64"),
         decrypt: async (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
       }),
+    });
+    const runtimeStateRemover = createProviderRuntimeStateRemover({
+      runtimeRoot: providerRuntimeRoot,
+      registry: productionProviderAdapterRegistry,
+    });
+    const removeRuntimeState = async (definition) => {
+      await primeSubscriptionProfile.logout(definition.id);
+      return runtimeStateRemover(definition);
+    };
+    removeRuntimeState.reconcile = async (definitions) => {
+      const [runtimeRemoved, profileRemoved] = await Promise.all([
+        runtimeStateRemover.reconcile(definitions),
+        primeSubscriptionProfile.reconcile(definitions),
+      ]);
+      return [...runtimeRemoved, ...profileRemoved];
+    };
+    providerComposition = createProviderComposition({
+      registry: productionProviderAdapterRegistry,
+      definitionStore: productServer.providerDefinitionStore(),
+      credentialStore: providerCredentialStore,
       diagnostics: providerDiagnostics,
-      removeRuntimeState: createProviderRuntimeStateRemover({
-        runtimeRoot: providerRuntimeRoot,
-        registry: productionProviderAdapterRegistry,
-      }),
+      removeRuntimeState,
       providerStatuses: () => productServer.providerStatuses(),
       runtimeDependencies: async (definition) => {
         const requirement = managedRuntimeRequirementForHarness(
@@ -354,6 +375,7 @@ if (primaryInstance) {
           legacyCodexHome,
           environment: process.env,
           managedRuntime,
+          primeSubscriptionProfile,
         });
       },
       prepareRuntime: async ({ adapterId }) => {

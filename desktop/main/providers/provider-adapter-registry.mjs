@@ -35,6 +35,7 @@ export const PROVIDER_ADAPTER_SUPPORT_MODULES = Object.freeze([
   "providers/implementations/managed-runtime-contract.mjs",
   "providers/implementations/api-provider-adapter.mjs",
   "providers/implementations/managed-subscription-adapter.mjs",
+  "providers/prime-subscription-profile.mjs",
 ]);
 
 export const PACKAGED_PROVIDER_MODULES = Object.freeze([
@@ -87,6 +88,9 @@ const PRODUCTION_RUNTIME_DEPENDENCIES = Object.freeze({
         ...managedRuntimeEnvironment(context.environment),
         CLAUDE_CONFIG_DIR: claudeHome,
       }, { platform: context.platform }),
+      ...(context.primeSubscriptionProfile
+        ? { primeSubscriptionProfile: context.primeSubscriptionProfile }
+        : {}),
     };
   },
 });

@@ -35,9 +35,22 @@ export const codexSubscriptionDescriptor = Object.freeze({
       executionAccess: async ({ signal } = {}) => {
         const account = await credentials.account({ signal });
         if (account?.status !== "connected") throw new Error("Codex subscription is not connected.");
+        let nativeRequestAccess;
+        try {
+          nativeRequestAccess = typeof credentials.nativeRequestAccess === "function"
+            ? await credentials.nativeRequestAccess({ signal })
+            : undefined;
+        } catch (error) {
+          if (signal?.aborted) throw error;
+          // The managed Codex profile remains valid for codex.basic. Prime
+          // compatibility fails independently when provider-native access is
+          // absent from the execution lease.
+          nativeRequestAccess = undefined;
+        }
         return Object.freeze({
           kind: "managed-runtime",
           ...managedRuntimeExecutionDetails(managedRuntime, credentials.environment),
+          ...(nativeRequestAccess === undefined ? {} : { nativeRequestAccess }),
         });
       },
       close: () => credentials.close(),

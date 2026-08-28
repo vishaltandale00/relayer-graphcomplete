@@ -303,6 +303,8 @@ function executionEnvironment(
     // Provider definitions store the catalog/API prefix (for example `/v1`), while
     // Claude Code appends the Anthropic API version path itself.
     environment.ANTHROPIC_BASE_URL = access.endpoint.replace(/\/v1\/?$/, "");
+  } else if (access.nativeRequestAccess) {
+    environment.ANTHROPIC_AUTH_TOKEN = access.nativeRequestAccess.apiKey;
   }
   environment.DISABLE_AUTOUPDATER = "1";
   environment.RELAYER_GRAPH_URL = graph.url;

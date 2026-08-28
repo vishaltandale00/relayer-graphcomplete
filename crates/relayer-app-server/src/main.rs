@@ -33,7 +33,7 @@ struct Arguments {
     harness_control_token: Option<String>,
     #[arg(long)]
     harness_configurations: Option<PathBuf>,
-    #[arg(long, default_value = "codex-basic")]
+    #[arg(long, default_value = "codex")]
     default_harness_configuration: String,
     #[arg(long, default_value_t = false)]
     allow_harness_override: bool,

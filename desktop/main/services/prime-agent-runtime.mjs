@@ -31,8 +31,7 @@ export const PRIME_AGENT_DEPENDENCY_CLOSURE_SHA256_BY_TARGET = Object.freeze({
   "win32-x64": "d9457c3a442be1705e9d42d4640a187d7030dc1de5a332ea3643a15a1e70186b",
 });
 export const PRIME_AGENT_HARNESS_CONFIGURATIONS = Object.freeze([
-  "prime-agent-basic.yaml",
-  "prime-agent-deep.yaml",
+  "prime-agent.yaml",
 ]);
 export const PRIME_AGENT_RUNTIME_CONSTANTS = Object.freeze({
   AGENT_RUN_MODEL_SCOPE_VERSION: 1,
@@ -50,8 +49,7 @@ export const PRIME_AGENT_RUNTIME_FUNCTIONS = Object.freeze([
 export const PRIME_AGENT_SESSION_FUNCTIONS = Object.freeze(["waitForRlmQuiescence"]);
 export const PRIME_AGENT_ASSET_SHA256 = Object.freeze({
   harnessConfigurations: Object.freeze({
-    "prime-agent-basic.yaml": "55e720e4628a3cab25e149a80325b804f247830b0bc00e5c472400d382fb9775",
-    "prime-agent-deep.yaml": "b91e705d99197419deecd5455ce4715b05246f8cc927dc5ba88c1eb4b50acad7",
+    "prime-agent.yaml": "8db3e3fb03e75030c910eef1210690b3635aa61306c16961198147de79b44e69",
   }),
   pythonPackageTree: "f70f003aa45414121ed7ec7f759f945369cbf4ea120a754e651a340bb8f8f0e4",
 });

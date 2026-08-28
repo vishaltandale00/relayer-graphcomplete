@@ -306,6 +306,25 @@ describe("ClaudeBasicHarness", () => {
     expect(events.find((event) => event.type === "message")?.data.text).toBe(text);
   });
 
+  it("uses the run-scoped Claude subscription token without persisting it", async () => {
+    let call: Parameters<ClaudeSdkQuery>[0] | undefined;
+    const harness = new ClaudeBasicHarness(factoryContext("ask"), {
+      query: sdkQuery(
+        [{ type: "result", subtype: "success", result: "done", session_id: "session-1" }],
+        (input) => { call = input; },
+      ),
+      browserSdk: browserSdk(),
+    });
+    const access = managedAccess({
+      nativeRequestAccess: { kind: "secret", contract: "secret@1", apiKey: "subscription-access" },
+    });
+
+    await harness.complete(runContext(access));
+
+    expect(call?.options.env.ANTHROPIC_AUTH_TOKEN).toBe("subscription-access");
+    expect(JSON.stringify(harness.state())).not.toContain("subscription-access");
+  });
+
   it("uses definition-scoped runtime state and explicit bypass only for full access", async () => {
     let call: Parameters<ClaudeSdkQuery>[0] | undefined;
     const harness = new ClaudeBasicHarness(factoryContext("bypassPermissions", {

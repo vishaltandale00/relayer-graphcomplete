@@ -1,5 +1,6 @@
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
+import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { CredentialAdapter } from "./credential-adapter.mjs";
@@ -218,6 +219,25 @@ export class CodexCredentialAdapter extends CredentialAdapter {
       if (signal?.aborted) throw abortReason(signal);
       return { status: "unavailable", account: null, error: "Codex subscription is unavailable." };
     }
+  }
+
+  async nativeRequestAccess({ signal } = {}) {
+    await waitWithSignal(this.start(), signal);
+    signal?.throwIfAborted();
+    await this.request("account/read", { refreshToken: true }, DEFAULT_TIMEOUT_MS, signal);
+    const codexHome = String(this.environment.CODEX_HOME || "").trim();
+    if (!codexHome) throw new Error("Codex subscription profile is unavailable for Prime.");
+    let stored;
+    try {
+      stored = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
+    } catch {
+      throw new Error("Codex subscription profile is unavailable for Prime.");
+    }
+    const apiKey = stored?.tokens?.access_token;
+    if (typeof apiKey !== "string" || apiKey.trim() === "") {
+      throw new Error("Codex subscription profile is unavailable for Prime.");
+    }
+    return Object.freeze({ kind: "secret", contract: "secret@1", apiKey });
   }
 
   async #login() {

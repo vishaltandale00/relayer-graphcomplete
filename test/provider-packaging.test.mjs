@@ -112,7 +112,9 @@ describe("provider adapter packaging", () => {
     expect([...packaged]).not.toContain("main/providers/implementations/leaked-provider.test.mjs");
     expect([...packaged]).not.toContain("main/providers/implementations/future-provider.mjs");
     expect(new Set([...packaged].filter((entry) => entry.startsWith("main/providers/implementations/"))))
-      .toEqual(new Set(PACKAGED_PROVIDER_MODULES.map((modulePath) => `main/${modulePath}`)));
+      .toEqual(new Set(PACKAGED_PROVIDER_MODULES
+        .filter((modulePath) => modulePath.startsWith("providers/implementations/"))
+        .map((modulePath) => `main/${modulePath}`)));
     expect([...packaged].some((entry) => entry.startsWith("packaging/"))).toBe(false);
     expect([...packaged].some((entry) => entry.startsWith("release/"))).toBe(false);
     expect([...packaged].some((entry) => entry.startsWith("renderer/"))).toBe(false);
