@@ -1,3 +1,5 @@
+import { harnessUsesConfigurationModel } from "./model-picker-model.js";
+
 export const MAX_MODELS_PER_FAMILY = 5;
 
 export function createFamilyVisibilityGate() {
@@ -168,14 +170,17 @@ export function defaultHarnessError(settings) {
   if (selected.available === false) {
     return unavailableReasonMessage(selected.unavailableReason) || "No available models for this harness.";
   }
-  if (selected.usableNow !== true) {
+  if (selected.usableNow !== true
+    && !harnessUsesConfigurationModel(settings, selected.id)) {
     return "No currently connected provider and eligible model can use this harness.";
   }
   return null;
 }
 
 export function usableDefaultHarnesses(settings) {
-  return settings.harnesses.filter((harness) => harness.usableNow === true);
+  return settings.harnesses.filter((harness) => (
+    harness.usableNow === true || harnessUsesConfigurationModel(settings, harness.id)
+  ));
 }
 
 export function availableModels(providerCatalog, providerId) {

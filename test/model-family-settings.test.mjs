@@ -214,7 +214,13 @@ describe("model family settings model", () => {
       defaults: { harnessId: "claude-basic" },
       harnesses: [
         { id: "codex-basic", usableNow: true },
-        { id: "claude-basic", available: true, usableNow: false },
+        {
+          id: "claude-basic",
+          available: true,
+          usableNow: false,
+          compatibleProviderIds: ["anthropic"],
+          modelCompatibility: [],
+        },
       ],
     };
     expect(usableDefaultHarnesses(settings)).toEqual([settings.harnesses[0]]);
@@ -222,6 +228,23 @@ describe("model family settings model", () => {
       "No currently connected provider and eligible model can use this harness.",
     );
     expect(settings.defaults.harnessId).toBe("claude-basic");
+  });
+
+  it("keeps configuration-owned harnesses selectable without a provider/model route", () => {
+    const settings = {
+      defaults: { harnessId: "codex-layered-navigation-luna" },
+      harnesses: [
+        {
+          id: "codex-layered-navigation-luna",
+          available: true,
+          usableNow: false,
+          compatibleProviderIds: [],
+          modelCompatibility: [],
+        },
+      ],
+    };
+    expect(usableDefaultHarnesses(settings)).toEqual(settings.harnesses);
+    expect(defaultHarnessError(settings)).toBeNull();
   });
 });
 

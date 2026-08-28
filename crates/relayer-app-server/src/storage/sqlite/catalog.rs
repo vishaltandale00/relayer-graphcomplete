@@ -522,7 +522,9 @@ impl SqliteProductStore {
                 .harness_id
                 .clone()
                 .unwrap_or(stored_defaults.harness_id);
-            if let Some(family_id) = family_id {
+            let configuration_owned =
+                harness_uses_configuration_model_on(&mut transaction, &harness_id).await?;
+            if let Some(family_id) = family_id.filter(|_| !configuration_owned) {
                 let candidates = sqlx::query_as::<_, (String, String)>(
                 "SELECT provider_id,model_id FROM model_family_members WHERE family_id=?1 ORDER BY position",
             )
@@ -1874,6 +1876,19 @@ async fn load_harness_rules(
         }
     }
     Ok(rules)
+}
+
+async fn harness_uses_configuration_model_on(
+    connection: &mut SqliteConnection,
+    harness_id: &str,
+) -> Result<bool, StorageError> {
+    Ok(sqlx::query_scalar::<_, bool>(
+        "SELECT available AND model_rules_present=0 AND NOT EXISTS(SELECT 1 FROM harness_provider_compatibility WHERE harness_configuration_name=product_harnesses.configuration_name) AND NOT EXISTS(SELECT 1 FROM harness_model_compatibility WHERE harness_configuration_name=product_harnesses.configuration_name) FROM product_harnesses WHERE configuration_name=?1 AND product_visible=1",
+    )
+    .bind(harness_id)
+    .fetch_optional(connection)
+    .await?
+    .unwrap_or(false))
 }
 
 fn overlay_digest(
@@ -3554,6 +3569,66 @@ mod provider_definition_tests {
         assert!(!claude.usable_now);
         assert!(claude.usable_provider_ids.is_empty());
         assert!(claude.usable_family_ids.is_empty());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn configuration_owned_harness_can_become_default_with_a_saved_family() {
+        let (store, path, provider_id) = onboarding_store().await;
+        let allowed = HashSet::from(["codex-basic".to_owned()]);
+        let projection = store
+            .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
+            .await
+            .unwrap();
+        let completion = store
+            .complete_provider_onboarding(
+                &CompleteProviderOnboardingCommand {
+                    provider_id: provider_id.clone(),
+                    harness_id: "codex-basic".into(),
+                    expected_projection_revision: projection.projection_revision,
+                    family: ProviderOnboardingFamilyIntent::Create {
+                        name: "Work models".into(),
+                        members: vec![ModelFamilyMember {
+                            provider_id,
+                            model_id: "gpt-work".into(),
+                            position: 0,
+                        }],
+                    },
+                },
+                "codex-basic",
+                &allowed,
+            )
+            .await
+            .unwrap();
+        store
+            .initialize_model_catalog(
+                "configuration-owned",
+                &[RuntimeProductHarness {
+                    id: "configuration-owned".into(),
+                    configuration_digest: "sha256:configuration-owned".into(),
+                    model_compatibility: Vec::new(),
+                    configuration_revision: 1,
+                    model_rules: None,
+                    execution_access_contracts: Vec::new(),
+                    family_policy: None,
+                    runtime_available: true,
+                    unavailable_reason: None,
+                }],
+            )
+            .await
+            .unwrap();
+
+        let defaults = store
+            .update_model_settings_defaults(&UpdateModelSettingsDefaultsCommand {
+                harness_id: Some("configuration-owned".into()),
+                provider_id: None,
+                family_id: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(defaults.harness_id, "configuration-owned");
+        assert_eq!(defaults.family_id, Some(completion.resolution.family_id));
         std::fs::remove_file(path).unwrap();
     }
 
