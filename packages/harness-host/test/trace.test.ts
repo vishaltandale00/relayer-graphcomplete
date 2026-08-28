@@ -90,7 +90,12 @@ describe("HarnessTraceStore", () => {
         configurationName: "fixture-trace",
         support: fullSupport,
       }).seal("complete");
+      // Only Node 22.22.1 and newer reject a pre-existing destination directory
+      // for errorOnExist copies (nodejs/node#60946). Colliding with a file the
+      // sealed trace must copy fails the export on every supported runtime, so
+      // this case does not depend on the runner's Node patch level.
       await mkdir(target);
+      await writeFile(join(target, "manifest.json"), "occupied export target\n");
 
       const error = await store.export(3, target, {
         runId: "run-1", executionId: "execution-1", interactionId: "3", harnessConfigurationName: "fixture-trace",

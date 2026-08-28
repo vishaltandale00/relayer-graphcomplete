@@ -2000,7 +2000,8 @@ describe("desktop skeleton", () => {
     expect(releaseWorkflow).toContain("Missing required Windows signing variable");
     expect(releaseWorkflow).toContain("if: ${{ false }}");
     expect(releaseWorkflow).toContain("needs: [package-macos]");
-    expect(releaseWorkflow).toContain("target: [macos-arm64, macos-x64]");
+    expect(releaseWorkflow).toContain("target: [macos-arm64]");
+    expect(releaseWorkflow).not.toContain("macos-15-intel");
     expect(releaseWorkflow).not.toContain("needs: [package-macos, package-windows]");
     expect(releaseWorkflow).not.toContain("AZURE_FEDERATED_TOKEN_FILE");
     expect(releaseWorkflow).toContain("environment:\n      name: desktop-update-preview");
