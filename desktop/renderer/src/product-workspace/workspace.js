@@ -742,12 +742,46 @@ export function contextEditorPresentation(editor, stagingDisabled = false, resol
   };
 }
 
+export function contextEditorIdentity(editor) {
+  if (!editor) return null;
+  return JSON.stringify([
+    String(editor.ownerThreadId),
+    editor.draftId,
+    String(editor.nodeId),
+    String(editor.target?.sourceInteractionNodeId),
+    String(editor.target?.sourceLayerId),
+    editor.annotationIndex,
+    editor.attaching,
+    editor.durable,
+  ]);
+}
+
+export function durableContextEditorForDraft(threadId, node, draft, {
+  attaching = true,
+} = {}) {
+  if (!draft || String(draft.target?.nodeId) !== String(node?.id)) return null;
+  return {
+    ownerThreadId: String(threadId),
+    nodeId: node.id,
+    draftId: draft.id,
+    target: draft.target,
+    annotationIndex: null,
+    confirmation: null,
+    value: draft.text || "",
+    attaching,
+    durable: true,
+    error: null,
+  };
+}
+
 export function syncMountedContextEditorControls(textarea, presentation, value) {
   if (!textarea) return;
   textarea.disabled = presentation.textareaDisabled;
-  const cancel = textarea.parentElement?.querySelector('[aria-label="Cancel annotation edit"]');
-  const remove = textarea.parentElement?.querySelector('[aria-label^="Discard annotation draft"]');
-  const confirm = textarea.parentElement?.querySelector('[aria-label="Confirm annotation"]');
+  const editor = textarea.closest?.(".node-context-dock, .composer-context-inline-editor")
+    || textarea.parentElement;
+  const cancel = editor?.querySelector('[aria-label="Cancel annotation edit"]');
+  const remove = editor?.querySelector('[aria-label^="Discard annotation draft"]');
+  const confirm = editor?.querySelector('[aria-label="Confirm annotation"]');
   if (cancel) cancel.disabled = presentation.controlsDisabled;
   if (remove) remove.disabled = presentation.controlsDisabled;
   if (confirm) confirm.disabled = presentation.confirmDisabled || !String(value).trim();
@@ -2077,14 +2111,14 @@ export function createProductWorkspace({
   };
   function renderContextDraftStatus() {
     if (!contextEditor?.durable) return;
-    const status = $(".composer-context-draft-status");
+    const status = $(".node-context-dock-status");
     if (!status) return;
     const draft = contextDraftController.draftForNode(getThread()?.id, contextEditor.nodeId);
     if (draft) {
       contextEditor.draftId = draft.id;
       contextEditor.target = draft.target;
     }
-    const textarea = $("#contextAnnotationEditor");
+    const textarea = $("#nodeContextDock #contextAnnotationEditor");
     if (draft?.editVersion === 0
       && textarea
       && (contextEditor.value !== draft.text || textarea.value !== draft.text)) {
@@ -2110,8 +2144,197 @@ export function createProductWorkspace({
     };
     syncMountedContextEditorControls(textarea, editorPresentation, contextEditor.value);
     const presentation = contextDraftStatusPresentation(draft);
-    status.className = presentation.className;
+    status.className = presentation.className.replace(
+      "composer-context-draft-status",
+      "node-context-dock-status",
+    );
     status.textContent = presentation.text;
+    status.setAttribute("role", draft?.status === "error" ? "alert" : "status");
+  }
+
+  function renderNodeContextDock() {
+    const dock = $("#nodeContextDock");
+    const threadId = String(getThread()?.id);
+    const selectedNode = resolveInteractionContextNode(
+      selection.selectedNodeId,
+      getState().nodes,
+      composerContextState.value,
+      contextNodeOverrides,
+    );
+    const selectedDraft = selectedNode && contextDraftController
+      ? contextDraftController.draftForNode(threadId, selectedNode.id)
+      : null;
+    if (!contextEditor && selectedDraft) {
+      contextEditor = durableContextEditorForDraft(threadId, selectedNode, selectedDraft, {
+        attaching: !contextForTarget(selectedDraft.target),
+      });
+    }
+    if (!contextEditor?.durable
+      || !selectedNode
+      || String(contextEditor.ownerThreadId) !== threadId
+      || String(contextEditor.nodeId) !== String(selectedNode.id)
+      || !selectedDraft) {
+      dock.classList.add("hidden");
+      dock.replaceChildren();
+      return;
+    }
+
+    contextEditor.draftId = selectedDraft.id;
+    contextEditor.target = selectedDraft.target;
+    const identity = contextEditorIdentity(contextEditor);
+    const existingTextarea = dock.querySelector("#contextAnnotationEditor");
+    if (existingTextarea?.dataset.contextEditorIdentity === identity
+      && existingTextarea.isConnected) {
+      const active = graphDocument.activeElement === existingTextarea;
+      const value = existingTextarea.value;
+      const selectionStart = existingTextarea.selectionStart;
+      const selectionEnd = existingTextarea.selectionEnd;
+      const selectionDirection = existingTextarea.selectionDirection;
+      const scrollTop = existingTextarea.scrollTop;
+      const scrollLeft = existingTextarea.scrollLeft;
+      contextEditor.value = value;
+      const resolving = Boolean(contextEditor.resolving)
+        || ["confirming", "discarding", "reconciling"].includes(
+          selectedDraft.operation?.kind,
+        );
+      const presentation = contextEditorPresentation(
+        contextEditor,
+        contextStagingDisabled(),
+        resolving,
+      );
+      const canContinueLocalEditing = capabilities.canCompose && !resolving;
+      syncMountedContextEditorControls(existingTextarea, {
+        ...presentation,
+        textareaDisabled: presentation.textareaDisabled && !canContinueLocalEditing,
+      }, value);
+      const status = dock.querySelector(".node-context-dock-status");
+      const statusPresentation = contextDraftStatusPresentation(selectedDraft);
+      status.className = statusPresentation.className.replace(
+        "composer-context-draft-status",
+        "node-context-dock-status",
+      );
+      status.textContent = statusPresentation.text;
+      status.setAttribute("role", selectedDraft.status === "error" ? "alert" : "status");
+      const error = dock.querySelector(".node-context-dock-error");
+      error.textContent = contextEditor.error || "";
+      error.classList.toggle("hidden", !contextEditor.error);
+      existingTextarea.value = value;
+      if (!existingTextarea.disabled) {
+        existingTextarea.setSelectionRange(
+          selectionStart,
+          selectionEnd,
+          selectionDirection || "none",
+        );
+        existingTextarea.scrollTop = scrollTop;
+        existingTextarea.scrollLeft = scrollLeft;
+        if (active) existingTextarea.focus({ preventScroll: true });
+      }
+      dock.classList.remove("hidden");
+      return;
+    }
+
+    const resolving = Boolean(contextEditor.resolving)
+      || ["confirming", "discarding"].includes(selectedDraft.operation?.kind);
+    const presentation = contextEditorPresentation(
+      contextEditor,
+      contextStagingDisabled(),
+      resolving,
+    );
+    const textarea = graphDocument.createElement("textarea");
+    textarea.id = "contextAnnotationEditor";
+    textarea.rows = 4;
+    textarea.placeholder = "Add an annotation…";
+    textarea.setAttribute("aria-label", `Annotation for ${selectedNode.title}`);
+    textarea.dataset.contextEditorIdentity = identity;
+    textarea.value = contextEditor.value;
+    textarea.disabled = presentation.textareaDisabled;
+
+    const error = graphDocument.createElement("p");
+    error.className = "node-context-dock-error";
+    error.setAttribute("role", "alert");
+    error.textContent = contextEditor.error || "";
+    error.classList.toggle("hidden", !contextEditor.error);
+
+    const actions = graphDocument.createElement("div");
+    actions.className = "node-context-dock-actions";
+    const status = graphDocument.createElement("small");
+    const statusPresentation = contextDraftStatusPresentation(selectedDraft);
+    status.className = statusPresentation.className.replace(
+      "composer-context-draft-status",
+      "node-context-dock-status",
+    );
+    status.setAttribute("aria-live", "polite");
+    status.setAttribute("role", selectedDraft.status === "error" ? "alert" : "status");
+    status.textContent = statusPresentation.text;
+
+    const discard = graphDocument.createElement("button");
+    discard.type = "button";
+    discard.textContent = "×";
+    discard.title = "Discard draft";
+    discard.setAttribute("aria-label", `Discard annotation draft for ${selectedNode.title}`);
+    discard.disabled = presentation.controlsDisabled;
+    discard.onclick = async () => {
+      if (contextStagingDisabled()) return;
+      const discardingEditor = contextEditor;
+      discardingEditor.resolving = true;
+      discardingEditor.error = null;
+      renderNodeContextDock();
+      try {
+        await contextDraftController.discard(threadId, selectedNode.id);
+        closeDurableEditor(threadId, discardingEditor.draftId);
+      } catch (discardError) {
+        discardingEditor.resolving = false;
+        discardingEditor.error = discardError.message;
+      }
+      renderComposerContexts();
+    };
+
+    const confirm = graphDocument.createElement("button");
+    confirm.type = "button";
+    confirm.textContent = "✓";
+    confirm.title = "Confirm";
+    confirm.setAttribute("aria-label", "Confirm annotation");
+    confirm.disabled = presentation.confirmDisabled || !String(contextEditor.value).trim();
+    confirm.onclick = async () => {
+      if (contextStagingDisabled()) return;
+      const confirmingEditor = contextEditor;
+      confirmingEditor.resolving = true;
+      confirmingEditor.error = null;
+      renderNodeContextDock();
+      try {
+        const confirmation = await contextDraftController.confirm(threadId, selectedNode.id);
+        if (!confirmation) {
+          confirmingEditor.resolving = false;
+          confirmingEditor.error = "This annotation could not be confirmed. Retry after it is saved.";
+        } else if (contextConfirmationDestination(getThread()?.id, threadId) === "current") {
+          applyConfirmedContextDraft(confirmation);
+          closeDurableEditor(threadId, confirmingEditor.draftId);
+        }
+      } catch (confirmError) {
+        confirmingEditor.resolving = false;
+        confirmingEditor.error = confirmError.message;
+      }
+      renderComposerContexts();
+    };
+
+    textarea.oninput = () => {
+      contextEditor.error = null;
+      if (!applyMountedContextEditorInput({
+        editor: contextEditor,
+        textarea,
+        controller: contextDraftController,
+        threadId,
+        nodeId: selectedNode.id,
+      })) return;
+      confirm.disabled = contextEditorPresentation(
+        contextEditor,
+        contextStagingDisabled(),
+      ).confirmDisabled || !textarea.value.trim();
+    };
+
+    actions.append(status, discard, confirm);
+    dock.replaceChildren(textarea, error, actions);
+    dock.classList.remove("hidden");
   }
   function renderComposerContexts() {
     const tray = $("#composerContextTray");
@@ -2134,17 +2357,10 @@ export function createProductWorkspace({
     ));
     if (!openContext) openComposerContextKey = null;
 
-    const editorIdentity = contextEditor ? JSON.stringify([
-      contextEditor.ownerThreadId,
-      contextEditor.draftId,
-      String(contextEditor.nodeId),
-      contextEditor.target?.sourceInteractionNodeId,
-      contextEditor.target?.sourceLayerId,
-      contextEditor.annotationIndex,
-      contextEditor.attaching,
-      contextEditor.durable,
-    ]) : null;
-    const existingTextarea = $("#contextAnnotationEditor");
+    const editorIdentity = contextEditorIdentity(contextEditor);
+    const existingTextarea = contextEditor?.durable
+      ? null
+      : $("#composerContextTray #contextAnnotationEditor");
     if (
       editorIdentity !== null
       && existingTextarea?.dataset.contextEditorIdentity === editorIdentity
@@ -2476,14 +2692,6 @@ export function createProductWorkspace({
       nodeButton.append(title);
       nodeButton.setAttribute("aria-label", `Open ${openContext.node.title} details`);
       nodeButton.onclick = () => selectNode(getState(), openContext.node.id);
-      const add = graphDocument.createElement("button");
-      add.type = "button";
-      add.className = "context-symbol-button";
-      add.textContent = "+";
-      add.title = "Add annotation";
-      add.setAttribute("aria-label", `Add annotation to ${openContext.node.title}`);
-      add.onclick = () => openContextEditor(openContext.node, null, openContext.target);
-      add.disabled = contextStagingDisabled() || Boolean(contextEditor);
       const close = graphDocument.createElement("button");
       close.type = "button";
       close.className = "context-symbol-button";
@@ -2496,7 +2704,7 @@ export function createProductWorkspace({
         renderComposerContexts();
       };
       close.disabled = Boolean(contextEditor);
-      heading.append(nodeButton, add, close);
+      heading.append(nodeButton, close);
 
       const list = graphDocument.createElement("ol");
       list.className = "composer-context-annotations";
@@ -2579,7 +2787,7 @@ export function createProductWorkspace({
       parts.push(preview);
     }
 
-    const attachingNode = contextEditor?.attaching
+    const attachingNode = contextEditor?.attaching && !contextEditor?.durable
       ? resolveInteractionContextNode(
         contextEditor.nodeId,
         getState().nodes,
@@ -2602,7 +2810,8 @@ export function createProductWorkspace({
       parts.push(editor);
     }
 
-    const standaloneEditorContext = !contextEditor?.attaching && !openContext
+    const standaloneEditorContext = !contextEditor?.durable
+      && !contextEditor?.attaching && !openContext
       ? contextForTarget(contextEditor?.target)
       : null;
     if (standaloneEditorContext) {
@@ -2703,8 +2912,9 @@ export function createProductWorkspace({
 
     tray.replaceChildren(...parts);
     tray.classList.toggle("hidden", parts.length === 0);
-    const renderedEditor = $("#contextAnnotationEditor");
+    const renderedEditor = $("#composerContextTray #contextAnnotationEditor");
     if (renderedEditor) resizeContextEditorTextarea(renderedEditor);
+    renderNodeContextDock();
     syncComposer();
   }
   const syncComposer = () => {
@@ -3919,6 +4129,32 @@ export function createProductWorkspace({
     contextTarget,
     origin = null,
   } = {}) {
+    const switchingDurableDraft = contextEditor?.durable
+      && String(contextEditor.nodeId) !== String(id);
+    if (switchingDurableDraft) {
+      const previousEditor = contextEditor;
+      const mountedTextarea = $("#nodeContextDock #contextAnnotationEditor");
+      if (mountedTextarea && mountedTextarea.value !== previousEditor.value) {
+        applyMountedContextEditorInput({
+          editor: previousEditor,
+          textarea: mountedTextarea,
+          controller: contextDraftController,
+          threadId: previousEditor.ownerThreadId,
+          nodeId: previousEditor.nodeId,
+        });
+      }
+      const previousDraft = contextDraftController.draftForNode(
+        previousEditor.ownerThreadId,
+        previousEditor.nodeId,
+      );
+      if (previousDraft?.status !== "saved" || previousDraft.revision == null) {
+        void contextDraftController.flush(
+          previousEditor.ownerThreadId,
+          previousEditor.nodeId,
+        );
+      }
+      contextEditor = null;
+    }
     selection.selectedNodeId = id;
     if (contextTarget !== undefined || notify) selectedContextTarget = contextTarget || null;
     const node = resolveInteractionContextNode(
@@ -3928,6 +4164,14 @@ export function createProductWorkspace({
       contextNodeOverrides,
     );
     if (!node) return;
+    if (!contextEditor && contextDraftController) {
+      const draft = contextDraftController.draftForNode(getThread()?.id, node.id);
+      if (draft) {
+        contextEditor = durableContextEditorForDraft(getThread()?.id, node, draft, {
+          attaching: !contextForTarget(draft.target),
+        });
+      }
+    }
     const nodeAnchor = annotationEnabled
       ? subjectAnchor("node", { nodeId: node.id }, state, getThread())
       : null;
@@ -4056,6 +4300,7 @@ export function createProductWorkspace({
     });
     renderAnnotationList();
     renderBreadcrumb(state, getThread());
+    renderComposerContexts();
     updateAttachContextControl();
     reveal();
     if (focusInspector) $("#closeInspector").focus({ preventScroll: true });
