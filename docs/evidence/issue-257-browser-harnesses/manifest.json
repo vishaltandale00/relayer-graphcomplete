@@ -81,7 +81,7 @@
       "configurationSha256": {
         "claude-basic.yaml": "05fbc6f5c50337595f020b1b2171fbd7a52ae58047a0166878573ea0cd8775da"
       },
-    "browserRuntimeSourceSha256": "4feeb71b1781aa7d6054b30348bfd277658f72bdd5f78d962289463d10f17283",
+      "browserRuntimeSourceSha256": "4feeb71b1781aa7d6054b30348bfd277658f72bdd5f78d962289463d10f17283",
       "mechanismProof": {
         "commentUrl": "https://github.com/vishaltandale00/relayer-graphcomplete/issues/250#issuecomment-5448833579",
         "commentBodyPlusLfSha256": "9e70d873e30660bfc9ac37d1a851a283fa0c2d1dd783980543af0401e61087c4"
@@ -93,13 +93,13 @@
         "chromeAliveAfterCleanup": true,
         "askEnclosingToolExecuted": false
       },
-    "deterministicProof": {
-      "boundedReadNavigateClickFillBatch": true,
-      "clickMustEndBatch": true,
-      "disabledClickRejected": true,
-      "finalFillValueVerified": true,
-      "sdkMcpExportsProbed": true,
-      "unavailableEndpointFailedHonestly": true
+      "deterministicProof": {
+        "boundedReadNavigateClickFillBatch": true,
+        "clickMustEndBatch": true,
+        "disabledClickRejected": true,
+        "finalFillValueVerified": true,
+        "sdkMcpExportsProbed": true,
+        "unavailableEndpointFailedHonestly": true
       }
     },
     "prime": {
