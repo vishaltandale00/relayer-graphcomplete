@@ -26,7 +26,7 @@ const scenes = [
   ["alternate-harness", "Explicitly choose a compatible alternate harness"],
   ["providers", "Manage independent provider connections"],
   ["families", "Configure harness-agnostic model families"],
-  ["harnesses", "Inspect separate harness rules"],
+  ["harnesses", "Inspect currently usable harnesses"],
   ["recovery", "Recover the same unsent turn with an explicit model choice"],
 ];
 const variants = [
@@ -203,6 +203,7 @@ async function captureBrowserScene(url, frame, profile, width = 1280) {
             })(),
             firstInvalidFocused: invalidInputs.length > 0 && document.activeElement === invalidInputs[0],
             connectedProviderRetained: Boolean(window.__providerEvidence?.definitions?.some((definition) => definition.id === "openai-work")),
+            harnessMarkup: document.querySelector("#harnessConfigurationList")?.innerHTML ?? "",
           };
         })()`,
         returnByValue: true,
@@ -313,28 +314,16 @@ async function recordBrowserFlow(url, directory, profile) {
       await click("#refreshProviderCatalogs");
       await waitFor("document.querySelector('#providerSettingsStatus')?.textContent.includes('refreshed')", "manual provider refresh");
 
-      await caption("4 · Validate and save harness model rules");
+      await caption("4 · Confirm the currently usable harnesses");
       await click('[data-settings-tab="harnesses"]');
-      await click('[data-harness-rules-edit="codex-basic"]');
-      await click('[data-harness-rule-add="deny"]');
-      await click("#saveHarnessRules");
       await waitFor(`(() => {
-        const invalid = [...document.querySelectorAll('[aria-invalid="true"]')];
-        return invalid.length > 0
-          && document.activeElement === invalid[0]
-          && invalid.every((input) => document.getElementById(input.getAttribute('aria-describedby'))?.getAttribute('role') === 'alert');
-      })()`, "focused, described invalid harness rule");
-      await capture(3);
-      await type('[data-harness-rule-adapter="deny.1"]', ["openai-", "api"]);
-      await type('[data-harness-rule-pattern="deny.1"]', ["gpt-5.2-", "legacy"]);
-      await click("#saveHarnessRules");
-      await waitFor(`(() => {
-        const editor = document.querySelector('.harness-rules-editor-card[aria-busy="true"]');
-        return editor && [...editor.querySelectorAll('input, select, button')].every((control) => control.disabled);
-      })()`, "locked harness controls during save");
-      await capture(2);
-      await waitFor("document.querySelector('#harnessSettingsStatus')?.textContent.includes('saved')", "saved harness rules");
-      await capture(3);
+        const list = document.querySelector('#harnessConfigurationList');
+        return list?.querySelector('[data-harness-configuration="codex-basic"]')
+          && !list.querySelector('button')
+          && !list.textContent.includes('Advanced configuration')
+          && !list.textContent.includes('Claude basic');
+      })()`, "read-only usable harness list");
+      await capture(8);
 
       await caption("5 · Edit, reselect, and retry the same unsent turn");
       await click("#settingsBackButton");
@@ -476,6 +465,9 @@ const modelSettings = (scene) => ({
         ],
         deny: [{ adapterId: "openai-api", modelIdRegex: "-deprecated$" }],
       },
+      usableNow: true,
+      usableProviderIds: ["openai-work", "codex"],
+      usableFamilyIds: [11, 12],
     },
     {
       id: "claude-basic",
@@ -485,6 +477,9 @@ const modelSettings = (scene) => ({
       executionAccessContracts: ["managed-runtime@1"],
       compatibleProviderIds: [],
       modelRules: { allow: [{ adapterId: "anthropic-api", modelIdRegex: "^claude-" }], deny: [] },
+      usableNow: false,
+      usableProviderIds: [],
+      usableFamilyIds: [],
     },
   ],
 });
@@ -747,11 +742,16 @@ try {
       "alternate-harness": ["Choose your default model family", "Claude basic", "Claude Sonnet"],
       providers: ["OpenAI Work", "gateway.example.com/openai/v1", "Default provider"],
       families: ["Work coding", "Fast review", "GPT-5.6 Sol"],
-      harnesses: ["Harnesses", "Codex basic", "openai-api"],
+      harnesses: ["Harnesses", "Codex basic", "Default harness"],
       recovery: ["OpenAI Work is rate limited", "Review the provider adapter architecture"],
     }[scene];
     for (const text of required) {
       if (!dom.includes(text)) throw new Error(`Evidence scene ${scene} is missing ${text}.`);
+    }
+    if (scene === "harnesses") {
+      for (const internal of ["Claude basic", "OpenAI Work", "Work coding", "Fast review", "Advanced configuration", "Configure other harnesses", "Execution access", "Revision", "managed-runtime@1", "openai-api", "Available"]) {
+        if (audit.harnessMarkup.includes(internal)) throw new Error(`Evidence scene harnesses exposes ${internal}.`);
+      }
     }
     if (scene === "onboarding" && !audit.providerOptionsUseRovingRadio) {
       throw new Error("Provider choices do not use a single-tab-stop roving radio group.");

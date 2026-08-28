@@ -11,6 +11,9 @@ pub(super) async fn run(pool: &SqlitePool) -> Result<(), StorageError> {
 #[cfg(test)]
 mod tests {
     use super::super::SqliteProductStore;
+    use crate::product::{
+        HarnessModelRule, HarnessModelRules, RuntimeProductHarness, UpdateHarnessModelRulesCommand,
+    };
     use sqlx::{Executor, Row, sqlite::SqlitePoolOptions};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -272,6 +275,87 @@ mod tests {
                 .to_string()
                 .contains("exactly one authoritative invocation result")
         );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_ui_rule_overrides_reset_once_before_catalog_reseeding() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "relayer-legacy-harness-rules-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let shipped = RuntimeProductHarness {
+            id: "codex-basic".into(),
+            configuration_digest: "sha256:shipped".into(),
+            model_compatibility: Vec::new(),
+            configuration_revision: 1,
+            model_rules: Some(HarnessModelRules {
+                allow: vec![HarnessModelRule {
+                    adapter_id: "codex-subscription".into(),
+                    model_id_exact: None,
+                    model_id_regex: Some(".*".into()),
+                }],
+                deny: Vec::new(),
+            }),
+            execution_access_contracts: vec!["managed-runtime@1".into()],
+            family_policy: None,
+            runtime_available: true,
+            unavailable_reason: None,
+        };
+        store
+            .initialize_model_catalog("codex-basic", std::slice::from_ref(&shipped))
+            .await
+            .unwrap();
+        store
+            .update_harness_model_rules(&UpdateHarnessModelRulesCommand {
+                harness_id: "codex-basic".into(),
+                expected_revision: 1,
+                rules: HarnessModelRules {
+                    allow: Vec::new(),
+                    deny: vec![HarnessModelRule {
+                        adapter_id: "codex-subscription".into(),
+                        model_id_exact: None,
+                        model_id_regex: Some(".*".into()),
+                    }],
+                },
+            })
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version=21")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        store.pool.close().await;
+
+        let reopened = SqliteProductStore::open(&path).await.unwrap();
+        let reset: (bool, i64, String, i64) = sqlx::query_as(
+            "SELECT model_rules_modified,configuration_revision,configuration_digest,(SELECT COUNT(*) FROM harness_model_rules WHERE harness_configuration_name='codex-basic') FROM product_harnesses WHERE configuration_name='codex-basic'",
+        )
+        .fetch_one(&reopened.pool)
+        .await
+        .unwrap();
+        assert_eq!(reset, (false, 1, "sha256:shipped".into(), 0));
+
+        reopened
+            .initialize_model_catalog("codex-basic", std::slice::from_ref(&shipped))
+            .await
+            .unwrap();
+        let rules = reopened
+            .load_model_settings()
+            .await
+            .unwrap()
+            .harnesses
+            .into_iter()
+            .find(|harness| harness.id == "codex-basic")
+            .unwrap()
+            .model_rules;
+        assert_eq!(rules, shipped.model_rules);
+        reopened.pool.close().await;
         std::fs::remove_file(path).unwrap();
     }
 }

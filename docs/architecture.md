@@ -215,9 +215,12 @@ either Prime configuration to the catalog. Failure leaves the Codex and Claude
 configurations available and records a local diagnostic; explicitly requesting
 an unavailable Prime default fails closed before the product runtime starts.
 The product catalog retains unavailable Prime entries and their stable reason for
-Harness Settings, while executable configuration lookup, onboarding, and the
-composer exclude them. The diagnostic and execution trace contain only the
-reviewed source commit and package name/version pairs. Current bounded Ask and
+diagnostics and validation, while ordinary Harness Settings, executable
+configuration lookup, onboarding, and the composer exclude them. Harness Settings
+uses the backend's exact provider, model, family, and access-contract projection
+rather than treating runtime installation as current feasibility. The diagnostic
+and execution trace contain only the reviewed source commit and package name/version
+pairs. Current bounded Ask and
 Auto support is macOS-only, so a Windows build never advertises Prime as runnable.
 
 Release configuration resolves through one fail-closed contract. The contract seals the numeric version, source commit, product identity, target, architecture, signing authority, channel manifest, and exact HTTPS update base into both the application package and its release receipt. macOS targets additionally seal the Apple team and minimum OS; Windows seals the Artifact Signing endpoint, account, profile, and publisher. The updater and publisher consume this contract rather than maintaining parallel identity or channel rules. See [ADR 0002](decisions/0002-desktop-release-contract.md).

@@ -4,7 +4,9 @@ import {
   copySystemFamily,
   createFamilyVisibilityGate,
   createModelFamilyDraft,
+  defaultHarnessIsSelectable,
   defaultHarnessError,
+  usableDefaultHarnesses,
   MAX_MODELS_PER_FAMILY,
   modelMember,
   moveItem,
@@ -207,6 +209,63 @@ describe("model family settings model", () => {
     expect(defaultHarnessError(settings)).toBe("No available models for this harness.");
     expect(settings.defaults.harnessId).toBe("codex-basic");
   });
+
+  it("offers only currently usable harnesses as new defaults", () => {
+    const settings = {
+      defaults: { harnessId: "claude-basic" },
+      harnesses: [
+        { id: "codex-basic", usableNow: true },
+        {
+          id: "claude-basic",
+          available: true,
+          usableNow: false,
+          compatibleProviderIds: ["anthropic"],
+          modelCompatibility: [],
+        },
+      ],
+    };
+    expect(usableDefaultHarnesses(settings)).toEqual([settings.harnesses[0]]);
+    expect(defaultHarnessError(settings)).toBe(
+      "No currently connected provider and eligible model can use this harness.",
+    );
+    expect(settings.defaults.harnessId).toBe("claude-basic");
+  });
+
+  it("keeps configuration-owned harnesses selectable without a provider/model route", () => {
+    const settings = {
+      defaults: { harnessId: "codex-layered-navigation-luna" },
+      harnesses: [
+        {
+          id: "codex-layered-navigation-luna",
+          available: true,
+          usableNow: false,
+          compatibleProviderIds: [],
+          modelCompatibility: [],
+        },
+      ],
+    };
+    expect(usableDefaultHarnesses(settings)).toEqual(settings.harnesses);
+    expect(defaultHarnessIsSelectable(settings, settings.defaults.harnessId)).toBe(true);
+    expect(defaultHarnessError(settings)).toBeNull();
+  });
+
+  it("offers ordinary harness defaults only when the saved family can execute them", () => {
+    const settings = {
+      defaults: { harnessId: "codex-basic", familyId: 11 },
+      harnesses: [
+        {
+          id: "codex-basic", usableNow: true, usableFamilyIds: [11],
+          compatibleProviderIds: ["openai"], modelCompatibility: [],
+        },
+        {
+          id: "claude-basic", usableNow: true, usableFamilyIds: [12],
+          compatibleProviderIds: ["anthropic"], modelCompatibility: [],
+        },
+      ],
+    };
+    expect(usableDefaultHarnesses(settings)).toEqual([settings.harnesses[0]]);
+    expect(defaultHarnessIsSelectable(settings, "claude-basic")).toBe(false);
+  });
 });
 
 describe("model settings API boundary", () => {
@@ -296,6 +355,7 @@ describe("model family settings layout", () => {
     expect(settingsSource).toContain("familyVisibilityGate.isPending()");
     expect(settingsSource).toContain("const settingsRefreshGate = createLatestRequestGate();");
     expect(settingsSource).toContain("if (!settingsRefreshGate.isCurrent(refreshToken)) return false;");
+    expect(settingsSource).toContain("const invalidDefault = defaultHarnessIsSelectable(");
     expect(settingsSource).toContain('$("#defaultHarnessSelect").disabled = savingDefaults');
     expect(settingsSource).toContain("await preparePermissionProfiles(candidate)");
     expect(settingsSource).toContain("await saveModelDefaults({ [field]: candidate })");

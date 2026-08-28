@@ -389,9 +389,10 @@ impl SqliteProductStore {
     pub(crate) async fn load_model_settings(&self) -> Result<ModelSettings, StorageError> {
         let mut transaction = self.pool.begin().await?;
         let defaults = load_defaults(&mut transaction).await?;
-        let harnesses = load_harnesses(&mut transaction).await?;
+        let mut harnesses = load_harnesses(&mut transaction).await?;
         let providers = load_providers(&mut transaction).await?;
         let families = load_families(&mut transaction).await?;
+        project_harness_usability_on(&mut transaction, &mut harnesses).await?;
         transaction.commit().await?;
         Ok(ModelSettings {
             defaults,
@@ -521,7 +522,9 @@ impl SqliteProductStore {
                 .harness_id
                 .clone()
                 .unwrap_or(stored_defaults.harness_id);
-            if let Some(family_id) = family_id {
+            let configuration_owned =
+                harness_uses_configuration_model_on(&mut transaction, &harness_id).await?;
+            if let Some(family_id) = family_id.filter(|_| !configuration_owned) {
                 let candidates = sqlx::query_as::<_, (String, String)>(
                 "SELECT provider_id,model_id FROM model_family_members WHERE family_id=?1 ORDER BY position",
             )
@@ -1022,6 +1025,107 @@ impl SqliteProductStore {
             Err(error) => Err(error),
         }
     }
+}
+
+async fn project_harness_usability_on(
+    connection: &mut SqliteConnection,
+    harnesses: &mut [ProductHarness],
+) -> Result<(), StorageError> {
+    let routes = sqlx::query(
+        "SELECT f.id,p.id,p.adapter_id,p.access_contract,m.model_id FROM model_families f JOIN model_family_members fm ON fm.family_id=f.id JOIN model_providers p ON p.id=fm.provider_id JOIN provider_models m ON m.provider_id=p.id AND m.model_id=fm.model_id WHERE f.lifecycle_state='active' AND f.enabled=1 AND p.lifecycle_state='active' AND p.connected=1 AND m.visible=1 AND m.available=1 ORDER BY f.position,f.id,fm.position",
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+    for harness in harnesses {
+        let mut provider_ids = Vec::new();
+        let mut family_ids = Vec::new();
+        if harness.available {
+            for route in &routes {
+                let family_id = ModelFamilyId::from_database(route.try_get(0)?);
+                let provider_id = ProviderId::from_database(route.try_get(1)?);
+                let adapter_id: String = route.try_get(2)?;
+                let access_contract: String = route.try_get(3)?;
+                let model_id: String = route.try_get(4)?;
+                if !harness_route_is_usable(
+                    harness,
+                    &provider_id,
+                    &adapter_id,
+                    &access_contract,
+                    &model_id,
+                )? {
+                    continue;
+                }
+                if !provider_ids.contains(&provider_id) {
+                    provider_ids.push(provider_id);
+                }
+                if !family_ids.contains(&family_id) {
+                    family_ids.push(family_id);
+                }
+            }
+        }
+        harness.usable_now = !family_ids.is_empty();
+        harness.usable_provider_ids = provider_ids;
+        harness.usable_family_ids = family_ids;
+    }
+    Ok(())
+}
+
+fn harness_route_is_usable(
+    harness: &ProductHarness,
+    provider_id: &ProviderId,
+    adapter_id: &str,
+    access_contract: &str,
+    model_id: &str,
+) -> Result<bool, StorageError> {
+    if !harness.execution_access_contracts.is_empty()
+        && !harness
+            .execution_access_contracts
+            .iter()
+            .any(|accepted| accepted == access_contract)
+    {
+        return Ok(false);
+    }
+    let Some(rules) = &harness.model_rules else {
+        return Ok(harness.model_compatibility.iter().any(|compatibility| {
+            compatibility.provider_id == *provider_id
+                && compatibility
+                    .model_ids
+                    .as_ref()
+                    .is_none_or(|models| models.iter().any(|candidate| candidate == model_id))
+        }));
+    };
+    let rule_matches = |rule: &HarnessModelRule| -> Result<bool, StorageError> {
+        if rule.adapter_id != adapter_id {
+            return Ok(false);
+        }
+        match (&rule.model_id_exact, &rule.model_id_regex) {
+            (Some(exact), None) => Ok(exact == model_id),
+            (None, Some(pattern)) => regex::Regex::new(pattern)
+                .map(|regex| regex.is_match(model_id))
+                .map_err(|error| {
+                    StorageError::IncompatibleSchema(format!(
+                        "invalid stored harness regex: {error}"
+                    ))
+                }),
+            _ => Err(StorageError::IncompatibleSchema(
+                "unknown harness model matcher".into(),
+            )),
+        }
+    };
+    for rule in &rules.deny {
+        if rule_matches(rule)? {
+            return Ok(false);
+        }
+    }
+    if rules.allow.is_empty() {
+        return Ok(true);
+    }
+    for rule in &rules.allow {
+        if rule_matches(rule)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 async fn provider_onboarding_projection_on(
@@ -1774,6 +1878,19 @@ async fn load_harness_rules(
     Ok(rules)
 }
 
+async fn harness_uses_configuration_model_on(
+    connection: &mut SqliteConnection,
+    harness_id: &str,
+) -> Result<bool, StorageError> {
+    Ok(sqlx::query_scalar::<_, bool>(
+        "SELECT available AND model_rules_present=0 AND NOT EXISTS(SELECT 1 FROM harness_provider_compatibility WHERE harness_configuration_name=product_harnesses.configuration_name) AND NOT EXISTS(SELECT 1 FROM harness_model_compatibility WHERE harness_configuration_name=product_harnesses.configuration_name) FROM product_harnesses WHERE configuration_name=?1 AND product_visible=1",
+    )
+    .bind(harness_id)
+    .fetch_optional(connection)
+    .await?
+    .unwrap_or(false))
+}
+
 fn overlay_digest(
     base_digest: &str,
     rules: &HarnessModelRules,
@@ -1914,6 +2031,9 @@ async fn load_harnesses(
                         ));
                     }
                 },
+                usable_now: false,
+                usable_provider_ids: Vec::new(),
+                usable_family_ids: Vec::new(),
             })
         })
         .collect()
@@ -3396,6 +3516,119 @@ mod provider_definition_tests {
                 .await
                 .unwrap();
         assert_eq!(retained_custom_name, custom_name);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn model_settings_project_only_exactly_executable_harnesses_as_usable_now() {
+        let (store, path, provider_id) = onboarding_store().await;
+        let allowed = HashSet::from(["codex-basic".to_owned(), "claude-basic".to_owned()]);
+        let projection = store
+            .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
+            .await
+            .unwrap();
+        let completion = store
+            .complete_provider_onboarding(
+                &CompleteProviderOnboardingCommand {
+                    provider_id: provider_id.clone(),
+                    harness_id: "codex-basic".into(),
+                    expected_projection_revision: projection.projection_revision,
+                    family: ProviderOnboardingFamilyIntent::Create {
+                        name: "Work models".into(),
+                        members: vec![ModelFamilyMember {
+                            provider_id: provider_id.clone(),
+                            model_id: "gpt-work".into(),
+                            position: 0,
+                        }],
+                    },
+                },
+                "codex-basic",
+                &allowed,
+            )
+            .await
+            .unwrap();
+
+        let settings = store.load_model_settings().await.unwrap();
+        let codex = settings
+            .harnesses
+            .iter()
+            .find(|harness| harness.id == "codex-basic")
+            .unwrap();
+        assert!(codex.usable_now);
+        assert_eq!(codex.usable_provider_ids, vec![provider_id]);
+        assert_eq!(
+            codex.usable_family_ids,
+            vec![completion.resolution.family_id]
+        );
+        let claude = settings
+            .harnesses
+            .iter()
+            .find(|harness| harness.id == "claude-basic")
+            .unwrap();
+        assert!(claude.available);
+        assert!(!claude.usable_now);
+        assert!(claude.usable_provider_ids.is_empty());
+        assert!(claude.usable_family_ids.is_empty());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn configuration_owned_harness_can_become_default_with_a_saved_family() {
+        let (store, path, provider_id) = onboarding_store().await;
+        let allowed = HashSet::from(["codex-basic".to_owned()]);
+        let projection = store
+            .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
+            .await
+            .unwrap();
+        let completion = store
+            .complete_provider_onboarding(
+                &CompleteProviderOnboardingCommand {
+                    provider_id: provider_id.clone(),
+                    harness_id: "codex-basic".into(),
+                    expected_projection_revision: projection.projection_revision,
+                    family: ProviderOnboardingFamilyIntent::Create {
+                        name: "Work models".into(),
+                        members: vec![ModelFamilyMember {
+                            provider_id,
+                            model_id: "gpt-work".into(),
+                            position: 0,
+                        }],
+                    },
+                },
+                "codex-basic",
+                &allowed,
+            )
+            .await
+            .unwrap();
+        store
+            .initialize_model_catalog(
+                "configuration-owned",
+                &[RuntimeProductHarness {
+                    id: "configuration-owned".into(),
+                    configuration_digest: "sha256:configuration-owned".into(),
+                    model_compatibility: Vec::new(),
+                    configuration_revision: 1,
+                    model_rules: None,
+                    execution_access_contracts: Vec::new(),
+                    family_policy: None,
+                    runtime_available: true,
+                    unavailable_reason: None,
+                }],
+            )
+            .await
+            .unwrap();
+
+        let defaults = store
+            .update_model_settings_defaults(&UpdateModelSettingsDefaultsCommand {
+                harness_id: Some("configuration-owned".into()),
+                provider_id: None,
+                family_id: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(defaults.harness_id, "configuration-owned");
+        assert_eq!(defaults.family_id, Some(completion.resolution.family_id));
         std::fs::remove_file(path).unwrap();
     }
 

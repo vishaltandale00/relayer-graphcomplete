@@ -3,6 +3,7 @@ import {
   copySystemFamily,
   createFamilyVisibilityGate,
   createModelFamilyDraft,
+  defaultHarnessIsSelectable,
   defaultHarnessError,
   MAX_MODELS_PER_FAMILY,
   modelMember,
@@ -10,6 +11,7 @@ import {
   preserveFamilyEditAfterRefresh,
   reconcileSavedFamily,
   replaceMemberProvider,
+  usableDefaultHarnesses,
   validateCustomFamily,
 } from "./model-family-model.js";
 import {
@@ -128,7 +130,7 @@ function setStatus(message = "", kind = "") {
   status.className = `model-settings-status${kind ? ` ${kind}` : ""}`;
 }
 
-async function refresh({ preserveIndex = true, preserveEdit = false } = {}) {
+export async function refreshModelSettings({ preserveIndex = true, preserveEdit = false } = {}) {
   const refreshToken = settingsRefreshGate.begin();
   const previousIndex = selectedFamilyIndex;
   const previousFamilyId = settings?.families?.[previousIndex]?.id;
@@ -168,11 +170,14 @@ async function refresh({ preserveIndex = true, preserveEdit = false } = {}) {
 }
 
 function harnessOptions() {
-  const selectedConfigured = settings.harnesses.some((harness) => harness.id === settings.defaults.harnessId);
-  const missing = selectedConfigured ? "" : `<option value="${escapeHtmlAttribute(settings.defaults.harnessId)}" selected disabled>${escapeHtml(settings.defaults.harnessId)} (unavailable)</option>`;
-  return `${missing}${settings.harnesses.map((harness) => {
+  const selectable = usableDefaultHarnesses(settings);
+  const selected = settings.harnesses.find((harness) => harness.id === settings.defaults.harnessId);
+  const invalidDefault = defaultHarnessIsSelectable(settings, settings.defaults.harnessId)
+    ? ""
+    : `<option value="${escapeHtmlAttribute(settings.defaults.harnessId)}" selected disabled>${escapeHtml(selected?.label ?? settings.defaults.harnessId)} (unavailable)</option>`;
+  return `${invalidDefault}${selectable.map((harness) => {
     const selected = harness.id === settings.defaults.harnessId;
-    return `<option value="${escapeHtmlAttribute(harness.id)}" ${selected ? "selected" : ""} ${harness.available === false ? "disabled" : ""}>${escapeHtml(harness.label)}</option>`;
+    return `<option value="${escapeHtmlAttribute(harness.id)}" ${selected ? "selected" : ""}>${escapeHtml(harness.label)}</option>`;
   }).join("")}`;
 }
 
@@ -333,7 +338,7 @@ async function persistFamilyOrder(fromIndex, toIndex) {
   render();
   try {
     await saveModelFamilyOrder(settings.families.filter((family) => !family.draft).map((family) => family.id));
-    await refresh({ preserveEdit: true });
+    await refreshModelSettings({ preserveEdit: true });
   } catch (error) {
     settings.families = previous;
     selectedFamilyIndex = fromIndex;
@@ -355,7 +360,7 @@ async function persistEnabled(index, enabled) {
   render();
   try {
     await updateModelFamily(family.id, family.kind === "system" ? { enabled } : familyPayload(family));
-    await refresh({ preserveEdit: true });
+    await refreshModelSettings({ preserveEdit: true });
   } catch (error) {
     const currentFamily = settings.families.find((candidate) => candidate.id === family.id);
     if (currentFamily) currentFamily.enabled = previousEnabled;
@@ -418,7 +423,7 @@ async function saveEdit() {
     settings.families[savedFamilyIndex] = reconcileSavedFamily(family, saved);
     editSnapshot = null;
     persisted = true;
-    await refresh();
+    await refreshModelSettings();
     setStatus("Saved", "success");
   } catch (error) {
     setStatus(persisted ? `Saved, but could not refresh: ${error.message}` : error.message, "error");
@@ -435,7 +440,7 @@ async function deleteFamily(index) {
   try {
     await deleteModelFamily(family.id);
     selectedFamilyIndex = Math.min(index, Math.max(0, settings.families.length - 2));
-    await refresh({ preserveEdit: true });
+    await refreshModelSettings({ preserveEdit: true });
     setStatus("Deleted", "success");
   } catch (error) {
     setStatus(error.message, "error");
@@ -531,7 +536,7 @@ async function persistDefault(field) {
       ? await preparePermissionProfiles(candidate)
       : null;
     await saveModelDefaults({ [field]: candidate });
-    await refresh({ preserveEdit: true });
+    await refreshModelSettings({ preserveEdit: true });
     if (field === "harnessId") {
       applyPermissionProfiles?.();
       resetNewThreadModelPicker();
@@ -590,5 +595,5 @@ export async function initializeModelFamilySettings() {
 
 export async function refreshModelFamilySettings() {
   if (!settings) return initializeModelFamilySettings();
-  return refresh({ preserveEdit: true });
+  return refreshModelSettings({ preserveEdit: true });
 }

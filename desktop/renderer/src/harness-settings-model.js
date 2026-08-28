@@ -36,3 +36,13 @@ export function validateHarnessRules(rules) {
   }
   return errors;
 }
+
+export function usableHarnessPresentations(settings) {
+  return (settings?.harnesses ?? []).flatMap((harness) => {
+    if (!harness.usableNow) return [];
+    return [{
+      harness,
+      isDefault: harness.id === settings?.defaults?.harnessId,
+    }];
+  });
+}

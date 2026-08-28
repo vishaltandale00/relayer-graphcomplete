@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
 
 import { validateHarnessRules } from "../desktop/renderer/src/harness-settings-model.js";
 
 describe("harness Settings model-rule validation", () => {
+  it("does not expose the model-rule editor from Harnesses settings", async () => {
+    const source = await readFile(new URL("../desktop/renderer/src/harness-settings.js", import.meta.url), "utf8");
+    const shell = await readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8");
+    expect(source).not.toContain("saveHarnessModelRules");
+    expect(source).not.toContain("data-harness-rule");
+    expect(source).not.toContain("Advanced configuration");
+    expect(shell).not.toContain("Harness configurations control execution behavior");
+  });
+
   it("accepts separate allow and deny exact/regex rules", () => {
     expect(validateHarnessRules({
       allow: [

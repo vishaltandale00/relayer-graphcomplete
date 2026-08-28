@@ -210,36 +210,83 @@ describe("provider and harness renderer markup", () => {
     expect(markup).not.toContain('data-provider-logout="claude-work"');
   });
 
-  it("presents harness rules separately with exact and regex matchers", () => {
-    const markup = harnessConfigurationsMarkup([{
-      id: "coding-default",
-      label: "Coding default",
-      revision: 3,
-      executionAccessContracts: ["secret@1", "managed-runtime@1"],
-      modelRules: {
-        allow: [{ adapterId: "openai-api", modelIdExact: "gpt-5.2" }],
-        deny: [{ adapterId: "anthropic-api", modelIdRegex: "-haiku-" }],
-      },
-    }]);
-    expect(markup).toContain("secret@1, managed-runtime@1");
-    expect(markup).toContain("openai-api · is gpt-5.2");
-    expect(markup).toContain("anthropic-api · matches -haiku-");
-    expect(markup).not.toContain("API key");
+  it("shows only harnesses usable through a currently connected provider and eligible model", () => {
+    const markup = harnessConfigurationsMarkup({
+      defaults: { harnessId: "codex-basic" },
+      providers: [{
+        id: "codex-work",
+        adapterId: "codex-subscription",
+        label: "Codex subscription",
+        connected: true,
+        models: [{ id: "gpt-5.6", label: "GPT-5.6", visible: true, available: true }],
+      }],
+      families: [{
+        id: 1,
+        name: "Codex models",
+        enabled: true,
+        members: [{ providerId: "codex-work", modelId: "gpt-5.6", position: 0 }],
+      }],
+      harnesses: [{
+        id: "codex-basic",
+        label: "Codex Basic",
+        available: true,
+        configurationRevision: 3,
+        executionAccessContracts: ["managed-runtime@1"],
+        modelRules: {
+          allow: [{ adapterId: "codex-subscription", modelIdRegex: ".*" }],
+          deny: [],
+        },
+        usableNow: true,
+        usableProviderIds: ["codex-work"],
+        usableFamilyIds: [1],
+      }, {
+        id: "claude-basic",
+        label: "Claude Basic",
+        available: true,
+        configurationRevision: 1,
+        executionAccessContracts: ["managed-runtime@1"],
+        modelRules: {
+          allow: [{ adapterId: "claude-subscription", modelIdExact: "sonnet" }],
+          deny: [],
+        },
+        usableNow: false,
+        usableProviderIds: [],
+        usableFamilyIds: [],
+      }],
+    });
+
+    expect(markup).toContain('data-harness-configuration="codex-basic"');
+    expect(markup).not.toContain('data-harness-configuration="claude-basic"');
+    expect(markup).not.toContain("Codex subscription");
+    expect(markup).not.toContain("Codex models");
+    expect(markup).toContain("Default harness");
+    expect(markup).not.toContain("Advanced configuration");
+    expect(markup).not.toContain("Configure other harnesses");
+    expect(markup).not.toContain("data-harness-rules-edit");
+    expect(markup).not.toContain("<button");
+    expect(markup).not.toContain("Available");
+    expect(markup).not.toContain("Execution access");
+    expect(markup).not.toContain("Revision");
+    expect(markup).not.toContain("managed-runtime@1");
+    expect(markup).not.toContain("codex-subscription");
+    expect(markup).not.toContain("model regex");
+    expect(markup).not.toContain(".*");
   });
 
-  it("shows an actionable unavailable runtime in Settings without enabling edits", () => {
-    const markup = harnessConfigurationsMarkup([{
-      id: "prime-agent-basic",
-      label: "Prime Agent Basic",
-      available: false,
-      unavailableReason: {
-        code: "prime_agent_boundary_unsupported",
-        message: "Prime Agent Ask and Auto require macOS. Choose another available harness on this device.",
-      },
-      executionAccessContracts: ["secret@1"],
-    }]);
-    expect(markup).toContain("Unavailable");
-    expect(markup).toContain("Choose another available harness on this device.");
-    expect(markup).toContain('data-harness-rules-edit="prime-agent-basic" disabled');
+  it("shows one actionable empty state when no harness has a feasible provider and model", () => {
+    const markup = harnessConfigurationsMarkup({
+      defaults: { harnessId: "claude-basic" },
+      providers: [],
+      families: [],
+      harnesses: [{ id: "claude-basic", label: "Claude Basic", available: true }],
+    });
+    expect(markup).toContain("No harnesses are usable right now");
+    expect(markup).toContain("Connect a provider");
+    expect(markup.match(/family-empty/g)).toHaveLength(1);
+    expect(markup).not.toContain("<button");
+    expect(markup).not.toContain("Advanced configuration");
+    expect(markup).not.toContain("Claude Basic");
+    expect(markup).not.toContain("Available");
+    expect(markup).not.toContain("Execution access");
   });
 });
