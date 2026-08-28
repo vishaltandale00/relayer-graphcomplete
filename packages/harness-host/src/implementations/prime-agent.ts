@@ -1044,7 +1044,10 @@ function primeAgentModel(route: HarnessAdmittedModelRoute, access: Extract<Harne
     && capabilities.contextWindow > 0
     && Number.isSafeInteger(capabilities.maxOutputTokens)
     && capabilities.maxOutputTokens > 0;
-  const supportsPrimeReserve = hasDiscoveredTokenCapabilities && capabilities.contextWindow > 16_384;
+  const primeCompactionReserveTokens = 16_384;
+  if (hasDiscoveredTokenCapabilities && capabilities.contextWindow <= primeCompactionReserveTokens) {
+    throw new Error(`prime.agent model ${route.modelId} context window cannot satisfy Prime's ${primeCompactionReserveTokens}-token compaction reserve`);
+  }
   return Object.freeze({
     id: route.modelId,
     name: route.modelId,
@@ -1059,17 +1062,10 @@ function primeAgentModel(route: HarnessAdmittedModelRoute, access: Extract<Harne
     // Prime requires numeric prices; zero is an unknown-cost sentinel here.
     // Relayer billing never treats this transport metadata as authoritative.
     cost: Object.freeze({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
-    // Smaller discovered windows cannot support Prime's fixed compaction
-    // reserve. Keep the established conservative context envelope for those
-    // models instead of introducing an execution-only compatibility failure.
-    contextWindow: supportsPrimeReserve ? capabilities.contextWindow : 32_768,
-    // Prime compaction reserves 16,384 tokens for the next turn. Never request
-    // more than that reserve, while preserving providers with a lower cap.
-    maxTokens: supportsPrimeReserve
-      ? Math.min(capabilities.maxOutputTokens, capabilities.contextWindow, 16_384)
-      : hasDiscoveredTokenCapabilities
-        ? Math.min(capabilities.maxOutputTokens, 4_096)
-        : 4_096,
+    contextWindow: hasDiscoveredTokenCapabilities ? capabilities.contextWindow : 32_768,
+    maxTokens: hasDiscoveredTokenCapabilities
+      ? Math.min(capabilities.maxOutputTokens, capabilities.contextWindow)
+      : 4_096,
     ...(mapping.compat === undefined ? {} : { compat: mapping.compat }),
   });
 }

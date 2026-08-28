@@ -381,7 +381,9 @@ describe("PrimeAgentHarness", () => {
     expect(createAgentSessionFromServices).toHaveBeenCalledOnce();
     expect(session.promptAndWait).toHaveBeenCalledTimes(2);
     expect(modelRegistryAuth).not.toHaveBeenCalled();
-    expect(scopes[0]!.input.models.map(({ id }) => id)).toEqual(["gpt-shared", "gpt-shared", "claude-root"]);
+    expect(scopes[0]!.input.models.map(({ id }) => id)).toEqual([
+      "gpt-shared", "gpt-shared", "claude-root", "qwen-root", "gemini-root",
+    ]);
     expect(scopes[0]!.input.models[0]!.provider).not.toBe(scopes[0]!.input.models[1]!.provider);
     expect(scopes[0]!.input.models[0]!.api).toBe("openai-responses");
     expect(scopes[0]!.input.models[1]!.api).toBe("openai-responses");
@@ -395,6 +397,18 @@ describe("PrimeAgentHarness", () => {
       maxTokens: 4_096,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     });
+    expect(scopes[0]!.input.models[3]).toMatchObject({
+      id: "qwen-root",
+      api: "openai-completions",
+      baseUrl: "https://openrouter-work.test/v1",
+      compat: { thinkingFormat: "openrouter", openRouterRouting: {} },
+    });
+    expect(scopes[0]!.input.models[4]).toMatchObject({
+      id: "gemini-root",
+      api: "openai-completions",
+      baseUrl: "https://vercel-work.test/v1",
+      compat: { vercelGatewayRouting: {} },
+    });
     expect(scopes[0]!.input.root.id).toBe("claude-root");
     expect(scopes[1]!.input.root.id).toBe("gpt-shared");
     expect(scopes[0]!.input.requestAccess).toHaveLength(scopes[0]!.input.models.length);
@@ -406,11 +420,15 @@ describe("PrimeAgentHarness", () => {
       { kind: "secret", contract: "secret@1", apiKey: "secret-openai-personal" },
       { kind: "secret", contract: "secret@1", apiKey: "secret-openai-work" },
       { kind: "secret", contract: "secret@1", apiKey: "secret-anthropic-work" },
+      { kind: "secret", contract: "secret@1", apiKey: "secret-openrouter-work" },
+      { kind: "secret", contract: "secret@1", apiKey: "secret-vercel-work" },
     ]);
     expect(scopes[0]!.input).not.toHaveProperty("resolveRequestAuth");
     expect(providerRequests.map(({ apiKey }) => apiKey)).toEqual([
       "secret-openai-personal", "secret-openai-work", "secret-anthropic-work",
+      "secret-openrouter-work", "secret-vercel-work",
       "secret-openai-personal", "secret-openai-work", "secret-anthropic-work",
+      "secret-openrouter-work", "secret-vercel-work",
     ]);
     expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/family-session.jsonl" });
 
@@ -516,14 +534,14 @@ describe("PrimeAgentHarness", () => {
     }))).toEqual([
       { api: "openai-responses", baseUrl: "https://provider-40.test/v1", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "anthropic-messages", baseUrl: "https://provider-41.test", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "openai-completions", baseUrl: "https://provider-42.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 196_608, maxTokens: 16_384, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", baseUrl: "https://provider-42.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 196_608, maxTokens: 131_072, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "openai-completions", baseUrl: "https://provider-43.test/v1", compat: { vercelGatewayRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "openai-completions", baseUrl: "https://provider-44.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 2_048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { api: "anthropic-messages", baseUrl: "https://provider-45.test/proxy/anthropic", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
     ]);
   });
 
-  it("keeps a small discovered context on Prime's compatible conservative envelope", async () => {
+  it("rejects a discovered context that cannot satisfy Prime's compaction reserve", async () => {
     const session = {
       promptAndWait: vi.fn(async (_text: string, _options: { modelScope: ControlledRunScopeInput }) => undefined),
       waitForRlmQuiescence: vi.fn(async () => undefined),
@@ -536,12 +554,8 @@ describe("PrimeAgentHarness", () => {
       45,
       "openrouter",
       { contextWindow: 4_095, maxOutputTokens: 3_685 },
-    ))).resolves.toBeUndefined();
-    expect(session.promptAndWait).toHaveBeenCalledOnce();
-    expect(session.promptAndWait.mock.calls[0]?.[1]?.modelScope.root).toMatchObject({
-      contextWindow: 32_768,
-      maxTokens: 3_685,
-    });
+    ))).rejects.toThrow("context window cannot satisfy Prime's 16384-token compaction reserve");
+    expect(session.promptAndWait).not.toHaveBeenCalled();
   });
 
   it("opens saved Prime Agent state and forwards cancellation", async () => {
@@ -1388,6 +1402,8 @@ function familyRunContext(
     { providerId: "openai-personal", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt-shared", adapterImplementationVersion: "1" },
     { providerId: "openai-work", adapterId: "openai-api", accessContract: "secret@1", modelId: "gpt-shared", adapterImplementationVersion: "1" },
     { providerId: "anthropic-work", adapterId: "anthropic-api", accessContract: "secret@1", modelId: "claude-root", adapterImplementationVersion: "1" },
+    { providerId: "openrouter-work", adapterId: "openrouter", accessContract: "secret@1", modelId: "qwen-root", adapterImplementationVersion: "1" },
+    { providerId: "vercel-work", adapterId: "vercel-ai-router", accessContract: "secret@1", modelId: "gemini-root", adapterImplementationVersion: "1" },
   ] as const;
   const orchestrator = routes[orchestratorIndex];
   if (orchestrator === undefined) throw new Error("invalid test orchestrator");
@@ -1403,6 +1419,14 @@ function familyRunContext(
     "anthropic-work": {
       kind: "secret", contract: "secret@1", providerId: "anthropic-work", adapterId: "anthropic-api",
       adapterImplementationVersion: "1", endpoint: "https://anthropic-work.test/v1", fields: { "api-key": "secret-anthropic-work" },
+    },
+    "openrouter-work": {
+      kind: "secret", contract: "secret@1", providerId: "openrouter-work", adapterId: "openrouter",
+      adapterImplementationVersion: "1", endpoint: "https://openrouter-work.test/v1", fields: { "api-key": "secret-openrouter-work" },
+    },
+    "vercel-work": {
+      kind: "secret", contract: "secret@1", providerId: "vercel-work", adapterId: "vercel-ai-router",
+      adapterImplementationVersion: "1", endpoint: "https://vercel-work.test/v1", fields: { "api-key": "secret-vercel-work" },
     },
   } as const;
   const base = runContext(nodeId, token, trace);
