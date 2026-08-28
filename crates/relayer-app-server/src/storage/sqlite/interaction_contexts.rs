@@ -408,6 +408,30 @@ impl SqliteProductStore {
         }))
     }
 
+    pub(crate) async fn submitted_input_evidence(
+        &self,
+        interaction_id: crate::product::InteractionId,
+    ) -> Result<Vec<crate::product::SubmittedInputEvidence>, StorageError> {
+        let rows = sqlx::query(
+            "SELECT snapshot.presenting_interaction_node_id,snapshot.presenting_layer_id,snapshot.action_id,snapshot.source_node_id,snapshot.action_json,snapshot.value_json,attempt.state FROM interaction_submitted_input_attachments snapshot JOIN interaction_submitted_input_attempts attempt ON attempt.interaction_id=snapshot.interaction_id WHERE snapshot.interaction_id=?1 ORDER BY snapshot.presenting_interaction_node_id,snapshot.presenting_layer_id,snapshot.action_id",
+        )
+        .bind(interaction_id.value())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                let submitted = submitted_input_from_row(row)?;
+                Ok(crate::product::SubmittedInputEvidence {
+                    occurrence: submitted.occurrence,
+                    source_node_id: row.try_get("source_node_id")?,
+                    action: submitted.action,
+                    value: submitted.value,
+                    attempt_state: row.try_get("state")?,
+                })
+            })
+            .collect()
+    }
+
     pub(crate) async fn discard_unbound_interaction_input(
         &self,
         interaction_id: crate::product::InteractionId,

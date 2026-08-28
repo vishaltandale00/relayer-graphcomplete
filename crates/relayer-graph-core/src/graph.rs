@@ -10,9 +10,9 @@ pub use completion::{AcceptedGraphClosure, CompletionOutput, current_transition_
 pub use database::GraphDatabase;
 pub use import::{
     ImportedAcceptedView, ImportedAction, ImportedConversation, ImportedConversationReceipt,
-    ImportedConversationStage, ImportedEdge, ImportedInteractionContext, ImportedInvokeOrigin,
-    ImportedLayer, ImportedLayerLayout, ImportedNode, ImportedNodePlacement, ImportedResolvedLayer,
-    ImportedTurn, ImportedTurnReceipt,
+    ImportedConversationStage, ImportedEdge, ImportedInputSource, ImportedInteractionContext,
+    ImportedInvokeOrigin, ImportedLayer, ImportedLayerLayout, ImportedNode, ImportedNodePlacement,
+    ImportedResolvedLayer, ImportedSubmittedInput, ImportedTurn, ImportedTurnReceipt,
 };
 pub use model::{
     ActionDraft, ActionId, ActionKind, ActionVariant, CompletionLifecycle, CompletionState,

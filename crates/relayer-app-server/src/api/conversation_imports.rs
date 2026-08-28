@@ -255,10 +255,12 @@ mod tests {
             ExportActionVariant, ExportAdmittedExecutionModelPlan,
             ExportAdmittedExecutionModelRoute, ExportCompletionReceipt, ExportCompletionStatus,
             ExportContextSource, ExportContextTargetSnapshot, ExportConversation,
+            ExportInputActionSnapshot, ExportInputControl, ExportInputOption, ExportInputSource,
             ExportInteractionContext, ExportLayer, ExportModelSelection, ExportNavigateRelation,
             ExportNode, ExportProducer, ExportRecordState, ExportResolvedLayer,
-            ExportTurnManifestEntry, ExportTurnOrigin, MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES,
-            admitted_model_plan_digest, decode_export_jsonl,
+            ExportSubmittedInput, ExportSubmittedInputValue, ExportTurnManifestEntry,
+            ExportTurnOrigin, MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES, admitted_model_plan_digest,
+            decode_export_jsonl,
         },
         product::ProductService,
         runtime::RuntimeClient,
@@ -309,6 +311,7 @@ mod tests {
                     admitted_model_plan: None,
                 },
                 contexts: vec![],
+                submitted_inputs: vec![],
                 accepted_view: None,
             })),
         ]
@@ -463,6 +466,7 @@ mod tests {
                 origin: ExportTurnOrigin::User,
                 completion: accepted_receipt(),
                 contexts: vec![],
+                submitted_inputs: vec![],
                 accepted_view: Some(ExportAcceptedView {
                     interaction_node_id: "node:interaction-1".into(),
                     root_action: export_action(
@@ -493,6 +497,7 @@ mod tests {
                 },
                 completion: accepted_receipt(),
                 contexts: vec![],
+                submitted_inputs: vec![],
                 accepted_view: Some(ExportAcceptedView {
                     interaction_node_id: "node:interaction-2".into(),
                     root_action: export_action(
@@ -870,7 +875,9 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(reexported.status(), StatusCode::OK);
+        if reexported.status() != StatusCode::OK {
+            panic!("re-export failed: {}", response_json(reexported).await);
+        }
         let reexported_bytes = to_bytes(reexported.into_body(), MAX_EXPORT_BYTES)
             .await
             .unwrap();
@@ -1009,6 +1016,41 @@ mod tests {
         };
         accepted.interaction_node_id = Some("node:interaction-1".into());
         accepted.contexts = vec![context("action:context-accepted", &["First", "Second"])];
+        accepted.accepted_view.as_mut().unwrap().layers[0]
+            .actions
+            .extend([
+                export_action(
+                    "action:input-shared",
+                    "node:source",
+                    Some("layer:source"),
+                    ExportActionKind::Input,
+                    None,
+                ),
+                export_action(
+                    "action:input-text",
+                    "node:source",
+                    Some("layer:source"),
+                    ExportActionKind::Input,
+                    None,
+                ),
+                export_action(
+                    "action:input-multi",
+                    "node:source",
+                    Some("layer:source"),
+                    ExportActionKind::Input,
+                    None,
+                ),
+            ]);
+        let options = vec![
+            ExportInputOption {
+                key: "failed".into(),
+                label: "Failed value".into(),
+            },
+            ExportInputOption {
+                key: "stopped".into(),
+                label: "Stopped value".into(),
+            },
+        ];
         for (sequence, status, suffix) in [
             (3, ExportCompletionStatus::Failed, "failed"),
             (4, ExportCompletionStatus::Stopped, "stopped"),
@@ -1018,7 +1060,11 @@ mod tests {
                     id: format!("turn:{sequence}"),
                     sequence,
                     created_at: format!("176900000{sequence}000"),
-                    text: format!("{suffix} turn"),
+                    text: if suffix == "failed" {
+                        String::new()
+                    } else {
+                        format!("{suffix} turn")
+                    },
                     interaction_node_id: Some(format!("node:interaction-{suffix}")),
                     origin: ExportTurnOrigin::User,
                     completion: ExportCompletionReceipt {
@@ -1034,6 +1080,71 @@ mod tests {
                         admitted_model_plan: None,
                     },
                     contexts: vec![context(&format!("action:context-{suffix}"), &["Preserved"])],
+                    submitted_inputs: vec![
+                        ExportSubmittedInput {
+                            id: format!("input-child:{suffix}-multi"),
+                            root_turn_id: format!("turn:{sequence}"),
+                            source: ExportInputSource {
+                                interaction_node_id: "node:interaction-1".into(),
+                                layer_id: "layer:source".into(),
+                                action_id: "action:input-multi".into(),
+                                node_id: "node:source".into(),
+                            },
+                            action: ExportInputActionSnapshot {
+                                control: ExportInputControl::MultiSelect,
+                                prompt: "Choose evidence".into(),
+                                options: options.clone(),
+                                minimum_selections: Some(2),
+                            },
+                            value: ExportSubmittedInputValue::Selected {
+                                selected: options.clone(),
+                            },
+                        },
+                        ExportSubmittedInput {
+                            id: format!("input-child:{suffix}-single"),
+                            root_turn_id: format!("turn:{sequence}"),
+                            source: ExportInputSource {
+                                interaction_node_id: "node:interaction-1".into(),
+                                layer_id: "layer:source".into(),
+                                action_id: "action:input-shared".into(),
+                                node_id: "node:source".into(),
+                            },
+                            action: ExportInputActionSnapshot {
+                                control: ExportInputControl::SingleSelect,
+                                prompt: "Choose outcome".into(),
+                                options: options.clone(),
+                                minimum_selections: None,
+                            },
+                            value: ExportSubmittedInputValue::Selected {
+                                selected: vec![
+                                    options
+                                        .iter()
+                                        .find(|option| option.key == suffix)
+                                        .unwrap()
+                                        .clone(),
+                                ],
+                            },
+                        },
+                        ExportSubmittedInput {
+                            id: format!("input-child:{suffix}-text"),
+                            root_turn_id: format!("turn:{sequence}"),
+                            source: ExportInputSource {
+                                interaction_node_id: "node:interaction-1".into(),
+                                layer_id: "layer:source".into(),
+                                action_id: "action:input-text".into(),
+                                node_id: "node:source".into(),
+                            },
+                            action: ExportInputActionSnapshot {
+                                control: ExportInputControl::Text,
+                                prompt: "Explain outcome".into(),
+                                options: vec![],
+                                minimum_selections: None,
+                            },
+                            value: ExportSubmittedInputValue::Text {
+                                text: format!("{suffix} explanation"),
+                            },
+                        },
+                    ],
                     accepted_view: None,
                 },
             )));
@@ -1097,6 +1208,38 @@ mod tests {
         );
         assert_eq!(interactions[2]["completionStatus"], "failed");
         assert_eq!(interactions[3]["completionStatus"], "stopped");
+        for (index, expected) in [(2, "failed"), (3, "stopped")] {
+            let submitted = interactions[index]["submittedInputs"].as_array().unwrap();
+            assert_eq!(submitted.len(), 3);
+            let single = submitted
+                .iter()
+                .find(|input| input["action"]["control"] == "single_select")
+                .unwrap();
+            assert_eq!(single["value"]["selected"][0]["key"], expected);
+        }
+        let failed_diagnostics = app
+            .clone()
+            .oneshot(request_uri(
+                "GET",
+                &format!(
+                    "/api/threads/{thread_id}/interactions/{}/input-children",
+                    interactions[2]["id"].as_i64().unwrap()
+                ),
+                "read-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(failed_diagnostics.status(), StatusCode::OK);
+        let failed_diagnostics = response_json(failed_diagnostics).await;
+        assert_eq!(
+            failed_diagnostics["children"][0]["value"]["selected"][0]["key"],
+            "failed"
+        );
+        let diagnostic_json = failed_diagnostics.to_string();
+        assert!(!diagnostic_json.contains("attemptKey"));
+        assert!(!diagnostic_json.contains("authorityDigest"));
+        assert!(!diagnostic_json.contains("semanticDigest"));
 
         let reexported = app
             .oneshot(request_uri(
@@ -1107,7 +1250,9 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(reexported.status(), StatusCode::OK);
+        if reexported.status() != StatusCode::OK {
+            panic!("re-export failed: {}", response_json(reexported).await);
+        }
         let bytes = to_bytes(reexported.into_body(), MAX_EXPORT_BYTES)
             .await
             .unwrap();
@@ -1127,6 +1272,19 @@ mod tests {
         assert_eq!(stopped.contexts[0].target, accepted.contexts[0].target);
         assert_eq!(failed.completion.status, ExportCompletionStatus::Failed);
         assert_eq!(stopped.completion.status, ExportCompletionStatus::Stopped);
+        assert_eq!(failed.submitted_inputs.len(), 3);
+        assert_eq!(stopped.submitted_inputs.len(), 3);
+        let failed_single = failed
+            .submitted_inputs
+            .iter()
+            .find(|input| input.source.action_id == "action:input-shared")
+            .unwrap();
+        let stopped_single = stopped
+            .submitted_inputs
+            .iter()
+            .find(|input| input.source.action_id == "action:input-shared")
+            .unwrap();
+        assert_ne!(failed_single.value, stopped_single.value);
         graph_task.abort();
     }
 
@@ -1189,6 +1347,7 @@ mod tests {
                     admitted_model_plan: None,
                 },
                 contexts: vec![],
+                submitted_inputs: vec![],
                 accepted_view: None,
             },
         )));

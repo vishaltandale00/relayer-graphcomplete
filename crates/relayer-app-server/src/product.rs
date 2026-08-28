@@ -91,6 +91,7 @@ pub(crate) use models::PreExecutionModelFailure;
 pub(crate) use models::ProductCapabilities;
 pub(crate) use models::ProductState;
 pub(crate) use models::Project;
+pub(crate) use models::SubmittedInputEvidence;
 pub(crate) use models::Thread;
 pub(crate) use models::ThreadView;
 pub(crate) use models::{ActionInputAttachment, ActionInputDraft, ActionInputValue};

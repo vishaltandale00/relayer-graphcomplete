@@ -1,14 +1,15 @@
 use crate::{
     ActionDraft, ActionId, CompletionOutput, CompletionState, CurrentTransition,
     CurrentTransitionReceipt, EdgeDraft, GraphAction, GraphDatabase, GraphEdge, GraphError,
-    GraphLayer, GraphNode, InteractionInput, InteractionInvocation, LayerDraft, LayerId,
-    NavigateRelation, NodeDraft, NodeId, RecordState, ResolvedLayer,
+    GraphLayer, GraphNode, InteractionInput, InteractionInputChild, InteractionInvocation,
+    LayerDraft, LayerId, NavigateRelation, NodeDraft, NodeId, RecordState, ResolvedLayer,
     graph::{InteractionScope, completion, database::initialize_completion, model::LayerCandidate},
     storage::{
         GraphConnection,
         sqlite::{
-            actions::ActionTable, contexts::ContextTable, currents::CurrentTable, edges::EdgeTable,
-            layers, layers::LayerTable, nodes::NodeTable,
+            actions::ActionTable, completions::CompletionTable, contexts::ContextTable,
+            currents::CurrentTable, edges::EdgeTable, input_children::InputChildTable, layers,
+            layers::LayerTable, nodes::NodeTable,
         },
     },
 };
@@ -83,6 +84,15 @@ impl GraphWriter {
             .await?;
         transaction.commit().await?;
         Ok(input)
+    }
+
+    pub async fn interaction_input_children(
+        &self,
+    ) -> Result<Vec<InteractionInputChild>, GraphError> {
+        let mut connection = self.database.storage.acquire().await?;
+        InputChildTable::new(&mut connection)
+            .children(self.scope.root_node_id)
+            .await
     }
 
     pub async fn submit_node(&self, draft: &NodeDraft) -> Result<GraphNode, GraphError> {

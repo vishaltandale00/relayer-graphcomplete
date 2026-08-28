@@ -1640,6 +1640,16 @@ impl RuntimeClient {
         )?)
     }
 
+    pub(crate) async fn interaction_input_children(
+        &self,
+        interaction_node_id: i64,
+    ) -> Result<Value, RuntimeError> {
+        self.control_get(&format!(
+            "api/control/interactions/{interaction_node_id}/input-children"
+        ))
+        .await
+    }
+
     pub(crate) async fn interaction_context_actions(
         &self,
         interaction_node_id: i64,
