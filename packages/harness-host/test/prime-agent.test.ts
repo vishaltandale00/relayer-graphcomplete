@@ -626,8 +626,10 @@ describe("PrimeAgentHarness", () => {
     }) as never });
 
     const context = runContext(11, "token");
+    const trace = recordingTrace();
     await harness.complete({
       ...context,
+      trace: trace.sink,
       personalPresentation: {
         attachment: { interactionNodeId: 11, versionInteractionNodeId: 90, rootLayerId: 91 },
         graph: {
@@ -667,14 +669,62 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("Do not add fake navigate or reference actions");
     expect(prompt).toContain("await graph.discard_layer(layer)");
     expect(prompt).toContain("Decision-useful center: Foreground the conclusion and material tradeoffs.");
-    expect(prompt).toContain("Apply the same pinned preferences to the root agent and every native child that can author graph content");
-    expect(prompt.indexOf("Graph presentation requirements")).toBeLessThan(prompt.indexOf("Personal graph presentation preferences"));
-    expect(prompt.indexOf("Personal graph presentation preferences")).toBeLessThan(prompt.indexOf('"message": "Question"'));
+    expect(prompt.indexOf("Graph presentation guidance:")).toBeLessThan(
+      prompt.indexOf("Personal graph presentation preferences:"),
+    );
+    expect(prompt.indexOf("Personal graph presentation preferences:")).toBeLessThan(
+      prompt.indexOf("Normalized interaction input:"),
+    );
+    const tracedPrompt = trace.events.find((event) => event.type === "prompt")?.data.text;
+    expect(tracedPrompt).not.toContain("Decision-useful center");
+    expect(tracedPrompt).not.toContain("Personal graph presentation preferences");
     expect(session.reload).toHaveBeenCalledOnce();
     const nativeInstructions = resourceLoaderOptions?.appendSystemPromptOverride(["base prompt"]);
     expect(nativeInstructions).toHaveLength(2);
     expect(nativeInstructions?.[1]).toContain("Decision-useful center: Foreground the conclusion and material tradeoffs.");
     expect(nativeInstructions?.[1]).toContain("every native child that can author graph content");
+  });
+
+  it("retries a presentation instruction reload after a transient failure", async () => {
+    let resourceLoaderOptions: { appendSystemPromptOverride(base: string[]): string[] } | undefined;
+    const reload = vi.fn().mockRejectedValueOnce(new Error("reload failed")).mockResolvedValueOnce(undefined);
+    const session = {
+      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload,
+    };
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+    }, { loadModule: async () => ({
+      ...runScopeApi(), SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async (options: { resourceLoaderOptions: typeof resourceLoaderOptions }) => {
+        resourceLoaderOptions = options.resourceLoaderOptions;
+        return { modelRegistry: { find: vi.fn() } };
+      }),
+      createAgentSessionFromServices: vi.fn(async () => ({ session })),
+    }) as never });
+    const context = runContext(11, "token");
+    const attached: HarnessRunContext = {
+      ...context,
+      personalPresentation: {
+        attachment: { interactionNodeId: 11, versionInteractionNodeId: 90, rootLayerId: 91 },
+        graph: {
+          nodeId: 90, rootLayerId: 91,
+          rootAction: { id: 92, sourceNodeId: 90, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: 91, state: "accepted" },
+          layers: [{
+            layer: { id: 91, nodes: [93], edges: [], state: "accepted" },
+            nodes: [{ id: 93, kind: "presentation-preference", icon: "compass", title: "Decision-useful center", detail: "Foreground the conclusion.", state: "accepted" }],
+            edges: [], actions: [],
+          }],
+        },
+      },
+    };
+
+    await expect(harness.complete(attached)).rejects.toThrow("reload failed");
+    expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])).toEqual(["base"]);
+    await expect(harness.complete(attached)).resolves.toBeUndefined();
+    expect(reload).toHaveBeenCalledTimes(2);
+    expect(resourceLoaderOptions?.appendSystemPromptOverride(["base"])[1]).toContain("Decision-useful center");
   });
 
   it("delivers the same ordered normalized context to Prime and its native children", async () => {

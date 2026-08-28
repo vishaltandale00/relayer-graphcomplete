@@ -125,7 +125,10 @@ export class CodexBasicHarness implements Harness {
     const sandboxPolicy = this.sandboxPolicy();
     const run = this.dependencies.runAppServerTurn ?? runCodexAppServerTurn;
     const prompt = this.prompt(context);
-    context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
+    context.trace.emit({
+      type: "prompt",
+      data: { text: this.prompt(context, false), interactionNodeId: context.inputGraph.id },
+    });
     const traceState: CodexTraceState = { collaborationSpans: new Map() };
     const forceShutdown = new AbortController();
     this.activeForceShutdowns.add(forceShutdown);
@@ -323,13 +326,13 @@ export class CodexBasicHarness implements Harness {
     };
   }
 
-  private prompt(context: HarnessRunContext): string {
+  private prompt(context: HarnessRunContext, includePersonalPresentation = true): string {
     const interactionNode = context.inputGraph;
     if (this.resolved.promptProfile === "layered-navigation-v1") {
-      return this.layeredNavigationPrompt(context);
+      return this.layeredNavigationPrompt(context, includePersonalPresentation);
     }
     if (this.resolved.promptProfile === "layered-navigation-multi-agent-v1") {
-      return `${this.layeredNavigationPrompt(context)}
+      return `${this.layeredNavigationPrompt(context, includePersonalPresentation)}
 
 Codex native subagents are available when useful. Subagents may directly author, revise, and submit graph objects using the available graph capability. Use the configured model family as appropriate; coordination remains native to Codex.`;
     }
@@ -341,7 +344,7 @@ Codex native subagents are available when useful. Subagents may directly author,
 
 Answer the current user interaction by authoring and accepting a useful graph layer that truthfully presents the completed work or genuine blocker.
 
-${GRAPH_PRESENTATION_GUIDANCE}${personalPresentationPrompt(context)}
+${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -389,8 +392,13 @@ Navigate and invoke actions are first-class options, not requirements for every 
 If a graph call rejects an object or graph.submit reports a repairable issue, edit the same program and rerun it with the same clientKey values. Stable keys make the whole-program rerun update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. The graph is complete only after graph.submit succeeds.`;
   }
 
-  private layeredNavigationPrompt(context: HarnessRunContext): string {
-    return buildLayeredNavigationPrompt(context, this.clientModuleUrl, this.dependencies.graphAuthoringLauncherPath);
+  private layeredNavigationPrompt(context: HarnessRunContext, includePersonalPresentation: boolean): string {
+    return buildLayeredNavigationPrompt(
+      context,
+      this.clientModuleUrl,
+      this.dependencies.graphAuthoringLauncherPath,
+      includePersonalPresentation,
+    );
   }
 
   private graphAuthoringCommand(): string {
@@ -418,6 +426,7 @@ export function buildLayeredNavigationPrompt(
   input: HarnessRunContext | GraphNode,
   clientModuleUrl: string,
   graphAuthoringLauncherPath?: string,
+  includePersonalPresentation = true,
 ): string {
   const context = "inputGraph" in input ? input as HarnessRunContext : undefined;
   const interactionNode = context ? context.inputGraph : input as GraphNode;
@@ -431,7 +440,7 @@ export function buildLayeredNavigationPrompt(
 
 After doing the underlying work, answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
-${GRAPH_PRESENTATION_GUIDANCE}${context === undefined ? "" : personalPresentationPrompt(context)}
+${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:

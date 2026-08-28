@@ -25,6 +25,7 @@ import { claimPrimaryDesktopInstance } from "../main/single-instance.mjs";
 import { confirmManagedRuntimeQuit } from "../main/managed-runtimes/quit-guard.mjs";
 import {
   createEvalCodexExecutionLease,
+  createEvalCodexCatalogProvisioner,
   createEvalManagedCodexRuntime,
 } from "./managed-codex-runtime.mjs";
 
@@ -476,6 +477,10 @@ async function start() {
     onUnexpectedStop: () => app.quit(),
   });
   const productSession = await productServer.start();
+  const ensureEvalCodexCatalog = createEvalCodexCatalogProvisioner({
+    productSession,
+    resolveRuntime: () => managedCodexRuntime.resolve(),
+  });
   const simulatedUserJudgeRunner = createLocalSimulatedUserJudgeRunner({
     resolveCodexRuntime: () => managedCodexRuntime.resolve(),
     loadLayer: ({ threadId, turnId, layerId }) => productRequest(productSession, (
@@ -494,6 +499,7 @@ async function start() {
       graphRuntime.exportCandidateTrace(productInteractionId, targetDirectory, correlation)
     ),
     candidateTraceRequired: true,
+    ensureModelCatalog: ensureEvalCodexCatalog,
     conversationImportEnabled: true,
     annotationSnapshotLoader: (threadIds) => loadAnnotationSnapshots(productSession, threadIds),
     onChanged: (runs) => dashboardWindow?.webContents.send("relayer-eval:runs-changed", runs),

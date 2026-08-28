@@ -300,11 +300,17 @@ export class PrimeAgentHarness implements Harness {
     signal?.throwIfAborted();
     const presentationInstructions = personalPresentationNativeInstructions(context);
     if (presentationInstructions !== this.presentationInstructions.current) {
-      this.presentationInstructions.current = presentationInstructions;
       if (this.session.reload === undefined) {
         throw new Error("Installed Prime Agent package cannot refresh interaction-scoped presentation instructions");
       }
-      await this.session.reload();
+      const previousInstructions = this.presentationInstructions.current;
+      this.presentationInstructions.current = presentationInstructions;
+      try {
+        await this.session.reload();
+      } catch (error) {
+        this.presentationInstructions.current = previousInstructions;
+        throw error;
+      }
     }
     const execution = createPrimeAgentModelScope(context, this.primeAgent);
     const runContext: PrimeAgentRunContext = Object.freeze({ graph: context.graph });
@@ -324,7 +330,10 @@ export class PrimeAgentHarness implements Harness {
       data: { provider: "prime-agent", event: { type: "runtime.provenance", ...runtimeProvenance } },
     });
     const prompt = this.prompt(context);
-    context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
+    context.trace.emit({
+      type: "prompt",
+      data: { text: this.prompt(context, false), interactionNodeId: context.inputGraph.id },
+    });
     let abortOutcome: Promise<OperationOutcome<void>> | undefined;
     const abort = () => {
       if (abortOutcome !== undefined) return;
@@ -430,14 +439,14 @@ export class PrimeAgentHarness implements Harness {
     }
   }
 
-  private prompt(context: HarnessRunContext): string {
+  private prompt(context: HarnessRunContext, includePersonalPresentation = true): string {
     const interaction = context.inputGraph;
     if (this.context.configuration.settings.promptProfile === "layered-navigation-v1") {
-      return this.layeredNavigationPrompt(context);
+      return this.layeredNavigationPrompt(context, includePersonalPresentation);
     }
     return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response.
 
-${GRAPH_PRESENTATION_GUIDANCE}${personalPresentationPrompt(context)}
+${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -461,11 +470,11 @@ await graph.submit(${interaction.id})
 If a graph call fails, edit and rerun the same authoring code with the same client_key values so it updates the same drafts instead of creating duplicates. Do not add fake navigation merely to make abandoned drafts reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with await graph.discard_layer(layer); this preserves that layer as stopped history without discarding its graph objects. A model turn ending is not completion. If graph.submit() has not succeeded, continue working or report the blocking graph error.`;
   }
 
-  private layeredNavigationPrompt(context: HarnessRunContext): string {
+  private layeredNavigationPrompt(context: HarnessRunContext, includePersonalPresentation: boolean): string {
     const interaction = context.inputGraph;
     return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
-${GRAPH_PRESENTATION_GUIDANCE}${personalPresentationPrompt(context)}
+${GRAPH_PRESENTATION_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:

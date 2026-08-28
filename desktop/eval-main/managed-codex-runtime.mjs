@@ -1,6 +1,9 @@
 import { resolve } from "node:path";
 
 import { createManagedRuntimeInstaller } from "../main/managed-runtimes/installer.mjs";
+import { CodexCredentialAdapter } from "../main/credentials/codex-credential-adapter.mjs";
+import { CodexModelCatalogAdapter } from "../main/models/codex-model-catalog-adapter.mjs";
+import { toProductCatalogSnapshot } from "../main/models/model-catalog-adapter.mjs";
 import { managedRuntimeRequirementForHarness } from "../shared/managed-runtime-requirements.mjs";
 import { withManagedCodexPath } from "../shared/codex-runtime-environment.mjs";
 
@@ -81,4 +84,68 @@ export function createEvalCodexExecutionLease(resolveRuntime) {
       release: async () => {},
     });
   };
+}
+
+export function createEvalCodexCatalogProvisioner({
+  productSession,
+  resolveRuntime,
+  fetchImpl = fetch,
+  createCredentials = (environment) => new CodexCredentialAdapter({ environment }),
+} = {}) {
+  if (!productSession?.origin || !productSession?.cookie?.value) {
+    throw new TypeError("Eval Codex catalog provisioning requires the product write session.");
+  }
+  if (typeof resolveRuntime !== "function") {
+    throw new TypeError("Eval Codex catalog provisioning requires a runtime resolver.");
+  }
+  let provisioned;
+  return async () => {
+    provisioned ??= (async () => {
+      const runtime = await resolveRuntime();
+      const credentials = createCredentials(runtime.environment);
+      try {
+        const catalog = await new CodexModelCatalogAdapter({ credentials }).discover();
+        if (catalog.provider.status !== "available" || catalog.models.length === 0) {
+          throw new Error("Eval requires a connected managed Codex provider with at least one available model.");
+        }
+        await internalProductRequest(fetchImpl, productSession, "/api/internal/provider-definitions", {
+          method: "PUT",
+          body: [{
+            id: "codex",
+            adapterId: "codex-subscription",
+            label: "Codex",
+            endpoint: null,
+            accessContract: "managed-runtime@1",
+            credentialReference: null,
+            lifecycleState: "active",
+            removedAt: null,
+          }],
+        });
+        await internalProductRequest(fetchImpl, productSession, "/api/internal/provider-catalog", {
+          method: "PUT",
+          body: toProductCatalogSnapshot(catalog),
+        });
+      } finally {
+        await credentials.close();
+      }
+    })().catch((error) => {
+      provisioned = undefined;
+      throw error;
+    });
+    return provisioned;
+  };
+}
+
+async function internalProductRequest(fetchImpl, session, path, { method, body }) {
+  const response = await fetchImpl(new URL(path, session.origin), {
+    method,
+    headers: {
+      Authorization: `Bearer ${session.cookie.value}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (response.ok) return;
+  const detail = await response.json().catch(() => ({}));
+  throw new Error(detail?.error?.message || detail?.error || `Eval provider catalog publication failed (${response.status}).`);
 }

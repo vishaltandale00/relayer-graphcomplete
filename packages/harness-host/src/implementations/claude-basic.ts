@@ -103,7 +103,10 @@ export class ClaudeBasicHarness implements Harness {
     }
     const graph = context.graph.acquireCapability();
     const prompt = this.prompt(context);
-    await context.trace.emit({ type: "prompt", data: { text: prompt, interactionNodeId: context.inputGraph.id } });
+    await context.trace.emit({
+      type: "prompt",
+      data: { text: this.prompt(context, false), interactionNodeId: context.inputGraph.id },
+    });
     const result = await this.run(prompt, context.model.modelId, graph, context.access, signal);
     await context.trace.emit({ type: "message", data: { role: "assistant", text: result.text } });
     if (result.sessionId) {
@@ -176,8 +179,8 @@ export class ClaudeBasicHarness implements Harness {
     }
   }
 
-  private prompt(context: HarnessRunContext): string {
-    return buildLayeredNavigationPrompt(context, this.clientModuleUrl);
+  private prompt(context: HarnessRunContext, includePersonalPresentation = true): string {
+    return buildLayeredNavigationPrompt(context, this.clientModuleUrl, undefined, includePersonalPresentation);
   }
 }
 

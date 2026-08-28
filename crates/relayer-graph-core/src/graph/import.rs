@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{GraphError, ProjectId, ThreadId};
+use crate::{GraphError, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, ThreadId};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -155,6 +155,13 @@ impl crate::GraphDatabase {
         &self,
         input: &ImportedConversationStage,
     ) -> Result<(), GraphError> {
+        if input.thread_id.value() == PERSONAL_PRESENTATION_PROFILE_THREAD_ID {
+            return Err(GraphError::validation(
+                "reserved_personal_presentation_thread",
+                "threadId",
+                "The personal-presentation profile thread cannot be used for conversation import.",
+            ));
+        }
         if input.import_id.trim().is_empty() || input.source_sha256.trim().is_empty() {
             return Err(GraphError::Internal(
                 "graph import identity is empty".into(),

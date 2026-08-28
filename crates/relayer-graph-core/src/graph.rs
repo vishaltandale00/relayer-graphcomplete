@@ -19,8 +19,9 @@ pub use model::{
     GraphLayer, GraphNode, InteractionContext, InteractionContextAction, InteractionContextDraft,
     InteractionContextTarget, InteractionInput, InteractionInputNode, InteractionInvocation,
     LayerDraft, LayerId, LayerLayout, NavigateRelation, NodeDraft, NodeId, NodePlacement,
-    ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, RecordState, ResolvedLayer, ThreadId,
-    interaction_input_digest, is_supported_icon, normalize_icon_name, resolve_icon_name,
+    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES,
+    RecordState, ResolvedLayer, ThreadId, interaction_input_digest, is_supported_icon,
+    normalize_icon_name, resolve_icon_name,
 };
 pub use personal_presentation::{
     PersonalPresentationAttachment, PublishedPersonalPresentationVersion,

@@ -497,6 +497,7 @@ export class EvalService {
     acceptedTopologyGrader = gradeAcceptedReviewTopology,
     candidateTraceExporter = null,
     candidateTraceRequired = false,
+    ensureModelCatalog = async () => {},
     conversationImportEnabled = false,
     conversationImportMaxBytes = MAX_CONVERSATION_IMPORT_BYTES,
     annotationSnapshotLoader = null,
@@ -517,6 +518,7 @@ export class EvalService {
     this.acceptedTopologyGrader = acceptedTopologyGrader;
     this.candidateTraceExporter = candidateTraceExporter;
     this.candidateTraceRequired = candidateTraceRequired;
+    this.ensureModelCatalog = ensureModelCatalog;
     this.conversationImportEnabled = conversationImportEnabled;
     this.conversationImportMaxBytes = conversationImportMaxBytes;
     this.annotationSnapshotLoader = annotationSnapshotLoader;
@@ -1508,6 +1510,7 @@ export class EvalService {
 
   async #createAndRunThread({ execution, title, prompts, projectId = null, permissionProfileId = "auto", afterTurn = async () => {} }) {
     if (!Array.isArray(prompts) || prompts.length === 0) throw new Error(`Eval thread ${title} has no prompts.`);
+    if (execution.harnessConfiguration.implementation === "codex.basic") await this.ensureModelCatalog();
     const modelSettings = await this.#productRequest("/api/model-settings");
     const selectedModel = firstAvailableSelection(modelSettings, execution.harnessConfigurationName);
     if (execution.harnessConfiguration.modelRules && selectedModel === null) {

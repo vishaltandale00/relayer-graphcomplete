@@ -23,14 +23,8 @@ modelRules:
   allow:
     - adapterId: codex-subscription
       modelIdRegex: ".*"
-    - adapterId: openai-api
-      modelIdRegex: ".*"
-    - adapterId: openrouter
-      modelIdRegex: ".*"
-    - adapterId: vercel-ai-router
-      modelIdRegex: ".*"
   deny: []
-executionAccessContracts: [managed-runtime@1, secret@1]
+executionAccessContracts: [managed-runtime@1]
 modelDefaults:
   familyPolicy:
     id: codex-default-family

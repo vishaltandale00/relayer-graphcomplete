@@ -8,7 +8,7 @@ import {
 } from "../src/implementations/claude-basic.js";
 import { CLAUDE_BROWSER_TOOL } from "../src/implementations/claude-basic-browser.js";
 import { createNoopHarnessTraceSink } from "../src/trace.js";
-import type { HarnessExecutionAccess, HarnessFactoryContext, HarnessRunContext } from "../src/types.js";
+import type { HarnessExecutionAccess, HarnessFactoryContext, HarnessRunContext, HarnessTraceEventInput } from "../src/types.js";
 import { expectGraphPresentationGuidance } from "./graph-presentation-guidance-assertions.js";
 
 function factoryContext(approvalMode: string, savedState = {}): HarnessFactoryContext {
@@ -223,8 +223,10 @@ describe("ClaudeBasicHarness", () => {
     });
   });
 
-  it("renders each pinned presentation version into the Claude root prompt", async () => {
+  it("delivers each pinned presentation version while redacting the traced Claude prompt", async () => {
     const calls: Parameters<ClaudeSdkQuery>[0][] = [];
+    const events: HarnessTraceEventInput[] = [];
+    const trace = createNoopHarnessTraceSink();
     const harness = new ClaudeBasicHarness(factoryContext("ask"), {
       query: sequentialSdkQuery([
         [{ type: "result", subtype: "success", result: "first", session_id: "session-1" }],
@@ -233,12 +235,23 @@ describe("ClaudeBasicHarness", () => {
     });
     const access = managedAccess();
 
-    await harness.complete(personalPresentationRunContext(access, true));
+    await harness.complete({
+      ...personalPresentationRunContext(access, true),
+      trace: { ...trace, emit: (event) => { events.push(event); } },
+    });
     await harness.complete(personalPresentationRunContext(access, false));
 
     expect(calls[0]?.prompt).toContain("Personal graph presentation preferences:");
     expect(calls[0]?.prompt).toContain("Decision-useful center: Foreground the conclusion and material tradeoffs.");
-    expect(calls[0]?.prompt).toContain("An explicit user presentation request takes precedence");
+    expect(calls[0]?.prompt.indexOf("Graph presentation guidance:")).toBeLessThan(
+      calls[0]!.prompt.indexOf("Personal graph presentation preferences:"),
+    );
+    expect(calls[0]?.prompt.indexOf("Personal graph presentation preferences:")).toBeLessThan(
+      calls[0]!.prompt.indexOf("Normalized interaction input:"),
+    );
+    const tracedPrompt = events.find((event) => event.type === "prompt")?.data.text;
+    expect(tracedPrompt).not.toContain("Personal graph presentation preferences:");
+    expect(tracedPrompt).not.toContain("Decision-useful center");
     expect(calls[0]?.options.allowedTools).toEqual(["Bash"]);
     expect(calls[1]?.prompt).not.toContain("Personal graph presentation preferences:");
     expect(calls[1]?.options.resume).toBe("session-1");

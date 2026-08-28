@@ -29,6 +29,56 @@ fn authored_layout(nodes: impl IntoIterator<Item = NodeId>) -> Option<LayerLayou
     ))
 }
 
+#[tokio::test]
+async fn personal_presentation_thread_is_reserved_from_ordinary_creation() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let reserved = thread(PERSONAL_PRESENTATION_PROFILE_THREAD_ID);
+    let ordinary = database
+        .create_interaction(None, reserved, "ordinary")
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        ordinary,
+        GraphError::Validation {
+            code: "reserved_personal_presentation_thread",
+            ..
+        }
+    ));
+    let imported = database
+        .begin_imported_conversation(&ImportedConversationStage {
+            import_id: "reserved-import".into(),
+            source_sha256: "sha256:test".into(),
+            project_id: None,
+            thread_id: reserved,
+            created_at: "2026-08-28T00:00:00Z".into(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        imported,
+        GraphError::Validation {
+            code: "reserved_personal_presentation_thread",
+            ..
+        }
+    ));
+
+    let digest = interaction_input_digest("profile", &[]).unwrap();
+    let profile = database
+        .create_personal_presentation_interaction(
+            "profile",
+            "relayer.personal-presentation:personal-presentation-v0",
+            &digest,
+        )
+        .await
+        .unwrap();
+    let ordinary = database
+        .create_interaction(None, thread(1), "ordinary")
+        .await
+        .unwrap();
+    let ordinary_writer = database.writer_for_subgraph(ordinary.id).await.unwrap();
+    assert!(ordinary_writer.get_node(profile.id).await.is_err());
+}
+
 async fn setup(project_id: Option<ProjectId>, thread_id: ThreadId) -> (GraphDatabase, GraphNode) {
     let database = GraphDatabase::in_memory().await.unwrap();
     let interaction = database
@@ -36,6 +86,18 @@ async fn setup(project_id: Option<ProjectId>, thread_id: ThreadId) -> (GraphData
         .await
         .unwrap();
     (database, interaction)
+}
+
+async fn personal_presentation_interaction(
+    database: &GraphDatabase,
+    text: &str,
+    identity: &str,
+) -> GraphNode {
+    let digest = interaction_input_digest(text, &[]).unwrap();
+    database
+        .create_personal_presentation_interaction(text, identity, &digest)
+        .await
+        .unwrap()
 }
 
 fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
@@ -517,10 +579,12 @@ async fn accept_single_node(
 #[tokio::test]
 async fn personal_presentation_attachment_is_control_owned_one_shot_and_hidden_from_completion() {
     let database = GraphDatabase::in_memory().await.unwrap();
-    let version = database
-        .create_interaction(None, thread(900), "Personal presentation version V1")
-        .await
-        .unwrap();
+    let version = personal_presentation_interaction(
+        &database,
+        "Personal presentation version V1",
+        "relayer.personal-presentation:test-v1",
+    )
+    .await;
     let version_writer = database.writer_for_subgraph(version.id).await.unwrap();
     let preference = version_writer
         .submit_node(&NodeDraft {
@@ -534,7 +598,7 @@ async fn personal_presentation_attachment_is_control_owned_one_shot_and_hidden_f
         .unwrap();
     let preference_root = accept_single_node(&version_writer, version.clone(), preference).await;
     database
-        .publish_personal_presentation_version(thread(900), version.id)
+        .publish_personal_presentation_version(version.id)
         .await
         .unwrap();
 
@@ -582,10 +646,12 @@ async fn personal_presentation_attachment_is_control_owned_one_shot_and_hidden_f
             .all(|layer| layer.layer.id != preference_root.id)
     );
 
-    let other_version = database
-        .create_interaction(None, thread(900), "Personal presentation version V2")
-        .await
-        .unwrap();
+    let other_version = personal_presentation_interaction(
+        &database,
+        "Personal presentation version V2",
+        "relayer.personal-presentation:test-v2",
+    )
+    .await;
     let other_writer = database
         .writer_for_subgraph(other_version.id)
         .await
@@ -593,7 +659,7 @@ async fn personal_presentation_attachment_is_control_owned_one_shot_and_hidden_f
     let other_preference = node(&other_writer, "other-preference").await;
     accept_single_node(&other_writer, other_version.clone(), other_preference).await;
     database
-        .publish_personal_presentation_version(thread(900), other_version.id)
+        .publish_personal_presentation_version(other_version.id)
         .await
         .unwrap();
     let replacement = database

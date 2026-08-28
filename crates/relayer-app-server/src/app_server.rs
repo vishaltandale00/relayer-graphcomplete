@@ -447,12 +447,7 @@ impl RelayerAppServer {
             let profile = storage.personal_presentation_profile().await?;
             for version in profile.versions {
                 let materialized = runtime
-                    .ensure_personal_presentation_version(
-                        profile.thread_id.checked_abs().ok_or_else(|| {
-                            anyhow::anyhow!("invalid personal presentation profile identity")
-                        })?,
-                        &version.version_key,
-                    )
+                    .ensure_personal_presentation_version(&version.version_key)
                     .await?;
                 storage
                     .publish_personal_presentation_version(

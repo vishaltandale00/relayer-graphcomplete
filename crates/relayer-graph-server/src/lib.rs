@@ -10,7 +10,8 @@ use relayer_graph_core::{
     GraphError, GraphNode, GraphWriter, ImportedConversationStage, ImportedTurn,
     InteractionContextAction, InteractionContextDraft, InteractionContextTarget, InteractionInput,
     InteractionInputNode, InteractionInvocation, LayerDraft, LayerId, LayerLayout, NodeDraft,
-    NodeId, NodePlacement, ProjectId, RecordState, ThreadId,
+    NodeId, NodePlacement, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, RecordState,
+    ThreadId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -197,7 +198,6 @@ struct AttachPersonalPresentationRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PublishPersonalPresentationVersionRequest {
-    profile_thread_id: ThreadId,
     version_interaction_node_id: NodeId,
 }
 
@@ -218,10 +218,7 @@ async fn publish_personal_presentation_version(
     Ok(Json(
         state
             .graph
-            .publish_personal_presentation_version(
-                input.profile_thread_id,
-                input.version_interaction_node_id,
-            )
+            .publish_personal_presentation_version(input.version_interaction_node_id)
             .await?,
     ))
 }
@@ -280,6 +277,8 @@ struct CreateInteractionRequest {
     input_digest: Option<String>,
     #[serde(default = "default_mint_capability")]
     mint_capability: bool,
+    #[serde(default)]
+    personal_presentation_profile: bool,
 }
 
 fn default_mint_capability() -> bool {
@@ -310,7 +309,32 @@ async fn create_interaction(
             "invocation and contexts cannot be prepared together yet",
         ));
     }
-    let (interaction, context_actions) = if let (Some(identity), Some(digest)) = (
+    let (interaction, context_actions) = if input.personal_presentation_profile {
+        if input.project_id.is_some()
+            || input.thread_id.value() != PERSONAL_PRESENTATION_PROFILE_THREAD_ID
+            || input.invocation.is_some()
+            || !input.contexts.is_empty()
+        {
+            return Err(ApiError::invalid(
+                "personal-presentation profile creation requires its reserved standalone thread and no invocation or contexts",
+            ));
+        }
+        let (Some(identity), Some(digest)) = (
+            input.input_identity.as_deref(),
+            input.input_digest.as_deref(),
+        ) else {
+            return Err(ApiError::invalid(
+                "personal-presentation profile creation requires inputIdentity and inputDigest",
+            ));
+        };
+        (
+            state
+                .graph
+                .create_personal_presentation_interaction(&input.text, identity, digest)
+                .await?,
+            Vec::new(),
+        )
+    } else if let (Some(identity), Some(digest)) = (
         input.input_identity.as_deref(),
         input.input_digest.as_deref(),
     ) {
@@ -1139,11 +1163,14 @@ mod tests {
     #[tokio::test]
     async fn personal_presentation_attachment_requires_control_authority_and_resolves_graph() {
         let graph = GraphDatabase::in_memory().await.unwrap();
+        let version_text = "Personal presentation V1";
+        let version_digest =
+            relayer_graph_core::interaction_input_digest(version_text, &[]).unwrap();
         let version = graph
-            .create_interaction(
-                None,
-                ThreadId::new(900).unwrap(),
-                "Personal presentation V1",
+            .create_personal_presentation_interaction(
+                version_text,
+                "relayer.personal-presentation:test-v1",
+                &version_digest,
             )
             .await
             .unwrap();
@@ -1186,7 +1213,7 @@ mod tests {
             .unwrap();
         version_writer.complete(version.id).await.unwrap();
         graph
-            .publish_personal_presentation_version(ThreadId::new(900).unwrap(), version.id)
+            .publish_personal_presentation_version(version.id)
             .await
             .unwrap();
         let target = graph

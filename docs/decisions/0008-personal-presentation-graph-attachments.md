@@ -16,8 +16,11 @@ The product database reserves negative row identities for this singleton hidden
 thread and its source interactions. They remain valid foreign-key-backed rows
 but cannot consume or collide with the positive product IDs used by ordinary
 conversation records. The graph database has an independent positive identity
-namespace, so the product adapter maps the reserved thread identity to its
-positive magnitude when materializing the profile completion.
+namespace and reserves one standalone thread identity for profile
+materialization. Ordinary graph interaction creation rejects that identity;
+only the dedicated authenticated profile-creation boundary can use it. The
+product's negative row identity is therefore never reused as graph visibility
+authority.
 
 Graph core stores publication and attachment as control relations. A publication registers an accepted standalone completion root in one profile thread. An attachment pins one published, non-retired version interaction and its root layer to one accepted root interaction. It is neither a `GraphEdge`, `GraphAction`, context occurrence, nor accepted response record. It therefore does not enter completion closure, topology, navigation, Node Details, or conversation export. Control-authenticated reads may resolve the attached accepted graph; an interaction-scoped graph capability may read only its own resolved attachment.
 

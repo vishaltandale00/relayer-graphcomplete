@@ -40,6 +40,7 @@ describe("CodexBasicHarness", () => {
     const baseline = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
     const neutral = buildLayeredNavigationPrompt(personalPresentationRunContext(false), "@relayer/graph-client");
     const treatment = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client");
+    const codexProviderPrompt = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client", undefined, false);
 
     expect(neutral).toBe(baseline);
     expect(treatment).toContain("Personal graph presentation preferences:");
@@ -51,22 +52,34 @@ describe("CodexBasicHarness", () => {
     expect(treatment.indexOf("Personal graph presentation preferences:")).toBeLessThan(
       treatment.indexOf("Normalized interaction input:"),
     );
+    expect(codexProviderPrompt).toBe(baseline);
   });
 
   it("injects V1 into native Codex child instructions and explicitly clears it for V0", async () => {
     const submitted: CodexAppServerTurnOptions[] = [];
+    const trace = recordingTrace();
     const harness = harnessFixture("auto", async (options) => {
       submitted.push(options);
       options.onThreadId("thread-1");
       return { threadId: "thread-1", turnId: "turn-1", status: "completed" };
     });
 
-    await harness.complete(personalPresentationRunContext(true));
+    await harness.complete({ ...personalPresentationRunContext(true), trace: trace.sink });
     await harness.complete(personalPresentationRunContext(false));
 
     expect(submitted[0]?.threadParams.developerInstructions).toContain("Personal graph presentation preferences:");
     expect(submitted[0]?.threadParams.developerInstructions).toContain("Decision-useful center");
     expect(submitted[0]?.threadParams.developerInstructions).toContain("every native child that can author graph content");
+    expect(submitted[0]?.prompt).toContain("Personal graph presentation preferences:");
+    expect(submitted[0]?.prompt.indexOf("Graph presentation guidance:")).toBeLessThan(
+      submitted[0]!.prompt.indexOf("Personal graph presentation preferences:"),
+    );
+    expect(submitted[0]?.prompt.indexOf("Personal graph presentation preferences:")).toBeLessThan(
+      submitted[0]!.prompt.indexOf("Normalized interaction input:"),
+    );
+    const tracedPrompt = trace.events.find((event) => event.type === "prompt")?.data.text;
+    expect(tracedPrompt).not.toContain("Personal graph presentation preferences:");
+    expect(tracedPrompt).not.toContain("Decision-useful center");
     expect(submitted[1]?.savedThreadId).toBe("thread-1");
     expect(submitted[1]?.threadParams.developerInstructions).toBeNull();
   });

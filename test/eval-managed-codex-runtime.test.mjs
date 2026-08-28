@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createEvalCodexCatalogProvisioner,
   createEvalCodexExecutionLease,
   createEvalManagedCodexRuntime,
 } from "../desktop/eval-main/managed-codex-runtime.mjs";
@@ -88,6 +89,42 @@ describe("Eval managed Codex runtime", () => {
     });
     await expect(acquire("other")).rejects.toThrow("no execution adapter");
     await expect(lease.release()).resolves.toBeUndefined();
+  });
+
+  it("publishes the connected managed Codex catalog once for fresh Eval profiles", async () => {
+    const close = vi.fn(async () => undefined);
+    const requests = [];
+    const fetchImpl = vi.fn(async (url, options) => {
+      requests.push({ url: String(url), ...options, body: JSON.parse(options.body) });
+      return { ok: true };
+    });
+    const provision = createEvalCodexCatalogProvisioner({
+      productSession: { origin: "http://127.0.0.1:43123", cookie: { value: "write-token" } },
+      resolveRuntime: async () => ({ environment: { RELAYER_CODEX_BINARY: "/managed/codex" } }),
+      fetchImpl,
+      createCredentials: () => ({
+        account: async () => ({ status: "connected", account: { id: "account" } }),
+        request: async (method) => {
+          expect(method).toBe("model/list");
+          return { data: [{ id: "catalog-sol", model: "gpt-5.6-sol", displayName: "Sol", isDefault: true, supportedReasoningEfforts: [] }], nextCursor: null };
+        },
+        close,
+      }),
+    });
+
+    await Promise.all([provision(), provision()]);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(requests[0]).toMatchObject({
+      url: "http://127.0.0.1:43123/api/internal/provider-definitions", method: "PUT",
+      headers: { Authorization: "Bearer write-token" },
+      body: [{ id: "codex", adapterId: "codex-subscription", accessContract: "managed-runtime@1" }],
+    });
+    expect(requests[1]).toMatchObject({
+      url: "http://127.0.0.1:43123/api/internal/provider-catalog", method: "PUT",
+      body: { providerId: "codex", connected: true, models: [{ id: "gpt-5.6-sol", providerDefault: true }] },
+    });
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("normalizes and deduplicates the helper PATH", () => {

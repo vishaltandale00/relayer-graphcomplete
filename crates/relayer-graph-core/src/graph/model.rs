@@ -17,7 +17,9 @@ pub use icon::{
     RELAYER_ICON_ALIASES, RELAYER_ICON_NAMES, is_supported_icon, normalize_icon_name,
     resolve_icon_name,
 };
-pub use ids::{ActionId, EdgeId, LayerId, NodeId, ProjectId, ThreadId};
+pub use ids::{
+    ActionId, EdgeId, LayerId, NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ProjectId, ThreadId,
+};
 pub(crate) use layer::validate_authored_layout;
 pub use layer::{GraphLayer, LayerDraft, LayerLayout, NodePlacement, ResolvedLayer};
 pub use node::{GraphNode, InteractionInvocation, NodeDraft};

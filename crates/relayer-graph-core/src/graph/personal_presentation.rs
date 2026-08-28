@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 use crate::storage::sqlite::personal_presentation::{
     AttachPersonalPresentationResult, PublishPersonalPresentationResult,
 };
-use crate::{AcceptedGraphClosure, GraphDatabase, GraphError, LayerId, NodeId, ThreadId};
+use crate::{
+    AcceptedGraphClosure, GraphDatabase, GraphError, LayerId, NodeId,
+    PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ThreadId,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,9 +34,10 @@ pub struct ResolvedPersonalPresentation {
 impl GraphDatabase {
     pub async fn publish_personal_presentation_version(
         &self,
-        profile_thread_id: ThreadId,
         version_interaction_node_id: NodeId,
     ) -> Result<PublishedPersonalPresentationVersion, GraphError> {
+        let profile_thread_id = ThreadId::new(PERSONAL_PRESENTATION_PROFILE_THREAD_ID)
+            .expect("the reserved profile thread identity is positive");
         let root_layer_id = match self
             .storage
             .publish_personal_presentation_version(profile_thread_id, version_interaction_node_id)
