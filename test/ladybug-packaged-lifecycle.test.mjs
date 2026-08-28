@@ -31,7 +31,7 @@ describe("Ladybug packaged lifecycle qualification", () => {
     })).rejects.toThrow("exact 40-character source commit");
   });
 
-  it("retains the historical capture's selected committed input hashes", async () => {
+  it("binds the isolated capture to its exact committed qualification inputs", async () => {
     const receipt = JSON.parse(await readFile("docs/evidence/issue-261-ladybug-packaged-arm64.json", "utf8"));
     expect(receipt.sourceCommit).toMatch(/^[0-9a-f]{40}$/u);
     for (const [path, expected] of Object.entries(receipt.inputSha256)) {
@@ -46,7 +46,8 @@ describe("Ladybug packaged lifecycle qualification", () => {
     }
     expect(receipt).toMatchObject({
       target: "macos-arm64",
-      buildIsolation: "shared-cargo-target-not-exact-source-proof",
+      buildIsolation: "clean-detached-worktree-and-empty-cargo-target",
+      dependencyIsolation: "locked-offline-npm-ci-and-generated-assets",
       nativeMode: "fully-static-ladybug-and-openssl",
       minimumMacOSVersion: "13.3",
       cleanProfileCreated: true,
