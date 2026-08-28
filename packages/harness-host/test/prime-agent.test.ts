@@ -388,7 +388,7 @@ describe("PrimeAgentHarness", () => {
     expect(scopes[0]!.input.models[2]).toMatchObject({
       id: "claude-root",
       api: "anthropic-messages",
-      baseUrl: "https://anthropic-work.test/v1",
+      baseUrl: "https://anthropic-work.test",
       reasoning: false,
       input: ["text"],
       contextWindow: 32_768,
@@ -497,9 +497,16 @@ describe("PrimeAgentHarness", () => {
       "openrouter",
       { contextWindow: 32_768, maxOutputTokens: 2_048 },
     ));
+    await harness.complete(singleAdapterRunContext(
+      45,
+      "anthropic-api",
+      undefined,
+      "https://provider-45.test/proxy/anthropic/v1/",
+    ));
 
     expect(scopes.map(({ input }) => ({
       api: input.root.api,
+      baseUrl: input.root.baseUrl,
       compat: input.root.compat,
       reasoning: input.root.reasoning,
       input: input.root.input,
@@ -507,17 +514,18 @@ describe("PrimeAgentHarness", () => {
       maxTokens: input.root.maxTokens,
       cost: input.root.cost,
     }))).toEqual([
-      { api: "openai-responses", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "anthropic-messages", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "openai-completions", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 196_608, maxTokens: 16_384, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "openai-completions", compat: { vercelGatewayRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-      { api: "openai-completions", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 2_048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-responses", baseUrl: "https://provider-40.test/v1", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "anthropic-messages", baseUrl: "https://provider-41.test", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", baseUrl: "https://provider-42.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 196_608, maxTokens: 16_384, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", baseUrl: "https://provider-43.test/v1", compat: { vercelGatewayRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "openai-completions", baseUrl: "https://provider-44.test/v1", compat: { thinkingFormat: "openrouter", openRouterRouting: {} }, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 2_048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { api: "anthropic-messages", baseUrl: "https://provider-45.test/proxy/anthropic", compat: undefined, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
     ]);
   });
 
   it("keeps a small discovered context on Prime's compatible conservative envelope", async () => {
     const session = {
-      promptAndWait: vi.fn(async () => undefined),
+      promptAndWait: vi.fn(async (_text: string, _options: { modelScope: ControlledRunScopeInput }) => undefined),
       waitForRlmQuiescence: vi.fn(async () => undefined),
       abort: vi.fn(async () => undefined),
       dispose: vi.fn(),
@@ -1418,6 +1426,7 @@ function singleAdapterRunContext(
   nodeId: number,
   adapterId: string,
   modelCapabilities?: { readonly contextWindow: number; readonly maxOutputTokens: number },
+  endpoint = `https://provider-${nodeId}.test/v1`,
 ): HarnessRunContext {
   const base = runContext(nodeId, `token-${nodeId}`);
   const route = {
@@ -1433,7 +1442,7 @@ function singleAdapterRunContext(
     providerId: route.providerId,
     adapterId,
     adapterImplementationVersion: "1",
-    endpoint: `https://provider-${nodeId}.test/v1`,
+    endpoint,
     fields: { "api-key": `secret-${nodeId}` },
     ...(modelCapabilities === undefined ? {} : {
       modelCapabilities: { [route.modelId]: modelCapabilities },

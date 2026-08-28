@@ -1050,7 +1050,7 @@ function primeAgentModel(route: HarnessAdmittedModelRoute, access: Extract<Harne
     name: route.modelId,
     api: mapping.api,
     provider: nativePrimeProviderId(route),
-    baseUrl: access.endpoint,
+    baseUrl: primeAgentExecutionBaseUrl(route.adapterId, access.endpoint),
     // Use exact provider-discovered limits when the execution lease carries
     // them. Keep the legacy conservative values when discovery has no limits;
     // model IDs are never used to infer capabilities.
@@ -1072,6 +1072,15 @@ function primeAgentModel(route: HarnessAdmittedModelRoute, access: Extract<Harne
         : 4_096,
     ...(mapping.compat === undefined ? {} : { compat: mapping.compat }),
   });
+}
+
+function primeAgentExecutionBaseUrl(adapterId: string, endpoint: string): string {
+  if (adapterId !== "anthropic-api") return endpoint;
+  const url = new URL(endpoint);
+  const pathname = url.pathname.replace(/\/+$/, "");
+  if (!pathname.endsWith("/v1")) return endpoint;
+  url.pathname = pathname.slice(0, -3) || "/";
+  return url.toString().replace(/\/$/, "");
 }
 
 function nativePrimeProviderId(route: HarnessAdmittedModelRoute): string {
