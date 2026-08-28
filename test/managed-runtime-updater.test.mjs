@@ -28,7 +28,7 @@ describe("managed runtime application-update boundary", () => {
     const { autoUpdater, updater } = fixture({ prefetchRuntimeUpdate });
     const info = {
       version: "0.2.15",
-      relayerManagedRuntimes: { claude: "0.3.247", codex: "0.147.0" },
+      relayerManagedRuntimes: { claude: "0.3.250", codex: "0.147.0" },
     };
     autoUpdater.emit("update-available", info);
 

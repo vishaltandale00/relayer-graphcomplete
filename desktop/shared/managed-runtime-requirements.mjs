@@ -1,5 +1,5 @@
 const REQUIREMENTS = Object.freeze({
-  claude: "0.3.247",
+  claude: "0.3.250",
   codex: "0.147.0",
 });
 

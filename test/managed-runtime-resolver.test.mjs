@@ -34,11 +34,11 @@ describe("managed runtime process resolver", () => {
   it("evicts a rejected active-generation probe", async () => {
     const installed = vi.fn()
       .mockRejectedValueOnce(new Error("missing"))
-      .mockResolvedValueOnce({ runtimeId: "claude", version: "0.3.247" });
+      .mockResolvedValueOnce({ runtimeId: "claude", version: "0.3.250" });
     const resolver = createManagedRuntimeResolver({ installed, ensure: vi.fn() });
 
     await expect(resolver.get("claude", "0.3.200")).rejects.toThrow("missing");
-    await expect(resolver.get("claude", "0.3.200")).resolves.toMatchObject({ version: "0.3.247" });
+    await expect(resolver.get("claude", "0.3.250")).resolves.toMatchObject({ version: "0.3.250" });
     expect(installed).toHaveBeenCalledTimes(2);
   });
 });

@@ -72,7 +72,7 @@ function managedAccess(overrides = {}): HarnessExecutionAccess {
     adapterId: "claude-subscription",
     adapterImplementationVersion: "1",
     runtimeId: "claude-code",
-    version: "0.3.247",
+    version: "0.3.250",
     executable: "/managed/claude",
     moduleUrl: "file:///managed/claude-agent-sdk/sdk.mjs",
     environment: { CLAUDE_CONFIG_DIR: "/isolated" },
@@ -91,7 +91,7 @@ function secretAccess(overrides = {}): HarnessExecutionAccess {
     fields: { "api-key": "secret" },
     runtime: {
       runtimeId: "claude-code",
-      version: "0.3.247",
+      version: "0.3.250",
       executable: "/managed/claude",
       moduleUrl: "file:///managed/claude-agent-sdk/sdk.mjs",
       environment: { CLAUDE_CONFIG_DIR: "/isolated/anthropic-work" },
