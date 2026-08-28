@@ -1650,6 +1650,46 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("replays a settled recursive failure without starting the provider twice", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-settled-retry-"));
+    let starts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : graphReadResponse(url, 2)));
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"),
+      controlToken: "control",
+      implementations: { test: () => ({
+        async complete() {},
+        async completeRecursive() {
+          starts += 1;
+          throw new Error("recursive provider failed");
+        },
+        state: emptyState,
+      }) },
+    });
+    try {
+      await host.initialize();
+      await host.createSession({
+        threadId: 1,
+        permissionProfileId: "auto",
+        configuration: testConfiguration,
+        workingDirectory: directory,
+      });
+      const capability = graph(2, "child-token");
+
+      const first = host.completeRecursive(1, capability);
+      await expect(first).rejects.toThrow("recursive provider failed");
+      const retry = host.completeRecursive(1, capability);
+
+      await expect(retry).rejects.toThrow("recursive provider failed");
+      expect(starts).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a conflicting capability instead of transferring an in-flight recursive result", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-binding-conflict-"));
     let release!: () => void;

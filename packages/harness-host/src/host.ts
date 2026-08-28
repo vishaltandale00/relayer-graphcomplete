@@ -455,11 +455,6 @@ export class HarnessHost {
       humanRoot: false,
     });
     session.recursiveCompletionRuns.set(capability.nodeId, { capabilityDigest, run });
-    void run.finally(() => {
-      if (session.recursiveCompletionRuns.get(capability.nodeId)?.run === run) {
-        session.recursiveCompletionRuns.delete(capability.nodeId);
-      }
-    }).catch(() => {});
     return run;
   }
 
