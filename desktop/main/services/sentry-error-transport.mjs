@@ -8,6 +8,7 @@ import {
 } from "@sentry/node";
 
 import { isApprovedTelemetryModule } from "../../shared/telemetry-module-inventory.mjs";
+import { exactKeys, validSourcePosition } from "../../shared/telemetry-validation.mjs";
 
 const ENVIRONMENTS = new Set(["development", "preview", "stable"]);
 const COMPONENT_PREFIXES = Object.freeze({
@@ -29,13 +30,6 @@ const EXCEPTION_CLASSES = new Set([
 ]);
 const SENTRY_SDK_VERSION = "10.72.0";
 
-function exactKeys(value, keys) {
-  return value !== null
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
-}
-
 function validModule(module, component) {
   if (typeof module !== "string"
     || module.length === 0
@@ -55,10 +49,8 @@ function validModule(module, component) {
 function validGatewayFrame(frame, component) {
   return exactKeys(frame, ["module", "line", "column"])
     && validModule(frame.module, component)
-    && Number.isSafeInteger(frame.line)
-    && frame.line >= 1
-    && Number.isSafeInteger(frame.column)
-    && frame.column >= 1;
+    && validSourcePosition(frame.line)
+    && validSourcePosition(frame.column);
 }
 
 function validateProjection(value) {
@@ -144,10 +136,8 @@ function mapEvent(event) {
 function validSentryFrame(frame, component) {
   return exactKeys(frame, ["filename", "lineno", "colno", "in_app"])
     && validModule(frame.filename, component)
-    && Number.isSafeInteger(frame.lineno)
-    && frame.lineno >= 1
-    && Number.isSafeInteger(frame.colno)
-    && frame.colno >= 1
+    && validSourcePosition(frame.lineno)
+    && validSourcePosition(frame.colno)
     && frame.in_app === true;
 }
 

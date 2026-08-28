@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { isApprovedTelemetryModule } from "../../shared/telemetry-module-inventory.mjs";
+import { exactKeys, validSourcePosition } from "../../shared/telemetry-validation.mjs";
 
 const COMPONENTS = new Set([
   "renderer",
@@ -67,13 +68,6 @@ const EXCEPTION_CLASSES = new Set([
   "URIError",
 ]);
 
-function exactKeys(value, keys) {
-  return value !== null
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
-}
-
 function validFrame(frame, component) {
   const segments = typeof frame?.module === "string" ? frame.module.split("/") : [];
   if (!exactKeys(frame, ["module", "line", "column"])
@@ -84,10 +78,8 @@ function validFrame(frame, component) {
     || frame.module.includes("\\")
     || !/^[A-Za-z0-9._/-]+$/u.test(frame.module)
     || segments.some((segment) => segment === "." || segment === ".." || segment === "node_modules" || segment === "vendor")
-    || !Number.isSafeInteger(frame.line)
-    || frame.line < 1
-    || !Number.isSafeInteger(frame.column)
-    || frame.column < 1) return false;
+    || !validSourcePosition(frame.line)
+    || !validSourcePosition(frame.column)) return false;
   const prefix = {
     renderer: "desktop/renderer/",
     "electron-main": "desktop/main/",

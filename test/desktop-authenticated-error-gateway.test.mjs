@@ -93,6 +93,46 @@ describe("authenticated desktop error gateway", () => {
     await gateway.close();
   });
 
+  it("rejects frames whose positions exceed the accepted source range", async () => {
+    const { gateway, send } = await fixture();
+    await gateway.transitionIdentity({ generation: 1, subject: "auth0|person" });
+    const reporter = gateway.issueReporter({ component: "renderer", processGeneration: 1 });
+
+    for (const frame of [
+      { module: "desktop/renderer/src/main.js", line: 10_000_001, column: 9 },
+      { module: "desktop/renderer/src/main.js", line: 41, column: 10_000_001 },
+      { module: "desktop/renderer/src/main.js", line: Number.MAX_SAFE_INTEGER, column: 9 },
+    ]) {
+      await expect(reporter.report({
+        code: "renderer.unhandled_crash",
+        exceptionClass: "TypeError",
+        frames: [frame],
+      })).resolves.toEqual({ accepted: false, reason: "invalid-record" });
+    }
+    expect(send).not.toHaveBeenCalled();
+
+    await expect(reporter.report({
+      code: "renderer.unhandled_crash",
+      exceptionClass: "TypeError",
+      frames: [{ module: "desktop/renderer/src/main.js", line: 10_000_000, column: 10_000_000 }],
+    })).resolves.toEqual({ accepted: true, delivery: "sent" });
+
+    await gateway.close();
+  });
+
+  it("rejects a record whose single key impersonates the closed field set", async () => {
+    const { gateway, send } = await fixture();
+    await gateway.transitionIdentity({ generation: 1, subject: "auth0|person" });
+    const reporter = gateway.issueReporter({ component: "renderer", processGeneration: 1 });
+
+    await expect(reporter.report(JSON.parse(
+      '{"code\\u0000exceptionClass\\u0000frames": "renderer.unhandled_crash"}',
+    ))).resolves.toEqual({ accepted: false, reason: "invalid-record" });
+    expect(send).not.toHaveBeenCalled();
+
+    await gateway.close();
+  });
+
   it("queues an authenticated transport failure without exposing plaintext", async () => {
     const send = vi.fn(async () => { throw new Error("capture sink unavailable"); });
     const { gateway, queuePath } = await fixture({ send });

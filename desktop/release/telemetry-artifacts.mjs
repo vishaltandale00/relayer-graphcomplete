@@ -23,6 +23,7 @@ import { promisify } from "node:util";
 import { extractFile, listPackage } from "@electron/asar";
 
 import { desktopTargetByKey } from "../shared/target.mjs";
+import { exactKeys } from "../shared/telemetry-validation.mjs";
 
 const RELEASE_ID_PREFIX = "ai.relayer.desktop@";
 const RELEASE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
@@ -44,13 +45,6 @@ const MANIFEST_FIELDS = Object.freeze([
   "target",
   "version",
 ]);
-
-function exactKeys(value, keys) {
-  return value !== null
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
-}
 
 function normalizedRelativePath(value) {
   const normalized = String(value || "").split(sep).join("/");
