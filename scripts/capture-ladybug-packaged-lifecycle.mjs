@@ -190,13 +190,22 @@ export function verifyNoBundledWindowsNativeLibraries(libraries) {
     const name = String(library).split(/[\\/]/u).at(-1);
     return (
       /^(?:lib)?(?:lbug|ladybug)(?:[-._].*)?\.dll$/iu.test(name)
-      || /^lib(?:ssl|crypto)(?:[-._].*)?\.dll$/iu.test(name)
+      || /^(?:lib)?(?:ssl|crypto)(?:[-._].*)?\.dll$/iu.test(name)
     );
   });
   if (forbidden.length > 0) {
     throw new Error(`packaged graph server imports forbidden native libraries: ${forbidden.join(", ")}`);
   }
   return libraries;
+}
+
+export function npmCommandForPlatform(
+  platform = process.platform,
+  commandShell = process.env.ComSpec ?? "cmd.exe",
+) {
+  return platform === "win32"
+    ? { executable: commandShell, prefixArgs: ["/d", "/s", "/c", "npm.cmd"] }
+    : { executable: "npm", prefixArgs: [] };
 }
 
 export function parseLadybugLockContention(output) {
@@ -619,14 +628,33 @@ export async function captureLadybugPackagedLifecycle({
         `${path} differs from the exact source commit`,
       );
     }
-    const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-    await execFileAsync(npmCommand, ["ci", "--ignore-scripts", "--offline"], {
+    const npmCommand = npmCommandForPlatform();
+    await execFileAsync(npmCommand.executable, [
+      ...npmCommand.prefixArgs,
+      "ci",
+      "--ignore-scripts",
+      "--offline",
+    ], {
       cwd: checkout,
       env: npmEnvironmentForDesktopTarget(environment, target),
       maxBuffer: 10 * 1024 * 1024,
     });
-    await execFileAsync(npmCommand, ["run", "prepare:renderer"], { cwd: checkout, maxBuffer: 10 * 1024 * 1024 });
-    await execFileAsync(npmCommand, ["run", "build:packages"], { cwd: checkout, maxBuffer: 10 * 1024 * 1024 });
+    await execFileAsync(npmCommand.executable, [
+      ...npmCommand.prefixArgs,
+      "run",
+      "prepare:renderer",
+    ], {
+      cwd: checkout,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    await execFileAsync(npmCommand.executable, [
+      ...npmCommand.prefixArgs,
+      "run",
+      "build:packages",
+    ], {
+      cwd: checkout,
+      maxBuffer: 10 * 1024 * 1024,
+    });
     const startedAt = Date.now() - 1_000;
     await buildDesktop({
       environment: {

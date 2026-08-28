@@ -10,6 +10,7 @@ import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.
 import {
   captureLadybugPackagedLifecycle,
   inspectPortableExecutable,
+  npmCommandForPlatform,
   npmEnvironmentForDesktopTarget,
   packagedApplicationBuiltAfter,
   parseMachOArchitectures,
@@ -325,9 +326,21 @@ describe("Ladybug packaged lifecycle qualification", () => {
       .toThrow("forbidden native libraries");
     expect(() => verifyNoBundledWindowsNativeLibraries(["libcrypto-3-x64.dll"]))
       .toThrow("forbidden native libraries");
-    const delayed = inspectPortableExecutable(minimalPe({ delayImports: ["libssl-3-x64.dll"] }));
+    expect(() => verifyNoBundledWindowsNativeLibraries(["crypto-3-x64.dll"]))
+      .toThrow("forbidden native libraries");
+    const delayed = inspectPortableExecutable(minimalPe({
+      delayImports: ["libssl-3-x64.dll", "ssl-3-x64.dll"],
+    }));
     expect(() => verifyNoBundledWindowsNativeLibraries(delayed.imports))
       .toThrow("forbidden native libraries");
+  });
+
+  it("invokes npm through the Windows command shell", () => {
+    expect(npmCommandForPlatform("win32", "C:\\Windows\\System32\\cmd.exe")).toEqual({
+      executable: "C:\\Windows\\System32\\cmd.exe",
+      prefixArgs: ["/d", "/s", "/c", "npm.cmd"],
+    });
+    expect(npmCommandForPlatform("darwin")).toEqual({ executable: "npm", prefixArgs: [] });
   });
 
   it("requires a newly created Windows unpacked application", async () => {
