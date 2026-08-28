@@ -178,6 +178,7 @@ impl SqliteProductStore {
         pinned_at: &str,
     ) -> Result<PersonalPresentationPin, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        validate_personal_presentation_target(&mut transaction, interaction_id).await?;
         if let Some((version_key, graph_node_id, root_layer_id)) =
             sqlx::query_as::<_, (String, i64, i64)>(
                 "SELECT version_key,version_interaction_node_id,root_layer_id FROM interaction_personal_presentation_pins WHERE interaction_id=?1",
@@ -279,17 +280,7 @@ async fn pin_in_transaction(
             "personal presentation version is retired".into(),
         ));
     }
-    let target_is_visible: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM interactions i JOIN threads t ON t.id=i.thread_id WHERE i.id=?1 AND t.surface='conversation')",
-    )
-    .bind(interaction_id.value())
-    .fetch_one(&mut **transaction)
-    .await?;
-    if !target_is_visible {
-        return Err(StorageError::PersonalPresentationConflict(
-            "personal presentation can only pin a product interaction".into(),
-        ));
-    }
+    validate_personal_presentation_target(transaction, interaction_id).await?;
     if let Some((version_key, stored_graph, stored_root)) =
         sqlx::query_as::<_, (String, i64, i64)>(
             "SELECT version_key,version_interaction_node_id,root_layer_id FROM interaction_personal_presentation_pins WHERE interaction_id=?1",
@@ -329,6 +320,24 @@ async fn pin_in_transaction(
         version_interaction_node_id: graph_node_id,
         root_layer_id,
     })
+}
+
+async fn validate_personal_presentation_target(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    interaction_id: InteractionId,
+) -> Result<(), StorageError> {
+    let target_is_visible: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM interactions i JOIN threads t ON t.id=i.thread_id WHERE i.id=?1 AND t.surface='conversation' AND t.conversation_import_id IS NULL)",
+    )
+    .bind(interaction_id.value())
+    .fetch_one(&mut **transaction)
+    .await?;
+    if target_is_visible {
+        return Ok(());
+    }
+    Err(StorageError::PersonalPresentationConflict(
+        "personal presentation can only pin a product interaction".into(),
+    ))
 }
 
 #[cfg(test)]
@@ -396,6 +405,29 @@ mod tests {
             )
             .await
             .unwrap();
+        sqlx::query("INSERT INTO conversation_imports(id,source_sha256,export_version,producer_json,header_json,state,created_at) VALUES ('import-1','sha256:test',1,'{}','{}','staging','1')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let imported_thread = sqlx::query("INSERT INTO threads(title,created_at,updated_at,conversation_import_id) VALUES ('Imported','1','1','import-1')")
+            .execute(&store.pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        let imported_interaction = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,1,'Historical turn','1','accepted')")
+            .bind(imported_thread)
+            .execute(&store.pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        let imported_pin_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM interaction_personal_presentation_pins WHERE interaction_id=?1",
+        )
+        .bind(imported_interaction)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(imported_pin_count, 0);
         assert!(
             store
                 .publish_personal_presentation_version(
@@ -482,6 +514,33 @@ mod tests {
                 .unwrap(),
             pin
         );
+        assert!(
+            store
+                .prepare_personal_presentation_pin(
+                    crate::product::InteractionId::from_database(imported_interaction),
+                    None,
+                    "8",
+                )
+                .await
+                .is_err()
+        );
+        sqlx::query("INSERT INTO interaction_personal_presentation_pins(interaction_id,version_key,version_interaction_node_id,root_layer_id,pinned_at) VALUES (?1,'personal-presentation-v1',502,602,'legacy')")
+            .bind(imported_interaction)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .prepare_personal_presentation_pin(
+                    crate::product::InteractionId::from_database(imported_interaction),
+                    None,
+                    "9",
+                )
+                .await
+                .is_err()
+        );
+        store.pool.close().await;
+        assert!(SqliteProductStore::open(file.path()).await.is_err());
     }
 
     #[tokio::test]

@@ -109,6 +109,7 @@ export class CodexBasicHarness implements Harness {
   private readonly clientModuleUrl: string;
   private readonly resolved: ResolvedCodexConfiguration;
   private codexThreadId: string | undefined;
+  private codexThreadPersonalPresentationVersionId: number | null | undefined;
   private readonly activeForceShutdowns = new Set<AbortController>();
 
   constructor(private readonly context: HarnessFactoryContext, private readonly dependencies: CodexBasicDependencies = {}) {
@@ -117,10 +118,25 @@ export class CodexBasicHarness implements Harness {
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
     validateBrowserMcpRuntime(dependencies.browserMcpRuntime);
     const codexThreadId = context.savedState?.codexThreadId;
-    this.codexThreadId = typeof codexThreadId === "string" ? codexThreadId : undefined;
+    const savedPresentationVersionId = context.savedState?.codexThreadPersonalPresentationVersionId;
+    const validSavedPresentationVersion = savedPresentationVersionId === undefined
+      || savedPresentationVersionId === null
+      || (typeof savedPresentationVersionId === "number"
+        && Number.isSafeInteger(savedPresentationVersionId)
+        && savedPresentationVersionId > 0);
+    if (typeof codexThreadId === "string" && validSavedPresentationVersion) {
+      this.codexThreadId = codexThreadId;
+      this.codexThreadPersonalPresentationVersionId = savedPresentationVersionId;
+    }
   }
 
   async complete(context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
+    const personalPresentationVersionId = context.personalPresentation?.attachment.versionInteractionNodeId ?? null;
+    if (this.codexThreadId !== undefined
+      && this.codexThreadPersonalPresentationVersionId !== personalPresentationVersionId) {
+      this.codexThreadId = undefined;
+      this.codexThreadPersonalPresentationVersionId = undefined;
+    }
     const model = this.selectedModel(context);
     if (context.model !== undefined && context.access === undefined) {
       throw new Error("codex.basic requires execution-scoped access for the selected provider");
@@ -159,7 +175,10 @@ export class CodexBasicHarness implements Harness {
         ...(signal === undefined ? {} : { signal }),
         forceSignal: forceShutdown.signal,
         ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
-        onThreadId: (threadId) => { this.codexThreadId = threadId; },
+        onThreadId: (threadId) => {
+          this.codexThreadId = threadId;
+          this.codexThreadPersonalPresentationVersionId = personalPresentationVersionId;
+        },
         onNotification: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
         onServerRequest: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
       });
@@ -183,7 +202,13 @@ export class CodexBasicHarness implements Harness {
   }
 
   state(): HarnessSessionState {
-    return this.codexThreadId === undefined ? {} : { codexThreadId: this.codexThreadId };
+    return this.codexThreadId === undefined
+      || this.codexThreadPersonalPresentationVersionId === undefined
+      ? {}
+      : {
+          codexThreadId: this.codexThreadId,
+          codexThreadPersonalPresentationVersionId: this.codexThreadPersonalPresentationVersionId,
+        };
   }
 
   forceShutdown(): void {

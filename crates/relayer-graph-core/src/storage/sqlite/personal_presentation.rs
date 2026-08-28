@@ -1,4 +1,4 @@
-use crate::{GraphError, LayerId, NodeId, ThreadId};
+use crate::{GraphError, LayerId, NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, ThreadId};
 
 use super::SqliteGraphStore;
 
@@ -93,9 +93,10 @@ impl SqliteGraphStore {
     ) -> Result<AttachPersonalPresentationResult, GraphError> {
         let mut transaction = self.begin_write().await?;
         let target_is_interaction: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM nodes WHERE id=?1 AND kind='user-interaction' AND state='accepted' AND owner_interaction_id IS NULL)",
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE id=?1 AND kind='user-interaction' AND state='accepted' AND owner_interaction_id IS NULL AND thread_id!=?2)",
         )
         .bind(interaction_node_id.value())
+        .bind(PERSONAL_PRESENTATION_PROFILE_THREAD_ID)
         .fetch_one(&mut *transaction)
         .await?;
         if !target_is_interaction {

@@ -805,6 +805,7 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
             JOIN threads target_thread ON target_thread.id=target.thread_id
             JOIN personal_presentation_versions version ON version.version_key=pin.version_key
             WHERE target_thread.surface!='conversation'
+               OR target_thread.conversation_import_id IS NOT NULL
                OR pin.version_interaction_node_id!=version.graph_node_id
                OR pin.root_layer_id!=version.root_layer_id
             UNION ALL

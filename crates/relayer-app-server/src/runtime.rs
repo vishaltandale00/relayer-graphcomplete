@@ -1237,15 +1237,11 @@ impl RuntimeClient {
         &self,
         interaction_node_id: i64,
     ) -> Result<relayer_graph_core::AcceptedGraphClosure, RuntimeError> {
-        let response = self
-            .client
-            .get(self.graph_url.join(&format!(
+        let value = self
+            .control_get(&format!(
                 "api/control/interactions/{interaction_node_id}/accepted-closure"
-            ))?)
-            .bearer_auth(&self.graph_control_token)
-            .send()
+            ))
             .await?;
-        let value = response_json(response, StatusCode::OK).await?;
         Ok(serde_json::from_value(value)?)
     }
 
@@ -2220,6 +2216,47 @@ mod tests {
         .unwrap_err();
         assert!(matches!(bounded, RuntimeError::Http(ref error) if error.is_timeout()));
         assert!(!runtime.supports_personal_presentation());
+        graph_task.abort();
+    }
+
+    #[tokio::test]
+    async fn accepted_graph_closure_times_out_when_headers_stall() {
+        let (graph_url, graph_task) = serve(Router::new().route(
+            "/api/control/interactions/1/accepted-closure",
+            routing::get(|| async {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                Json(json!({"rootLayerId": 1, "layers": []}))
+            }),
+        ))
+        .await;
+        let catalog = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            catalog.path(),
+            json!({"schemaVersion":1,"configurations":[{"configuration":{
+                "schemaVersion":1,"name":"test","implementation":"test",
+                "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+            },"digest":"sha256:test"}]})
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeClient::open(
+            &graph_url,
+            "http://127.0.0.1:2/",
+            "graph-control".into(),
+            "harness-control".into(),
+            catalog.path(),
+        )
+        .await
+        .unwrap();
+
+        let bounded = tokio::time::timeout(
+            CONTROL_REQUEST_TIMEOUT + Duration::from_secs(1),
+            runtime.accepted_graph_closure(1),
+        )
+        .await
+        .expect("the accepted-closure read must honor its request timeout")
+        .unwrap_err();
+        assert!(matches!(bounded, RuntimeError::Http(ref error) if error.is_timeout()));
         graph_task.abort();
     }
 

@@ -602,6 +602,19 @@ async fn personal_presentation_attachment_is_control_owned_one_shot_and_hidden_f
         .publish_personal_presentation_version(version.id)
         .await
         .unwrap();
+    assert!(matches!(
+        database
+            .attach_personal_presentation(version.id, version.id)
+            .await,
+        Err(GraphError::NotFound(_))
+    ));
+    assert!(
+        database
+            .personal_presentation_attachment(version.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     let target = database
         .create_interaction(Some(project(1)), thread(1), "Explain the queue")

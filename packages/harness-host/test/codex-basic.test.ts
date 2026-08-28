@@ -55,7 +55,7 @@ describe("CodexBasicHarness", () => {
     expect(codexProviderPrompt).toBe(baseline);
   });
 
-  it("injects V1 into native Codex child instructions and explicitly clears it for V0", async () => {
+  it("reuses a native Codex thread only while its pinned presentation version is unchanged", async () => {
     const submitted: CodexAppServerTurnOptions[] = [];
     const trace = recordingTrace();
     const harness = harnessFixture("auto", async (options) => {
@@ -65,6 +65,7 @@ describe("CodexBasicHarness", () => {
     });
 
     await harness.complete({ ...personalPresentationRunContext(true), trace: trace.sink });
+    await harness.complete(personalPresentationRunContext(true));
     await harness.complete(personalPresentationRunContext(false));
 
     expect(submitted[0]?.threadParams.developerInstructions).toContain("If you are the root agent");
@@ -85,7 +86,31 @@ describe("CodexBasicHarness", () => {
     expect(tracedPrompt).not.toContain("Personal graph presentation preferences:");
     expect(tracedPrompt).not.toContain("Decision-useful center");
     expect(submitted[1]?.savedThreadId).toBe("thread-1");
-    expect(submitted[1]?.threadParams.developerInstructions).toBeNull();
+    expect(submitted[2]?.savedThreadId).toBeUndefined();
+    expect(submitted[2]?.threadParams.developerInstructions).toBeNull();
+  });
+
+  it("rotates a legacy saved Codex thread whose presentation version is unknown", async () => {
+    let submitted: CodexAppServerTurnOptions | undefined;
+    const harness = new CodexBasicHarness({
+      ...context("auto"),
+      savedState: { codexThreadId: "legacy-thread" },
+    }, {
+      codexPathOverride: "/managed/codex",
+      runAppServerTurn: async (options) => {
+        submitted = options;
+        options.onThreadId("replacement-thread");
+        return { threadId: "replacement-thread", turnId: "turn-1", status: "completed" };
+      },
+    });
+
+    await harness.complete(runContext(1, "token"));
+
+    expect(submitted?.savedThreadId).toBeUndefined();
+    expect(harness.state()).toEqual({
+      codexThreadId: "replacement-thread",
+      codexThreadPersonalPresentationVersionId: null,
+    });
   });
 
   it("requires an explicit Codex executable before submitting an app-server turn", async () => {
@@ -183,7 +208,10 @@ describe("CodexBasicHarness", () => {
 
     await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("turn failed");
 
-    expect(harness.state()).toEqual({ codexThreadId: "codex-thread-after-start" });
+    expect(harness.state()).toEqual({
+      codexThreadId: "codex-thread-after-start",
+      codexThreadPersonalPresentationVersionId: null,
+    });
     expect(submitted?.prompt).toContain("Relayer graph affordances:");
     expect(submitted?.prompt).toContain("Each layer should explain its scope as a coherent whole");
     expect(submitted?.prompt).toContain('Choose "expand" when another layer should deepen one part');
@@ -566,7 +594,10 @@ describe("CodexBasicHarness", () => {
       ["gpt-first", "gpt-first"],
       ["gpt-second", "gpt-second"],
     ]);
-    expect(harness.state()).toEqual({ codexThreadId: "codex-thread-1" });
+    expect(harness.state()).toEqual({
+      codexThreadId: "codex-thread-1",
+      codexThreadPersonalPresentationVersionId: null,
+    });
   });
 
   it("passes only the selected execution-scoped provider secret to Codex", async () => {

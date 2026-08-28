@@ -66,7 +66,7 @@ CREATE TRIGGER pin_personal_presentation_on_interaction_insert
 AFTER INSERT ON interactions
 WHEN EXISTS(
     SELECT 1 FROM threads
-    WHERE id=NEW.thread_id AND surface='conversation'
+    WHERE id=NEW.thread_id AND surface='conversation' AND conversation_import_id IS NULL
 )
 AND EXISTS(
     SELECT 1 FROM personal_presentation_versions
