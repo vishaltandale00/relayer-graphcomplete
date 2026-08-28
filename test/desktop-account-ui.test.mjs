@@ -46,8 +46,6 @@ function fixture() {
     onboardingSignIn: element(),
     onboardingNotNow: element(),
     settingsStatus: element(),
-    settingsDetail: element(),
-    settingsChannel: element(),
     settingsSignIn: element(),
     settingsLogout: element(),
   };
@@ -118,7 +116,7 @@ describe("desktop account presentation", () => {
     expect(showWorkspace).toHaveBeenCalledOnce();
   });
 
-  it("keeps release channel out of the everyday account control and in diagnostics", async () => {
+  it("keeps account settings minimal and excludes sensitive or release-channel details", async () => {
     const { controller, elements, changed } = fixture();
     await controller.start();
 
@@ -132,25 +130,19 @@ describe("desktop account presentation", () => {
 
     expect(elements.accountButton.textContent).toBe("Account");
     expect(elements.settingsStatus.textContent).toBe("Signed in");
-    expect(elements.settingsDetail.textContent).toContain("auth0|pseudonymous-123");
-    expect(elements.settingsDetail.textContent).not.toContain("must-not-render");
-    expect(elements.settingsChannel.textContent).toBe("Preview");
     expect(elements.settingsLogout.classList.contains("hidden")).toBe(false);
     expect(elements.settingsSignIn.classList.contains("hidden")).toBe(true);
   });
 
-  it("keeps local use available in uncertain and error states while explaining telemetry is paused", async () => {
+  it("keeps local use available in uncertain and error states with concise status copy", async () => {
     const { controller, elements, changed } = fixture();
     await controller.start();
 
     changed({ status: "uncertain", channel: "stable", subject: "auth0|123", reason: "offline" });
     expect(elements.settingsStatus.textContent).toBe("Account unavailable offline");
-    expect(elements.settingsDetail.textContent).toContain("Local features remain available");
-    expect(elements.settingsDetail.textContent).toContain("Error reporting is paused");
 
     changed({ status: "totally-new", channel: "preview", token: "secret" });
     expect(elements.settingsStatus.textContent).toBe("Account status unavailable");
-    expect(elements.settingsDetail.textContent).toContain("Local features remain available");
     expect(normalizeDesktopAccountState({ status: "totally-new", channel: "preview" })).toEqual({
       status: "error",
       channel: "preview",
@@ -158,23 +150,47 @@ describe("desktop account presentation", () => {
     });
   });
 
-  it("routes the quiet account control to Account settings and never disables local controls", async () => {
+  it("starts sign-in directly from the bottom-right control and opens settings only for an existing account", async () => {
     const { controller, elements, openSettings, api, changed } = fixture();
-    const localControl = element();
     await controller.start();
 
+    expect(elements.accountButton.getAttribute("title")).toBe("Sign in");
+    expect(elements.accountButton.getAttribute("aria-label")).toBe("Sign in to Relayer.");
+    elements.accountButton.onclick();
+    expect(api.login).toHaveBeenCalledOnce();
+    expect(openSettings).not.toHaveBeenCalled();
+
+    changed({ status: "signing-in", channel: "stable" });
+    expect(elements.settingsStatus.textContent).toBe("Finish signing in in your browser");
+
+    changed({ status: "signed-in", channel: "stable", subject: "auth0|123" });
+    expect(elements.accountButton.getAttribute("title")).toBe("Account");
     elements.accountButton.onclick();
     expect(openSettings).toHaveBeenCalledOnce();
 
-    elements.settingsSignIn.onclick();
-    expect(api.login).toHaveBeenCalledOnce();
-    changed({ status: "signing-in", channel: "stable" });
-    expect(elements.settingsStatus.textContent).toBe("Finish signing in in your browser");
-    expect(localControl.disabled).toBe(false);
-
     elements.settingsLogout.onclick();
     expect(api.logout).toHaveBeenCalledOnce();
-    expect(localControl.disabled).toBe(false);
+  });
+
+  it("coalesces rapid sign-in actions into one browser flow", async () => {
+    const { controller, elements, api } = fixture();
+    let resolveLogin;
+    api.login.mockImplementationOnce(() => new Promise((resolve) => { resolveLogin = resolve; }));
+    await controller.start();
+
+    elements.accountButton.onclick();
+    elements.accountButton.onclick();
+    elements.onboardingSignIn.onclick();
+    elements.settingsSignIn.onclick();
+
+    expect(api.login).toHaveBeenCalledOnce();
+    expect(elements.accountButton.textContent).toBe("Signing in…");
+    expect(elements.accountButton.disabled).toBe(true);
+    expect(elements.onboardingSignIn.disabled).toBe(true);
+    expect(elements.settingsSignIn.disabled).toBe(true);
+
+    resolveLogin({ status: "signing-in", channel: "stable" });
+    await vi.waitFor(() => expect(elements.settingsStatus.textContent).toBe("Finish signing in in your browser"));
   });
 
   it("contains account read failures inside the optional surface instead of failing desktop boot", async () => {
@@ -187,7 +203,6 @@ describe("desktop account presentation", () => {
       reason: "authentication-failed",
     });
     expect(elements.settingsStatus.textContent).toBe("Account status unavailable");
-    expect(elements.settingsDetail.textContent).not.toContain("private failure detail");
     expect(elements.onboarding.classList.contains("hidden")).toBe(false);
     expect(showWorkspace).not.toHaveBeenCalled();
     elements.onboardingNotNow.onclick();
@@ -229,6 +244,14 @@ describe("desktop account presentation", () => {
     expect(html).toContain('id="desktopAccountOnboardingNotNow">Continue without an account</button>');
     expect(sidebarFooter).not.toContain('id="desktopAccountButton"');
     expect(html).toContain('class="desktop-account-corner-control hidden" id="desktopAccountButton"');
+    const accountPanel = html.slice(html.indexOf('id="accountSettingsPanel"'), html.indexOf('id="providerSettingsPanel"'));
+    expect(accountPanel).toContain('id="desktopAccountStatus"');
+    expect(accountPanel).toContain('id="desktopAccountSignIn"');
+    expect(accountPanel).toContain('id="desktopAccountLogout"');
+    expect(accountPanel).not.toContain("account-settings-intro");
+    expect(accountPanel).not.toContain("desktopAccountDetail");
+    expect(accountPanel).not.toContain("desktopAccountChannel");
+    expect(accountPanel).not.toContain("Release channel");
     expect(css).toContain(".desktop-account-onboarding{position:fixed;inset:0;");
     expect(css).toContain(".desktop-account-corner-control{position:fixed;right:16px;bottom:14px;");
   });

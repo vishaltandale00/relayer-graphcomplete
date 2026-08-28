@@ -132,12 +132,10 @@
         <div class="settings-content">
           <section class="settings-section account-settings-section hidden" id="accountSettingsPanel" role="tabpanel" data-settings-panel="account" aria-labelledby="accountSettingsHeading">
             <h2 id="accountSettingsHeading">Account</h2>
-            <p class="account-settings-intro">An account is optional. Projects, threads, models, harnesses, permissions, updates, and exports remain available while signed out.</p>
             <div class="setting-row account-status-row">
-              <div><b id="desktopAccountStatus">Checking account…</b><small id="desktopAccountDetail">Privacy-filtered error reports can use a pseudonymous account ID.</small></div>
+              <b id="desktopAccountStatus">Checking account…</b>
               <div class="account-settings-actions"><button type="button" class="secondary" id="desktopAccountSignIn">Sign in</button><button type="button" class="secondary hidden" id="desktopAccountLogout">Log out</button></div>
             </div>
-            <div class="setting-row"><div><b>Release channel</b><small>Preview is identified separately in account diagnostics.</small></div><span class="account-channel" id="desktopAccountChannel">Stable</span></div>
           </section>
           <section class="settings-section provider-settings-section hidden" id="providerSettingsPanel" role="tabpanel" data-settings-panel="providers" aria-labelledby="providerSettingsHeading">
             <div class="settings-section-heading"><div><h2 id="providerSettingsHeading">Providers</h2><p>Each provider is an independent access path with its own credentials.</p></div><div class="provider-definition-actions"><button type="button" class="secondary" id="refreshProviderCatalogs">Refresh models</button><button type="button" class="primary" id="newProviderDefinition">＋ Add provider</button></div></div>
