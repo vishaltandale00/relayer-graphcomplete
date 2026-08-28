@@ -112,6 +112,7 @@ function registerIpc() {
     status: "dismissed",
     automaticEligible: false,
   }));
+  ipcMain.handle("relayer:provider-status", () => null);
 }
 
 function unregisterIpc() {
@@ -121,6 +122,7 @@ function unregisterIpc() {
     "relayer:update-status",
     "relayer:folder-choose",
     "relayer:tutorial-read",
+    "relayer:provider-status",
   ]) ipcMain.removeHandler(channel);
 }
 
