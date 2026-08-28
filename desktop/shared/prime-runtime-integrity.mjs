@@ -41,6 +41,62 @@ export function digestFileEntries(entries) {
   return digest.digest("hex");
 }
 
+export function isMachONativeModule(path, bytes) {
+  if (!String(path).endsWith(".node") || !Buffer.isBuffer(bytes) || bytes.length < 4) return false;
+  const magic = bytes.readUInt32BE(0);
+  return [0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe, 0xbebafeca].includes(magic);
+}
+
+export function createSignedDependencyClosureSnapshot(entries, targetKey) {
+  const mutableNativeCode = entries
+    .filter(({ path, bytes }) => isMachONativeModule(path, bytes))
+    .map(({ path, bytes }) => ({ path, unsignedSha256: sha256(bytes) }))
+    .sort((left, right) => Buffer.compare(Buffer.from(left.path, "utf8"), Buffer.from(right.path, "utf8")));
+  const mutablePaths = new Set(mutableNativeCode.map(({ path }) => path));
+  return {
+    schemaVersion: 1,
+    targetKey,
+    immutableClosureSha256: digestFileEntries(entries.filter(({ path }) => !mutablePaths.has(path))),
+    mutableNativeCode,
+  };
+}
+
+export function verifySignedDependencyClosureSnapshot(entries, snapshot, targetKey) {
+  const expectedMutable = snapshot?.mutableNativeCode;
+  const validDigest = (value) => /^[a-f0-9]{64}$/.test(String(value || ""));
+  if (
+    snapshot?.schemaVersion !== 1
+    || snapshot?.targetKey !== targetKey
+    || !validDigest(snapshot?.immutableClosureSha256)
+    || !Array.isArray(expectedMutable)
+    || expectedMutable.some(({ path, unsignedSha256 } = {}) => (
+      typeof path !== "string" || !path.endsWith(".node") || !validDigest(unsignedSha256)
+    ))
+  ) {
+    throw new Error("Bundled Prime Agent signed closure snapshot is invalid.");
+  }
+  const expectedPaths = expectedMutable.map(({ path }) => path);
+  const sortedExpectedPaths = [...new Set(expectedPaths)].sort((left, right) => (
+    Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"))
+  ));
+  if (JSON.stringify(expectedPaths) !== JSON.stringify(sortedExpectedPaths)) {
+    throw new Error("Bundled Prime Agent signed closure snapshot is invalid.");
+  }
+  const actualMutable = entries
+    .filter(({ path, bytes }) => isMachONativeModule(path, bytes))
+    .map(({ path }) => path)
+    .sort((left, right) => Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8")));
+  if (JSON.stringify(actualMutable) !== JSON.stringify(expectedPaths)) {
+    throw new Error("Bundled Prime Agent signed native-code inventory mismatch.");
+  }
+  const mutablePaths = new Set(expectedPaths);
+  const immutableDigest = digestFileEntries(entries.filter(({ path }) => !mutablePaths.has(path)));
+  if (immutableDigest !== snapshot.immutableClosureSha256) {
+    throw new Error("Bundled Prime Agent signed immutable closure mismatch.");
+  }
+  return { mutableNativeCode: expectedPaths.length, immutableClosureSha256: immutableDigest };
+}
+
 export function runtimePackageMetadata(metadata) {
   const runtimeFields = [
     "name",
@@ -124,7 +180,7 @@ export function runtimeDependencyRequirements(metadata) {
   ));
 }
 
-export async function digestFilesystemDependencyClosure(appRoot, rootInstallPaths) {
+export async function collectFilesystemDependencyClosureEntries(appRoot, rootInstallPaths) {
   const queue = [...rootInstallPaths];
   const visited = new Set();
   const entries = [];
@@ -167,5 +223,9 @@ export async function digestFilesystemDependencyClosure(appRoot, rootInstallPath
     await visit(packageRoot);
     entries.push(...packageEntries);
   }
-  return digestFileEntries(entries);
+  return entries;
+}
+
+export async function digestFilesystemDependencyClosure(appRoot, rootInstallPaths) {
+  return digestFileEntries(await collectFilesystemDependencyClosureEntries(appRoot, rootInstallPaths));
 }
