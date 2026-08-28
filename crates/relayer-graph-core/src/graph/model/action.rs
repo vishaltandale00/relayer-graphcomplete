@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{ActionId, GraphError, LayerId, NodeId, RecordState, ValidationIssue};
@@ -73,6 +75,8 @@ pub struct InputAction {
     pub options: Vec<InputOption>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minimum_selections: Option<usize>,
+    #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unsupported_fields: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -394,6 +398,13 @@ impl ActionDraft {
 }
 
 fn validate_input_action(input: &InputAction, issues: &mut Vec<ValidationIssue>) {
+    for field in input.unsupported_fields.keys() {
+        issues.push(ValidationIssue::new(
+            "input_action_payload_unexpected",
+            field,
+            "Remove fields that are not part of the selected input control grammar.",
+        ));
+    }
     if input.prompt.trim().is_empty() {
         issues.push(ValidationIssue::new(
             "input_action_prompt_required",

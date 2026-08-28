@@ -66,6 +66,7 @@ CREATE TRIGGER submitted_input_attempt_restore
 AFTER UPDATE OF completion_status ON interactions
 WHEN OLD.completion_status != NEW.completion_status
   AND NEW.completion_status IN ('failed','stopped','not_started')
+  AND COALESCE(NEW.completion_error,'') NOT LIKE 'Canonical reconciliation pending:%'
   AND EXISTS(
       SELECT 1 FROM interaction_submitted_input_attempts attempt
       WHERE attempt.interaction_id=NEW.id

@@ -430,6 +430,7 @@ async fn imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable()
                     label: "One".into(),
                 }],
                 minimum_selections: None,
+                unsupported_fields: Default::default(),
             },
             value: SubmittedInputValue::Selected {
                 selected: vec![InputOption {
@@ -2450,6 +2451,7 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
             prompt: "Describe the evidence".into(),
             options: vec![],
             minimum_selections: None,
+            unsupported_fields: Default::default(),
         },
         InputAction {
             control: InputControl::SingleSelect,
@@ -2465,6 +2467,7 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
                 },
             ],
             minimum_selections: None,
+            unsupported_fields: Default::default(),
         },
         InputAction {
             control: InputControl::MultiSelect,
@@ -2480,6 +2483,7 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
                 },
             ],
             minimum_selections: Some(2),
+            unsupported_fields: Default::default(),
         },
     ];
     for (index, input) in cases.into_iter().enumerate() {
@@ -2518,6 +2522,7 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
     );
     let canonical = database
         .canonical_input_action_occurrence(
+            Some(project(88)),
             thread(88),
             &PresentingInputOccurrence {
                 presenting_interaction_node_id: interaction.id,
@@ -2560,6 +2565,7 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
                     },
                 ],
                 minimum_selections: Some(3),
+                unsupported_fields: Default::default(),
             }),
         })
         .await
@@ -2588,7 +2594,8 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
         "targetLayerId": null,
         "interactionText": null,
         "control": "slider",
-        "prompt": "Choose a value"
+        "prompt": "Choose a value",
+        "sliderMin": 1
     }))
     .unwrap();
     let error = writer.add_action(&unsupported).await.unwrap_err();
@@ -2598,10 +2605,13 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
     assert!(issues.iter().any(|issue| {
         issue.code == "input_action_control_unsupported" && issue.path == "control"
     }));
+    assert!(issues.iter().any(|issue| {
+        issue.code == "input_action_payload_unexpected" && issue.path == "sliderMin"
+    }));
 }
 
 #[tokio::test]
-async fn canonical_input_occurrence_requires_the_destination_graph_thread() {
+async fn canonical_input_occurrence_uses_project_scope_with_standalone_thread_fallback() {
     let (database, interaction) = setup(Some(project(89)), thread(89)).await;
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
     let source = node(&writer, "thread-bound-input-source").await;
@@ -2624,6 +2634,7 @@ async fn canonical_input_occurrence_requires_the_destination_graph_thread() {
                 prompt: "Explain".into(),
                 options: vec![],
                 minimum_selections: None,
+                unsupported_fields: Default::default(),
             }),
         })
         .await
@@ -2637,17 +2648,94 @@ async fn canonical_input_occurrence_requires_the_destination_graph_thread() {
     };
 
     database
-        .canonical_input_action_occurrence(thread(89), &occurrence)
+        .canonical_input_action_occurrence(Some(project(89)), thread(90), &occurrence)
         .await
         .unwrap();
+    let wrong_action = PresentingInputOccurrence {
+        action_id: relayer_graph_core::ActionId::new(action.id.value() + 1).unwrap(),
+        ..occurrence.clone()
+    };
     let error = database
-        .canonical_input_action_occurrence(thread(90), &occurrence)
+        .canonical_input_action_occurrence(Some(project(89)), thread(90), &wrong_action)
         .await
         .unwrap_err();
     assert!(matches!(
         error,
         GraphError::Validation { code, path, .. }
-            if code == "input_occurrence_not_visible" && path == "occurrence"
+            if code == "input_action_not_in_occurrence" && path == "attachments[0].actionId"
+    ));
+    let error = database
+        .canonical_input_action_occurrence(Some(project(90)), thread(89), &occurrence)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation { code, path, .. }
+            if code == "input_occurrence_not_visible" && path == "attachments[0]"
+    ));
+
+    let (standalone_database, standalone_interaction) = setup(None, thread(91)).await;
+    let standalone_writer = standalone_database
+        .writer_for_subgraph(standalone_interaction.id)
+        .await
+        .unwrap();
+    let standalone_source = node(&standalone_writer, "standalone-input-source").await;
+    let standalone_layer = single_node_layer(
+        &standalone_writer,
+        "standalone-input-layer",
+        &standalone_source,
+    )
+    .await;
+    let standalone_action = standalone_writer
+        .add_action(&ActionDraft {
+            client_key: "standalone-input".into(),
+            source_node_id: standalone_source.id,
+            source_layer_id: Some(standalone_layer.id),
+            kind: ActionKind::Input,
+            relation: None,
+            label: "Standalone input".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            input: Some(InputAction {
+                control: InputControl::Text,
+                prompt: "Explain".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            }),
+        })
+        .await
+        .unwrap();
+    root_expand(
+        &standalone_writer,
+        &standalone_interaction,
+        &standalone_layer,
+    )
+    .await;
+    standalone_writer
+        .complete(standalone_interaction.id)
+        .await
+        .unwrap();
+    let standalone_occurrence = PresentingInputOccurrence {
+        presenting_interaction_node_id: standalone_interaction.id,
+        presenting_layer_id: standalone_layer.id,
+        action_id: standalone_action.id,
+    };
+    standalone_database
+        .canonical_input_action_occurrence(None, thread(91), &standalone_occurrence)
+        .await
+        .unwrap();
+    let error = standalone_database
+        .canonical_input_action_occurrence(None, thread(92), &standalone_occurrence)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GraphError::Validation { code, path, .. }
+            if code == "input_occurrence_not_visible" && path == "attachments[0]"
     ));
 }
 
@@ -2665,6 +2753,7 @@ async fn submitted_input_children_are_canonical_isolated_and_retry_stable() {
                 prompt: "Explain the tradeoff".into(),
                 options: vec![],
                 minimum_selections: None,
+                unsupported_fields: Default::default(),
             },
         ),
         (
@@ -2683,6 +2772,7 @@ async fn submitted_input_children_are_canonical_isolated_and_retry_stable() {
                     },
                 ],
                 minimum_selections: Some(1),
+                unsupported_fields: Default::default(),
             },
         ),
     ] {

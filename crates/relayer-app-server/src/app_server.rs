@@ -575,16 +575,25 @@ impl RelayerAppServer {
                         .or(interaction.harness_configuration_name.clone())
                         .unwrap_or_else(|| "unknown".into());
                     if has_submitted_inputs {
-                        storage
-                            .fail_interrupted_submitted_input(
-                                interaction.id,
-                                &harness,
-                                &format!(
-                                    "{} {error}",
-                                    crate::product::RECONCILIATION_PENDING_PREFIX
-                                ),
-                            )
-                            .await?;
+                        let pending_error =
+                            format!("{} {error}", crate::product::RECONCILIATION_PENDING_PREFIX);
+                        if error.is_retryable() {
+                            storage
+                                .quarantine_interrupted_submitted_input(
+                                    interaction.id,
+                                    &harness,
+                                    &pending_error,
+                                )
+                                .await?;
+                        } else {
+                            storage
+                                .fail_interrupted_submitted_input(
+                                    interaction.id,
+                                    &harness,
+                                    &pending_error,
+                                )
+                                .await?;
+                        }
                     } else {
                         storage
                             .fail_interaction_completion(

@@ -285,6 +285,7 @@ mod tests {
                 label: "One".into(),
             }],
             minimum_selections: None,
+            unsupported_fields: Default::default(),
         };
         let first_value = ActionInputValue::Selected {
             selected_keys: vec!["one".into()],
@@ -382,6 +383,7 @@ mod tests {
                 label: "One".into(),
             }],
             minimum_selections: None,
+            unsupported_fields: Default::default(),
         };
         let value = ActionInputValue::Selected {
             selected_keys: vec!["one".into()],

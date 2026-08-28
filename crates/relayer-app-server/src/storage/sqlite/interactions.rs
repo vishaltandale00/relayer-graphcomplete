@@ -49,14 +49,29 @@ impl SqliteProductStore {
         // Ordinary running completions cannot resume across a backend restart. Preserve
         // not_started rows: they are durable user drafts, including recoverable model failures.
         // Finalize the attempt in the same transaction: an interrupted harness has an unknown
-        // effect boundary and therefore must never be silently replayed after restart.
+        // effect boundary and therefore must never be silently replayed after restart. A
+        // submitted-input attempt quarantined by a retryable canonical read stays open only for
+        // graph reconciliation; it is never replayed through the provider.
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let finished_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time is before unix epoch")
             .as_millis()
             .to_string();
-        sqlx::query("UPDATE interaction_attempts SET finished_at=?1,outcome='execution_failed',failure_category='application_restart',effect_boundary='unknown' WHERE outcome='running'")
+        sqlx::query(
+            "UPDATE interaction_attempts
+             SET finished_at=?1,outcome='execution_failed',failure_category='application_restart',effect_boundary='unknown'
+             WHERE outcome='running'
+               AND interaction_id NOT IN (
+                 SELECT interaction.id
+                 FROM interactions interaction
+                 JOIN interaction_submitted_input_attempts submitted
+                   ON submitted.interaction_id=interaction.id
+                 WHERE interaction.completion_status='failed'
+                   AND interaction.completion_error LIKE 'Canonical reconciliation pending:%'
+                   AND submitted.state NOT IN ('accepted','failed','stopped')
+               )",
+        )
             .bind(finished_at)
             .execute(&mut *transaction)
             .await?;
@@ -117,6 +132,59 @@ impl SqliteProductStore {
         }
         transaction.commit().await?;
         Ok(true)
+    }
+
+    pub(crate) async fn quarantine_interrupted_submitted_input(
+        &self,
+        interaction_id: InteractionId,
+        harness_configuration_name: &str,
+        error: &str,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query(
+            "UPDATE interactions
+             SET completion_status='failed',
+                 harness_configuration_name=COALESCE(harness_configuration_name,?1),
+                 completion_error=?2
+             WHERE id=?3
+               AND completion_status IN ('not_started','running','submitted','waiting_for_approval')
+               AND EXISTS (
+                 SELECT 1 FROM interaction_submitted_input_attempts
+                 WHERE interaction_id=interactions.id
+                   AND state NOT IN ('accepted','failed','stopped')
+               )
+               AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+        )
+        .bind(harness_configuration_name)
+        .bind(error)
+        .bind(interaction_id.value())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub(crate) async fn finalize_quarantined_submitted_input_failure(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query(
+            "UPDATE interactions
+             SET completion_status='not_started',completion_error=?1
+             WHERE id=?2
+               AND completion_status='failed'
+               AND completion_error LIKE 'Canonical reconciliation pending:%'
+               AND EXISTS (
+                 SELECT 1 FROM interaction_submitted_input_attempts
+                 WHERE interaction_id=interactions.id
+                   AND state NOT IN ('accepted','failed','stopped')
+               )
+               AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+        )
+        .bind(error)
+        .bind(interaction_id.value())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
     }
 
     pub(crate) async fn get_interaction(

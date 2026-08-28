@@ -521,6 +521,7 @@ async fn canonical_context_occurrence(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CanonicalInputActionOccurrenceRequest {
+    destination_project_id: Option<ProjectId>,
     destination_thread_id: ThreadId,
     occurrence: relayer_graph_core::PresentingInputOccurrence,
 }
@@ -534,7 +535,11 @@ async fn canonical_input_action_occurrence(
     Ok(Json(
         state
             .graph
-            .canonical_input_action_occurrence(input.destination_thread_id, &input.occurrence)
+            .canonical_input_action_occurrence(
+                input.destination_project_id,
+                input.destination_thread_id,
+                &input.occurrence,
+            )
             .await?,
     ))
 }
@@ -2778,6 +2783,7 @@ mod tests {
                 label: "Logs".into(),
             }],
             minimum_selections: None,
+            unsupported_fields: Default::default(),
         };
         let action = writer
             .add_action(&ActionDraft {
@@ -2839,8 +2845,9 @@ mod tests {
         })
         .to_string();
         let app = router(ServerState::new(graph, "control"));
-        let canonical_body = |destination_thread_id| {
+        let canonical_body = |destination_project_id, destination_thread_id| {
             json!({
+                "destinationProjectId": destination_project_id,
                 "destinationThreadId": destination_thread_id,
                 "occurrence": {
                     "presentingInteractionNodeId": presenting.id,
@@ -2858,13 +2865,13 @@ mod tests {
                     .uri("/api/control/input-action-occurrences/canonical")
                     .header("authorization", "Bearer control")
                     .header("content-type", "application/json")
-                    .body(Body::from(canonical_body(73)))
+                    .body(Body::from(canonical_body(41, 74)))
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(canonical.status(), StatusCode::OK);
-        let wrong_thread = app
+        let wrong_project = app
             .clone()
             .oneshot(
                 Request::builder()
@@ -2872,20 +2879,20 @@ mod tests {
                     .uri("/api/control/input-action-occurrences/canonical")
                     .header("authorization", "Bearer control")
                     .header("content-type", "application/json")
-                    .body(Body::from(canonical_body(74)))
+                    .body(Body::from(canonical_body(42, 73)))
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(wrong_thread.status(), StatusCode::UNPROCESSABLE_ENTITY);
-        let wrong_thread_body: Value = serde_json::from_slice(
-            &to_bytes(wrong_thread.into_body(), usize::MAX)
+        assert_eq!(wrong_project.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let wrong_project_body: Value = serde_json::from_slice(
+            &to_bytes(wrong_project.into_body(), usize::MAX)
                 .await
                 .unwrap(),
         )
         .unwrap();
         assert_eq!(
-            wrong_thread_body["error"]["code"],
+            wrong_project_body["error"]["code"],
             "input_occurrence_not_visible"
         );
         let response = app

@@ -364,7 +364,6 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
     .await
     .unwrap();
     pool.close().await;
-
     let graph = Router::new()
         .route(
             "/api/control/context-occurrences/canonical",
@@ -736,7 +735,7 @@ async fn confirming_a_node_context_draft_revalidates_and_replays_one_annotation(
 }
 
 #[tokio::test]
-async fn input_draft_commit_binds_graph_visibility_to_the_destination_product_thread() {
+async fn input_draft_commit_sends_the_destination_product_graph_scope() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -826,6 +825,7 @@ async fn input_draft_commit_binds_graph_visibility_to_the_destination_product_th
     assert_eq!(
         observed.lock().unwrap().clone().unwrap(),
         json!({
+            "destinationProjectId": null,
             "destinationThreadId": thread_id,
             "occurrence": occurrence
         })
@@ -6025,6 +6025,116 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
     .execute(&pool)
     .await
     .unwrap();
+    let transient_interaction_id = sqlx::query(
+        "INSERT INTO interactions(
+            thread_id,sequence,text,created_at,graph_node_id,completion_status,
+            harness_configuration_name,harness_configuration_digest,permission_profile_id,
+            effective_execution_digest,effective_permission_receipt_json,input_identity,input_digest
+         ) VALUES (?1,3,'Use another committed answer',?2,78,'running','codex-basic','sha256:test',
+            'auto','sha256:execution','{}','send-restart-transient','sha256:transient-input')",
+    )
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query(
+        "INSERT INTO interaction_attempts(
+            interaction_id,attempt_number,started_at,family_id,family_revision,
+            harness_configuration_name,harness_configuration_revision,harness_configuration_digest,
+            provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,
+            outcome,effect_boundary
+         ) VALUES (?1,1,?2,?3,?4,'codex-basic',1,'sha256:test',
+            'codex','test-adapter',1,'test-model','managed-runtime@1','running','unknown')",
+    )
+    .bind(transient_interaction_id)
+    .bind(&created_at)
+    .bind(family_id)
+    .bind(family_revision)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO interaction_submitted_input_attempts(
+            interaction_id,thread_id,draft_revision,authority_digest,semantic_digest,state,
+            graph_root_node_id,created_at,bound_at
+         ) VALUES (?1,?2,1,'sha256:transient-input','sha256:transient-semantic','running',78,?3,?3)",
+    )
+    .bind(transient_interaction_id)
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO interaction_submitted_input_attachments(
+            interaction_id,presenting_interaction_node_id,presenting_layer_id,action_id,
+            source_node_id,action_json,value_json,committed_at
+         ) VALUES (?1,11,21,31,41,?2,?3,?4)",
+    )
+    .bind(transient_interaction_id)
+    .bind(json!({"control":"text","prompt":"Another answer"}).to_string())
+    .bind(json!({"text":"accepted later"}).to_string())
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mismatched_interaction_id = sqlx::query(
+        "INSERT INTO interactions(
+            thread_id,sequence,text,created_at,graph_node_id,completion_status,
+            harness_configuration_name,harness_configuration_digest,permission_profile_id,
+            effective_execution_digest,effective_permission_receipt_json,input_identity,input_digest
+         ) VALUES (?1,4,'Do not accept mismatched provenance',?2,79,'running','codex-basic','sha256:test',
+            'auto','sha256:execution','{}','send-restart-mismatch','sha256:expected-input')",
+    )
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query(
+        "INSERT INTO interaction_attempts(
+            interaction_id,attempt_number,started_at,family_id,family_revision,
+            harness_configuration_name,harness_configuration_revision,harness_configuration_digest,
+            provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,
+            outcome,effect_boundary
+         ) VALUES (?1,1,?2,?3,?4,'codex-basic',1,'sha256:test',
+            'codex','test-adapter',1,'test-model','managed-runtime@1','running','unknown')",
+    )
+    .bind(mismatched_interaction_id)
+    .bind(&created_at)
+    .bind(family_id)
+    .bind(family_revision)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO interaction_submitted_input_attempts(
+            interaction_id,thread_id,draft_revision,authority_digest,semantic_digest,state,
+            graph_root_node_id,created_at,bound_at
+         ) VALUES (?1,?2,1,'sha256:expected-input','sha256:mismatch-semantic','running',79,?3,?3)",
+    )
+    .bind(mismatched_interaction_id)
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO interaction_submitted_input_attachments(
+            interaction_id,presenting_interaction_node_id,presenting_layer_id,action_id,
+            source_node_id,action_json,value_json,committed_at
+         ) VALUES (?1,12,22,32,42,?2,?3,?4)",
+    )
+    .bind(mismatched_interaction_id)
+    .bind(json!({"control":"text","prompt":"Mismatch"}).to_string())
+    .bind(json!({"text":"must remain quarantined"}).to_string())
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
     pool.close().await;
 
     let catalog = root.join("catalog.json");
@@ -6043,6 +6153,8 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
     )
     .unwrap();
 
+    let transient_output_reads = Arc::new(AtomicUsize::new(0));
+    let observed_transient_output_reads = transient_output_reads.clone();
     let graph = Router::new()
         .route(
             "/api/control/interactions/77",
@@ -6060,6 +6172,55 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
                     StatusCode::NOT_FOUND,
                     axum::Json(json!({"error":{"code":"completion_not_found"}})),
                 )
+            }),
+        )
+        .route(
+            "/api/control/interactions/78",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":78,"invocation":null,
+                    "inputIdentity":"send-restart-transient",
+                    "inputDigest":"sha256:transient-input"
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/78/output",
+            axum::routing::get(move || {
+                let observed_transient_output_reads = observed_transient_output_reads.clone();
+                async move {
+                    if observed_transient_output_reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+                        )
+                            .into_response();
+                    }
+                    axum::Json(json!({
+                        "nodeId":78,
+                        "rootLayer":{"id":1,"nodes":[],"edges":[],"actions":[]}
+                    }))
+                    .into_response()
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/79",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":79,"invocation":null,
+                    "inputIdentity":"send-restart-mismatch",
+                    "inputDigest":"sha256:wrong-input"
+                }))
+            }),
+        )
+        .route(
+            "/api/control/interactions/79/output",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "nodeId":79,
+                    "rootLayer":{"id":1,"nodes":[],"edges":[],"actions":[]}
+                }))
             }),
         )
         .route(
@@ -6086,6 +6247,49 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let pool = sqlite_pool(&database).await;
+    let transient_pending: (String, String, String, String, i64) = sqlx::query_as(
+        "SELECT i.completion_status,i.completion_error,a.state,
+                (SELECT outcome FROM interaction_attempts execution
+                 WHERE execution.interaction_id=i.id ORDER BY attempt_number DESC LIMIT 1),
+                (SELECT COUNT(*) FROM action_input_attachments d
+                 WHERE d.thread_id=i.thread_id AND d.action_id=31)
+         FROM interactions i
+         JOIN interaction_submitted_input_attempts a ON a.interaction_id=i.id
+         WHERE i.id=?1",
+    )
+    .bind(transient_interaction_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(transient_pending.0, "failed");
+    assert!(
+        transient_pending
+            .1
+            .starts_with("Canonical reconciliation pending:")
+    );
+    assert_eq!(transient_pending.2, "running");
+    assert_eq!(transient_pending.3, "running");
+    assert_eq!(transient_pending.4, 0);
+    let mismatched_pending: (String, String, String, i64) = sqlx::query_as(
+        "SELECT i.completion_status,i.completion_error,a.state,
+                (SELECT COUNT(*) FROM action_input_attachments d
+                 WHERE d.thread_id=i.thread_id AND d.action_id=32)
+         FROM interactions i
+         JOIN interaction_submitted_input_attempts a ON a.interaction_id=i.id
+         WHERE i.id=?1",
+    )
+    .bind(mismatched_interaction_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(mismatched_pending.0, "failed");
+    assert!(
+        mismatched_pending
+            .1
+            .starts_with("Canonical reconciliation pending:")
+    );
+    assert_eq!(mismatched_pending.2, "running");
+    assert_eq!(mismatched_pending.3, 0);
     let (status, error): (String, Option<String>) =
         sqlx::query_as("SELECT completion_status,completion_error FROM interactions WHERE id=?1")
             .bind(interaction_id)
@@ -6122,6 +6326,66 @@ async fn interrupted_submitted_input_without_graph_acceptance_restores_without_p
     .await
     .unwrap();
     assert_eq!(restored, (1, json!({"text":"committed"}).to_string()));
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    pool.close().await;
+
+    let state = response_json(
+        resumed
+            .clone()
+            .oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let transient = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == transient_interaction_id)
+        .unwrap();
+    assert_eq!(transient["completionStatus"], "accepted");
+    let mismatched = state["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == mismatched_interaction_id)
+        .unwrap();
+    assert_eq!(mismatched["completionStatus"], "failed");
+    assert_eq!(mismatched["projectionFresh"], false);
+    let pool = sqlite_pool(&database).await;
+    let transient_accepted: (String, String, i64) = sqlx::query_as(
+        "SELECT a.state,
+                (SELECT outcome FROM interaction_attempts execution
+                 WHERE execution.interaction_id=a.interaction_id
+                 ORDER BY attempt_number DESC LIMIT 1),
+                (SELECT COUNT(*) FROM action_input_attachments d
+                 WHERE d.thread_id=a.thread_id AND d.action_id=31)
+         FROM interaction_submitted_input_attempts a WHERE a.interaction_id=?1",
+    )
+    .bind(transient_interaction_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        transient_accepted,
+        ("accepted".into(), "accepted".into(), 0)
+    );
+    let mismatch_still_quarantined: (String, i64) = sqlx::query_as(
+        "SELECT a.state,
+                (SELECT COUNT(*) FROM action_input_attachments d
+                 WHERE d.thread_id=a.thread_id AND d.action_id=32)
+         FROM interaction_submitted_input_attempts a WHERE a.interaction_id=?1",
+    )
+    .bind(mismatched_interaction_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(mismatch_still_quarantined, ("running".into(), 0));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     pool.close().await;
 

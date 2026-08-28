@@ -909,4 +909,16 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
     };
     turn.submitted_inputs[0].source.action_id = "action:missing".into();
     assert_rejected_with_parity(&unresolved, "submitted_input_source_unresolved");
+
+    let mut invalid_single_minimum = fixture.clone();
+    let ConversationExportRecord::Turn(turn) = &mut invalid_single_minimum[2] else {
+        unreachable!()
+    };
+    let single = turn
+        .submitted_inputs
+        .iter_mut()
+        .find(|input| input.action.control == ExportInputControl::SingleSelect)
+        .unwrap();
+    single.action.minimum_selections = Some(1);
+    assert_rejected_with_parity(&invalid_single_minimum, "submitted_input_shape_invalid");
 }

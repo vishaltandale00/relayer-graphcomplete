@@ -89,8 +89,19 @@ pub(super) async fn commit(
     let runtime = state.runtime.as_ref().ok_or_else(|| {
         ApiError::internal("graph runtime is unavailable for input occurrence validation")
     })?;
+    let destination_project_id = state
+        .product
+        .get_thread(thread_id)
+        .await?
+        .thread
+        .project_id
+        .map(|project_id| project_id.value());
     let action = runtime
-        .canonical_input_action_occurrence(thread_id.value(), &request.occurrence)
+        .canonical_input_action_occurrence(
+            destination_project_id,
+            thread_id.value(),
+            &request.occurrence,
+        )
         .await?;
     Ok(Json(
         state

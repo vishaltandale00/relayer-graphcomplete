@@ -1831,6 +1831,17 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn finalize_quarantined_submitted_input_failure(
+        &self,
+        interaction_id: InteractionId,
+        error: &str,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .finalize_quarantined_submitted_input_failure(interaction_id, error)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn accept_interaction_completion(
         &self,
         completion: AcceptedInteractionCompletion<'_>,

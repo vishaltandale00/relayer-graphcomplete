@@ -436,6 +436,7 @@ impl GraphDatabase {
 
     pub async fn canonical_input_action_occurrence(
         &self,
+        destination_project_id: Option<crate::ProjectId>,
         destination_thread_id: crate::ThreadId,
         occurrence: &PresentingInputOccurrence,
     ) -> Result<crate::GraphAction, GraphError> {
@@ -447,23 +448,28 @@ impl GraphDatabase {
                 .map_err(|error| match error {
                     GraphError::Forbidden(_) | GraphError::NotFound(_) => GraphError::validation(
                         "input_occurrence_not_accepted",
-                        "occurrence.presentingInteractionNodeId",
+                        "attachments[0].presentingInteractionNodeId",
                         "Reopen an action from accepted history.",
                     ),
                     other => other,
                 })?
         };
-        if scope.thread_id != destination_thread_id {
+        let visible = match destination_project_id {
+            Some(project_id) => scope.project_id == Some(project_id),
+            None => scope.project_id.is_none() && scope.thread_id == destination_thread_id,
+        };
+        if !visible {
             return Err(GraphError::validation(
                 "input_occurrence_not_visible",
-                "occurrence",
-                "Remove an occurrence unavailable to this thread scope.",
+                "attachments[0]",
+                "Remove an occurrence unavailable to this destination graph scope.",
             ));
         }
         let mut connection = self.storage.acquire().await?;
         ActionTable::new(&mut connection)
             .canonical_input_occurrence(&scope, occurrence)
             .await
+            .map_err(first_attachment_error)
     }
 
     pub async fn close(&self) {
@@ -480,4 +486,32 @@ fn reject_reserved_profile_thread(thread_id: ThreadId) -> Result<(), GraphError>
         ));
     }
     Ok(())
+}
+
+fn first_attachment_error(error: GraphError) -> GraphError {
+    match error {
+        GraphError::Validation {
+            code,
+            path,
+            message,
+        } => {
+            let suffix = path.strip_prefix("occurrence").unwrap_or(&path);
+            GraphError::validation(code, format!("attachments[0]{suffix}"), message)
+        }
+        GraphError::ValidationIssues { message, issues } => GraphError::ValidationIssues {
+            message,
+            issues: issues
+                .into_iter()
+                .map(|issue| {
+                    let suffix = issue.path.strip_prefix("occurrence").unwrap_or(&issue.path);
+                    crate::ValidationIssue {
+                        code: issue.code,
+                        path: format!("attachments[0]{suffix}"),
+                        message: issue.message,
+                    }
+                })
+                .collect(),
+        },
+        other => other,
+    }
 }
