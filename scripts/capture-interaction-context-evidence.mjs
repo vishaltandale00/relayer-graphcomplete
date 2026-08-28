@@ -395,7 +395,9 @@ async function run() {
   await setValue("#contextAnnotationEditor", "Prioritize worker availability when reasoning.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("second confirmation collapsed", () => evaluate(`
-    document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
+    !document.querySelector('#contextAnnotationEditor')
+      && document.querySelector('[aria-label="Show Incoming queue annotations"]')?.disabled === false
+      && document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
       && !document.querySelector('.composer-context-preview')
   `));
   await click("[aria-label='Show Incoming queue annotations']");
