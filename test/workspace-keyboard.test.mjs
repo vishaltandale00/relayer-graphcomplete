@@ -29,6 +29,8 @@ import {
   contextDetachNeedsConfirmation,
   contextEditorCanConfirm,
   contextEditorPresentation,
+  contextEditorIdentity,
+  durableContextEditorForDraft,
   contextDraftStatusPresentation,
   contextConfirmationDestination,
   contextStagingDisabledFor,
@@ -189,6 +191,68 @@ describe("product workspace keyboard behavior", () => {
       className: "composer-context-draft-status status-error",
       text: "Not saved: disk full",
     });
+  });
+
+  it("binds a durable draft to the selected node-details editor identity", () => {
+    const target = { nodeId: 7, sourceInteractionNodeId: 3, sourceLayerId: 5 };
+    const targetNode = { id: 7, title: "Incoming queue" };
+    const draft = {
+      id: "draft-queue",
+      target,
+      targetNode,
+      text: "Keep the queue ordered",
+      revision: 3,
+      status: "saved",
+    };
+    const editor = durableContextEditorForDraft("thread-a", targetNode, draft, {
+      attaching: false,
+    });
+
+    expect(editor).toMatchObject({
+      ownerThreadId: "thread-a",
+      nodeId: targetNode.id,
+      draftId: "draft-queue",
+      target,
+      value: "Keep the queue ordered",
+      annotationIndex: null,
+      attaching: false,
+      durable: true,
+    });
+    expect(contextEditorIdentity(editor)).toBe(JSON.stringify([
+      "thread-a",
+      "draft-queue",
+      String(targetNode.id),
+      String(target.sourceInteractionNodeId),
+      String(target.sourceLayerId),
+      null,
+      false,
+      true,
+    ]));
+    expect(durableContextEditorForDraft("thread-a", { ...targetNode, id: 8 }, draft))
+      .toBeNull();
+  });
+
+  it("mounts the annotation editor only in the bottom of Node Details", async () => {
+    const markup = productWorkspaceMarkup();
+    const detailContent = markup.indexOf('id="inspectorContent"');
+    const dock = markup.indexOf('id="nodeContextDock"');
+    const evaluationPanel = markup.indexOf('id="annotationPanel"');
+    const composerTray = markup.slice(
+      markup.indexOf('id="composerContextTray"'),
+      markup.indexOf('id="threadComposer"'),
+    );
+
+    expect(detailContent).toBeGreaterThan(-1);
+    expect(detailContent).toBeLessThan(dock);
+    expect(dock).toBeLessThan(evaluationPanel);
+    expect(markup).toContain('aria-label="Node context annotation editor"');
+    expect(composerTray).not.toContain("contextAnnotationEditor");
+
+    const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
+    expect(styles).toContain(".node-context-dock{height:33.333%");
+    expect(styles).toContain(".node-context-dock textarea{min-height:0;flex:1;resize:none;overflow:auto");
+    expect(styles).toContain("@media(forced-colors:active){.node-context-dock");
+    expect(styles).toContain("@media(prefers-reduced-motion:reduce)");
   });
 
   it("presents every unconfirmed draft with stable accessible identity", () => {

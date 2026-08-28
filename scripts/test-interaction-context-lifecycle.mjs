@@ -18,6 +18,7 @@ const configurationPath = join(repositoryRoot, "harnesses", "fixture-task-system
 const graphServerBinary = join(repositoryRoot, "target", "debug", "relayer-graph-server");
 const appServerBinary = join(repositoryRoot, "target", "debug", "relayer-app-server");
 const EDITOR_VALUE = "Queue order controls which task is claimed next.";
+const SECOND_DRAFT_VALUE = "Keep worker capacity visible while prioritizing work.";
 const EDITOR_SELECTION = { start: 6, end: 31, direction: "backward" };
 const SUCCESS_MESSAGE = "Use the attached queue context for this follow-up.";
 const FAILED_MESSAGE = "Keep this exact message available for retry.";
@@ -340,7 +341,13 @@ async function openContextEditor() {
       && !document.querySelector('#attachNodeContext')?.classList.contains('hidden')
   `));
   await click("#attachNodeContext");
-  await waitFor("interaction-context editor", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
+  await waitFor("Node Details interaction-context editor", () => evaluate(`(() => {
+    const editor = document.querySelector('#contextAnnotationEditor');
+    const dock = document.querySelector('#nodeContextDock');
+    return editor && dock?.contains(editor)
+      && !document.querySelector('#composerContextTray')?.contains(editor)
+      && document.activeElement === editor;
+  })()`));
 }
 
 async function stageContext(annotation) {
@@ -415,6 +422,69 @@ async function run() {
   await openThreadWindow(thread.id);
 
   await stageContext(EDITOR_VALUE);
+  const dockGeometry = await evaluate(`(() => {
+    const inspector = document.querySelector('#inspector').getBoundingClientRect();
+    const content = document.querySelector('#inspectorContent').getBoundingClientRect();
+    const dock = document.querySelector('#nodeContextDock').getBoundingClientRect();
+    const graph = document.querySelector('#graphStage').getBoundingClientRect();
+    const composer = document.querySelector('#threadComposerShell').getBoundingClientRect();
+    return {
+      ratio: dock.height / inspector.height,
+      detailScrollableAbove: content.bottom <= dock.top + 1,
+      insideInspector: dock.left >= inspector.left && dock.right <= inspector.right + 1,
+      graphUnobstructed: dock.left >= graph.right,
+      composerStable: dock.bottom <= composer.bottom && dock.left >= composer.right,
+    };
+  })()`);
+  if (dockGeometry.ratio < 0.25 || dockGeometry.ratio > 0.42
+    || !dockGeometry.detailScrollableAbove || !dockGeometry.insideInspector
+    || !dockGeometry.graphUnobstructed || !dockGeometry.composerStable) {
+    throw new Error(`Node Details dock geometry is invalid: ${JSON.stringify(dockGeometry)}`);
+  }
+  await clickNode("Two-worker pool");
+  await waitFor("undrafted worker node without an editor", () => evaluate(`
+    document.querySelector('#detailTitle')?.textContent === 'Two-worker pool'
+      && !document.querySelector('#contextAnnotationEditor')
+      && document.querySelector('#nodeContextDock')?.classList.contains('hidden')
+  `));
+  await waitFor("first node draft saved before selection changed", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.some((draft) => draft.targetNode?.title === "Incoming queue"
+      && draft.text === EDITOR_VALUE && draft.revision >= 1);
+  });
+  await click("#attachNodeContext");
+  let rejectedAutosave = false;
+  const autosaveFailureFilter = { urls: [`${productSession.origin}/api/threads/*/context-drafts/*`] };
+  window.webContents.session.webRequest.onBeforeRequest(autosaveFailureFilter, (details, callback) => {
+    if (!rejectedAutosave && details.method === "PUT") {
+      rejectedAutosave = true;
+      callback({ cancel: true });
+      return;
+    }
+    callback({});
+  });
+  await setValue("#contextAnnotationEditor", SECOND_DRAFT_VALUE);
+  await waitFor("inline Node Details autosave failure", () => evaluate(`(() => {
+    const status = document.querySelector('#nodeContextDock .node-context-dock-status');
+    return status?.getAttribute('role') === 'alert'
+      && status.textContent.startsWith('Not saved:')
+      && document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(SECOND_DRAFT_VALUE)};
+  })()`));
+  window.webContents.session.webRequest.onBeforeRequest(autosaveFailureFilter, null);
+  if (!rejectedAutosave) throw new Error("The one-shot autosave interceptor did not reject the request.");
+  await click("[aria-label='Discard annotation draft for Two-worker pool']");
+  await waitFor("second node draft discarded immediately", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.length === 1
+      && response.drafts[0].targetNode?.title === "Incoming queue"
+      && !await evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`);
+  });
+  await clickNode("Incoming queue");
+  await waitFor("drafted node editor restored on selection", () => evaluate(`
+    document.querySelector('#detailTitle')?.textContent === 'Incoming queue'
+      && document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(EDITOR_VALUE)}
+      && document.querySelector('#nodeContextDock')?.contains(document.querySelector('#contextAnnotationEditor'))
+  `));
   const initialEditor = await evaluate(`(() => {
     const editor = document.querySelector('#contextAnnotationEditor');
     editor.focus();
@@ -525,16 +595,34 @@ async function run() {
   await waitFor("saved draft source turn", () => evaluate(`
     document.querySelector('#turnPickerButton')?.textContent === 'Turn 1 of 2'
   `));
-  await openContextEditor();
+  await clickNode("Incoming queue");
   const restoredEditor = await waitFor("saved draft restoration in the editor", () => evaluate(`(() => {
     const editor = document.querySelector('#contextAnnotationEditor');
-    const status = document.querySelector('.composer-context-draft-status')?.textContent;
+    const status = document.querySelector('.node-context-dock-status')?.textContent;
     return status === 'Saved' ? { value: editor?.value, status } : false;
   })()`));
   if (restoredEditor.value !== EDITOR_VALUE) {
     throw new Error(`Restart restored the wrong draft text: ${JSON.stringify(restoredEditor)}`);
   }
 
+  let rejectedConfirm = false;
+  const confirmFailureFilter = { urls: [`${productSession.origin}/api/threads/*/context-drafts/*/confirm*`] };
+  window.webContents.session.webRequest.onBeforeRequest(confirmFailureFilter, (details, callback) => {
+    if (!rejectedConfirm) {
+      rejectedConfirm = true;
+      callback({ cancel: true });
+      return;
+    }
+    callback({});
+  });
+  await click("[aria-label='Confirm annotation']");
+  await waitFor("inline Node Details confirmation failure", () => evaluate(`(() => {
+    const error = document.querySelector('#nodeContextDock [role="alert"]');
+    const editor = document.querySelector('#contextAnnotationEditor');
+    return error?.textContent && editor?.value === ${JSON.stringify(EDITOR_VALUE)};
+  })()`));
+  window.webContents.session.webRequest.onBeforeRequest(confirmFailureFilter, null);
+  if (!rejectedConfirm) throw new Error("The one-shot confirmation interceptor did not reject the request.");
   await click("[aria-label='Confirm annotation']");
   await assertCollapsedPill();
   const confirmedState = await productRequest(`/api/threads/${thread.id}/context-drafts`);

@@ -324,7 +324,7 @@ async function run() {
   await waitFor("first compact annotation preview", () => evaluate(`
     document.querySelectorAll('.composer-context-annotations li').length === 1
   `));
-  await click("[aria-label='Add annotation to Incoming queue']");
+  await click("#attachNodeContext");
   await setValue("#contextAnnotationEditor", "Prioritize worker availability when reasoning.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("second confirmation collapsed", () => evaluate(`
@@ -394,7 +394,7 @@ async function run() {
       .map((element) => element.textContent);
     return JSON.stringify(values) === JSON.stringify([${JSON.stringify(longAnnotation)}]);
   })()`));
-  await click("[aria-label='Add annotation to Incoming queue']");
+  await click("#attachNodeContext");
   await setValue("#contextAnnotationEditor", "Prioritize worker availability when reasoning.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("re-added annotation confirmation settled", () => evaluate(`

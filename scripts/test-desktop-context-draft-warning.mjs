@@ -753,7 +753,10 @@ async function run() {
   await evaluate(`window.__contextDraftWarningFetchProbe.holdNextDraftSave = true`);
   const heldDraftText = "This draft save is intentionally held while the override is cancelled.";
   await setField("#contextAnnotationEditor", heldDraftText);
-  await click("[aria-label='Cancel annotation edit']");
+  await clickNode(confirmedOccurrence.node.title);
+  await waitFor("draft dock hidden after node selection changed", () => evaluate(
+    `!document.querySelector('#contextAnnotationEditor')`,
+  ));
   await setPrompt("Do not send after I cancel the pending draft-save override.");
   await click("#sendInteraction", { focus: true });
   await waitFor("warning before held draft persistence", () => evaluate(
@@ -796,7 +799,6 @@ async function run() {
     throw new Error(`Cancelled persistence did not preserve the held draft: ${JSON.stringify(heldDraft)}`);
   }
   await clickNode(pendingCancelNodeTitle);
-  await click("#attachNodeContext");
   await waitFor("persisted cancellation-test draft editor", () => evaluate(`(() => (
     document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(heldDraftText)}
   ))()`));
