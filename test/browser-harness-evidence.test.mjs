@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -21,10 +21,10 @@ async function sha256(path) {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
-async function sourceSetSha256(files) {
+async function sourceSetSha256(files, sourceRevision) {
   const digest = createHash("sha256");
   for (const path of [...files].sort()) {
-    const bytes = await integratedHeadBytes(path);
+    const bytes = await integratedHeadBytes(path, sourceRevision);
     digest.update(path);
     digest.update("\0");
     digest.update(createHash("sha256").update(bytes).digest("hex"));
@@ -33,16 +33,28 @@ async function sourceSetSha256(files) {
   return digest.digest("hex");
 }
 
-async function integratedHeadBytes(path) {
-  if (process.env.GITHUB_EVENT_NAME !== "pull_request") {
+async function integratedHeadBytes(path, sourceRevision) {
+  if (!sourceRevision) {
     return readFile(join(repositoryRoot, path));
   }
-  const { stdout } = await execFileAsync("git", ["show", `HEAD^2:${path}`], {
+  const { stdout } = await execFileAsync("git", ["show", `${sourceRevision}:${path}`], {
     cwd: repositoryRoot,
     encoding: "buffer",
     maxBuffer: 32 * 1024 * 1024,
   });
   return stdout;
+}
+
+async function changedSourceFiles(mergeBase, sourceRevision) {
+  const comparison = sourceRevision ? `${mergeBase}...${sourceRevision}` : mergeBase;
+  const { stdout } = await execFileAsync("git", ["diff", "--name-only", comparison, "--"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  });
+  return stdout
+    .split("\n")
+    .filter((path) => path && path !== "docs/evidence/issue-257-browser-harnesses/manifest.json")
+    .sort();
 }
 
 async function archiveEntrySha256(archivePath, targetPath) {
@@ -79,7 +91,11 @@ describe("issue 257 browser harness evidence", () => {
     expect(await sha256(join(repositoryRoot, "packages", "harness-host", "src", "implementations", "claude-basic-browser.ts")))
       .toBe(manifest.harnesses.claude.browserRuntimeSourceSha256);
     expect(manifest.assemblyMergeBase).toBe("9188a8123b7c40436f0100d124c24103a768d32d");
-    expect(await sourceSetSha256(manifest.integratedSource.files)).toBe(manifest.integratedSource.sha256);
+    const sourceRevision = process.env.GITHUB_EVENT_NAME === "pull_request" ? "HEAD^2" : undefined;
+    expect(await changedSourceFiles(manifest.assemblyMergeBase, sourceRevision))
+      .toEqual([...manifest.integratedSource.files].sort());
+    expect(await sourceSetSha256(manifest.integratedSource.files, sourceRevision))
+      .toBe(manifest.integratedSource.sha256);
   });
 
   it("matches the production Prime and Codex package contracts", async () => {

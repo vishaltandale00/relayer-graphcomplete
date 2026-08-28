@@ -5,8 +5,9 @@
   "assemblyMergeBase": "9188a8123b7c40436f0100d124c24103a768d32d",
   "integratedSource": {
     "algorithm": "sha256-of-sorted-path-nul-file-sha256-lf",
-    "sha256": "664062eb50c7db01c80ae4f711867da2e8db1fdce17da05bd17d4915cda0b74c",
+    "sha256": "005d51516817e3a2cf80aa0651c58f8ef9dc5569daf812dbec21aa2fee6e5861",
     "files": [
+      ".github/workflows/ci.yml",
       "README.md",
       "crates/relayer-app-server/src/runtime.rs",
       "desktop/eval-main/index.mjs",
