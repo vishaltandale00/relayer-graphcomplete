@@ -23,6 +23,20 @@ import {
 } from "../interaction-failure-model.js";
 import { createNodeContextDraftController } from "../node-context-drafts.js";
 import {
+  captureTextControlState,
+  committedInputAttachment,
+  createInputOccurrence,
+  createNodeInputDraftController,
+  initialInputStageValue,
+  inspectedInputDraftRevision,
+  inputOccurrenceKey,
+  inputStageValuesEqual,
+  restoreTextControlState,
+  summarizeInputStage,
+  threadInputOccurrenceKey,
+  validateInputStage,
+} from "../node-input-controls.js";
+import {
   captureComposerSubmission,
   settleComposerSubmission,
 } from "./composer-submission.js";
@@ -559,12 +573,15 @@ export function confirmationSendReplayIntent({
   contextRevision,
   replayContextRevision,
   modelSelection,
+  inputDraftRevision = null,
+  inputCompositionRevision = 0,
 }) {
-  if (!intent?.contextConfirmationIds?.length) return null;
+  if (!intent?.contextConfirmationIds?.length && intent?.inputDraftRevision == null) return null;
   if (!sendIntentIsCurrentThread(threadId, intent.threadId)) return null;
   if (intent.draftScopeKey !== draftScopeKey) return null;
   if (!Object.is(intent.submission.prompt.revision, promptRevision)) return null;
   if (!Object.is(replayContextRevision, contextRevision)) return null;
+  if (!Object.is(intent.inputCompositionRevision ?? 0, inputCompositionRevision)) return null;
   return JSON.stringify(intent.modelSelection ?? null) === JSON.stringify(modelSelection ?? null)
     ? intent
     : null;
@@ -595,6 +612,8 @@ export function interactionSendIntent({
   contexts,
   contextRevision = 0,
   modelSelection,
+  inputDraftRevision = null,
+  inputCompositionRevision = 0,
 }) {
   const confirmationIds = contextConfirmationIds(contexts);
   return Object.freeze({
@@ -612,6 +631,8 @@ export function interactionSendIntent({
       contexts: { value: contexts, revision: contextRevision },
     }),
     modelSelection,
+    inputDraftRevision,
+    inputCompositionRevision,
   });
 }
 
@@ -621,11 +642,16 @@ export function composerSubmissionReady(
   modelReady = true,
   contexts = [],
   editorOpen = false,
+  inputAttachments = [],
 ) {
   return !disabled
     && modelReady
     && !editorOpen
-    && (Boolean(value.trim()) || contextDraftHasAnnotation(contexts));
+    && (
+      Boolean(value.trim())
+      || contextDraftHasAnnotation(contexts)
+      || inputAttachments.length > 0
+    );
 }
 
 export function interactionContextPayload(contexts = []) {
@@ -1127,6 +1153,7 @@ export async function navigateWorkspaceAction({
 }
 
 export function actionReviewKind(action) {
+  if (action?.kind === "input") return "input-action";
   return (
     action?.kind === "navigate"
     || (action?.kind === "invoke" && action.targetLayerId != null)
@@ -1189,6 +1216,7 @@ export function createProductWorkspace({
   onDecideApproval = async () => {},
   annotationApi = null,
   contextDraftApi = null,
+  inputDraftApi = null,
 }) {
   const capabilities = workspaceModeCapabilities(mode);
   let graphNodes = [];
@@ -1254,10 +1282,78 @@ export function createProductWorkspace({
   );
   const contextDraftLoads = new Map();
   const loadedContextDraftThreads = new Set();
+  const inputDraftController = inputDraftApi
+    ? createNodeInputDraftController({ api: inputDraftApi })
+    : null;
+  const inputDraftLoads = new Map();
+  const loadedInputDraftThreads = new Set();
+  const inputStages = new Map();
+  const inputErrors = new Map();
+  const inputTouched = new Set();
+  const inputPending = new Set();
+  const inputRailScroll = new Map();
+  let inputFocusRequest = null;
+  const renderedInputDraftStatusKeys = new Map();
+  let openComposerInputKey = null;
+  const inputCompositionRevisions = new Map();
   const recoveredConfirmationThreads = new Set();
   const contextDraftLoadRetryTimers = new Map();
   const contextDraftLoadRetryAttempts = new Map();
   let disposed = false;
+
+  const inputKeyBelongsToThread = (key, threadId) => {
+    try {
+      return JSON.parse(key)?.[0] === String(threadId);
+    } catch {
+      return false;
+    }
+  };
+  const clearInputStagesForThread = (threadId) => {
+    for (const collection of [inputStages, inputErrors, inputRailScroll, inputTouched]) {
+      for (const key of collection.keys()) {
+        if (inputKeyBelongsToThread(key, threadId)) collection.delete(key);
+      }
+    }
+  };
+  const currentInputDraftRevision = (threadId) => {
+    const draft = inputDraftController?.current(threadId);
+    return inspectedInputDraftRevision(draft);
+  };
+  const currentInputCompositionRevision = (threadId) => (
+    inputCompositionRevisions.get(String(threadId)) || 0
+  );
+  const markInputCompositionChanged = (threadId) => {
+    const key = String(threadId);
+    inputCompositionRevisions.set(key, currentInputCompositionRevision(key) + 1);
+  };
+  const ensureInputDraftLoaded = (threadId, { reload = false } = {}) => {
+    if (!inputDraftController || threadId == null) return Promise.resolve(null);
+    const key = String(threadId);
+    if (!reload && loadedInputDraftThreads.has(key)) {
+      return Promise.resolve(inputDraftController.current(threadId));
+    }
+    if (inputDraftLoads.has(key)) return inputDraftLoads.get(key);
+    const load = inputDraftController.load(threadId)
+      .then((draft) => {
+        inputDraftLoads.delete(key);
+        if (disposed) return draft;
+        loadedInputDraftThreads.add(key);
+        if (String(getThread()?.id) === key) {
+          renderComposerContexts();
+          if (selection.selectedNodeId != null) {
+            void selectNode(getState(), selection.selectedNodeId, { notify: false });
+          }
+        }
+        return draft;
+      })
+      .catch((error) => {
+        inputDraftLoads.delete(key);
+        loadedInputDraftThreads.delete(key);
+        throw error;
+      });
+    inputDraftLoads.set(key, load);
+    return load;
+  };
 
   const prepareNodeContextSelectionChange = async () => {
     const requestSequence = ++nodeSelectionSequence;
@@ -1473,6 +1569,7 @@ export function createProductWorkspace({
   };
   const closeInspector = async ({ restoreFocus = true } = {}) => {
     if (!await prepareNodeContextSelectionChange()) return false;
+    clearInputStagesForThread(getThread()?.id);
     cancelInspectorFit();
     selection.selectedNodeId = null;
     selectedContextTarget = null;
@@ -2069,7 +2166,7 @@ export function createProductWorkspace({
   ));
   const contextStagingDisabled = () => {
     const status = composerStatusForThread(getState(), getThread());
-    return contextStagingDisabledFor(
+    return Boolean(sendAttempt) || contextStagingDisabledFor(
       status,
       capabilities.canCompose,
       prompt.disabled,
@@ -2545,6 +2642,7 @@ export function createProductWorkspace({
         pill.append(title, count, chevron);
         pill.onclick = () => {
           if (contextEditor) return;
+          openComposerInputKey = null;
           const contextKey = interactionContextTargetKey(context.target);
           openComposerContextKey = openComposerContextKey === contextKey
             ? null
@@ -2599,6 +2697,102 @@ export function createProductWorkspace({
       parts.push(pills);
     }
 
+    const thread = getThread();
+    const inputDraft = inputDraftController?.current(thread?.id);
+    const inputAttachments = inputDraft?.attachments || [];
+    const openInput = inputAttachments.find((attachment) => (
+      inputOccurrenceKey(attachment.occurrence) === openComposerInputKey
+    ));
+    if (!openInput) openComposerInputKey = null;
+    if (openInput) {
+      const preview = graphDocument.createElement("section");
+      preview.className = "composer-context-preview composer-input-preview";
+      preview.setAttribute("aria-live", "polite");
+      const heading = graphDocument.createElement("div");
+      heading.className = "composer-context-preview-heading";
+      const title = graphDocument.createElement("strong");
+      title.textContent = openInput.action.prompt;
+      const close = graphDocument.createElement("button");
+      close.type = "button";
+      close.className = "context-symbol-button";
+      close.textContent = "×";
+      close.title = "Close input details";
+      close.setAttribute("aria-label", `Close ${openInput.action.prompt} input details`);
+      close.onclick = () => {
+        openComposerInputKey = null;
+        renderComposerContexts();
+      };
+      heading.append(title, close);
+      const value = graphDocument.createElement("p");
+      value.textContent = summarizeInputStage(
+        openInput.action,
+        initialInputStageValue(openInput.action, openInput),
+      );
+      preview.append(heading, value);
+      parts.push(preview);
+    }
+    if (inputAttachments.length) {
+      const pills = graphDocument.createElement("div");
+      pills.className = "composer-context-pills composer-input-pills";
+      pills.setAttribute("aria-label", "Committed node inputs");
+      inputAttachments.forEach((attachment) => {
+        const occurrenceKey = inputOccurrenceKey(attachment.occurrence);
+        const stageKey = threadInputOccurrenceKey(thread.id, attachment.occurrence);
+        const wrap = graphDocument.createElement("div");
+        wrap.className = "composer-context-pill-wrap";
+        const pill = graphDocument.createElement("button");
+        pill.type = "button";
+        pill.className = "composer-context-pill composer-input-pill";
+        pill.setAttribute("aria-expanded", String(openComposerInputKey === occurrenceKey));
+        pill.setAttribute("aria-label", `Inspect ${attachment.action.prompt}`);
+        const title = graphDocument.createElement("strong");
+        title.textContent = attachment.action.prompt;
+        const summary = graphDocument.createElement("span");
+        summary.textContent = summarizeInputStage(
+          attachment.action,
+          initialInputStageValue(attachment.action, attachment),
+        );
+        pill.append(title, summary);
+        pill.onclick = () => {
+          openComposerContextKey = null;
+          openComposerInputKey = openComposerInputKey === occurrenceKey ? null : occurrenceKey;
+          renderComposerContexts();
+        };
+        const detach = graphDocument.createElement("button");
+        detach.type = "button";
+        detach.className = "composer-context-pill-remove";
+        detach.textContent = "×";
+        detach.title = "Detach input";
+        detach.setAttribute("aria-label", `Detach ${attachment.action.prompt}`);
+        detach.disabled = contextStagingDisabled() || inputPending.has(stageKey);
+        detach.onclick = async () => {
+          if (detach.disabled) return;
+          inputPending.add(stageKey);
+          renderComposerContexts();
+          try {
+            await inputDraftController.detach(thread.id, attachment.occurrence);
+            markInputCompositionChanged(thread.id);
+            inputStages.delete(stageKey);
+            inputErrors.delete(stageKey);
+            inputTouched.delete(stageKey);
+            if (openComposerInputKey === occurrenceKey) openComposerInputKey = null;
+          } catch (error) {
+            inputErrors.set(stageKey, error?.message || "Input could not be detached.");
+            toast(error?.message || "Input could not be detached.");
+          } finally {
+            inputPending.delete(stageKey);
+            renderComposerContexts();
+            if (selection.selectedNodeId != null) {
+              void selectNode(getState(), selection.selectedNodeId, { notify: false });
+            }
+          }
+        };
+        wrap.append(pill, detach);
+        pills.append(wrap);
+      });
+      parts.push(pills);
+    }
+
     tray.replaceChildren(...parts);
     tray.classList.toggle("hidden", parts.length === 0);
     renderNodeContextDock();
@@ -2608,6 +2802,9 @@ export function createProductWorkspace({
     resizeComposerTextarea(prompt);
     const contextDraftsReady = !contextDraftController
       || loadedContextDraftThreads.has(String(getThread()?.id));
+    const inputDraftsReady = !inputDraftController
+      || loadedInputDraftThreads.has(String(getThread()?.id));
+    const inputAttachments = inputDraftController?.current(getThread()?.id)?.attachments || [];
     const failedConfirmationSend = failedConfirmationSends.get(String(getThread()?.id));
     const replayIntent = confirmationSendReplayIntent({
       intent: failedConfirmationSend?.intent,
@@ -2617,18 +2814,22 @@ export function createProductWorkspace({
       contextRevision: composerContextState.revision,
       replayContextRevision: failedConfirmationSend?.contextRevision,
       modelSelection: pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection,
+      inputDraftRevision: currentInputDraftRevision(getThread()?.id),
+      inputCompositionRevision: currentInputCompositionRevision(getThread()?.id),
     });
     const replayReady = replayIntent
       && !prompt.disabled
       && (modelPicker?.isReady() ?? false)
       && !contextEditor;
     send.disabled = threadHasInFlightSend(inFlightSendThreads, getThread()?.id)
-      || !contextDraftsReady || (!replayReady && !composerSubmissionReady(
+      || inputPending.size > 0
+      || !contextDraftsReady || !inputDraftsReady || (!replayReady && !composerSubmissionReady(
       prompt.value,
       prompt.disabled,
       modelPicker?.isReady() ?? false,
       composerContextState.value,
       Boolean(contextEditor),
+      inputAttachments,
     ));
     send.title = modelPicker?.isReady()
       ? "Send"
@@ -2639,6 +2840,9 @@ export function createProductWorkspace({
     send.removeAttribute("aria-busy");
     confirmContextDraftSend.disabled = false;
     syncComposer();
+    if (selection.selectedNodeId != null) {
+      void selectNode(getState(), selection.selectedNodeId, { notify: false });
+    }
   };
   const cancelSendAttempt = () => {
     releaseInFlightSend(inFlightSendThreads, sendAttempt);
@@ -2709,6 +2913,9 @@ export function createProductWorkspace({
     const submission = intent.submission;
     prompt.disabled = true;
     send.disabled = true;
+    for (const control of $("#nodeInputActions").querySelectorAll("button, textarea")) {
+      control.disabled = true;
+    }
     renderComposerContexts();
     updateAttachContextControl();
     try {
@@ -2717,7 +2924,18 @@ export function createProductWorkspace({
         intent.modelSelection,
         intent.contextPayload,
         submittedConfirmationIds,
+        intent.inputDraftRevision,
+        currentInputDraftRevision(submittedThreadId),
       );
+      if (inputDraftController) {
+        try {
+          await ensureInputDraftLoaded(submittedThreadId, { reload: true });
+          clearInputStagesForThread(submittedThreadId);
+          openComposerInputKey = null;
+        } catch (refreshError) {
+          toast(`Sent, but committed inputs could not be refreshed: ${refreshError.message}`);
+        }
+      }
       const failedConfirmationSend = failedConfirmationSends.get(String(submittedThreadId));
       if (failedConfirmationSend?.intent === intent) {
         failedConfirmationSends = settleConfirmationSendReplay(failedConfirmationSends, {
@@ -2781,7 +2999,10 @@ export function createProductWorkspace({
         renderComposerContexts();
       }
     } catch (error) {
-      const preserveReplay = submittedConfirmationIds.length
+      if (inputDraftController) {
+        void ensureInputDraftLoaded(submittedThreadId, { reload: true }).catch(() => {});
+      }
+      const preserveReplay = (submittedConfirmationIds.length || intent.inputDraftRevision != null)
         && confirmationSendFailureMayHaveCommitted(error);
       if (submittedConfirmationIds.length && contextDraftController) {
         try {
@@ -2822,6 +3043,9 @@ export function createProductWorkspace({
         restoredDraftActive,
       );
       renderComposerContexts();
+      if (selection.selectedNodeId != null) {
+        void selectNode(getState(), selection.selectedNodeId, { notify: false });
+      }
       updateAttachContextControl();
       syncComposer();
     }
@@ -2844,6 +3068,8 @@ export function createProductWorkspace({
       contextRevision: composerContextState.revision,
       replayContextRevision: failedConfirmationSend?.contextRevision,
       modelSelection: pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection,
+      inputDraftRevision: currentInputDraftRevision(threadId),
+      inputCompositionRevision: currentInputCompositionRevision(threadId),
     });
     const intent = draftOverride
       ? sendWarningIntent
@@ -2855,12 +3081,17 @@ export function createProductWorkspace({
         contexts: composerContextState.value,
         contextRevision: composerContextState.revision,
         modelSelection: pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection,
+        inputDraftRevision: currentInputDraftRevision(threadId),
+        inputCompositionRevision: currentInputCompositionRevision(threadId),
       });
     if (!intent || !sendIntentIsCurrentThread(threadId, intent.threadId)) return;
     const attempt = { threadId: String(threadId) };
     inFlightSendThreads.set(attempt.threadId, attempt);
     sendAttempt = attempt;
     send.setAttribute("aria-busy", "true");
+    for (const control of $("#nodeInputActions").querySelectorAll("button, textarea")) {
+      control.disabled = true;
+    }
     try {
       if (!draftOverride && contextDraftController) {
         await ensureContextDraftsLoaded(threadId);
@@ -2870,6 +3101,10 @@ export function createProductWorkspace({
           openContextDraftSendWarning(drafts, intent);
           return;
         }
+      }
+      if (!draftOverride && inputDraftController) {
+        await ensureInputDraftLoaded(threadId);
+        if (!sendIntentIsCurrentThread(getThread()?.id, threadId) || sendAttempt !== attempt) return;
       }
       if (draftOverride && contextDraftController) {
         await continueDraftOverrideAfterPersistence({
@@ -3145,6 +3380,37 @@ export function createProductWorkspace({
     $("#interactionContextPopover").classList.toggle("hidden", !contextPopoverOpen);
   }
 
+  function renderHistoricalInputs(interaction) {
+    const host = $("#interactionInputHistory");
+    const inputs = interaction?.submittedInputs || [];
+    host.classList.toggle("hidden", inputs.length === 0);
+    if (!inputs.length) {
+      host.replaceChildren();
+      return;
+    }
+    const heading = graphDocument.createElement("strong");
+    heading.textContent = "Submitted inputs";
+    const list = graphDocument.createElement("div");
+    list.className = "interaction-input-history-list";
+    inputs.forEach((input) => {
+      const item = graphDocument.createElement("section");
+      item.className = "interaction-input-history-item";
+      const prompt = graphDocument.createElement("strong");
+      prompt.textContent = input.action?.prompt || "Input";
+      const value = graphDocument.createElement("span");
+      if (typeof input.value?.text === "string") {
+        value.textContent = input.value.text;
+      } else if (Array.isArray(input.value?.selected)) {
+        value.textContent = input.value.selected.map((option) => option.label).join(", ");
+      } else {
+        value.textContent = (input.value?.selectedKeys || []).join(", ");
+      }
+      item.append(prompt, value);
+      list.append(item);
+    });
+    host.replaceChildren(heading, list);
+  }
+
   function render() {
     const state = getState();
     const thread = getThread();
@@ -3156,6 +3422,7 @@ export function createProductWorkspace({
         closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });
       }
       renderedWithoutThread = true;
+      openComposerInputKey = null;
       showEmpty();
       return;
     }
@@ -3170,6 +3437,13 @@ export function createProductWorkspace({
         if (disposed) return;
         toast(`Annotation drafts could not be restored: ${error.message}`);
         scheduleContextDraftLoadRetry(thread.id);
+      });
+    }
+    if (inputDraftController && !inputDraftLoads.has(threadId)) {
+      void ensureInputDraftLoaded(thread.id).catch((error) => {
+        if (!disposed && String(getThread()?.id) === threadId) {
+          toast(`Committed inputs could not be restored: ${error.message}`);
+        }
       });
     }
     if (renderedThreadId !== null && renderedThreadId !== threadId) {
@@ -3191,6 +3465,8 @@ export function createProductWorkspace({
         type: "thread_change",
       });
       openComposerContextKey = null;
+      openComposerInputKey = null;
+      clearInputStagesForThread(renderedThreadId);
       if (contextDraftController.confirmationsForThread(thread.id).length) {
         replaceComposerContexts(composerContextsFromConfirmations(
           contextDraftController.confirmationsForThread(thread.id),
@@ -3245,8 +3521,22 @@ export function createProductWorkspace({
     $("#interactionText").title = interactionText;
     renderTurnNavigation(state, thread, interaction);
     renderHistoricalContexts(state, interaction);
+    renderHistoricalInputs(interaction);
     const turns = (state.interactions || []).filter((item) => String(item.threadId) === String(thread.id));
     const latestInteraction = turns.at(-1);
+    if (inputDraftController && latestInteraction) {
+      const statusKey = `${latestInteraction.id}:${latestInteraction.completionStatus || ""}`;
+      const priorStatusKey = renderedInputDraftStatusKeys.get(threadId);
+      renderedInputDraftStatusKeys.set(threadId, statusKey);
+      if (priorStatusKey && priorStatusKey !== statusKey
+        && !PENDING_COMPLETION_STATUSES.has(latestInteraction.completionStatus)) {
+        void ensureInputDraftLoaded(threadId, { reload: true }).catch((error) => {
+          if (!disposed && String(getThread()?.id) === threadId) {
+            toast(`Restored inputs could not be refreshed: ${error.message}`);
+          }
+        });
+      }
+    }
     const restoredDraft = restoredDraftForInteraction(latestInteraction);
     restoredDraftActive = Boolean(restoredDraft);
     const restoredConfirmationKey = confirmationRestorationKey(threadId, latestInteraction);
@@ -3830,6 +4120,235 @@ export function createProductWorkspace({
     ));
   }
 
+  function renderNodeInputActions(state, node, actions) {
+    const host = $("#nodeInputActions");
+    host.classList.toggle("hidden", actions.length === 0);
+    if (!actions.length) {
+      host.replaceChildren();
+      return;
+    }
+    const thread = getThread();
+    const interaction = currentInteraction(state, thread);
+    const layerId = currentLayerId(state, thread);
+    if (!inputDraftController || !loadedInputDraftThreads.has(String(thread?.id))) {
+      const status = graphDocument.createElement("p");
+      status.className = "node-input-status";
+      status.textContent = inputDraftController
+        ? "Loading committed inputs…"
+        : "Input editing is unavailable in this view.";
+      host.replaceChildren(status);
+      return;
+    }
+    if (interaction?.graphNodeId == null || layerId == null) {
+      const status = graphDocument.createElement("p");
+      status.className = "node-input-status";
+      status.textContent = "This input occurrence is not available in the selected history view.";
+      host.replaceChildren(status);
+      return;
+    }
+
+    const activeControl = graphDocument.activeElement;
+    const activeKey = activeControl?.closest?.("[data-input-occurrence-key]")
+      ?.dataset.inputOccurrenceKey;
+    const activeRole = activeControl?.dataset?.inputControlRole;
+    const activeOptionKey = activeControl?.dataset?.optionKey;
+    const activeTextState = activeRole === "value"
+      ? captureTextControlState(activeControl)
+      : null;
+    for (const rail of host.querySelectorAll("[data-input-rail-key]")) {
+      inputRailScroll.set(rail.dataset.inputRailKey, rail.scrollLeft);
+    }
+    const draft = inputDraftController.current(thread.id);
+    const sections = actions.map((action) => {
+      // Product state projects the accepted input payload onto the action record. Keep the
+      // nested form compatible with direct graph-shaped fixtures and older snapshots.
+      const semantic = action.input || action;
+      const occurrence = createInputOccurrence(interaction.graphNodeId, layerId, action.id);
+      const stageKey = threadInputOccurrenceKey(thread.id, occurrence);
+      const attachment = committedInputAttachment(draft, occurrence);
+      const committedValue = initialInputStageValue(semantic, attachment);
+      if (!inputStages.has(stageKey)) inputStages.set(stageKey, committedValue);
+      const fieldset = graphDocument.createElement("fieldset");
+      fieldset.className = "node-input-editor";
+      fieldset.dataset.inputOccurrenceKey = stageKey;
+      const legend = graphDocument.createElement("legend");
+      legend.textContent = semantic.prompt;
+      fieldset.append(legend);
+
+      let control;
+      if (semantic.control === "text") {
+        control = graphDocument.createElement("textarea");
+        control.className = "node-input-text";
+        control.rows = 3;
+        control.value = inputStages.get(stageKey);
+        control.setAttribute("aria-label", semantic.prompt);
+        control.dataset.inputControlRole = "value";
+        fieldset.append(control);
+      } else {
+        control = graphDocument.createElement("div");
+        control.className = "node-input-option-rail";
+        control.dataset.inputRailKey = stageKey;
+        control.dataset.inputControlRole = "rail";
+        control.setAttribute("aria-label", semantic.prompt);
+        control.setAttribute("role", semantic.control === "single_select" ? "radiogroup" : "group");
+        for (const option of semantic.options || []) {
+          const selected = inputStages.get(stageKey).includes(String(option.key));
+          const button = graphDocument.createElement("button");
+          button.type = "button";
+          button.className = "node-input-option";
+          button.classList.toggle("selected", selected);
+          button.dataset.optionKey = String(option.key);
+          button.dataset.inputControlRole = "option";
+          button.setAttribute("role", semantic.control === "single_select" ? "radio" : "checkbox");
+          button.setAttribute("aria-checked", String(selected));
+          const visual = graphDocument.createElement("span");
+          visual.className = "node-input-option-visual";
+          visual.setAttribute("aria-hidden", "true");
+          visual.textContent = String(option.label || option.key).slice(0, 1).toUpperCase();
+          const label = graphDocument.createElement("span");
+          label.className = "node-input-option-label";
+          label.textContent = option.label;
+          button.append(visual, label);
+          button.onclick = () => {
+            if (button.disabled) return;
+            const key = String(option.key);
+            const current = inputStages.get(stageKey);
+            inputStages.set(stageKey, semantic.control === "single_select"
+              ? [key]
+              : current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
+            inputErrors.delete(stageKey);
+            inputTouched.add(stageKey);
+            renderNodeInputActions(state, node, actions);
+          };
+          button.onkeydown = (event) => {
+            if (!new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"])
+              .has(event.key)) return;
+            event.preventDefault();
+            const options = [...control.querySelectorAll("button")];
+            const index = options.indexOf(button);
+            const nextIndex = event.key === "Home" ? 0
+              : event.key === "End" ? options.length - 1
+                : (index + (["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 1)
+                  + options.length) % options.length;
+            const next = options[nextIndex];
+            if (semantic.control === "single_select") {
+              inputFocusRequest = { stageKey, optionKey: next?.dataset.optionKey };
+              next?.click();
+            }
+            else next?.focus({ preventScroll: true });
+            next?.scrollIntoView({ block: "nearest", inline: "nearest" });
+          };
+          control.append(button);
+        }
+        fieldset.append(control);
+      }
+
+      const footer = graphDocument.createElement("div");
+      footer.className = "node-input-editor-footer";
+      const error = graphDocument.createElement("p");
+      error.className = "node-input-error";
+      error.setAttribute("aria-live", "polite");
+      const actionsHost = graphDocument.createElement("div");
+      actionsHost.className = "node-input-symbols";
+      const undo = graphDocument.createElement("button");
+      undo.type = "button";
+      undo.className = "node-input-symbol node-input-undo";
+      undo.textContent = "↶";
+      undo.title = `Undo ${semantic.prompt}`;
+      undo.setAttribute("aria-label", `Undo ${semantic.prompt}`);
+      undo.dataset.inputControlRole = "undo";
+      const commit = graphDocument.createElement("button");
+      commit.type = "button";
+      commit.className = "node-input-symbol node-input-commit";
+      commit.textContent = "✓";
+      commit.title = `Commit ${semantic.prompt}`;
+      commit.setAttribute("aria-label", `Commit ${semantic.prompt}`);
+      commit.dataset.inputControlRole = "commit";
+      const sync = () => {
+        const staged = inputStages.get(stageKey);
+        const issue = validateInputStage(semantic, staged);
+        const persistedError = inputErrors.get(stageKey);
+        error.textContent = persistedError || (inputTouched.has(stageKey) ? issue?.message : "") || "";
+        const pending = inputPending.has(stageKey);
+        const locked = contextStagingDisabled() || pending;
+        control.disabled = locked;
+        for (const option of control.querySelectorAll?.("button") || []) option.disabled = locked;
+        undo.disabled = locked || inputStageValuesEqual(semantic, staged, committedValue);
+        commit.disabled = locked || Boolean(issue)
+          || (attachment && inputStageValuesEqual(semantic, staged, committedValue));
+        commit.classList.toggle("node-input-committed", Boolean(attachment)
+          && inputStageValuesEqual(semantic, staged, committedValue));
+        fieldset.setAttribute("aria-busy", String(pending));
+      };
+      if (semantic.control === "text") {
+        control.oninput = () => {
+          inputStages.set(stageKey, control.value);
+          inputErrors.delete(stageKey);
+          inputTouched.add(stageKey);
+          sync();
+          syncComposer();
+        };
+      }
+      undo.onclick = () => {
+        inputStages.set(stageKey, committedValue);
+        inputErrors.delete(stageKey);
+        inputTouched.delete(stageKey);
+        renderNodeInputActions(state, node, actions);
+      };
+      commit.onclick = async () => {
+        if (commit.disabled) return;
+        inputPending.add(stageKey);
+        inputErrors.delete(stageKey);
+        renderNodeInputActions(state, node, actions);
+        try {
+          const next = await inputDraftController.commit(
+            thread.id,
+            occurrence,
+            semantic,
+            inputStages.get(stageKey),
+          );
+          const nextAttachment = committedInputAttachment(next, occurrence);
+          inputStages.set(stageKey, initialInputStageValue(semantic, nextAttachment));
+          markInputCompositionChanged(thread.id);
+        } catch (commitError) {
+          inputErrors.set(stageKey, commitError?.message || "Input could not be committed.");
+        } finally {
+          inputPending.delete(stageKey);
+          renderNodeInputActions(getState(), node, actions);
+          renderComposerContexts();
+        }
+      };
+      actionsHost.append(undo, commit);
+      footer.append(error, actionsHost);
+      fieldset.append(footer);
+      sync();
+      return fieldset;
+    });
+    host.replaceChildren(...sections);
+    for (const rail of host.querySelectorAll("[data-input-rail-key]")) {
+      rail.scrollLeft = inputRailScroll.get(rail.dataset.inputRailKey) || 0;
+    }
+    if (activeKey && activeRole) {
+      const editor = [...host.querySelectorAll("[data-input-occurrence-key]")]
+        .find((item) => item.dataset.inputOccurrenceKey === activeKey);
+      const restored = activeRole === "option"
+        ? [...editor?.querySelectorAll("[data-option-key]") || []]
+          .find((item) => item.dataset.optionKey === activeOptionKey)
+        : editor?.querySelector(`[data-input-control-role="${activeRole}"]`);
+      restored?.focus({ preventScroll: true });
+      restoreTextControlState(restored, activeTextState);
+    }
+    if (inputFocusRequest) {
+      const requested = inputFocusRequest;
+      inputFocusRequest = null;
+      const editor = [...host.querySelectorAll("[data-input-occurrence-key]")]
+        .find((item) => item.dataset.inputOccurrenceKey === requested.stageKey);
+      [...editor?.querySelectorAll("[data-option-key]") || []]
+        .find((item) => item.dataset.optionKey === requested.optionKey)
+        ?.focus({ preventScroll: true });
+    }
+  }
+
   async function selectNode(state, id, {
     notify = true,
     userInitiated = notify,
@@ -3885,6 +4404,9 @@ export function createProductWorkspace({
     }
     if (requestSequence !== nodeSelectionSequence
       || String(getThread()?.id) !== sourceThreadId) return false;
+    if (selection.selectedNodeId != null && String(selection.selectedNodeId) !== String(id)) {
+      clearInputStagesForThread(getThread()?.id);
+    }
     selection.selectedNodeId = id;
     selectedContextTarget = nextSelectedContextTarget;
     if (!contextEditor && contextDraftController) {
@@ -3926,8 +4448,11 @@ export function createProductWorkspace({
     $("#detailTitle").textContent = node.title;
     renderMarkdown($("#detailContent"), node.detail || node.summary || node.content || "No details supplied.");
     const actions = (state.actions || []).filter((action) => String(action.sourceNodeId) === String(node.id));
-    $("#detailActions").classList.toggle("hidden", !actions.length);
-    $("#detailActions").replaceChildren(...actions.map((action) => {
+    const inputActions = actions.filter((action) => action.kind === "input" && action.control);
+    const ordinaryActions = actions.filter((action) => action.kind !== "input");
+    renderNodeInputActions(state, node, inputActions);
+    $("#detailActions").classList.toggle("hidden", !ordinaryActions.length);
+    $("#detailActions").replaceChildren(...ordinaryActions.map((action) => {
       const presentation = actionPresentation(action);
       const button = graphDocument.createElement("button");
       button.type = "button";
@@ -3984,7 +4509,7 @@ export function createProductWorkspace({
       return wrapper;
     }));
     [...$("#detailActions").querySelectorAll(".action-control")].forEach((button, index) => {
-      const action = actions[index];
+      const action = ordinaryActions[index];
       const invoked = actionWasInvoked(
         state.actionInvocations,
         state.pendingActionInvocations,

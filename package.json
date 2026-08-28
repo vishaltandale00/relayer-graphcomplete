@@ -41,6 +41,7 @@
     "test:desktop:first-message": "npm run build && electron scripts/test-desktop-first-message.mjs",
     "test:desktop:context-draft-warning": "npm run build && node scripts/run-context-draft-warning-test.mjs",
     "test:desktop:interaction-context": "npm run build && node scripts/run-interaction-context-lifecycle-test.mjs",
+    "test:desktop:node-input-actions": "npm run build && node scripts/run-node-input-actions-test.mjs",
     "evidence:model-selector": "RELAYER_CAPTURE_MODEL_SELECTOR_EVIDENCE=1 electron scripts/capture-model-selector-evidence.mjs",
     "evidence:provider-ux": "node scripts/capture-provider-ux-video.mjs",
     "evidence:prime-family:packaged": "node scripts/capture-packaged-prime-family-evidence.mjs",

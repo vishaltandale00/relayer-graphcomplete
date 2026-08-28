@@ -22,6 +22,7 @@ export function productWorkspaceMarkup() {
           <span class="interaction-icon">›_</span>
           <div class="interaction-copy">
             <p id="interactionText"></p>
+            <div class="interaction-input-history hidden" id="interactionInputHistory" aria-label="Submitted node inputs"></div>
           </div>
           <div class="turn-picker" id="turnPicker">
             <button class="interaction-context-pill hidden" id="interactionContextPill" type="button" title="Show connected nodes" aria-label="Show connected nodes" aria-expanded="false" aria-controls="interactionContextPopover"><span aria-hidden="true">⌘</span><b id="interactionContextCount">0</b></button>
@@ -95,7 +96,7 @@ export function productWorkspaceMarkup() {
           </div>
         </section>
         <div class="thread-composer-shell" id="threadComposerShell">
-          <section class="composer-context-tray hidden" id="composerContextTray" aria-label="Connected node draft"></section>
+          <section class="composer-context-tray hidden" id="composerContextTray" aria-label="Composer attachments"></section>
           <div class="thread-composer" id="threadComposer"><p class="composer-retry-message hidden" id="composerRetryMessage" role="alert"></p><p class="read-only-composer-message hidden" id="readOnlyComposerMessage">Read-only evaluation result</p><textarea id="threadPrompt" rows="1" placeholder="Follow up…"></textarea><div class="thread-composer-actions">${modelPickerMarkup({ mode: "ongoing" })}<button class="send-button" id="sendInteraction" title="Send" disabled>↑</button></div></div>
           <dialog class="context-draft-send-warning" id="contextDraftSendWarning" role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="contextDraftSendWarningTitle" aria-describedby="contextDraftSendWarningCopy contextDraftSendWarningCount">
             <div class="context-draft-send-warning-kicker"><span aria-hidden="true">!</span> Drafts will be omitted</div>
@@ -115,6 +116,7 @@ export function productWorkspaceMarkup() {
         <div class="inspector-content" id="inspectorContent">
           <div class="node-heading"><div class="node-icon" id="detailIcon">N</div><div><small id="detailKind">CONCEPT</small><h2 id="detailTitle"></h2></div></div>
           <div class="node-content" id="detailContent"></div>
+          <div class="node-input-actions hidden" id="nodeInputActions"></div>
           <div class="inline-actions hidden" id="detailActions"></div>
         </div>
         <section class="node-context-dock hidden" id="nodeContextDock" aria-label="Node context annotation editor"></section>

@@ -506,6 +506,7 @@ describe("product workspace keyboard behavior", () => {
       }],
       contextRevision: 8,
       modelSelection: { providerId: "fixture", modelId: "deterministic" },
+      inputDraftRevision: 3,
     });
 
     expect(confirmationSendReplayIntent({
@@ -516,6 +517,7 @@ describe("product workspace keyboard behavior", () => {
       contextRevision: 9,
       replayContextRevision: 9,
       modelSelection: intent.modelSelection,
+      inputDraftRevision: 3,
     })).toBe(intent);
     expect(confirmationSendReplayIntent({
       intent,
@@ -525,6 +527,7 @@ describe("product workspace keyboard behavior", () => {
       contextRevision: 9,
       replayContextRevision: 9,
       modelSelection: intent.modelSelection,
+      inputDraftRevision: 3,
     })).toBeNull();
     expect(confirmationSendReplayIntent({
       intent,
@@ -534,6 +537,7 @@ describe("product workspace keyboard behavior", () => {
       contextRevision: 9,
       replayContextRevision: 9,
       modelSelection: intent.modelSelection,
+      inputDraftRevision: 3,
     })).toBeNull();
     expect(confirmationSendReplayIntent({
       intent,
@@ -543,6 +547,7 @@ describe("product workspace keyboard behavior", () => {
       contextRevision: 10,
       replayContextRevision: 9,
       modelSelection: intent.modelSelection,
+      inputDraftRevision: 3,
     })).toBeNull();
     expect(confirmationSendReplayIntent({
       intent,
@@ -552,10 +557,52 @@ describe("product workspace keyboard behavior", () => {
       contextRevision: 9,
       replayContextRevision: 9,
       modelSelection: { providerId: "fixture", modelId: "other" },
+      inputDraftRevision: 3,
+    })).toBeNull();
+    expect(confirmationSendReplayIntent({
+      intent,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptRevision: 4,
+      contextRevision: 9,
+      replayContextRevision: 9,
+      modelSelection: intent.modelSelection,
+      inputDraftRevision: 4,
+      inputCompositionRevision: 1,
     })).toBeNull();
     expect(confirmationSendFailureMayHaveCommitted(new Error("network lost"))).toBe(true);
     expect(confirmationSendFailureMayHaveCommitted({ status: 503 })).toBe(true);
     expect(confirmationSendFailureMayHaveCommitted({ status: 409 })).toBe(false);
+  });
+
+  it("replays an ambiguous input-bearing send until the user changes the input composition", () => {
+    const intent = interactionSendIntent({
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptValue: "",
+      promptRevision: 2,
+      contexts: [],
+      contextRevision: 0,
+      modelSelection: { providerId: "fixture", modelId: "deterministic" },
+      inputDraftRevision: 7,
+      inputCompositionRevision: 3,
+    });
+    const current = {
+      intent,
+      threadId: "thread-a",
+      draftScopeKey: "thread-a:turn-a",
+      promptRevision: 2,
+      contextRevision: 0,
+      replayContextRevision: 0,
+      modelSelection: intent.modelSelection,
+      inputDraftRevision: null,
+      inputCompositionRevision: 3,
+    };
+    expect(confirmationSendReplayIntent(current)).toBe(intent);
+    expect(confirmationSendReplayIntent({
+      ...current,
+      inputCompositionRevision: 4,
+    })).toBeNull();
   });
 
   it("settles overlapping confirmation replays without cross-thread clobbering", () => {
@@ -946,13 +993,19 @@ describe("product workspace keyboard behavior", () => {
 
   it("keeps context controls symbol-first and accessible", () => {
     const markup = productWorkspaceMarkup();
-    expect(markup).toContain('id="composerContextTray" aria-label="Connected node draft"');
+    expect(markup).toContain('id="composerContextTray" aria-label="Composer attachments"');
     expect(markup).toContain('id="attachNodeContext"');
     expect(markup).toContain('aria-label="Connect node to next message">+</button>');
     expect(markup).toContain('id="interactionContextPill"');
     expect(markup.indexOf('id="interactionContextPill"')).toBeLessThan(
       markup.indexOf('id="turnPickerButton"'),
     );
+  });
+
+  it("allows a committed node input to submit without prompt text", () => {
+    expect(composerSubmissionReady("", false, true, [], false, [{ id: "input" }])).toBe(true);
+    expect(composerSubmissionReady("", false, true, [], false, [])).toBe(false);
+    expect(composerSubmissionReady("", true, true, [], false, [{ id: "input" }])).toBe(false);
   });
 
   it("keeps context editing enabled only for an available composer", () => {

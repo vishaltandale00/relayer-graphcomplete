@@ -49,6 +49,7 @@ pub(super) struct CreateInteractionRequest {
     contexts: Vec<InteractionContextIntent>,
     #[serde(default)]
     context_confirmation_ids: Vec<String>,
+    input_draft_revision: Option<i64>,
     model_selection: Option<ModelSelectionRequest>,
 }
 
@@ -62,6 +63,7 @@ pub(super) struct RetryInteractionRequest {
     contexts: Vec<InteractionContextIntent>,
     #[serde(default)]
     context_confirmation_ids: Vec<String>,
+    input_draft_revision: Option<i64>,
     model_selection: ModelSelectionRequest,
 }
 
@@ -522,6 +524,7 @@ pub(super) async fn create_interaction(
                     input_identity: &input_id,
                     contexts: &request.contexts,
                     context_confirmation_ids: &request.context_confirmation_ids,
+                    input_draft_revision: request.input_draft_revision,
                     model_selection: model_selection.as_ref(),
                     allow_unselected_model,
                 },
@@ -535,6 +538,11 @@ pub(super) async fn create_interaction(
             Err(
                 error @ crate::product::ProductError::Storage(
                     crate::storage::StorageError::ContextDraftConflict { .. },
+                ),
+            ) => return Err(error.into()),
+            Err(
+                error @ crate::product::ProductError::Storage(
+                    crate::storage::StorageError::ActionInputDraftConflict { .. },
                 ),
             ) => return Err(error.into()),
             Err(error) if !request.contexts.is_empty() => {
@@ -626,6 +634,7 @@ pub(super) async fn retry_interaction(
                 input_identity: &request.input_id,
                 contexts: &request.contexts,
                 context_confirmation_ids: &request.context_confirmation_ids,
+                input_draft_revision: request.input_draft_revision,
                 model_selection: &model_selection,
                 harness_configuration_name: &thread.harness_configuration_name,
             },

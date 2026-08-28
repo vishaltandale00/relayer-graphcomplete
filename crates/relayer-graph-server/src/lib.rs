@@ -1304,6 +1304,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();

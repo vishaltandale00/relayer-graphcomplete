@@ -186,6 +186,34 @@ describe("composer provider lifecycle", () => {
     });
   });
 
+  it("carries the inspected input draft revision through create and retry requests", () => {
+    const selection = { familyId: 12, providerId: "openai-work", modelId: "gpt-5.2" };
+    expect(interactionSubmissionTarget(
+      7,
+      null,
+      "Use inputs",
+      selection,
+      "input-1",
+      [],
+      [],
+      9,
+    ).body).toMatchObject({ inputDraftRevision: 9 });
+    expect(interactionSubmissionTarget(
+      7,
+      {
+        id: 91,
+        completionStatus: "not_started",
+        latestAttempt: { id: 44, outcome: "model_failed", failureCategory: "transport" },
+      },
+      "Use inputs",
+      selection,
+      "input-1",
+      [],
+      [],
+      9,
+    ).body).toMatchObject({ inputId: "input-1", inputDraftRevision: 9 });
+  });
+
   it("applies adapter exact/regex allow rules with deny precedence", () => {
     const ruled = structuredClone(settings);
     ruled.providers[0].adapterId = "anthropic-api";

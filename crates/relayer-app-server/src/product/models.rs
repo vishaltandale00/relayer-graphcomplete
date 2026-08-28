@@ -159,8 +159,36 @@ pub(crate) struct NodeContextDraftConfirmation {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", untagged)]
 pub(crate) enum ActionInputValue {
-    Text { text: String },
-    Selected { selected_keys: Vec<String> },
+    Text {
+        text: String,
+    },
+    Selected {
+        #[serde(rename = "selectedKeys")]
+        selected_keys: Vec<String>,
+    },
+}
+
+#[cfg(test)]
+mod action_input_value_tests {
+    use super::ActionInputValue;
+
+    #[test]
+    fn selected_input_value_uses_the_camel_case_api_contract() {
+        let value: ActionInputValue = serde_json::from_value(serde_json::json!({
+            "selectedKeys": ["logs", "traces"]
+        }))
+        .expect("camelCase selection payload should deserialize");
+        assert_eq!(
+            value,
+            ActionInputValue::Selected {
+                selected_keys: vec!["logs".into(), "traces".into()]
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(value).expect("selection payload should serialize"),
+            serde_json::json!({ "selectedKeys": ["logs", "traces"] })
+        );
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

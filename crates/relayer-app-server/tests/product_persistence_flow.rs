@@ -809,6 +809,7 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
         "actionId": 301
     });
     let committed = app
+        .clone()
         .oneshot(api_request(
             "PUT",
             &format!("/api/threads/{thread_id}/input-draft/attachments"),
@@ -829,6 +830,39 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
             "destinationThreadId": thread_id,
             "occurrence": occurrence
         })
+    );
+    let replaced = app
+        .clone()
+        .oneshot(api_request(
+            "PUT",
+            &format!("/api/threads/{thread_id}/input-draft/attachments"),
+            Some(json!({
+                "occurrence": occurrence,
+                "value": {"text": "Use the newer constraint"},
+                "expectedRevision": 1
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(replaced.status(), StatusCode::OK);
+    let stale_send = app
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions"),
+            Some(json!({
+                "text": "Send the inspected input",
+                "inputId": "stale-input-draft-send",
+                "inputDraftRevision": 1
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stale_send.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(stale_send).await["code"],
+        "input_draft_revision_conflict"
     );
 
     graph_task.abort();
@@ -5299,7 +5333,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .fetch_one(&migration_pool)
             .await
             .unwrap();
-    assert_eq!(applied_migrations, 24);
+    assert_eq!(applied_migrations, 25);
     migration_pool.close().await;
 
     let incompatible_database = root.join("incompatible.sqlite3");
@@ -5382,7 +5416,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
             .unwrap();
     }
     sqlx::raw_sql(include_str!(
-        "../src/storage/sqlite/migrations/0024_submitted_input_attempts.sql"
+        "../src/storage/sqlite/migrations/0025_submitted_input_attempts.sql"
     ))
     .execute(&partial_index_pool)
     .await

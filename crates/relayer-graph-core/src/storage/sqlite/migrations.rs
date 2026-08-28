@@ -100,6 +100,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(root.id),
                 interaction_text: None,
+                input: None,
             })
             .await
             .unwrap();
@@ -523,7 +524,8 @@ mod tests {
             include_str!("migrations/0007_active_root_action_guard.sql"),
             include_str!("migrations/0008_interaction_context_actions.sql"),
             include_str!("migrations/0009_interaction_input_identity.sql"),
-            include_str!("migrations/0010_input_actions.sql"),
+            include_str!("migrations/0010_personal_presentation_attachments.sql"),
+            include_str!("migrations/0011_input_actions.sql"),
         ] {
             sqlx::raw_sql(migration)
                 .execute(&mut connection)
@@ -538,7 +540,7 @@ mod tests {
         .unwrap();
 
         sqlx::raw_sql(include_str!(
-            "migrations/0011_interaction_input_children.sql"
+            "migrations/0012_interaction_input_children.sql"
         ))
         .execute(&mut connection)
         .await

@@ -28,12 +28,17 @@ export function interactionSubmissionTarget(
   inputId,
   contexts = [],
   contextConfirmationIds = [],
+  inputDraftRevision = null,
 ) {
   const restoredDraft = restoredDraftForInteraction(latestInteraction);
   if (!restoredDraft) {
     return {
       path: `/api/threads/${encodeURIComponent(threadId)}/interactions`,
-      body: { text, modelSelection },
+      body: {
+        text,
+        modelSelection,
+        ...(inputDraftRevision == null ? {} : { inputDraftRevision }),
+      },
     };
   }
   return {
@@ -45,6 +50,7 @@ export function interactionSubmissionTarget(
       contexts,
       contextConfirmationIds,
       modelSelection,
+      ...(inputDraftRevision == null ? {} : { inputDraftRevision }),
     },
   };
 }
