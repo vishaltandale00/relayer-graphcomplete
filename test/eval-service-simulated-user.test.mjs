@@ -10,7 +10,10 @@ import {
   OFETCH_RETRY_METHODS_CASE_ID,
   SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
   TRUE_MYTH_INSPECT_BOTH_CASE_ID,
+  TOURNAMENT_OPERATIONS_CASE_ID,
+  TOURNAMENT_VERIFIER_GATE_CHECKS,
   calibrationAutonomousCaseIds,
+  materializeTournamentOperationsFixture,
 } from "@relayer/eval-runner";
 
 import {
@@ -18,6 +21,7 @@ import {
   judgeArtifactEvidenceForExecution,
   judgeArtifactForExecution,
   presentationGradeFromTurns,
+  projectCaseKind,
   resolveH3PermissionProfile,
 } from "../desktop/eval-main/eval-service.mjs";
 
@@ -32,6 +36,52 @@ afterEach(async () => {
 });
 
 describe("EvalService simulated-user result persistence", () => {
+  it("routes the Tournament Operations case through its dedicated materializer and grader kind", () => {
+    expect(projectCaseKind(TOURNAMENT_OPERATIONS_CASE_ID)).toBe("tournament");
+    expect(projectCaseKind(OFETCH_RETRY_METHODS_CASE_ID)).toBe("frontier");
+  });
+
+  it("executes the Tournament Operations materializer and grader and persists every mandatory receipt", async () => {
+    const { stateFile, configurationPath } = await testPaths();
+    const interaction = {
+      id: "interaction-tournament",
+      sequence: 1,
+      graphNodeId: 1,
+      completionStatus: "accepted",
+      completionOutput: acceptedOutput(),
+      completionError: null,
+      text: "Build tournament operations.",
+      permissionProfileId: "auto",
+      effectiveExecutionDigest: "sha256:" + "a".repeat(64),
+      effectivePermissionReceipt: { permissionProfileId: "auto" },
+    };
+    globalThis.fetch = vi.fn(async (url, options = {}) => {
+      const path = new URL(url).pathname;
+      if (path === "/api/projects" && options.method === "POST") return jsonResponse({ id: "project-tournament" });
+      if (path === "/api/threads" && options.method === "POST") return jsonResponse({ id: "thread-tournament", rootInteractionId: interaction.id });
+      if (path === "/api/threads/thread-tournament") return jsonResponse({ id: "thread-tournament", interactions: [interaction] });
+      return jsonResponse({ error: `Unexpected tournament request: ${options.method || "GET"} ${path}` }, 404);
+    });
+    const materializer = vi.fn((options) => materializeTournamentOperationsFixture(options));
+    const grader = vi.fn(async () => [...new Set(Object.values(TOURNAMENT_VERIFIER_GATE_CHECKS).flat())].map((name) => ({ name: `workspace:${name}`, passed: true, detail: `${name} passed.` })));
+    const service = await new EvalService({
+      stateFile,
+      productSession: productSession(),
+      configurationPaths: [configurationPath],
+      tournamentFixtureMaterializer: materializer,
+      tournamentWorkspaceGrader: grader,
+      acceptedTopologyBuilder: async () => ({ layers: [] }),
+      acceptedTopologyGrader: () => [],
+      platform: "darwin",
+    }).open();
+    const created = await service.createRun({ testCaseIds: [TOURNAMENT_OPERATIONS_CASE_ID], harnessConfigurationNames: ["fixture-task-system"], judgeConfigurationName: "deterministic-graph-contract" });
+    const completed = await waitForCompletedRun(service, created.id);
+    expect(materializer).toHaveBeenCalledOnce();
+    expect(grader).toHaveBeenCalledOnce();
+    expect(completed.executions[0].outcomeGrade.mandatoryGates).toHaveLength(4);
+    expect(completed.executions[0].outcomeGrade.mandatoryGates.every(({ status, passed }) => status === "completed" && passed === true)).toBe(true);
+  });
+
   it("normalizes each selected recursive review by its own schema in a mixed-history projection", () => {
     const legacy = {
       status: "completed",
@@ -176,6 +226,7 @@ describe("EvalService simulated-user result persistence", () => {
       SQL_FORMATTER_ANSI_ALIAS_CASE_ID,
       HTTPX_PROXY_AUTH_REPORT_CASE_ID,
       ...calibrationAutonomousCaseIds,
+      TOURNAMENT_OPERATIONS_CASE_ID,
     ]);
     const created = await service.createRun(simulatedUserSelection());
     const completed = await waitForCompletedRun(service, created.id);

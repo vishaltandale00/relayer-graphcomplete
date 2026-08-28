@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "verifierId": "tournament-operations-v2",
+  "logicalContentDigest": "sha256:99726ebc46af392fa7ce6d026cb28e0d7de735d71c27a003c9630cbd02c9be2a",
+  "behavioralVerifierSourceDigest": "sha256:4eec11682338ceb95d8067d24a43e5743cdf024607a225ffd174bbc907111e01",
+  "serviceIntegrationSourceDigest": "sha256:a9e9323e744d616c28615db28d30fd3623c2eaccab83cc2a276eceab654d2cf5",
+  "operatorInterfaceVerifierDigest": "sha256:0b237f2b74ee0041271ff183fe0adb8c080f59b4d7a6259ca964bf1929f8b2aa",
+  "gateChecks": {
+    "tournament-core": [
+      "snapshot-schema",
+      "registration-uniqueness",
+      "configuration-matrix",
+      "seeding-determinism",
+      "pool-round-robin",
+      "results-validation",
+      "results-integer-boundary",
+      "standings-points",
+      "tiebreak-head-to-head",
+      "tiebreak-differential-seed",
+      "advancement-pool-qualifiers",
+      "bracket-progression"
+    ],
+    "schedule-operations": [
+      "schedule-venue-boundaries",
+      "schedule-collision-free",
+      "schedule-infeasible",
+      "elimination-schedule",
+      "withdrawal-cancellation",
+      "withdrawal-eligibility",
+      "reschedule-collision",
+      "reschedule-window",
+      "reschedule-terminal",
+      "reschedule-valid-free-slot",
+      "json-compatible-snapshots"
+    ],
+    "operator-interface": [
+      "operator-interface"
+    ],
+    "tournament-scoped-commit": [
+      "visible-contract",
+      "required-deliverables",
+      "delivery-commit",
+      "delivery-clean"
+    ]
+  }
+}

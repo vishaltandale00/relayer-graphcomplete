@@ -33,6 +33,11 @@ import {
   calibrationAutonomousCaseIds,
   materializeCalibrationFixture,
   gradeCalibrationWorkspace,
+  tournamentOperationsCase,
+  tournamentOperationsCaseIds,
+  materializeTournamentOperationsFixture,
+  gradeTournamentOperationsWorkspace,
+  TOURNAMENT_VERIFIER_GATE_CHECKS,
   materializeFrontierProjectFixture,
   materializeH3ProjectFixture,
   projectDeterministicChecksToOutcome,
@@ -82,6 +87,11 @@ export const evalCases = Object.freeze([
     caseSnapshot: entry.catalogSnapshot,
     caseSnapshotDigest: entry.snapshotDigest,
   })),
+  Object.freeze({
+    ...tournamentOperationsCase.definition,
+    caseSnapshot: tournamentOperationsCase.catalogSnapshot,
+    caseSnapshotDigest: tournamentOperationsCase.snapshotDigest,
+  }),
 ]);
 
 const h3CaseIds = new Set([
@@ -89,7 +99,15 @@ const h3CaseIds = new Set([
   H3_AUTONOMOUS_FIX_CASE_ID,
   H3_AUTONOMOUS_INVESTIGATION_CASE_ID,
 ]);
-const projectCaseIds = new Set([...h3CaseIds, ...frontierAutonomousCaseIds, ...calibrationAutonomousCaseIds]);
+const projectCaseIds = new Set([...h3CaseIds, ...frontierAutonomousCaseIds, ...calibrationAutonomousCaseIds, ...tournamentOperationsCaseIds]);
+
+export function projectCaseKind(caseId) {
+  if (h3CaseIds.has(caseId)) return "h3";
+  if (tournamentOperationsCaseIds.has(caseId)) return "tournament";
+  if (calibrationAutonomousCaseIds.has(caseId)) return "calibration";
+  if (frontierAutonomousCaseIds.has(caseId)) return "frontier";
+  return null;
+}
 
 export const evalJudges = Object.freeze([
   Object.freeze({ id: "deterministic-graph-contract", name: "Deterministic graph contract" }),
@@ -146,6 +164,7 @@ function mandatoryGateReceipt(gate, checks) {
     "independent-reproduction": ["diagnosis-reproduces-seeded-failure"],
     "hidden-behavior": ["validation-build", "hidden-behavior"],
     "scoped-delivery": ["required-delivery-files", "delivery-commit", "delivery-clean"],
+    ...TOURNAMENT_VERIFIER_GATE_CHECKS,
   }[gate.id];
   const matched = Array.isArray(patterns)
     ? checks.filter((check) => patterns.some((pattern) => check.name.includes(pattern)))
@@ -492,6 +511,8 @@ export class EvalService {
     frontierWorkspaceGrader = gradeFrontierProjectWorkspace,
     calibrationFixtureMaterializer = materializeCalibrationFixture,
     calibrationWorkspaceGrader = gradeCalibrationWorkspace,
+    tournamentFixtureMaterializer = materializeTournamentOperationsFixture,
+    tournamentWorkspaceGrader = gradeTournamentOperationsWorkspace,
     acceptedTopologyBuilder = buildAcceptedReviewTopology,
     acceptedTopologyGrader = gradeAcceptedReviewTopology,
     candidateTraceExporter = null,
@@ -512,6 +533,8 @@ export class EvalService {
     this.frontierWorkspaceGrader = frontierWorkspaceGrader;
     this.calibrationFixtureMaterializer = calibrationFixtureMaterializer;
     this.calibrationWorkspaceGrader = calibrationWorkspaceGrader;
+    this.tournamentFixtureMaterializer = tournamentFixtureMaterializer;
+    this.tournamentWorkspaceGrader = tournamentWorkspaceGrader;
     this.acceptedTopologyBuilder = acceptedTopologyBuilder;
     this.acceptedTopologyGrader = acceptedTopologyGrader;
     this.candidateTraceExporter = candidateTraceExporter;
@@ -1440,15 +1463,21 @@ export class EvalService {
       encodeURIComponent(execution.id),
     );
     const workspaceDirectory = join(executionDirectory, "workspace");
-    const isH3 = h3CaseIds.has(definition.id);
-    const isCalibration = calibrationAutonomousCaseIds.has(definition.id);
+    const caseKind = projectCaseKind(definition.id);
+    const isH3 = caseKind === "h3";
+    const isCalibration = caseKind === "calibration";
+    const isTournament = caseKind === "tournament";
     const fixture = isH3
       ? await this.projectFixtureMaterializer({
         cacheDirectory: join(dirname(this.stateFile), "fixtures", `h3-${H3_UPSTREAM_COMMIT}`),
         workspaceDirectory,
         platform: this.platform,
       })
-      : isCalibration ? await this.calibrationFixtureMaterializer({
+      : isTournament ? await this.tournamentFixtureMaterializer({
+        caseId: definition.id,
+        workspaceDirectory,
+        platform: this.platform,
+      }) : isCalibration ? await this.calibrationFixtureMaterializer({
         caseId: definition.id,
         workspaceDirectory,
         platform: this.platform,
@@ -1492,7 +1521,9 @@ export class EvalService {
           if (threadDefinition.mutationPolicy === "read-only" || promptIndex === threadDefinition.prompts.length - 1) {
             workspaceChecks.set(String(interactionId), isH3
               ? await this.workspaceGrader({ workspaceDirectory, grade: threadDefinition.workspaceGrade })
-              : isCalibration
+              : isTournament
+                ? await this.tournamentWorkspaceGrader({ caseId: definition.id, workspaceDirectory, baseRevision: fixture.seededCommit })
+                : isCalibration
                 ? await this.calibrationWorkspaceGrader({ caseId: definition.id, workspaceDirectory, baseRevision: fixture.seededCommit })
                 : await this.frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory }));
           }
