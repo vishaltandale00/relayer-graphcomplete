@@ -73,6 +73,7 @@ describe("workspace action presentation grammar", () => {
     })).toMatchObject({ resolvedInvoke: true, navigational: true, disabled: false });
     expect(actionReviewKind(unresolved)).toBe("invoke-action");
     expect(actionReviewKind(resolved)).toBe("navigate-action");
+    expect(actionReviewKind({ kind: "input" })).toBe("input-action");
   });
 
   it("collapses previews before resolved-invoke turn navigation but preserves them for layer navigation", async () => {

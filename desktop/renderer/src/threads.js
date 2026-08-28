@@ -730,6 +730,8 @@ export async function submitInteraction(
   modelSelection,
   contexts = [],
   contextConfirmationIds = [],
+  inputIdentityRevision = null,
+  inputDraftRevision = null,
 ) {
   if (!viewState.currentThreadId) throw new Error("Select a thread before sending a follow-up.");
   const threadId = viewState.currentThreadId;
@@ -750,6 +752,7 @@ export async function submitInteraction(
     modelSelection,
     contexts,
     contextConfirmationIds,
+    inputIdentityRevision,
   );
   try {
     const latestInteraction = appState.interactions
@@ -763,6 +766,7 @@ export async function submitInteraction(
       inputId,
       contexts,
       contextConfirmationIds,
+      inputDraftRevision,
     );
     const body = restoredDraftForInteraction(latestInteraction)
       ? retryBody
@@ -772,6 +776,7 @@ export async function submitInteraction(
         inputId,
         contexts,
         contextConfirmationIds,
+        inputDraftRevision,
       );
     const response = await request(path, {
       method: "POST",

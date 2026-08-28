@@ -182,7 +182,7 @@ impl SqliteProductStore {
                     .bind(thread_id.value())
                     .fetch_optional(&mut *tx)
                     .await?;
-            if current_revision != Some(expected_revision) {
+            if current_revision.unwrap_or(0) != expected_revision {
                 return Err(StorageError::ActionInputDraftConflict {
                     code: "input_draft_revision_conflict",
                     message: "The committed interaction inputs changed while Send was reserving them. Reload the draft and send again.".into(),
@@ -194,12 +194,6 @@ impl SqliteProductStore {
             .bind(thread_id.value())
             .fetch_all(&mut *tx)
             .await?;
-            if rows.is_empty() {
-                return Err(StorageError::ActionInputDraftConflict {
-                    code: "interaction_input_required",
-                    message: "The committed interaction inputs disappeared before Send could reserve them.".into(),
-                });
-            }
             let submitted_inputs = rows
                 .iter()
                 .map(submitted_input_from_row)
@@ -220,7 +214,7 @@ impl SqliteProductStore {
                 &submitted_inputs,
             )
             .map_err(|error| StorageError::Serialization(error.to_string()))?;
-            Some((expected_revision, semantic_digest))
+            (!rows.is_empty()).then_some((expected_revision, semantic_digest))
         } else {
             None
         };
@@ -532,6 +526,85 @@ pub(super) fn submitted_input_from_row(
 mod tests {
     use super::*;
     use crate::storage::NewInteractionInput;
+
+    #[tokio::test]
+    async fn empty_input_snapshot_is_revision_checked_inside_send_transaction() {
+        let path = std::env::temp_dir().join(format!(
+            "relayer-empty-input-revision-{}-{}.sqlite3",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let input_digest =
+            relayer_graph_core::interaction_input_authority_digest("Prompt", &[]).unwrap();
+        let clean_thread = sqlx::query(
+            "INSERT INTO threads(title,created_at,updated_at) VALUES ('Clean','1','1')",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let created = store
+            .insert_interaction_input(
+                ThreadId::from_database(clean_thread),
+                NewInteractionInput {
+                    text: "Prompt",
+                    input_identity: "empty-revision-zero",
+                    input_digest: &input_digest,
+                    contexts: &[],
+                    context_confirmation_ids: &[],
+                    submitted_input_draft_revision: Some(0),
+                },
+                None,
+                false,
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(created, InteractionInputInsertOutcome::Created(_)));
+
+        let changed_thread = sqlx::query(
+            "INSERT INTO threads(title,created_at,updated_at) VALUES ('Changed','1','1')",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        sqlx::query(
+            "INSERT INTO action_input_drafts(thread_id,revision,updated_at) VALUES (?1,1,'2')",
+        )
+        .bind(changed_thread)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let conflict = store
+            .insert_interaction_input(
+                ThreadId::from_database(changed_thread),
+                NewInteractionInput {
+                    text: "Prompt",
+                    input_identity: "stale-empty-revision",
+                    input_digest: &input_digest,
+                    contexts: &[],
+                    context_confirmation_ids: &[],
+                    submitted_input_draft_revision: Some(0),
+                },
+                None,
+                false,
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            conflict,
+            StorageError::ActionInputDraftConflict {
+                code: "input_draft_revision_conflict",
+                ..
+            }
+        ));
+    }
 
     #[tokio::test]
     async fn interaction_atomically_consumes_and_unbound_delete_restores_confirmation() {

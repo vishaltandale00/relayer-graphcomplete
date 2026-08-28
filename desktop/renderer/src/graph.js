@@ -9,6 +9,7 @@ import { toast } from "./ui.js";
 import { onboardingTutorialController } from "./onboarding-tutorial.js";
 import { createAnnotationApi } from "./annotation-api.js";
 import { createNodeContextDraftApi } from "./node-context-drafts.js";
+import { createNodeInputDraftApi } from "./node-input-drafts.js";
 import {
   getNavigationHistory,
   navigateHistory,
@@ -60,7 +61,21 @@ function workspace() {
     onExportConversation: desktop?.conversation?.export
       ? (threadId) => desktop.conversation.export(threadId)
       : null,
-    onSubmitInteraction: (text, modelSelection, contexts, contextConfirmationIds) => import("./threads.js").then(({ submitInteraction }) => submitInteraction(text, modelSelection, contexts, contextConfirmationIds)),
+    onSubmitInteraction: (
+      text,
+      modelSelection,
+      contexts,
+      contextConfirmationIds,
+      inputIdentityRevision,
+      inputDraftRevision,
+    ) => import("./threads.js").then(({ submitInteraction }) => submitInteraction(
+      text,
+      modelSelection,
+      contexts,
+      contextConfirmationIds,
+      inputIdentityRevision,
+      inputDraftRevision,
+    )),
     onOpenSettings: () => {
       setSettingsTab("models");
       document.querySelector("#settingsButton")?.click();
@@ -87,6 +102,7 @@ function workspace() {
     onDecideApproval: (requestId, decision) => import("./threads.js").then(({ decideApproval }) => decideApproval(requestId, decision)),
     annotationApi,
     contextDraftApi: nextMode === "interactive" ? createNodeContextDraftApi() : null,
+    inputDraftApi: nextMode === "interactive" ? createNodeInputDraftApi() : null,
   });
   return productWorkspace;
 }

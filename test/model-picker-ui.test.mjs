@@ -194,6 +194,14 @@ describe("composer model picker UI contract", () => {
       modelSelection: pickerPayload.modelSelection,
     });
     expect(followupRequestBody("Next", pickerPayload.modelSelection, "send-2")).not.toHaveProperty("harnessId");
+    expect(followupRequestBody(
+      "Next",
+      pickerPayload.modelSelection,
+      "send-3",
+      [],
+      [],
+      7,
+    )).toMatchObject({ inputId: "send-3", inputDraftRevision: 7 });
     expect(JSON.stringify(pickerPayload)).not.toContain("harnessConfigurationName");
   });
 
@@ -207,6 +215,10 @@ describe("composer model picker UI contract", () => {
     expect(otherThread).not.toBe(first);
     expect(stableFollowupInputId(3, "Next", selection, [], ["confirmation-a"]))
       .not.toBe(first);
+    expect(stableFollowupInputId(3, "Next", selection, [], [], 2)).not.toBe(first);
+    expect(stableFollowupInputId(3, "Next", selection, [], [], 2)).toBe(
+      stableFollowupInputId(3, "Next", selection, [], [], 2),
+    );
     expect(stableFollowupInputId(3, "Next", selection, [])).toBe(first);
     markFollowupSendSucceeded(changed);
     expect(stableFollowupInputId(3, "Changed", selection, [])).not.toBe(changed);

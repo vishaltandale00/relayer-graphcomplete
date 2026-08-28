@@ -43,6 +43,7 @@ pub(crate) struct RetryInteractionCommand<'a> {
     pub(crate) input_identity: &'a str,
     pub(crate) contexts: &'a [super::InteractionContextIntent],
     pub(crate) context_confirmation_ids: &'a [String],
+    pub(crate) input_draft_revision: Option<i64>,
     pub(crate) model_selection: &'a InteractionModelSelection,
     pub(crate) harness_configuration_name: &'a str,
 }
@@ -52,6 +53,7 @@ pub(crate) struct CreateIdentifiedInteractionCommand<'a> {
     pub(crate) input_identity: &'a str,
     pub(crate) contexts: &'a [super::InteractionContextIntent],
     pub(crate) context_confirmation_ids: &'a [String],
+    pub(crate) input_draft_revision: Option<i64>,
     pub(crate) model_selection: Option<&'a InteractionModelSelection>,
     pub(crate) allow_unselected_model: bool,
 }
@@ -1167,6 +1169,11 @@ impl ProductService {
             .iter()
             .map(submitted_input_from_attachment)
             .collect::<Result<Vec<_>, _>>()?;
+        let submitted_input_draft_revision = input_draft_reservation_revision(
+            command.input_draft_revision,
+            action_input_draft.revision,
+            !submitted_inputs.is_empty(),
+        )?;
         let input_digest =
             validated_interaction_input_digest(command.text, command.contexts, &submitted_inputs)?;
         self.storage
@@ -1178,8 +1185,7 @@ impl ProductService {
                     input_digest: &input_digest,
                     contexts: command.contexts,
                     context_confirmation_ids: command.context_confirmation_ids,
-                    submitted_input_draft_revision: (!submitted_inputs.is_empty())
-                        .then_some(action_input_draft.revision),
+                    submitted_input_draft_revision,
                 },
                 command.model_selection,
                 self.runtime_available && !command.allow_unselected_model,
@@ -1896,7 +1902,23 @@ impl ProductService {
         command: RetryInteractionCommand<'_>,
     ) -> Result<bool, ProductError> {
         let input_identity = required(command.input_identity, "inputId")?;
-        let input_digest = validated_interaction_input_digest(command.text, command.contexts, &[])?;
+        let interaction = self.get_interaction(interaction_id).await?;
+        let action_input_draft = self
+            .storage
+            .action_input_draft(interaction.thread_id)
+            .await?;
+        let submitted_inputs = action_input_draft
+            .attachments
+            .iter()
+            .map(submitted_input_from_attachment)
+            .collect::<Result<Vec<_>, _>>()?;
+        let submitted_input_draft_revision = input_draft_reservation_revision(
+            command.input_draft_revision,
+            action_input_draft.revision,
+            !submitted_inputs.is_empty(),
+        )?;
+        let input_digest =
+            validated_interaction_input_digest(command.text, command.contexts, &submitted_inputs)?;
         self.storage
             .claim_interaction_retry(
                 interaction_id,
@@ -1907,7 +1929,7 @@ impl ProductService {
                     input_digest: &input_digest,
                     contexts: command.contexts,
                     context_confirmation_ids: command.context_confirmation_ids,
-                    submitted_input_draft_revision: None,
+                    submitted_input_draft_revision,
                 },
                 command.model_selection,
                 command.harness_configuration_name,
@@ -2193,6 +2215,23 @@ impl ProductService {
             .await?
             .ok_or_else(|| ProductError::NotFound(format!("project {project_id}")))
     }
+}
+
+fn input_draft_reservation_revision(
+    requested_revision: Option<i64>,
+    current_revision: i64,
+    has_inputs: bool,
+) -> Result<Option<i64>, ProductError> {
+    if requested_revision.is_some_and(|revision| revision != current_revision) {
+        return Err(ProductError::Storage(
+            crate::storage::StorageError::ActionInputDraftConflict {
+                code: "input_draft_revision_conflict",
+                message: "The committed interaction inputs changed before Send. Review them and send again."
+                    .into(),
+            },
+        ));
+    }
+    Ok(requested_revision.or_else(|| has_inputs.then_some(current_revision)))
 }
 
 fn validate_action_input_value(
@@ -2484,6 +2523,40 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static MANAGED_POLICY_TEST_ID: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn input_send_reserves_only_the_exact_inspected_draft_revision() {
+        assert_eq!(
+            input_draft_reservation_revision(Some(4), 4, true).unwrap(),
+            Some(4)
+        );
+        assert_eq!(
+            input_draft_reservation_revision(None, 4, true).unwrap(),
+            Some(4)
+        );
+        assert_eq!(
+            input_draft_reservation_revision(Some(4), 4, false).unwrap(),
+            Some(4)
+        );
+        assert!(matches!(
+            input_draft_reservation_revision(Some(3), 4, true),
+            Err(ProductError::Storage(
+                crate::storage::StorageError::ActionInputDraftConflict {
+                    code: "input_draft_revision_conflict",
+                    ..
+                }
+            ))
+        ));
+        assert!(matches!(
+            input_draft_reservation_revision(Some(3), 4, false),
+            Err(ProductError::Storage(
+                crate::storage::StorageError::ActionInputDraftConflict {
+                    code: "input_draft_revision_conflict",
+                    ..
+                }
+            ))
+        ));
+    }
 
     #[test]
     #[cfg(unix)]
