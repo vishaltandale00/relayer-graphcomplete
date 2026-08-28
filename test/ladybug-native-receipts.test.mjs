@@ -1,15 +1,29 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 const root = resolve(import.meta.dirname, "..");
 const verifier = join(root, "scripts/verify-ladybug-native-receipts.mjs");
 const inventoryPath = join(root, "vendor/ladybug/native-inventory.json");
 
+const temporaryDirectories = [];
+
+function temporaryDirectory(prefix) {
+  const directory = mkdtempSync(join(tmpdir(), prefix));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+afterEach(() => {
+  while (temporaryDirectories.length > 0) {
+    rmSync(temporaryDirectories.pop(), { recursive: true, force: true });
+  }
+});
+
 function fixtureInventory() {
-  const directory = mkdtempSync(join(tmpdir(), "ladybug-native-receipt-"));
+  const directory = temporaryDirectory("ladybug-native-receipt-");
   const inventory = join(directory, "native-inventory.json");
   cpSync(inventoryPath, inventory);
   return { directory, inventory };
@@ -34,7 +48,7 @@ describe("Ladybug native dependency receipts", () => {
   });
 
   it("fails closed when the exact source contains an unlisted native subtree", () => {
-    const source = mkdtempSync(join(tmpdir(), "ladybug-native-source-"));
+    const source = temporaryDirectory("ladybug-native-source-");
     mkdirSync(join(source, "src"), { recursive: true });
     mkdirSync(join(source, "lbug-src", "third_party", "surprise-native"), { recursive: true });
     const result = spawnSync(process.execPath, [verifier, "--source-root", source], { encoding: "utf8" });
@@ -43,7 +57,7 @@ describe("Ladybug native dependency receipts", () => {
   });
 
   it("replays the vendored OpenSSL notice against exact source bytes", () => {
-    const source = mkdtempSync(join(tmpdir(), "openssl-license-source-"));
+    const source = temporaryDirectory("openssl-license-source-");
     cpSync(join(root, "vendor/ladybug/notices/openssl-LICENSE.txt"), join(source, "LICENSE.txt"));
     expect(execFileSync(process.execPath, [verifier, "--openssl-source-root", source], { encoding: "utf8" }))
       .toContain("release blockers preserved");

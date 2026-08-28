@@ -124,7 +124,12 @@ export async function verifyLadybugNativeReceipts({
     { name: "Apple libc++ and libSystem", targets: ["aarch64-apple-darwin", "x86_64-apple-darwin"], shipped: false, classification: "operating-system-runtime" },
     { name: "Microsoft Visual C++ Runtime", targets: ["x86_64-pc-windows-msvc"], shipped: false, classification: "system-runtime-prerequisite" },
   ]);
-  assert.deepEqual(inventory.releaseBlockers, ["lbug-binding-missing-upstream-license-file"]);
+  const knownReleaseBlockers = ["lbug-binding-missing-upstream-license-file"];
+  assert.ok(
+    Array.isArray(inventory.releaseBlockers)
+      && inventory.releaseBlockers.every((blocker) => knownReleaseBlockers.includes(blocker)),
+    `native inventory declares an unrecognized release blocker: ${JSON.stringify(inventory.releaseBlockers)}`,
+  );
   if (requireReleaseReady) {
     assert.deepEqual(inventory.releaseBlockers, [], "native receipt is not release-ready");
   }

@@ -224,7 +224,11 @@ fn validate_tagged_value(value: &Value) {
                     assert_eq!(names.first().copied(), Some("label"));
                     assert_eq!(names.get(1).copied(), Some("variant"));
                 }
-                assert_eq!(names.get(names.len() - 2).copied(), Some("relation"));
+                let relation_index = names
+                    .len()
+                    .checked_sub(2)
+                    .expect("relationship must expose at least the relation and state properties");
+                assert_eq!(names.get(relation_index).copied(), Some("relation"));
                 assert_eq!(names.last().copied(), Some("state"));
                 let expected_relation = match value["kind"].as_str().unwrap() {
                     "EXPANDS" => "expand",
