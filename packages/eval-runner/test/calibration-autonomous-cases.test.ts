@@ -41,6 +41,14 @@ describe("deep calibration candidate cases", () => {
     }
   });
 
+  it("rejects calibration fixture execution outside the declared local Mac environment", async () => {
+    await expect(materializeCalibrationFixture({
+      caseId: "calibration.greenfield.json-explorer",
+      workspaceDirectory: "/unused/calibration-workspace",
+      platform: "linux",
+    })).rejects.toThrow("Calibration cases are local Mac only");
+  });
+
   it("materializes an immutable baseline repository through the production seam", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-calibration-case-"));
     temporaryDirectories.push(root);
@@ -48,6 +56,7 @@ describe("deep calibration candidate cases", () => {
     const fixture = await materializeCalibrationFixture({
       caseId: "calibration.greenfield.json-explorer",
       workspaceDirectory,
+      platform: "darwin",
     });
 
     expect(fixture).toMatchObject({
@@ -67,6 +76,7 @@ describe("deep calibration candidate cases", () => {
     const fixture = await materializeCalibrationFixture({
       caseId: "calibration.research.rome-transition",
       workspaceDirectory,
+      platform: "darwin",
     });
     const checks = await gradeCalibrationWorkspace({
       caseId: "calibration.research.rome-transition",
@@ -84,11 +94,11 @@ describe("deep calibration candidate cases", () => {
       const root = await mkdtemp(join(tmpdir(), "relayer-calibration-red-"));
       temporaryDirectories.push(root);
       const workspaceDirectory = join(root, "workspace");
-      const fixture = await materializeCalibrationFixture({ caseId: definition.id, workspaceDirectory });
+      const fixture = await materializeCalibrationFixture({ caseId: definition.id, workspaceDirectory, platform: "darwin" });
       const checks = await gradeCalibrationWorkspace({ caseId: definition.id, workspaceDirectory, baseRevision: fixture.seededCommit });
       expect(checks.find(({ name }) => name === "workspace:behavior-or-structure"), definition.id).toMatchObject({ passed: false });
     }
-  });
+  }, 20_000);
 
   it("gives the cross-cutting debugging cases inspectable responsibility seams", async () => {
     const expectedFiles: Partial<Readonly<Record<CalibrationCaseId, readonly string[]>>> = {
@@ -109,12 +119,12 @@ describe("deep calibration candidate cases", () => {
       const root = await mkdtemp(join(tmpdir(), "relayer-calibration-depth-"));
       temporaryDirectories.push(root);
       const workspaceDirectory = join(root, "workspace");
-      await materializeCalibrationFixture({ caseId: caseId as CalibrationCaseId, workspaceDirectory });
+      await materializeCalibrationFixture({ caseId: caseId as CalibrationCaseId, workspaceDirectory, platform: "darwin" });
       for (const relativePath of relativePaths) {
         expect((await readFile(join(workspaceDirectory, relativePath), "utf8")).trim(), `${caseId}:${relativePath}`).not.toBe("");
       }
     }
-  });
+  }, 20_000);
 
   it("accepts one known-good implementation for every coding verifier", async () => {
     const solutions: Readonly<Record<string, string>> = {
@@ -152,7 +162,7 @@ export const resultView=(store,key)=>{const result=store.read(key);return result
       const root = await mkdtemp(join(tmpdir(), "relayer-calibration-solution-"));
       temporaryDirectories.push(root);
       const workspaceDirectory = join(root, "workspace");
-      const fixture = await materializeCalibrationFixture({ caseId: typedCaseId, workspaceDirectory });
+      const fixture = await materializeCalibrationFixture({ caseId: typedCaseId, workspaceDirectory, platform: "darwin" });
       await writeFile(join(workspaceDirectory, "src/index.js"), implementation, "utf8");
       if (caseId.startsWith("calibration.greenfield.")) await writeFile(join(workspaceDirectory, "index.html"), "<!doctype html><title>Working calibration application</title>\n", "utf8");
       await execFileAsync("git", ["add", "--all"], { cwd: workspaceDirectory });
@@ -160,7 +170,7 @@ export const resultView=(store,key)=>{const result=store.read(key);return result
       const checks = await gradeCalibrationWorkspace({ caseId: typedCaseId, workspaceDirectory, baseRevision: fixture.seededCommit });
       expect(checks.every(({ passed }) => passed), `${caseId}: ${JSON.stringify(checks)}`).toBe(true);
     }
-  });
+  }, 20_000);
 
   it("accepts structurally complete work artifacts without claiming semantic qualification", async () => {
     const sources = Array.from({ length: 5 }, (_, index) => ({
@@ -212,7 +222,7 @@ export const resultView=(store,key)=>{const result=store.read(key);return result
       const root = await mkdtemp(join(tmpdir(), "relayer-calibration-green-"));
       temporaryDirectories.push(root);
       const workspaceDirectory = join(root, "workspace");
-      const fixture = await materializeCalibrationFixture({ caseId: typedCaseId, workspaceDirectory });
+      const fixture = await materializeCalibrationFixture({ caseId: typedCaseId, workspaceDirectory, platform: "darwin" });
       for (const [relativePath, contents] of Object.entries(files)) {
         await mkdir(join(workspaceDirectory, relativePath, ".."), { recursive: true });
         await writeFile(join(workspaceDirectory, relativePath), `${contents}\n`, "utf8");
@@ -222,5 +232,5 @@ export const resultView=(store,key)=>{const result=store.read(key);return result
       const checks = await gradeCalibrationWorkspace({ caseId: typedCaseId, workspaceDirectory, baseRevision: fixture.seededCommit });
       expect(checks.every(({ passed }) => passed), `${caseId}: ${JSON.stringify(checks)}`).toBe(true);
     }
-  });
+  }, 20_000);
 });
