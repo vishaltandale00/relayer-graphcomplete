@@ -95,8 +95,9 @@ const catalogSnapshot = {
 
 function registerIpc() {
   ipcMain.handle("relayer:account-read", () => ({
-    status: "connected",
-    account: { email: "zero-inference@relayer.test", planType: "Fixture" },
+    status: "signed-in",
+    channel: "stable",
+    subject: "fixture|node-details-evidence",
   }));
   ipcMain.handle("relayer:appearance-read", () => ({ appearance: "dark" }));
   ipcMain.handle("relayer:update-status", () => ({
@@ -112,6 +113,11 @@ function registerIpc() {
     status: "dismissed",
     automaticEligible: false,
   }));
+  ipcMain.handle("relayer:provider-status", () => ({
+    adapters: [],
+    definitions: [],
+    hasCompletedOnboarding: true,
+  }));
 }
 
 function unregisterIpc() {
@@ -121,6 +127,7 @@ function unregisterIpc() {
     "relayer:update-status",
     "relayer:folder-choose",
     "relayer:tutorial-read",
+    "relayer:provider-status",
   ]) ipcMain.removeHandler(channel);
 }
 
@@ -135,7 +142,24 @@ async function refreshCaptureSurface() {
   await sleep(120);
 }
 
-async function captureStep(caption, selector, duration = 2.4) {
+async function capturePagePng(label, timeoutMs = 10_000) {
+  let timeout;
+  try {
+    const image = await Promise.race([
+      mainWindow.webContents.capturePage(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(
+          `Timed out after ${timeoutMs}ms while capturing ${label}.`,
+        )), timeoutMs);
+      }),
+    ]);
+    return image.toPNG();
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function captureStep(caption, selector, duration = 4.5) {
   await mkdir(framesDirectory, { recursive: true });
   await evaluate(`(() => {
     document.querySelector('[data-relayer-evidence-caption]')?.remove();
@@ -156,8 +180,9 @@ async function captureStep(caption, selector, duration = 2.4) {
   })()`);
   await refreshCaptureSurface();
   const file = join(framesDirectory, `${String(frames.length + 1).padStart(2, "0")}.png`);
-  await writeFile(file, (await mainWindow.webContents.capturePage()).toPNG());
+  await writeFile(file, await capturePagePng(`video frame ${frames.length + 1}`));
   frames.push({ file, duration, caption });
+  process.stdout.write(`Captured ${frames.length}/20: ${caption}\n`);
   await evaluate(`(() => {
     document.querySelector('[data-relayer-evidence-caption]')?.remove();
     document.querySelectorAll('[data-relayer-evidence-highlight]').forEach((element) => {
@@ -167,12 +192,55 @@ async function captureStep(caption, selector, duration = 2.4) {
   })()`);
 }
 
+function holdNextDraftSave() {
+  const filter = { urls: [`${productSession.origin}/api/threads/*/context-drafts/*`] };
+  let heldCallback;
+  let intercepted = false;
+  const held = new Promise((resolveHeld) => {
+    mainWindow.webContents.session.webRequest.onBeforeRequest(filter, (details, callback) => {
+      if (!intercepted && details.method === "PUT") {
+        intercepted = true;
+        heldCallback = callback;
+        resolveHeld();
+        return;
+      }
+      callback({});
+    });
+  });
+  return Object.freeze({
+    wait: () => held,
+    release() {
+      if (!heldCallback) throw new Error("Cannot release a draft save before it is held.");
+      mainWindow.webContents.session.webRequest.onBeforeRequest(filter, null);
+      heldCallback({});
+    },
+  });
+}
+
 async function startServices() {
   runtime = new GraphCompleteRuntimeService({
     userDataDirectory: dataDirectory,
     graphServerBinary,
     configurationPaths: [configurationPath],
     additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory },
+    acquireProviderExecution: async (providerId) => ({
+      definition: {
+        id: providerId,
+        adapterId: "codex-subscription",
+        accessContract: "managed-runtime@1",
+      },
+      descriptor: {
+        adapterId: "codex-subscription",
+        accessContract: "managed-runtime@1",
+        implementationVersion: "1",
+      },
+      runtime: {
+        async executionAccess() {
+          return { kind: "managed-runtime", environment: {} };
+        },
+      },
+      async release() {},
+    }),
   });
   const runtimeSession = await runtime.start();
   catalogRefreshServer = await startModelCatalogRefreshServer({
@@ -216,7 +284,11 @@ async function openThreadWindow(threadId) {
   mainWindow.focus();
   mainWindow.webContents.focus();
   await waitFor("production thread workspace", () => evaluate(`(() => (
-    !document.querySelector('#threadView')?.classList.contains('hidden')
+    document.querySelector('#desktopAccountOnboarding')?.classList.contains('hidden')
+    && !document.body.classList.contains('desktop-account-pending')
+    && !document.querySelector('#appShell')?.classList.contains('hidden')
+    && getComputedStyle(document.querySelector('#appShell')).visibility !== 'hidden'
+    && !document.querySelector('#threadView')?.classList.contains('hidden')
     && document.querySelectorAll('.graph-node').length === 3
     && !document.querySelector('#threadPrompt')?.disabled
   ))()`));
@@ -280,9 +352,16 @@ async function run() {
     method: "POST",
     body: JSON.stringify({ path: repositoryRoot }),
   });
-  const modelSettings = await productRequest("/api/model-settings");
+  const fixtureFamily = await productRequest("/api/model-families", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Fixture models",
+      enabled: true,
+      members: [{ providerId: "codex", modelId: "fixture-model" }],
+    }),
+  });
   const modelSelection = {
-    familyId: modelSettings.families[0].id,
+    familyId: fixtureFamily.id,
     providerId: "codex",
     modelId: "fixture-model",
   };
@@ -292,7 +371,6 @@ async function run() {
       title: "Interaction context verification",
       initialMessage: "Show the deterministic task system.",
       projectId: project.id,
-      permissionProfileId: "auto",
       harnessId: "fixture-task-system",
       modelSelection,
     }),
@@ -307,35 +385,175 @@ async function run() {
       && !document.querySelector('#attachNodeContext')?.classList.contains('hidden')
   `));
   await captureStep(
-    "1. Open Node Details for any visible node; the + control connects it to the next interaction",
+    "1. Selecting a graph node opens its full Node Details without covering the graph or composer",
     "#inspector",
   );
-
   await click("#attachNodeContext");
   await waitFor("new context annotation editor", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
   await setValue("#contextAnnotationEditor", "Queue order controls which task is claimed next.");
+  await waitFor("first annotation autosave", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.[0]?.text === "Queue order controls which task is claimed next."
+      && response.drafts[0].revision >= 1;
+  });
+  await captureStep(
+    "2. The node's + opens its saved annotation editor in the bottom third of Node Details",
+    "#inspector",
+  );
+  let rejectedDraftSave = false;
+  const draftSaveFilter = { urls: [`${productSession.origin}/api/threads/*/context-drafts/*`] };
+  mainWindow.webContents.session.webRequest.onBeforeRequest(draftSaveFilter, (details, callback) => {
+    if (!rejectedDraftSave && details.method === "PUT") {
+      rejectedDraftSave = true;
+      callback({ cancel: true });
+      return;
+    }
+    callback({});
+  });
+  await setValue("#contextAnnotationEditor", "Queue order must remain stable while workers are busy.");
+  await waitFor("inline annotation save failure", () => evaluate(`(() => {
+    const error = document.querySelector('#nodeContextDock [role="alert"]');
+    return error?.textContent?.startsWith('Not saved:')
+      && document.querySelector('#contextAnnotationEditor')?.value
+        === 'Queue order must remain stable while workers are busy.';
+  })()`));
+  await captureStep(
+    "3. A failed save stays in Node Details with the draft intact and an inline retryable error",
+    "#nodeContextDock",
+  );
+  mainWindow.webContents.session.webRequest.onBeforeRequest(draftSaveFilter, null);
+  await setValue("#contextAnnotationEditor", "Queue order controls which task is claimed next.");
+  await waitFor("annotation save recovery", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.[0]?.text === "Queue order controls which task is claimed next."
+      && response.drafts[0].revision >= 2
+      && await evaluate(`document.querySelector('#nodeContextDock [role="alert"]')?.classList.contains('hidden')`);
+  });
+  const switchedDraftText = "Queue order remains FIFO when both workers are busy.";
+  const heldSwitchSave = holdNextDraftSave();
+  await setValue("#contextAnnotationEditor", switchedDraftText);
+  await clickNode("Two-worker pool");
+  await waitFor("node-switch draft persistence to be held", () => Promise.race([
+    heldSwitchSave.wait().then(() => true),
+    sleep(40).then(() => false),
+  ]));
+  const heldSwitchState = await evaluate(`({
+    title: document.querySelector('#detailTitle')?.textContent,
+    editorValue: document.querySelector('#contextAnnotationEditor')?.value,
+    dockHidden: document.querySelector('#nodeContextDock')?.classList.contains('hidden'),
+  })`);
+  if (heldSwitchState.title !== "Incoming queue"
+    || heldSwitchState.editorValue !== switchedDraftText
+    || heldSwitchState.dockHidden) {
+    throw new Error(`Node switch escaped before its draft save settled: ${JSON.stringify(heldSwitchState)}`);
+  }
+  await captureStep(
+    "4. While the draft save is held, Node Details stays on the source node with the exact text visible",
+    "#nodeContextDock",
+  );
+  heldSwitchSave.release();
+  await waitFor("node switch persists and hides the source draft dock", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.[0]?.text === switchedDraftText
+      && await evaluate(`document.querySelector('#detailTitle')?.textContent === 'Two-worker pool'
+        && document.querySelector('#nodeContextDock')?.classList.contains('hidden')`);
+  });
+  await captureStep(
+    "5. After persistence settles, switching opens the next node without carrying the editor across",
+    "#inspector",
+  );
+  await clickNode("Incoming queue");
+  await waitFor("source draft restored after node switch", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(switchedDraftText)}
+  `));
+  await captureStep(
+    "6. Returning to the source node restores the exact unconfirmed draft in its Node Details dock",
+    "#inspector",
+  );
+  await setValue("#contextAnnotationEditor", "Queue order controls which task is claimed next.");
+  const heldCloseSave = holdNextDraftSave();
+  await click("#closeInspector");
+  await waitFor("Node Details close persistence to be held", () => Promise.race([
+    heldCloseSave.wait().then(() => true),
+    sleep(40).then(() => false),
+  ]));
+  const heldCloseState = await evaluate(`({
+    inspectorHidden: document.querySelector('#inspector')?.classList.contains('hidden'),
+    title: document.querySelector('#detailTitle')?.textContent,
+    editorValue: document.querySelector('#contextAnnotationEditor')?.value,
+  })`);
+  if (heldCloseState.inspectorHidden
+    || heldCloseState.title !== "Incoming queue"
+    || heldCloseState.editorValue !== "Queue order controls which task is claimed next.") {
+    throw new Error(`Node Details closed before its draft save settled: ${JSON.stringify(heldCloseState)}`);
+  }
+  await captureStep(
+    "7. While Close waits on a held save, the exact draft remains visible in Node Details",
+    "#nodeContextDock",
+  );
+  heldCloseSave.release();
+  await waitFor("Node Details closes only after the draft is saved", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.[0]?.text === "Queue order controls which task is claimed next."
+      && await evaluate(`document.querySelector('#inspector')?.classList.contains('hidden')
+        && !document.querySelector('#contextAnnotationEditor')`);
+  });
+  await captureStep(
+    "8. After persistence settles, Node Details closes and the graph and composer remain usable",
+    "#graphStage",
+  );
+  await clickNode("Incoming queue");
+  await waitFor("saved draft restored after closing Node Details", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === 'Queue order controls which task is claimed next.'
+  `));
   await click("[aria-label='Confirm annotation']");
   await waitFor("first collapsed context pill", () => evaluate(`
     document.querySelectorAll('.composer-context-pill-wrap').length === 1
       && document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
       && !document.querySelector('.composer-context-preview')
   `));
+  await captureStep(
+    "9. Confirming closes the editor and leaves a compact collapsed node pill above the composer",
+    "#composerContextTray",
+  );
+  await click("#attachNodeContext");
+  await setValue("#contextAnnotationEditor", "Discard this temporary annotation.");
+  await waitFor("temporary draft saved before discard", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.[0]?.text === "Discard this temporary annotation.";
+  });
+  await captureStep(
+    "10. The × control discards only this unconfirmed draft while the confirmed node context remains attached",
+    "#nodeContextDock",
+  );
+  await click("[aria-label='Discard annotation draft for Incoming queue']");
+  await waitFor("temporary draft discarded from Node Details", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.length === 0
+      && await evaluate(`!document.querySelector('#contextAnnotationEditor')`);
+  });
+  await captureStep(
+    "11. After discard, the temporary editor is gone and the confirmed collapsed pill is unchanged",
+    "#composerContextTray",
+  );
   await click("[aria-label='Show Incoming queue annotations']");
   await waitFor("first compact annotation preview", () => evaluate(`
     document.querySelectorAll('.composer-context-annotations li').length === 1
   `));
-  await click("[aria-label='Add annotation to Incoming queue']");
+  await click("#attachNodeContext");
   await setValue("#contextAnnotationEditor", "Prioritize worker availability when reasoning.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("second confirmation collapsed", () => evaluate(`
-    document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
+    !document.querySelector('#contextAnnotationEditor')
+      && document.querySelector('[aria-label="Show Incoming queue annotations"]')?.disabled === false
+      && document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
       && !document.querySelector('.composer-context-preview')
   `));
   await click("[aria-label='Show Incoming queue annotations']");
   await waitFor("second ordered annotation", () => evaluate(`
     document.querySelectorAll('.composer-context-annotations li').length === 2
   `));
-  const previewBeforeEdit = await evaluate(`(() => {
+  const explicitPreview = await evaluate(`(() => {
     const preview = document.querySelector('.composer-context-preview')?.getBoundingClientRect();
     const inspector = document.querySelector('#inspector')?.getBoundingClientRect();
     return preview && inspector ? {
@@ -344,57 +562,20 @@ async function run() {
       avoidsInspector: preview.right < inspector.left,
     } : null;
   })()`);
-  if (!previewBeforeEdit?.avoidsInspector) {
-    throw new Error(`Composer context preview overlaps Node Details: ${JSON.stringify(previewBeforeEdit)}`);
+  if (!explicitPreview?.avoidsInspector) {
+    throw new Error(`Composer context preview overlaps Node Details: ${JSON.stringify(explicitPreview)}`);
   }
-  const longAnnotation = "Queue ordering is the key bottleneck. Compare the oldest pending items with current worker capacity, preserve their original priority, and call out any work that has remained stalled across multiple interactions.";
-  await click("[aria-label='Edit annotation 1 for Incoming queue']");
-  await setValue("#contextAnnotationEditor", longAnnotation);
-  const previewDuringEdit = await waitFor("fixed long annotation editor", () => evaluate(`(() => {
-    const preview = document.querySelector('.composer-context-preview')?.getBoundingClientRect();
-    const editor = document.querySelector('#contextAnnotationEditor');
-    if (!preview || !editor || editor.scrollHeight <= editor.clientHeight) return null;
-    const initialScrollTop = editor.scrollTop;
-    editor.scrollTop = editor.scrollHeight;
-    return {
-      width: preview.width,
-      height: preview.height,
-      editorOverflow: getComputedStyle(editor).overflowY,
-      editorScrolled: editor.scrollTop > initialScrollTop,
-    };
-  })()`));
-  if (Math.abs(previewDuringEdit.width - previewBeforeEdit.width) >= 1
-    || Math.abs(previewDuringEdit.height - previewBeforeEdit.height) >= 1
-    || previewDuringEdit.editorOverflow !== "auto"
-    || !previewDuringEdit.editorScrolled) {
-    throw new Error(`Long annotation edit changed preview geometry: ${JSON.stringify({ previewBeforeEdit, previewDuringEdit })}`);
-  }
-  await click("[aria-label='Confirm annotation']");
-  await waitFor("edited annotation confirmation collapsed", () => evaluate(`
-    document.querySelector('.composer-context-pill')?.getAttribute('aria-expanded') === 'false'
-      && !document.querySelector('.composer-context-preview')
-  `));
-  await click("[aria-label='Show Incoming queue annotations']");
-  await waitFor("edited ordered annotations", () => evaluate(`(() => {
-    const values = [...document.querySelectorAll('.composer-context-annotations li > span')]
-      .map((element) => element.textContent);
-    return JSON.stringify(values) === JSON.stringify([
-      ${JSON.stringify("Queue ordering is the key bottleneck. Compare the oldest pending items with current worker capacity, preserve their original priority, and call out any work that has remained stalled across multiple interactions.")},
-      'Prioritize worker availability when reasoning.',
-    ]);
-  })()`));
-  await click("[aria-label='Edit annotation 2 for Incoming queue']");
   await captureStep(
-    "2. Editing stays inside the fixed popover and keeps an explicit trash control available",
+    "12. Confirmed annotations stay read-only in an explicitly opened compact preview",
     ".composer-context-preview",
   );
-  await click("[aria-label='Delete annotation being edited for Incoming queue']");
-  await waitFor("annotation deleted while editing", () => evaluate(`(() => {
+  await click("[aria-label='Delete annotation 2 for Incoming queue']");
+  await waitFor("second annotation deleted from the explicit preview", () => evaluate(`(() => {
     const values = [...document.querySelectorAll('.composer-context-annotations li > span')]
       .map((element) => element.textContent);
-    return JSON.stringify(values) === JSON.stringify([${JSON.stringify(longAnnotation)}]);
+    return JSON.stringify(values) === JSON.stringify(['Queue order controls which task is claimed next.']);
   })()`));
-  await click("[aria-label='Add annotation to Incoming queue']");
+  await click("#attachNodeContext");
   await setValue("#contextAnnotationEditor", "Prioritize worker availability when reasoning.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("re-added annotation confirmation settled", () => evaluate(`
@@ -405,6 +586,7 @@ async function run() {
   await click("[aria-label='Close Incoming queue annotations']");
   await clickNode("Two-worker pool");
   await click("#attachNodeContext");
+  await setValue("#contextAnnotationEditor", "Keep both workers busy while tasks are queued.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("worker-pool context confirmation settled", () => evaluate(`
     !document.querySelector('#contextAnnotationEditor')
@@ -412,6 +594,7 @@ async function run() {
   `));
   await clickNode("Results store");
   await click("#attachNodeContext");
+  await setValue("#contextAnnotationEditor", "Preserve completed results in claim order.");
   await click("[aria-label='Confirm annotation']");
   await waitFor("results context confirmation settled", () => evaluate(`
     !document.querySelector('#contextAnnotationEditor')
@@ -432,11 +615,12 @@ async function run() {
     throw new Error(`Multiple node pills did not scroll horizontally: ${JSON.stringify(pillOverflow)}`);
   }
   await captureStep(
-    "3. Multiple attached-node pills scroll horizontally within the available composer width",
+    "13. Multiple attached-node pills scroll horizontally within the available composer width",
     ".composer-context-pills",
   );
   mainWindow.setSize(1480, 920);
   await waitForPaint();
+  await evaluate(`(() => { window.confirm = () => true; return true; })()`);
   await click("[aria-label='Detach Two-worker pool']");
   await click("[aria-label='Detach Results store']");
   await click("[aria-label='Show Incoming queue annotations']");
@@ -446,11 +630,11 @@ async function run() {
   await setValue("#threadPrompt", "Use this connected queue context in the follow-up.");
   await waitFor("message and context send enabled", () => evaluate(`document.querySelector('#sendInteraction')?.disabled === false`));
   await refreshCaptureSurface();
-  await writeFile(composerScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
+  await writeFile(composerScreenshotFile, await capturePagePng("grouped composer screenshot"));
   await captureStep(
-    "4. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
+    "14. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
     "#composerContextTray",
-    3,
+    4.5,
   );
   await click("[aria-label='Close Incoming queue annotations']");
   await click("#sendInteraction");
@@ -463,7 +647,7 @@ async function run() {
   `));
   const secondContext = secondDetail.interactions[1].contexts?.[0];
   if (JSON.stringify(secondContext?.annotations) !== JSON.stringify([
-    longAnnotation,
+    "Queue order controls which task is claimed next.",
     "Prioritize worker availability when reasoning.",
   ])) throw new Error(`Message+context annotations were not durably ordered: ${JSON.stringify(secondContext)}`);
   await click("#interactionContextPill");
@@ -472,9 +656,9 @@ async function run() {
       && document.querySelectorAll('#interactionContextPopover li').length === 2
   `));
   await captureStep(
-    "5. The turn banner shows one connected-node pill; its popover restores both annotations in order",
+    "15. The turn banner shows one connected-node pill; its popover restores both annotations in order",
     "#interactionContextPopover",
-    3,
+    4.5,
   );
 
   await click("#interactionContextPopover .interaction-context-node");
@@ -485,7 +669,7 @@ async function run() {
       && document.querySelector('#attachNodeContext')?.disabled === false
   `));
   await captureStep(
-    "6. Clicking the connected node reopens its full Node Details from history",
+    "16. Clicking the connected node reopens its full Node Details from history",
     "#inspector",
   );
 
@@ -500,7 +684,7 @@ async function run() {
       && document.querySelector('#sendInteraction')?.disabled === false
   `));
   await captureStep(
-    "7. A connected node with a non-empty annotation enables send even when message text is empty",
+    "17. A connected node with a non-empty annotation enables send even when message text is empty",
     "#threadComposerShell",
   );
   await click("#sendInteraction");
@@ -520,9 +704,9 @@ async function run() {
       === 'This annotation alone is a valid interaction input.'
   `));
   await captureStep(
-    "8. Annotation-only history has no derived message label; the context pill preserves the actual input",
+    "18. Annotation-only history has no derived message label; the context pill preserves the actual input",
     "#interactionBanner",
-    3,
+    4.5,
   );
 
   await restartStack(thread.id);
@@ -538,11 +722,11 @@ async function run() {
       === 'This annotation alone is a valid interaction input.'
   `));
   await refreshCaptureSurface();
-  await writeFile(restartedScreenshotFile, (await mainWindow.webContents.capturePage()).toPNG());
+  await writeFile(restartedScreenshotFile, await capturePagePng("restarted context screenshot"));
   await captureStep(
-    "9. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
+    "19. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
     "#interactionContextPopover",
-    3.4,
+    4.5,
   );
   await click("#interactionContextPopover .interaction-context-node");
   await waitFor("restarted target Node Details", () => evaluate(`
@@ -550,9 +734,9 @@ async function run() {
       && !document.querySelector('#inspector')?.classList.contains('hidden')
   `));
   await captureStep(
-    "10. The persisted context still reopens the exact target node after restart",
+    "20. The persisted context still reopens the exact target node after restart",
     "#inspector",
-    3.4,
+    4.5,
   );
 
   if (restartedDetail.interactions[2].contexts?.[0]?.targetNode?.title !== "Incoming queue") {
@@ -579,13 +763,15 @@ async function run() {
     },
     assertions: {
       nodeDetailsOpened: true,
-      multipleAnnotationsAddedEditedAndOrdered: true,
+      nodeSwitchSavedAndRestoredDraft: true,
+      closeWaitedForDraftSave: true,
+      draftDiscardedFromDock: true,
+      multipleAnnotationsAddedAndOrdered: true,
       compactComposerPopoverVisible: true,
       compactComposerPopoverAvoidsNodeDetails: true,
       multipleNodePillStripScrolls: true,
-      editPreservesPopoverDimensions: true,
-      longAnnotationEditorScrolls: true,
-      annotationDeletedWhileEditing: true,
+      confirmedPreviewIsReadOnly: true,
+      annotationDeletedFromExplicitPreview: true,
       messageAndContextSent: true,
       historyPillAndPopoverVisible: true,
       historicalTargetNodeReopened: true,

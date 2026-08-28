@@ -1933,13 +1933,19 @@ settings:
 <p><strong>Acceptance:</strong> Each invoked action creates one traceable interaction.</p>
 </section>
 <h3>7.1 Add as context</h3>
-<p>The permanent inline <code>+</code> action exists on every selectable node. It opens an optional annotation field in the inspector. After attachment:</p>
+<p>The permanent inline <code>+</code> action exists on every selectable node. It opens an annotation dock in the bottom region of Node Details. The dock uses roughly one third of the pane height, while node details scroll independently above it. The graph and main follow-up composer do not move or become covered.</p>
 <ul>
-<li>the composer shows one compact graph annotation with a count;</li>
-<li>a compact attachment strip appears directly above the chat box, following the familiar Codex attachment placement;</li>
-<li>hover or click on that strip reveals the attached node icons;</li>
-<li>selecting an icon shows the user&#39;s annotation for that node;</li>
-<li>attachments persist with the draft, survive navigation, and clear only after durable send or explicit removal;</li>
+<li>the dock contains one multiline field plus <code>×</code> and <code>✓</code>;</li>
+<li><code>×</code> immediately discards the selected node&#39;s unconfirmed draft;</li>
+<li><code>✓</code> confirms one separate ordered annotation and closes the dock;</li>
+<li>each node retains its own occurrence-bound unconfirmed draft;</li>
+<li>switching nodes saves the current value and hides the dock for a node without a draft;</li>
+<li>selecting a drafted node restores the same text and open editor;</li>
+<li>autosave or confirmation failure keeps the draft editable and reports the failure inline in Node Details;</li>
+<li>the active editor preserves its DOM identity, value, focus, caret, selection, and scroll across unrelated workspace reconciliation;</li>
+<li>after confirmation, the composer shows only a compact collapsed annotation pill with a count;</li>
+<li>an annotation preview appears above the composer only after the user explicitly activates that pill;</li>
+<li>confirmed attachments persist with the composer draft, survive navigation, and clear only after durable send or explicit removal;</li>
 <li>the next interaction node receives typed attachment edges carrying the selected node IDs and annotations.</li>
 </ul>
 <p>Adding context alone does not invoke Complete.</p>
@@ -1987,7 +1993,7 @@ settings:
 <li>Invoke actions create one durable, idempotent product interaction through the app server.</li>
 <li>The clicked invoke action becomes disabled while its one-shot interaction runs.</li>
 <li>A failed invoke stays terminal and unavailable. V1 currently has no invoke retry control.</li>
-<li>Context attachment, annotations, draft persistence, and attachment-edge creation do not have product proof.</li>
+<li>Context attachment, per-node draft persistence, collapsed composer context, dock editing, and interaction-context creation have deterministic renderer, persistence, and zero-inference Electron proof. Release-candidate visual evidence remains a separate release-context gate.</li>
 </ul>
 <h2 data-prd-layer="Product" data-prd-order="6">6. Inspect the result</h2>
 <section class="capability-summary" aria-label="Inspect the result summary">

@@ -3,11 +3,24 @@ export function createElectronWorkspaceDriver({
   getProductSession,
   diagnosticBodyLength = 2_500,
   pollIntervalMs = 40,
+  operationTimeoutMs = 20_000,
 }) {
   const sleep = (milliseconds) => new Promise((resolveWait) => setTimeout(resolveWait, milliseconds));
 
   async function evaluate(expression) {
-    return getWindow().webContents.executeJavaScript(expression);
+    let timeout;
+    try {
+      return await Promise.race([
+        getWindow().webContents.executeJavaScript(expression),
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(
+            `Renderer operation exceeded ${operationTimeoutMs}ms: ${expression.slice(0, 160)}`,
+          )), operationTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
   }
 
   async function productRequest(path, options = {}) {
