@@ -75,7 +75,8 @@ export interface BuildGraphPresentationGradeOptions {
   readonly layers?: readonly PresentationLayerGrade[];
   readonly depthDecay?: number;
   readonly comprehensionRatings?: readonly PresentationRating[];
-  readonly scoreCeilings?: readonly (1 | 2 | 3 | 4)[];
+  readonly scoreCeilings?: readonly (1 | 2 | 3 | 4 | 5 | 6 | 7 | 8)[];
+  readonly scoreScaleMaximum?: 4 | 8;
 }
 
 export function buildGraphPresentationGrade(
@@ -104,10 +105,10 @@ export function buildGraphPresentationGrade(
     : renderedScore === null
       ? comprehensionScore
       : rounded(comprehensionScore * 0.65 + renderedScore * 0.35);
-  const declaredCeiling: 1 | 2 | 3 | 4 | null = options.scoreCeilings?.length
-    ? Math.min(...options.scoreCeilings) as 1 | 2 | 3 | 4
+  const declaredCeiling = options.scoreCeilings?.length
+    ? Math.min(...options.scoreCeilings) as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
     : null;
-  const scoreCeiling: 1 | 2 | 3 | 4 | null = declaredCeiling;
+  const scoreCeiling = declaredCeiling;
   const score = rawScore === null
     ? null
     : rounded(scoreCeiling === null ? rawScore : Math.min(rawScore, scoreCeiling));
@@ -122,6 +123,7 @@ export function buildGraphPresentationGrade(
     renderedScore,
     rawScore,
     scoreCeiling,
+    scoreScaleMaximum: options.scoreScaleMaximum ?? 4,
     depthDecay,
     layers,
     aggregation,
@@ -136,7 +138,8 @@ export interface BuildRecursiveGraphPresentationGradeOptions {
   readonly layers?: readonly PresentationLayerGrade[];
   readonly presentationRatings?: readonly PresentationRating[];
   readonly comprehensionRatings?: readonly PresentationRating[];
-  readonly scoreCeilings?: readonly (1 | 2 | 3 | 4)[];
+  readonly scoreCeilings?: readonly (1 | 2 | 3 | 4 | 5 | 6 | 7 | 8)[];
+  readonly scoreScaleMaximum?: 4 | 8;
   readonly rootLayerResultIds?: readonly string[];
 }
 
@@ -153,7 +156,7 @@ export function buildRecursiveGraphPresentationGrade(
   const presentation = options.status === "completed" ? meanRatings(options.presentationRatings ?? []) : null;
   const comprehension = options.status === "completed" ? meanRatings(options.comprehensionRatings ?? []) : null;
   const ceiling = options.scoreCeilings?.length
-    ? Math.min(...options.scoreCeilings) as 1 | 2 | 3 | 4
+    ? Math.min(...options.scoreCeilings) as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
     : null;
   const score = presentation === null ? null : rounded(ceiling === null ? presentation : Math.min(presentation, ceiling));
   const rootLayerResultIds = [...(options.rootLayerResultIds ?? [])];
@@ -167,6 +170,7 @@ export function buildRecursiveGraphPresentationGrade(
     renderedScore: null,
     rawScore: presentation,
     scoreCeiling: ceiling,
+    scoreScaleMaximum: options.scoreScaleMaximum ?? 4,
     depthDecay: 1,
     layers,
     aggregation: [],
@@ -274,7 +278,7 @@ function validatePresentationLayers(layers: readonly PresentationLayerGrade[]): 
     requireText(layer.summary, "presentation layer summary");
     for (const [criterionId, rating] of Object.entries(layer.ratings)) {
       requireIdentifier(criterionId, "presentation criterion ID");
-      if (rating !== null && ![1, 2, 3, 4].includes(rating)) {
+      if (rating !== null && ![1, 2, 3, 4, 5, 6, 7, 8].includes(rating)) {
         throw new Error(`Presentation criterion ${criterionId} on ${layer.layerId} has an invalid rating`);
       }
     }
@@ -284,7 +288,7 @@ function validatePresentationLayers(layers: readonly PresentationLayerGrade[]): 
       requireText(node.summary, "presentation node summary");
       for (const [criterionId, rating] of Object.entries(node.ratings)) {
         requireIdentifier(criterionId, "presentation node criterion ID");
-        if (rating !== null && ![1, 2, 3, 4].includes(rating)) {
+        if (rating !== null && ![1, 2, 3, 4, 5, 6, 7, 8].includes(rating)) {
           throw new Error(`Presentation node criterion ${criterionId} on ${node.nodeId} has an invalid rating`);
         }
       }

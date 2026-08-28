@@ -10,6 +10,11 @@ import {
   GRAPH_PRESENTATION_RUBRIC_V3,
   GRAPH_PRESENTATION_RUBRIC_V4,
   GRAPH_PRESENTATION_RUBRIC_V5,
+  GRAPH_PRESENTATION_RUBRIC_V6,
+  GRAPH_PRESENTATION_RUBRIC_V7,
+  GRAPH_PRESENTATION_RUBRIC_V8,
+  GRAPH_PRESENTATION_RUBRIC_V9,
+  GRAPH_PRESENTATION_RUBRIC_V10,
   SIMULATED_USER_RUBRIC_V1,
   getRubricCriterionKeys,
   validateRubricRatings,
@@ -179,6 +184,73 @@ describe("recursive simulated-user rubric", () => {
     expect(GRAPH_PRESENTATION_RUBRIC_V5.recursiveJudgment.contractId).toBe("recursive-presentation-judge-v3");
     expect(GRAPH_PRESENTATION_RUBRIC_V5.subjects.turn.criteria.recursive_coherence.description)
       .toContain("first-class missing-action opportunity");
+  });
+
+  it("makes interaction choices and relational layout explicit in v6 without changing the recursive data contract", () => {
+    expect(GRAPH_PRESENTATION_RUBRIC_V6.rubricVersion).toBe("graph-presentation-rubric-v6");
+    expect(GRAPH_PRESENTATION_RUBRIC_V6.recursiveJudgment.contractId).toBe("recursive-presentation-judge-v3");
+    expect(GRAPH_PRESENTATION_RUBRIC_V6.subjects.layer.criteria.relationship_clarity.description)
+      .toContain("arbitrary row or line");
+    expect(GRAPH_PRESENTATION_RUBRIC_V6.subjects.turn.criteria.navigation_value.description)
+      .toContain("there is no required action count");
+    expect(GRAPH_PRESENTATION_RUBRIC_V6.subjects.turn.criteria.presentation_quality.description)
+      .toContain("Do not require media capabilities");
+  });
+
+  it("separates human experience from task outcome and anchors weak relationship layouts in v7", () => {
+    expect(GRAPH_PRESENTATION_RUBRIC_V7.rubricVersion).toBe("graph-presentation-rubric-v7");
+    expect(GRAPH_PRESENTATION_RUBRIC_V7.recursiveJudgment.contractId).toBe("recursive-presentation-judge-v3");
+    expect(GRAPH_PRESENTATION_RUBRIC_V7.subjects.turn.criteria.answer_quality.description)
+      .toContain("belongs exclusively to the separate outcome grade");
+    expect(GRAPH_PRESENTATION_RUBRIC_V7.subjects.layer.criteria.relationship_clarity.description)
+      .toContain("score at most 2");
+    expect(GRAPH_PRESENTATION_RUBRIC_V7.subjects.turn.criteria.recursive_coherence.description)
+      .toContain("never convert an artifact defect");
+  });
+
+  it("records polish separately in recursive contract v4 without semantic compensation", () => {
+    expect(GRAPH_PRESENTATION_RUBRIC_V8.rubricVersion).toBe("graph-presentation-rubric-v8");
+    expect(GRAPH_PRESENTATION_RUBRIC_V8.recursiveJudgment).toMatchObject({
+      contractId: "recursive-presentation-judge-v4",
+      nodeScoreDimensions: ["content", "actionAllocation", "actionDelivery", "recursiveQuality", "polish"],
+    });
+    expect(GRAPH_PRESENTATION_RUBRIC_V8.subjects.turn.criteria.presentation_quality.description)
+      .toContain("recorded only as polish");
+    expect(GRAPH_PRESENTATION_RUBRIC_V8.subjects.layer.criteria.visual_organization.description)
+      .toContain("cannot raise this rating");
+  });
+
+  it("makes polish evidence exclusive and raises the graph-native bar in v9", () => {
+    expect(GRAPH_PRESENTATION_RUBRIC_V9.rubricVersion).toBe("graph-presentation-rubric-v9");
+    expect(GRAPH_PRESENTATION_RUBRIC_V9.polishPolicy).toEqual({
+      exclusiveEvidence: ["readability", "spacing", "alignment", "clipping", "density", "render_consistency", "icon_consistency"],
+      mayAffectOtherRatings: false,
+    });
+    expect(GRAPH_PRESENTATION_RUBRIC_V9.subjects.layer.criteria.visual_organization.label)
+      .toBe("Information architecture");
+    expect(GRAPH_PRESENTATION_RUBRIC_V9.subjects.turn.criteria.presentation_quality.label)
+      .toBe("Graph experience");
+    expect(GRAPH_PRESENTATION_RUBRIC_V9.subjects.turn.criteria.presentation_quality.description)
+      .toContain("Static prose-in-boxes is at most 2");
+    expect(GRAPH_PRESENTATION_RUBRIC_V9.subjects.layer.criteria.relationship_clarity.description)
+      .toContain("Do not infer a sequence from card prose");
+  });
+
+  it("uses reasoned 1-8 judgments without canned point meanings in v10", () => {
+    expect(GRAPH_PRESENTATION_RUBRIC_V10).toMatchObject({
+      rubricVersion: "graph-presentation-rubric-v10",
+      ratingScale: {
+        minimum: 1,
+        maximum: 8,
+        direction: "higher_is_better",
+        fixedPointMeanings: false,
+        reasonRequired: true,
+        screenshotEvidenceRequired: true,
+      },
+      recursiveJudgment: { contractId: "recursive-presentation-judge-v5" },
+    });
+    expect(GRAPH_PRESENTATION_RUBRIC_V10.subjects.turn.criteria.presentation_quality.description)
+      .not.toMatch(/a 3|4 is|at most 2/);
   });
 
   it("reports missing, unknown, and invalid rating keys without inference", () => {
