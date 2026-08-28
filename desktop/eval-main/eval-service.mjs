@@ -110,6 +110,16 @@ function copy(value) {
   return structuredClone(value);
 }
 
+export function evalModelSelectionRequest(selectedModel) {
+  return selectedModel === null ? {} : {
+    modelSelection: {
+      familyId: selectedModel.familyId,
+      providerId: selectedModel.providerId,
+      modelId: selectedModel.modelId,
+    },
+  };
+}
+
 function outcomeGradeFromChecks(checks, caseSnapshot = null) {
   const criteria = caseSnapshot?.artifacts?.outcomeRubric?.criteria || [];
   const criterionGrades = criteria.map((criterion) => ({
@@ -1523,13 +1533,7 @@ export class EvalService {
         initialMessage: prompts[0],
         harnessConfigurationName: execution.harnessConfigurationName,
         permissionProfileId,
-        ...(selectedModel === null ? {} : {
-          modelSelection: {
-            familyId: selectedModel.familyId,
-            providerId: selectedModel.providerId,
-            modelId: selectedModel.modelId,
-          },
-        }),
+        ...evalModelSelectionRequest(selectedModel),
         ...(projectId === null ? {} : { projectId }),
       },
     });
@@ -1540,7 +1544,10 @@ export class EvalService {
     for (const [offset, prompt] of prompts.slice(1).entries()) {
       const interaction = await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
         method: "POST",
-        body: { text: prompt },
+        body: {
+          text: prompt,
+          ...evalModelSelectionRequest(selectedModel),
+        },
       });
       const completedInteraction = await this.#waitForInteraction(thread.id, interaction.id);
       await this.#captureCandidateTrace(execution, completedInteraction);

@@ -15,6 +15,7 @@ import {
 
 import {
   EvalService,
+  evalModelSelectionRequest,
   judgeArtifactEvidenceForExecution,
   judgeArtifactForExecution,
   presentationGradeFromTurns,
@@ -24,6 +25,23 @@ import {
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const directories = [];
 const originalFetch = globalThis.fetch;
+
+it("carries the selected Eval model into every product interaction request", () => {
+  const selected = {
+    familyId: 7,
+    providerId: "codex",
+    modelId: "gpt-5.6-sol",
+    harnessId: "codex-layered-personal-presentation-v1",
+  };
+  expect(evalModelSelectionRequest(selected)).toEqual({
+    modelSelection: {
+      familyId: 7,
+      providerId: "codex",
+      modelId: "gpt-5.6-sol",
+    },
+  });
+  expect(evalModelSelectionRequest(null)).toEqual({});
+});
 
 afterEach(async () => {
   globalThis.fetch = originalFetch;

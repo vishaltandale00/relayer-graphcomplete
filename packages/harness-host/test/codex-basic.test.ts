@@ -816,12 +816,18 @@ describe("CodexBasicHarness", () => {
         type: "commandExecution",
         aggregatedOutput: "Decision-useful center",
       } });
+      options.onNotification?.("item/started", { item: {
+        id: "graph-command",
+        type: "commandExecution",
+        command: "/immutable/runtime/graph-authoring-launcher <<'NODE'\nDecision-useful center\nNODE",
+        aggregatedOutput: "Decision-useful center",
+      } });
       options.onNotification?.("item/agentMessage/delta", {
         itemId: "agent-delta",
         delta: "Decision-useful center",
       });
       options.onNotification?.("item/commandExecution/outputDelta", {
-        itemId: "command-delta",
+        itemId: "graph-command",
         delta: "Decision-useful center",
       });
       return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
@@ -850,8 +856,7 @@ describe("CodexBasicHarness", () => {
 
     await harness.complete({ ...context, trace: trace.sink });
 
-    const echoEvents = trace.events.filter((event) => event.providerEventId !== "unrelated-command"
-      && event.data.method !== "item/commandExecution/outputDelta");
+    const echoEvents = trace.events.filter((event) => event.providerEventId !== "unrelated-command");
     const serializedEchoes = JSON.stringify(echoEvents);
     expect(serializedEchoes).not.toContain("Decision-useful center");
     expect(serializedEchoes).not.toContain("The user prefers central layers that are immediately decision-useful.");
@@ -866,7 +871,8 @@ describe("CodexBasicHarness", () => {
     expect(JSON.stringify(agentDelta?.data)).not.toContain("Decision-useful center");
     const commandDelta = trace.events.find((event) => event.type === "provider.event"
       && event.data.method === "item/commandExecution/outputDelta");
-    expect(JSON.stringify(commandDelta?.data)).toContain("Decision-useful center");
+    expect(JSON.stringify(commandDelta?.data)).toContain("[redacted-personal-presentation]");
+    expect(JSON.stringify(commandDelta?.data)).not.toContain("Decision-useful center");
     const graphChild = trace.events.find((event) => event.type === "tool.call.started"
       && event.data.providerItemId === "graph-child");
     expect(graphChild?.data.delegationPrompt).toContain("[redacted-personal-presentation]");

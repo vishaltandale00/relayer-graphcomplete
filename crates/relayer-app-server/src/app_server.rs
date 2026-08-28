@@ -120,16 +120,9 @@ async fn reconcile_interrupted_interaction(
                 }
             });
         let personal_presentation = if runtime.supports_personal_presentation() {
-            let requested = runtime
-                .personal_presentation_version_key(&thread.harness_configuration_name)
-                .map_err(StartupReconciliationError::from_runtime)?;
             Some(crate::runtime::PersonalPresentationExecution::from(
                 &storage
-                    .prepare_personal_presentation_pin(
-                        interaction.id,
-                        requested,
-                        &startup_timestamp(),
-                    )
+                    .prepare_personal_presentation_pin(interaction.id, None, &startup_timestamp())
                     .await
                     .map_err(StartupReconciliationError::retryable)?,
             ))

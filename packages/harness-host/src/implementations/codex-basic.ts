@@ -88,6 +88,7 @@ interface ResolvedCodexPermission {
 
 interface CodexTraceState {
   readonly collaborationSpans: Map<string, HarnessTraceSpan>;
+  readonly graphAuthoringCommandIds: Set<string>;
 }
 
 interface NormalizedCollaborationItem {
@@ -133,7 +134,10 @@ export class CodexBasicHarness implements Harness {
       type: "prompt",
       data: { text: this.prompt(context, false), interactionNodeId: context.inputGraph.id },
     });
-    const traceState: CodexTraceState = { collaborationSpans: new Map() };
+    const traceState: CodexTraceState = {
+      collaborationSpans: new Map(),
+      graphAuthoringCommandIds: new Set(),
+    };
     const forceShutdown = new AbortController();
     this.activeForceShutdowns.add(forceShutdown);
     try {
@@ -496,11 +500,12 @@ function pinnedExecutionClause(launcher: string | undefined): string {
 }
 
 function traceCodexAppServerNotification(context: HarnessRunContext, method: string, params: unknown, state: CodexTraceState): void {
+  rememberGraphAuthoringCommand(state, params);
   const redactedParams = attachCommandExecutableAuthority(
     redactTraceData(redactPersonalPresentationTraceData(
       context,
       params,
-      isPersonalPresentationEchoEvent(method, params),
+      isPersonalPresentationEchoEvent(method, params, state),
     ) as JsonValue),
     params,
   );
@@ -570,13 +575,38 @@ function redactPersonalPresentationTraceData(
   ]));
 }
 
-function isPersonalPresentationEchoEvent(method: string, params: unknown): boolean {
+function rememberGraphAuthoringCommand(state: CodexTraceState, params: unknown): void {
+  if (!isRecord(params) || !isRecord(params.item)) return;
+  const item = params.item;
+  const id = optionalNonemptyString(item.id);
+  if (id === undefined) return;
+  const commands = [
+    item.command,
+    ...(Array.isArray(item.commandActions)
+      ? item.commandActions.flatMap((action) => isRecord(action) ? [action.command] : [])
+      : []),
+  ];
+  if (commands.some((command) => pinnedGraphAuthoringLauncher(command) !== undefined)) {
+    state.graphAuthoringCommandIds.add(id);
+  }
+}
+
+function isPersonalPresentationEchoEvent(
+  method: string,
+  params: unknown,
+  state: CodexTraceState,
+): boolean {
   const normalizedMethod = normalizeName(method);
   if (normalizedMethod.includes("delta")
     && (normalizedMethod.includes("agentmessage") || normalizedMethod.includes("reasoning"))) {
     return true;
   }
-  if (!isRecord(params) || !isRecord(params.item) || typeof params.item.type !== "string") return false;
+  if (!isRecord(params)) return false;
+  const itemId = optionalNonemptyString(params.itemId);
+  if (itemId !== undefined && state.graphAuthoringCommandIds.has(itemId)) return true;
+  if (!isRecord(params.item) || typeof params.item.type !== "string") return false;
+  const providerItemId = optionalNonemptyString(params.item.id);
+  if (providerItemId !== undefined && state.graphAuthoringCommandIds.has(providerItemId)) return true;
   return ["agentmessage", "reasoning", "collabtoolcall", "collabagenttoolcall"]
     .includes(normalizeName(params.item.type));
 }
