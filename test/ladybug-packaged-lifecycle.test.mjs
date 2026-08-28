@@ -30,7 +30,7 @@ describe("Ladybug packaged lifecycle qualification", () => {
     expect(npmEnvironmentForDesktopTarget(
       { PATH: "/bin" },
       { platform: "darwin", architecture: "x64" },
-    )).toEqual({ PATH: "/bin", npm_config_platform: "darwin", npm_config_arch: "x64" });
+    )).toEqual({ PATH: "/bin", npm_config_os: "darwin", npm_config_cpu: "x64" });
   });
   it("recognizes lock contention across the pinned Ladybug message variants", () => {
     expect(parseLadybugLockContention(

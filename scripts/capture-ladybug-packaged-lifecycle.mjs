@@ -58,8 +58,8 @@ export function parseLadybugLockContention(output) {
 export function npmEnvironmentForDesktopTarget(environment, target) {
   return {
     ...environment,
-    npm_config_platform: target.platform,
-    npm_config_arch: target.architecture,
+    npm_config_os: target.platform,
+    npm_config_cpu: target.architecture,
   };
 }
 
