@@ -5,7 +5,7 @@
   "assemblyMergeBase": "9188a8123b7c40436f0100d124c24103a768d32d",
   "integratedSource": {
     "algorithm": "sha256-of-sorted-path-nul-file-sha256-lf",
-    "sha256": "0cec65b8f1a2fd4c4fa9d69414a7166c8902cea82a47627c2ae9f585304bd8ec",
+    "sha256": "664062eb50c7db01c80ae4f711867da2e8db1fdce17da05bd17d4915cda0b74c",
     "files": [
       "README.md",
       "crates/relayer-app-server/src/runtime.rs",

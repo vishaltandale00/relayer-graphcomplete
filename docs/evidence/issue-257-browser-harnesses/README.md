@@ -16,6 +16,8 @@ Claude Ask currently leaves its coarse MCP tool outside `allowedTools`, so the n
 
 [`manifest.json`](manifest.json) pins the exact configuration and implementation digests used by the proof. Tests cover:
 
+On pull-request CI, the integrated source digest is read from the synthetic merge commit's second parent. That keeps the receipt bound to the exact PR head when `main` advances independently.
+
 - Codex helper identity/version, explicit loopback arguments, packaged ASAR presence, native approval labels, cancellation, and Codex-local failure isolation;
 - Claude target selection, bounded payloads and operations, navigation failure, cancellation, sanitized errors, native Ask/Auto/Full translation, and socket-only cleanup;
 - Prime archive/tree/three-target dependency closures, required root/dist skill assets, configuration discovery, production preflight, and unchanged permission profiles;
