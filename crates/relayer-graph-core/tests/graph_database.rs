@@ -428,6 +428,7 @@ async fn imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable()
                 options: vec![InputOption {
                     key: "one".into(),
                     label: "One".into(),
+                    unsupported_fields: Default::default(),
                 }],
                 minimum_selections: None,
                 unsupported_fields: Default::default(),
@@ -436,6 +437,7 @@ async fn imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable()
                 selected: vec![InputOption {
                     key: "one".into(),
                     label: "One".into(),
+                    unsupported_fields: Default::default(),
                 }],
             },
         }],
@@ -3077,10 +3079,12 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
                 InputOption {
                     key: "left".into(),
                     label: "Left".into(),
+                    unsupported_fields: Default::default(),
                 },
                 InputOption {
                     key: "right".into(),
                     label: "Right".into(),
+                    unsupported_fields: Default::default(),
                 },
             ],
             minimum_selections: None,
@@ -3093,10 +3097,12 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
                 InputOption {
                     key: "logs".into(),
                     label: "Logs".into(),
+                    unsupported_fields: Default::default(),
                 },
                 InputOption {
                     key: "traces".into(),
                     label: "Traces".into(),
+                    unsupported_fields: Default::default(),
                 },
             ],
             minimum_selections: Some(2),
@@ -3175,10 +3181,12 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
                     InputOption {
                         key: "same".into(),
                         label: "One".into(),
+                        unsupported_fields: Default::default(),
                     },
                     InputOption {
                         key: "same".into(),
                         label: "Two".into(),
+                        unsupported_fields: Default::default(),
                     },
                 ],
                 minimum_selections: Some(3),
@@ -3224,6 +3232,29 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
     }));
     assert!(issues.iter().any(|issue| {
         issue.code == "input_action_payload_unexpected" && issue.path == "sliderMin"
+    }));
+
+    let option_extension: ActionDraft = serde_json::from_value(serde_json::json!({
+        "clientKey": "extended-option-input",
+        "sourceNodeId": source.id,
+        "sourceLayerId": layer.id,
+        "kind": "input",
+        "label": "Extended option input",
+        "variant": "pill",
+        "targetLayerId": null,
+        "interactionText": null,
+        "control": "single_select",
+        "prompt": "Choose a value",
+        "options": [{"key":"one","label":"One","imageUrl":"https://example.invalid/one.png"}]
+    }))
+    .unwrap();
+    let error = writer.add_action(&option_extension).await.unwrap_err();
+    let GraphError::ValidationIssues { issues, .. } = error else {
+        panic!("expected a stable option-payload validation issue");
+    };
+    assert!(issues.iter().any(|issue| {
+        issue.code == "input_action_option_payload_unexpected"
+            && issue.path == "options[0].imageUrl"
     }));
 }
 
@@ -3382,10 +3413,12 @@ async fn submitted_input_children_are_canonical_isolated_and_retry_stable() {
                     InputOption {
                         key: "logs".into(),
                         label: "Logs".into(),
+                        unsupported_fields: Default::default(),
                     },
                     InputOption {
                         key: "traces".into(),
                         label: "Traces".into(),
+                        unsupported_fields: Default::default(),
                     },
                 ],
                 minimum_selections: Some(1),
@@ -3447,10 +3480,12 @@ async fn submitted_input_children_are_canonical_isolated_and_retry_stable() {
                 InputOption {
                     key: "traces".into(),
                     label: "Traces".into(),
+                    unsupported_fields: Default::default(),
                 },
                 InputOption {
                     key: "logs".into(),
                     label: "Logs".into(),
+                    unsupported_fields: Default::default(),
                 },
             ],
         },
@@ -3551,6 +3586,7 @@ async fn submitted_input_children_are_canonical_isolated_and_retry_stable() {
             selected: vec![InputOption {
                 key: "unknown".into(),
                 label: "Forged".into(),
+                unsupported_fields: Default::default(),
             }],
         },
     };

@@ -921,4 +921,43 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
         .unwrap();
     single.action.minimum_selections = Some(1);
     assert_rejected_with_parity(&invalid_single_minimum, "submitted_input_shape_invalid");
+
+    let single_only = || {
+        let mut records = fixture.clone();
+        let ConversationExportRecord::Turn(turn) = &mut records[2] else {
+            unreachable!()
+        };
+        turn.submitted_inputs
+            .retain(|input| input.action.control == ExportInputControl::SingleSelect);
+        records
+    };
+    let mut oversized_prompt = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut oversized_prompt[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.prompt = "p".repeat(2_001);
+    assert_rejected_with_parity(&oversized_prompt, "input_action_prompt_too_long");
+
+    let mut too_many_options = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut too_many_options[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options = (0..51)
+        .map(|index| option(&format!("key-{index}"), &format!("Option {index}")))
+        .collect();
+    assert_rejected_with_parity(&too_many_options, "input_action_option_count");
+
+    let mut invalid_key = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut invalid_key[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options[0].key = " untrimmed".into();
+    assert_rejected_with_parity(&invalid_key, "input_action_option_key_invalid");
+
+    let mut oversized_label = single_only();
+    let ConversationExportRecord::Turn(turn) = &mut oversized_label[2] else {
+        unreachable!()
+    };
+    turn.submitted_inputs[0].action.options[0].label = "l".repeat(513);
+    assert_rejected_with_parity(&oversized_label, "input_action_option_label_too_long");
 }

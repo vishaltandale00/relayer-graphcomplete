@@ -167,6 +167,21 @@ impl SqliteProductStore {
         interaction_id: InteractionId,
         error: &str,
     ) -> Result<bool, StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let finished_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time is before unix epoch")
+            .as_millis()
+            .to_string();
+        sqlx::query(
+            "UPDATE interaction_attempts
+             SET finished_at=?1,outcome='execution_failed',failure_category='application_restart',effect_boundary='unknown'
+             WHERE interaction_id=?2 AND outcome='running'",
+        )
+        .bind(&finished_at)
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
         let result = sqlx::query(
             "UPDATE interactions
              SET completion_status='not_started',completion_error=?1
@@ -182,9 +197,14 @@ impl SqliteProductStore {
         )
         .bind(error)
         .bind(interaction_id.value())
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
-        Ok(result.rows_affected() == 1)
+        if result.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        transaction.commit().await?;
+        Ok(true)
     }
 
     pub(crate) async fn get_interaction(

@@ -1232,6 +1232,7 @@ mod tests {
                 options: vec![InputOption {
                     key: "one".into(),
                     label: "From /workspace/project".into(),
+                    unsupported_fields: Default::default(),
                 }],
                 minimum_selections: None,
                 unsupported_fields: Default::default(),
@@ -1240,6 +1241,7 @@ mod tests {
                 selected: vec![InputOption {
                     key: "one".into(),
                     label: "From /workspace/project".into(),
+                    unsupported_fields: Default::default(),
                 }],
             },
             attempt_state: "failed".into(),

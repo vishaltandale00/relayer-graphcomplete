@@ -683,7 +683,9 @@ impl RelayerAppServer {
                                 .fail_interrupted_submitted_input(
                                     interaction.id,
                                     &harness,
-                                    &pending_error,
+                                    &format!(
+                                        "Submitted interaction input could not be reconciled with canonical graph provenance: {error}. The input draft was restored; send it again only after resolving the provenance mismatch."
+                                    ),
                                 )
                                 .await?;
                         }

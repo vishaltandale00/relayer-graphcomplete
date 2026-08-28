@@ -64,6 +64,8 @@ impl InputControl {
 pub struct InputOption {
     pub key: String,
     pub label: String,
+    #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unsupported_fields: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -451,6 +453,13 @@ fn validate_input_action(input: &InputAction, issues: &mut Vec<ValidationIssue>)
             }
             let mut keys = std::collections::HashSet::new();
             for (index, option) in input.options.iter().enumerate() {
+                for field in option.unsupported_fields.keys() {
+                    issues.push(ValidationIssue::new(
+                        "input_action_option_payload_unexpected",
+                        format!("options[{index}].{field}"),
+                        "Remove fields outside the input option grammar.",
+                    ));
+                }
                 if option.key.is_empty()
                     || option.key.trim() != option.key
                     || option.key.contains('\0')

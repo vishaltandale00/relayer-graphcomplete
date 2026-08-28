@@ -3534,6 +3534,7 @@ mod tests {
             options: vec![relayer_graph_core::InputOption {
                 key: "logs".into(),
                 label: "Logs".into(),
+                unsupported_fields: Default::default(),
             }],
             minimum_selections: None,
             unsupported_fields: Default::default(),
@@ -3584,6 +3585,7 @@ mod tests {
                 selected: vec![relayer_graph_core::InputOption {
                     key: "logs".into(),
                     label: "Logs".into(),
+                    unsupported_fields: Default::default(),
                 }],
             },
         };
