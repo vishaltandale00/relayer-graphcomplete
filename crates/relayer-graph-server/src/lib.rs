@@ -70,6 +70,10 @@ pub fn router(state: ServerState) -> Router {
             "/api/control/context-occurrences/canonical",
             post(canonical_context_occurrence),
         )
+        .route(
+            "/api/control/input-action-occurrences/canonical",
+            post(canonical_input_action_occurrence),
+        )
         .route("/api/control/interactions/{id}/output", get(control_output))
         .route(
             "/api/control/interactions/{id}/current",
@@ -575,6 +579,20 @@ async fn canonical_context_occurrence(
         state
             .graph
             .canonical_interaction_context_occurrence(&target)
+            .await?,
+    ))
+}
+
+async fn canonical_input_action_occurrence(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(occurrence): Json<relayer_graph_core::PresentingInputOccurrence>,
+) -> Result<Json<GraphAction>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .canonical_input_action_occurrence(&occurrence)
             .await?,
     ))
 }

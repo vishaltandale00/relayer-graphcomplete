@@ -3045,6 +3045,15 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
             InputControl::MultiSelect,
         ]
     );
+    let canonical = database
+        .canonical_input_action_occurrence(&PresentingInputOccurrence {
+            presenting_interaction_node_id: interaction.id,
+            presenting_layer_id: layer.id,
+            action_id: accepted.actions[0].id,
+        })
+        .await
+        .unwrap();
+    assert_eq!(canonical.input.unwrap().prompt, "Describe the evidence");
 
     let (database, interaction) = setup(None, thread(89)).await;
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();

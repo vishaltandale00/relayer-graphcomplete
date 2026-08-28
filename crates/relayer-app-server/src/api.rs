@@ -4,6 +4,7 @@ mod context_drafts;
 mod conversation_imports;
 mod environment;
 mod error;
+mod input_drafts;
 mod model_settings;
 mod projects;
 mod state;
@@ -230,6 +231,18 @@ pub(crate) fn router(
             "/api/threads/{thread_id}/context-confirmations/{draft_id}",
             axum::routing::put(context_drafts::update_confirmation)
                 .delete(context_drafts::dismiss_confirmation),
+        )
+        .route(
+            "/api/threads/{thread_id}/input-draft",
+            get(input_drafts::get),
+        )
+        .route(
+            "/api/threads/{thread_id}/input-draft/attachments",
+            axum::routing::put(input_drafts::commit),
+        )
+        .route(
+            "/api/threads/{thread_id}/input-draft/attachments/{presenting_interaction_node_id}/{presenting_layer_id}/{action_id}",
+            axum::routing::delete(input_drafts::detach),
         )
         .route(
             "/api/internal/annotation-sessions",

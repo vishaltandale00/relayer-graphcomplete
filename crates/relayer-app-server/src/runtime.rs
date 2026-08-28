@@ -1667,6 +1667,25 @@ impl RuntimeClient {
         Ok(serde_json::from_value(value)?)
     }
 
+    pub(crate) async fn canonical_input_action_occurrence(
+        &self,
+        occurrence: &relayer_graph_core::PresentingInputOccurrence,
+    ) -> Result<relayer_graph_core::GraphAction, RuntimeError> {
+        let response = self
+            .client
+            .post(
+                self.graph_url
+                    .join("api/control/input-action-occurrences/canonical")?,
+            )
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(occurrence)
+            .send()
+            .await?;
+        let value = response_json(response, StatusCode::OK).await?;
+        Ok(serde_json::from_value(value)?)
+    }
+
     async fn control_get(&self, path: &str) -> Result<Value, RuntimeError> {
         let response = self
             .client
