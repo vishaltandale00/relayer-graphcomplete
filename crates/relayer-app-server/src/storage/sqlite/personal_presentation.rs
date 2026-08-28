@@ -483,4 +483,72 @@ mod tests {
             pin
         );
     }
+
+    #[tokio::test]
+    async fn retired_versions_preserve_historical_threads_and_pins() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let store = SqliteProductStore::open(file.path()).await.unwrap();
+        let version = store
+            .publish_personal_presentation_version(
+                "personal-presentation-v0",
+                501,
+                601,
+                &serde_json::json!({"nodeId":501,"rootLayer":{"layer":{"id":601}}}),
+                "1",
+            )
+            .await
+            .unwrap();
+        let thread = store
+            .insert_thread_with_initial_interaction_and_personal_presentation(
+                crate::storage::NewThreadRecord {
+                    title: "Historical",
+                    project_id: None,
+                    initial_message: "Question",
+                    harness_configuration_name: "codex-layered-personal-presentation-v0",
+                    permission_profile_id: "auto",
+                    model_selection: None,
+                    timestamp: "2",
+                },
+                Some("personal-presentation-v0"),
+            )
+            .await
+            .unwrap();
+        store
+            .pin_personal_presentation(thread.root_interaction_id, &version, "3")
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE personal_presentation_versions SET retired=1 WHERE version_key='personal-presentation-v0'",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        store.pool.close().await;
+
+        let reopened = SqliteProductStore::open(file.path()).await.unwrap();
+        let replay = reopened
+            .prepare_personal_presentation_pin(thread.root_interaction_id, None, "4")
+            .await
+            .unwrap();
+        assert_eq!(replay.version_key, "personal-presentation-v0");
+        assert_eq!(replay.version_interaction_node_id, 501);
+        assert_eq!(replay.root_layer_id, 601);
+        assert!(
+            reopened
+                .insert_thread_with_initial_interaction_and_personal_presentation(
+                    crate::storage::NewThreadRecord {
+                        title: "Rejected",
+                        project_id: None,
+                        initial_message: "New question",
+                        harness_configuration_name: "codex-layered-personal-presentation-v0",
+                        permission_profile_id: "auto",
+                        model_selection: None,
+                        timestamp: "5",
+                    },
+                    Some("personal-presentation-v0"),
+                )
+                .await
+                .is_err()
+        );
+    }
 }

@@ -446,6 +446,9 @@ impl RelayerAppServer {
         {
             let profile = storage.personal_presentation_profile().await?;
             for version in profile.versions {
+                if version.retired {
+                    continue;
+                }
                 let materialized = runtime
                     .ensure_personal_presentation_version(&version.version_key)
                     .await?;

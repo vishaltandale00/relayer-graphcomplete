@@ -804,14 +804,14 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
             JOIN interactions target ON target.id=pin.interaction_id
             JOIN threads target_thread ON target_thread.id=target.thread_id
             JOIN personal_presentation_versions version ON version.version_key=pin.version_key
-            WHERE target_thread.surface!='conversation' OR version.retired!=0
+            WHERE target_thread.surface!='conversation'
                OR pin.version_interaction_node_id!=version.graph_node_id
                OR pin.root_layer_id!=version.root_layer_id
             UNION ALL
             SELECT 1 FROM threads target_thread
             JOIN personal_presentation_versions version
               ON version.version_key=target_thread.personal_presentation_version_key
-            WHERE target_thread.surface!='conversation' OR version.retired!=0
+            WHERE target_thread.surface!='conversation'
         )",
     )
     .fetch_one(pool)

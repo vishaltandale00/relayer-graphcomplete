@@ -93,6 +93,7 @@ describe("Eval managed Codex runtime", () => {
 
   it("publishes the connected managed Codex catalog once for fresh Eval profiles", async () => {
     const close = vi.fn(async () => undefined);
+    const credentialEnvironments = [];
     const requests = [];
     const fetchImpl = vi.fn(async (url, options) => {
       requests.push({ url: String(url), ...options, body: JSON.parse(options.body) });
@@ -100,16 +101,22 @@ describe("Eval managed Codex runtime", () => {
     });
     const provision = createEvalCodexCatalogProvisioner({
       productSession: { origin: "http://127.0.0.1:43123", cookie: { value: "write-token" } },
-      resolveRuntime: async () => ({ environment: { RELAYER_CODEX_BINARY: "/managed/codex" } }),
-      fetchImpl,
-      createCredentials: () => ({
-        account: async () => ({ status: "connected", account: { id: "account" } }),
-        request: async (method) => {
-          expect(method).toBe("model/list");
-          return { data: [{ id: "catalog-sol", model: "gpt-5.6-sol", displayName: "Sol", isDefault: true, supportedReasoningEfforts: [] }], nextCursor: null };
-        },
-        close,
+      resolveRuntime: async () => ({
+        executable: "/managed/codex",
+        environment: { PATH: "/managed/codex-path:/usr/bin" },
       }),
+      fetchImpl,
+      createCredentials: (environment) => {
+        credentialEnvironments.push(environment);
+        return {
+          account: async () => ({ status: "connected", account: { id: "account" } }),
+          request: async (method) => {
+            expect(method).toBe("model/list");
+            return { data: [{ id: "catalog-sol", model: "gpt-5.6-sol", displayName: "Sol", isDefault: true, supportedReasoningEfforts: [] }], nextCursor: null };
+          },
+          close,
+        };
+      },
     });
 
     await Promise.all([provision(), provision()]);
@@ -125,6 +132,10 @@ describe("Eval managed Codex runtime", () => {
       body: { providerId: "codex", connected: true, models: [{ id: "gpt-5.6-sol", providerDefault: true }] },
     });
     expect(close).toHaveBeenCalledOnce();
+    expect(credentialEnvironments).toEqual([{
+      PATH: "/managed/codex-path:/usr/bin",
+      RELAYER_CODEX_BINARY: "/managed/codex",
+    }]);
   });
 
   it("normalizes and deduplicates the helper PATH", () => {

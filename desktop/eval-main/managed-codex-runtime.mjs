@@ -102,7 +102,10 @@ export function createEvalCodexCatalogProvisioner({
   return async () => {
     provisioned ??= (async () => {
       const runtime = await resolveRuntime();
-      const credentials = createCredentials(runtime.environment);
+      const credentials = createCredentials({
+        ...runtime.environment,
+        RELAYER_CODEX_BINARY: runtime.executable,
+      });
       try {
         const catalog = await new CodexModelCatalogAdapter({ credentials }).discover();
         if (catalog.provider.status !== "available" || catalog.models.length === 0) {

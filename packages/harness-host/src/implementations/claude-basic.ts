@@ -16,6 +16,7 @@ import {
   type ClaudeBasicBrowserDependencies,
   type ClaudeBrowserSdk,
 } from "./claude-basic-browser.js";
+import { personalPresentationTraceValues } from "./personal-presentation-guidance.js";
 
 export const CLAUDE_BASIC_KEY = "claude.basic";
 
@@ -108,7 +109,10 @@ export class ClaudeBasicHarness implements Harness {
       data: { text: this.prompt(context, false), interactionNodeId: context.inputGraph.id },
     });
     const result = await this.run(prompt, context.model.modelId, graph, context.access, signal);
-    await context.trace.emit({ type: "message", data: { role: "assistant", text: result.text } });
+    await context.trace.emit({
+      type: "message",
+      data: { role: "assistant", text: redactPersonalPresentationResult(context, result.text) },
+    });
     if (result.sessionId) {
       this.sessionId = result.sessionId;
       this.sessionProviderDefinitionId = providerDefinitionId;
@@ -182,6 +186,15 @@ export class ClaudeBasicHarness implements Harness {
   private prompt(context: HarnessRunContext, includePersonalPresentation = true): string {
     return buildLayeredNavigationPrompt(context, this.clientModuleUrl, undefined, includePersonalPresentation);
   }
+}
+
+function redactPersonalPresentationResult(context: HarnessRunContext, text: string): string {
+  const traceValues = personalPresentationTraceValues(context);
+  if (traceValues === undefined) return text;
+  return [traceValues.exactBlock, ...traceValues.fragments].reduce(
+    (sanitized, value) => sanitized.split(value).join("[redacted-personal-presentation]"),
+    text,
+  );
 }
 
 export function claudePermissionMode(value: unknown): "default" | "acceptEdits" | "bypassPermissions" {

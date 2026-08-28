@@ -101,6 +101,9 @@ describe("Eval harness configuration availability", () => {
     });
     expect(evalPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses"), to: "harnesses", filter: ["*.yaml"] }');
     expect(evalPackaging).toContain('"main/managed-runtimes/**/*"');
+    expect(evalPackaging).toContain('"main/credentials/**/*"');
+    expect(evalPackaging).toContain('"main/models/**/*"');
+    expect(evalPackaging).toContain('"renderer/src/model-picker-model.js"');
     expect(evalPackaging).toContain('"shared/codex-runtime-environment.mjs"');
     expect(evalPackaging).toContain('"shared/managed-runtime-requirements.mjs"');
     expect(evalPackaging).toContain('"shared/target.mjs"');

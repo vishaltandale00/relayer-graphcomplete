@@ -257,6 +257,47 @@ describe("ClaudeBasicHarness", () => {
     expect(calls[1]?.options.resume).toBe("session-1");
   });
 
+  it("redacts preference fragments echoed by Claude from message traces", async () => {
+    const events: HarnessTraceEventInput[] = [];
+    const trace = createNoopHarnessTraceSink();
+    const harness = new ClaudeBasicHarness(factoryContext("ask"), {
+      query: sdkQuery([{
+        type: "result",
+        subtype: "success",
+        result: "Decision-useful center means Foreground the conclusion and material tradeoffs.",
+        session_id: "session-1",
+      }]),
+    });
+
+    await harness.complete({
+      ...personalPresentationRunContext(managedAccess(), true),
+      trace: { ...trace, emit: (event) => { events.push(event); } },
+    });
+
+    const tracedMessage = events.find((event) => event.type === "message")?.data.text;
+    expect(tracedMessage).toBe(
+      "[redacted-personal-presentation] means [redacted-personal-presentation]",
+    );
+  });
+
+  it("preserves Claude message traces without a presentation attachment", async () => {
+    const events: HarnessTraceEventInput[] = [];
+    const trace = createNoopHarnessTraceSink();
+    const text = "Decision-useful center is ordinary task content here.";
+    const harness = new ClaudeBasicHarness(factoryContext("ask"), {
+      query: sdkQuery([{
+        type: "result", subtype: "success", result: text, session_id: "session-1",
+      }]),
+    });
+
+    await harness.complete({
+      ...runContext(managedAccess()),
+      trace: { ...trace, emit: (event) => { events.push(event); } },
+    });
+
+    expect(events.find((event) => event.type === "message")?.data.text).toBe(text);
+  });
+
   it("uses definition-scoped runtime state and explicit bypass only for full access", async () => {
     let call: Parameters<ClaudeSdkQuery>[0] | undefined;
     const harness = new ClaudeBasicHarness(factoryContext("bypassPermissions", {
