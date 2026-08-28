@@ -1774,7 +1774,7 @@ GET  /api/graph/nodes/:id/output
 <h3>11.9 Graph search v1 contract</h3>
 <p><strong>Goal:</strong> Let authorized agents query accepted graph structure without known record identifiers.</p>
 <p><strong>Primary issue:</strong> <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/52">#52 Add graph search functionality</a>.</p>
-<p><strong>Current status:</strong> The product contract is settled. Runtime, packaging, recovery, and release evidence remain unverified.</p>
+<p><strong>Current status:</strong> The product contract is settled. The Issue #261 feasibility gate rejects the upstream Ladybug 0.19.1 artifacts as shipped. All three target families retain unowned runtime dependencies and lack complete shipped-license receipts. Projection, query, recovery, and release implementation remain blocked while the product contract stays unchanged.</p>
 <h4>Product requirements</h4>
 <ul>
 <li>Graph search uses Ladybug from its first enabled product path. SQLite search fallback is forbidden.</li>

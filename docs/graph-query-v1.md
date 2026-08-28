@@ -1,7 +1,8 @@
 # Relayer graph query contract, version 1
 
-Status: frozen contract for Issue #260. Runtime implementation and Ladybug qualification are
-owned by later Issue #52 DAG nodes.
+Status: frozen contract for Issue #260. The initial Ladybug qualification is a no-go because the
+pinned 0.19.1 native artifacts are not yet self-contained application-owned bytes; see
+`docs/evidence/issue-261-ladybug-qualification.md`. This does not change the contract.
 
 This document defines Relayer's deliberately bounded, read-only, GQL/Cypher-shaped graph query
 profile. It does not claim compatibility with complete Cypher or ISO GQL. The normative
