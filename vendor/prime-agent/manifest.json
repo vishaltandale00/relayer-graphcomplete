@@ -60,7 +60,7 @@
     "pythonPackageTreeSha256": "f70f003aa45414121ed7ec7f759f945369cbf4ea120a754e651a340bb8f8f0e4"
   },
   "dependencyClosureSha256ByTarget": {
-    "darwin-arm64": "bdbbff636ced9f4eca35ea16bb7a594cc89352c32dc0e1c039ccae753dc4fcea",
+    "darwin-arm64": "da92908f0d08ec84e0481fbb4d5cf9938c6fe9a89fbd8f553defad9c38a14dc7",
     "darwin-x64": "958556efec9f1d899f74d33a4dde357c5901168c7b3ae36e42380d494d40a917",
     "win32-x64": "d9457c3a442be1705e9d42d4640a187d7030dc1de5a332ea3643a15a1e70186b"
   },

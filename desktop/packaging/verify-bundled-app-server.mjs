@@ -195,7 +195,9 @@ export async function verifyPackagedPrimeAgent(
     const dependencyClosureDigest = verifyDependencyClosure(...closureArguments);
     const expectedClosureDigest = manifest.dependencyClosureSha256ByTarget[targetKey];
     if (!expectedClosureDigest || dependencyClosureDigest !== expectedClosureDigest) {
-      throw new Error("Bundled Prime Agent dependency closure mismatch.");
+      throw new Error(
+        `Bundled Prime Agent dependency closure mismatch for ${targetKey}: expected ${expectedClosureDigest || "missing"}, actual ${dependencyClosureDigest}.`,
+      );
     }
   } else {
     verifySignedDependencyClosureSnapshot(

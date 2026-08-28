@@ -1,0 +1,217 @@
+{
+  "schema": "relayer.telemetry-privacy-corpus/v1",
+  "positiveCases": [
+    {
+      "component": "renderer",
+      "code": "renderer.unhandled_crash",
+      "exceptionClass": "TypeError",
+      "frames": [{ "module": "desktop/renderer/src/main.js", "line": 41, "column": 7 }]
+    },
+    {
+      "component": "electron-main",
+      "code": "electron_main.unhandled_crash",
+      "exceptionClass": "Error",
+      "frames": [{ "module": "desktop/main/index.mjs", "line": 413, "column": 7 }]
+    },
+    {
+      "component": "node-harness-host",
+      "code": "node_harness_host.unhandled_crash",
+      "exceptionClass": "Error",
+      "frames": [{ "module": "packages/harness-host/dist/host.js", "line": 27, "column": 4 }]
+    },
+    {
+      "component": "rust-app-server",
+      "code": "rust_app_server.startup_failure",
+      "exceptionClass": null,
+      "frames": [{ "module": "crates/relayer-app-server/src/main.rs", "line": 88, "column": 2 }]
+    },
+    {
+      "component": "rust-graph-server",
+      "code": "rust_graph_server.unexpected_exit",
+      "exceptionClass": null,
+      "frames": [{ "module": "crates/relayer-graph-server/src/main.rs", "line": 64, "column": 9 }]
+    }
+  ],
+  "forbiddenCases": [
+    {
+      "id": "absolute-raw-path",
+      "kind": "frame-module",
+      "value": "/Users/privacy-sentinel/private-workspace/secret.mjs"
+    },
+    {
+      "id": "raw-token",
+      "kind": "extra-field",
+      "field": "accessToken",
+      "value": "privacy-sentinel-token"
+    },
+    {
+      "id": "raw-headers",
+      "kind": "extra-field",
+      "field": "headers",
+      "value": { "authorization": "Bearer privacy-sentinel-header" }
+    },
+    {
+      "id": "process-arguments",
+      "kind": "extra-field",
+      "field": "processArgs",
+      "value": ["--credential=privacy-sentinel-argument"]
+    },
+    {
+      "id": "prompt-content",
+      "kind": "extra-field",
+      "field": "prompt",
+      "value": "privacy-sentinel-prompt"
+    },
+    {
+      "id": "credential-material",
+      "kind": "extra-field",
+      "field": "credential",
+      "value": "privacy-sentinel-credential"
+    },
+    {
+      "id": "graph-content",
+      "kind": "extra-field",
+      "field": "graph",
+      "value": { "private": "privacy-sentinel-graph" }
+    },
+    {
+      "id": "environment-content",
+      "kind": "extra-field",
+      "field": "environment",
+      "value": { "SECRET": "privacy-sentinel-environment" }
+    },
+    {
+      "id": "log-content",
+      "kind": "extra-field",
+      "field": "log",
+      "value": "privacy-sentinel-log"
+    },
+    {
+      "id": "raw-error",
+      "kind": "extra-field",
+      "field": "rawError",
+      "value": { "message": "privacy-sentinel-error" }
+    },
+    {
+      "id": "filename",
+      "kind": "extra-field",
+      "field": "filename",
+      "value": "privacy-sentinel-file.txt"
+    },
+    {
+      "id": "command",
+      "kind": "extra-field",
+      "field": "command",
+      "value": "privacy-sentinel-command"
+    },
+    {
+      "id": "cookie",
+      "kind": "extra-field",
+      "field": "cookie",
+      "value": "privacy-sentinel-cookie"
+    },
+    {
+      "id": "url",
+      "kind": "extra-field",
+      "field": "url",
+      "value": "https://privacy-sentinel.invalid/private"
+    },
+    {
+      "id": "provider-state",
+      "kind": "extra-field",
+      "field": "providerState",
+      "value": { "detail": "privacy-sentinel-provider" }
+    },
+    {
+      "id": "model-output",
+      "kind": "extra-field",
+      "field": "modelOutput",
+      "value": "privacy-sentinel-model-output"
+    },
+    {
+      "id": "path-field",
+      "kind": "extra-field",
+      "field": "path",
+      "value": "/Users/privacy-sentinel/private"
+    },
+    {
+      "id": "request-data",
+      "kind": "extra-field",
+      "field": "request",
+      "value": { "body": "privacy-sentinel-request" }
+    },
+    {
+      "id": "windows-absolute-frame",
+      "kind": "frame-module",
+      "value": "C:\\Users\\privacy-sentinel\\project\\main.js"
+    },
+    {
+      "id": "url-frame",
+      "kind": "frame-module",
+      "value": "https://privacy-sentinel.invalid/main.js"
+    },
+    {
+      "id": "traversal-frame",
+      "kind": "frame-module",
+      "value": "desktop/renderer/../main/index.mjs"
+    },
+    {
+      "id": "node-modules-frame",
+      "kind": "frame-module",
+      "value": "desktop/renderer/node_modules/vendor/index.js"
+    },
+    {
+      "id": "vendor-frame",
+      "kind": "frame-module",
+      "value": "desktop/renderer/vendor/marked.js"
+    },
+    {
+      "id": "protocol-frame",
+      "kind": "frame-module",
+      "value": "desktop/renderer/http:remote.js"
+    },
+    {
+      "id": "top-level-dependency-frame",
+      "kind": "frame-module",
+      "value": "node_modules/vendor/index.js"
+    },
+    {
+      "id": "third-party-rust-frame",
+      "kind": "frame-module",
+      "value": "crates/third-party/src/lib.rs"
+    },
+    {
+      "id": "invented-renderer-module",
+      "kind": "frame-module",
+      "value": "desktop/renderer/privacy-sentinel-prompt.js"
+    },
+    {
+      "id": "invented-electron-module",
+      "kind": "frame-module",
+      "value": "desktop/main/privacy-sentinel-token.mjs"
+    },
+    {
+      "id": "invented-harness-module",
+      "kind": "frame-module",
+      "value": "packages/harness-host/dist/privacy-sentinel-graph.js"
+    },
+    {
+      "id": "invented-rust-app-module",
+      "kind": "frame-module",
+      "value": "crates/relayer-app-server/src/privacy-sentinel-command.rs"
+    },
+    {
+      "id": "invented-rust-graph-module",
+      "kind": "frame-module",
+      "value": "crates/relayer-graph-server/src/privacy-sentinel-credential.rs"
+    },
+    {
+      "id": "oversized-frames",
+      "kind": "oversized-frames"
+    },
+    {
+      "id": "oversized-module",
+      "kind": "oversized-module"
+    }
+  ]
+}

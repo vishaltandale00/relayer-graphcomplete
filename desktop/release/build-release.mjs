@@ -8,6 +8,7 @@ import { desktopReleaseAppPath } from "./app-path.mjs";
 import { loadDesktopReleaseContract } from "./contract.mjs";
 import { finalizeDesktopUpdateArtifact } from "./finalize-update-artifact.mjs";
 import { notarizeAndStapleDesktopDMGs } from "./notarize-and-staple.mjs";
+import { prepareDesktopTelemetryArtifacts } from "./telemetry-artifacts.mjs";
 import { verifyMacOSApplication } from "./verify-macos-app.mjs";
 import { verifyPackagedDesktopContract } from "./verify-packaged-contract.mjs";
 import { verifyDesktopUpdateZip } from "./verify-update-zip.mjs";
@@ -43,7 +44,10 @@ export async function buildDesktopRelease({ channelName = process.argv[2], envir
     "-p", "relayer-app-server",
     "-p", "relayer-graph-server",
     "--target", contract.rustTarget,
-  ], { cwd: repositoryRoot, env: releaseEnvironment });
+  ], {
+    cwd: repositoryRoot,
+    env: { ...releaseEnvironment, CARGO_PROFILE_RELEASE_DEBUG: "1" },
+  });
   await rm(distRoot, { recursive: true, force: true });
   const builderArguments = contract.platform === "darwin"
     ? ["--config", "desktop/packaging/electron-builder.mjs", "--mac", "dmg", "zip", `--${contract.architecture}`, "--publish", "never"]
@@ -65,6 +69,12 @@ export async function buildDesktopRelease({ channelName = process.argv[2], envir
     await verifyWindowsRelease({ appOutDir: appPath, distRoot, contract });
   }
   await verifyPackagedDesktopContract({ appPath, contract });
+  await prepareDesktopTelemetryArtifacts({
+    contract,
+    repositoryRoot,
+    outputRoot: resolve(distRoot, "telemetry"),
+    packagedApplication: appPath,
+  });
   await writeDesktopReleaseEvidence({ distRoot, contract });
   return verifyDesktopReleaseEvidence({ distRoot, contract });
 }

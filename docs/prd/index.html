@@ -781,7 +781,28 @@ type CompleteResult =
 <li>Logout disables the current telemetry generation and clears the encrypted local refresh credential before best-effort Auth0 revocation. It does not sign the browser out.</li>
 </ul>
 <p>Electron main owns state and PKCE generation, loopback binding, callback validation, direct token operations, OIDC verification, encrypted refresh-token custody, and account generation. Stable can bind only ports 49152 through 49154. Preview can bind only ports 49155 through 49157. The renderer receives only a closed presentation state, the selected channel, a pseudonymous subject where useful, and safe reason codes.</p>
-<h3>2.5 Configuration schema</h3>
+<h3>2.5 Authenticated error reporting</h3>
+<p>Electron main is the only Sentry authority. Renderer and child processes submit typed records through generation-bound local capabilities.</p>
+<p>Only a verified account generation enables admission. Every other account state creates no request or queue record.</p>
+<p>Main derives one stable identifier with <code>SHA-256("graphcomplete-sentry-user-v1\0" || UTF-8(Auth0 sub))</code>. Callers cannot supply identity or transport configuration.</p>
+<ul>
+<li>V1 reports only unhandled process crashes, supervised-child startup failures, and supervised-child unexpected exits.</li>
+<li>Handled operation failures, validation, denials, cancellations, retries, disconnections, warnings, information, and success never report.</li>
+<li>Accepted JavaScript frames use application-relative module names. Each event keeps at most 32 frames and 256 characters per module name.</li>
+<li>Rust frames name only approved workspace crates and modules. Absolute paths and third-party frames are rejected.</li>
+<li>Every module name must match the exact packaged-module inventory. Valid-looking invented names are rejected.</li>
+<li>Approved fields are stable failure code, code-owned message, frames, component, operation, release, environment, OS, architecture, and pseudonymous identity.</li>
+<li>Prompts, graph or model content, paths, commands, environment data, credentials, requests, URLs, logs, and raw errors are forbidden.</li>
+<li>Breadcrumbs, attachments, replay, tracing, profiling, performance events, default PII, and automatic request context remain disabled.</li>
+</ul>
+<p>The encrypted queue holds at most 32 records and 256 KiB. Records expire after seven days, and overflow evicts the oldest record.</p>
+<p>Any corrupt queue is deleted. Retry requires revalidation of the same Auth0 subject and never creates recursive telemetry.</p>
+<p>Logout or account replacement disables admission and deletes the old queue before account presentation changes.</p>
+<p>Release identity comes only from immutable sealed package metadata. Electron main supplies the Sentry environment from its validated current update channel.</p>
+<p>The versioned shared privacy corpus covers every process seam and forbidden field. <code>npm run evidence:telemetry</code> runs its deterministic portfolio.</p>
+<p>Live Auth0, packaged storage, system-browser, upload, and symbolication proof runs only for Preview or Stable release candidates.</p>
+<p>Each target proves only its native platform: macOS Apple Silicon, macOS Intel, or Windows x64. Missing target evidence remains indeterminate.</p>
+<h3>2.6 Configuration schema</h3>
 <pre><code class="language-ts">type AgentConfiguration = {
   harnessId: string;
   harnessVersion: string;
@@ -806,7 +827,7 @@ type InteractionModelBinding = {
 };
 </code></pre>
 <p>The harness binding is written when the thread&#39;s root interaction is created and is inherited by every interaction in that thread. The model picker remains available in the composer and may change before any interaction. Every submitted interaction records the exact provider, credential reference, and model used for that call.</p>
-<h3>2.6 Product requirements</h3>
+<h3>2.7 Product requirements</h3>
 <ul>
 <li><strong>AGT-001:</strong> Agent-provider login remains independent from the optional Relayer account. No avatar or cloud-sync promise appears in V1.</li>
 <li><strong>AGT-002:</strong> Agent login is the primary setup task. Harness selection does not compete with credential setup.</li>
@@ -826,8 +847,20 @@ type InteractionModelBinding = {
 <li><strong>ACC-006:</strong> Refresh rotation and logout cannot resurrect stale credentials after generation invalidation.</li>
 <li><strong>ACC-007:</strong> Optional account sign-in is a dedicated onboarding step after provider setup and before projects, chats, threads, or the desktop workspace are revealed. Sign in and Continue without an account both resolve the step, and account failure cannot trap local use.</li>
 <li><strong>ACC-008:</strong> The bottom-right control starts sign-in directly while signed out and opens minimal settings for an existing account. Account UX never shows Stable or Preview.</li>
+<li><strong>TEL-001:</strong> Electron main alone owns Sentry admission, identity, queueing, SDK configuration, and transport.</li>
+<li><strong>TEL-002:</strong> Only a verified account generation reports. Main derives the stable domain-separated pseudonym and callers cannot supply identity.</li>
+<li><strong>TEL-003:</strong> The final event contains only approved fields. Forbidden privacy fixtures fail before transport and queue persistence.</li>
+<li><strong>TEL-004:</strong> V1 reports only unhandled crashes and supervised-child startup or unexpected-exit failures.</li>
+<li><strong>TEL-005:</strong> Frames are bounded and application-relative. Rust frames use only approved workspace crate and module names.</li>
+<li><strong>TEL-006:</strong> Every external process capability is generation-bound. Process restart and account-generation change invalidate it.</li>
+<li><strong>TEL-007:</strong> The encrypted queue holds 32 records and 256 KiB for seven days. Overflow evicts oldest, and corruption deletes the queue.</li>
+<li><strong>TEL-008:</strong> Queue retry requires the same revalidated Auth0 subject. Rejection and transport failure never recurse.</li>
+<li><strong>TEL-009:</strong> Logout or account replacement disables admission and deletes the prior queue before public account state changes.</li>
+<li><strong>TEL-010:</strong> Events use immutable sealed release identity. Main alone supplies environment from the validated current update channel.</li>
+<li><strong>TEL-011:</strong> Reporting never changes product behavior, graph acceptance, transactions, retry, supervision, or shutdown.</li>
+<li><strong>TEL-012:</strong> One versioned privacy corpus and deterministic telemetry portfolio cover every process seam.</li>
 </ul>
-<h3>2.7 Verification</h3>
+<h3>2.8 Verification</h3>
 <p>Deterministic UI tests cover each selector transition, conditional field, validation error, and disabled state. They also cover secure storage and secret removal. Credential-adapter integration tests use fake Codex and provider servers.</p>
 <table>
 <thead><tr><th>Optional-account checkpoint</th><th>Deterministic proof</th></tr></thead>
@@ -838,7 +871,20 @@ type InteractionModelBinding = {
 <tr><td><code>ACC-005</code>, <code>ACC-007</code>, and <code>ACC-008</code></td><td><code>test/desktop-account-ui.test.mjs</code> verifies the startup gate, direct account control, minimal settings, action coalescing, and contained failures.</td></tr>
 </tbody>
 </table>
-<p>One optional authentication smoke test runs before a signed release. It is not in the default test suite. It does not make a paid Complete call.</p>
+<table>
+<thead><tr><th>Telemetry checkpoint</th><th>Deterministic proof</th></tr></thead>
+<tbody>
+<tr><td><code>TEL-001</code>, <code>TEL-002</code>, and <code>TEL-006</code></td><td><code>desktop-authenticated-error-startup</code>, <code>desktop-rust-error-capabilities</code>, and account-session fixtures exercise bootstrap, live child refresh, logout, replacement, verified, uncertain, stale, and restarted generations without live Auth0.</td></tr>
+<tr><td><code>TEL-003</code> and <code>TEL-005</code></td><td>The shared privacy corpus, renderer reporting, and stack-sanitizer suites cross every seam. They reject every forbidden field, absolute or third-party frame, oversized frame set, and extra key.</td></tr>
+<tr><td><code>TEL-004</code> and <code>TEL-011</code></td><td><code>desktop-error-domain-adapters</code> drives all five production adapters. Expected states, reporting rejection, and transport failure produce no product behavior change.</td></tr>
+<tr><td><code>TEL-007</code>, <code>TEL-008</code>, and <code>TEL-009</code></td><td>Queue tests cover size, count, age, eviction, corruption, same-subject retry, logout, replacement, and recursion suppression.</td></tr>
+<tr><td><code>TEL-010</code></td><td>Release and telemetry-artifact fixtures reject caller identity, mismatched metadata, source bytes, native debug IDs, targets, and authority outside release CI. Main projects validated Development, Preview, or Stable environment.</td></tr>
+<tr><td><code>TEL-012</code></td><td><code>npm run evidence:telemetry</code> first runs the named adapter, service-protocol, and shared Rust suites. It then runs the versioned zero-inference loopback privacy portfolio and emits reviewable evidence.</td></tr>
+</tbody>
+</table>
+<p>The default portfolio uses no paid inference, production Auth0, Relayer API, or live Sentry.</p>
+<p>The default portfolio does not induce a panic in a spawned production Rust binary. That remains explicit in its evidence limitations.</p>
+<p>Live authentication and packaged symbol proof run only for Preview or Stable release candidates. Each target proves only its own platform.</p>
 <h2 data-prd-layer="Evidence" data-prd-order="15.1">15A. Agent connection evidence</h2>
 <p><code>PROV-001</code> is one product requirement with several observable subrequirements, not a collection of independent setup features:</p>
 <ul>

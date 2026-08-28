@@ -18,8 +18,15 @@ import {
 } from "./providers/provider-definition-store.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
 import { createConversationExportService } from "./services/conversation-export.mjs";
+import {
+  createDesktopAccountTelemetry,
+  createDesktopErrorReporterIssuer,
+  initializeDesktopAuthenticatedErrorReporting,
+  setDesktopAuthenticatedErrorChannel,
+} from "./services/authenticated-error-startup.mjs";
 import { inspectCodexBrowserMcpRuntime } from "./services/codex-browser-mcp-runtime.mjs";
 import { RelayerAppServerService } from "./services/relayer-app-server.mjs";
+import { installElectronMainErrorAdapter } from "./services/electron-main-error-adapter.mjs";
 import { createCanaryEvidenceLog } from "./services/canary-evidence-log.mjs";
 import { GraphCompleteRuntimeService } from "./services/graphcomplete-runtime.mjs";
 import { inspectPrimeAgentRuntime, requirePrimeAgentRuntime } from "./services/prime-agent-runtime.mjs";
@@ -138,6 +145,14 @@ if (primaryInstance) {
   let appearance = "dark";
   const settings = createSettingsStore(userDataPath);
   const tutorial = createTutorialLifecycle({ settings });
+  let authenticatedErrorReporting;
+  let electronMainErrorAdapter;
+  const issueErrorReporter = createDesktopErrorReporterIssuer({
+    getReporting: () => authenticatedErrorReporting,
+  });
+  const issueErrorCapability = (component, processGeneration) => (
+    authenticatedErrorReporting?.issueCapability({ component, processGeneration }) ?? null
+  );
   let fatalShutdownRequested = false;
   const requestFatalShutdown = () => {
     fatalShutdownRequested = true;
@@ -163,6 +178,8 @@ if (primaryInstance) {
       if (!providerSetup) throw new Error("Provider execution broker is not ready.");
       return providerSetup.acquireExecution(providerId);
     },
+    issueErrorReporter,
+    issueErrorCapability,
     onUnexpectedStop: () => {
       dialog.showErrorBox(
         "Relayer graph service stopped",
@@ -175,22 +192,36 @@ if (primaryInstance) {
   let modelCatalog;
   let providerSetup;
   let providerComposition;
-  const accountService = createDesktopAccountService({
-    channel: "stable",
-    credentialPath: join(userDataPath, "account-credentials.json"),
-    auth0: GRAPHCOMPLETE_AUTH0,
-    launcherUrl: GRAPHCOMPLETE_LOGIN_URL,
-    encrypt: async (value) => {
-      if (!safeStorage.isEncryptionAvailable()) throw new Error("Operating-system credential encryption is unavailable.");
-      return safeStorage.encryptString(value).toString("base64");
+  let accountService;
+  const accountTelemetry = createDesktopAccountTelemetry({
+    getReporting: () => authenticatedErrorReporting,
+    refreshChildren: async () => {
+      await Promise.allSettled([
+        graphRuntime.refreshErrorCapability(),
+        productServer?.refreshErrorCapability(),
+      ]);
     },
-    decrypt: async (value) => {
-      if (!safeStorage.isEncryptionAvailable()) throw new Error("Operating-system credential encryption is unavailable.");
-      return safeStorage.decryptString(Buffer.from(value, "base64"));
-    },
-    openExternal: (url) => shell.openExternal(url),
-    emit: (state) => mainWindow?.webContents.send("relayer:account-changed", state),
   });
+
+  function createAccountService(channel) {
+    return createDesktopAccountService({
+      channel,
+      credentialPath: join(userDataPath, "account-credentials.json"),
+      auth0: GRAPHCOMPLETE_AUTH0,
+      launcherUrl: GRAPHCOMPLETE_LOGIN_URL,
+      encrypt: async (value) => {
+        if (!safeStorage.isEncryptionAvailable()) throw new Error("Operating-system credential encryption is unavailable.");
+        return safeStorage.encryptString(value).toString("base64");
+      },
+      decrypt: async (value) => {
+        if (!safeStorage.isEncryptionAvailable()) throw new Error("Operating-system credential encryption is unavailable.");
+        return safeStorage.decryptString(Buffer.from(value, "base64"));
+      },
+      openExternal: (url) => shell.openExternal(url),
+      emit: (state) => mainWindow?.webContents.send("relayer:account-changed", state),
+      telemetry: accountTelemetry,
+    });
+  }
 
   const managedRuntimeDescriptor = (runtime) => Object.freeze({
     runtimeId: runtime.runtimeId,
@@ -241,6 +272,7 @@ if (primaryInstance) {
     desktopDirectory,
     getAppearance: () => appearance,
     updater,
+    issueErrorReporter,
   });
 
   let shutdownPromise;
@@ -259,12 +291,22 @@ if (primaryInstance) {
     shutdownPromise ??= (async () => {
       const results = [];
       try {
+        electronMainErrorAdapter?.close();
+      } catch (error) {
+        results.push({ status: "rejected", reason: error });
+      }
+      try {
         if (productServer) await productServer.close();
       } catch (error) {
         results.push({ status: "rejected", reason: error });
       }
+      try {
+        if (accountService) await accountService.close();
+      } catch (error) {
+        results.push({ status: "rejected", reason: error });
+      }
+      void authenticatedErrorReporting?.close().catch(() => undefined);
       results.push(...await Promise.allSettled([
-        accountService.close(),
         providerComposition?.close(),
         graphRuntime.close(),
       ]));
@@ -281,8 +323,24 @@ if (primaryInstance) {
     appearance = saved.appearance === "light" ? "light" : "dark";
     nativeTheme.themeSource = appearance;
     const channel = resolveUpdateChannel(saved.updateChannel);
+    const telemetryPackageMetadata = app.isPackaged ? metadata : {
+      version: app.getVersion(),
+      relayerArtifactMode: "development",
+      relayerProductName: "Relayer Dev",
+    };
+    authenticatedErrorReporting = await initializeDesktopAuthenticatedErrorReporting({
+      userDataPath,
+      packageMetadata: telemetryPackageMetadata,
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      architecture: process.arch,
+      currentUpdateChannel: releaseArtifact ? channel : "development",
+      safeStorage,
+      onUnavailable: () => console.error("Authenticated error reporting unavailable."),
+    });
+    electronMainErrorAdapter = installElectronMainErrorAdapter({ issueErrorReporter });
+    accountService = createAccountService(channel);
     if (channel === "preview") updater.setChannel("preview");
-    await accountService.setChannel(channel);
     void accountService.start().catch((error) => console.error("Optional desktop account initialization failed:", error));
     const activation = await managedRuntimeInstaller.activatePendingAppUpdate(app.getVersion());
     if (activation.failures.length) {
@@ -322,6 +380,8 @@ if (primaryInstance) {
         );
         requestFatalShutdown();
       },
+      issueErrorReporter,
+      issueErrorCapability,
     });
     const productSession = await productServer.start();
     const publishCatalog = (snapshot, { signal } = {}) => (
@@ -378,7 +438,14 @@ if (primaryInstance) {
       shell,
       nativeTheme,
       credentials: accountService,
-      accountChannel: accountService,
+      accountChannel: {
+        setChannel: (nextChannel) => setDesktopAuthenticatedErrorChannel({
+          reporting: authenticatedErrorReporting,
+          account: accountService,
+          releaseArtifact,
+          channel: nextChannel,
+        }),
+      },
       modelCatalog,
       providerDefinitions: providerSetup,
       validateProviderOnboarding: () => productServer.validateProviderOnboarding(),
