@@ -5,8 +5,8 @@
   "assemblyMergeBase": "9188a8123b7c40436f0100d124c24103a768d32d",
   "integratedSource": {
     "algorithm": "sha256-of-sorted-path-nul-file-sha256-lf",
-    "snapshotId": "issue-257-browser-harnesses-v4",
-    "sha256": "346cbc5887dd9174e75b3f6e7afcd21b17dab0eba8e9a0ad2932f1e68f27928f",
+    "snapshotId": "issue-257-browser-harnesses-v5",
+    "sha256": "5094be2c8a2d66735b1576f58917deafc3e3161d6f71a99d89d37da2e2f0a176",
     "files": [
       ".github/workflows/ci.yml",
       "README.md",
@@ -63,7 +63,7 @@
       "desktop/packaging/eval-electron-builder.mjs": "9e3a4e206beeede788e94e8e6fdf6b58ec5a664657dd43433049bd4677612b77",
       "desktop/packaging/verify-bundled-app-server.mjs": "065d0c19b21aafe5786751cbc016cb4862a22ce79dba6826172b9a56884e923d",
       "desktop/shared/managed-runtime-requirements.mjs": "a05bc3afeb3b344b72e48f9e6fc5a599586b1a2d4c6f0afe43b21cef37b7c39c",
-      "docs/evidence/issue-257-browser-harnesses/README.md": "70e495b4706d6fe4057cb96954a797e61c895157b00967ba65764bc1effad3e4",
+      "docs/evidence/issue-257-browser-harnesses/README.md": "283175dc391b72c4005e9c74ce46125f450e73b082e13963f50aad00a5c2d666",
       "docs/prd/index.html": "9a03c31ec7d5b75b15f712dfa4e7630d1365db3f4e472f905b608bc283b31801",
       "package-lock.json": "f2ddae5b7d46206ac66f96af81cc3fbfcc5d5db57a0033cc8fa78ffc5e3c9709",
       "packages/harness-host/package.json": "10f934519885a74bdb478e445b32f19add1bcc12d811c16fb6773208d3617c1e",
@@ -141,8 +141,9 @@
         "askEnclosingToolExecuted": false
       },
       "deterministicProof": {
-        "boundedReadNavigateClickFillBatch": true,
+        "boundedReadNavigateClickFillOperations": true,
         "clickMustEndBatch": true,
+        "fillMustEndBatch": true,
         "disabledClickRejected": true,
         "finalFillValueVerified": true,
         "sdkMcpExportsProbed": true,
