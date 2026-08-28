@@ -140,7 +140,7 @@ describe("issue 257 browser harness evidence", () => {
       .toBe(manifest.harnesses.codex.browserRuntimeSourceSha256);
     expect(createHash("sha256").update(await integratedHeadBytes("packages/harness-host/src/implementations/claude-basic-browser.ts", sourceRevision)).digest("hex"))
       .toBe(manifest.harnesses.claude.browserRuntimeSourceSha256);
-    expect(manifest.assemblyMergeBase).toBe("ead15b0791504da68a3588ad1fcf2ef15092df96");
+    expect(manifest.assemblyMergeBase).toBe("6e7ab59dc91a07a86dc04357d6d0f3c38430caed");
     expect(await changedSourceFiles(manifest.assemblyMergeBase, sourceRevision))
       .toEqual([...manifest.integratedSource.files].sort());
     expect(await sourceFileSha256(manifest.integratedSource.files, sourceRevision))
