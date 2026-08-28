@@ -9,11 +9,14 @@ import { $, $$, toast } from "./ui.js";
 let status;
 let selectedDescriptor;
 let values;
-let pendingReconnectConnectionId;
 let initialized = false;
 const providerConnection = desktop?.providers ? createProviderSettingsConnectionController({
   providers: desktop.providers,
   onPending: () => dialogStatus("Complete sign-in in your browser. Relayer will continue automatically."),
+}) : null;
+const providerReconnect = desktop?.providers ? createProviderSettingsConnectionController({
+  providers: desktop.providers,
+  onPending: () => setStatus("Complete sign-in in your browser. Relayer will continue automatically."),
 }) : null;
 
 function setStatus(message = "", kind = "") {
@@ -58,15 +61,8 @@ function renderDefinitions() {
   $$('[data-provider-reconnect]', $("#providerDefinitionList")).forEach((button) => {
     button.onclick = async () => {
       try {
-        let result = await desktop.providers.reconnect(button.dataset.providerReconnect);
-        pendingReconnectConnectionId = result.status === "pending" ? result.connectionId : null;
-        while (result.status === "pending" && result.connectionId === pendingReconnectConnectionId) {
-          setStatus("Complete sign-in in your browser. Relayer will continue automatically.");
-          await new Promise((resolve) => setTimeout(resolve, 750));
-          if (pendingReconnectConnectionId !== result.connectionId) return;
-          result = await desktop.providers.completeConnection(result.connectionId);
-        }
-        pendingReconnectConnectionId = null;
+        const outcome = await providerReconnect?.reconnect(button.dataset.providerReconnect);
+        if (!outcome || outcome.status !== "settled") return;
         await refreshProviderSettings();
         await refreshModelFamilySettings();
         refreshNewThreadModelPicker();
