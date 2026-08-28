@@ -5,6 +5,7 @@ export const openAiApiDescriptor = Object.freeze({
   implementationVersion: "1",
   label: "OpenAI API",
   accessContract: "secret@1",
+  definitionRuntimeState: true,
   defaultEndpoint: "https://api.openai.com/v1",
   endpointEditableDuringCreation: true,
   connection: { mode: "secret-fields", fields: [{ id: "api-key", label: "API key", kind: "secret", required: true }] },

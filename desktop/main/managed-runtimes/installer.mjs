@@ -280,14 +280,17 @@ export function createManagedRuntimeInstaller({
   extract = defaultExtract,
   spawnProcess,
   probes = {},
-  removeInactiveInstallation = (path) => rm(path, { recursive: true, force: true }),
+  removeDirectory = rm,
+  removeInactiveInstallation = (path) => removeDirectory(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
+  removeAbandonedStaging = (path) => removeDirectory(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
   readPruneDirectory = (path) => readdir(path, { withFileTypes: true }),
   readPendingUpdateDirectory = (path) => readdir(path, { withFileTypes: true }),
 } = {}) {
   const target = managedRuntimeTarget({ platform, architecture });
   if (typeof root !== "string" || root.trim() === "") throw new Error("Managed runtime root is required.");
   if (typeof fetch !== "function" || typeof extract !== "function"
-    || typeof removeInactiveInstallation !== "function" || typeof readPruneDirectory !== "function"
+    || typeof removeDirectory !== "function" || typeof removeInactiveInstallation !== "function"
+    || typeof removeAbandonedStaging !== "function" || typeof readPruneDirectory !== "function"
     || typeof readPendingUpdateDirectory !== "function") {
     throw new Error("Managed runtime installer dependencies are invalid.");
   }
@@ -757,9 +760,27 @@ export function createManagedRuntimeInstaller({
     if (operations.size || pendingOperations.size || activationOperations.size) {
       throw new Error("Managed runtime installations cannot be pruned while an operation is active.");
     }
+    const removed = [];
+    const failures = [];
+    const stagingRoot = join(root, ".staging");
+    const stagingEntries = await readPruneDirectory(stagingRoot).catch((error) => {
+      if (error?.code === "ENOENT") return [];
+      failures.push(Object.freeze({ runtimeId: null, installation: null, staging: null, error }));
+      return [];
+    });
+    const stagingName = /^(claude|codex)(?:-update)?-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
+    for (const entry of stagingEntries) {
+      const match = entry.isDirectory() ? entry.name.match(stagingName) : null;
+      if (!match) continue;
+      try {
+        await removeAbandonedStaging(join(stagingRoot, entry.name));
+        removed.push(Object.freeze({ runtimeId: match[1], staging: entry.name }));
+      } catch (error) {
+        failures.push(Object.freeze({ runtimeId: match[1], installation: null, staging: entry.name, error }));
+      }
+    }
     const retained = new Map(MANAGED_RUNTIME_IDS.map((runtimeId) => [runtimeId, new Set()]));
     const unsafeRuntimeIds = new Set();
-    const failures = [];
     for (const runtimeId of MANAGED_RUNTIME_IDS) {
       const base = join(root, runtimeId, target.key);
       const active = await readActive(base);
@@ -795,7 +816,6 @@ export function createManagedRuntimeInstaller({
         if (pending?.installation) retained.get(runtimeId).add(pending.installation);
       }
     }
-    const removed = [];
     for (const runtimeId of MANAGED_RUNTIME_IDS) {
       if (unsafeRuntimeIds.has(runtimeId)) continue;
       const installations = join(root, runtimeId, target.key, "installations");

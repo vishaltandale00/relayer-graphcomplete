@@ -785,6 +785,22 @@ describe("managed provider runtime cleanup", () => {
     await expect(removeRuntimeState({ id: "api", adapterId: "openai-api" })).resolves.toBe(false);
   });
 
+  it("deletes definition-scoped runtime state for an API adapter after its definition is removed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-provider-runtime-api-remove-"));
+    await mkdir(join(root, "openai-work", "codex-home"), { recursive: true });
+    const removeRuntimeState = createProviderRuntimeStateRemover({
+      runtimeRoot: root,
+      registry: productionProviderAdapterRegistry,
+    });
+
+    await expect(removeRuntimeState({
+      id: "openai-work",
+      adapterId: "openai-api",
+      accessContract: "secret@1",
+    })).resolves.toBe(true);
+    await expect(access(join(root, "openai-work"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("rejects traversal and non-definition paths", () => {
     expect(() => providerRuntimeDirectory("/tmp/provider-runtimes", {
       id: "../escape", adapterId: "codex-subscription",
@@ -798,18 +814,25 @@ describe("managed provider runtime cleanup", () => {
 
   it("reconciles crash-orphan directories while retaining active managed definitions", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-provider-runtime-reconcile-"));
-    for (const name of ["codex-active", "claude-orphan", "api-artifact"]) {
+    for (const name of ["codex-active", "openai-active", "claude-orphan", "api-artifact"]) {
       await mkdir(join(root, name), { recursive: true });
       await writeFile(join(root, name, "state"), name);
     }
     const removeRuntimeState = createProviderRuntimeStateRemover({
       runtimeRoot: root, registry: productionProviderAdapterRegistry,
     });
-    await expect(removeRuntimeState.reconcile([{
-      id: "codex-active", adapterId: "codex-subscription", accessContract: "managed-runtime@1",
-      lifecycleState: "active",
-    }])).resolves.toEqual(["api-artifact", "claude-orphan"]);
+    await expect(removeRuntimeState.reconcile([
+      {
+        id: "codex-active", adapterId: "codex-subscription", accessContract: "managed-runtime@1",
+        lifecycleState: "active",
+      },
+      {
+        id: "openai-active", adapterId: "openai-api", accessContract: "secret@1",
+        lifecycleState: "active",
+      },
+    ])).resolves.toEqual(["api-artifact", "claude-orphan"]);
     await expect(readFile(join(root, "codex-active", "state"), "utf8")).resolves.toBe("codex-active");
+    await expect(readFile(join(root, "openai-active", "state"), "utf8")).resolves.toBe("openai-active");
     await expect(access(join(root, "claude-orphan"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(access(join(root, "api-artifact"))).rejects.toMatchObject({ code: "ENOENT" });
   });

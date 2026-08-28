@@ -5,6 +5,7 @@ export const vercelAiRouterDescriptor = Object.freeze({
   implementationVersion: "1",
   label: "Vercel AI Gateway",
   accessContract: "secret@1",
+  definitionRuntimeState: true,
   defaultEndpoint: "https://ai-gateway.vercel.sh/v1",
   endpointEditableDuringCreation: true,
   connection: { mode: "secret-fields", fields: [{ id: "api-key", label: "API key", kind: "secret", required: true }] },

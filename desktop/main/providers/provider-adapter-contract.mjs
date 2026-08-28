@@ -74,6 +74,7 @@ export function validateProviderAdapterDescriptor(value) {
     endpointEditableDuringCreation: value.endpointEditableDuringCreation === true,
     connection: Object.freeze({ mode, fields }),
     catalog: Object.freeze({ source: value.catalog?.source === "code-manifest" ? "code-manifest" : "provider-discovery" }),
+    definitionRuntimeState: value.definitionRuntimeState === true || accessContract === "managed-runtime@1",
     create: value.create,
   });
 }

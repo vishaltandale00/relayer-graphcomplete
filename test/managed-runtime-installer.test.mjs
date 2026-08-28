@@ -998,6 +998,42 @@ describe("managed runtime installer", () => {
     }
   });
 
+  it("removes only abandoned UUID staging directories with Windows-safe retries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
+    const abandoned = [
+      "claude-11111111-1111-4111-8111-111111111111",
+      "codex-update-22222222-2222-4222-8222-222222222222",
+    ];
+    const retained = ["notes", "claude-not-a-uuid", "other-33333333-3333-4333-8333-333333333333"];
+    const removeDirectory = vi.fn((path, options) => rm(path, options));
+    try {
+      await Promise.all([...abandoned, ...retained].map((name) => (
+        mkdir(join(root, ".staging", name), { recursive: true })
+      )));
+      const installer = createManagedRuntimeInstaller({
+        root,
+        platform: "darwin",
+        architecture: "arm64",
+        removeDirectory,
+      });
+
+      const pruning = await installer.pruneInactiveInstallations();
+
+      expect(pruning.removed).toEqual([
+        { runtimeId: "claude", staging: abandoned[0] },
+        { runtimeId: "codex", staging: abandoned[1] },
+      ]);
+      for (const name of abandoned) await expect(access(join(root, ".staging", name))).rejects.toMatchObject({ code: "ENOENT" });
+      for (const name of retained) await expect(access(join(root, ".staging", name))).resolves.toBeUndefined();
+      expect(removeDirectory).toHaveBeenCalledTimes(2);
+      for (const [, options] of removeDirectory.mock.calls) {
+        expect(options).toMatchObject({ recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("reports a locked retired generation without making startup cleanup fatal", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-managed-runtime-"));
     const activeInstallation = "11111111-1111-4111-8111-111111111111";

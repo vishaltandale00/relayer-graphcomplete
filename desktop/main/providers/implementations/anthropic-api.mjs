@@ -5,6 +5,7 @@ export const anthropicApiDescriptor = Object.freeze({
   implementationVersion: "1",
   label: "Anthropic API",
   accessContract: "secret@1",
+  definitionRuntimeState: true,
   defaultEndpoint: "https://api.anthropic.com/v1",
   endpointEditableDuringCreation: true,
   connection: { mode: "secret-fields", fields: [{ id: "api-key", label: "API key", kind: "secret", required: true }] },
